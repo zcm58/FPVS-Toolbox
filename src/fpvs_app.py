@@ -3,7 +3,7 @@
 """
 FPVS all-in-one toolbox using MNE-Python and CustomTkinter.
 
-Version: 1.20 (April 2025) - Revised to use mne.find_events for event extraction
+Version: 0.9.0 (May 2025) - Revised to use mne.find_events for event extraction
 from a stimulus channel using numerical IDs mapped to labels provided by the user.
 Replaces annotation-based extraction from v1.10.
 
@@ -268,7 +268,7 @@ class FPVSApp(ctk.CTk):
     def show_about_dialog(self):
         messagebox.showinfo(
             "About FPVS ToolBox",
-            f"Version: 0.8.2 was developed by Zack Murphy at Mississippi State University."
+            f"Version: 0.9.0 was developed by Zack Murphy at Mississippi State University."
         )
 
     def quit(self):
@@ -1093,241 +1093,320 @@ class FPVSApp(ctk.CTk):
         # 6. Final internal log
         self.log("--- State Reset. Ready for next run. ---")
 
-
+    # --- Background Processing Thread ---
+        # In fpvs_app.py
 
         # --- Background Processing Thread ---
     def _processing_thread_func(self, data_paths, params, gui_queue):
-            # Import necessary libraries locally within the thread if needed
+            # Import necessary libraries locally within the thread
             import os
             import gc
             import traceback
             import mne
-            import numpy as np  # Ensure numpy is available if used implicitly
+            import numpy as np
+            import pandas as pd  # Just in case, though not directly used for DataFrame creation here now
+            import re  # For extracting numbers from annotation descriptions
 
-            event_id_map = params['event_id_map']
-            stim_channel_name = params['stim_channel']
-            save_folder = self.save_folder_path.get()  # Get save folder once
+            event_id_map_from_gui = params['event_id_map']  # This is {'User Label': int_id, ...}
+            stim_channel_name = params.get('stim_channel', DEFAULT_STIM_CHANNEL)
+            save_folder = self.save_folder_path.get()
 
-            # Store original state that gets modified temporarily
-            original_preprocessed_data = self.preprocessed_data  # Should be {} initially
-            original_data_paths = self.data_paths  # The full list
+            original_app_data_paths = list(self.data_paths)
+            original_app_preprocessed_data = dict(self.preprocessed_data)
 
             try:
                 for i, f_path in enumerate(data_paths):
                     f_name = os.path.basename(f_path)
-                    gui_queue.put({
-                        'type': 'log',
-                        'message': f"\n--- Processing file {i + 1}/{len(data_paths)}: {f_name} ---"
-                    })
+                    gui_queue.put(
+                        {'type': 'log', 'message': f"\n--- Processing file {i + 1}/{len(data_paths)}: {f_name} ---"})
 
                     raw = None
                     raw_proc = None
-                    file_epochs = {}  # Holds {label: [Epochs]} for the current file
+                    file_epochs = {}
+                    events = np.array([])  # Initialize events array
 
                     try:
                         # 1) LOAD
                         raw = self.load_eeg_file(f_path)
                         if raw is None:
-                            gui_queue.put({'type': 'log', 'message': f"Skipping file {f_name} due to load error."})
-                            continue  # Skip to next file
+                            gui_queue.put(
+                                {'type': 'log', 'message': f"Skipping file {f_name} due to load error (raw is None)."})
+                            continue
+
+                        gui_queue.put({'type': 'log',
+                                       'message': f"DEBUG [{f_name}]: Raw channel names immediately after load: {raw.ch_names}"})
+                        gui_queue.put({'type': 'log',
+                                       'message': f"DEBUG [{f_name}]: Raw channel types after load: {raw.get_channel_types(unique=True)}"})
+                        # This check is less critical now if .set files use annotations, but good for .bdf
+                        if stim_channel_name in raw.ch_names:
+                            gui_queue.put({'type': 'log',
+                                           'message': f"DEBUG [{f_name}]: Configured stim channel '{stim_channel_name}' IS PRESENT in raw data after load."})
+                        else:
+                            gui_queue.put({'type': 'log',
+                                           'message': f"DEBUG [{f_name}]: NOTE: Configured stim channel '{stim_channel_name}' IS NOT PRESENT in raw data after load (may be fine for .set files using annotations)."})
 
                         # 2) PREPROCESS
-                        # Ensure preprocess_raw doesn't rely on self.preprocessed_data
+                        gui_queue.put({'type': 'log',
+                                       'message': f"DEBUG [{f_name}]: Calling preprocess_raw. Configured stim_channel for potential preservation (if found): '{stim_channel_name}'"})
                         raw_proc = self.preprocess_raw(raw.copy(), **params)
                         del raw;
-                        gc.collect()  # Free memory from raw
+                        gc.collect()
                         if raw_proc is None:
-                            gui_queue.put(
-                                {'type': 'log', 'message': f"Skipping file {f_name} due to preprocess error."})
-                            continue  # Skip to next file
+                            gui_queue.put({'type': 'log',
+                                           'message': f"Skipping file {f_name} due to preprocess error (raw_proc is None)."})
+                            continue
 
-                        # 3) FIND EVENTS
-                        try:
-                            events = mne.find_events(
-                                raw_proc,
-                                stim_channel=stim_channel_name,
-                                consecutive=True,
-                                verbose=False
-                            )
-                        except Exception as e:
-                            gui_queue.put({
-                                'type': 'log',
-                                'message': f"Warning finding events in {f_name}: {e}"
-                            })
-                            events = np.array([])  # Use empty numpy array
+                        gui_queue.put({'type': 'log',
+                                       'message': f"DEBUG [{f_name}]: Channel names AFTER preprocess_raw: {raw_proc.ch_names}"})
+                        # This check is critical before find_events (for BDF)
+                        if stim_channel_name in raw_proc.ch_names:
+                            gui_queue.put({'type': 'log',
+                                           'message': f"DEBUG [{f_name}]: Configured stim channel '{stim_channel_name}' IS PRESENT in raw_proc data."})
+                        else:
+                            gui_queue.put({'type': 'log',
+                                           'message': f"DEBUG [{f_name}]: Configured stim channel '{stim_channel_name}' IS NOT PRESENT in raw_proc data."})
 
-                        # 4) EPOCH for each condition
-                        for lbl, num in event_id_map.items():
-                            # Check if the event ID exists in the found events
-                            if events.size > 0 and num in events[:, 2]:
+                        # 3) EVENT EXTRACTION (Conditional: Annotations for .SET, Stim Channel for .BDF)
+                        file_extension = os.path.splitext(f_path)[1].lower()
+
+                        if file_extension == ".set":
+                            if hasattr(raw_proc, 'annotations') and raw_proc.annotations and len(
+                                    raw_proc.annotations) > 0:
+                                gui_queue.put({'type': 'log',
+                                               'message': f"DEBUG [{f_name}]: Attempting event extraction using MNE Annotations for .set file."})
+
+                                mne_annots_event_id_map = {}  # This will map actual annotation descriptions to the GUI's integer IDs
+                                user_gui_int_ids = set(
+                                    event_id_map_from_gui.values())  # Integer IDs from GUI {1, 2, 3...}
+                                unique_raw_ann_descriptions = list(np.unique(raw_proc.annotations.description))
+                                gui_queue.put({'type': 'log',
+                                               'message': f"DEBUG [{f_name}]: Unique annotation descriptions in file: {unique_raw_ann_descriptions}"})
+                                gui_queue.put({'type': 'log',
+                                               'message': f"DEBUG [{f_name}]: User-defined GUI event map (Label -> Int ID): {event_id_map_from_gui}"})
+
+                                for desc_str_from_file in unique_raw_ann_descriptions:
+                                    mapped_id_for_this_desc = None
+                                    # Priority 1: Direct match of annotation description with a GUI Label
+                                    if desc_str_from_file in event_id_map_from_gui:
+                                        mapped_id_for_this_desc = event_id_map_from_gui[desc_str_from_file]
+                                        gui_queue.put({'type': 'log',
+                                                       'message': f"DEBUG [{f_name}]: Annotation description '{desc_str_from_file}' directly matches a GUI Label. Mapping to ID: {mapped_id_for_this_desc}."})
+
+                                    # Priority 2 (Fallback or Augment): Match by extracting number from annotation description
+                                    if mapped_id_for_this_desc is None:  # Only if not already matched by label
+                                        numeric_part_match = re.search(r'\d+', desc_str_from_file)
+                                        if numeric_part_match:
+                                            try:
+                                                extracted_num_from_desc = int(numeric_part_match.group(0))
+                                                if extracted_num_from_desc in user_gui_int_ids:
+                                                    mapped_id_for_this_desc = extracted_num_from_desc
+                                                    gui_queue.put({'type': 'log',
+                                                                   'message': f"DEBUG [{f_name}]: Annotation description '{desc_str_from_file}' contains numeric part '{extracted_num_from_desc}' which matches a GUI ID. Mapping to ID: {mapped_id_for_this_desc}."})
+                                            except ValueError:
+                                                pass  # Could not convert numeric part to int
+
+                                    if mapped_id_for_this_desc is not None:
+                                        if desc_str_from_file in mne_annots_event_id_map and mne_annots_event_id_map[
+                                            desc_str_from_file] != mapped_id_for_this_desc:
+                                            gui_queue.put({'type': 'log',
+                                                           'message': f"WARNING [{f_name}]: Ambiguous mapping for ann. desc. '{desc_str_from_file}'. Already mapped to {mne_annots_event_id_map[desc_str_from_file]}, now also matches ID {mapped_id_for_this_desc}. Check your annotation descriptions and GUI map."})
+                                        mne_annots_event_id_map[desc_str_from_file] = mapped_id_for_this_desc
+
+                                if not mne_annots_event_id_map:
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"WARNING [{f_name}]: For .set file, could not create any MNE event_id map from annotations based on GUI event map. No events will be extracted from annotations."})
+                                else:
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"DEBUG [{f_name}]: Constructed MNE event_id map for annotations: {mne_annots_event_id_map}"})
+                                    try:
+                                        # regexp=None ensures exact string matching for keys in mne_annots_event_id_map
+                                        events, _ = mne.events_from_annotations(raw_proc,
+                                                                                event_id=mne_annots_event_id_map,
+                                                                                verbose=False, regexp=None)
+                                        gui_queue.put({'type': 'log',
+                                                       'message': f"DEBUG [{f_name}]: Events successfully extracted from annotations. Shape: {events.shape if events.size > 0 else 'Empty'}"})
+                                        if events.size == 0:
+                                            gui_queue.put({'type': 'log',
+                                                           'message': f"WARNING [{f_name}]: mne.events_from_annotations returned no events even with map: {mne_annots_event_id_map}."})
+                                    except KeyError as ke:
+                                        gui_queue.put({'type': 'log',
+                                                       'message': f"ERROR [{f_name}]: KeyError getting events from annotations. Likely a description in annotations was expected in map but not found, or map was empty. Error: {ke}"})
+                                        events = np.array([])
+                                    except Exception as e_ann:
+                                        gui_queue.put({'type': 'log',
+                                                       'message': f"ERROR [{f_name}]: Failed to get events from annotations: {e_ann}\n{traceback.format_exc()}"})
+                                        events = np.array([])
+                            else:  # .set file but no annotations found on raw_proc object
+                                gui_queue.put({'type': 'log',
+                                               'message': f"WARNING [{f_name}]: .set file has no MNE annotations attached to raw_proc. Cannot use events_from_annotations."})
+
+                            if events.size == 0:  # If .set file and annotations didn't yield events
+                                gui_queue.put({'type': 'log',
+                                               'message': f"FINAL WARNING [{f_name}]: No events could be extracted for this .set file using annotations."})
+
+                        else:  # Not a .set file (e.g., .bdf), use find_events
+                            gui_queue.put({'type': 'log',
+                                           'message': f"DEBUG [{f_name}]: File is '{file_extension}'. Using mne.find_events on stim channel '{stim_channel_name}'."})
+                            if stim_channel_name not in raw_proc.ch_names:
+                                gui_queue.put({'type': 'log',
+                                               'message': f"ERROR [{f_name}]: Configured stim channel '{stim_channel_name}' is NOT in preprocessed data. Cannot find events for this BDF/other file."})
+                            else:
                                 try:
+                                    events = mne.find_events(raw_proc, stim_channel=stim_channel_name, consecutive=True,
+                                                             verbose=False)
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"DEBUG [{f_name}]: mne.find_events call completed for BDF/other."})
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"DEBUG [{f_name}]: Events found (shape): {events.shape if events.size > 0 else 'None or Empty'}"})
+                                    if events.size > 0:
+                                        unique_ids_in_file = np.unique(events[:, 2])
+                                        gui_queue.put({'type': 'log',
+                                                       'message': f"DEBUG [{f_name}]: Unique event IDs from stim channel: {unique_ids_in_file}"})
+                                except ValueError as find_err_stim:  # Should have been caught by the "not in raw_proc.ch_names" check above, but good to have
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"ERROR [{f_name}]: ValueError during mne.find_events for BDF/other: {find_err_stim}"})
+                                except Exception as e_find_stim:
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"ERROR [{f_name}]: Exception during mne.find_events for BDF/other: {e_find_stim}"})
+
+                        # Central check for empty events array after attempting extraction
+                        if events.size == 0:
+                            gui_queue.put({'type': 'log',
+                                           'message': f"CRITICAL WARNING [{f_name}]: Event extraction resulted in an empty events array. Epoching will not produce results."})
+
+                        # 4) EPOCH for each condition (using the events array derived from either method)
+                        gui_queue.put({'type': 'log',
+                                       'message': f"DEBUG [{f_name}]: Starting epoching based on GUI event_id_map: {event_id_map_from_gui}"})
+                        for lbl, num_id_val_gui in event_id_map_from_gui.items():  # Iterate through GUI map
+                            gui_queue.put({'type': 'log',
+                                           'message': f"DEBUG [{f_name}]: Attempting to epoch for GUI label '{lbl}' (using Int ID: {num_id_val_gui}). Events array shape: {events.shape}"})
+
+                            # Now, num_id_val_gui is the integer ID we want to find in the events array's 3rd column
+                            if events.size > 0 and num_id_val_gui in events[:, 2]:
+                                try:
+                                    # When epoching, event_id takes the form {' Epoch_Label_You_Want ': Int_ID_from_Events_Array }
+                                    # Here, lbl is the User's Condition Label, and num_id_val_gui is the Int_ID.
                                     epochs = mne.Epochs(
                                         raw_proc, events,
-                                        event_id={lbl: num},  # Process one ID at a time
+                                        event_id={lbl: num_id_val_gui},
                                         tmin=params['epoch_start'],
                                         tmax=params['epoch_end'],
-                                        preload=True,  # Preload data as requested
-                                        verbose=False,
-                                        baseline=None,  # No baseline subtraction here
-                                        on_missing='warn'  # Log if event ID is missing
+                                        preload=True, verbose=False, baseline=None, on_missing='warn'
                                     )
-                                    # Check if any epochs were actually created for this label
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"DEBUG [{f_name}]: MNE Epochs object created for GUI label '{lbl}'. Length: {len(epochs)}. Events in this obj: {len(epochs.events)}."})
+
                                     if len(epochs.events) > 0:
-                                        gui_queue.put({
-                                            'type': 'log',
-                                            'message': f"  -> Created {len(epochs.events)} epochs for '{lbl}' (ID: {num}) in {f_name}."
-                                        })
-                                        # Store the epochs object *within a list*
+                                        gui_queue.put({'type': 'log',
+                                                       'message': f"  -> Successfully created {len(epochs.events)} epochs for GUI label '{lbl}' (target Int ID: {num_id_val_gui}) in {f_name}."})
                                         file_epochs[lbl] = [epochs]
                                     else:
-                                        gui_queue.put({
-                                            'type': 'log',
-                                            'message': f"  -> No epochs found for '{lbl}' (ID: {num}) in {f_name}."
-                                        })
-
-                                except Exception as e:
-                                    gui_queue.put({
-                                        'type': 'log',
-                                        'message': f"!!! Epoch error for '{lbl}' in {f_name}: {e}"
-                                    })
-                            # else: Event ID 'num' not found in this file's events
-
-                        # 5) OPTIONAL: save preprocessed .fif (Do this *before* deleting raw_proc)
-                        if params.get('save_preprocessed', False) and raw_proc is not None:
-                            p_path = os.path.join(
-                                save_folder,  # Output dir
-                                f"{os.path.splitext(f_name)[0]}_preproc_raw.fif"
-                            )
-                            try:
-                                gui_queue.put({
-                                    'type': 'log',
-                                    'message': f"Saving preprocessed to: {p_path}"
-                                })
-                                raw_proc.save(p_path, overwrite=True, verbose=False)
-                            except Exception as e:
-                                gui_queue.put({
-                                    'type': 'log',
-                                    'message': f"Warn: Failed to save preprocessed file {p_path}: {e}"
-                                })
-
-                        # --- File processing steps done, raw_proc and file_epochs exist (or are None/empty) ---
-
-                    except Exception as file_proc_err:
-                        # Catch errors during load/preprocess/epoch stage for this file
-                        gui_queue.put({
-                            'type': 'log',
-                            'message': f"!!! Error processing file {f_name} before post-processing: {file_proc_err}\n{traceback.format_exc()}"
-                        })
-                        # Ensure cleanup happens even if error occurred mid-file
-                        # Fall through to the finally block below
-
-                    finally:
-                        # --- Post-process and Cleanup Section for the current file ---
-                        post_process_done = False
-                        if raw_proc is not None and file_epochs:  # Check if preprocessing worked AND file_epochs dict exists
-                            # 6) POST-PROCESS THIS FILE IMMEDIATELY
-                            gui_queue.put({
-                                'type': 'log',
-                                'message': f"--- Post‐processing & Saving Excel for {f_name} ---"
-                            })
-
-                            # Temporarily set the attributes needed by self.post_process
-                            self.data_paths = [f_path]  # Set to current file path
-                            self.preprocessed_data = file_epochs  # The dict {'label': [Epochs]}
-
-                            try:
-                                # --- DEBUG LOGGING ---
-                                gui_queue.put({'type': 'log',
-                                               'message': f"DEBUG: Checking file_epochs before post-process. Keys: {list(file_epochs.keys())}"})
-                                for lbl, epochs_list in file_epochs.items():
-                                    if epochs_list:  # Check if list exists and is not empty
-                                        epochs_obj = epochs_list[0]  # Get the first item
-                                        obj_type = type(epochs_obj)
-                                        is_epochs_inst = isinstance(epochs_obj, mne.Epochs)
-                                        try:
-                                            # Check events attribute existence before accessing length
-                                            if hasattr(epochs_obj, 'events'):
-                                                num_events = len(epochs_obj.events)
-                                            else:
-                                                num_events = 'No events attr'
-                                        except Exception as e:
-                                            num_events = f"Error getting events: {e}"
                                         gui_queue.put({'type': 'log',
-                                                       'message': f"  DEBUG: Label '{lbl}': List[0] type={obj_type}, isinstance(mne.Epochs)={is_epochs_inst}, num_events={num_events}"})
-                                    else:
-                                        gui_queue.put({'type': 'log',
-                                                       'message': f"  DEBUG: Label '{lbl}': List is empty or None."})
-                                # --- END DEBUG LOGGING ---
+                                                       'message': f"  -> No epochs generated for GUI label '{lbl}' (target Int ID: {num_id_val_gui}) in {f_name} (MNE Epochs object empty or len(epochs.events) was 0)."})
 
-                                # Check if there's actually any data to process across all labels
-                                has_valid_data = any(
-                                    epochs_list and isinstance(epochs_list[0], mne.Epochs) and len(
-                                        epochs_list[0].events) > 0
-                                    for epochs_list in file_epochs.values()
-                                )
-
-                                if has_valid_data:
-                                    self.post_process(list(file_epochs.keys()))  # Call post_process
-                                    post_process_done = True
-                                else:
-                                    # This message is being triggered unexpectedly
+                                except Exception as e_epoch:
                                     gui_queue.put({'type': 'log',
-                                                   'message': f"Skipping Excel generation for {f_name} as no valid epochs were created."})
-                                    post_process_done = True  # Still consider done for cleanup purposes
+                                                   'message': f"!!! Epoching error for GUI label '{lbl}' (target Int ID: {num_id_val_gui}) in {f_name}: {e_epoch}\n{traceback.format_exc()}"})
+                            else:
+                                gui_queue.put({'type': 'log',
+                                               'message': f"DEBUG [{f_name}]: Target Int ID {num_id_val_gui} for GUI label '{lbl}' not found in the extracted events array (unique IDs found: {np.unique(events[:, 2]) if events.size > 0 else 'empty events array'}). Skipping epoching for this label."})
 
-                            except Exception as e:
-                                gui_queue.put({
-                                    'type': 'log',
-                                    'message': f"!!! Post-processing/Excel error for {f_name}: {e}\n{traceback.format_exc()}"
-                                })
-                                # Allow finally block (nested one) to run for cleanup
-                            # --- End of inner try...except for post-processing ---
+                        gui_queue.put(
+                            {'type': 'log', 'message': f"DEBUG [{f_name}]: Epoching loop for all GUI labels finished."})
 
-                        # --- MEMORY CLEANUP for the current file (runs regardless of post-process success) ---
+                        # 5) OPTIONAL: save preprocessed .fif
+                        if params.get('save_preprocessed', False) and raw_proc is not None:
+                            p_path = os.path.join(save_folder, f"{os.path.splitext(f_name)[0]}_preproc_raw.fif")
+                            try:
+                                gui_queue.put({'type': 'log', 'message': f"Saving preprocessed to: {p_path}"})
+                                raw_proc.save(p_path, overwrite=True, verbose=False)
+                            except Exception as e_save_fif:
+                                gui_queue.put({'type': 'log',
+                                               'message': f"Warn: Failed to save preprocessed file {p_path}: {e_save_fif}"})
+
+                    except Exception as file_proc_err:  # Catch errors in main try block for this file
+                        gui_queue.put({'type': 'log',
+                                       'message': f"!!! Error during main processing stages for {f_name} (before post-processing): {file_proc_err}\n{traceback.format_exc()}"})
+
+                    finally:  # For current file processing
+                        gui_queue.put({'type': 'log',
+                                       'message': f"DEBUG [{f_name}]: Entering finally block for post-processing and cleanup."})
+                        gui_queue.put({'type': 'log',
+                                       'message': f"DEBUG [{f_name}]: file_epochs before has_valid_data check. Keys: {list(file_epochs.keys()) if file_epochs is not None else 'None'}"})
+                        if file_epochs:
+                            for lbl_debug, epochs_list_debug in file_epochs.items():
+                                if epochs_list_debug and epochs_list_debug[0] and isinstance(epochs_list_debug[0],
+                                                                                             mne.Epochs):  # check if list is not empty and first element is Epochs
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"  DEBUG [{f_name}]: Label '{lbl_debug}': Epochs obj contains {len(epochs_list_debug[0].events)} events."})
+                                else:
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"  DEBUG [{f_name}]: Label '{lbl_debug}': No valid Epochs object found in list or list empty."})
+
+                        has_valid_data = False
+                        if file_epochs:  # Check if file_epochs dict itself is not None and not empty
+                            has_valid_data = any(
+                                epochs_list and epochs_list[0] and isinstance(epochs_list[0], mne.Epochs) and hasattr(
+                                    epochs_list[0], 'events') and len(epochs_list[0].events) > 0
+                                for epochs_list in file_epochs.values()
+                            )
+                        gui_queue.put(
+                            {'type': 'log', 'message': f"DEBUG [{f_name}]: Value of has_valid_data: {has_valid_data}"})
+
+                        if raw_proc is not None and has_valid_data:
+                            gui_queue.put({'type': 'log',
+                                           'message': f"--- Post‐processing & Saving Excel for {f_name} (has_valid_data is True) ---"})
+
+                            current_file_original_app_data_paths_temp = list(self.data_paths)  # copy
+                            current_file_original_app_preprocessed_data_temp = dict(self.preprocessed_data)  # copy
+
+                            self.data_paths = [f_path]
+                            self.preprocessed_data = file_epochs
+
+                            try:
+                                self.post_process(list(file_epochs.keys()))
+                            except Exception as e_post:
+                                gui_queue.put({'type': 'log',
+                                               'message': f"!!! Post-processing/Excel error for {f_name}: {e_post}\n{traceback.format_exc()}"})
+                            finally:
+                                self.data_paths = current_file_original_app_data_paths_temp
+                                self.preprocessed_data = current_file_original_app_preprocessed_data_temp
+
+                        elif raw_proc is not None and not has_valid_data:
+                            gui_queue.put({'type': 'log',
+                                           'message': f"Skipping Excel generation for {f_name} as no valid epochs were created (has_valid_data was False)."})
+                        elif raw_proc is None:
+                            gui_queue.put({'type': 'log',
+                                           'message': f"Skipping Excel generation for {f_name} as preprocessed data (raw_proc) is None."})
+
                         gui_queue.put({'type': 'log', 'message': f"Cleaning up memory for {f_name}..."})
-
-                        # Explicitly delete Epochs objects first
                         if isinstance(file_epochs, dict):
-                            for label, epochs_list_to_del in file_epochs.items():
-                                if epochs_list_to_del:  # Check if list is not empty
-                                    # Assuming list contains only one item based on current logic
-                                    epochs_obj_to_del = epochs_list_to_del[0]
-                                    if epochs_obj_to_del is not None:
-                                        del epochs_obj_to_del
-                            file_epochs.clear()  # Clear the dictionary
-                        del file_epochs  # Delete the variable itself
-
-                        # Delete the preprocessed raw data if it exists
-                        if raw_proc is not None:
-                            del raw_proc
-
-                        # Raw data was already deleted after preprocessing or if load failed
-
-                        # Restore the original app state attributes BEFORE gc.collect()
-                        self.data_paths = original_data_paths  # Restore full list
-                        self.preprocessed_data = original_preprocessed_data  # Restore original (empty) dict
-
-                        # Trigger garbage collection aggressively
+                            for epochs_list_to_del in file_epochs.values():
+                                if epochs_list_to_del and epochs_list_to_del[
+                                    0] is not None:  # Check list and its first element
+                                    if hasattr(epochs_list_to_del[0], '_data') and epochs_list_to_del[
+                                        0]._data is not None:
+                                        del epochs_list_to_del[0]._data  # Try to free data more explicitly
+                                    del epochs_list_to_del[0]
+                            file_epochs.clear()
+                        del file_epochs
+                        if raw_proc is not None: del raw_proc
                         gc.collect()
                         gui_queue.put({'type': 'log', 'message': f"Memory cleanup for {f_name} complete."})
-                        # --- End of Cleanup for the current file ---
 
-                    # Update progress after all steps for the file are done (including cleanup)
                     gui_queue.put({'type': 'progress', 'value': i + 1})
-                    # --- End of loop for one file ---
+                # --- End of loop for one file ---
 
-                # --- Loop finished ---
                 gui_queue.put({'type': 'done'})  # Signal successful completion of all files
 
-            except Exception as e:
-                # Catch unexpected errors in the main loop logic/setup
-                gui_queue.put({
-                    'type': 'error',
-                    'message': f"Critical error in processing thread: {e}",
-                    'traceback': traceback.format_exc()
-                })
-                # Still signal done to allow GUI to unlock, but error state will be handled
+            except Exception as e_thread:  # Catch errors in the main try block of the thread
+                gui_queue.put({'type': 'error', 'message': f"Critical error in processing thread: {e_thread}",
+                               'traceback': traceback.format_exc()})
                 gui_queue.put({'type': 'done'})
+            finally:
+                # Final restore of app state in case of unhandled exit from loop
+                self.data_paths = original_app_data_paths
+                self.preprocessed_data = original_app_preprocessed_data
 
 
     # --- EEG Loading Method ---
@@ -1368,213 +1447,236 @@ class FPVSApp(ctk.CTk):
 
 
     # --- Preprocessing Method ---
-        # --- Preprocessing Method ---
+
     def preprocess_raw(self, raw, **params):
             """
-            Applies preprocessing steps to the raw MNE object. FINAL VERSION.
-
-            Steps include:
-            1. Initial reference (e.g., subtract average of mastoids).
-            2. Drop channels beyond a specified index (preserving stim channel).
-            3. Downsample if necessary (using specified window if desired, default is Hann).
-            4. Bandpass filter with specified transition bandwidths and length.
-            5. Kurtosis-based channel rejection (using Trimmed Normalization) and interpolation.
-            6. Average common reference.
+            Applies preprocessing steps to the raw MNE object.
+            Includes detailed logging for channel dropping.
             """
             # Extract parameters
             downsample_rate = params.get('downsample_rate')
             low_pass = params.get('low_pass')
             high_pass = params.get('high_pass')
-            reject_thresh = params.get('reject_thresh')  # Z-score threshold (e.g., 5.0)
+            reject_thresh = params.get('reject_thresh')
             ref1 = params.get('ref_channel1')
             ref2 = params.get('ref_channel2')
             max_keep = params.get('max_idx_keep')
+            # Use stim_channel from params, falling back to DEFAULT_STIM_CHANNEL if not provided in params
             stim_ch = params.get('stim_channel', DEFAULT_STIM_CHANNEL)
 
-            # Import necessary libraries (ensure they are available)
+            # Import necessary libraries
             import numpy as np
             from scipy.stats import kurtosis
-            import mne  # Ensure mne is imported globally or here
-            import traceback  # For detailed error logging
+            import mne
+            import traceback
+            import os  # For os.path.basename
+
+            # Get filename for logging, handle if raw.filenames is empty or None
+            current_filename = "UnknownFile"
+            if raw.filenames and raw.filenames[0]:  # Check raw.filenames is not None and not empty
+                current_filename = os.path.basename(raw.filenames[0])
+            elif hasattr(raw, 'filename') and raw.filename:  # Fallback for some MNE versions/objects
+                current_filename = os.path.basename(raw.filename)
 
             try:
-                orig_names = list(raw.info['ch_names'])
-                self.log(f"Preprocessing {len(orig_names)} chans...")
+                orig_ch_names = list(raw.info['ch_names'])  # Make a copy
+                self.log(f"Preprocessing {len(orig_ch_names)} chans from '{current_filename}'...")
+                # === DETAILED DEBUG LOGGING: Initial state ===
+                self.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: Initial channel names ({len(orig_ch_names)}): {orig_ch_names}")
+                self.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: Expected stim_ch for preservation: '{stim_ch}', max_idx_keep parameter: {max_keep}")
+                if stim_ch not in orig_ch_names:
+                    self.log(
+                        f"DEBUG [preprocess_raw for {current_filename}]: WARNING - Expected stim_ch '{stim_ch}' is NOT in the initial channel list.")
+                # === END DEBUG LOGGING ===
 
                 # 1. Initial Reference (e.g., Mastoids)
-                if ref1 and ref2 and ref1 in orig_names and ref2 in orig_names:
+                if ref1 and ref2 and ref1 in orig_ch_names and ref2 in orig_ch_names:
                     try:
-                        self.log(f"Applying reference: Subtract average of {ref1} & {ref2}...")
+                        self.log(f"Applying reference: Subtract average of {ref1} & {ref2} for {current_filename}...")
                         raw.set_eeg_reference(ref_channels=[ref1, ref2], projection=False, verbose=False)
-                        self.log("Initial reference applied.")
+                        self.log(f"Initial reference applied to {current_filename}.")
                     except Exception as e:
-                        self.log(f"Warn: Initial reference failed: {e}")
+                        self.log(f"Warn: Initial reference failed for {current_filename}: {e}")
                 else:
-                    self.log("Skip initial referencing (Reference channels not found or not specified).")
+                    self.log(
+                        f"Skip initial referencing for {current_filename} (Ref channels '{ref1}', '{ref2}' not found or not specified).")
 
                 # 2. Drop Channels
-                names = list(raw.info['ch_names'])
-                if max_keep is not None and 0 < max_keep < len(names):
-                    keep_channels = names[:max_keep]
-                    if stim_ch in names and stim_ch not in keep_channels:
-                        keep_channels.append(stim_ch)
-                    keep_channels = sorted(list(set(keep_channels)), key=lambda x: names.index(x))
-                    drop = [ch for ch in names if ch not in keep_channels]
-                    if drop:
-                        self.log(f"Dropping {len(drop)} chans (keeping first {max_keep} EEG + stim '{stim_ch}')...")
-                        raw.drop_channels(drop, on_missing='warn')
-                        self.log(f"{len(raw.ch_names)} remain.")
-                    else:
-                        self.log("No channels to drop based on max_keep.")
-                else:
-                    self.log("Skip channel drop based on max_keep.")
+                current_names_before_drop = list(
+                    raw.info['ch_names'])  # Get names after potential re-ref (though unlikely to change names)
+                self.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: Channel names BEFORE drop logic ({len(current_names_before_drop)}): {current_names_before_drop}")
 
-                # 3. Downsample (Optionally try Kaiser window matching MATLAB)
+                if max_keep is not None and 0 < max_keep < len(current_names_before_drop):
+                    channels_to_keep_by_index = current_names_before_drop[:max_keep]
+                    self.log(
+                        f"DEBUG [preprocess_raw for {current_filename}]: Initial channels selected by index (first {max_keep}): {channels_to_keep_by_index}")
+
+                    final_channels_to_keep = list(channels_to_keep_by_index)  # Start with a copy
+                    if stim_ch in current_names_before_drop:
+                        if stim_ch not in final_channels_to_keep:
+                            final_channels_to_keep.append(stim_ch)
+                            self.log(
+                                f"DEBUG [preprocess_raw for {current_filename}]: Stim_ch '{stim_ch}' was present in data and explicitly added to keep_channels.")
+                        else:
+                            self.log(
+                                f"DEBUG [preprocess_raw for {current_filename}]: Stim_ch '{stim_ch}' was present and already within the first {max_keep} channels.")
+                    else:
+                        # This was already logged at the start of the function, but good to be aware here too.
+                        self.log(
+                            f"DEBUG [preprocess_raw for {current_filename}]: NOTE - Configured stim_ch '{stim_ch}' was NOT FOUND in current channel names before drop logic execution: {current_names_before_drop}.")
+
+                    # Ensure uniqueness (in case stim_ch was already in channels_to_keep_by_index)
+                    # and preserve original order as much as possible for the kept channels.
+                    unique_set_to_keep = set(final_channels_to_keep)
+                    ordered_unique_keep_channels = [name for name in current_names_before_drop if
+                                                    name in unique_set_to_keep]
+
+                    channels_to_drop = [ch for ch in current_names_before_drop if
+                                        ch not in ordered_unique_keep_channels]
+
+                    self.log(
+                        f"DEBUG [preprocess_raw for {current_filename}]: Final list of channels to KEEP ({len(ordered_unique_keep_channels)}): {ordered_unique_keep_channels}")
+                    self.log(
+                        f"DEBUG [preprocess_raw for {current_filename}]: Final list of channels to DROP ({len(channels_to_drop)}): {channels_to_drop}")
+
+                    if channels_to_drop:
+                        self.log(f"Attempting to drop {len(channels_to_drop)} channels from {current_filename}...")
+                        raw.drop_channels(channels_to_drop, on_missing='warn')  # on_missing='warn' is safer
+                        self.log(f"{len(raw.ch_names)} channels remain in {current_filename} after drop operation.")
+                        self.log(
+                            f"DEBUG [preprocess_raw for {current_filename}]: Channel names AFTER drop operation: {list(raw.info['ch_names'])}")
+                    else:
+                        self.log(f"No channels were ultimately selected to be dropped for {current_filename}.")
+                else:
+                    self.log(
+                        f"Skip channel drop based on max_keep for {current_filename} (max_keep is None, 0, or >= num channels). Current channels: {len(current_names_before_drop)}")
+
+                # 3. Downsample (rest of the function remains as previously provided)
                 if downsample_rate:
                     sf = raw.info['sfreq']
-                    self.log(f"Downsample check: Curr {sf:.1f}Hz, Tgt {downsample_rate}Hz.")
+                    self.log(f"Downsample check for {current_filename}: Curr {sf:.1f}Hz, Tgt {downsample_rate}Hz.")
                     if sf > downsample_rate:
-                        # --- Choose one resampling line ---
-                        # Option A: Default MNE (Hann window) - Generally recommended
-                        self.log("Attempting resample with default Hann window...")
-                        resample_window = 'hann'  # MNE default
-                        # Option B: Try Kaiser window to match MATLAB's default more closely
-                        # kaiser_beta = 5.0
-                        # self.log(f"Attempting resample with Kaiser window (beta={kaiser_beta})...")
-                        # resample_window = ('kaiser', kaiser_beta)
-                        # --- End Choose ---
+                        resample_window = 'hann'
                         try:
-                            raw.resample(downsample_rate, npad="auto",
-                                         window=resample_window,  # Use the chosen window
-                                         verbose=False)
-                            self.log(f"Resampled to {raw.info['sfreq']:.1f}Hz.")
+                            raw.resample(downsample_rate, npad="auto", window=resample_window, verbose=False)
+                            self.log(f"Resampled {current_filename} to {raw.info['sfreq']:.1f}Hz.")
                         except Exception as resample_err:
-                            self.log(f"Warn: Resampling failed: {resample_err}")
+                            self.log(f"Warn: Resampling failed for {current_filename}: {resample_err}")
                     else:
-                        self.log("No downsampling needed.")
+                        self.log(f"No downsampling needed for {current_filename}.")
                 else:
-                    self.log("Skip downsample.")
+                    self.log(f"Skip downsample for {current_filename}.")
 
-                # 4. Filter (Using explicit transition bands AND filter length)
-                l = low_pass if low_pass and low_pass > 0 else None
-                h = high_pass
-                if l or h:
+                # 4. Filter
+                l_freq = low_pass if low_pass and low_pass > 0 else None
+                h_freq = high_pass
+                if l_freq or h_freq:
                     try:
-                        low_trans_bw = 0.1
-                        high_trans_bw = 0.1  # Match sharp cutoff implied by EEGLAB log
-                        filter_len = 8449  # Match EEGLAB log
-
-                        self.log(f"Filtering ({l if l else 'DC'}-{h if h else 'Nyq'}Hz) "
-                                 f"with L_TBW={low_trans_bw:.2f}, H_TBW={high_trans_bw:.2f} Hz, "
-                                 f"Length={filter_len} points...")
-
-                        raw.filter(l, h, method='fir', phase='zero-double',
+                        low_trans_bw = 0.1;
+                        high_trans_bw = 0.1;
+                        filter_len_points = 8449
+                        self.log(
+                            f"Filtering {current_filename} ({l_freq if l_freq else 'DC'}-{h_freq if h_freq else 'Nyq'}Hz) ...")
+                        raw.filter(l_freq, h_freq, method='fir', phase='zero-double',
                                    fir_window='hamming', fir_design='firwin',
-                                   l_trans_bandwidth=low_trans_bw,
-                                   h_trans_bandwidth=high_trans_bw,
-                                   filter_length=filter_len,
-                                   skip_by_annotation='edge',
-                                   verbose=False)
-                        self.log("Filter OK.")
-                    except NameError as ne:
-                        self.log(f"FATAL Filter Error: Variable not defined? {ne}")
-                        print(traceback.format_exc())
-                        return None  # Stop processing
+                                   l_trans_bandwidth=low_trans_bw, h_trans_bandwidth=high_trans_bw,
+                                   filter_length=filter_len_points, skip_by_annotation='edge', verbose=False)
+                        self.log(f"Filter OK for {current_filename}.")
                     except Exception as e:
-                        self.log(f"Warn: Filter failed: {e}")
+                        self.log(f"Warn: Filter failed for {current_filename}: {e}")
                 else:
-                    self.log("Skip filter.")
+                    self.log(f"Skip filter for {current_filename}.")
 
-                # 5. Kurtosis rejection & interp (Using Automatic Trimmed Normalization)
+                # 5. Kurtosis rejection & interp
                 if reject_thresh:
-                    self.log(f"Kurtosis rejection (Z > {reject_thresh}) using Trimmed Normalization...")
-                    bad_k_auto = []  # Initialize list of bad channels found automatically
-                    picks = mne.pick_types(raw.info, eeg=True, exclude='bads')  # Pick good EEG channels
-
-                    if len(picks) >= 2:
-                        data = raw.get_data(picks=picks)
-                        k = kurtosis(data, axis=1, fisher=True, bias=False)
-                        k = np.nan_to_num(k)
-
-                        # --- Trimmed Normalization Logic ---
-                        threshold = reject_thresh
-                        proportion_to_cut = 0.1  # Trim 10% from each end (20% total) - Can be adjusted
-
-                        n = len(k)
-                        trim_count = int(np.floor(n * proportion_to_cut))
-
-                        if n - 2 * trim_count > 1:
-                            k_sorted = np.sort(k)
-                            k_trimmed = k_sorted[trim_count: n - trim_count]
-                            m_trimmed = np.mean(k_trimmed)
-                            s_trimmed = np.std(k_trimmed)
-                            self.log(f"Using trimmed normalization (cut {proportion_to_cut * 100:.0f}% each end): "
-                                     f"Mean={m_trimmed:.3f}, Std={s_trimmed:.3f} (based on {len(k_trimmed)} values)")
-
+                    self.log(f"Kurtosis rejection for {current_filename} (Z > {reject_thresh})...")
+                    bad_k_auto = []
+                    eeg_picks_for_kurtosis = mne.pick_types(raw.info, eeg=True, exclude=raw.info['bads'] + (
+                        [stim_ch] if stim_ch in raw.ch_names else []))
+                    if len(eeg_picks_for_kurtosis) >= 2:
+                        data = raw.get_data(picks=eeg_picks_for_kurtosis)
+                        k_values = kurtosis(data, axis=1, fisher=True, bias=False);
+                        k_values = np.nan_to_num(k_values)
+                        proportion_to_cut = 0.1;
+                        n_k = len(k_values);
+                        trim_count = int(np.floor(n_k * proportion_to_cut))
+                        if n_k - 2 * trim_count > 1:
+                            k_sorted = np.sort(k_values);
+                            k_trimmed = k_sorted[trim_count: n_k - trim_count]
+                            m_trimmed, s_trimmed = np.mean(k_trimmed), np.std(k_trimmed)
+                            self.log(
+                                f"Trimmed Norm for {current_filename}: Mean={m_trimmed:.3f}, Std={s_trimmed:.3f} (N_trimmed={len(k_trimmed)})")
                             if s_trimmed > 1e-9:
-                                z_scores_trimmed = (k - m_trimmed) / s_trimmed
-                                bad_k_indices = np.where(np.abs(z_scores_trimmed) > threshold)[0]
-                                ch_names_picked = [raw.info['ch_names'][i] for i in picks]
-                                bad_k_auto = [ch_names_picked[i] for i in bad_k_indices]
+                                z_scores_trimmed = (k_values - m_trimmed) / s_trimmed
+                                bad_k_indices_in_eeg_picks = np.where(np.abs(z_scores_trimmed) > reject_thresh)[0]
+                                ch_names_picked_for_kurtosis = [raw.info['ch_names'][i] for i in eeg_picks_for_kurtosis]
+                                bad_k_auto = [ch_names_picked_for_kurtosis[i] for i in bad_k_indices_in_eeg_picks]
                             else:
-                                self.log("Trimmed Std Dev is near zero, cannot calculate Z-scores.")
+                                self.log(f"Kurtosis Trimmed Std Dev near zero for {current_filename}.")
                         else:
-                            self.log(f"Not enough data points ({len(k)}) to calculate trimmed statistics "
-                                     f"after cutting {proportion_to_cut * 100:.0f}% from each end.")
-                        # --- End Trimmed Normalization ---
-
+                            self.log(f"Not enough data for Kurtosis trimmed stats in {current_filename} (N_k={n_k}).")
                         if bad_k_auto:
-                            self.log(f"Bad by Kurtosis (Trimmed Norm - Auto): {bad_k_auto}")
+                            self.log(f"Bad by Kurtosis for {current_filename}: {bad_k_auto}")
                         else:
-                            self.log("No channels found bad by automatic Kurtosis with Trimmed Normalization.")
-
+                            self.log(f"No channels bad by Kurtosis for {current_filename}.")
                     else:
-                        self.log("Skip Kurtosis rejection (less than 2 good EEG channels found).")
-
-                    # <<< DEBUG OVERRIDE REMOVED >>>
-
-                    # Directly use the automatic result to update MNE's bads list
-                    # Add the automatically detected bad channels, avoiding duplicates
-                    new_bads = [b for b in bad_k_auto if b not in raw.info['bads']]
-                    if new_bads:
-                        raw.info['bads'].extend(new_bads)
-
-                    # Now proceed with interpolation based on the final bads list
+                        self.log(f"Skip Kurtosis for {current_filename} ( < 2 good EEG channels).")
+                    new_bads_from_kurtosis = [b for b in bad_k_auto if b not in raw.info['bads']]
+                    if new_bads_from_kurtosis: raw.info['bads'].extend(new_bads_from_kurtosis)
                     if raw.info['bads']:
-                        self.log(f"Channels marked bad for interpolation: {raw.info['bads']}")
+                        self.log(f"Interpolating bads in {current_filename}: {raw.info['bads']}")
                         if raw.get_montage():
                             try:
-                                raw.interpolate_bads(reset_bads=True, mode='accurate', verbose=False)
-                                self.log("Interpolation OK.")
+                                raw.interpolate_bads(reset_bads=True, mode='accurate', verbose=False); self.log(
+                                    f"Interpolation OK for {current_filename}.")
                             except Exception as e:
-                                self.log(f"Warn: Interpolation failed: {e}")
+                                self.log(f"Warn: Interpolation failed for {current_filename}: {e}")
                         else:
-                            self.log("Warn: No montage found, cannot interpolate bad channels.")
+                            self.log(
+                                f"Warn: No montage for {current_filename}, cannot interpolate. Bads remain: {raw.info['bads']}")
                     else:
-                        self.log("No channels marked bad, skipping interpolation.")
+                        self.log(f"No bads to interpolate in {current_filename}.")
                 else:
-                    self.log("Skip Kurtosis rejection (threshold not set).")
+                    self.log(f"Skip Kurtosis for {current_filename} (no threshold).")
 
                 # 6. Average Reference
                 try:
-                    self.log("Applying average reference projection...")
-                    raw.set_eeg_reference('average', projection=True, verbose=False)
-                    raw.apply_proj(verbose=False)
-                    self.log("Average reference applied.")
+                    self.log(f"Applying average reference to {current_filename}...")
+                    eeg_picks_for_ref = mne.pick_types(raw.info, eeg=True, exclude=raw.info['bads'])
+                    if len(eeg_picks_for_ref) > 0:
+                        raw.set_eeg_reference(ref_channels='average', picks=eeg_picks_for_ref, projection=True,
+                                              verbose=False)
+                        raw.apply_proj(verbose=False)
+                        self.log(f"Average reference applied to {current_filename}.")
+                    else:
+                        self.log(f"Skip average ref for {current_filename}: No good EEG channels.")
                 except Exception as e:
-                    self.log(f"Warn: Average reference failed: {e}")
+                    self.log(f"Warn: Average reference failed for {current_filename}: {e}")
 
-                # Final log and return
-                self.log(f"Preprocessing OK. {len(raw.ch_names)} channels, {raw.info['sfreq']:.1f}Hz.")
+                self.log(
+                    f"Preprocessing OK for {current_filename}. {len(raw.ch_names)} channels, {raw.info['sfreq']:.1f}Hz.")
+                # === FINAL DEBUG LOGGING before returning raw_proc ===
+                final_ch_names = list(raw.info['ch_names'])
+                self.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: Final channel names before returning ({len(final_ch_names)}): {final_ch_names}")
+                if stim_ch in final_ch_names:
+                    self.log(
+                        f"DEBUG [preprocess_raw for {current_filename}]: Expected stim_ch '{stim_ch}' IS PRESENT at the VERY END of preprocessing.")
+                else:
+                    self.log(
+                        f"DEBUG [preprocess_raw for {current_filename}]: CRITICAL! Expected stim_ch '{stim_ch}' IS NOT PRESENT at the VERY END of preprocessing.")
+                # === END FINAL DEBUG LOGGING ===
                 return raw
 
             except Exception as e:
-                # Log the general error and print traceback for detailed debugging
-                self.log(f"!!! Critical Preprocessing error: {e}")
-                print("--- Traceback ---")
-                print(traceback.format_exc())
-                print("-----------------")
+                self.log(f"!!! CRITICAL Preprocessing error for {current_filename}: {e}")
+                self.log(f"Traceback: {traceback.format_exc()}")
                 return None
+
+
 
 
     def _focus_next_id_entry(self, event):

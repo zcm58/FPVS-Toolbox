@@ -1,4 +1,5 @@
 # stats_export.py
+# -*- coding: utf-8 -*-
 """
 Contains functions for exporting statistical analysis results from the FPVS Stats Tool
 to formatted Excel files using pandas and xlsxwriter.
@@ -6,34 +7,113 @@ to formatted Excel files using pandas and xlsxwriter.
 
 import os
 import pandas as pd
-import tkinter as tk # Required for filedialog/messagebox even if GUI isn't built here
+import tkinter as tk  # Required for filedialog/messagebox
 from tkinter import filedialog, messagebox
-import numpy as np # Required if handling NaN checks explicitly
+import numpy as np  # For handling np.nan if necessary
+import traceback  # For detailed error logging
 
-def export_significance_results_to_excel(findings_dict, metric, threshold, parent_folder, log_func=print):
+
+# --- Helper Function for Excel Formatting ---
+def _auto_format_and_write_excel(writer, df, sheet_name, log_func, custom_formats=None, default_col_width=15,
+                                 padding=2):
     """
-    Exports the structured Significance Check findings to a formatted Excel file.
+    Writes a DataFrame to an Excel sheet with auto-adjusted column widths and basic formatting.
+    Uses xlsxwriter engine.
 
     Args:
-        findings_dict (dict): Nested dictionary {condition: {roi: [finding_list]}}
-                              containing significant results. Each finding in the list
-                              is expected to be a dict like:
-                              {'Frequency': str, 'Mean_MetricName': float, 'N': int, ...}
-        metric (str): The metric analyzed (e.g., "Z Score"). Used for filename and lookup.
-        threshold (float): The significance threshold used. Used for filename.
-        parent_folder (str): The path to the parent data folder, used for suggesting save location.
-        log_func (callable, optional): Function to use for logging messages. Defaults to print.
+        writer (pd.ExcelWriter): Pandas ExcelWriter object.
+        df (pd.DataFrame): DataFrame to write.
+        sheet_name (str): Name of the sheet.
+        log_func (callable): Logging function.
+        custom_formats (dict, optional): Dict of {'col_name': xlsxwriter_format_object}.
+        default_col_width (int): Default column width if auto-sizing fails.
+        padding (int): Padding to add to auto-sized column width.
     """
-    log_func("Attempting to export Significance Check results...")
+    df.to_excel(writer, sheet_name=sheet_name, index=False)
+    workbook = writer.book
+    worksheet = writer.sheets[sheet_name]
 
-    if not findings_dict or not any(any(findings_dict[cond].values()) for cond in findings_dict):
-        log_func("No significant findings available to export.")
-        messagebox.showwarning("No Results", "No significant findings available to export for the Significance Check.")
+    # Default formats
+    header_format = workbook.add_format({'bold': True, 'text_wrap': True, 'valign': 'top',
+                                         'align': 'center', 'border': 1, 'fg_color': '#DDEBF7'})
+    center_format = workbook.add_format({'align': 'center', 'valign': 'vcenter'})
+    left_format = workbook.add_format({'align': 'left', 'valign': 'vcenter'})
+    num_format_2dp = workbook.add_format({'num_format': '0.00', 'align': 'center', 'valign': 'vcenter'})
+    num_format_3dp = workbook.add_format({'num_format': '0.000', 'align': 'center', 'valign': 'vcenter'})
+    num_format_4dp = workbook.add_format({'num_format': '0.0000', 'align': 'center', 'valign': 'vcenter'})
+    int_format = workbook.add_format({'num_format': '0', 'align': 'center', 'valign': 'vcenter'})
+
+    # Write headers with formatting
+    for col_num, value in enumerate(df.columns.values):
+        worksheet.write(0, col_num, value, header_format)
+
+    # Apply formatting and auto-adjust column widths
+    for col_idx, col_name in enumerate(df.columns):
+        # Determine format
+        cell_format = center_format  # Default to center
+        if custom_formats and col_name in custom_formats:
+            cell_format = custom_formats[col_name]
+        elif df[col_name].dtype == np.int64 or df[col_name].dtype == np.int32:
+            cell_format = int_format
+        elif df[col_name].dtype == np.float64 or df[col_name].dtype == np.float32:
+            # Basic heuristic for float precision, can be refined
+            if 'p_value' in col_name.lower() or 'P_Value' in col_name:  # more decimals for p-values
+                cell_format = num_format_4dp
+            elif 't_statistic' in col_name.lower() or 'F_value' in col_name.lower() or 'Mean_Difference' in col_name:  # 2dp for t-stats, F
+                cell_format = num_format_2dp
+            else:  # Default for other floats (means etc.)
+                cell_format = num_format_3dp
+        elif pd.api.types.is_string_dtype(df[col_name]) or pd.api.types.is_object_dtype(df[col_name]):
+            # Check if column name suggests it should be centered or left aligned
+            if col_name in ['Condition', 'ROI', 'Effect']:  # Typically longer text
+                cell_format = left_format
+            else:  # Shorter text like Frequency
+                cell_format = center_format
+
+        # Calculate width based on data and header length
+        try:
+            # Ensure data is string for length calculation, handle potential NaN properly
+            max_len_data = df[col_name].astype(str).map(len).max()
+            if pd.isna(max_len_data): max_len_data = 0  # Handle all-NaN columns
+
+            # Header length
+            header_len = len(str(col_name))
+
+            col_width = max(int(max_len_data), header_len) + padding
+            col_width = max(col_width, 10)  # Minimum width of 10
+            col_width = min(col_width, 50)  # Maximum width of 50 to prevent overly wide columns
+
+        except Exception as e_width:
+            log_func(f"Warning: Could not auto-set width for column '{col_name}': {e_width}")
+            col_width = default_col_width  # Fallback width
+
+        worksheet.set_column(col_idx, col_idx, col_width, cell_format)
+    log_func(f"Formatted sheet: {sheet_name}")
+
+
+# --- Export Function for Per-Harmonic Significance Check Results ---
+def export_significance_results_to_excel(findings_dict, metric, threshold, parent_folder, log_func=print):
+    """
+    Exports structured Per-Harmonic Significance Check findings to a formatted Excel file.
+
+    Args:
+        findings_dict (dict): Nested {condition: {roi: [finding_list]}}.
+                              finding_list contains dicts with keys like 'Frequency',
+                              'Mean_MetricName', 'N_Subjects', 'T_Statistic', 'P_Value', 'df', 'Threshold_Used'.
+        metric (str): Metric analyzed (e.g., "SNR", "Z-Score").
+        threshold (float): Mean value threshold used.
+        parent_folder (str): Path for suggesting save location.
+        log_func (callable): Logging function.
+    """
+    log_func("Attempting to export Per-Harmonic Significance Check results...")
+
+    if not findings_dict or not any(any(roi_data.values()) for roi_data in findings_dict.values()):
+        log_func("No significant findings available to export for Harmonic Check.")
+        messagebox.showwarning("No Results", "No significant findings from Harmonic Check to export.")
         return
 
-    # --- 1. Flatten the data structure for DataFrame ---
     flat_results = []
-    metric_col_name = f'Mean_{metric.replace(" ","_")}' # Construct the key for the metric value
+    mean_metric_col_key = f'Mean_{metric.replace(" ", "_")}'  # Key for the mean metric value column
 
     for condition, roi_data in findings_dict.items():
         for roi_name, findings_list in roi_data.items():
@@ -42,105 +122,150 @@ def export_significance_results_to_excel(findings_dict, metric, threshold, paren
                     'Condition': condition,
                     'ROI': roi_name,
                     'Frequency': finding.get('Frequency', 'N/A'),
-                    metric_col_name: finding.get(metric_col_name, np.nan),
-                    'N': finding.get('N', 'N/A'),
-                    'Threshold_Used': finding.get('Threshold', threshold) # Get threshold from finding or default
-                    # Add other relevant columns if stored (e.g., t-stat, p-value from 1-samp test)
-                    # 'T_Stat_vs_Threshold': finding.get('T_Stat', np.nan),
-                    # 'P_Value_vs_Threshold': finding.get('P_Value', np.nan)
+                    mean_metric_col_key: finding.get(mean_metric_col_key, np.nan),
+                    'N_Subjects': finding.get('N', np.nan),  # 'N' from stats.py's dict structure for this
+                    'df': finding.get('df', np.nan),
+                    'T_Statistic': finding.get('T_Statistic', np.nan),
+                    'P_Value': finding.get('P_Value', np.nan),
+                    'Mean_Threshold_Used': finding.get('Threshold', np.nan)  # 'Threshold' from stats.py
                 }
                 flat_results.append(row)
 
     if not flat_results:
-        log_func("Data structure was provided, but yielded no results to flatten for export.")
-        messagebox.showwarning("No Results", "Could not prepare any results for export.")
+        log_func("Harmonic check data yielded no results to flatten for export.")
+        messagebox.showwarning("No Results", "Could not prepare Harmonic Check results for export.")
         return
 
     df_export = pd.DataFrame(flat_results)
 
-    # --- 2. Define preferred column order ---
-    # Adjust if adding t-test results etc.
-    preferred_cols = ['Condition', 'ROI', 'Frequency', metric_col_name, 'N', 'Threshold_Used']
-    # Filter to only columns that actually exist in the generated DataFrame
-    cols_to_export = [col for col in preferred_cols if col in df_export.columns]
-    if not cols_to_export:
-         log_func("Error: Could not determine columns to export.")
-         messagebox.showerror("Export Error", "Could not determine valid columns for export.")
-         return
-    df_export = df_export[cols_to_export] # Reorder DF
+    # Define preferred column order
+    preferred_cols = ['Condition', 'ROI', 'Frequency', mean_metric_col_key,
+                      'N_Subjects', 'df', 'T_Statistic', 'P_Value', 'Mean_Threshold_Used']
+    df_export = df_export[[col for col in preferred_cols if col in df_export.columns]]
 
-    # --- 3. Get Save Path from User ---
     initial_dir = parent_folder if os.path.isdir(parent_folder) else os.path.expanduser("~")
-    metric_filename = metric.replace("-", "").replace(" ", "")
-    threshold_filename = f"{threshold:.2f}".replace('.', 'p') # e.g., 1p96
-    suggested_filename = f"Stats_SignificanceCheck_{metric_filename}_Thresh{threshold_filename}.xlsx"
+    metric_filename = metric.replace(" ", "").replace("-", "")
+    threshold_filename = f"{threshold:.2f}".replace('.', 'p')
+    suggested_filename = f"Stats_HarmonicCheck_{metric_filename}_Thresh{threshold_filename}.xlsx"
 
     save_path = filedialog.asksaveasfilename(
-        title=f"Save Significance Check Results ({metric} > {threshold:.2f}) As",
-        initialdir=initial_dir,
-        initialfile=suggested_filename,
-        defaultextension=".xlsx",
+        title=f"Save Harmonic Check Results ({metric}, Mean > {threshold:.2f})",
+        initialdir=initial_dir, initialfile=suggested_filename, defaultextension=".xlsx",
         filetypes=[("Excel Workbook", "*.xlsx"), ("All Files", "*.*")]
     )
+    if not save_path: log_func("Harmonic Check export cancelled."); return
 
-    if not save_path:
-        log_func("Export cancelled by user.")
+    try:
+        log_func(f"Exporting Harmonic Check results to: {save_path}")
+        with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
+            _auto_format_and_write_excel(writer, df_export, 'Significant Harmonics', log_func)
+        log_func("Harmonic Check results export successful.")
+        messagebox.showinfo("Export Successful", f"Harmonic Check results exported to:\n{save_path}")
+    except PermissionError:
+        err_msg = f"Permission denied writing to {save_path}. File may be open or folder write-protected."
+        log_func(f"!!! Export Failed: {err_msg}")
+        messagebox.showerror("Export Failed", err_msg)
+    except Exception as e:
+        log_func(f"!!! Harmonic Check Export Failed: {e}\n{traceback.format_exc()}")
+        messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
+
+
+# --- Export Function for Paired t-test Results (Summed BCA) ---
+def export_paired_results_to_excel(data, parent_folder, log_func=print):
+    """
+    Exports structured Paired t-test results to a formatted Excel file.
+
+    Args:
+        data (list of dict): List of dictionaries, each representing a significant paired test.
+                             Expected keys: 'ROI', 'Condition_A', 'Condition_B', 'N_Pairs',
+                                           't_statistic', 'df', 'p_value',
+                                           'Mean_A', 'Mean_B', 'Mean_Difference'.
+        parent_folder (str): Path for suggesting save location.
+        log_func (callable): Logging function.
+    """
+    log_func("Attempting to export Paired Test results...")
+    if not data:
+        log_func("No Paired Test results data available to export.")
+        messagebox.showwarning("No Results", "No Paired Test results to export.")
         return
 
-    # --- 4. Write to Excel with Formatting ---
+    df_export = pd.DataFrame(data)
+
+    # Define preferred column order
+    preferred_cols = ['ROI', 'Condition_A', 'Condition_B', 'N_Pairs',
+                      'Mean_A', 'Mean_B', 'Mean_Difference',
+                      't_statistic', 'df', 'p_value']
+    df_export = df_export[[col for col in preferred_cols if col in df_export.columns]]
+
+    # Suggest filename (try to get condition names if available from first result)
+    cond_a_name = data[0].get('Condition_A', 'CondA').replace(" ", "_")
+    cond_b_name = data[0].get('Condition_B', 'CondB').replace(" ", "_")
+    initial_dir = parent_folder if os.path.isdir(parent_folder) else os.path.expanduser("~")
+    suggested_filename = f"Stats_PairedTests_SummedBCA_{cond_a_name}_vs_{cond_b_name}.xlsx"
+
+    save_path = filedialog.asksaveasfilename(
+        title="Save Paired Test Results (Summed BCA)",
+        initialdir=initial_dir, initialfile=suggested_filename, defaultextension=".xlsx",
+        filetypes=[("Excel Workbook", "*.xlsx"), ("All Files", "*.*")]
+    )
+    if not save_path: log_func("Paired Test export cancelled."); return
+
     try:
-        log_func(f"Exporting Significance Check results to: {save_path}")
+        log_func(f"Exporting Paired Test results to: {save_path}")
         with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
-            df_export.to_excel(writer, sheet_name='Significant Findings', index=False)
-            workbook = writer.book
-            worksheet = writer.sheets['Significant Findings']
-
-            # Define cell formats (including centering)
-            fmt_num_2dp_center = workbook.add_format({'num_format': '0.00', 'align': 'center', 'valign': 'vcenter'})
-            fmt_int_center = workbook.add_format({'num_format': '0', 'align': 'center', 'valign': 'vcenter'})
-            fmt_text_left = workbook.add_format({'align': 'left', 'valign': 'vcenter'}) # Default for text
-            fmt_text_center = workbook.add_format({'align': 'center', 'valign': 'vcenter'})
-
-            # Column specific formats and widths
-            col_settings = {
-                'Condition': {'format': fmt_text_left, 'width': 25},
-                'ROI': {'format': fmt_text_left, 'width': 18},
-                'Frequency': {'format': fmt_text_center, 'width': 12},
-                metric_col_name: {'format': fmt_num_2dp_center, 'width': 15},
-                'N': {'format': fmt_int_center, 'width': 8},
-                'Threshold_Used': {'format': fmt_num_2dp_center, 'width': 15}
-                # Add settings for T_Stat, P_Value if they are included
-                # 'T_Stat_vs_Threshold': {'format': fmt_num_2dp_center, 'width': 15},
-                # 'P_Value_vs_Threshold': {'format': fmt_num_3dp_center, 'width': 15}, # Need 3dp format
-            }
-
-            # Apply formatting and auto-adjust column widths (using heuristic + defined minimums)
-            for col_idx, col_name in enumerate(df_export.columns):
-                settings = col_settings.get(col_name, {'format': fmt_text_left, 'width': 15}) # Default settings
-                col_format = settings['format']
-                min_width = settings['width']
-
-                # Calculate width based on data and header length
-                try:
-                    max_len_data = df_export[col_name].astype(str).map(len).max()
-                    if pd.isna(max_len_data): max_len_data = 0
-                    # Consider header length, add padding
-                    col_width = max(int(max_len_data) + 2, len(col_name) + 2, min_width)
-                except Exception:
-                    col_width = max(len(col_name) + 5, min_width) # Fallback width
-
-                worksheet.set_column(col_idx, col_idx, col_width, col_format)
-
-        log_func("Significance Check results export successful.")
-        messagebox.showinfo("Export Successful", f"Significance Check results exported to:\n{save_path}")
-
-    except PermissionError as e:
-         log_func(f"!!! Export Failed: Permission denied writing to {save_path}. Check file/folder permissions.")
-         messagebox.showerror("Export Failed", f"Permission denied writing file:\n{save_path}\nClose the file if it's open, or choose a different location.")
+            _auto_format_and_write_excel(writer, df_export, 'Paired Test Results', log_func)
+        log_func("Paired Test results export successful.")
+        messagebox.showinfo("Export Successful", f"Paired Test results exported to:\n{save_path}")
+    except PermissionError:
+        err_msg = f"Permission denied writing to {save_path}. File may be open or folder write-protected."
+        log_func(f"!!! Export Failed: {err_msg}")
+        messagebox.showerror("Export Failed", err_msg)
     except Exception as e:
-        log_func(f"!!! Export Failed: An unexpected error occurred.\n{traceback.format_exc()}")
-        messagebox.showerror("Export Failed", f"Could not save Excel file:\n{e}")
+        log_func(f"!!! Paired Test Export Failed: {e}\n{traceback.format_exc()}")
+        messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
 
-# You could add other export functions here later if needed, e.g., for paired results
-# def export_paired_results_to_excel(results_structured, ...):
-#    pass
+
+# --- Export Function for RM-ANOVA Results (Summed BCA) ---
+def export_rm_anova_results_to_excel(anova_table, parent_folder, log_func=print):
+    """
+    Exports RM-ANOVA table (DataFrame) to a formatted Excel file.
+
+    Args:
+        anova_table (pd.DataFrame): DataFrame containing the ANOVA results.
+        parent_folder (str): Path for suggesting save location.
+        log_func (callable): Logging function.
+    """
+    log_func("Attempting to export RM-ANOVA results...")
+    if anova_table is None or not isinstance(anova_table, pd.DataFrame) or anova_table.empty:
+        log_func("No RM-ANOVA results data available or data is not a DataFrame.")
+        messagebox.showwarning("No Results", "No RM-ANOVA results available to export or data format is incorrect.")
+        return
+
+    df_export = anova_table.copy()  # Use the DataFrame as is
+
+    initial_dir = parent_folder if os.path.isdir(parent_folder) else os.path.expanduser("~")
+    suggested_filename = f"Stats_RM_ANOVA_SummedBCA.xlsx"
+
+    save_path = filedialog.asksaveasfilename(
+        title="Save RM-ANOVA Results (Summed BCA)",
+        initialdir=initial_dir, initialfile=suggested_filename, defaultextension=".xlsx",
+        filetypes=[("Excel Workbook", "*.xlsx"), ("All Files", "*.*")]
+    )
+    if not save_path: log_func("RM-ANOVA export cancelled."); return
+
+    try:
+        log_func(f"Exporting RM-ANOVA results to: {save_path}")
+        with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
+            # The anova_table from statsmodels often has 'F', 'p-unc', 'ddof1', 'ddof2' etc.
+            # Or 'SS', 'DF', 'MS', 'F', 'PR(>F)' from other packages.
+            # The _auto_format_and_write_excel helper will handle standard numeric types.
+            _auto_format_and_write_excel(writer, df_export, 'RM-ANOVA Table', log_func)
+        log_func("RM-ANOVA results export successful.")
+        messagebox.showinfo("Export Successful", f"RM-ANOVA results exported to:\n{save_path}")
+    except PermissionError:
+        err_msg = f"Permission denied writing to {save_path}. File may be open or folder write-protected."
+        log_func(f"!!! Export Failed: {err_msg}")
+        messagebox.showerror("Export Failed", err_msg)
+    except Exception as e:
+        log_func(f"!!! RM-ANOVA Export Failed: {e}\n{traceback.format_exc()}")
+        messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
