@@ -4,299 +4,210 @@
 stats.py
 
 Provides a Toplevel window for statistical analysis of FPVS results.
-Features:
 
-1. Paired comparisons (t-test or Wilcoxon) between two conditions
-   for selected metrics (Z-Score/SNR etc.) averaged over Regions of Interest (ROIs)
-   across multiple selected frequencies. Can analyze a single selected ROI or all defined ROIs.
+Dual-track workflow:
+  1. Summed BCA analysis (paired t-tests & RM-ANOVA) excluding base frequency multiples
+  2. Per-harmonic significance check on SNR or Z-Score, excluding base frequency multiples
 
-2. Single-Condition significance check to scan the excel files for significant responses based on a user-input
-threshold. For example, the user can choose to scan the files for significant frontal lobe SNR responses above 1.5.
-
-Results are displayed and paired comparison results are exportable to Excel.
-
-Dependencies: customtkinter, pandas, numpy, scipy, (optional: config.py for TARGET_FREQUENCIES)
+Results are displayed in a textbox and exportable to Excel.
 """
+
+import os
+import glob
+import re
+import traceback
 
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
-import os
-import glob
-import re
+
 import pandas as pd
 import numpy as np
 import scipy.stats as stats
-import traceback
-from . import stats_export
 
-# Attempt to import from config, handle if running standalone
-try:
-    # Assumes config.py is in the same directory or Python path
-    # Or that the main app adds it to the Python path
-    from config import TARGET_FREQUENCIES
-except ImportError:
-    print("Warning: config.py not found or TARGET_FREQUENCIES not defined. Using default frequencies.")
-    # Define default frequencies if config is missing
-    TARGET_FREQUENCIES = np.round(np.arange(1.2, 17.0, 1.2), 1) # Example default
+from . import stats_export  # Assuming stats_export.py is in the same package
+from .repeated_m_anova import run_repeated_measures_anova  # Assuming repeated_m_anova.py
 
-
-# Define ROIs (e.g., based on Filho et al., 2021 or project specific)
-# Ensure channel names match exactly those in the Excel output's 'Electrode' column
+# Regions of Interest (10-20 montage)
 ROIS = {
     "Frontal Lobe": ["F3", "F4", "Fz"],
     "Occipital Lobe": ["O1", "O2", "Oz"],
     "Parietal Lobe": ["P3", "P4", "Pz"],
     "Central Lobe": ["C3", "C4", "Cz"]
-    # Add more ROIs here if needed, e.g.:
-    # "Temporal Lobe": ["T7", "T8", "TP9", "TP10"],
 }
-ALL_ROIS_OPTION = "(All ROIs)" # Constant for the special option for paired tests
+ALL_ROIS_OPTION = "(All ROIs)"
+HARMONIC_CHECK_ALPHA = 0.05  # Significance level for one-sample t-test
 
 
 class StatsAnalysisWindow(ctk.CTkToplevel):
-    """
-    A Toplevel window for performing and displaying paired statistical comparisons
-    and single-condition significance checks on FPVS results.
-    """
-
-    def run_analysis(self):
-        """ Paired comparison analysis """
-        self.log_to_main_app("Run Paired Comparison button clicked.")
-        self.results_structured = []
-        self.significant_findings = {}
-        self.results_textbox.configure(state="normal")
-        self.results_textbox.delete("1.0", tk.END)
-        self.export_button.configure(state="disabled")
-        self.export_sig_button.configure(state="disabled")  # <<< CHANGE: Disable sig export too
-
     def __init__(self, master, default_folder=""):
-        """
-        Initializes the Stats Analysis Window.
-
-        Args:
-            master: The parent Tkinter/CTk window.
-            default_folder (str, optional): Default folder path to suggest. Defaults to "".
-        """
-        if not isinstance(master, (tk.Tk, tk.Toplevel, ctk.CTk, ctk.CTkToplevel)):
-            raise TypeError("Master must be a Tkinter root or Toplevel window.")
-
         super().__init__(master)
         self.title("FPVS Statistical Analysis Tool")
-        # Increased default size for better layout
-        self.geometry("850x950")
-        # Make window modal (prevents interaction with parent window)
+        self.geometry("950x950")  # Adjusted for clarity of layout
         self.grab_set()
-        # Focus on this window when opened
-        self.lift()
         self.focus_force()
 
-        self.master_app = master  # Reference to the parent app window
-        self.default_output_folder = default_folder
-        self.subject_data = {}  # Stores {pid: {condition: file_path}}
-        self.conditions_list = []  # List of detected condition names
-        self.subjects_list = []  # List of detected subject IDs (PIDs)
-        self.results_structured = []  # Stores results dicts for paired comparison export
-        self.significant_findings = {}  # Stores {cond: {roi: [details]}} for sig check
+        self.master_app = master
 
-        # --- Define GUI Variables ---
-        self.stats_data_folder_var = tk.StringVar(value=self.default_output_folder)
-        self.detected_info_var = tk.StringVar(value="Select the folder that contains all of your FPVS results excel files.")
-        self.metric_var = tk.StringVar(value="Z Score")  # Default metric
-        self.roi_var = tk.StringVar(value=ALL_ROIS_OPTION)  # Default ROI for paired test
-        self.condition_A_var = tk.StringVar()
-        self.condition_B_var = tk.StringVar()
-        self.freq_checkbox_vars = {}  # Stores {freq_str: tk.BooleanVar}
-        self.significance_threshold_var = tk.StringVar(value="1.96")  # Default threshold for sig check
+        # Data structures
+        self.subject_data = {}
+        self.all_subject_data = {}  # For summed BCA: {pid: {condition: {roi: sum_bca}}}
+        self.subjects = []
+        self.conditions = []
 
-        # Add instance variable for the new button state management
-        self.export_sig_button = None  # Initialize significance check export button variable
+        # Results storage for export (structured data)
+        self.paired_tests_results_data = []
+        self.rm_anova_results_data = None  # Will store ANOVA table (ideally DataFrame)
+        self.harmonic_check_results_data = []
 
-        # --- Create Widgets ---
-        self.create_stats_widgets()
+        # UI state variables
+        self.stats_data_folder_var = tk.StringVar(master=self, value=default_folder)
+        self.detected_info_var = tk.StringVar(master=self, value="Select folder containing FPVS results.")
+        self.base_freq_var = tk.StringVar(master=self, value="6.0")
+        self.roi_var = tk.StringVar(master=self, value=ALL_ROIS_OPTION)
+        self.condition_A_var = tk.StringVar(master=self)
+        self.condition_B_var = tk.StringVar(master=self)
+        self.harmonic_metric_var = tk.StringVar(master=self, value="SNR")
+        self.harmonic_threshold_var = tk.StringVar(master=self, value="1.96")
 
-        # --- Initial Scan if Default Folder Exists ---
-        if self.default_output_folder and os.path.isdir(self.default_output_folder):
+        # UI Widget References (stored for potential future dynamic updates)
+        self.roi_menu = None
+        self.condA_menu = None
+        self.condB_menu = None
+        self.harmonic_metric_menu = None
+
+        # Export Buttons (instance variables to manage state)
+        self.export_paired_tests_btn = None
+        self.export_rm_anova_btn = None
+        self.export_harmonic_check_btn = None
+
+        self.create_widgets()
+        if default_folder and os.path.isdir(default_folder):
             self.scan_folder()
-
-        # Ensure window destruction cleans up resources if necessary
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    def on_close(self):
-        """Handles window closing."""
-        self.log_to_main_app("Closing Stats Analysis window.")
-        self.grab_release() # Release modal grab
-        self.destroy()
-
-    # ==============================================================
-    # Widget Creation
-    # ==============================================================
-    def create_stats_widgets(self):
-        """Creates and lays out the widgets for the statistics window."""
-
-        # Register validation command for numeric entry
-        validate_num_cmd = (self.register(self._validate_numeric_input), '%P')
-
-        # Configure main frame grid
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-
-        main_frame = ctk.CTkFrame(self)
-        main_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        # Configure grid layout for main_frame content
-        main_frame.grid_rowconfigure(2, weight=1)  # Results frame row expands (changed from 3)
-        main_frame.grid_columnconfigure(0, weight=1)
-
-        # --- 1. Data Input Frame ---
-        input_frame = ctk.CTkFrame(main_frame)
-        input_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
-        input_frame.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(input_frame, text="Data Folder:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        folder_entry = ctk.CTkEntry(input_frame, textvariable=self.stats_data_folder_var, state="readonly")
-        folder_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        browse_button = ctk.CTkButton(input_frame, text="Select Folder w/ excel files", command=self.browse_folder)
-        browse_button.grid(row=0, column=2, padx=5, pady=5)
-
-        detected_label = ctk.CTkLabel(input_frame, textvariable=self.detected_info_var, justify="left", anchor="w")
-        detected_label.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="w")
-
-        # --- 2. Analysis Setup Frame ---
-        setup_frame = ctk.CTkFrame(main_frame)
-        setup_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-        # Configure grid columns for setup_frame
-        setup_frame.grid_columnconfigure(1, weight=1)
-        setup_frame.grid_columnconfigure(3, weight=1)
-
-        # Row 0: Metric & Significance Threshold
-        ctk.CTkLabel(setup_frame, text="Metric:").grid(row=0, column=0, padx=(5, 2), pady=5, sticky="w")
-        metric_menu = ctk.CTkOptionMenu(setup_frame, variable=self.metric_var,
-                                        values=["Z Score", "SNR", "FFT Amplitude (uV)", "BCA (uV)"])
-        metric_menu.set("Z Score")
-        metric_menu.grid(row=0, column=1, padx=(0, 5), pady=5, sticky="ew")
-
-        ctk.CTkLabel(setup_frame, text="Significance Threshold:").grid(row=0, column=2, padx=(15, 2), pady=5, sticky="w")
-        self.sig_threshold_entry = ctk.CTkEntry(
-            setup_frame, textvariable=self.significance_threshold_var,
-            validate='key', validatecommand=validate_num_cmd, width=80
-        )
-        self.sig_threshold_entry.grid(row=0, column=3, padx=(0, 5), pady=5, sticky="w")
-
-        # Row 1: ROI for Paired Test
-        ctk.CTkLabel(setup_frame, text="ROI (Paired Test):").grid(row=1, column=0, padx=(5, 2), pady=5, sticky="w")
-        roi_options = [ALL_ROIS_OPTION] + list(ROIS.keys())
-        roi_menu = ctk.CTkOptionMenu(setup_frame, variable=self.roi_var, values=roi_options)
-        roi_menu.set(ALL_ROIS_OPTION)
-        roi_menu.grid(row=1, column=1, padx=(0, 5), pady=5, sticky="ew")
-
-        # Row 2: Frequencies (Label + Scrollable Frame)
-        ctk.CTkLabel(setup_frame, text="Frequencies:").grid(row=2, column=0, padx=(5, 2), pady=5, sticky="nw")
-        freq_frame = ctk.CTkScrollableFrame(setup_frame, label_text="", height=120)  # Slightly taller
-        freq_frame.grid(row=2, column=1, columnspan=3, padx=(0, 5), pady=5, sticky="nsew")  # Span across remaining cols
-
-        # Populate Frequency Checkboxes
-        self.freq_checkbox_vars = {}
-        try:
-            # Ensure TARGET_FREQUENCIES is iterable (list or numpy array)
-            formatted_freqs = [f"{f:.1f}_Hz" for f in TARGET_FREQUENCIES]
-        except TypeError:
-            self.log_to_main_app("Error: TARGET_FREQUENCIES not defined or not iterable. Using empty list.")
-            formatted_freqs = []
-            messagebox.showerror("Configuration Error",
-                                 "TARGET_FREQUENCIES not defined correctly.\nPlease check config.py or default setup.")
-
-        for i, freq_str in enumerate(formatted_freqs):
-            var = tk.BooleanVar(value=(i == 0))  # Select first by default only if list is not empty
-            cb = ctk.CTkCheckBox(freq_frame, text=freq_str, variable=var)
-            cb.pack(anchor="w", padx=5, pady=1)
-            self.freq_checkbox_vars[freq_str] = var
-
-        # Row 3: Frequency Select/Deselect Buttons
-        freq_button_frame = ctk.CTkFrame(setup_frame, fg_color="transparent")
-        freq_button_frame.grid(row=3, column=1, columnspan=3, sticky="w", padx=(0, 5), pady=(0, 5))  # Align left
-        btn_select_all = ctk.CTkButton(freq_button_frame, text="Select All Harmonics", command=self.select_all_freqs,
-                                       width=120)
-        btn_select_all.pack(side="left", padx=(0, 5))
-        btn_deselect_all = ctk.CTkButton(freq_button_frame, text="Deselect All Harmonics", command=self.deselect_all_freqs,
-                                         width=120)
-        btn_deselect_all.pack(side="left")
-
-        # Row 4: Paired Comparison Condition Selection
-        ctk.CTkLabel(setup_frame, text="Condition A (Paired):").grid(row=4, column=0, padx=(5, 2), pady=5, sticky="w")
-        self.cond_A_menu = ctk.CTkOptionMenu(setup_frame, variable=self.condition_A_var, values=["(Scan Folder)"],
-                                             command=self.update_condition_b_options)
-        self.cond_A_menu.grid(row=4, column=1, padx=(0, 5), pady=5, sticky="ew")
-
-        ctk.CTkLabel(setup_frame, text="Condition B (Paired):").grid(row=4, column=2, padx=(15, 2), pady=5, sticky="w")
-        self.cond_B_menu = ctk.CTkOptionMenu(setup_frame, variable=self.condition_B_var, values=["(Scan Folder)"])
-        self.cond_B_menu.grid(row=4, column=3, padx=(0, 5), pady=5, sticky="ew")
-
-        # --- 3. Run Buttons & Results Frame ---
-        results_outer_frame = ctk.CTkFrame(main_frame)  # Contains buttons and results box
-        results_outer_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
-        results_outer_frame.grid_rowconfigure(1, weight=1)  # Textbox row expands
-        results_outer_frame.grid_columnconfigure(0, weight=1)  # Textbox col expands
-
-        # Frame for Run Buttons
-        run_buttons_frame = ctk.CTkFrame(results_outer_frame, fg_color="transparent")
-        run_buttons_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, 5))
-
-        run_paired_button = ctk.CTkButton(run_buttons_frame, text="Run Paired Comparison", command=self.run_analysis)
-        run_paired_button.pack(side="left", padx=(0, 10), pady=5)
-
-        run_sig_check_button = ctk.CTkButton(run_buttons_frame, text="Check for Significant Responses",
-                                             command=self.run_significance_check)
-        run_sig_check_button.pack(side="left", padx=(0, 10), pady=5)
-
-        # Paired results export button
-        self.export_button = ctk.CTkButton(run_buttons_frame, text="Export Paired Results", state="disabled",
-                                           command=self.export_results)
-        self.export_button.pack(side="left", padx=(0, 10), pady=5)
-
-        # Significance Check Export Button
-        self.export_sig_button = ctk.CTkButton(run_buttons_frame, text="Export Sig. Check Results", state="disabled",
-                                               command=self.call_export_significance_results)
-        self.export_sig_button.pack(side="left", padx=0, pady=5)
-
-        # Results Textbox (Increased font size)
-        results_font = ctk.CTkFont(family="Courier New", size=12)  # Larger font
-        self.results_textbox = ctk.CTkTextbox(results_outer_frame, wrap="word", state="disabled", font=results_font)
-        self.results_textbox.grid(row=1, column=0, padx=0, pady=0, sticky="nsew")
-
-    # ==============================================================
-    # Helper Functions (Including Validation)
-    # ==============================================================
-    def _validate_numeric_input(self, P):
-        """ Allows empty string, '-', or valid float number """
-        if P == "" or P == "-":
-            return True
-        try:
-            float(P)
-            return True
-        except ValueError:
-            # self.bell() # Optional: sound feedback
-            return False
-
     def log_to_main_app(self, message):
-        """ Safely logs messages to the main app's log method if it exists. """
         try:
             if hasattr(self.master_app, 'log') and callable(self.master_app.log):
                 self.master_app.log(f"[Stats] {message}")
             else:
-                # Fallback to print if master doesn't have 'log' (e.g., when testing)
                 print(f"[Stats] {message}")
         except Exception as e:
             print(f"[Stats Log Error] {e} | Original message: {message}")
 
+    def on_close(self):
+        self.log_to_main_app("Closing Stats Analysis window.")
+        self.grab_release()
+        self.destroy()
+
+    def _validate_numeric(self, P):
+        if P in ("", "-"): return True
+        try:
+            float(P)
+            return True
+        except ValueError:
+            return False
+
+    def create_widgets(self):
+        validate_num_cmd = (self.register(self._validate_numeric), '%P')
+
+        main_frame = ctk.CTkFrame(self)
+        main_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
+
+        # --- Row 0: Folder Selection ---
+        folder_frame = ctk.CTkFrame(main_frame)
+        folder_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 10))
+        folder_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(folder_frame, text="Data Folder:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkEntry(folder_frame, textvariable=self.stats_data_folder_var, state="readonly").grid(row=0, column=1,
+                                                                                                   padx=5, pady=5,
+                                                                                                   sticky="ew")
+        ctk.CTkButton(folder_frame, text="Browse...", command=self.browse_folder).grid(row=0, column=2, padx=5, pady=5)
+        ctk.CTkLabel(folder_frame, textvariable=self.detected_info_var, justify="left", anchor="w").grid(row=1,
+                                                                                                         column=0,
+                                                                                                         columnspan=3,
+                                                                                                         padx=5, pady=5,
+                                                                                                         sticky="w")
+
+        # --- Row 1: Common Setup ---
+        common_setup_frame = ctk.CTkFrame(main_frame)
+        common_setup_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+        common_setup_frame.grid_columnconfigure(1, weight=1)
+        common_setup_frame.grid_columnconfigure(3, weight=1)
+        ctk.CTkLabel(common_setup_frame, text="Base Freq (Hz):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkEntry(common_setup_frame, textvariable=self.base_freq_var, validate='key',
+                     validatecommand=validate_num_cmd, width=100).grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(common_setup_frame, text="ROI (Paired/ANOVA):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        roi_options = [ALL_ROIS_OPTION] + list(ROIS.keys())
+        self.roi_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.roi_var,
+                                          values=roi_options)  # Stored instance
+        self.roi_menu.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(common_setup_frame, text="Condition A (Paired):").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        self.condA_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.condition_A_var, values=["(Scan Folder)"],
+                                            command=lambda *_: self.update_condition_B_options())  # Already stored
+        self.condA_menu.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(common_setup_frame, text="Condition B (Paired):").grid(row=2, column=2, padx=(15, 5), pady=5,
+                                                                            sticky="w")
+        self.condB_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.condition_B_var,
+                                            values=["(Scan Folder)"])  # Already stored
+        self.condB_menu.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
+
+        # --- Row 2: Section A - Summed BCA Analysis ---
+        summed_bca_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        summed_bca_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=(10, 5))
+        ctk.CTkLabel(summed_bca_frame, text="Summed BCA Analysis:", font=ctk.CTkFont(weight="bold")).pack(anchor="w",
+                                                                                                          pady=(0, 5))
+        buttons_summed_frame = ctk.CTkFrame(summed_bca_frame)
+        buttons_summed_frame.pack(fill="x", padx=0, pady=0)  # Use pack for horizontal button layout
+        ctk.CTkButton(buttons_summed_frame, text="Run Paired Tests (Summed BCA)", command=self.run_paired_tests).pack(
+            side="left", padx=(0, 5), pady=5)
+        ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
+            side="left", padx=5, pady=5)
+        self.export_paired_tests_btn = ctk.CTkButton(buttons_summed_frame, text="Export Paired Results",
+                                                     state="disabled", command=self.export_paired_results)
+        self.export_paired_tests_btn.pack(side="left", padx=5, pady=5)
+        self.export_rm_anova_btn = ctk.CTkButton(buttons_summed_frame, text="Export RM-ANOVA", state="disabled",
+                                                 command=self.export_rm_anova_results)
+        self.export_rm_anova_btn.pack(side="left", padx=5, pady=5)
+
+        # --- Row 3: Section B - Harmonic Significance Check ---
+        harmonic_check_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        harmonic_check_frame.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
+        ctk.CTkLabel(harmonic_check_frame, text="Per-Harmonic Significance Check:",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(0, 5))
+        controls_harmonic_frame = ctk.CTkFrame(harmonic_check_frame)
+        controls_harmonic_frame.pack(fill="x", padx=0, pady=0)
+        ctk.CTkLabel(controls_harmonic_frame, text="Metric:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
+        self.harmonic_metric_menu = ctk.CTkOptionMenu(controls_harmonic_frame, variable=self.harmonic_metric_var,
+                                                      values=["SNR", "Z Score"])  # Stored instance
+        self.harmonic_metric_menu.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(controls_harmonic_frame, text="Mean Threshold:").grid(row=0, column=2, padx=(15, 5), pady=5,
+                                                                           sticky="w")
+        ctk.CTkEntry(controls_harmonic_frame, textvariable=self.harmonic_threshold_var, validate='key',
+                     validatecommand=validate_num_cmd, width=100).grid(row=0, column=3, padx=5, pady=5, sticky="w")
+        ctk.CTkButton(controls_harmonic_frame, text="Run Harmonic Check", command=self.run_harmonic_check).grid(row=0,
+                                                                                                                column=4,
+                                                                                                                padx=15,
+                                                                                                                pady=5)
+        self.export_harmonic_check_btn = ctk.CTkButton(controls_harmonic_frame, text="Export Harmonic Results",
+                                                       state="disabled", command=self.export_harmonic_check_results)
+        self.export_harmonic_check_btn.grid(row=0, column=5, padx=5, pady=5)
+        controls_harmonic_frame.grid_columnconfigure(1, weight=1)  # Allow metric menu to expand
+
+        # --- Row 4: Results Textbox ---
+        self.results_textbox = ctk.CTkTextbox(main_frame, wrap="word", state="disabled",
+                                              font=ctk.CTkFont(family="Courier New", size=12))
+        self.results_textbox.grid(row=4, column=0, sticky="nsew", padx=5, pady=(10, 5))
+        main_frame.grid_rowconfigure(4, weight=1)
 
     def browse_folder(self):
-        """Opens folder selection dialog and triggers scanning."""
         current_folder = self.stats_data_folder_var.get()
         initial_dir = current_folder if os.path.isdir(current_folder) else os.path.expanduser("~")
-        folder = filedialog.askdirectory(
-            title="Select Parent Folder Containing Condition Subfolders",
-            initialdir=initial_dir
-        )
+        folder = filedialog.askdirectory(title="Select Parent Folder Containing Condition Subfolders",
+                                         initialdir=initial_dir)
         if folder:
             self.stats_data_folder_var.set(folder)
             self.scan_folder()
@@ -304,1160 +215,801 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.log_to_main_app("Folder selection cancelled.")
 
     def scan_folder(self):
-        """
-        Scans the selected PARENT folder for SUBFOLDERS (conditions).
-        Looks inside each subfolder for participant Excel files matching PID pattern.
-        Updates internal lists and GUI dropdowns.
-        This file expects a naming scheme like "P1_FPVS" or "P2_FPVS" etc.
-        It matches participants across conditions based on the "P1" "P2" etc filename.
-        """
+        """ Scans folder for PIDs and Conditions """
         parent_folder = self.stats_data_folder_var.get()
         if not parent_folder or not os.path.isdir(parent_folder):
             self.detected_info_var.set("Invalid parent folder selected.")
-            self.update_condition_menus([]) # Clear menus
-            return
-
-        self.log_to_main_app(f"Scanning parent folder for condition subfolders: {parent_folder}")
-        subjects = set()
-        conditions = set()
-        self.subject_data = {} # Reset data
-        # PID pattern: Starts with 'P' followed by digits, anywhere in the filename before '.xlsx'
-        pid_pattern = re.compile(r"^(?:[a-zA-Z0-9_.-]*?)(P\d+|S\d+|Sub\d+).*\.xlsx$", re.IGNORECASE)
-
-        try:
-            for item_name in os.listdir(parent_folder):
-                item_path = os.path.join(parent_folder, item_name)
-                if os.path.isdir(item_path):
-                    # Use subfolder name as potential condition identifier
-                    subfolder_name = item_name
-                    # Simple cleaning: remove leading numbers/hyphens/spaces
-                    condition_name = re.sub(r'^\d+\s*[-_]*\s*', '', subfolder_name).strip()
-                    if not condition_name: continue # Skip if cleaning results in empty name
-
-                    self.log_to_main_app(f"  Found potential condition subfolder: '{subfolder_name}' -> Condition Name: '{condition_name}'")
-                    conditions.add(condition_name)
-                    found_files_in_subfolder = False
-
-                    # Look for Excel files directly within this subfolder
-                    subfolder_files = glob.glob(os.path.join(item_path, "*.xlsx"))
-                    for f_path in subfolder_files:
-                        excel_filename = os.path.basename(f_path)
-                        pid_match = pid_pattern.match(excel_filename)
-
-                        if pid_match:
-                            pid = pid_match.group(1).upper() # Use uppercase PID consistently
-                            subjects.add(pid)
-                            found_files_in_subfolder = True
-                            if pid not in self.subject_data:
-                                self.subject_data[pid] = {}
-                            if condition_name in self.subject_data[pid]:
-                                self.log_to_main_app(f"    Warn: Duplicate Excel file found for Subject {pid}, Condition '{condition_name}'. Overwriting path with {excel_filename}")
-                            self.subject_data[pid][condition_name] = f_path
-                        # else: # Optional logging for non-matching files
-                            # self.log_to_main_app(f"    Info: File '{excel_filename}' in subfolder '{subfolder_name}' does not match PID pattern. Skipping.")
-
-                    if not found_files_in_subfolder:
-                         self.log_to_main_app(f"    Warn: No Excel files matching PID pattern (e.g., P001_*.xlsx) found in subfolder '{subfolder_name}'.")
-
-        except PermissionError as e:
-             self.log_to_main_app(f"!!! Permission Error scanning folder: {parent_folder}. Check permissions.")
-             messagebox.showerror("Scanning Error", f"Permission denied accessing folder or its contents:\n{parent_folder}\n{e}")
-             self.detected_info_var.set("Error: Permission denied during scanning.")
-             self.update_condition_menus([])
-             return
-        except Exception as e:
-            self.log_to_main_app(f"!!! Error scanning folder structure: {e}\n{traceback.format_exc()}")
-            messagebox.showerror("Scanning Error", f"An unexpected error occurred during scanning:\n{e}")
-            self.detected_info_var.set("Error during scanning.")
             self.update_condition_menus([])
             return
 
-        self.subjects_list = sorted(list(subjects))
-        self.conditions_list = sorted(list(conditions))
+        self.log_to_main_app(f"Scanning parent folder: {parent_folder}")
+        subjects_set = set()
+        conditions_set = set()
+        self.subject_data.clear()  # Clear previous data
 
-        # Update GUI info label and menus
-        if not self.conditions_list or not self.subjects_list:
-            info_text = "Scan complete: No valid condition subfolders or subject Excel files (e.g., P001_*.xlsx) found."
-            messagebox.showwarning("Scan Results", info_text)
-        else:
-            info_text = f"Scan complete: Found {len(self.subjects_list)} subjects (PIDs) and {len(self.conditions_list)} conditions (subfolders)."
-            self.log_to_main_app(f"Detected Subjects: {', '.join(self.subjects_list)}")
-            self.log_to_main_app(f"Detected Conditions: {', '.join(self.conditions_list)}")
+        # Revised PID pattern:
+        # Looks for an optional prefix of letters, then P (case-insensitive) followed by digits.
+        # Captures the P and digits part.
+        pid_pattern = re.compile(r"(?:[a-zA-Z]*)?(P\d+).*\.xlsx$", re.IGNORECASE)
 
-        self.detected_info_var.set(info_text)
-        self.update_condition_menus(self.conditions_list)
-
-    def update_condition_menus(self, conditions):
-        """Updates the condition dropdown menus based on scanned folders."""
-        valid_conditions = [c for c in conditions if c] # Exclude potential empty strings
-
-        if not valid_conditions:
-            display_list = ["(Scan Folder)"]
-            self.condition_A_var.set(display_list[0])
-        else:
-            display_list = valid_conditions
-            # Preserve selection if still valid, otherwise default to first
-            if self.condition_A_var.get() not in valid_conditions:
-                self.condition_A_var.set(valid_conditions[0])
-
-        self.cond_A_menu.configure(values=display_list)
-        # Update Cond B options whenever Cond A options change
-        self.update_condition_b_options()
-
-    def update_condition_b_options(self, *args):
-        """Updates Condition B options to exclude the selection in Condition A."""
-        cond_a = self.condition_A_var.get()
-        valid_b_options = [c for c in self.conditions_list if c != cond_a] # Exclude Cond A selection
-
-        # Handle placeholder messages
-        if not valid_b_options:
-            if cond_a and cond_a != "(Scan Folder)":
-                 valid_b_options = ["(No other conditions)"]
-            else: # If Cond A is placeholder or list is empty
-                 valid_b_options = ["(Select Condition A)"]
-
-        current_b_val = self.condition_B_var.get()
-        self.cond_B_menu.configure(values=valid_b_options)
-
-        # Reset B selection if current is invalid or same as A
-        if current_b_val not in valid_b_options or current_b_val == cond_a:
-            self.condition_B_var.set(valid_b_options[0]) # Default to first valid option
-
-    def select_all_freqs(self):
-        """Sets all frequency checkboxes to True."""
-        for var in self.freq_checkbox_vars.values():
-            var.set(True)
-
-    def deselect_all_freqs(self):
-        """Sets all frequency checkboxes to False."""
-        for var in self.freq_checkbox_vars.values():
-            var.set(False)
-
-    # ==============================================================
-    # Data Aggregation
-    # ==============================================================
-    def aggregate_data(self, metric, roi_name, frequency, cond_a, cond_b=None):
-        """
-        Aggregates data for the specified parameters across subjects.
-        If cond_b is None, aggregates only for cond_a.
-
-        Args:
-            metric (str): The metric to extract (e.g., "Z Score").
-            roi_name (str): The name of the ROI (must be a key in ROIS dict).
-            frequency (str): The frequency column name (e.g., "1.2_Hz").
-            cond_a (str): The name of the first condition.
-            cond_b (str, optional): The name of the second condition for paired analysis. Defaults to None.
-
-        Returns:
-            tuple: (scores_a, scores_b, included_subjects)
-                   scores_a (list): List of aggregated scores for cond_a.
-                   scores_b (list or None): List of scores for cond_b if paired, else None.
-                   included_subjects (list): List of PIDs included in the aggregation.
-                   Returns (None, None, None) if aggregation fails for any reason.
-        """
-        log_conds = f"{cond_a} vs {cond_b}" if cond_b else f"{cond_a} only"
-        self.log_to_main_app(f"Aggregating: Metric='{metric}', ROI='{roi_name}', Freq='{frequency}', Conds='{log_conds}'")
-
-        scores_a = []
-        scores_b = [] if cond_b else None # Initialize scores_b only if needed
-        included_subjects = []
-        roi_channels = ROIS.get(roi_name)
-        if not roi_channels:
-            self.log_to_main_app(f"Error: Invalid ROI name '{roi_name}' provided. Check ROIS definition.")
-            return None, None, None
-
-        # Map metric display name to exact sheet name expected in Excel files
-        sheet_name_map = {
-            "Z Score": "Z Score",
-            "SNR": "SNR",
-            "FFT Amplitude (uV)": "FFT Amplitude (uV)",
-            "BCA (uV)": "BCA (uV)"
-            # Add other mappings if needed
-        }
-        sheet_name = sheet_name_map.get(metric)
-        if not sheet_name:
-             self.log_to_main_app(f"Error: Invalid metric '{metric}' selected. Cannot map to sheet name.")
-             return None, None, None
-
-        if not self.subjects_list:
-             self.log_to_main_app("Warning: No subjects found during scan. Cannot aggregate data.")
-             return None, None, None
-
-        # Iterate through all scanned subjects
-        for pid in self.subjects_list:
-            subject_files = self.subject_data.get(pid, {})
-            file_a = subject_files.get(cond_a)
-            file_b = subject_files.get(cond_b) if cond_b else None
-
-            # Check if files exist for required conditions for this subject
-            if not file_a:
-                # self.log_to_main_app(f"Debug: Skipping Subject {pid} - Missing file/data for Condition A ('{cond_a}').")
-                continue
-            if cond_b and not file_b:
-                # self.log_to_main_app(f"Debug: Skipping Subject {pid} - Missing file/data for Condition B ('{cond_b}').")
-                continue
-
-            # Check file paths actually exist on disk
-            if not os.path.exists(file_a):
-                self.log_to_main_app(f"Warn: File path not found for Subject {pid}, Cond A: {file_a}. Skipping.")
-                continue
-            if cond_b and not os.path.exists(file_b):
-                self.log_to_main_app(f"Warn: File path not found for Subject {pid}, Cond B: {file_b}. Skipping.")
-                continue
-
-            # Try reading data and calculating ROI mean for this subject
-            try:
-                # --- Process Condition A ---
-                df_a = pd.read_excel(file_a, sheet_name=sheet_name, index_col="Electrode")
-                # Check if frequency column exists
-                if frequency not in df_a.columns:
-                    self.log_to_main_app(f"Warn: Freq column '{frequency}' missing in {os.path.basename(file_a)} (Subj {pid}). Skipping for this freq.")
-                    continue
-                # Extract data for ROI channels, drop any missing channels for this subject
-                roi_vals_a = df_a.reindex(roi_channels)[frequency].dropna()
-
-                # --- Process Condition B (only if required) ---
-                roi_vals_b = None
-                if cond_b:
-                    df_b = pd.read_excel(file_b, sheet_name=sheet_name, index_col="Electrode")
-                    if frequency not in df_b.columns:
-                        self.log_to_main_app(f"Warn: Freq column '{frequency}' missing in {os.path.basename(file_b)} (Subj {pid}). Skipping for this freq.")
+        try:
+            for item_name in os.listdir(parent_folder):  # These are expected to be condition subfolders
+                item_path = os.path.join(parent_folder, item_name)
+                if os.path.isdir(item_path):
+                    condition_name_raw = item_name
+                    # Clean condition name (remove leading numbers/hyphens/spaces if any)
+                    condition_name = re.sub(r'^\d+\s*[-_]*\s*', '', condition_name_raw).strip()
+                    if not condition_name:
+                        self.log_to_main_app(
+                            f"  Skipping subfolder '{condition_name_raw}' due to empty name after cleaning.")
                         continue
-                    roi_vals_b = df_b.reindex(roi_channels)[frequency].dropna()
 
-                # --- Check data completeness for ROI channels ---
-                # Require *all* defined ROI channels to be present after dropping NaNs
-                complete_a = len(roi_vals_a) == len(roi_channels)
-                # Complete B only matters if we are doing a paired analysis
-                complete_b = cond_b is None or (roi_vals_b is not None and len(roi_vals_b) == len(roi_channels))
-
-                if complete_a and complete_b:
-                    avg_a = roi_vals_a.mean()
-                    scores_a.append(avg_a)
-                    if cond_b: # If paired analysis, calculate and append B
-                        avg_b = roi_vals_b.mean()
-                        scores_b.append(avg_b)
-                    included_subjects.append(pid) # Add subject ID to included list
-                else:
-                    # Log which channels were missing if incomplete
-                    missing_a_str = "" if complete_a else f"Cond A missing channels: {set(roi_channels) - set(roi_vals_a.index) or 'N/A'}. "
-                    missing_b_str = ""
-                    if cond_b and not complete_b: missing_b_str = f"Cond B missing channels: {set(roi_channels) - set(roi_vals_b.index) or 'N/A'}. "
-                    self.log_to_main_app(f"Warn: Subj {pid}, Freq {frequency}, ROI {roi_name} - Incomplete channel data. {missing_a_str}{missing_b_str}Excluding.")
-
-            # Handle specific errors during file reading/processing
-            except FileNotFoundError:
-                self.log_to_main_app(f"Warn: FileNotFoundError for subject {pid}, conds '{cond_a}'/'{cond_b}'. Check paths. Excluding.")
-                continue # Skip to next subject
-            except KeyError as e:
-                 # More specific messages for common KeyErrors
-                 if sheet_name in str(e): self.log_to_main_app(f"Warn: Sheet '{sheet_name}' not found in files for {pid}. Check Metric setting and Excel files. Excluding.")
-                 elif "Electrode" in str(e): self.log_to_main_app(f"Warn: 'Electrode' index column not found in files for {pid}. Check Excel format. Excluding.")
-                 elif frequency in str(e): self.log_to_main_app(f"Warn: Freq column '{frequency}' processing error for {pid}: {e}. Check data. Excluding.")
-                 else: self.log_to_main_app(f"Warn: KeyError reading data for subject {pid}: {e}. Excluding.")
-                 continue
-            except ValueError as e:
-                  # Check if error message relates to missing ROI channels during reindex
-                 if any(ch in str(e) for ch in roi_channels): self.log_to_main_app(f"Warn: One or more ROI channels ({roi_channels}) not found in index for {pid}. Check ROI definition/Excel file. Excluding.")
-                 else: self.log_to_main_app(f"ValueError reading data for subject {pid}: {e}. Excluding.")
-                 continue
-            except Exception as e:
-                # Catch-all for other unexpected errors
-                self.log_to_main_app(f"!!! Unexpected Error reading data for subject {pid}: {e}\n{traceback.format_exc()}")
-                continue # Skip subject on unexpected error
-
-        # Check if any subjects were successfully included
-        if not included_subjects:
-             self.log_to_main_app("Aggregation complete: No subjects found with complete data for the selected parameters.")
-             return None, None, None # Return None if no subjects included
-
-        self.log_to_main_app(f"Aggregation complete: Successfully aggregated data for {len(included_subjects)} subjects: {', '.join(included_subjects)}")
-        return scores_a, scores_b, included_subjects # Return aggregated scores and included IDs
-
-    # ==============================================================
-    # Statistical Testing
-    # ==============================================================
-    def perform_paired_test(self, scores_a, scores_b):
-        """
-        Performs Shapiro-Wilk test on differences, then Paired t-test or Wilcoxon Signed-Rank test.
-        Calculates descriptive statistics and effect size (Cohen's d for t-test).
-
-        Args:
-            scores_a (list): List of scores for condition A.
-            scores_b (list): List of scores for condition B.
-
-        Returns:
-            dict: Dictionary containing statistical results and descriptive stats.
-                  Includes an 'error' key if testing fails.
-        """
-        results = {}
-        n_pairs = len(scores_a)
-        if n_pairs < 3: # Minimum pairs for meaningful testing (especially normality)
-             results['error'] = f"Insufficient pairs (N={n_pairs}, requires >= 3) for reliable statistical testing."
-             results['N'] = n_pairs
-             return results
-
-        scores_a = np.array(scores_a)
-        scores_b = np.array(scores_b)
-        differences = scores_a - scores_b
-
-        # --- Descriptive Stats ---
-        # Use ddof=1 for sample standard deviation
-        mean_a, std_a = np.mean(scores_a), np.std(scores_a, ddof=1)
-        mean_b, std_b = np.mean(scores_b), np.std(scores_b, ddof=1)
-        median_a, median_b = np.median(scores_a), np.median(scores_b)
-        # Interquartile Range (IQR)
-        try:
-            q75a, q25a = np.percentile(scores_a, [75 ,25])
-            iqr_a = q75a - q25a
-            q75b, q25b = np.percentile(scores_b, [75 ,25])
-            iqr_b = q75b - q25b
-        except IndexError: # Handle case N<2 for percentile
-            iqr_a, iqr_b = np.nan, np.nan
-
-
-        results['N'] = n_pairs
-        results['Mean_A'], results['SD_A'] = mean_a, std_a
-        results['Mean_B'], results['SD_B'] = mean_b, std_b
-        results['Median_A'], results['IQR_A'] = median_a, iqr_a
-        results['Median_B'], results['IQR_B'] = median_b, iqr_b
-
-        # --- Normality Test (Shapiro-Wilk on differences) ---
-        shapiro_stat, shapiro_p = np.nan, np.nan
-        is_normal = False # Default to non-normal
-        results['Shapiro_Note'] = ""
-        try:
-            # Handle edge cases for Shapiro test
-            if np.all(np.isclose(differences, differences[0])): # All differences are identical
-                 shapiro_stat, shapiro_p = np.nan, 1.0 # Cannot test normality, assume possible for t-test? Or force Wilcoxon? Let's assume normal enough.
-                 results['Shapiro_Note'] = "Note: Differences are constant."
-                 is_normal = True # Allow t-test if differences constant but >0
-            elif len(np.unique(differences)) < 3: # Too few unique values
-                 shapiro_stat, shapiro_p = np.nan, 0.0 # Force non-normal
-                 results['Shapiro_Note'] = "Note: Fewer than 3 unique difference values."
-            elif n_pairs < 3: # SciPy shapiro needs N>=3
-                 shapiro_stat, shapiro_p = np.nan, 0.0 # Force non-normal
-                 results['Shapiro_Note'] = f"Note: N={n_pairs} < 3 for Shapiro test."
-            else:
-                 shapiro_stat, shapiro_p = stats.shapiro(differences)
-                 is_normal = shapiro_p > 0.05 # Standard alpha for normality check
-
-            results['Shapiro_W'] = shapiro_stat
-            results['Shapiro_p'] = shapiro_p
-            results['Normality_Decision'] = "Normal" if is_normal else "Not Normal"
-
-        except Exception as e:
-            results['error'] = f"Shapiro-Wilk test failed: {e}. Cannot proceed with primary test."
-            results['Normality_Decision'] = "Test Failed"
-            return results # Stop if normality test fails unexpectedly
-
-        # --- Primary Statistical Test & Effect Size ---
-        if is_normal:
-            # Use Paired t-test
-            results['Test_Used'] = "Paired t-test"
-            try:
-                t_stat, p_val = stats.ttest_rel(scores_a, scores_b, nan_policy='omit') # Omit pairs with NaN if any slip through
-                results['Statistic_Type'] = "t"
-                results['Statistic_Value'] = t_stat
-                results['df'] = n_pairs - 1 # Degrees of freedom for paired t-test
-                results['p_value'] = p_val
-
-                # Effect Size: Cohen's d for paired samples
-                mean_diff = np.mean(differences)
-                std_diff = np.std(differences, ddof=1) # Use sample SD of differences
-                # Avoid division by zero or near-zero
-                if std_diff is not None and not np.isclose(std_diff, 0):
-                     cohen_d = mean_diff / std_diff
-                else:
-                     cohen_d = np.nan
-                     self.log_to_main_app(f"Note: Could not calculate Cohen's d (SD of differences is zero or near-zero). N={n_pairs}")
-
-                results['Effect_Size_Type'] = "Cohen's d (paired)"
-                results['Effect_Size_Value'] = cohen_d
-
-            except Exception as e:
-                results['error'] = f"Paired t-test failed: {e}"
-                self.log_to_main_app(f"Paired t-test error: {e}\n{traceback.format_exc()}")
-        else:
-            # Use Wilcoxon Signed-Rank Test
-            results['Test_Used'] = "Wilcoxon Signed-Rank"
-            try:
-                # Wilcoxon requires non-zero differences
-                non_zero_diffs = differences[~np.isclose(differences, 0)]
-                wilcoxon_n = len(non_zero_diffs)
-                results['Wilcoxon_Note'] = ""
-                if wilcoxon_n < n_pairs:
-                     results['Wilcoxon_Note'] = f"Note: {n_pairs - wilcoxon_n} zero difference(s) excluded from ranking."
-
-                # Check if enough non-zero differences for reliable test
-                # SciPy default threshold for normal approximation is often ~25, but test runs with fewer.
-                # Let's set a practical minimum, e.g., 5 or more non-zero differences.
-                min_wilcoxon_n = 5
-                if wilcoxon_n >= min_wilcoxon_n :
-                    # Use 'wilcox' method for zeros, 'pratt' handles them differently, 'zsplit' includes them in ranking. 'wilcox' is common.
-                    # alternative='two-sided' is default
-                    wilcox_stat, p_val = stats.wilcoxon(scores_a, scores_b, zero_method='wilcox', nan_policy='omit')
-                    results['Statistic_Type'] = "W" # Test statistic W
-                    results['Statistic_Value'] = wilcox_stat
-                    results['p_value'] = p_val
-                    # Effect Size for Wilcoxon: Rank Biserial Correlation is common, but hard to get Z easily.
-                    # Report as not calculated for simplicity here.
-                    results['Effect_Size_Type'] = "Rank Biserial r"
-                    results['Effect_Size_Value'] = "N/A" # Not easily calculated from scipy output
-
-                else:
-                    # Not enough non-zero differences
-                    results['error'] = f"Wilcoxon test requires >= {min_wilcoxon_n} non-zero differences (found {wilcoxon_n})."
-                    results['Statistic_Type'] = "W"; results['Statistic_Value'] = np.nan; results['p_value'] = np.nan
-                    results['Effect_Size_Type'] = "N/A"; results['Effect_Size_Value'] = "N/A"
-
-            except Exception as e:
-                results['error'] = f"Wilcoxon test failed: {e}"
-                self.log_to_main_app(f"Wilcoxon error: {e}\n{traceback.format_exc()}")
-
-        return results
-
-
-    # ==============================================================
-    # Results Formatting
-    # ==============================================================
-
-    def format_significance_results(self, findings_dict, metric, threshold):
-        """
-        Formats the significant findings from the single-condition check
-        into a readable string, grouped by Condition, then ROI.
-
-        Args:
-            findings_dict (dict): Nested dict {condition: {roi: [finding_list]}}.
-            metric (str): The metric being analyzed (e.g., "Z Score").
-            threshold (float): The significance threshold used.
-
-        Returns:
-            str: Formatted string for display.
-        """
-        output = f"===== SIGNIFICANCE CHECK RESULTS (Mean {metric} > {threshold:.2f}) =====\n\n"
-        any_significant = False
-        metric_short_name = metric.split()[0]  # Get "Z", "SNR", "FFT", "BCA"
-        metric_key = f'Mean_{metric.replace(" ", "_")}'  # Key used in findings dict
-
-        # Sort conditions alphabetically for consistent output
-        sorted_conditions = sorted(findings_dict.keys())
-
-        for condition in sorted_conditions:
-            condition_findings = findings_dict[condition]
-            # Check if there are any significant ROIs for this condition before adding header
-            if not any(condition_findings.values()): continue
-
-            any_significant = True
-            output += f"Significant responses found for Condition: '{condition}'\n"
-            # Sort ROIs alphabetically within condition
-            sorted_rois = sorted(condition_findings.keys())
-
-            for roi_name in sorted_rois:
-                roi_findings = condition_findings.get(roi_name, [])
-                if not roi_findings: continue  # Skip if no findings for this ROI
-
-                output += f"  * {roi_name}:\n"
-                # Sort findings by frequency (convert freq string to float for sorting)
-                try:
-                    # Attempt numeric sort after removing '_Hz'
-                    sorted_findings = sorted(roi_findings, key=lambda x: float(x['Frequency'].replace('_Hz', '')))
-                except ValueError:
-                    # Fallback to string sort if conversion fails
                     self.log_to_main_app(
-                        f"Warning: Could not sort frequencies numerically for ROI {roi_name}, Condition {condition}. Using string sort.")
-                    sorted_findings = sorted(roi_findings, key=lambda x: x['Frequency'])
-
-                for finding in sorted_findings:
-                    freq = finding['Frequency']
-                    # Safely get metric value using .get() with a default
-                    mean_val = finding.get(metric_key, np.nan)
-                    n_subs = finding.get('N', 'N/A')
-                    # Format output line concisely
-                    output += f"      - {freq:<8}: Mean {metric_short_name} = {mean_val:.2f} (N={n_subs})\n"  # Left-align freq
-            output += "\n"  # Add space between condition blocks
-
-        # Footer / Summary
-        if not any_significant:
-            output += f"No conditions/ROIs/frequencies found where the Mean {metric} exceeded the {threshold:.2f} threshold."
-        else:
-            output += "--------------------------------------------------\n"
-            output += f"Analysis based on Mean {metric} > {threshold:.2f} threshold across subjects.\n"
-            output += f"N = Number of subjects with valid data for the specific Condition/ROI/Frequency.\n"
-
-        return output.strip()
-
-    def format_results_text(self, params, stats_results):
-        """
-        Formats the statistical results for PAIRED comparisons into a research-friendly string.
-
-        Args:
-            params (dict): Dictionary containing analysis parameters (frequency, metric, roi_name, condition_a, condition_b).
-            stats_results (dict): Dictionary containing results from perform_paired_test.
-
-        Returns:
-            str: Formatted string for display.
-        """
-        error_msg = stats_results.get('error', '')
-        freq = params['frequency']; metric = params['metric']; roi = params['roi_name']
-        cond_a = params['condition_a']; cond_b = params['condition_b']; n = stats_results.get('N', 'N/A')
-
-        output = f"--- Paired Analysis: {freq} ---\n" # Header clarifies paired test
-        output += f"Metric: {metric}\n"
-        output += f"ROI: {roi} (Channels: {','.join(ROIS.get(roi,['N/A']))})\n" # Added channel list
-        output += f"Comparison: '{cond_a}' vs '{cond_b}'\n"
-        output += f"N (Pairs) = {n}\n\n"
-
-        output += "Descriptive Stats:\n"
-        # Format numbers nicely, handle potential NaN
-        def format_num(val, precision=3): return f"{val:.{precision}f}" if pd.notna(val) else "N/A"
-
-        if 'Mean_A' in stats_results:
-             output += f"  {cond_a:<15}: Mean = {format_num(stats_results['Mean_A'])}, SD = {format_num(stats_results['SD_A'])}\n"
-             output += f"  {cond_b:<15}: Mean = {format_num(stats_results['Mean_B'])}, SD = {format_num(stats_results['SD_B'])}\n"
-        if 'Median_A' in stats_results:
-             output += f"  {cond_a:<15}: Median = {format_num(stats_results['Median_A'])}, IQR = {format_num(stats_results['IQR_A'])}\n"
-             output += f"  {cond_b:<15}: Median = {format_num(stats_results['Median_B'])}, IQR = {format_num(stats_results['IQR_B'])}\n"
-        output += "\n"
-
-        # Normality Test Info
-        if 'Shapiro_p' in stats_results:
-            p_shapiro_str = format_num(stats_results['Shapiro_p'])
-            w_shapiro_str = format_num(stats_results['Shapiro_W'])
-            output += f"Normality of Differences (Shapiro-Wilk): W = {w_shapiro_str}, p = {p_shapiro_str}\n"
-            if stats_results.get('Shapiro_Note'): output += f"  {stats_results['Shapiro_Note']}\n"
-            output += f"Decision: Differences assessed as {stats_results.get('Normality_Decision', 'N/A')}. Using {stats_results.get('Test_Used', 'N/A')}.\n"
-            if stats_results.get('Wilcoxon_Note'): output += f"  {stats_results['Wilcoxon_Note']}\n"
-            output += "\n"
-        elif 'error' not in stats_results: # Only show if normality test was expected but missing
-             output += "Normality test results not available.\n\n"
-
-        # Primary Test Result
-        if stats_results.get('Test_Used'):
-            output += f"Statistical Test Result ({stats_results['Test_Used']}):\n"
-            p_val = stats_results.get('p_value')
-            p_str = "N/A"
-            if pd.notna(p_val):
-                 p_str = f"{p_val:.3f}" if p_val >= 0.001 else "< .001" # Standard p-value formatting
-
-            stat_val = stats_results.get('Statistic_Value')
-            stat_str = "N/A"
-            if pd.notna(stat_val):
-                 stat_type = stats_results.get('Statistic_Type', '')
-                 if stats_results['Test_Used'] == "Paired t-test":
-                     df_val = stats_results.get('df', 'N/A')
-                     stat_str = f"{stat_type}({df_val}) = {stat_val:.2f}" # t(df) = value
-                 else: # Wilcoxon
-                     stat_str = f"{stat_type} = {stat_val:.1f}" # W = value
-            output += f"  Statistic: {stat_str}\n"
-            output += f"  p-value:   {p_str}\n\n" # Align p-value
-
-            # Effect Size
-            output += "Effect Size:\n"
-            eff_size_val = stats_results.get('Effect_Size_Value')
-            eff_size_type = stats_results.get('Effect_Size_Type', 'Effect Size')
-            # Format effect size value, handle "N/A" string or NaN
-            eff_size_str = format_num(eff_size_val, 2) if isinstance(eff_size_val, (int, float)) else str(eff_size_val)
-            output += f"  {eff_size_type}: {eff_size_str}\n\n"
-
-            # Interpretation
-            if pd.notna(p_val):
-                sig_thresh = 0.05 # Standard alpha
-                interpretation = "significant" if p_val < sig_thresh else "non-significant"
-                output += f"Interpretation (Paired): The difference between '{cond_a}' and '{cond_b}' was statistically {interpretation} (alpha = {sig_thresh}).\n"
-            else:
-                 output += "Interpretation (Paired): Could not determine significance (statistical test failed or insufficient data).\n"
-
-        # Append error message if a test failed during execution
-        if error_msg:
-             output += f"\nNote: {error_msg}\n"
-
-        output += "----------------------------------------\n" # Separator
-        return output
-
-    def format_significance_results(self, findings_dict, metric, threshold):
-        """
-        Formats the significant findings from the single-condition check
-        into a readable string, grouped by Condition, then ROI.
-
-        Args:
-            findings_dict (dict): Nested dict {condition: {roi: [finding_list]}}.
-            metric (str): The metric being analyzed (e.g., "Z Score").
-            threshold (float): The significance threshold used.
-
-        Returns:
-            str: Formatted string for display.
-        """
-        output = f"===== SIGNIFICANCE CHECK RESULTS (Mean {metric} > {threshold:.2f}) =====\n\n"
-        any_significant = False
-        metric_short_name = metric.split()[0] # Get "Z", "SNR", "FFT", "BCA"
-        metric_key = f'Mean_{metric.replace(" ","_")}' # Key used in findings dict
-
-        # Sort conditions alphabetically for consistent output
-        sorted_conditions = sorted(findings_dict.keys())
-
-        for condition in sorted_conditions:
-            condition_findings = findings_dict[condition]
-            # Check if there are any significant ROIs for this condition
-            if not any(condition_findings.values()): continue
-
-            any_significant = True
-            output += f"Significant responses found for Condition: '{condition}'\n"
-            # Sort ROIs alphabetically within condition
-            sorted_rois = sorted(condition_findings.keys())
-
-            for roi_name in sorted_rois:
-                roi_findings = condition_findings.get(roi_name, [])
-                if not roi_findings: continue # Skip if no findings for this ROI (shouldn't happen with check above, but safe)
-
-                output += f"  * {roi_name}:\n"
-                # Sort findings by frequency (convert freq string to float for sorting)
-                try:
-                     sorted_findings = sorted(roi_findings, key=lambda x: float(x['Frequency'].replace('_Hz','')))
-                except ValueError:
-                     # Fallback if frequency format is unexpected
-                     self.log_to_main_app(f"Warning: Could not sort frequencies numerically for ROI {roi_name}, Condition {condition}. Using string sort.")
-                     sorted_findings = sorted(roi_findings, key=lambda x: x['Frequency'])
-
-                for finding in sorted_findings:
-                    freq = finding['Frequency']
-                    # Handle potential KeyError if metric key isn't found (shouldn't happen)
-                    mean_val = finding.get(metric_key, np.nan)
-                    n_subs = finding.get('N', 'N/A')
-                    # Format output line concisely
-                    output += f"      - {freq:<8}: Mean {metric_short_name} = {mean_val:.2f} (N={n_subs})\n"
-            output += "\n" # Add space between condition blocks
-
-        # Footer / Summary
-        if not any_significant:
-            output += f"No conditions/ROIs/frequencies found where the Mean {metric} exceeded the {threshold:.2f} threshold."
-        else:
-             output += "--------------------------------------------------\n"
-             output += f"Analysis based on Mean {metric} > {threshold:.2f} threshold across subjects.\n"
-             output += f"N = Number of subjects with valid data for the specific Condition/ROI/Frequency.\n"
-
-        return output.strip()
-
-    # ==============================================================
-    # Analysis Execution Functions
-    # ==============================================================
-    def run_analysis(self):
-        """
-        Gathers parameters, aggregates data, runs PAIRED tests for selected ROI(s)
-        and frequencies, displays results. Enables export for paired results.
-        Includes a warning for common artifact frequencies (6Hz, 12Hz).
-        """
-        self.log_to_main_app("Run Paired Comparison button clicked.")
-        self.results_structured = []  # Clear previous paired results for export
-        self.significant_findings = {}  # Also clear sig findings structure
-        self.results_textbox.configure(state="normal")
-        self.results_textbox.delete("1.0", tk.END)
-        self.export_button.configure(state="disabled")  # Disable paired export initially
-        self.export_sig_button.configure(state="disabled")  # Disable sig export too
-
-        # --- Get Parameters ---
-        folder = self.stats_data_folder_var.get()
-        metric = self.metric_var.get()
-        selected_roi_option = self.roi_var.get()  # ROI selection for paired test
-        cond_a = self.condition_A_var.get()
-        cond_b = self.condition_B_var.get()
-        selected_freqs = [freq for freq, var in self.freq_checkbox_vars.items() if var.get()]
-
-        # --- Validate Parameters ---
-        if not folder or not os.path.isdir(folder): messagebox.showerror("Input Error",
-                                                                         "Please select a valid data folder."); self.results_textbox.configure(
-            state="disabled"); return
-        if not selected_freqs: messagebox.showerror("Input Error",
-                                                    "Please select at least one frequency."); self.results_textbox.configure(
-            state="disabled"); return
-        if not selected_roi_option: messagebox.showerror("Input Error",
-                                                         "Please select an ROI option for the paired test."); self.results_textbox.configure(
-            state="disabled"); return
-        # Validate conditions specifically for paired test
-        invalid_cond_msgs = ["(Scan Folder)", "(Select Condition A)", "(No other conditions)"]
-        if not cond_a or not cond_b or cond_a == cond_b or cond_a in invalid_cond_msgs or cond_b in invalid_cond_msgs:
-            messagebox.showerror("Input Error",
-                                 "Please select two different valid conditions from the dropdowns for paired comparison.")
-            self.results_textbox.configure(state="disabled");
-            return
-
-        # <<< --- ADDED WARNING CHECK --- >>>
-        warning_freqs_str = ["6.0_Hz", "12.0_Hz"]
-        selected_warning_freqs = [f for f in selected_freqs if f in warning_freqs_str]
-
-        if selected_warning_freqs:
-            freq_list_str = ", ".join(selected_warning_freqs).replace('_Hz', '') + " Hz"
-            warning_message = (
-                f"Warning: Frequency {freq_list_str} is selected.\n\n"
-                "Responses at these frequencies can be strongly influenced by screen refresh rates "
-                "or the fundamental image presentation rate (6 Hz) and may not reflect purely neural activity.\n\n"
-                "Do you want to proceed with the Paired Comparison analysis including these frequencies?"
-            )
-            proceed = messagebox.askyesno("Frequency Warning (Paired Comparison)", warning_message, icon='warning')
-            if not proceed:
-                self.log_to_main_app(f"Paired Comparison cancelled by user due to frequency warning ({freq_list_str}).")
-                self.results_textbox.insert("1.0",
-                                            "Analysis cancelled by user due to frequency warning.\nPlease deselect 6.0 Hz and/or 12.0 Hz if desired and run again.")
-                self.results_textbox.configure(state="disabled")
-                return  # Stop the analysis
-            else:
-                self.log_to_main_app(f"User chose to proceed despite frequency warning ({freq_list_str}).")
-        # <<< --- END WARNING CHECK --- >>>
-
-        # --- Determine which ROIs to analyze (for paired test) ---
-        rois_to_analyze = []
-        if selected_roi_option == ALL_ROIS_OPTION:
-            rois_to_analyze = list(ROIS.keys())
-            self.log_to_main_app(f"Paired Analysis: Running for All ROIs: {', '.join(rois_to_analyze)}")
-        elif selected_roi_option in ROIS:
-            rois_to_analyze = [selected_roi_option]
-            self.log_to_main_app(f"Paired Analysis: Running for selected ROI: {selected_roi_option}")
-        else:  # Should not happen if dropdown is populated correctly
-            messagebox.showerror("Error", f"Invalid ROI selection '{selected_roi_option}'.")
-            self.results_textbox.configure(state="disabled");
-            return
-
-        # --- Run Paired Analysis Loop ---
-        # Add header to results box
-        results_header = f"===== PAIRED COMPARISON RESULTS ('{cond_a}' vs '{cond_b}') =====\n"
-        results_header += f"Metric: {metric} | ROI(s) Analyzed: {selected_roi_option}\n"  # Use the selection option
-        results_header += "=" * (len(results_header.split('\n')[0]) + 4) + "\n\n"
-        all_results_text = results_header
-
-        any_analysis_ran = False
-        any_test_completed = False
-        processing_errors = []  # Collect errors during processing
-
-        # Loop through ROIs and Frequencies
-        for roi_name in rois_to_analyze:
-            roi_header_added = False
-            for freq in selected_freqs:
-                params = {'frequency': freq, 'metric': metric, 'roi_name': roi_name, 'condition_a': cond_a,
-                          'condition_b': cond_b}
-                try:
-                    any_analysis_ran = True
-                    # Aggregate paired data
-                    scores_a, scores_b, included_subjects = self.aggregate_data(metric, roi_name, freq, cond_a, cond_b)
-
-                    # Check if aggregation was successful and returned data
-                    if scores_a is not None and scores_b is not None and included_subjects:
-                        # Perform the paired statistical test
-                        stats_results = self.perform_paired_test(scores_a, scores_b)
-
-                        # Prepare data for export table
-                        export_data = params.copy()
-                        export_data.update(stats_results)
-                        export_data['Included_Subjects'] = ", ".join(included_subjects)
-                        self.results_structured.append(export_data)  # Add to list for export
-
-                        # Add ROI header only once if analyzing all ROIs and data exists
-                        if selected_roi_option == ALL_ROIS_OPTION and not roi_header_added:
-                            all_results_text += f"\n========== ROI: {roi_name} ==========\n"
-                            roi_header_added = True
-
-                        # Format and append results text
-                        result_text = self.format_results_text(params, stats_results)
-                        all_results_text += result_text
-
-                        # Check if the test itself completed without internal error
-                        if 'error' not in stats_results:
-                            any_test_completed = True
-                    else:
-                        # Aggregation failed or returned no subjects
-                        # Add a note to the output for this combination
-                        if selected_roi_option == ALL_ROIS_OPTION and not roi_header_added:
-                            all_results_text += f"\n========== ROI: {roi_name} ==========\n"
-                            roi_header_added = True
-                        all_results_text += f"--- Paired Analysis: {freq} ---\n"
-                        all_results_text += "Result: No complete paired data found for analysis.\n"
-                        all_results_text += "----------------------------------------\n"
-                        # Optionally add an entry to export table indicating failure
-                        error_entry = params.copy();
-                        error_entry['error'] = "No paired data found"
-                        self.results_structured.append(error_entry)
-
-                except Exception as e:
-                    # Catch unexpected errors during the loop for one combination
-                    err_msg = f"!!! Paired Analysis CRITICAL Error: ROI='{roi_name}', Freq='{freq}'. Error: {e}"
-                    self.log_to_main_app(f"{err_msg}\n{traceback.format_exc()}")
-                    processing_errors.append(f"ROI: {roi_name}, Freq: {freq} -> {e}")
-                    # Add error entry for export
-                    error_entry = params.copy();
-                    error_entry['error'] = f"Unexpected Processing Error: {e}"
-                    self.results_structured.append(error_entry)
-
-        # --- Display Final Results ---
-        # Append any critical errors encountered during the loop
-        if processing_errors:
-            all_results_text += "\n\n===== PROCESSING ERRORS ENCOUNTERED =====\n"
-            all_results_text += "\n".join(processing_errors)
-            all_results_text += "\n=======================================\n"
-
-        self.results_textbox.insert("1.0", all_results_text.strip())
-        self.results_textbox.configure(state="disabled")  # Make read-only
-
-        # Final status logging and export button enabling
-        if any_test_completed:
-            self.export_button.configure(state="normal")  # Enable paired export
-            self.log_to_main_app("Paired comparison analysis complete.")
-        elif any_analysis_ran:
-            self.log_to_main_app(
-                "Paired comparison analysis finished, but some tests may have failed or had insufficient data.")
-        else:
-            # This case might happen if validation passed but aggregation failed for all combinations
-            self.log_to_main_app("Paired comparison analysis did not yield results (check aggregation logs/data).")
-
-    def call_export_significance_results(self):
-        """
-        Gathers necessary data and calls the external function to export
-        Significance Check results stored in self.significant_findings.
-        """
-        # Check the instance variable populated by run_significance_check
-        if not self.significant_findings or not any(
-                any(self.significant_findings[cond].values()) for cond in self.significant_findings):
-            messagebox.showwarning("No Results", "No significant findings available from the last check to export.")
-            self.log_to_main_app("Export Sig Check called, but no significant findings stored.")
-            return
-
-        metric = self.metric_var.get()
-        try:
-            # Read threshold value again for consistency, handle potential error
-            threshold = float(self.significance_threshold_var.get())
-        except ValueError:
-            messagebox.showerror("Error", "Cannot export: Invalid Significance Threshold value in the entry field.")
-            return
-        parent_folder = self.stats_data_folder_var.get()
-
-        self.log_to_main_app("Calling external function to export significance results...")
-        # Call the function from the imported module
-        stats_export.export_significance_results_to_excel(
-            findings_dict=self.significant_findings,  # Pass the stored findings
-            metric=metric,
-            threshold=threshold,
-            parent_folder=parent_folder,
-            log_func=self.log_to_main_app  # Pass the logger method
-        )
-
-    def run_significance_check(self):
-        """
-        Gathers parameters, aggregates data for EACH condition separately,
-        checks if mean metric exceeds threshold for all ROIs and selected frequencies,
-        and displays only the significant findings in a structured format.
-        Enables export for significance check results if any are found.
-        Includes a warning for common artifact frequencies (6Hz, 12Hz).
-        """
-        self.log_to_main_app("Run Significance Check button clicked.")
-        structured_significant_findings = {}  # Use local var for building results
-        self.results_structured = []  # Clear paired results
-        self.results_textbox.configure(state="normal")
-        self.results_textbox.delete("1.0", tk.END)
-        self.export_button.configure(state="disabled")  # Disable paired export
-        self.export_sig_button.configure(state="disabled")  # Disable sig export initially
-
-        # --- Get Parameters ---
-        folder = self.stats_data_folder_var.get()
-        metric = self.metric_var.get()
-        selected_freqs = [freq for freq, var in self.freq_checkbox_vars.items() if var.get()]
-        try:
-            threshold = float(self.significance_threshold_var.get())
-        except ValueError:
-            messagebox.showerror("Input Error", "Invalid Significance Threshold. Please enter a number (e.g., 1.96).");
-            self.results_textbox.configure(state="disabled");
-            return
-
-        # --- Validate Parameters ---
-        if not folder or not os.path.isdir(folder): messagebox.showerror("Input Error",
-                                                                         "Please select a valid data folder."); self.results_textbox.configure(
-            state="disabled"); return
-        if not selected_freqs: messagebox.showerror("Input Error",
-                                                    "Please select at least one frequency."); self.results_textbox.configure(
-            state="disabled"); return
-        if not self.conditions_list: messagebox.showerror("Input Error",
-                                                          "No conditions found. Please scan a valid folder first."); self.results_textbox.configure(
-            state="disabled"); return
-
-        # <<< --- ADDED WARNING CHECK --- >>>
-        warning_freqs_str = ["6.0_Hz", "12.0_Hz"]
-        selected_warning_freqs = [f for f in selected_freqs if f in warning_freqs_str]
-
-        if selected_warning_freqs:
-            freq_list_str = ", ".join(selected_warning_freqs).replace('_Hz', '') + " Hz"
-            warning_message = (
-                f"Warning: Frequency {freq_list_str} is selected.\n\n"
-                "Responses at these frequencies can be strongly influenced by screen refresh rates "
-                "or the fundamental image presentation rate (6 Hz) and may not reflect purely neural activity.\n\n"
-                "Do you want to proceed with the Significance Check analysis including these frequencies?"
-            )
-            proceed = messagebox.askyesno("Frequency Warning (Significance Check)", warning_message, icon='warning')
-            if not proceed:
-                self.log_to_main_app(
-                    f"Significance Check cancelled by user due to frequency warning ({freq_list_str}).")
-                self.results_textbox.insert("1.0",
-                                            "Analysis cancelled by user due to frequency warning.\nPlease deselect 6.0 Hz and/or 12.0 Hz if desired and run again.")
-                self.results_textbox.configure(state="disabled")
-                return  # Stop the analysis
-            else:
-                self.log_to_main_app(f"User chose to proceed despite frequency warning ({freq_list_str}).")
-        # <<< --- END WARNING CHECK --- >>>
-
-        # --- Run Significance Check Loop ---
-        processing_errors = []  # Store any errors encountered
-
-        # Initialize structure for findings
-        for condition in self.conditions_list:
-            structured_significant_findings[condition] = {}
-
-        # Loop through Conditions -> ROIs -> Frequencies
-        self.log_to_main_app(f"Starting Significance Check (Mean {metric} > {threshold:.2f})...")
-        for condition in self.conditions_list:
-            self.log_to_main_app(f"  Checking Condition: '{condition}'")
-            for roi_name in ROIS.keys():  # Check all defined ROIs
-                for freq in selected_freqs:
-                    try:
-                        # Aggregate data for the single condition
-                        scores, _, included_subjects = self.aggregate_data(metric, roi_name, freq, condition,
-                                                                           None)  # cond_b=None
-
-                        # Check if aggregation successful and data exists
-                        if scores is not None and len(scores) > 0:
-                            mean_score = np.mean(scores)
-                            n_subs = len(scores)
-
-                            # --- Perform the Significance Check ---
-                            # Simple check: is the mean score greater than the threshold?
-                            is_significant = mean_score > threshold
-
-                            # (Optional: Implement one-sample t-test here if desired for rigor)
-
-                            if is_significant:
-                                # Initialize ROI dict if first finding for this ROI in this condition
-                                if roi_name not in structured_significant_findings[condition]:
-                                    structured_significant_findings[condition][roi_name] = []
-
-                                # Store finding details (using dynamic key for metric)
-                                metric_key = f'Mean_{metric.replace(" ", "_")}'
-                                finding = {
-                                    'Frequency': freq,
-                                    metric_key: mean_score,
-                                    'N': n_subs,
-                                    'Threshold': threshold  # Store for context
-                                    # Add t-stat, p-value here if using t-test option
-                                }
-                                structured_significant_findings[condition][roi_name].append(finding)
-
-                        # else: No data aggregated or N=0 for this combo
-
-                    except Exception as e:
-                        # Catch unexpected errors during loop for one combination
-                        err_msg = f"!!! Sig Check CRITICAL Error: Cond='{condition}', ROI='{roi_name}', Freq='{freq}'. Error: {e}"
-                        self.log_to_main_app(f"{err_msg}\n{traceback.format_exc()}")
-                        processing_errors.append(f"Cond: {condition}, ROI: {roi_name}, Freq: {freq} -> {e}")
-                        # Continue to next iteration
-
-        # --- Format and Display Results ---
-        # Use the dedicated formatting function
-        all_results_text = self.format_significance_results(structured_significant_findings, metric, threshold)
-
-        # Append any critical errors encountered during the loop
-        if processing_errors:
-            all_results_text += "\n\n===== PROCESSING ERRORS ENCOUNTERED =====\n"
-            all_results_text += "\n".join(processing_errors)
-            all_results_text += "\n=======================================\n"
-
-        # Display in the textbox
-        self.results_textbox.insert("1.0", all_results_text)
-        self.results_textbox.configure(state="disabled")  # Make read-only
-
-        # --- Enable Export Button if Significant Findings Exist ---
-        # Check if the dictionary contains any actual findings across all conditions/ROIs
-        any_significant = any(
-            any(structured_significant_findings[cond].values()) for cond in structured_significant_findings)
-        if any_significant:
-            self.export_sig_button.configure(state="normal")
-            # Store findings dict in instance variable for the export function to access
-            self.significant_findings = structured_significant_findings
-            self.log_to_main_app("Significance check complete. Significant findings found.")
-        else:
-            self.significant_findings = {}  # Ensure it's empty if none found
-            self.log_to_main_app("Significance check complete. No findings exceeded the threshold.")
-
-
-    # ==============================================================
-    # Export Function (Only for Paired Results)
-    # ==============================================================
-    def export_results(self):
-        """
-        Exports the structured PAIRED comparison results (from self.results_structured)
-        to an Excel file using xlsxwriter for formatting.
-        """
-        if not self.results_structured:
-            messagebox.showwarning("No Paired Results",
-                                   "No paired comparison results available to export. Please run the 'Run Paired Comparison' analysis first.")
-            return
-
-        # Suggest filename based on the parameters of the paired test run
-        initial_dir = self.stats_data_folder_var.get() or os.path.expanduser("~")
-        # Safely get params from the first result entry, provide defaults
-        first_result = self.results_structured[0] if self.results_structured else {}
-        cond_a = first_result.get('condition_a', 'CondA').replace(" ", "_").replace(os.sep, "-")
-        cond_b = first_result.get('condition_b', 'CondB').replace(" ", "_").replace(os.sep, "-")
-        roi_selection = self.roi_var.get()  # Use the ROI setting from the GUI during the paired run
-        roi_part = roi_selection if roi_selection != ALL_ROIS_OPTION else "AllROIs"
-        metric = first_result.get('metric', 'Metric').replace("-", "").replace(" ", "")
-        suggested_filename = f"Stats_Paired_{metric}_{roi_part}_{cond_a}_vs_{cond_b}.xlsx"
-
-        # Ask user for save location
-        save_path = filedialog.asksaveasfilename(
-            title="Save Paired Statistical Results As",  # Explicit title
-            initialdir=initial_dir,
-            initialfile=suggested_filename,
-            defaultextension=".xlsx",
-            filetypes=[("Excel Workbook", "*.xlsx"), ("All Files", "*.*")]
-        )
-        if not save_path:
-            self.log_to_main_app("Paired results export cancelled.");
-            return
-
-        try:
-            self.log_to_main_app(f"Exporting paired results to: {save_path}")
-            df_export = pd.DataFrame(self.results_structured)
-
-            # Check if dataframe is empty after creation (e.g., only error entries existed)
-            if df_export.empty:
-                messagebox.showwarning("Empty Results", "The results table for paired export is empty.")
-                return
-
-            # Define preferred column order for export
-            cols_order = [
-                'roi_name', 'frequency', 'metric', 'condition_a', 'condition_b', 'N',
-                'Mean_A', 'SD_A', 'Median_A', 'IQR_A', 'Mean_B', 'SD_B', 'Median_B', 'IQR_B',
-                'Shapiro_W', 'Shapiro_p', 'Normality_Decision', 'Shapiro_Note',
-                'Test_Used', 'Statistic_Type', 'Statistic_Value', 'df', 'p_value', 'Wilcoxon_Note',
-                'Effect_Size_Type', 'Effect_Size_Value',
-                'Included_Subjects', 'error'
-            ]
-            # Filter to only include columns actually present in the dataframe
-            cols_to_export = [col for col in cols_order if col in df_export.columns]
-            if not cols_to_export:
-                self.log_to_main_app("Export Error: No valid columns found in paired results data.")
-                messagebox.showerror("Export Error", "No valid columns found in the paired results data to export.")
-                return
-            df_export = df_export[cols_to_export]  # Reorder dataframe with existing columns
-
-            # Write to Excel using xlsxwriter engine for formatting
-            with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
-                df_export.to_excel(writer, sheet_name='Paired Comparison Results', index=False)
-                workbook = writer.book
-                worksheet = writer.sheets['Paired Comparison Results']
-
-                # Define cell formats (add centering here if desired based on user pref)
-                # Example with centering: fmt_num_3dp = workbook.add_format({'num_format': '0.000', 'align': 'center'})
-                fmt_num_3dp = workbook.add_format({'num_format': '0.000'})
-                fmt_num_2dp = workbook.add_format({'num_format': '0.00'})
-                fmt_num_1dp = workbook.add_format({'num_format': '0.0'})
-                fmt_wrap = workbook.add_format(
-                    {'text_wrap': True, 'valign': 'top'})  # Vertical align top for wrapped text
-
-                # Column types for formatting
-                float_cols_3dp = ['Shapiro_W', 'Shapiro_p', 'p_value', 'Mean_A', 'SD_A', 'Mean_B', 'SD_B', 'Median_A',
-                                  'IQR_A', 'Median_B', 'IQR_B']
-                float_cols_2dp = ['Statistic_Value', 'Effect_Size_Value']
-                text_cols = ['Included_Subjects', 'error', 'Wilcoxon_Note', 'Shapiro_Note', 'Normality_Decision',
-                             'Test_Used', 'Statistic_Type', 'Effect_Size_Type', 'roi_name', 'frequency', 'metric',
-                             'condition_a', 'condition_b']  # Added text columns for width calc
-
-                # Apply formatting and auto-adjust column widths
-                for col_idx, col_name in enumerate(df_export.columns):
-                    # Calculate width based on data and header length
-                    try:
-                        max_len_data = df_export[col_name].astype(str).map(len).max()
-                        # Handle case where max() returns NaN for empty or all-NaN column
-                        if pd.isna(max_len_data): max_len_data = 0
-                        # Ensure header length is considered, add padding
-                        col_width = max(int(max_len_data), len(col_name)) + 2
-                    except Exception:
-                        col_width = len(col_name) + 5  # Fallback width
-
-                    # Determine appropriate format
-                    col_format = None
-                    min_width = 10  # Default minimum width
-
-                    if col_name in float_cols_3dp:
-                        col_format = fmt_num_3dp; min_width = 12
-                    elif col_name in float_cols_2dp:
-                        col_format = fmt_num_2dp; min_width = 12
-                    # Special case for Wilcoxon W statistic (usually integer or .0)
-                    elif col_name == 'Statistic_Value' and 'Test_Used' in df_export.columns and df_export[
-                        'Test_Used'].str.contains('Wilcoxon').any():
-                        col_format = fmt_num_1dp;
-                        min_width = 10
-                    elif col_name in text_cols:
-                        col_format = fmt_wrap
-                        # Set wider minimum for certain text columns
-                        if col_name in ['Included_Subjects', 'error', 'Shapiro_Note', 'Wilcoxon_Note']:
-                            min_width = 30
-                        else:
-                            min_width = 15  # For shorter text fields like Condition names
-
-                    # Ensure final width meets minimum
-                    col_width = max(col_width, min_width)
-
-                    # Apply format and width
-                    worksheet.set_column(col_idx, col_idx, col_width, col_format)
-
-            self.log_to_main_app("Paired results export successful.")
-            messagebox.showinfo("Export Successful", f"Paired comparison results exported to:\n{save_path}")
+                        f"  Processing Condition Subfolder: '{condition_name_raw}' as Condition: '{condition_name}'")
+
+                    files_in_subfolder = glob.glob(os.path.join(item_path, "*.xlsx"))
+                    found_files_for_condition = False
+                    for f_path in files_in_subfolder:
+                        excel_filename = os.path.basename(f_path)
+                        pid_match = pid_pattern.search(
+                            excel_filename)  # Use search to find pattern anywhere before .xlsx
+
+                        if pid_match:
+                            pid = pid_match.group(1).upper()  # group(1) is (P\d+)
+                            subjects_set.add(pid)
+                            conditions_set.add(condition_name)
+                            found_files_for_condition = True
+
+                            if pid not in self.subject_data:
+                                self.subject_data[pid] = {}
+
+                            if condition_name in self.subject_data[pid]:
+                                self.log_to_main_app(
+                                    f"    Warning: Duplicate Excel file found for Subject {pid}, Condition '{condition_name}'. Overwriting path from '{os.path.basename(self.subject_data[pid][condition_name])}' to '{excel_filename}'")
+                            self.subject_data[pid][condition_name] = f_path
+                            self.log_to_main_app(
+                                f"      Found PID: {pid} in file: {excel_filename} for Condition: {condition_name}")
+                        # else: # Optional: log files that don't match the PID pattern
+                        # self.log_to_main_app(f"      File '{excel_filename}' does not match PID pattern. Skipping.")
+
+                    if not found_files_for_condition:
+                        self.log_to_main_app(
+                            f"    Warning: No Excel files matching PID pattern (e.g., SCP1_data.xlsx, P01_data.xlsx) found in subfolder '{condition_name_raw}'.")
 
         except PermissionError as e:
-            self.log_to_main_app(
-                f"!!! Export Failed: Permission denied writing to {save_path}. Check file/folder permissions.")
-            messagebox.showerror("Export Failed",
-                                 f"Permission denied writing file:\n{save_path}\nClose the file if it's open, or choose a different location.")
+            self.log_to_main_app(f"!!! Permission Error scanning folder: {parent_folder}. {e}")
+            messagebox.showerror("Scanning Error",
+                                 f"Permission denied accessing folder or its contents:\n{parent_folder}\n{e}")
+            self.update_condition_menus([])
+            return
         except Exception as e:
-            self.log_to_main_app(f"!!! Export Failed: {e}\n{traceback.format_exc()}")
-            messagebox.showerror("Export Failed", f"Could not save Excel file:\n{e}")
+            self.log_to_main_app(f"!!! Error scanning folder structure: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("Scanning Error", f"An unexpected error occurred during scanning:\n{e}")
+            self.update_condition_menus([])
+            return
 
+        self.subjects = sorted(list(subjects_set))
+        self.conditions = sorted(list(conditions_set))
 
-# ==============================================================
-# Example Usage (if running this file directly for testing)
-# ==============================================================
-if __name__ == "__main__":
-    # This allows testing the StatsAnalysisWindow independently
-    # Create a dummy root window (required by CTkToplevel)
-    root = ctk.CTk()
-    root.title("Main App Window (Test Host)")
-    root.geometry("300x150")
+        if not self.conditions or not self.subjects:
+            info_text = "Scan complete: No valid condition subfolders or subject Excel files (e.g., P01_data.xlsx, SCP1_data.xlsx) found with recognized PIDs."
+            # messagebox.showwarning("Scan Results", info_text) # Can be noisy if expected
+        else:
+            info_text = f"Scan complete: Found {len(self.subjects)} subjects and {len(self.conditions)} conditions."
 
-    # Define a simple log function for testing if main app isn't available
-    def test_log(message):
-        timestamp = pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]
-        print(f"{timestamp} {message}")
+        self.log_to_main_app(info_text)
+        if self.subjects: self.log_to_main_app(f"Detected Subjects (PIDs): {', '.join(self.subjects)}")
+        if self.conditions: self.log_to_main_app(f"Detected Conditions: {', '.join(self.conditions)}")
 
-    # Create a dummy master object that mimics having a 'log' method
-    # Add other attributes/methods if StatsAnalysisWindow relies on them from master
-    class TestMaster:
-        # Mimic the log method
-        log = test_log
-        # Example: add other attributes if needed
-        # some_other_attribute = "value"
+        self.detected_info_var.set(info_text)
+        self.update_condition_menus(self.conditions)
+
+        # Reset pre-calculated data as new files are scanned
+        self.all_subject_data.clear()
+        self.paired_tests_results_data.clear()
+        self.rm_anova_results_data = None
+        self.harmonic_check_results_data.clear()
+
+    def update_condition_menus(self, conditions_list):
+        current_a = self.condition_A_var.get()
+        display_list = conditions_list if conditions_list else ["(Scan Folder)"]
+        if current_a not in display_list and display_list:
+            self.condition_A_var.set(display_list[0])
+        elif not display_list:
+            self.condition_A_var.set("(Scan Folder)")
+        if self.condA_menu: self.condA_menu.configure(values=display_list)  # Check if widget exists
+        self.update_condition_B_options()
+
+    def update_condition_B_options(self, *args):
+        cond_a = self.condition_A_var.get()
+        valid_b = [c for c in self.conditions if c and c != cond_a]
+        if not self.conditions:
+            valid_b_display = ["(Scan Folder)"]
+        elif not valid_b:
+            valid_b_display = [
+                "(No other conditions)" if cond_a and cond_a != "(Scan Folder)" else "(Select Condition A)"]
+        else:
+            valid_b_display = valid_b
+
+        current_b = self.condition_B_var.get()
+        if self.condB_menu: self.condB_menu.configure(values=valid_b_display)  # Check if widget exists
+        if current_b not in valid_b_display or current_b == cond_a:
+            self.condition_B_var.set(valid_b_display[0] if valid_b_display else "")
+
+    def _get_included_freqs(self, all_col_names):
+        try:
+            base_freq_val = float(self.base_freq_var.get())
+            if base_freq_val <= 0: raise ValueError("Base frequency must be positive.")
+        except ValueError as e:
+            self.log_to_main_app(f"Error: Invalid Base Frequency '{self.base_freq_var.get()}': {e}")
+            # messagebox.showerror("Input Error", f"Invalid Base Frequency: {self.base_freq_var.get()}") # Can be noisy
+            return []
+        numeric_freqs = []
+        for col_name in all_col_names:
+            if isinstance(col_name, str) and col_name.endswith('_Hz'):
+                try:
+                    numeric_freqs.append(float(col_name[:-3]))
+                except ValueError:
+                    self.log_to_main_app(f"Could not parse freq from col: {col_name}")
+        if not numeric_freqs: return []
+        sorted_numeric_freqs = sorted(list(set(numeric_freqs)))
+        excluded_freqs = {f_val for f_val in sorted_numeric_freqs if
+                          abs(f_val / base_freq_val - round(f_val / base_freq_val)) < 1e-6}
+        included_freqs = [f_val for f_val in sorted_numeric_freqs if f_val not in excluded_freqs]
+        return included_freqs
+
+    def aggregate_bca_sum(self, file_path, roi_name):
+        try:
+            df = pd.read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
+            roi_channels = ROIS.get(roi_name)
+            if not roi_channels: self.log_to_main_app(f"ROI {roi_name} not defined."); return np.nan
+            df_roi = df.reindex(roi_channels).dropna(how='all')
+            if df_roi.empty: self.log_to_main_app(f"No data for ROI {roi_name} in {file_path}."); return np.nan
+            included_freq_values = self._get_included_freqs(df.columns)
+            if not included_freq_values: self.log_to_main_app(f"No freqs to sum for BCA in {file_path}."); return np.nan
+            cols_to_sum = [f"{f:.1f}_Hz" for f in included_freq_values if f"{f:.1f}_Hz" in df_roi.columns]
+            if not cols_to_sum: self.log_to_main_app(
+                f"No matching BCA freq columns for ROI {roi_name} in {file_path}."); return np.nan
+            return df_roi[cols_to_sum].sum(axis=1).mean()
+        except Exception as e:
+            self.log_to_main_app(f"Error aggregating BCA for {os.path.basename(file_path)}, ROI {roi_name}: {e}")
+            return np.nan
+
+    def prepare_all_subject_summed_bca_data(self):
+        self.log_to_main_app("Preparing summed BCA data...")
+        self.all_subject_data.clear()
+        if not self.subjects or not self.subject_data:
+            messagebox.showwarning("Data Error", "No subject data. Scan folder first.")
+            return False
+        for pid in self.subjects:
+            self.all_subject_data[pid] = {}
+            for cond_name in self.conditions:
+                file_path = self.subject_data.get(pid, {}).get(cond_name)
+                self.all_subject_data[pid].setdefault(cond_name, {})
+                for roi_name in ROIS.keys():
+                    sum_val = self.aggregate_bca_sum(file_path, roi_name) if file_path and os.path.exists(
+                        file_path) else np.nan
+                    self.all_subject_data[pid][cond_name][roi_name] = sum_val
+        self.log_to_main_app("Summed BCA data prep complete.")
+        return True
+
+        # In stats.py
+
+        # ... (other parts of the class) ...
+
+    def run_paired_tests(self):
+            self.log_to_main_app("Running Paired Tests (Summed BCA)...")
+            self.results_textbox.configure(state="normal");
+            self.results_textbox.delete("1.0", tk.END)
+            self.export_paired_tests_btn.configure(state="disabled")
+            self.paired_tests_results_data.clear()
+
+            cond_a = self.condition_A_var.get()
+            cond_b = self.condition_B_var.get()
+
+            if not (cond_a and cond_a != "(Scan Folder)" and \
+                    cond_b and cond_b not in ["(Scan Folder)", "(No other conditions)", "(Select Condition A)"] and \
+                    cond_a != cond_b):
+                messagebox.showerror("Input Error",
+                                     "Please select two different and valid conditions for paired tests.")
+                self.results_textbox.configure(state="disabled");
+                return
+
+            if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+                messagebox.showerror("Data Error",
+                                     "Summed BCA data could not be prepared. Please check logs or re-scan folder.")
+                self.results_textbox.configure(state="disabled");
+                return
+
+            rois_to_analyze = []
+            selected_roi_option = self.roi_var.get()
+            if selected_roi_option == ALL_ROIS_OPTION:
+                rois_to_analyze = list(ROIS.keys())
+            elif selected_roi_option in ROIS:
+                rois_to_analyze = [selected_roi_option]
+            else:
+                messagebox.showerror("Input Error", f"Invalid ROI selected: {selected_roi_option}")
+                self.results_textbox.configure(state="disabled");
+                return
+
+            # --- Start Building Output Text ---
+            output_text = f"============================================================\n"
+            output_text += f"              Paired t-tests (Summed BCA)\n"
+            output_text += f"============================================================\n\n"
+            output_text += f"Comparing Condition A: '{cond_a}'\n"
+            output_text += f"With Condition B:      '{cond_b}'\n"
+            output_text += f"ROIs Analyzed:         {selected_roi_option}\n"
+            output_text += f"(Significance level for p-values: p < 0.05)\n\n"
+
+            significant_tests_found_overall = False
+            alpha = 0.05
+
+            for roi_name in rois_to_analyze:
+                output_text += f"--- ROI: {roi_name} ---\n"
+
+                values_a, values_b = [], []
+                for pid in self.subjects:
+                    val_a = self.all_subject_data.get(pid, {}).get(cond_a, {}).get(roi_name, np.nan)
+                    val_b = self.all_subject_data.get(pid, {}).get(cond_b, {}).get(roi_name, np.nan)
+                    if not (pd.isna(val_a) or pd.isna(val_b)):
+                        values_a.append(val_a)
+                        values_b.append(val_b)
+
+                n_pairs = len(values_a)
+
+                if n_pairs < 3:  # Need at least 3 pairs for a meaningful t-test
+                    output_text += f"  Insufficient paired data (N={n_pairs}). Minimum 3 pairs required for a t-test.\n\n"
+                    continue
+
+                try:
+                    t_stat, p_value_raw = stats.ttest_rel(values_a, values_b)
+                    df_val = n_pairs - 1
+
+                    mean_a = np.mean(values_a)
+                    mean_b = np.mean(values_b)
+                    mean_diff = mean_a - mean_b
+
+                    is_significant = p_value_raw < alpha
+                    p_value_str = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
+
+                    if is_significant:
+                        significant_tests_found_overall = True
+                        output_text += f"  FINDING: SIGNIFICANT DIFFERENCE found between conditions.\n"
+                    else:
+                        output_text += f"  FINDING: NO SIGNIFICANT DIFFERENCE found between conditions.\n"
+
+                    output_text += f"    - Average Summed BCA for '{cond_a}': {mean_a:.3f} (approx. uV)\n"
+                    output_text += f"    - Average Summed BCA for '{cond_b}': {mean_b:.3f} (approx. uV)\n"
+                    output_text += f"    - Mean Difference ('{cond_a}' - '{cond_b}'): {mean_diff:.3f} (approx. uV)\n"
+
+                    if is_significant:
+                        if mean_diff > 1e-9:  # Check if meaningfully positive (accounting for float precision)
+                            output_text += f"      Interpretation: On average, '{cond_a}' showed a significantly HIGHER Summed BCA than '{cond_b}'.\n"
+                        elif mean_diff < -1e-9:  # Check if meaningfully negative
+                            output_text += f"      Interpretation: On average, '{cond_b}' showed a significantly HIGHER Summed BCA than '{cond_a}'.\n"
+                        else:  # Difference is very close to zero despite significance (unlikely with typical data if p is low)
+                            output_text += f"      Interpretation: A significant difference was found, but the average values are very close.\n"
+                    else:
+                        output_text += f"      Interpretation: The observed difference in averages was not statistically significant.\n"
+
+                    output_text += f"    - Statistics: t({df_val}) = {t_stat:.2f}, p-value = {p_value_str}\n"
+                    output_text += f"    - Number of pairs included: N = {n_pairs}\n\n"
+
+                    if is_significant:  # Store data for export only if significant
+                        self.paired_tests_results_data.append({
+                            'ROI': roi_name,
+                            'Condition_A': cond_a,
+                            'Condition_B': cond_b,
+                            'N_Pairs': n_pairs,
+                            'Mean_A': mean_a,
+                            'Mean_B': mean_b,
+                            'Mean_Difference': mean_diff,
+                            't_statistic': t_stat,
+                            'df': df_val,
+                            'p_value': p_value_raw  # Store raw p-value for export
+                        })
+
+                except Exception as e:
+                    output_text += f"  Error performing t-test for this ROI: {e}\n\n"
+                    self.log_to_main_app(
+                        f"Paired t-test error for ROI {roi_name} ({cond_a} vs {cond_b}): {e}\n{traceback.format_exc()}")
+
+            if not self.paired_tests_results_data:  # If no significant results were stored
+                output_text += "------------------------------------------------------------\n"
+                if not any(f"ROI: {r}" in output_text for r in rois_to_analyze if
+                           "Insufficient paired data" not in output_text and "Error performing t-test" not in output_text):  # Check if any ROI was actually tested without error/insufficient data
+                    output_text += "No ROIs had sufficient data for all paired tests.\n"
+                else:
+                    output_text += "No statistically significant differences (p < 0.05) were found for any of the analyzed ROIs that had sufficient data.\n"
+            else:
+                output_text += "------------------------------------------------------------\n"
+                output_text += "Tip: For a detailed table of significant findings, please use the 'Export Paired Results' feature.\n"
+
+            output_text += "============================================================\n"
+
+            self.results_textbox.insert("1.0", output_text)
+            if self.paired_tests_results_data:  # Enable export if there are structured significant results
+                self.export_paired_tests_btn.configure(state="normal")
+
+            self.results_textbox.configure(state="disabled")
+            self.log_to_main_app("Paired tests (Summed BCA) complete.")
+
+    def run_rm_anova(self):
+        self.log_to_main_app("Running RM-ANOVA (Summed BCA)...")
+        self.results_textbox.configure(state="normal");
+        self.results_textbox.delete("1.0", tk.END)  # Clear textbox
+        self.export_rm_anova_btn.configure(state="disabled");
+        self.rm_anova_results_data = None
+
+        if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+            messagebox.showerror("Data Error", "Summed BCA data could not be prepared for RM-ANOVA.");
+            self.results_textbox.configure(state="disabled");
+            return
+
+        long_format_data = []
+        for pid, cond_data in self.all_subject_data.items():
+            for cond_name, roi_data in cond_data.items():
+                for roi_name, value in roi_data.items():
+                    if not pd.isna(value):
+                        long_format_data.append(
+                            {'subject': pid, 'condition': cond_name, 'roi': roi_name, 'value': value})
+
+        if not long_format_data:
+            messagebox.showerror("Data Error", "No valid data available for RM-ANOVA after filtering NaNs.");
+            self.results_textbox.configure(state="disabled");
+            return
+
+        df_long = pd.DataFrame(long_format_data)
+
+        if df_long['condition'].nunique() < 2 or df_long['roi'].nunique() < 1:
+            messagebox.showerror("Data Error",
+                                 "RM-ANOVA requires at least two conditions and at least one ROI with valid data.")
+            self.results_textbox.configure(state="disabled");
+            return
+
+        # --- Start Building Output Text ---
+        output_text = "============================================================\n"
+        output_text += "       Repeated Measures ANOVA (RM-ANOVA) Results\n"
+        output_text += "       Analysis conducted on: Summed BCA Data\n"
+        output_text += "============================================================\n\n"
+        output_text += (
+            "This test examines the overall effects of your experimental conditions (e.g., different stimuli),\n"
+            "the different brain regions (ROIs) you analyzed, and, crucially, whether the\n"
+            "effect of the conditions changes depending on the brain region (interaction effect).\n\n")
+
+        try:
+            self.log_to_main_app(f"Calling run_repeated_measures_anova with DataFrame of shape: {df_long.shape}")
+            anova_df_results = run_repeated_measures_anova(data=df_long, dv_col='value',
+                                                           within_cols=['condition', 'roi'],
+                                                           subject_col='subject')
+
+            if anova_df_results is not None and not anova_df_results.empty:
+                # --- Display the Statistical Table ---
+                output_text += "------------------------------------------------------------\n"
+                output_text += "                 STATISTICAL TABLE (RM-ANOVA)\n"
+                output_text += "------------------------------------------------------------\n"
+                output_text += anova_df_results.to_string(index=False) + "\n\n"
+                self.rm_anova_results_data = anova_df_results
+                self.export_rm_anova_btn.configure(state="normal")
+
+                # --- Add Plain Language Interpretation ---
+                output_text += "------------------------------------------------------------\n"
+                output_text += "           SIMPLIFIED EXPLANATION OF RESULTS\n"
+                output_text += "------------------------------------------------------------\n"
+                alpha = 0.05
+                output_text += f"(A result is typically considered 'statistically significant' if its p-value ('Pr > F') is less than {alpha:.2f})\n\n"
+
+                for index, row in anova_df_results.iterrows():
+                    effect_name_raw = str(row.get('Effect', 'Unknown Effect'))
+                    effect_display_name = effect_name_raw.replace(':', ' by ').replace('_', ' ').title()
+
+                    p_value_raw = row.get('Pr > F', row.get('p-unc', np.nan))
+                    # f_value = row.get('F Value', row.get('F', np.nan)) # F-value is in the table, not explicitly used in this text yet
+
+                    output_text += f"Effect: {effect_display_name}\n"
+
+                    if pd.isna(p_value_raw):
+                        output_text += "  - Significance: Could not be determined (p-value missing from table).\n\n"
+                        continue
+
+                    is_significant = p_value_raw < alpha
+                    significance_status = "SIGNIFICANT" if is_significant else "NOT SIGNIFICANT"
+
+                    # Format p-value for display in explanation
+                    p_value_display_str = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
+
+                    output_text += f"  - Statistical Finding: {significance_status} (p-value = {p_value_display_str})\n"
+
+                    explanation = ""
+                    # Assuming within_cols are 'condition' and 'roi' for these interpretations
+                    if 'condition' in effect_name_raw.lower() and 'roi' in effect_name_raw.lower() and (
+                            ':' in effect_name_raw or '_' in effect_name_raw):  # Interaction
+                        if is_significant:
+                            explanation = (
+                                "  - Interpretation: This is often a very important finding! It means the way brain\n"
+                                "                    activity (Summed BCA) changed across your different experimental conditions\n"
+                                "                    **significantly depended on which brain region (ROI)** you were observing.\n"
+                                "                    The effect of conditions isn't the same for all ROIs.\n"
+                                "                    (For example, Condition A might boost activity in the Frontal lobe more than\n"
+                                "                     Condition B, but this pattern might be different or even reversed in the\n"
+                                "                     Occipital lobe.)\n"
+                                "  - Next Steps: Consider creating interaction plots to visualize this. Post-hoc tests\n"
+                                "                are often needed to understand where these specific differences lie.\n"
+                            )
+                        else:
+                            explanation = (
+                                "  - Interpretation: The effect of your experimental conditions on brain activity (Summed BCA)\n"
+                                "                    was generally consistent across the different brain regions analyzed.\n"
+                                "                    There wasn't a significant 'it depends' relationship found here.\n"
+                            )
+                    elif 'condition' == effect_name_raw.lower():  # Main effect of Condition
+                        if is_significant:
+                            explanation = (
+                                "  - Interpretation: Overall, when averaging across all your brain regions (ROIs),\n"
+                                "                    your different experimental conditions led to statistically different\n"
+                                "                    average levels of brain activity (Summed BCA).\n"
+                                "  - Next Steps: If you have more than two conditions, post-hoc tests can help\n"
+                                "                identify which specific conditions differ from each other.\n"
+                            )
+                        else:
+                            explanation = (
+                                "  - Interpretation: When averaging across all brain regions, your different experimental\n"
+                                "                    conditions did not produce statistically different overall levels of\n"
+                                "                    brain activity (Summed BCA).\n"
+                            )
+                    elif 'roi' == effect_name_raw.lower():  # Main effect of ROI
+                        if is_significant:
+                            explanation = (
+                                "  - Interpretation: Different brain regions (ROIs) showed reliably different average levels\n"
+                                "                    of brain activity (Summed BCA), regardless of the specific experimental condition.\n"
+                                "                    Some regions were consistently more (or less) active than others.\n"
+                                "  - Next Steps: If you have more than two ROIs, post-hoc tests can show which specific\n"
+                                "                ROIs differ from each other in overall activity.\n"
+                            )
+                        else:
+                            explanation = (
+                                "  - Interpretation: There wasn't a statistically significant overall difference in brain activity\n"
+                                "                    (Summed BCA) between the different brain regions analyzed (when averaged\n"
+                                "                    across your experimental conditions).\n"
+                            )
+                    else:
+                        explanation = f"  - Interpretation: This effect relates to '{effect_display_name}'.\n"  # Generic for other potential effects
+
+                    output_text += explanation + "\n"
+
+                output_text += "------------------------------------------------------------\n"
+                output_text += "IMPORTANT NOTE:\n"
+                output_text += ("  This explanation simplifies the main statistical patterns. For detailed scientific\n"
+                                "  reporting, precise interpretation, and any follow-up analyses (e.g., post-hoc tests\n"
+                                "  for significant effects or interactions), please refer to the statistical table above\n"
+                                "  and consider consulting with a statistician or researcher familiar with ANOVA.\n")
+                output_text += "------------------------------------------------------------\n"
+
+            else:
+                output_text += "RM-ANOVA did not return any results or the result was empty.\n"
+                self.log_to_main_app("RM-ANOVA did not return results or was empty.")
+
+        except ImportError:
+            output_text += "Error: The `repeated_m_anova.py` module or its dependency `statsmodels` could not be loaded.\nPlease ensure `statsmodels` is installed (`pip install statsmodels`).\nContact developer if issues persist.\n"
+            self.log_to_main_app("ImportError during RM-ANOVA execution, likely statsmodels or the custom module.")
+        except Exception as e:
+            output_text += f"RM-ANOVA analysis failed unexpectedly: {e}\n"
+            output_text += "Common issues include insufficient data after removing missing values, or data not having\nenough variation or levels for each factor (e.g., needing at least 2 conditions).\n"
+            output_text += "Please check your input data structure and console logs for more details.\n"
+            self.log_to_main_app(f"!!! RM-ANOVA Error: {e}\n{traceback.format_exc()}")
+
+        self.results_textbox.insert("1.0", output_text)
+        self.results_textbox.configure(state="disabled")
+        self.log_to_main_app("RM-ANOVA (Summed BCA) attempt complete.")
+
+    def run_harmonic_check(self):
+        self.log_to_main_app("Running Per-Harmonic Significance Check...")
+        self.results_textbox.configure(state="normal");
+        self.results_textbox.delete("1.0", tk.END)
+        self.export_harmonic_check_btn.configure(state="disabled")
+        self.harmonic_check_results_data.clear()
+
+        selected_metric = self.harmonic_metric_var.get()
+        try:
+            mean_value_threshold = float(self.harmonic_threshold_var.get())
+        except ValueError:
+            messagebox.showerror("Input Error", "Invalid Mean Threshold. Please enter a numeric value.")
+            self.results_textbox.configure(state="disabled");
+            return
+
+        if not (self.subject_data and self.subjects and self.conditions):
+            messagebox.showerror("Data Error", "No subject data found. Please scan a folder first.")
+            self.results_textbox.configure(state="disabled");
+            return
+
+        output_text = f"===== Per-Harmonic Significance Check ({selected_metric}) =====\n"
+        output_text += f"A harmonic is flagged as 'Significant' if:\n"
+        output_text += f"1. Its average {selected_metric} is reliably different from zero across subjects\n"
+        output_text += f"   (statistically tested using a 1-sample t-test vs 0, p-value < {HARMONIC_CHECK_ALPHA}).\n"
+        output_text += f"2. AND this average {selected_metric} is also greater than your threshold of {mean_value_threshold}.\n"
+        output_text += f"(N = number of subjects included in each specific test listed below)\n\n"
+
+        any_significant_found_overall = False
+        loaded_dataframes = {}  # Cache for loaded DataFrames: {file_path: df}
+
+        for cond_name in self.conditions:
+            output_text += f"\n=== Condition: {cond_name} ===\n"
+            found_significant_in_this_condition = False
+
+            for roi_name in ROIS.keys():
+                # Determine included frequencies based on a sample file for this condition
+                sample_file_path = None
+                for pid_s in self.subjects:  # Find first subject with data for this condition
+                    if self.subject_data.get(pid_s, {}).get(cond_name):
+                        sample_file_path = self.subject_data[pid_s][cond_name]
+                        break
+
+                if not sample_file_path:
+                    self.log_to_main_app(
+                        f"No sample file for Cond '{cond_name}' to determine frequencies for ROI '{roi_name}'.")
+                    output_text += f"\n  --- ROI: {roi_name} ---\n"
+                    output_text += f"      Could not determine checkable frequencies (no sample data file found for this condition).\n\n"
+                    continue
+
+                try:
+                    # Load sample DF for columns if not already cached
+                    if sample_file_path not in loaded_dataframes:
+                        self.log_to_main_app(
+                            f"Cache miss for sample file columns: {os.path.basename(sample_file_path)}. Loading sheet: '{selected_metric}'")
+                        loaded_dataframes[sample_file_path] = pd.read_excel(sample_file_path,
+                                                                            sheet_name=selected_metric,
+                                                                            index_col="Electrode")
+
+                    sample_df_cols = loaded_dataframes[sample_file_path].columns
+                    included_freq_values = self._get_included_freqs(sample_df_cols)
+                except Exception as e:
+                    self.log_to_main_app(
+                        f"Error reading columns for ROI '{roi_name}', Cond '{cond_name}' from sample file {os.path.basename(sample_file_path)}: {e}")
+                    output_text += f"\n  --- ROI: {roi_name} ---\n"
+                    output_text += f"      Error determining checkable frequencies for this ROI (could not read sample file columns).\n\n"
+                    continue
+
+                if not included_freq_values:
+                    output_text += f"\n  --- ROI: {roi_name} ---\n"
+                    output_text += f"      No applicable harmonics to check for this ROI after frequency exclusions.\n\n"
+                    continue
+
+                roi_header_printed_for_cond = False
+                significant_harmonics_count_for_roi = 0
+
+                for freq_val in included_freq_values:
+                    harmonic_col_name = f"{freq_val:.1f}_Hz"
+                    subject_harmonic_roi_values = []
+
+                    for pid in self.subjects:
+                        file_path = self.subject_data.get(pid, {}).get(cond_name)
+                        if not (file_path and os.path.exists(file_path)):
+                            # self.log_to_main_app(f"File path missing or invalid for PID {pid}, Cond {cond_name}")
+                            continue
+
+                        current_df = loaded_dataframes.get(file_path)
+                        if current_df is None:  # Check for None (DataFrame not in cache)
+                            try:
+                                self.log_to_main_app(
+                                    f"Cache miss for {os.path.basename(file_path)}. Loading sheet: '{selected_metric}'")
+                                current_df = pd.read_excel(file_path, sheet_name=selected_metric, index_col="Electrode")
+                                loaded_dataframes[file_path] = current_df  # Cache it
+                            except FileNotFoundError:
+                                self.log_to_main_app(
+                                    f"Error: File not found {file_path} for PID {pid}, Cond {cond_name}.")
+                                continue
+                            except KeyError as e_key:  # Handles wrong sheet name or missing 'Electrode'
+                                self.log_to_main_app(
+                                    f"Error: Sheet '{selected_metric}' or index 'Electrode' not found in {os.path.basename(file_path)}. {e_key}")
+                                continue
+                            except Exception as e:
+                                self.log_to_main_app(
+                                    f"Error loading DataFrame for {os.path.basename(file_path)}, sheet '{selected_metric}': {e}")
+                                continue
+
+                                # After loading or retrieving from cache, check if it's empty or harmonic column exists
+                        if current_df.empty:
+                            # self.log_to_main_app(f"DataFrame for {os.path.basename(file_path)} is empty. Skipping harmonic {harmonic_col_name}.")
+                            continue
+                        if harmonic_col_name not in current_df.columns:
+                            # self.log_to_main_app(f"Harmonic {harmonic_col_name} not in {os.path.basename(file_path)} for PID {pid}.")
+                            continue
+
+                        try:
+                            roi_channels = ROIS.get(roi_name)
+                            df_roi_metric = current_df.reindex(roi_channels)  # Select ROI channels
+                            # Mean of the specific harmonic across selected ROI channels for this subject
+                            mean_val_subj_roi_harmonic = df_roi_metric[harmonic_col_name].dropna().mean()
+
+                            if not pd.isna(mean_val_subj_roi_harmonic):
+                                subject_harmonic_roi_values.append(mean_val_subj_roi_harmonic)
+                        except Exception as e_proc:
+                            self.log_to_main_app(
+                                f"Error processing Subj {pid}, Cond {cond_name}, ROI {roi_name}, Freq {harmonic_col_name}: {e_proc}")
+                            continue
+
+                    if len(subject_harmonic_roi_values) >= 3:
+                        t_stat, p_value_raw = stats.ttest_1samp(subject_harmonic_roi_values, 0, nan_policy='omit')
+
+                        # After ttest_1samp with nan_policy='omit', N might change if NaNs were present
+                        valid_values_for_stat = [v for v in subject_harmonic_roi_values if not pd.isna(v)]
+                        num_subjects_in_test = len(valid_values_for_stat)
+
+                        if num_subjects_in_test < 3:  # Re-check N after potential NaN omission by t-test
+                            # self.log_to_main_app(f"Skipping {harmonic_col_name} for {roi_name}/{cond_name}: N < 3 after NaN removal for t-test.")
+                            continue
+
+                        mean_group_value = np.mean(valid_values_for_stat)
+                        df_val = num_subjects_in_test - 1
+
+                        p_value_str = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
+
+                        if p_value_raw < HARMONIC_CHECK_ALPHA and mean_group_value > mean_value_threshold:
+                            if not roi_header_printed_for_cond:
+                                output_text += f"\n  --- ROI: {roi_name} ---\n"
+                                roi_header_printed_for_cond = True
+                            found_significant_in_this_condition = True
+                            any_significant_found_overall = True
+                            significant_harmonics_count_for_roi += 1
+
+                            output_text += f"    ----------------------------------------------------\n"
+                            output_text += f"    Harmonic: {harmonic_col_name} -> SIGNIFICANT RESPONSE\n"
+                            output_text += f"        Average {selected_metric}: {mean_group_value:.3f} (based on N={num_subjects_in_test} subjects)\n"
+                            output_text += f"        Statistical Test: t({df_val}) = {t_stat:.2f}, p-value = {p_value_str}\n"
+                            output_text += f"    ----------------------------------------------------\n"
+                            self.harmonic_check_results_data.append({
+                                'Condition': cond_name, 'ROI': roi_name, 'Frequency': harmonic_col_name,
+                                'N_Subjects': num_subjects_in_test,
+                                f'Mean_{selected_metric.replace(" ", "_")}': mean_group_value,
+                                'T_Statistic': t_stat, 'P_Value': p_value_raw, 'df': df_val,
+                                'Threshold_Criteria_Mean_Value': mean_value_threshold,
+                                'Threshold_Criteria_Alpha': HARMONIC_CHECK_ALPHA
+                            })
+
+                if roi_header_printed_for_cond:  # If any finding was printed for this ROI
+                    if significant_harmonics_count_for_roi > 1:
+                        output_text += f"    Summary for {roi_name}: Found {significant_harmonics_count_for_roi} significant harmonics (details above).\n"
+                    output_text += "\n"
+                elif included_freq_values:  # If ROI was processed (had included_freqs) but no sig results printed
+                    output_text += f"\n  --- ROI: {roi_name} ---\n"
+                    output_text += f"      No significant harmonics met criteria for this ROI.\n\n"
+
+            if not found_significant_in_this_condition:
+                # Check if any ROI header was printed for this condition at all.
+                # If an ROI header was printed, it means it was processed but had no sig results (message printed above).
+                # If no ROI header at all, it means no ROIs had processable data or findings.
+                if not any(f"--- ROI:" in line for line in
+                           output_text.split(f"=== Condition: {cond_name} ===")[-1].splitlines()):
+                    output_text += f"  No processable data or no significant harmonics found for any ROI in this condition.\n\n"
+                else:
+                    output_text += f"  No significant harmonics met criteria in this condition across reported ROIs.\n\n"
+
+            else:
+                output_text += "\n"  # Space after condition block with results
+
+        if not any_significant_found_overall:
+            output_text += "Overall: No harmonics met the significance criteria across all conditions and ROIs.\n"
+        else:
+            output_text += "\n--- End of Report ---\nTip: For a comprehensive table of all significant findings, please use the 'Export Harmonic Results' feature.\n"
+
+        self.results_textbox.insert("1.0", output_text)
+        if self.harmonic_check_results_data: self.export_harmonic_check_btn.configure(state="normal")
+        self.results_textbox.configure(state="disabled")
+        loaded_dataframes.clear()  # Clear cache after run completes
+
+    def export_paired_results(self):
+        self.log_to_main_app("Exporting Paired Test results...")
+        if not self.paired_tests_results_data: messagebox.showwarning("No Results",
+                                                                      "No paired results data to export."); return
+        try:
+            # Using keyword arguments for clarity and robustness
+            stats_export.export_paired_results_to_excel(
+                data=self.paired_tests_results_data,
+                parent_folder=self.stats_data_folder_var.get(),
+                log_func=self.log_to_main_app
+            )
+        except AttributeError:
+            messagebox.showerror("Export Error", "'export_paired_results_to_excel' is missing in stats_export.py.")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Paired export failed: {e}\n{traceback.format_exc()}")
+
+    def export_rm_anova_results(self):
+        self.log_to_main_app("Exporting RM-ANOVA results...")
+        if self.rm_anova_results_data is None or (
+                isinstance(self.rm_anova_results_data, pd.DataFrame) and self.rm_anova_results_data.empty):
+            messagebox.showwarning("No Results", "No RM-ANOVA results data to export.");
+            return
+        try:
+            # Using keyword arguments
+            stats_export.export_rm_anova_results_to_excel(
+                anova_table=self.rm_anova_results_data,
+                parent_folder=self.stats_data_folder_var.get(),
+                log_func=self.log_to_main_app
+            )
+        except AttributeError:
+            messagebox.showerror("Export Error", "'export_rm_anova_results_to_excel' is missing in stats_export.py.")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"RM-ANOVA export failed: {e}\n{traceback.format_exc()}")
+
+    def export_harmonic_check_results(self):
+        self.log_to_main_app("Exporting Per-Harmonic Check results...")
+        if not self.harmonic_check_results_data: messagebox.showwarning("No Results",
+                                                                        "No harmonic check results data to export."); return
+        findings_dict = {}
+        metric_key_name = f'Mean_{self.harmonic_metric_var.get().replace(" ", "_")}'  # Dynamic key for mean metric value
+        for item in self.harmonic_check_results_data:
+            cond, roi = item['Condition'], item['ROI']
+            findings_dict.setdefault(cond, {}).setdefault(roi, []).append({
+                'Frequency': item['Frequency'],
+                metric_key_name: item[metric_key_name],  # Use the dynamic key from item
+                'N': item['N_Subjects'],
+                'T_Statistic': item['T_Statistic'],
+                'P_Value': item['P_Value'],
+                'df': item['df'],
+                'Threshold_Used': item['Threshold_Criteria_Mean_Value']  # The mean value threshold
+            })
+        if not findings_dict: messagebox.showwarning("No Results",
+                                                     "Failed to structure harmonic results for export."); return
+        try:
+            # Using keyword arguments
+            stats_export.export_significance_results_to_excel(
+                findings_dict=findings_dict,
+                metric=self.harmonic_metric_var.get(),
+                threshold=float(self.harmonic_threshold_var.get()),  # This is the input mean value threshold
+                parent_folder=self.stats_data_folder_var.get(),
+                log_func=self.log_to_main_app
+            )
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Harmonic check export failed: {e}\n{traceback.format_exc()}")
+
+    def call_export_significance_results(self):  # Legacy
+        self.log_to_main_app("call_export_significance_results is legacy and unused.")
         pass
 
-    test_master_obj = TestMaster() # Use this if StatsAnalysisWindow needs methods from master
 
-    def launch_stats():
-        # Set an optional default path for testing convenience
-        test_path = "" # e.g., "C:/Users/YourUser/Documents/FPVS_Processed_Data"
-        try:
-             # Pass the actual root window as the Tkinter master
-             # StatsAnalysisWindow internally uses self.master_app for logging now
-             stats_win = StatsAnalysisWindow(master=root, default_folder=test_path)
-             # stats_win.grab_set() # Typically disable grab_set during basic testing
-        except Exception as e:
-             print(f"Error launching Stats window: {e}\n{traceback.format_exc()}")
+if __name__ == "__main__":
+    try:
+        root = ctk.CTk()
+        root.title("Main App Test Host")
+        root.geometry("300x100")
 
-    # Add a button to the dummy root window to launch the stats tool
-    button = ctk.CTkButton(root, text="Open Stats Tool", command=launch_stats)
-    button.pack(pady=20, padx=20)
 
-    # Run the dummy main loop
-    root.mainloop()
+        class TestMaster:
+            log = staticmethod(lambda msg: print(f"[TestHost] {msg}"))
+
+
+        # Mock stats_export and repeated_m_anova for standalone testing if not available
+        class MockStatsExport:
+            def export_paired_results_to_excel(self, data, parent_folder, log_func): log_func(
+                "Mock: export_paired_results_to_excel called")
+
+            def export_rm_anova_results_to_excel(self, anova_table, parent_folder, log_func): log_func(
+                "Mock: export_rm_anova_results_to_excel called")
+
+            def export_significance_results_to_excel(self, findings_dict, metric, threshold, parent_folder,
+                                                     log_func): log_func(
+                f"Mock: export_significance_results_to_excel called for {metric}")
+
+
+        class MockRepeatedMAnova:
+            def run_repeated_measures_anova(self, data, dv_col, within_cols, subject_col):
+                print(
+                    f"Mock: run_repeated_measures_anova called with DV:{dv_col}, Within:{within_cols}, Subj:{subject_col}")
+                return pd.DataFrame(
+                    {'Source': ['condition', 'roi', 'condition:roi'], 'F': [1.0, 2.0, 3.0], 'p-unc': [0.5, 0.4, 0.3]})
+
+
+        # Replace actual imports with mocks if they cause issues during standalone run
+        import sys
+
+        if 'stats_export' not in sys.modules: sys.modules['stats_export'] = MockStatsExport()
+        if 'repeated_m_anova' not in sys.modules: sys.modules['repeated_m_anova'] = MockRepeatedMAnova()
+        # Re-import after mocking (or ensure they are imported after this block)
+        from . import stats_export
+        from repeated_m_anova import run_repeated_measures_anova
+
+        ctk.CTkButton(root, text="Open Stats Tool",
+                      command=lambda: StatsAnalysisWindow(master=TestMaster(), default_folder="")).pack(pady=20)
+        root.mainloop()
+    except Exception as e_main:
+        print(f"Error in __main__ block: {e_main}\n{traceback.format_exc()}")
