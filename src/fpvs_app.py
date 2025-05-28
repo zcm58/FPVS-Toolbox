@@ -51,6 +51,7 @@ from typing import Optional, Dict, Any  # Add any other type hints you use, like
 from Main_App.menu_bar import AppMenuBar
 from Main_App.eeg_preprocessing import perform_preprocessing
 from Main_App.ui_setup_panels import SetupPanelManager
+from Main_App.ui_event_map_manager import EventMapManager
 
 from config import (
     FPVS_TOOLBOX_VERSION,
@@ -86,7 +87,7 @@ class FPVSApp(ctk.CTk):
         # --- App Version and Title ---
         from datetime import datetime
         self.title(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION} — {datetime.now():%Y-%m-%d}")
-        self.minsize(750, 920)  # Adjusted height slightly as params panel is shorter
+        self.minsize(750, 920)
 
         # --- Core State Variables ---
         self.busy = False
@@ -99,24 +100,21 @@ class FPVSApp(ctk.CTk):
         self._max_progress = 1
         self.validated_params = {}
 
-        # --- Tkinter Variables for UI State (used by SetupPanelManager and other parts) ---
-        # self.save_preprocessed tk.BooleanVar is REMOVED
+        # --- Tkinter Variables for UI State ---
         self.file_mode = tk.StringVar(master=self, value="Single")
         self.file_type = tk.StringVar(master=self, value=".BDF")
         self.save_folder_path = tk.StringVar(master=self)
+        # self.save_preprocessed (BooleanVar) was REMOVED
 
         # --- Initialize Widget Attributes ---
-        # Top bar
         self.select_button = None
         self.select_output_button = None
         self.start_button = None
-        # Options Panel
         self.options_frame = None
         self.radio_single = None
         self.radio_batch = None
         self.radio_bdf = None
         self.radio_set = None
-        # Params Panel
         self.params_frame = None
         self.low_pass_entry = None
         self.high_pass_entry = None
@@ -127,14 +125,11 @@ class FPVSApp(ctk.CTk):
         self.ref_channel1_entry = None
         self.ref_channel2_entry = None
         self.max_idx_keep_entry = None
-        # self.stim_channel_entry = None # REMOVED FROM UI
-        self.max_bad_channels_alert_entry = None  # This one STAYS
-        # self.save_preprocessed_checkbox = None # REMOVED FROM UI
-        # Event Map
+        self.max_bad_channels_alert_entry = None
+        self.event_map_outer_frame = None
         self.event_map_scroll_frame = None
         self.detect_button = None
         self.add_map_button = None
-        # Log/Progress
         self.log_text = None
         self.progress_bar = None
         self.menubar = None
@@ -145,24 +140,31 @@ class FPVSApp(ctk.CTk):
 
         # --- Build UI ---
         self.create_menu()
-        self.create_widgets()
+        self.create_widgets()  # This will call SetupPanelManager and EventMapManager
 
         # --- Initial UI State ---
-        self.add_event_map_entry()
+        # The initial event map row is now added by EventMapManager._build_event_map_ui()
+        # So, the explicit call to self.add_event_map_entry() is REMOVED from here.
 
         # --- Welcome and Logging ---
         self.log("Welcome to the FPVS Toolbox!")
         self.log(f"Appearance Mode: {ctk.get_appearance_mode()}")
 
         # --- Set Initial Focus ---
-        if self.event_map_entries:
+        # If EventMapManager's _add_new_event_row_ui focuses its new row,
+        # this specific block might be redundant or could be generalized
+        # to focus the main window or another element if no event map entries exist yet.
+        # For now, let's keep it, as it checks winfo_exists().
+        if self.event_map_entries:  # event_map_entries should be populated by EventMapManager by now
             try:
                 first_entry_widgets = self.event_map_entries[0]
-                if first_entry_widgets['frame'].winfo_exists() and \
-                        first_entry_widgets['label'].winfo_exists():
+                if first_entry_widgets.get('label') and first_entry_widgets['label'].winfo_exists():
                     first_entry_widgets['label'].focus_set()
-            except Exception as e:
-                self.log(f"Warning: Could not set initial focus on event map: {e}")
+                    # self.app_ref.after(50, lambda: label_entry.select_range(0, tk.END)) # This was in EventMapManager, good there.
+            except (IndexError, tk.TclError, AttributeError) as e:
+                self.log(f"Warning: Could not set initial focus on event map label: {e}")
+        else:
+            self.log("No event map entries present after UI creation to set initial focus.")
 
         # --- Define List of Widgets to Toggle Enabled/Disabled State ---
         self._toggle_widgets = [
@@ -171,10 +173,9 @@ class FPVSApp(ctk.CTk):
             self.low_pass_entry, self.high_pass_entry, self.downsample_entry,
             self.epoch_start_entry, self.epoch_end_entry, self.reject_thresh_entry,
             self.ref_channel1_entry, self.ref_channel2_entry, self.max_idx_keep_entry,
-            # self.stim_channel_entry, # REMOVED
-            self.max_bad_channels_alert_entry,  # STAYS
-            # self.save_preprocessed_checkbox, # REMOVED
-            self.detect_button, self.add_map_button,
+            self.max_bad_channels_alert_entry,
+            self.detect_button,
+            self.add_map_button,
         ]
         self._toggle_widgets = [widget for widget in self._toggle_widgets if widget is not None]
 
@@ -339,37 +340,42 @@ class FPVSApp(ctk.CTk):
     # --- GUI Creation ---
 
     def create_widgets(self):
-        """Creates all the widgets for the main application window, delegating panel creation."""
+        """Creates all the widgets for the main application window,
+        delegating panel creation to respective managers."""
 
-        # Constants for padding (can also be from config)
-        PAD_X = 5 # Assuming PAD_X is from global scope or config
-        PAD_Y = 5 # Assuming PAD_Y is from global scope or config
-        # LABEL_ID_ENTRY_WIDTH = 100 # Assuming this is from global/config for event_map_headers
+        # Attempt to import UI constants from config, with fallbacks
+        try:
+            from config import PAD_X, PAD_Y, CORNER_RADIUS
+            # LABEL_ID_ENTRY_WIDTH is now primarily used within EventMapManager
+        except ImportError:
+            PAD_X = 5
+            PAD_Y = 5
+            CORNER_RADIUS = 6
+            print("Warning [FPVSApp.create_widgets]: Could not import UI constants from config. Using fallbacks.")
 
         # Main container
         main_frame = ctk.CTkFrame(self, corner_radius=0)
         main_frame.pack(fill="both", expand=True, padx=PAD_X * 2, pady=PAD_Y * 2)
         main_frame.grid_columnconfigure(0, weight=1)
         main_frame.grid_rowconfigure(0, weight=0)  # Top Bar
-        main_frame.grid_rowconfigure(1, weight=0)  # Options Panel (created by manager)
-        main_frame.grid_rowconfigure(2, weight=0)  # Params Panel (created by manager)
-        main_frame.grid_rowconfigure(3, weight=1)  # Event Map (expands)
-        main_frame.grid_rowconfigure(4, weight=0)  # Bottom (Log/Progress)
+        main_frame.grid_rowconfigure(1, weight=0)  # Options Panel (created by SetupPanelManager)
+        main_frame.grid_rowconfigure(2, weight=0)  # Params Panel (created by SetupPanelManager)
+        main_frame.grid_rowconfigure(3, weight=1)  # Event Map Frame (content by EventMapManager, expands)
+        main_frame.grid_rowconfigure(4, weight=0)  # Bottom Frame (Log/Progress)
 
         # --- Top Control Bar (Row 0) ---
-        # (This section remains the same as your current create_widgets)
         top_bar = ctk.CTkFrame(main_frame, corner_radius=0)
         top_bar.grid(row=0, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
-        top_bar.grid_columnconfigure(0, weight=0)
-        top_bar.grid_columnconfigure(1, weight=1)
-        top_bar.grid_columnconfigure(2, weight=0)
+        top_bar.grid_columnconfigure(0, weight=0)  # Select button
+        top_bar.grid_columnconfigure(1, weight=1)  # Output folder button (centered)
+        top_bar.grid_columnconfigure(2, weight=0)  # Start button
 
         self.select_button = ctk.CTkButton(top_bar, text="Select EEG File…",
                                            command=self.select_data_source,
                                            corner_radius=CORNER_RADIUS, width=180)
         self.select_button.grid(row=0, column=0, sticky="w", padx=(0, PAD_X))
 
-        # self.save_folder_path should be initialized in __init__
+        # self.save_folder_path (StringVar) should be initialized in FPVSApp.__init__
         self.select_output_button = ctk.CTkButton(top_bar, text="Select Output Folder…",
                                                   command=self.select_save_folder,
                                                   corner_radius=CORNER_RADIUS, width=180)
@@ -381,52 +387,25 @@ class FPVSApp(ctk.CTk):
                                           font=ctk.CTkFont(weight="bold"))
         self.start_button.grid(row=0, column=2, sticky="e", padx=(PAD_X, 0))
 
-        # --- Create Setup Panels using the Manager ---
-        # The SetupPanelManager will create self.options_frame (gridded at row=1)
-        # and self.params_frame (gridded at row=2) within main_frame.
+        # --- Create Setup Panels using SetupPanelManager ---
+        # (Options Panel on row=1, Params Panel on row=2, inside main_frame)
         setup_panel_handler = SetupPanelManager(app_reference=self, main_parent_frame=main_frame)
-        setup_panel_handler.create_all_setup_panels()  # This populates the frames and widgets
+        setup_panel_handler.create_all_setup_panels()
 
         # --- Event ID Mapping Frame (Row 3 - EXPANDS) ---
-        # (This section remains the same as your current create_widgets)
-        event_map_outer = ctk.CTkFrame(main_frame)  # This will be parent for EventMapManager later
-        event_map_outer.grid(row=3, column=0, sticky="nsew", padx=PAD_X, pady=PAD_Y)
-        event_map_outer.grid_columnconfigure(0, weight=1)
-        event_map_outer.grid_rowconfigure(2, weight=1)  # Scrollable frame's row
+        # Create the outer container frame that will be passed to EventMapManager
+        self.event_map_outer_frame = ctk.CTkFrame(main_frame)
+        self.event_map_outer_frame.grid(row=3, column=0, sticky="nsew", padx=PAD_X, pady=PAD_Y)
+        # EventMapManager will configure the grid inside self.event_map_outer_frame
+        # and populate self.event_map_scroll_frame, self.detect_button, self.add_map_button
 
-        ctk.CTkLabel(event_map_outer, text="Event Map (Condition Label → Numerical ID)",
-                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=PAD_X, pady=(PAD_Y, 0))  # Changed to pack
-
-        header_frame = ctk.CTkFrame(event_map_outer, fg_color="transparent")
-        header_frame.pack(fill="x", padx=PAD_X, pady=(2, 0))  # Changed to pack
-
-        # Assuming LABEL_ID_ENTRY_WIDTH and PAD_X are accessible (e.g., imported from config or defined globally)
-        # If not, pass them or use default values. For now, assuming they are available.
-        try:
-            from config import LABEL_ID_ENTRY_WIDTH  # Local import just for this section if preferred
-        except:
-            LABEL_ID_ENTRY_WIDTH = 100
-
-        ctk.CTkLabel(header_frame, text="Condition Label", width=LABEL_ID_ENTRY_WIDTH * 2 + PAD_X, anchor="w").pack(
-            side="left", padx=(0, 0))
-        ctk.CTkLabel(header_frame, text="Numerical ID", width=LABEL_ID_ENTRY_WIDTH + PAD_X, anchor="w").pack(
-            side="left", padx=(0, 0))
-        ctk.CTkLabel(header_frame, text="", width=28 + PAD_X).pack(side="right", padx=(0, 0))  # Spacer
-
-        self.event_map_scroll_frame = ctk.CTkScrollableFrame(event_map_outer, label_text="")
-        self.event_map_scroll_frame.pack(fill="both", expand=True, padx=PAD_X, pady=(0, PAD_Y))  # Changed to pack
-
-        event_map_button_frame = ctk.CTkFrame(event_map_outer, fg_color="transparent")
-        event_map_button_frame.pack(fill="x", pady=(0, PAD_Y), padx=PAD_X)  # Changed to pack
-        self.detect_button = ctk.CTkButton(event_map_button_frame, text="Detect Trigger IDs",
-                                           command=self.detect_and_show_event_ids, corner_radius=CORNER_RADIUS)
-        self.detect_button.pack(side="left", padx=(0, PAD_X))
-        self.add_map_button = ctk.CTkButton(event_map_button_frame, text="+ Add Condition",
-                                            command=self.add_event_map_entry, corner_radius=CORNER_RADIUS)
-        self.add_map_button.pack(side="left")
+        # Instantiate EventMapManager to build the event map UI
+        # The EventMapManager's __init__ calls its _build_event_map_ui method,
+        # which now also adds the initial event map row.
+        event_map_manager = EventMapManager(app_reference=self, parent_ui_frame=self.event_map_outer_frame)
+        # No further calls to event_map_manager needed here if its __init__ builds the UI.
 
         # --- Bottom Frame: Log & Progress (Row 4) ---
-        # (This section remains the same as your current create_widgets)
         bottom_frame = ctk.CTkFrame(main_frame)
         bottom_frame.grid(row=4, column=0, sticky="ew", padx=PAD_X, pady=(PAD_Y, 0))
         bottom_frame.grid_columnconfigure(0, weight=1)
@@ -434,8 +413,8 @@ class FPVSApp(ctk.CTk):
         log_outer = ctk.CTkFrame(bottom_frame)
         log_outer.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, PAD_Y))
         log_outer.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(log_outer, text="Log", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w",
-                                                                                  padx=PAD_X, pady=(PAD_Y, 0))
+        ctk.CTkLabel(log_outer, text="Log", font=ctk.CTkFont(weight="bold")).grid(
+            row=0, column=0, sticky="w", padx=PAD_X, pady=(PAD_Y, 0))
         self.log_text = ctk.CTkTextbox(log_outer, height=100, wrap="word", state="disabled",
                                        corner_radius=CORNER_RADIUS)
         self.log_text.grid(row=1, column=0, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
@@ -444,7 +423,7 @@ class FPVSApp(ctk.CTk):
         prog_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=PAD_Y)
         prog_frame.grid_columnconfigure(0, weight=1)
         self.progress_bar = ctk.CTkProgressBar(prog_frame, orientation="horizontal", height=20)
-        self.progress_bar.grid(row=0, column=0, sticky="ew", padx=0, pady=0);
+        self.progress_bar.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
         self.progress_bar.set(0)
 
         # Sync select button label initially
