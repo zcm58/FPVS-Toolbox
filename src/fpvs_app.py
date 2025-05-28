@@ -3,16 +3,19 @@
 """
 FPVS all-in-one toolbox using MNE-Python and CustomTkinter.
 
-Version: 0.9.0 (May 2025) - Revised to use mne.find_events for event extraction
-from a stimulus channel using numerical IDs mapped to labels provided by the user.
-Replaces annotation-based extraction from v1.10.
+Version: 0.9.1 (May 2025) - the main app file (fpvs_app.py) has been refactored to remove roughly
+350 lines of code in an effort to simplify future development.
+
+Removed lines of code will be placed into new files under the Main_App package.
+
 
 Key functionalities:
-- Modern GUI using CustomTkinter.
-- Load EEG data (.BDF, .set).
-- Process single files or batch folders.
+
+- Process BioSemi datafiles. (.BDF Format)
+- Allows the user to process one file at a time, or multiple files at once.
+
 - Preprocessing Steps:
-    - Specify Stimulus Channel Name (default: 'Status').
+
     - Imports the data and subtracts the average reference from the mastoid electrodes.
     - Downsamples the data to 256Hz if necessary.
     - Apply standard_1020 montage for channel locations.
@@ -20,6 +23,7 @@ Key functionalities:
     - Applies basic FIR bandpass filter.
     - Kurtosis-based channel rejection & interpolation.
     - Re-references to the average common reference.
+    - Extracts each PsychoPy condition separately.
 
 - Extracts epochs based on numerical triggers from PsychoPy.
 - Post-processing using FFT, SNR, Z-score, BCA computation.
@@ -299,7 +303,7 @@ class FPVSApp(ctk.CTk):
     def show_about_dialog(self):
         messagebox.showinfo(
             "About FPVS ToolBox",
-            f"Version: 0.9.0 was developed by Zack Murphy at Mississippi State University."
+            f"Version: 0.9.1 was developed by Zack Murphy at Mississippi State University."
         )
 
     def quit(self):
