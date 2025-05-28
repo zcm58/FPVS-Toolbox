@@ -970,7 +970,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
 if __name__ == "__main__":
     try:
         root = ctk.CTk()
-        root.title("Main App Test Host")
+        root.title("Main_App Test Host")
         root.geometry("300x100")
 
 

@@ -44,6 +44,7 @@ import mne
 import requests
 from packaging.version import parse as version_parse
 from typing import Optional, Dict, Any  # Add any other type hints you use, like List
+from Main_App.menu_bar import AppMenuBar
 
 from config import (
     FPVS_TOOLBOX_VERSION,
@@ -145,6 +146,13 @@ class FPVSApp(ctk.CTk):
         #     w_dict['id'].configure(state=state)
         #     w_dict['button'].configure(state=state) # The 'X' button
 
+    def open_advanced_analysis_window(self):
+        """Opens the Advanced Preprocessing Epoch Averaging window."""
+        self.log("Opening Advanced Analysis (Preprocessing Epoch Averaging) tool...")
+        # AdvancedAnalysisWindow is imported from Tools.Average_Preprocessing
+        adv_win = AdvancedAnalysisWindow(master=self)
+        adv_win.grab_set()  # Make it modal
+
     def _set_controls_enabled(self, enabled: bool):
         """
         Enable or disable all main interactive widgets based on the `enabled` flag.
@@ -183,47 +191,37 @@ class FPVSApp(ctk.CTk):
 
     # --- Menu Methods ---
     def create_menu(self):
+        """
+        Creates the main application menubar by instantiating and using
+        the AppMenuBar class from Main_App.menu_bar.
+        """
+        # Create the top-level menu bar widget itself, attached to the main window (self)
         self.menubar = tk.Menu(self)
+
+        # Instantiate our AppMenuBar handler, passing a reference to this FPVSApp instance (self).
+        # The AppMenuBar class will use this reference to call back to methods
+        # in FPVSApp (like self.quit, self.open_stats_analyzer, etc.)
+        menu_manager = AppMenuBar(app_reference=self)
+
+        # Ask the menu_manager instance to populate our menubar widget.
+        # The populate_menu method in AppMenuBar will add all the cascades (File, Tools, etc.)
+        # and commands to self.menubar.
+        menu_manager.populate_menu(self.menubar)
+
+        # Configure the main window (self, which is the CTk instance) to use this menubar.
         self.config(menu=self.menubar)
 
-        # === File menu ===
-        file_menu = tk.Menu(self.menubar, tearoff=0)
-        self.menubar.add_cascade(label="File", menu=file_menu)
+    # Note: All the methods that are actual commands for the menu items, such as:
+    #   - set_appearance_mode(self, mode)
+    #   - check_for_updates(self)
+    #   - quit(self)
+    #   - open_stats_analyzer(self)
+    #   - open_image_resizer(self)
+    #   - show_about_dialog(self)
+    #   - open_advanced_analysis_window(self) (the new one we discussed)
+    # ...should REMAIN as methods within this FPVSApp class because AppMenuBar
+    # calls them via `self.app_ref.method_name()`.
 
-        # Appearance submenu
-        appearance_menu = tk.Menu(file_menu, tearoff=0)
-        file_menu.add_cascade(label="Appearance", menu=appearance_menu)
-        appearance_menu.add_command(label="Dark Mode", command=lambda: self.set_appearance_mode("Dark"))
-        appearance_menu.add_command(label="Light Mode", command=lambda: self.set_appearance_mode("Light"))
-        appearance_menu.add_command(label="System Default", command=lambda: self.set_appearance_mode("System"))
-
-        file_menu.add_separator()
-
-        # Check for Updates moved here
-        file_menu.add_command(label="Check for Updates", command=self.check_for_updates)
-        file_menu.add_separator()
-
-        file_menu.add_command(label="Exit", command=self.quit)
-
-        # === Tools menu ===
-        tools_menu = tk.Menu(self.menubar, tearoff=0)
-        self.menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Stats Toolbox", command=self.open_stats_analyzer)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Image_Resizer", command=self.open_image_resizer)
-
-        # === Help menu ===
-        help_menu = tk.Menu(self.menubar, tearoff=0)
-        self.menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="About...", command=self.show_about_dialog)
-
-        # === Advanced Analysis menu ===
-        adv_menu = tk.Menu(self.menubar, tearoff=0)
-        self.menubar.add_cascade(label="Advanced Analysis", menu=adv_menu)
-        adv_menu.add_command(
-        label = "Preprocessing Epoch Averaging",
-        command = lambda: AdvancedAnalysisWindow(self)
-                                            )
 
     def check_for_updates(self):
         """
