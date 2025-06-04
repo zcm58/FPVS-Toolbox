@@ -555,75 +555,25 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         """Validates main‐app params and group configs, then kicks off the background thread."""
         self.log("=" * 30 + "\nAttempting to Start Advanced Processing...")
 
-        # 0) If the main app hasn't yet validated its entries, do so now.
-        self.log(
-            f"[PARAM_CHECK] Initial check: self.master_app has 'validated_params' attribute: {hasattr(self.master_app, 'validated_params')}")
-        if hasattr(self.master_app, 'validated_params'):
-            # Log the type and content, be careful with potentially large/complex objects if not a dict
-            current_params = getattr(self.master_app, 'validated_params', 'Attribute exists but is None')
-            self.log(
-                f"[PARAM_CHECK] Initial self.master_app.validated_params (type: {type(current_params)}): {current_params}")
+        # 0) Validate and fetch main app parameters
+        main_app_params = None
+        if hasattr(self.master_app, "get_fpvs_params"):
+            self.log("[PARAM_CHECK] Attempting to fetch parameters from main app via get_fpvs_params().")
+            try:
+                main_app_params = self.master_app.get_fpvs_params()
+            except Exception as e:
+                self.log(f"[PARAM_CHECK] Error calling get_fpvs_params(): {traceback.format_exc()}")
+        else:
+            self.log("[PARAM_CHECK] master_app does not implement get_fpvs_params().")
 
-        # Check if validated_params is None, or an empty dict/list if those are invalid states
-        # For this logic, primarily checking for None as the original code does.
-        main_app_params_are_set = bool(getattr(self.master_app, "validated_params", None))
-
-        if not main_app_params_are_set:
-            self.log(
-                "[PARAM_CHECK] Main app's 'validated_params' not set or is None/empty. Attempting to call _validate_inputs().")
-            ok = False
-            if hasattr(self.master_app, "_validate_inputs"):
-                self.log("[PARAM_CHECK] Calling self.master_app._validate_inputs()...")
-                try:
-                    ok = self.master_app._validate_inputs()  # This method should set self.master_app.validated_params
-                    self.log(f"[PARAM_CHECK] self.master_app._validate_inputs() returned: {ok}")
-
-                    # After calling _validate_inputs, check validated_params again
-                    if hasattr(self.master_app, 'validated_params'):
-                        current_params_after_call = getattr(self.master_app, 'validated_params',
-                                                            'Attribute exists but is None')
-                        self.log(
-                            f"[PARAM_CHECK] After _validate_inputs(), self.master_app.validated_params (type: {type(current_params_after_call)}): {current_params_after_call}")
-                        main_app_params_are_set = bool(current_params_after_call)  # Update based on new state
-                    else:
-                        self.log(
-                            "[PARAM_CHECK] After _validate_inputs(), self.master_app still does not have 'validated_params' attribute.")
-                        main_app_params_are_set = False
-
-                except Exception as e:
-                    self.log(f"[PARAM_CHECK] Error during self.master_app._validate_inputs(): {traceback.format_exc()}")
-                    CTkMessagebox.CTkMessagebox(
-                        title="Error",
-                        message=f"An error occurred while validating main application inputs: {e}",
-                        icon="cancel",
-                        parent=self
-                    )
-                    return  # Bail out if validation call itself fails
-            else:
-                self.log(
-                    "[PARAM_CHECK] Warning: Main app does not have a '_validate_inputs' method, and 'validated_params' was not already set.")
-
-            if not ok and not main_app_params_are_set:  # If validation call failed (or didn't exist) AND params are still not set
-                self.log(
-                    "[PARAM_CHECK] Main app input validation failed or was not performed, and parameters are still not set.")
-                CTkMessagebox.CTkMessagebox(
-                    title="Error",
-                    message="Main application parameters could not be validated or are missing. Please check the main app settings and ensure they are confirmed/applied.",
-                    icon="cancel",
-                    parent=self
-                )
-                return
-            elif ok and not main_app_params_are_set:
-                self.log(
-                    "[PARAM_CHECK] Warning: _validate_inputs returned True, but validated_params is still not set or is None/empty.")
-                # This indicates an issue in the _validate_inputs method itself.
-                CTkMessagebox.CTkMessagebox(
-                    title="Error",
-                    message="Main app validation reported success, but parameters are missing. Please check the main app's _validate_inputs method.",
-                    icon="cancel",
-                    parent=self
-                )
-                return
+        if not main_app_params:
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message="Main application parameters could not be validated or are missing. Please check the main app settings.",
+                icon="cancel",
+                parent=self
+            )
+            return
 
         # 1) Check that we have at least one fully‐defined, saved group
         if not self.defined_groups:
@@ -653,8 +603,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 self.on_group_select(None)
                 return
 
-        # 2) Pull in the now‐populated parameters
-        main_app_params = getattr(self.master_app, 'validated_params', None)
+        # 2) main_app_params now holds the validated parameters from the main app
         self.log(f"[PARAM_CHECK] Final fetched main_app_params to be used for processing: {main_app_params}")
 
         if main_app_params is None or not main_app_params:  # Also check for empty dict if that's invalid
