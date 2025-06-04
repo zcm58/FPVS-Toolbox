@@ -100,7 +100,13 @@ class FPVSApp(ctk.CTk):
         init_fonts()
 
         # use modern default font
-        self.option_add("*Font", FONT_MAIN)
+        # ``option_add`` internally forwards arguments directly to the
+        # underlying Tcl interpreter. Passing ``None`` as the optional
+        # priority argument results in Tcl receiving five tokens instead of
+        # four, which raises "wrong # args" on some platforms. Casting the
+        # ``CTkFont`` instance to ``str`` and explicitly providing the default
+        # priority avoids this issue.
+        self.option_add("*Font", str(FONT_MAIN), 80)
 
 
         # 2) State variables

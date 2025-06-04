@@ -51,7 +51,11 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         # Ensure fonts are initialised in case this window is launched
         # independently of the main application.
         init_fonts()
-        self.option_add("*Font", FONT_MAIN)
+        # ``option_add`` expects a concrete priority value.  Without it the
+        # ``None`` forwarded by ``tkinter.Misc.option_add`` can cause Tcl to
+        # complain about the number of arguments.  Using ``str`` and an
+        # explicit priority sidesteps that issue.
+        self.option_add("*Font", str(FONT_MAIN), 80)
         self.title("FPVS Statistical Analysis Tool")
         self.geometry("950x950")  # Adjusted for clarity of layout
         self.grab_set()
