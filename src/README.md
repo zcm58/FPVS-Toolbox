@@ -19,3 +19,8 @@ cmd = ["pyinstaller", "-n", f"FPVS_Toolbox_{FPVS_TOOLBOX_VERSION}", ...]
 
 Updating `FPVS_TOOLBOX_VERSION` is all that's required when releasing a new
 version.
+
+
+The build scripts locate the repository root automatically before running
+PyInstaller, so they work even if launched from another directory.
+
