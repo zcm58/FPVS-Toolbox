@@ -779,10 +779,20 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.results_textbox.configure(state="disabled")
             return
 
+        # Basic dataset summary for the user
+        num_subjects = df_long['subject'].nunique()
+        conditions_list = sorted(df_long['condition'].unique().tolist())
+        rois_list = sorted(df_long['roi'].unique().tolist())
+        base_condition = conditions_list[0]
+        base_roi = rois_list[0]
+
         output_text = "===========================================================\n"
         output_text += "           Mixed Effects Model Results\n"
         output_text += "           Analysis conducted on: Summed BCA Data\n"
         output_text += "===========================================================\n\n"
+        output_text += f"Data from {num_subjects} subjects across {len(conditions_list)} conditions and {len(rois_list)} ROIs were included.\n"
+        output_text += f"Model formula: value ~ condition + roi (random intercept by subject).\n"
+        output_text += f"Baseline level is condition '{base_condition}' at ROI '{base_roi}'.\n\n"
 
         try:
             self.log_to_main_app(f"Calling run_mixed_effects_model with DataFrame of shape: {df_long.shape}")
@@ -792,7 +802,36 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                 output_text += "-----------------------------\n"
                 output_text += "            FIXED EFFECTS\n"
                 output_text += "-----------------------------\n"
-                output_text += mixed_df.to_string(index=False) + "\n"
+                if '' in mixed_df.columns:
+                    mixed_df = mixed_df.rename(columns={'': 'Effect'})
+                output_text += mixed_df.to_string(index=False) + "\n\n"
+
+                # --- Simplified interpretation of each effect ---
+                output_text += "---------------------------------------------\n"
+                output_text += "        SIMPLIFIED EXPLANATION OF RESULTS\n"
+                output_text += "---------------------------------------------\n"
+                for _, row in mixed_df.iterrows():
+                    effect = str(row.get('Effect', ''))
+                    coef = row.get('Coef.', row.get('coef', ''))
+                    p_val = row.get('P>|z|', row.get('P>|t|', ''))
+                    explanation = effect
+                    if effect.lower().startswith('intercept'):
+                        explanation = f"Baseline level ({base_condition}, {base_roi})"
+                    elif effect.startswith('condition[T.'):
+                        cond = effect.split('T.')[1].rstrip(']')
+                        explanation = f"Difference for condition '{cond}' vs '{base_condition}'"
+                    elif effect.startswith('roi[T.'):
+                        roi_name = effect.split('T.')[1].rstrip(']')
+                        explanation = f"Difference for ROI '{roi_name}' vs '{base_roi}'"
+
+                    significance = ''
+                    try:
+                        p_val_float = float(p_val)
+                        significance = ' (p < 0.05)' if p_val_float < 0.05 else ' (n.s.)'
+                    except Exception:
+                        pass
+                    output_text += f"- {explanation}: Coef = {coef}{significance}\n"
+
                 self.mixed_model_results_data = mixed_df
                 self.export_mixed_model_btn.configure(state="normal")
             else:
