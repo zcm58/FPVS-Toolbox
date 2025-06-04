@@ -949,7 +949,8 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                 'T_Statistic': item['T_Statistic'],
                 'P_Value': item['P_Value'],
                 'df': item['df'],
-                'Threshold_Used': item['Threshold_Criteria_Mean_Value']  # The mean value threshold
+                # Store the mean value threshold used for this harmonic
+                'Threshold': item['Threshold_Criteria_Mean_Value']
             })
         if not findings_dict: messagebox.showwarning("No Results",
                                                      "Failed to structure harmonic results for export."); return
