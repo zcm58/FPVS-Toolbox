@@ -49,8 +49,24 @@ def run_mixed_effects_model(data: pd.DataFrame, dv_col: str, group_col: str, fix
     try:
         model = smf.mixedlm(formula, df, groups=df[group_col])
         result = model.fit()
+
         summary_table = result.summary().tables[1]
-        df_result = pd.DataFrame(summary_table.data[1:], columns=summary_table.data[0])
+
+        if hasattr(summary_table, "data"):
+            # statsmodels SimpleTable object
+            df_result = pd.DataFrame(summary_table.data[1:], columns=summary_table.data[0])
+        elif isinstance(summary_table, pd.DataFrame):
+            # Some versions return a DataFrame directly
+            df_result = summary_table.reset_index(drop=True)
+        else:
+            # Fallback: construct from params and p-values
+            df_result = pd.DataFrame({
+                "Coef.": result.params,
+                "P>|z|": result.pvalues
+            })
+            df_result.index.name = "Effect"
+            df_result = df_result.reset_index()
+
         return df_result
     except Exception as e:
         raise RuntimeError(f"Failed to run mixed effects model: {e}")
