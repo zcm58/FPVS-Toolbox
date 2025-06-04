@@ -16,6 +16,9 @@ import os
 import glob
 import re
 import traceback
+import logging
+
+logger = logging.getLogger(__name__)
 
 import customtkinter as ctk
 import tkinter as tk
@@ -91,9 +94,9 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             if hasattr(self.master_app, 'log') and callable(self.master_app.log):
                 self.master_app.log(f"[Stats] {message}")
             else:
-                print(f"[Stats] {message}")
+                logger.info("[Stats] %s", message)
         except Exception as e:
-            print(f"[Stats Log Error] {e} | Original message: {message}")
+            logger.error("[Stats Log Error] %s | Original message: %s", e, message)
 
     def on_close(self):
         self.log_to_main_app("Closing Stats Analysis window.")
@@ -975,7 +978,7 @@ if __name__ == "__main__":
 
 
         class TestMaster:
-            log = staticmethod(lambda msg: print(f"[TestHost] {msg}"))
+            log = staticmethod(lambda msg: logger.info("[TestHost] %s", msg))
 
 
         # Mock stats_export and repeated_m_anova for standalone testing if not available
@@ -993,8 +996,12 @@ if __name__ == "__main__":
 
         class MockRepeatedMAnova:
             def run_repeated_measures_anova(self, data, dv_col, within_cols, subject_col):
-                print(
-                    f"Mock: run_repeated_measures_anova called with DV:{dv_col}, Within:{within_cols}, Subj:{subject_col}")
+                logger.info(
+                    "Mock: run_repeated_measures_anova called with DV:%s, Within:%s, Subj:%s",
+                    dv_col,
+                    within_cols,
+                    subject_col,
+                )
                 return pd.DataFrame(
                     {'Source': ['condition', 'roi', 'condition:roi'], 'F': [1.0, 2.0, 3.0], 'p-unc': [0.5, 0.4, 0.3]})
 
@@ -1012,4 +1019,4 @@ if __name__ == "__main__":
                       command=lambda: StatsAnalysisWindow(master=TestMaster(), default_folder="")).pack(pady=20)
         root.mainloop()
     except Exception as e_main:
-        print(f"Error in __main__ block: {e_main}\n{traceback.format_exc()}")
+        logger.error("Error in __main__ block: %s\n%s", e_main, traceback.format_exc())

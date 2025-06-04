@@ -37,6 +37,7 @@ import gc
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import webbrowser
+import logging
 import numpy as np
 import pandas as pd
 import customtkinter as ctk
@@ -70,6 +71,21 @@ import Tools.Stats as stats
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
+
+class AppLoggingHandler(logging.Handler):
+    """Logging handler that routes records to the FPVSApp.log method."""
+
+    def __init__(self, app: "FPVSApp"):
+        super().__init__()
+        self.app = app
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg = self.format(record)
+        try:
+            self.app.log(msg)
+        except Exception:
+            pass
+
 class FPVSApp(ctk.CTk):
     """ Main application class replicating MATLAB FPVS analysis workflow using numerical triggers. """
 
@@ -97,6 +113,11 @@ class FPVSApp(ctk.CTk):
         # 4) Build UI
         self.create_menu()
         self.create_widgets()  # <-- all widgets are created here
+
+        # Configure logging to route messages through the app log
+        logging.basicConfig(level=logging.INFO)
+        self._log_handler = AppLoggingHandler(self)
+        logging.getLogger().addHandler(self._log_handler)
 
         # 5) Add initial event map row
         self.add_event_map_entry()  # <<< ADD FIRST EVENT MAP ROW
