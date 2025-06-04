@@ -195,7 +195,7 @@ def export_paired_results_to_excel(data, parent_folder, log_func=print):
     # Define preferred column order
     preferred_cols = ['ROI', 'Condition_A', 'Condition_B', 'N_Pairs',
                       'Mean_A', 'Mean_B', 'Mean_Difference',
-                      't_statistic', 'df', 'p_value']
+                      'Cohen_d', 't_statistic', 'df', 'p_value']
     df_export = df_export[[col for col in preferred_cols if col in df_export.columns]]
 
     # Suggest filename (try to get condition names if available from first result)

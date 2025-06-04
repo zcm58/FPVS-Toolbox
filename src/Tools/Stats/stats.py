@@ -471,6 +471,8 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                     mean_a = np.mean(values_a)
                     mean_b = np.mean(values_b)
                     mean_diff = mean_a - mean_b
+                    diff_std = np.std(np.array(values_a) - np.array(values_b), ddof=1)
+                    cohen_d = mean_diff / diff_std if diff_std != 0 else np.nan
 
                     is_significant = p_value_raw < alpha
                     p_value_str = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
@@ -484,6 +486,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                     output_text += f"    - Average Summed BCA for '{cond_a}': {mean_a:.3f} (approx. uV)\n"
                     output_text += f"    - Average Summed BCA for '{cond_b}': {mean_b:.3f} (approx. uV)\n"
                     output_text += f"    - Mean Difference ('{cond_a}' - '{cond_b}'): {mean_diff:.3f} (approx. uV)\n"
+                    output_text += f"    - Effect Size (Cohen's d): {cohen_d:.3f}\n"
 
                     if is_significant:
                         if mean_diff > 1e-9:  # Check if meaningfully positive (accounting for float precision)
@@ -509,7 +512,8 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                             'Mean_Difference': mean_diff,
                             't_statistic': t_stat,
                             'df': df_val,
-                            'p_value': p_value_raw  # Store raw p-value for export
+                            'p_value': p_value_raw,
+                            'Cohen_d': cohen_d  # Store effect size for export
                         })
 
                 except Exception as e:
@@ -587,6 +591,18 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                                                            subject_col='subject')
 
             if anova_df_results is not None and not anova_df_results.empty:
+                # Calculate partial eta squared for each effect
+                pes_vals = []
+                for _, row in anova_df_results.iterrows():
+                    f_val = row.get('F Value', row.get('F', np.nan))
+                    df1 = row.get('Num DF', row.get('df1', row.get('ddof1', np.nan)))
+                    df2 = row.get('Den DF', row.get('df2', row.get('ddof2', np.nan)))
+                    if not pd.isna(f_val) and not pd.isna(df1) and not pd.isna(df2) and (f_val * df1 + df2) != 0:
+                        pes_vals.append((f_val * df1) / ((f_val * df1) + df2))
+                    else:
+                        pes_vals.append(np.nan)
+                anova_df_results['Partial_Eta_Squared'] = pes_vals
+
                 # --- Display the Statistical Table ---
                 output_text += "------------------------------------------------------------\n"
                 output_text += "                 STATISTICAL TABLE (RM-ANOVA)\n"
@@ -621,7 +637,10 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                     # Format p-value for display in explanation
                     p_value_display_str = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
 
+                    eta_sq = row.get('Partial_Eta_Squared', np.nan)
+                    eta_sq_display = f"{eta_sq:.3f}" if not pd.isna(eta_sq) else "N/A"
                     output_text += f"  - Statistical Finding: {significance_status} (p-value = {p_value_display_str})\n"
+                    output_text += f"  - Partial Eta Squared: {eta_sq_display}\n"
 
                     explanation = ""
                     # Assuming within_cols are 'condition' and 'roi' for these interpretations
