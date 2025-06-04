@@ -27,6 +27,29 @@ LABEL_ID_ENTRY_WIDTH  = 120
 
 # --- Fonts ---
 FONT_FAMILY = "Segoe UI"
-FONT_MAIN = ctk.CTkFont(family=FONT_FAMILY, size=12)
-FONT_BOLD = ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold")
-FONT_HEADING = ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold")
+
+# Font variables are initialised after a Tk root exists.  They are set to
+# ``None`` here and configured via :func:`init_fonts` which should be called
+# once a ``ctk.CTk`` instance has been created.
+FONT_MAIN = None
+FONT_BOLD = None
+FONT_HEADING = None
+
+
+def init_fonts() -> None:
+    """Initialise global ``customtkinter`` fonts.
+
+    ``customtkinter.CTkFont`` requires a default Tk root window. Importing this
+    module before a root exists would raise ``RuntimeError: Too early to use
+    font``.  Call this function after creating the main application window to
+    populate the global font variables.
+    """
+    global FONT_MAIN, FONT_BOLD, FONT_HEADING
+
+    if FONT_MAIN is None:
+        FONT_MAIN = ctk.CTkFont(family=FONT_FAMILY, size=12)
+    if FONT_BOLD is None:
+        FONT_BOLD = ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold")
+    if FONT_HEADING is None:
+        FONT_HEADING = ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold")
+

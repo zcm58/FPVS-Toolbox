@@ -31,7 +31,7 @@ import scipy.stats as stats
 from . import stats_export  # Assuming stats_export.py is in the same package
 from .repeated_m_anova import run_repeated_measures_anova  # Assuming repeated_m_anova.py
 from .mixed_effects_model import run_mixed_effects_model
-from config import FONT_BOLD, FONT_MAIN
+from config import FONT_BOLD, FONT_MAIN, init_fonts
 
 # Regions of Interest (10-20 montage)
 ROIS = {
@@ -47,6 +47,10 @@ HARMONIC_CHECK_ALPHA = 0.05  # Significance level for one-sample t-test
 class StatsAnalysisWindow(ctk.CTkToplevel):
     def __init__(self, master, default_folder=""):
         super().__init__(master)
+
+        # Ensure fonts are initialised in case this window is launched
+        # independently of the main application.
+        init_fonts()
         self.option_add("*Font", FONT_MAIN)
         self.title("FPVS Statistical Analysis Tool")
         self.geometry("950x950")  # Adjusted for clarity of layout
