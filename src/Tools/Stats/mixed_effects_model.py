@@ -94,6 +94,35 @@ def run_mixed_effects_model(data: pd.DataFrame, dv_col: str, group_col: str, fix
             logger.info("Renaming first column to 'Effect'.")
             df_result = df_result.rename(columns={"": "Effect"})
 
+        logger.info("Interpreting fixed effects results for user-friendly output.")
+
+        # Provide a basic interpretation of each effect for easier understanding
+        for _, row in df_result.iterrows():
+            effect = str(row.get("Effect", "")).strip()
+            coef = row.get("Coef.", row.get("coef", ""))
+            p_val = row.get("P>|z|", row.get("P>|t|", ""))
+
+            if effect.lower().startswith("intercept"):
+                explanation = (
+                    "Intercept represents the expected value when all predictors "
+                    "are at their reference level."
+                )
+            else:
+                explanation = f"Effect of {effect} relative to the baseline level."
+
+            try:
+                p_val_float = float(p_val)
+                significance = "significant" if p_val_float < 0.05 else "not significant"
+                logger.info(
+                    "%s Coef=%.3f, p=%s (%s)",
+                    explanation,
+                    float(coef) if coef != "" else float("nan"),
+                    p_val,
+                    significance,
+                )
+            except Exception:
+                logger.info("%s Coef=%s, p=%s", explanation, coef, p_val)
+
         logger.info("Mixed effects model run successfully.")
         return df_result
     except Exception as e:
