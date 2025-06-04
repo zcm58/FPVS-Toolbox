@@ -121,12 +121,7 @@ class FPVSApp(ctk.CTk):
         self._max_progress = 1
         self.validated_params = {}
 
-        # Icon images for toolbar buttons
-        icon_dir = os.path.join(os.path.dirname(__file__), "icons")
-        self.icon_open = tk.PhotoImage(file=os.path.join(icon_dir, "open_file.ppm"))
-        self.icon_folder = tk.PhotoImage(file=os.path.join(icon_dir, "folder.ppm"))
-        self.icon_start = tk.PhotoImage(file=os.path.join(icon_dir, "start.ppm"))
-        self.icon_stats = tk.PhotoImage(file=os.path.join(icon_dir, "stats.ppm"))
+        # Toolbar button icons have been removed to reduce binary dependencies
 
         # 3) Window Setup
         from datetime import datetime
@@ -383,25 +378,25 @@ class FPVSApp(ctk.CTk):
             self.save_folder_path = tk.StringVar()
 
             self.select_button = ctk.CTkButton(
-                toolbar, image=self.icon_open, text="", width=36,
+                toolbar, text="Open", width=36,
                 command=self.select_data_source, corner_radius=CORNER_RADIUS
             )
             self.select_button.grid(row=0, column=0, padx=(0, PAD_X))
 
             self.select_output_button = ctk.CTkButton(
-                toolbar, image=self.icon_folder, text="", width=36,
+                toolbar, text="Output", width=36,
                 command=self.select_save_folder, corner_radius=CORNER_RADIUS
             )
             self.select_output_button.grid(row=0, column=1, padx=(0, PAD_X))
 
             self.stats_button = ctk.CTkButton(
-                toolbar, image=self.icon_stats, text="", width=36,
+                toolbar, text="Stats", width=36,
                 command=self.open_stats_analyzer, corner_radius=CORNER_RADIUS
             )
             self.stats_button.grid(row=0, column=2, padx=(0, PAD_X))
 
             self.start_button = ctk.CTkButton(
-                toolbar, image=self.icon_start, text="", width=36,
+                toolbar, text="Start", width=36,
                 command=self.start_processing, corner_radius=CORNER_RADIUS
             )
             self.start_button.grid(row=0, column=3)
