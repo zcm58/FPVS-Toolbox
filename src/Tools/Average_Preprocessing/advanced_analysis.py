@@ -10,6 +10,9 @@ import re
 import threading
 from typing import List, Dict, Any, Optional, Union
 import traceback
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Shared constants (with fallbacks)
 try:
@@ -43,7 +46,7 @@ except ImportError as e:
     run_advanced_averaging_processing = None
     _external_post_process_actual = None
     # You might want to update this message slightly to be more general
-    print(f"ERROR importing core components for Advanced Analysis: {e}")
+    logger.error("ERROR importing core components for Advanced Analysis: %s", e)
 
 
 def create_themed_listbox(parent: ctk.CTkBaseClass, **kwargs) -> tk.Listbox:
@@ -59,7 +62,12 @@ def create_themed_listbox(parent: ctk.CTkBaseClass, **kwargs) -> tk.Listbox:
             idx = 0 if appearance == "Light" else 1
             return theme[component][property_key][idx]
         except KeyError:
-            print(f"Warning: Theme color for {component}.{property_key} not found for mode {appearance}.")
+            logger.warning(
+                "Theme color for %s.%s not found for mode %s.",
+                component,
+                property_key,
+                appearance,
+            )
             default_bg = "white" if appearance == "Light" else "#2B2B2B"
             default_fg = "black" if appearance == "Light" else "white"
             if "background" in property_key or "fg_color" in property_key: return default_bg
@@ -830,29 +838,29 @@ if __name__ == "__main__":
             try:
                 os.makedirs(self.save_folder_path.get(), exist_ok=True)
             except Exception as e:
-                print(f"Error creating dummy output dir for test: {e}")
+                logger.error("Error creating dummy output dir for test: %s", e)
             self.DEFAULT_STIM_CHANNEL = "Status"
 
         def log(self, message):
-            print(f"[DummyMasterLog] {message}")
+            logger.info("[DummyMasterLog] %s", message)
 
         def load_eeg_file(self, filepath):
-            print(f"DummyLoad: {filepath}")
+            logger.info("DummyLoad: %s", filepath)
             return "dummy_raw_obj_for_test"
 
         def preprocess_raw(self, raw, **params):
-            print(f"DummyPreproc of '{raw}' with {params}")
+            logger.info("DummyPreproc of '%s' with %s", raw, params)
             return "dummy_proc_raw_obj_for_test"
 
 
     try:
         dummy_master_app = DummyMasterApp()
         if run_advanced_averaging_processing is None:
-            print(
+            logger.critical(
                 "CRITICAL ERROR: advanced_analysis_core.py (run_advanced_averaging_processing) could not be imported. Processing will fail.")
 
         advanced_window = AdvancedAnalysisWindow(master=dummy_master_app)
         dummy_master_app.mainloop()
-    except Exception as e:
-        print("Error in __main__ of advanced_analysis.py:", traceback.format_exc())
+    except Exception:
+        logger.error("Error in __main__ of advanced_analysis.py: %s", traceback.format_exc())
 
