@@ -289,7 +289,7 @@ class FPVSApp(ctk.CTk):
     def show_about_dialog(self):
         messagebox.showinfo(
             "About FPVS ToolBox",
-            f"Version: 0.9.0 was developed by Zack Murphy at Mississippi State University."
+            f"Version: {FPVS_TOOLBOX_VERSION} was developed by Zack Murphy at Mississippi State University."
         )
 
     def quit(self):
