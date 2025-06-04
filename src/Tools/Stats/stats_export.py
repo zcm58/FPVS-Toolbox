@@ -270,3 +270,41 @@ def export_rm_anova_results_to_excel(anova_table, parent_folder, log_func=print)
     except Exception as e:
         log_func(f"!!! RM-ANOVA Export Failed: {e}\n{traceback.format_exc()}")
         messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
+
+
+# --- Export Function for Mixed Effects Model Results ---
+def export_mixedlm_results_to_excel(mixedlm_table, parent_folder, log_func=print):
+    """Exports MixedLM fixed effects table to a formatted Excel file."""
+    log_func("Attempting to export Mixed Model results...")
+    if mixedlm_table is None or not isinstance(mixedlm_table, pd.DataFrame) or mixedlm_table.empty:
+        log_func("No Mixed Model results data available or data is not a DataFrame.")
+        messagebox.showwarning("No Results", "No Mixed Model results available to export or data format is incorrect.")
+        return
+
+    df_export = mixedlm_table.copy()
+
+    initial_dir = parent_folder if os.path.isdir(parent_folder) else os.path.expanduser("~")
+    suggested_filename = "Stats_MixedModel_SummedBCA.xlsx"
+
+    save_path = filedialog.asksaveasfilename(
+        title="Save Mixed Model Results (Summed BCA)",
+        initialdir=initial_dir, initialfile=suggested_filename, defaultextension=".xlsx",
+        filetypes=[("Excel Workbook", "*.xlsx"), ("All Files", "*.*")]
+    )
+    if not save_path:
+        log_func("Mixed Model export cancelled.")
+        return
+
+    try:
+        log_func(f"Exporting Mixed Model results to: {save_path}")
+        with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
+            _auto_format_and_write_excel(writer, df_export, 'Mixed Model Results', log_func)
+        log_func("Mixed Model results export successful.")
+        messagebox.showinfo("Export Successful", f"Mixed Model results exported to:\n{save_path}")
+    except PermissionError:
+        err_msg = f"Permission denied writing to {save_path}. File may be open or folder write-protected."
+        log_func(f"!!! Export Failed: {err_msg}")
+        messagebox.showerror("Export Failed", err_msg)
+    except Exception as e:
+        log_func(f"!!! Mixed Model Export Failed: {e}\n{traceback.format_exc()}")
+        messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
