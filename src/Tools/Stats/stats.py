@@ -72,6 +72,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.condition_B_var = tk.StringVar(master=self)
         self.harmonic_metric_var = tk.StringVar(master=self, value="SNR")
         self.harmonic_threshold_var = tk.StringVar(master=self, value="1.96")
+        self.alpha_var = tk.StringVar(master=self, value="0.05")
 
         # UI Widget References (stored for potential future dynamic updates)
         self.roi_menu = None
@@ -157,6 +158,10 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.condB_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.condition_B_var,
                                             values=["(Scan Folder)"])  # Already stored
         self.condB_menu.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
+
+        ctk.CTkLabel(common_setup_frame, text="Alpha (Sig. Level):").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkEntry(common_setup_frame, textvariable=self.alpha_var, validate='key',
+                     validatecommand=validate_num_cmd, width=100).grid(row=3, column=1, padx=5, pady=5, sticky="w")
 
         # --- Row 2: Section A - Summed BCA Analysis ---
         summed_bca_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -442,10 +447,16 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             output_text += f"Comparing Condition A: '{cond_a}'\n"
             output_text += f"With Condition B:      '{cond_b}'\n"
             output_text += f"ROIs Analyzed:         {selected_roi_option}\n"
-            output_text += f"(Significance level for p-values: p < 0.05)\n\n"
+            try:
+                alpha = float(self.alpha_var.get())
+            except ValueError:
+                messagebox.showerror("Input Error", "Invalid alpha value. Please enter a numeric value.")
+                self.results_textbox.configure(state="disabled");
+                return
+
+            output_text += f"(Significance level for p-values: p < {alpha})\n\n"
 
             significant_tests_found_overall = False
-            alpha = 0.05
 
             for roi_name in rois_to_analyze:
                 output_text += f"--- ROI: {roi_name} ---\n"
@@ -523,7 +534,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                            "Insufficient paired data" not in output_text and "Error performing t-test" not in output_text):  # Check if any ROI was actually tested without error/insufficient data
                     output_text += "No ROIs had sufficient data for all paired tests.\n"
                 else:
-                    output_text += "No statistically significant differences (p < 0.05) were found for any of the analyzed ROIs that had sufficient data.\n"
+                    output_text += f"No statistically significant differences (p < {alpha}) were found for any of the analyzed ROIs that had sufficient data.\n"
             else:
                 output_text += "------------------------------------------------------------\n"
                 output_text += "Tip: For a detailed table of significant findings, please use the 'Export Paired Results' feature.\n"
@@ -599,7 +610,12 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                 output_text += "------------------------------------------------------------\n"
                 output_text += "           SIMPLIFIED EXPLANATION OF RESULTS\n"
                 output_text += "------------------------------------------------------------\n"
-                alpha = 0.05
+                try:
+                    alpha = float(self.alpha_var.get())
+                except ValueError:
+                    messagebox.showerror("Input Error", "Invalid alpha value. Please enter a numeric value.")
+                    self.results_textbox.configure(state="disabled");
+                    return
                 output_text += f"(A result is typically considered 'statistically significant' if its p-value ('Pr > F') is less than {alpha:.2f})\n\n"
 
                 for index, row in anova_df_results.iterrows():
