@@ -30,6 +30,7 @@ import scipy.stats as stats
 
 from . import stats_export  # Assuming stats_export.py is in the same package
 from .repeated_m_anova import run_repeated_measures_anova  # Assuming repeated_m_anova.py
+from .mixed_effects_model import run_mixed_effects_model
 
 # Regions of Interest (10-20 montage)
 ROIS = {
@@ -61,6 +62,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         # Results storage for export (structured data)
         self.paired_tests_results_data = []
         self.rm_anova_results_data = None  # Will store ANOVA table (ideally DataFrame)
+        self.mixed_model_results_data = None  # Will store MixedLM fixed effects table
         self.harmonic_check_results_data = []
 
         # UI state variables
@@ -82,6 +84,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         # Export Buttons (instance variables to manage state)
         self.export_paired_tests_btn = None
         self.export_rm_anova_btn = None
+        self.export_mixed_model_btn = None
         self.export_harmonic_check_btn = None
 
         self.create_widgets()
@@ -169,12 +172,17 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             side="left", padx=(0, 5), pady=5)
         ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
             side="left", padx=5, pady=5)
+        ctk.CTkButton(buttons_summed_frame, text="Run Mixed Model (Summed BCA)", command=self.run_mixed_model).pack(
+            side="left", padx=5, pady=5)
         self.export_paired_tests_btn = ctk.CTkButton(buttons_summed_frame, text="Export Paired Results",
                                                      state="disabled", command=self.export_paired_results)
         self.export_paired_tests_btn.pack(side="left", padx=5, pady=5)
         self.export_rm_anova_btn = ctk.CTkButton(buttons_summed_frame, text="Export RM-ANOVA", state="disabled",
                                                  command=self.export_rm_anova_results)
         self.export_rm_anova_btn.pack(side="left", padx=5, pady=5)
+        self.export_mixed_model_btn = ctk.CTkButton(buttons_summed_frame, text="Export Mixed Model", state="disabled",
+                                                   command=self.export_mixed_model_results)
+        self.export_mixed_model_btn.pack(side="left", padx=5, pady=5)
 
         # --- Row 3: Section B - Harmonic Significance Check ---
         harmonic_check_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -705,6 +713,67 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.results_textbox.configure(state="disabled")
         self.log_to_main_app("RM-ANOVA (Summed BCA) attempt complete.")
 
+    def run_mixed_model(self):
+        self.log_to_main_app("Running Mixed Effects Model (Summed BCA)...")
+        self.results_textbox.configure(state="normal")
+        self.results_textbox.delete("1.0", tk.END)
+        self.export_mixed_model_btn.configure(state="disabled")
+        self.mixed_model_results_data = None
+
+        if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+            messagebox.showerror("Data Error", "Summed BCA data could not be prepared for Mixed Model.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        long_format_data = []
+        for pid, cond_data in self.all_subject_data.items():
+            for cond_name, roi_data in cond_data.items():
+                for roi_name, value in roi_data.items():
+                    if not pd.isna(value):
+                        long_format_data.append({'subject': pid, 'condition': cond_name, 'roi': roi_name, 'value': value})
+
+        if not long_format_data:
+            messagebox.showerror("Data Error", "No valid data available for Mixed Model after filtering NaNs.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        df_long = pd.DataFrame(long_format_data)
+
+        if df_long['condition'].nunique() < 2 or df_long['roi'].nunique() < 1:
+            messagebox.showerror("Data Error", "Mixed model requires at least two conditions and at least one ROI with valid data.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        output_text = "===========================================================\n"
+        output_text += "           Mixed Effects Model Results\n"
+        output_text += "           Analysis conducted on: Summed BCA Data\n"
+        output_text += "===========================================================\n\n"
+
+        try:
+            self.log_to_main_app(f"Calling run_mixed_effects_model with DataFrame of shape: {df_long.shape}")
+            mixed_df = run_mixed_effects_model(data=df_long, dv_col='value', group_col='subject',
+                                               fixed_effects=['condition', 'roi'])
+            if mixed_df is not None and not mixed_df.empty:
+                output_text += "-----------------------------\n"
+                output_text += "            FIXED EFFECTS\n"
+                output_text += "-----------------------------\n"
+                output_text += mixed_df.to_string(index=False) + "\n"
+                self.mixed_model_results_data = mixed_df
+                self.export_mixed_model_btn.configure(state="normal")
+            else:
+                output_text += "Mixed model did not return any results or the result was empty.\n"
+                self.log_to_main_app("Mixed model did not return results or was empty.")
+        except ImportError:
+            output_text += "Error: statsmodels is required for Mixed Effects modeling. Please install it via `pip install statsmodels`.\n"
+            self.log_to_main_app("ImportError during Mixed Model execution.")
+        except Exception as e:
+            output_text += f"Mixed model analysis failed: {e}\n"
+            self.log_to_main_app(f"!!! Mixed Model Error: {e}\n{traceback.format_exc()}")
+
+        self.results_textbox.insert("1.0", output_text)
+        self.results_textbox.configure(state="disabled")
+        self.log_to_main_app("Mixed Effects Model attempt complete.")
+
     def run_harmonic_check(self):
         self.log_to_main_app("Running Per-Harmonic Significance Check...")
         self.results_textbox.configure(state="normal");
@@ -933,6 +1002,23 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             messagebox.showerror("Export Error", "'export_rm_anova_results_to_excel' is missing in stats_export.py.")
         except Exception as e:
             messagebox.showerror("Export Error", f"RM-ANOVA export failed: {e}\n{traceback.format_exc()}")
+
+    def export_mixed_model_results(self):
+        self.log_to_main_app("Exporting Mixed Model results...")
+        if self.mixed_model_results_data is None or (
+                isinstance(self.mixed_model_results_data, pd.DataFrame) and self.mixed_model_results_data.empty):
+            messagebox.showwarning("No Results", "No Mixed Model results data to export.")
+            return
+        try:
+            stats_export.export_mixedlm_results_to_excel(
+                mixedlm_table=self.mixed_model_results_data,
+                parent_folder=self.stats_data_folder_var.get(),
+                log_func=self.log_to_main_app
+            )
+        except AttributeError:
+            messagebox.showerror("Export Error", "'export_mixedlm_results_to_excel' is missing in stats_export.py.")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Mixed Model export failed: {e}\n{traceback.format_exc()}")
 
     def export_harmonic_check_results(self):
         self.log_to_main_app("Exporting Per-Harmonic Check results...")
