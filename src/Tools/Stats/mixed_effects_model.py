@@ -67,6 +67,9 @@ def run_mixed_effects_model(data: pd.DataFrame, dv_col: str, group_col: str, fix
             df_result.index.name = "Effect"
             df_result = df_result.reset_index()
 
+        if df_result.columns[0] == "":
+            df_result = df_result.rename(columns={"": "Effect"})
+
         return df_result
     except Exception as e:
         raise RuntimeError(f"Failed to run mixed effects model: {e}")
