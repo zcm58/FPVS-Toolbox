@@ -24,3 +24,9 @@ PAD_X                 = 5
 PAD_Y                 = 5
 ENTRY_WIDTH           = 100
 LABEL_ID_ENTRY_WIDTH  = 120
+
+# --- Fonts ---
+FONT_FAMILY = "Segoe UI"
+FONT_MAIN = ctk.CTkFont(family=FONT_FAMILY, size=12)
+FONT_BOLD = ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold")
+FONT_HEADING = ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold")

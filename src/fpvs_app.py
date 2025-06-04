@@ -52,7 +52,10 @@ from config import (
     FPVS_TOOLBOX_REPO_PAGE,
     DEFAULT_STIM_CHANNEL,
     CORNER_RADIUS,
-    PAD_X
+    PAD_X,
+    FONT_MAIN,
+    FONT_BOLD,
+    FONT_HEADING
 )
 from post_process import post_process as _external_post_process
 
@@ -92,6 +95,9 @@ class FPVSApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        # use modern default font
+        self.option_add("*Font", FONT_MAIN)
+
 
         # 2) State variables
         self.save_preprocessed = tk.BooleanVar(value=False)
@@ -104,6 +110,13 @@ class FPVSApp(ctk.CTk):
         self.gui_queue = queue.Queue()
         self._max_progress = 1
         self.validated_params = {}
+
+        # Icon images for toolbar buttons
+        icon_dir = os.path.join(os.path.dirname(__file__), "icons")
+        self.icon_open = tk.PhotoImage(file=os.path.join(icon_dir, "open_file.ppm"))
+        self.icon_folder = tk.PhotoImage(file=os.path.join(icon_dir, "folder.ppm"))
+        self.icon_start = tk.PhotoImage(file=os.path.join(icon_dir, "start.ppm"))
+        self.icon_stats = tk.PhotoImage(file=os.path.join(icon_dir, "stats.ppm"))
 
         # 3) Window Setup
         from datetime import datetime
@@ -142,6 +155,7 @@ class FPVSApp(ctk.CTk):
             # Top‐bar buttons
             self.select_button,
             self.select_output_button,
+            self.stats_button,
             self.start_button,
 
             # Mode & file‐type controls
@@ -349,52 +363,45 @@ class FPVSApp(ctk.CTk):
             main_frame.grid_rowconfigure(3, weight=1)  # Event Map - *should* expand vertically
             main_frame.grid_rowconfigure(4, weight=0)  # Bottom (Log/Progress) - no vertical expand
 
-            # --- Top Control Bar (Row 0) --- <<< MODIFIED SECTION FOR BUTTON LAYOUT
-            top_bar = ctk.CTkFrame(main_frame, corner_radius=0)
-            top_bar.grid(row=0, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)  # top_bar still fills horizontally
+            # --- Toolbar (Row 0) ---
+            toolbar = ctk.CTkFrame(main_frame, corner_radius=0)
+            toolbar.grid(row=0, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
+            for i in range(4):
+                toolbar.grid_columnconfigure(i, weight=0)
+            toolbar.grid_columnconfigure(4, weight=1)
 
-            # Configure columns inside top_bar for button alignment
-            top_bar.grid_columnconfigure(0, weight=0)  # Left column - no extra space
-            top_bar.grid_columnconfigure(1, weight=1)  # Center column - takes all extra space
-            top_bar.grid_columnconfigure(2, weight=0)  # Right column - no extra space
+            self.save_folder_path = tk.StringVar()
 
-            # Place Buttons using grid within top_bar
-
-            # "Select EEG File..." Button - Column 0 (Left)
             self.select_button = ctk.CTkButton(
-                top_bar, text="Select EEG File…",  # Text might be updated later
-                command=self.select_data_source,
-                corner_radius=CORNER_RADIUS, width=180  # Keep desired width
+                toolbar, image=self.icon_open, text="", width=36,
+                command=self.select_data_source, corner_radius=CORNER_RADIUS
             )
-            # Place in grid, stick to the West (left) edge
-            self.select_button.grid(row=0, column=0, sticky="w", padx=(0, PAD_X))
+            self.select_button.grid(row=0, column=0, padx=(0, PAD_X))
 
-            # "Select Output Folder..." Button - Column 1 (Center)
-            self.save_folder_path = tk.StringVar()  # Needs to exist before button
             self.select_output_button = ctk.CTkButton(
-                top_bar, text="Select Output Folder…",
-                command=self.select_save_folder,
-                corner_radius=CORNER_RADIUS, width=180  # Keep desired width
+                toolbar, image=self.icon_folder, text="", width=36,
+                command=self.select_save_folder, corner_radius=CORNER_RADIUS
             )
-            # Place in grid, default sticky is center within the expanding column
-            self.select_output_button.grid(row=0, column=1, sticky="", padx=PAD_X)  # sticky="" centers it
+            self.select_output_button.grid(row=0, column=1, padx=(0, PAD_X))
 
-            # "Start Processing" Button - Column 2 (Right)
-            self.start_button = ctk.CTkButton(
-                top_bar, text="Start Processing",
-                command=self.start_processing,
-                corner_radius=CORNER_RADIUS, width=180,  # Keep desired width
-                font=ctk.CTkFont(weight="bold")
+            self.stats_button = ctk.CTkButton(
+                toolbar, image=self.icon_stats, text="", width=36,
+                command=self.open_stats_analyzer, corner_radius=CORNER_RADIUS
             )
-            # Place in grid, stick to the East (right) edge
-            self.start_button.grid(row=0, column=2, sticky="e", padx=(PAD_X, 0))
-            # --- END OF MODIFIED TOP BAR SECTION ---
+            self.stats_button.grid(row=0, column=2, padx=(0, PAD_X))
+
+            self.start_button = ctk.CTkButton(
+                toolbar, image=self.icon_start, text="", width=36,
+                command=self.start_processing, corner_radius=CORNER_RADIUS
+            )
+            self.start_button.grid(row=0, column=3)
+            # --- END OF TOOLBAR SECTION ---
 
             # --- Processing Options Frame (Row 1) ---
             self.options_frame = ctk.CTkFrame(main_frame)
             self.options_frame.grid(row=1, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
             ctk.CTkLabel(self.options_frame, text="Processing Options",
-                         font=ctk.CTkFont(weight="bold")).grid(
+                         font=FONT_BOLD).grid(
                 row=0, column=0, columnspan=4, sticky="w", padx=PAD_X, pady=(PAD_Y, PAD_Y * 2)
             )
             # Mode radios
@@ -423,7 +430,7 @@ class FPVSApp(ctk.CTk):
             self.params_frame = ctk.CTkFrame(main_frame)
             self.params_frame.grid(row=2, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
             ctk.CTkLabel(self.params_frame, text="Preprocessing Parameters",
-                         font=ctk.CTkFont(weight="bold")).grid(
+                         font=FONT_BOLD).grid(
                 row=0, column=0, columnspan=6, sticky="w", padx=PAD_X, pady=(PAD_Y, PAD_Y * 2)
             )
             # Row 1: Low/High pass
@@ -495,7 +502,7 @@ class FPVSApp(ctk.CTk):
 
             # Header Label for Event Map
             ctk.CTkLabel(event_map_outer, text="Event Map (Condition Label → Numerical ID)",
-                         font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=PAD_X, pady=(PAD_Y, 0))
+                         font=FONT_BOLD).pack(anchor="w", padx=PAD_X, pady=(PAD_Y, 0))
 
             # Header Frame for Column Titles
             header_frame = ctk.CTkFrame(event_map_outer, fg_color="transparent")
@@ -536,7 +543,7 @@ class FPVSApp(ctk.CTk):
             log_outer.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, PAD_Y))  # Log takes full width
             log_outer.grid_columnconfigure(0, weight=1)  # Textbox expands horizontally
             log_outer.grid_rowconfigure(1, weight=0)  # Textbox does NOT expand vertically
-            ctk.CTkLabel(log_outer, text="Log", font=ctk.CTkFont(weight="bold")).grid(
+            ctk.CTkLabel(log_outer, text="Log", font=FONT_BOLD).grid(
                 row=0, column=0, sticky="w", padx=PAD_X, pady=(PAD_Y, 0)
             )
             self.log_text = ctk.CTkTextbox(
