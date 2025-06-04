@@ -612,7 +612,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                         pes_vals.append((f_val * df1) / ((f_val * df1) + df2))
                     else:
                         pes_vals.append(np.nan)
-                anova_df_results['Partial_Eta_Squared'] = pes_vals
+                anova_df_results['Effect Size'] = pes_vals
 
                 # --- Display the Statistical Table ---
                 output_text += "------------------------------------------------------------\n"
