@@ -25,6 +25,13 @@ PAD_Y                 = 5
 ENTRY_WIDTH           = 100
 LABEL_ID_ENTRY_WIDTH  = 120
 
+# Additional GUI dimensions used in advanced processing windows.
+# Modify these to adjust default control sizes.
+BUTTON_WIDTH             = 180
+ADV_ENTRY_WIDTH          = ENTRY_WIDTH
+ADV_LABEL_ID_ENTRY_WIDTH = int(ENTRY_WIDTH * 1.5)
+ADV_ID_ENTRY_WIDTH       = int(ENTRY_WIDTH * 0.5)
+
 # --- Fonts ---
 FONT_FAMILY = "Segoe UI"
 

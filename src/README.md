@@ -24,3 +24,16 @@ version.
 The build scripts locate the repository root automatically before running
 PyInstaller, so they work even if launched from another directory.
 
+## Configuration
+
+The look and feel of the interface can be tweaked by editing constants in
+`config.py`.  In particular, several width settings control the advanced
+processing window:
+
+- `BUTTON_WIDTH`
+- `ADV_ENTRY_WIDTH`
+- `ADV_LABEL_ID_ENTRY_WIDTH`
+- `ADV_ID_ENTRY_WIDTH`
+
+Adjust these as desired to better fit your screen or preferences.
+
