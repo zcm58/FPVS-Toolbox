@@ -31,6 +31,7 @@ import scipy.stats as stats
 from . import stats_export  # Assuming stats_export.py is in the same package
 from .repeated_m_anova import run_repeated_measures_anova  # Assuming repeated_m_anova.py
 from .mixed_effects_model import run_mixed_effects_model
+from config import FONT_BOLD, FONT_MAIN
 
 # Regions of Interest (10-20 montage)
 ROIS = {
@@ -46,6 +47,7 @@ HARMONIC_CHECK_ALPHA = 0.05  # Significance level for one-sample t-test
 class StatsAnalysisWindow(ctk.CTkToplevel):
     def __init__(self, master, default_folder=""):
         super().__init__(master)
+        self.option_add("*Font", FONT_MAIN)
         self.title("FPVS Statistical Analysis Tool")
         self.geometry("950x950")  # Adjusted for clarity of layout
         self.grab_set()
@@ -169,7 +171,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         # --- Row 2: Section A - Summed BCA Analysis ---
         summed_bca_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         summed_bca_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=(10, 5))
-        ctk.CTkLabel(summed_bca_frame, text="Summed BCA Analysis:", font=ctk.CTkFont(weight="bold")).pack(anchor="w",
+        ctk.CTkLabel(summed_bca_frame, text="Summed BCA Analysis:", font=FONT_BOLD).pack(anchor="w",
                                                                                                           pady=(0, 5))
         buttons_summed_frame = ctk.CTkFrame(summed_bca_frame)
         buttons_summed_frame.pack(fill="x", padx=0, pady=0)  # Use pack for horizontal button layout
@@ -193,7 +195,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         harmonic_check_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         harmonic_check_frame.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
         ctk.CTkLabel(harmonic_check_frame, text="Per-Harmonic Significance Check:",
-                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(0, 5))
+                     font=FONT_BOLD).pack(anchor="w", pady=(0, 5))
         controls_harmonic_frame = ctk.CTkFrame(harmonic_check_frame)
         controls_harmonic_frame.pack(fill="x", padx=0, pady=0)
         ctk.CTkLabel(controls_harmonic_frame, text="Metric:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
