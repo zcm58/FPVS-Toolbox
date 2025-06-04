@@ -99,7 +99,8 @@ def export_significance_results_to_excel(findings_dict, metric, threshold, paren
     Args:
         findings_dict (dict): Nested {condition: {roi: [finding_list]}}.
                               finding_list contains dicts with keys like 'Frequency',
-                              'Mean_MetricName', 'N_Subjects', 'T_Statistic', 'P_Value', 'df', 'Threshold'.
+                              'Mean_MetricName', 'N_Subjects', 'T_Statistic', 'P_Value', 'df',
+                              'Threshold' (previously documented as 'Threshold_Used').
         metric (str): Metric analyzed (e.g., "SNR", "Z-Score").
         threshold (float): Mean value threshold used.
         parent_folder (str): Path for suggesting save location.
@@ -127,7 +128,7 @@ def export_significance_results_to_excel(findings_dict, metric, threshold, paren
                     'df': finding.get('df', np.nan),
                     'T_Statistic': finding.get('T_Statistic', np.nan),
                     'P_Value': finding.get('P_Value', np.nan),
-                    'Mean_Threshold_Used': finding.get('Threshold', np.nan)  # 'Threshold' from stats.py
+                    'Mean_Threshold_Used': finding.get('Threshold', np.nan)  # value from the 'Threshold' field
                 }
                 flat_results.append(row)
 
