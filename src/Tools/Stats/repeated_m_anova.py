@@ -19,7 +19,6 @@ Dependencies:
     pandas, statsmodels
 """
 import pandas as pd
-import warnings
 
 def run_repeated_measures_anova(data, dv_col, within_cols, subject_col):
     """
