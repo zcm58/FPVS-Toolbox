@@ -899,16 +899,6 @@ class FPVSApp(ctk.CTk):
             messagebox.showerror("Input Error", "No data selected.")
             return False
 
-        def get_fpvs_params(self) -> Optional[Dict[str, Any]]:
-            """
-            Validate all inputs and return a fresh copy of the params dict,
-            or return None if validation fails.
-            """
-            if not self._validate_inputs():
-                # _validate_inputs already shows an error dialog & logs
-                return None
-            # Return a shallow copy so callers can’t accidentally mutate your UI state
-            return self.validated_params.copy()
 
         # Validate output folder
         save_folder = self.save_folder_path.get()
@@ -1008,6 +998,13 @@ class FPVSApp(ctk.CTk):
         self.log("Inputs Validated Successfully.")
         self.log(f"Parameters: {self.validated_params}")
         return True
+
+    def get_fpvs_params(self) -> Optional[Dict[str, Any]]:
+        """Return a validated copy of current parameters or ``None`` if invalid."""
+        if not self._validate_inputs():
+            # _validate_inputs already reports errors
+            return None
+        return self.validated_params.copy()
 
 
     # --- Periodic Queue Check ---
