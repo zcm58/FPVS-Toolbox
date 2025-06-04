@@ -15,6 +15,8 @@ if __name__ == "__main__":
     src_dir = root / "src"
 
 
+    icon_path = Path(__file__).parent / "ToolBox Icon.ico"
+
     cmd = [
         "pyinstaller",
         "--clean",
@@ -26,7 +28,7 @@ if __name__ == "__main__":
         "--paths",
         str(src_dir),
         "-i",
-        r"C:\\Users\\zackm\\OneDrive - Mississippi State University\\Office Desktop\\ToolBox Icon.ico",
+        str(icon_path),
         "--collect-all",
         "mne",
         "--hidden-import",
@@ -43,18 +45,4 @@ if __name__ == "__main__":
         str(src_dir / "main.py"),
     ]
     subprocess.run(cmd, check=True, cwd=root)
-
-        "--paths=src",
-        "-i",
-        r"C:\\Users\\zackm\\OneDrive - Mississippi State University\\Office Desktop\\ToolBox Icon.ico",
-        "--collect-all", "mne",
-        "--hidden-import=mne.io.bdf",
-        "--hidden-import=mne.io.eeglab",
-        "--hidden-import=scipy",
-        "--hidden-import=pandas",
-        "--hidden-import=numpy",
-        "-F",
-        "src/main.py",
-    ]
-    subprocess.run(cmd, check=True)
 
