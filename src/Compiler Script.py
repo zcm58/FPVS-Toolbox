@@ -1,7 +1,7 @@
 import subprocess
 
 from pathlib import Path
-=======
+
 
 from config import FPVS_TOOLBOX_VERSION
 
@@ -13,7 +13,7 @@ if __name__ == "__main__":
         root = root.parent
 
     src_dir = root / "src"
-=======
+
 
     cmd = [
         "pyinstaller",
