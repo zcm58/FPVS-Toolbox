@@ -53,6 +53,7 @@ from config import (
     DEFAULT_STIM_CHANNEL,
     CORNER_RADIUS,
     PAD_X,
+    init_fonts,
     FONT_MAIN,
     FONT_BOLD,
     FONT_HEADING
@@ -94,6 +95,9 @@ class FPVSApp(ctk.CTk):
 
     def __init__(self):
         super().__init__()
+
+        # Initialise fonts now that a root window exists
+        init_fonts()
 
         # use modern default font
         self.option_add("*Font", FONT_MAIN)
