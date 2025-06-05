@@ -91,6 +91,100 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.scan_folder()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
+    def run_interaction_posthocs(self):
+        """
+        Runs post-hoc tests to break down a significant interaction from the last RM-ANOVA.
+        Specifically, it iterates through each ROI and performs pairwise comparisons
+        between all conditions within that ROI.
+        """
+        self.log_to_main_app("Running post-hoc tests for ANOVA interaction...")
+        self.run_posthoc_btn.configure(state="disabled")  # Disable while running
+
+        if self.rm_anova_results_data is None:
+            messagebox.showwarning("No ANOVA Data",
+                                   "Please run a successful RM-ANOVA first to provide data for post-hoc tests.")
+            self.run_posthoc_btn.configure(state="normal")
+            return
+
+        # Re-create the long-format DataFrame that was used for the ANOVA
+        if not self.all_subject_data:
+            messagebox.showwarning("No Data", "Summed BCA data not found. Please re-run the main analysis pipeline.")
+            return
+
+        long_format_data = []
+        for pid, cond_data in self.all_subject_data.items():
+            for cond_name, roi_data in cond_data.items():
+                for roi_name, value in roi_data.items():
+                    if not pd.isna(value):
+                        long_format_data.append(
+                            {'subject': pid, 'condition': cond_name, 'roi': roi_name, 'value': value})
+
+        if not long_format_data:
+            messagebox.showerror("Data Error", "Could not assemble any data for post-hoc tests.")
+            return
+
+        df_long = pd.DataFrame(long_format_data)
+
+        # Apply the same listwise deletion of subjects with any missing cells to ensure
+        # the post-hoc tests are run on the exact same balanced dataset as the ANOVA.
+        num_conditions = df_long['condition'].nunique()
+        num_rois = df_long['roi'].nunique()
+        expected_cells_per_subject = num_conditions * num_rois
+        subject_cell_counts = df_long.groupby('subject').size()
+        complete_subjects = subject_cell_counts[subject_cell_counts == expected_cells_per_subject].index.tolist()
+        df_long_balanced = df_long[df_long['subject'].isin(complete_subjects)]
+
+        if len(complete_subjects) < df_long['subject'].nunique():
+            self.log_to_main_app(
+                f"NOTE: Post-hoc tests will be run only on the {len(complete_subjects)} subjects with complete data.")
+
+        # --- Loop through each ROI and run post-hoc tests for conditions within it ---
+        all_rois = sorted(df_long_balanced['roi'].unique())  # Sort for consistent order
+        final_log_output = ""  # Start with empty string
+        any_posthoc_run = False
+
+        for roi_name in all_rois:
+            # Add a clear header for this ROI's specific set of post-hoc results
+            final_log_output += f"\n\n************************************************************\n"
+            final_log_output += f" Post-Hoc Tests on 'condition' within ROI: {roi_name}\n"
+            final_log_output += f"************************************************************\n"
+
+            # Filter the balanced DataFrame for only the current ROI
+            roi_specific_df = df_long_balanced[df_long_balanced['roi'] == roi_name]
+
+            # Check if there's enough data for this specific slice
+            if roi_specific_df.empty or roi_specific_df['subject'].nunique() < 2:
+                final_log_output += "  Not enough data to perform post-hoc tests for this ROI.\n"
+                continue
+
+            # Use the imported function from your posthoc_tests.py module
+            log_text, results_df = run_posthoc_pairwise_tests(
+                data=roi_specific_df,
+                dv_col='value',
+                factor_col='condition',
+                subject_col='subject',
+                correction="holm"  # Using Holm-Sidak correction
+            )
+
+            final_log_output += log_text
+            any_posthoc_run = True
+
+            # You could also store the `results_df` for a new export function
+            # if not hasattr(self, 'posthoc_results_to_export'):
+            #     self.posthoc_results_to_export = {}
+            # self.posthoc_results_to_export[f"condition_in_{roi_name.replace(' ','_')}"] = results_df
+
+        if not any_posthoc_run:
+            final_log_output += "Could not run any post-hoc tests. Please check data completeness for each ROI."
+
+        self.results_textbox.configure(state="normal")
+        self.results_textbox.insert(tk.END, final_log_output)  # Append post-hoc results to the textbox
+        self.results_textbox.see(tk.END)  # Scroll to the end
+        self.results_textbox.configure(state="disabled")
+
+        self.log_to_main_app("Post-hoc analysis complete.")
+        self.run_posthoc_btn.configure(state="normal")  # Re-enable after running
+
     def log_to_main_app(self, message):
         try:
             if hasattr(self.master_app, 'log') and callable(self.master_app.log):
