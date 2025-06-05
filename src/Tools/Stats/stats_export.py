@@ -272,3 +272,42 @@ def export_rm_anova_results_to_excel(anova_table, parent_folder, log_func=print)
     except Exception as e:
         log_func(f"!!! RM-ANOVA Export Failed: {e}\n{traceback.format_exc()}")
         messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
+
+
+# --- Export Function for Post-hoc Pairwise Test Results ---
+def export_posthoc_results_to_excel(results_df, factor, parent_folder, log_func=print):
+    """Exports post-hoc pairwise test results to an Excel file."""
+    log_func("Attempting to export Post-hoc results...")
+    if results_df is None or not isinstance(results_df, pd.DataFrame) or results_df.empty:
+        log_func("No Post-hoc results data available to export.")
+        messagebox.showwarning("No Results", "No Post-hoc results to export.")
+        return
+
+    df_export = results_df.copy()
+    preferred_cols = ['Level_A', 'Level_B', 'N_Pairs', 't_statistic', 'p_value', 'p_value_corrected', 'Significant']
+    df_export = df_export[[col for col in preferred_cols if col in df_export.columns]]
+
+    initial_dir = parent_folder if os.path.isdir(parent_folder) else os.path.expanduser("~")
+    factor_name = factor.replace(' ', '_')
+    suggested_filename = f"Stats_Posthoc_{factor_name}.xlsx"
+
+    save_path = filedialog.asksaveasfilename(
+        title=f"Save Post-hoc Results ({factor})",
+        initialdir=initial_dir, initialfile=suggested_filename, defaultextension=".xlsx",
+        filetypes=[("Excel Workbook", "*.xlsx"), ("All Files", "*.*")]
+    )
+    if not save_path: log_func("Post-hoc export cancelled."); return
+
+    try:
+        log_func(f"Exporting Post-hoc results to: {save_path}")
+        with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
+            _auto_format_and_write_excel(writer, df_export, 'Post-hoc Results', log_func)
+        log_func("Post-hoc results export successful.")
+        messagebox.showinfo("Export Successful", f"Post-hoc results exported to:\n{save_path}")
+    except PermissionError:
+        err_msg = f"Permission denied writing to {save_path}. File may be open or folder write-protected."
+        log_func(f"!!! Export Failed: {err_msg}")
+        messagebox.showerror("Export Failed", err_msg)
+    except Exception as e:
+        log_func(f"!!! Post-hoc Export Failed: {e}\n{traceback.format_exc()}")
+        messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
