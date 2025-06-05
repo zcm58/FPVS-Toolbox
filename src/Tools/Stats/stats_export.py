@@ -127,7 +127,10 @@ def export_significance_results_to_excel(findings_dict, metric, threshold, paren
                     'df': finding.get('df', np.nan),
                     'T_Statistic': finding.get('T_Statistic', np.nan),
                     'P_Value': finding.get('P_Value', np.nan),
-                    'Mean_Threshold_Used': finding.get('Threshold', np.nan)  # 'Threshold' from stats.py
+                    # Attempt to use the explicit key from stats.py if present,
+                    # otherwise fall back to any older key name
+                    'Mean_Threshold_Used': finding.get('Threshold_Used',
+                                                    finding.get('Threshold', np.nan))
                 }
                 flat_results.append(row)
 
