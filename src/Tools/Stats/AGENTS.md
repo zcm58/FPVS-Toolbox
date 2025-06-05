@@ -19,3 +19,7 @@ in the statistical analysis.
 IMPORTANT RULE: The explanatory log output text should not be removed these files. 
 It is important that an explanation of the results is provided in the output text
 log so that the user can understand the results more easily. 
+
+None of the statistical analysis should be altered in any way. The only exception is
+if you are trying to reduce module size; in that case, you can move sections of code 
+into new files, but do not change the content of the code or the functionality. 
