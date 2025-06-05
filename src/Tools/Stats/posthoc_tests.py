@@ -167,7 +167,10 @@ def run_interaction_posthocs(data, dv_col, roi_col, condition_col, subject_col,
         (log_output: str, results_df: pandas.DataFrame)
     """
 
-    output_lines = [
+    summary_lines = []
+    output_lines = []
+
+    header_main = [
         "============================================================",
         "         Post-hoc Comparisons: Condition by ROI",
         "============================================================\n",
@@ -175,6 +178,7 @@ def run_interaction_posthocs(data, dv_col, roi_col, condition_col, subject_col,
 
     if any(col not in data.columns for col in [dv_col, roi_col, condition_col, subject_col]):
         output_lines.append("Required columns missing from data. Cannot run interaction post-hocs.")
+        output_lines = header_main + output_lines
         return "\n".join(output_lines), pd.DataFrame()
 
     unique_rois = data[roi_col].dropna().unique()
@@ -191,14 +195,31 @@ def run_interaction_posthocs(data, dv_col, roi_col, condition_col, subject_col,
             correction=correction,
             alpha=alpha,
         )
-        # Indent the ROI specific output for readability
         roi_text_indented = "\n".join([f"  {line}" for line in roi_text.splitlines()])
         output_lines.append(roi_text_indented)
         if roi_df is not None and not roi_df.empty:
             roi_df = roi_df.assign(ROI=roi)
             results_list.append(roi_df)
+            sig_rows = roi_df[roi_df["Significant"]]
+            for _, row in sig_rows.iterrows():
+                summary_lines.append(
+                    f"ROI {roi}: {row['Level_A']} vs {row['Level_B']} "
+                    f"(t={row['t_statistic']:.3f}, p={row['p_value_corrected']:.4f})"
+                )
 
     results_df = pd.concat(results_list, ignore_index=True) if results_list else pd.DataFrame()
     output_lines.append("============================================================")
 
+    summary_section = [
+        "============================================================",
+        "        SUMMARY OF SIGNIFICANT FINDINGS",
+        "============================================================",
+    ]
+    if summary_lines:
+        summary_section.extend(summary_lines)
+    else:
+        summary_section.append("No significant differences found.")
+    summary_section.append("")
+
+    output_lines = summary_section + header_main + output_lines
     return "\n".join(output_lines), results_df
