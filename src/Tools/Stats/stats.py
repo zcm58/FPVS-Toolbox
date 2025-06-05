@@ -98,19 +98,16 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
     def run_interaction_posthocs(self):
         """
         Runs post-hoc tests to break down a significant interaction from the last RM-ANOVA.
-        Specifically, it iterates through each ROI and performs pairwise comparisons
-        between all conditions within that ROI.
+        This version builds a summary of significant findings and places it at the top of the output.
         """
         self.log_to_main_app("Running post-hoc tests for ANOVA interaction...")
-        self.run_posthoc_btn.configure(state="disabled")  # Disable while running
+        self.run_posthoc_btn.configure(state="disabled")
 
         if self.rm_anova_results_data is None:
-            messagebox.showwarning("No ANOVA Data",
-                                   "Please run a successful RM-ANOVA first to provide data for post-hoc tests.")
+            messagebox.showwarning("No ANOVA Data", "Please run a successful RM-ANOVA first.")
             self.run_posthoc_btn.configure(state="normal")
             return
 
-        # Re-create the long-format DataFrame that was used for the ANOVA
         if not self.all_subject_data:
             messagebox.showwarning("No Data", "Summed BCA data not found. Please re-run the main analysis pipeline.")
             return
@@ -129,8 +126,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
 
         df_long = pd.DataFrame(long_format_data)
 
-        # Apply the same listwise deletion of subjects with any missing cells to ensure
-        # the post-hoc tests are run on the exact same balanced dataset as the ANOVA.
+        # Ensure we use the same balanced dataset as the ANOVA
         num_conditions = df_long['condition'].nunique()
         num_rois = df_long['roi'].nunique()
         expected_cells_per_subject = num_conditions * num_rois
@@ -142,52 +138,82 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.log_to_main_app(
                 f"NOTE: Post-hoc tests will be run only on the {len(complete_subjects)} subjects with complete data.")
 
-        # --- Loop through each ROI and run post-hoc tests for conditions within it ---
-        all_rois = sorted(df_long_balanced['roi'].unique())  # Sort for consistent order
-        final_log_output = ""  # Start with empty string
-        any_posthoc_run = False
+        # --- Loop through ROIs, run post-hocs, and collect results ---
+        all_rois = sorted(df_long_balanced['roi'].unique())
+        full_details_output = ""  # For the detailed breakdown
+        significant_findings_for_summary = []  # For the top-level summary
 
         for roi_name in all_rois:
-            # Add a clear header for this ROI's specific set of post-hoc results
-            final_log_output += f"\n\n************************************************************\n"
-            final_log_output += f" Post-Hoc Tests on 'condition' within ROI: {roi_name}\n"
-            final_log_output += f"************************************************************\n"
-
-            # Filter the balanced DataFrame for only the current ROI
             roi_specific_df = df_long_balanced[df_long_balanced['roi'] == roi_name]
 
-            # Check if there's enough data for this specific slice
             if roi_specific_df.empty or roi_specific_df['subject'].nunique() < 2:
-                final_log_output += "  Not enough data to perform post-hoc tests for this ROI.\n"
                 continue
 
-            # Use the imported function from your posthoc_tests.py module
             log_text, results_df = run_posthoc_pairwise_tests(
                 data=roi_specific_df,
                 dv_col='value',
                 factor_col='condition',
-                subject_col='subject',
-                correction="holm"  # Using Holm-Sidak correction
+                subject_col='subject'
             )
 
-            final_log_output += log_text
-            any_posthoc_run = True
+            # Add the detailed breakdown for this ROI to the main detailed log
+            full_details_output += f"\n\n************************************************************\n"
+            full_details_output += f" Detailed Post-Hoc Results for ROI: {roi_name}\n"
+            full_details_output += f"************************************************************\n"
+            full_details_output += log_text
 
-            # You could also store the `results_df` for a new export function
-            # if not hasattr(self, 'posthoc_results_to_export'):
-            #     self.posthoc_results_to_export = {}
-            # self.posthoc_results_to_export[f"condition_in_{roi_name.replace(' ','_')}"] = results_df
+            # Check the returned DataFrame for significant results to add to our summary
+            if results_df is not None and not results_df.empty:
+                significant_pairs = results_df[results_df['Significant'] == True]
+                if not significant_pairs.empty:
+                    # Add this ROI to the summary list
+                    significant_findings_for_summary.append({
+                        'roi': roi_name,
+                        'findings': significant_pairs.to_dict('records')
+                    })
 
-        if not any_posthoc_run:
-            final_log_output += "Could not run any post-hoc tests. Please check data completeness for each ROI."
+        # --- Now, build the final output string with the summary at the top ---
+        final_output_string = ""
+        if significant_findings_for_summary:
+            summary_section = "============================================================\n"
+            summary_section += "             SUMMARY OF SIGNIFICANT FINDINGS\n"
+            summary_section += "============================================================\n"
+            summary_section += "(Holm-corrected p-values < 0.05)\n"
 
+            for finding_group in significant_findings_for_summary:
+                roi = finding_group['roi']
+                summary_section += f"\n* In ROI: {roi}\n"
+                for row in finding_group['findings']:
+                    # Build a clear comparison string
+                    comp_str = f"'{row['Level_A']}' vs. '{row['Level_B']}'"
+                    t_val = row['t_statistic']
+                    df = row['N_Pairs'] - 1
+                    p_corr = row['p_value_corrected']
+                    p_corr_str = "< .0001" if p_corr < 0.0001 else f"{p_corr:.4f}"
+
+                    summary_section += f"  - Difference between {comp_str} is significant.\n"
+                    summary_section += f"    (t({df}) = {t_val:.2f}, corrected p = {p_corr_str})\n"
+
+            summary_section += "============================================================\n"
+            final_output_string += summary_section
+        else:
+            final_output_string += "No significant pairwise differences found after multiple comparison correction.\n"
+
+        final_output_string += "\n\n============================================================\n"
+        final_output_string += "           Full Post-Hoc Comparison Details\n"
+        final_output_string += "============================================================\n"
+        final_output_string += full_details_output
+
+        # Append all results to the textbox
         self.results_textbox.configure(state="normal")
-        self.results_textbox.insert(tk.END, final_log_output)  # Append post-hoc results to the textbox
-        self.results_textbox.see(tk.END)  # Scroll to the end
+        # Prepend to existing text (so user sees summary first) or clear and insert
+        # Let's clear and insert so only post-hoc results are shown for this action
+        self.results_textbox.delete("1.0", tk.END)
+        self.results_textbox.insert("1.0", final_output_string)
         self.results_textbox.configure(state="disabled")
 
         self.log_to_main_app("Post-hoc analysis complete.")
-        self.run_posthoc_btn.configure(state="normal")  # Re-enable after running
+        self.run_posthoc_btn.configure(state="normal")
 
     def log_to_main_app(self, message):
         try:
