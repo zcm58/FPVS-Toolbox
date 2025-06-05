@@ -15,3 +15,7 @@ the user to tell the Stats tool what frequency they ran their FPVS experiment at
 This information is important because BCA values at the target frequency and its 
 harmonics introduce falsely high visual responses that we don't need to include 
 in the statistical analysis. 
+
+IMPORTANT RULE: The explanatory log output text should not be removed these files. 
+It is important that an explanation of the results is provided in the output text
+log so that the user can understand the results more easily. 
