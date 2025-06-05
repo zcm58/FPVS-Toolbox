@@ -75,7 +75,8 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.condition_B_var = tk.StringVar(master=self)
         self.harmonic_metric_var = tk.StringVar(master=self, value="SNR")
         self.harmonic_threshold_var = tk.StringVar(master=self, value="1.96")
-        self.posthoc_factor_var = tk.StringVar(master=self, value="condition")
+        # Only the interaction post-hoc is supported so default to that option
+        self.posthoc_factor_var = tk.StringVar(master=self, value="condition by roi")
 
         # UI Widget References (stored for potential future dynamic updates)
         self.roi_menu = None
@@ -257,12 +258,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                                             values=["(Scan Folder)"])  # Already stored
         self.condB_menu.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
 
-        ctk.CTkLabel(common_setup_frame, text="Post-hoc Factor:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
-        ctk.CTkOptionMenu(
-            common_setup_frame,
-            variable=self.posthoc_factor_var,
-            values=["condition", "roi", "condition by roi"],
-        ).grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+        # Post-hoc factor selection removed; only condition by ROI interaction is supported
 
         # --- Row 2: Section A - Summed BCA Analysis ---
         summed_bca_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -275,10 +271,9 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             side="left", padx=(0, 5), pady=5)
         ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
             side="left", padx=5, pady=5)
-        ctk.CTkButton(buttons_summed_frame, text="Run Post-hoc Tests", command=self.run_posthoc_tests).pack(
-            side="left", padx=5, pady=5)
-        ctk.CTkButton(buttons_summed_frame, text="Run Interaction Post-hocs", command=self.run_interaction_posthocs).pack(
-            side="left", padx=5, pady=5)
+        # Only the interaction post-hoc test is available
+        self.run_posthoc_btn = ctk.CTkButton(buttons_summed_frame, text="Run Interaction Post-hocs", command=self.run_interaction_posthocs)
+        self.run_posthoc_btn.pack(side="left", padx=5, pady=5)
         self.export_paired_tests_btn = ctk.CTkButton(
             buttons_summed_frame,
             text="Export Paired Results",
