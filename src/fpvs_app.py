@@ -160,7 +160,6 @@ class FPVSApp(ctk.CTk):
             # Top‐bar buttons
             self.select_button,
             self.select_output_button,
-            self.stats_button,
             self.start_button,
 
             # Mode & file‐type controls
@@ -362,74 +361,65 @@ class FPVSApp(ctk.CTk):
             main_frame = ctk.CTkFrame(self, corner_radius=0)
             main_frame.pack(fill="both", expand=True, padx=PAD_X * 2, pady=PAD_Y * 2)
             main_frame.grid_columnconfigure(0, weight=1)  # Allow content to expand horizontally
-            main_frame.grid_rowconfigure(0, weight=0)  # Top Bar - no vertical expand
-            main_frame.grid_rowconfigure(1, weight=0)  # Options - no vertical expand
-            main_frame.grid_rowconfigure(2, weight=0)  # Params - no vertical expand
-            main_frame.grid_rowconfigure(3, weight=1)  # Event Map - *should* expand vertically
-            main_frame.grid_rowconfigure(4, weight=0)  # Bottom (Log/Progress) - no vertical expand
-
-            # --- Toolbar (Row 0) ---
-            toolbar = ctk.CTkFrame(main_frame, corner_radius=0)
-            toolbar.grid(row=0, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
-            for i in range(4):
-                toolbar.grid_columnconfigure(i, weight=0)
-            toolbar.grid_columnconfigure(4, weight=1)
+            main_frame.grid_rowconfigure(0, weight=0)  # Options + Buttons
+            main_frame.grid_rowconfigure(1, weight=0)  # Params - no vertical expand
+            main_frame.grid_rowconfigure(2, weight=1)  # Event Map - *should* expand vertically
+            main_frame.grid_rowconfigure(3, weight=0)  # Bottom (Log/Progress) - no vertical expand
 
             self.save_folder_path = tk.StringVar()
 
+            # --- Options & Buttons Frame (Row 0) ---
+            self.options_frame = ctk.CTkFrame(main_frame)
+            self.options_frame.grid(row=0, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
+
+            button_frame = ctk.CTkFrame(self.options_frame, fg_color="transparent")
+            button_frame.grid(row=0, column=0, columnspan=4, sticky="w")
+
             self.select_button = ctk.CTkButton(
-                toolbar, text="Open", width=36,
+                button_frame, text="Select EEG File…",
                 command=self.select_data_source, corner_radius=CORNER_RADIUS
             )
             self.select_button.grid(row=0, column=0, padx=(0, PAD_X))
 
             self.select_output_button = ctk.CTkButton(
-                toolbar, text="Output", width=36,
+                button_frame, text="Select Output Folder…",
                 command=self.select_save_folder, corner_radius=CORNER_RADIUS
             )
             self.select_output_button.grid(row=0, column=1, padx=(0, PAD_X))
 
-            self.stats_button = ctk.CTkButton(
-                toolbar, text="Stats", width=36,
-                command=self.open_stats_analyzer, corner_radius=CORNER_RADIUS
-            )
-            self.stats_button.grid(row=0, column=2, padx=(0, PAD_X))
-
             self.start_button = ctk.CTkButton(
-                toolbar, text="Start", width=36,
+                button_frame, text="Start Processing",
                 command=self.start_processing, corner_radius=CORNER_RADIUS
             )
-            self.start_button.grid(row=0, column=3)
-            # --- END OF TOOLBAR SECTION ---
+            self.start_button.grid(row=0, column=2)
 
-            # --- Processing Options Frame (Row 1) ---
-            self.options_frame = ctk.CTkFrame(main_frame)
-            self.options_frame.grid(row=1, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
+            # --- Processing Options Heading ---
             ctk.CTkLabel(self.options_frame, text="Processing Options",
                          font=FONT_BOLD).grid(
-                row=0, column=0, columnspan=4, sticky="w", padx=PAD_X, pady=(PAD_Y, PAD_Y * 2)
+                row=1, column=0, columnspan=4, sticky="w", padx=PAD_X, pady=(PAD_Y, PAD_Y * 2)
             )
+
             # Mode radios
-            ctk.CTkLabel(self.options_frame, text="Mode:").grid(row=1, column=0, sticky="w", padx=PAD_X, pady=PAD_Y)
+            ctk.CTkLabel(self.options_frame, text="Mode:").grid(row=2, column=0, sticky="w", padx=PAD_X, pady=PAD_Y)
             self.file_mode = tk.StringVar(value="Single")
             self.radio_single = ctk.CTkRadioButton(self.options_frame, text="Single File", variable=self.file_mode,
                                                    value="Single", command=self.update_select_button_text,
                                                    corner_radius=CORNER_RADIUS)
-            self.radio_single.grid(row=1, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
+            self.radio_single.grid(row=2, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
             self.radio_batch = ctk.CTkRadioButton(self.options_frame, text="Batch Folder", variable=self.file_mode,
                                                   value="Batch", command=self.update_select_button_text,
                                                   corner_radius=CORNER_RADIUS)
-            self.radio_batch.grid(row=1, column=2, padx=PAD_X, pady=PAD_Y, sticky="w")
+            self.radio_batch.grid(row=2, column=2, padx=PAD_X, pady=PAD_Y, sticky="w")
             # File-type radios
-            ctk.CTkLabel(self.options_frame, text="File Type:").grid(row=2, column=0, sticky="w", padx=PAD_X,
+            ctk.CTkLabel(self.options_frame, text="File Type:").grid(row=3, column=0, sticky="w", padx=PAD_X,
                                                                      pady=PAD_Y)
             self.file_type = tk.StringVar(value=".BDF")
             self.radio_bdf = ctk.CTkRadioButton(self.options_frame, text=".BDF", variable=self.file_type, value=".BDF",
                                                 corner_radius=CORNER_RADIUS)
-            self.radio_bdf.grid(row=2, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
+            self.radio_bdf.grid(row=3, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
             self.radio_set = ctk.CTkRadioButton(self.options_frame, text=".set", variable=self.file_type, value=".set",
                                                 corner_radius=CORNER_RADIUS)
-            self.radio_set.grid(row=2, column=2, padx=PAD_X, pady=PAD_Y, sticky="w")
+            self.radio_set.grid(row=3, column=2, padx=PAD_X, pady=PAD_Y, sticky="w")
 
             # --- Preprocessing Parameters Frame (Row 2) ---
             self.params_frame = ctk.CTkFrame(main_frame)
@@ -498,9 +488,9 @@ class FPVSApp(ctk.CTk):
             self.max_idx_keep_entry.grid(row=5, column=1, padx=PAD_X, pady=PAD_Y)
 
 
-            # --- Event ID Mapping Frame (Row 3 - EXPANDS) ---
+            # --- Event ID Mapping Frame (Row 2 - EXPANDS) ---
             event_map_outer = ctk.CTkFrame(main_frame)
-            event_map_outer.grid(row=3, column=0, sticky="nsew", padx=PAD_X, pady=PAD_Y)  # Use grid, allow expand
+            event_map_outer.grid(row=2, column=0, sticky="nsew", padx=PAD_X, pady=PAD_Y)  # Use grid, allow expand
             # Configure event_map_outer's internal layout (using pack is fine here)
             event_map_outer.columnconfigure(0, weight=1)
             event_map_outer.rowconfigure(2, weight=1)  # Scroll frame should expand vertically
@@ -537,10 +527,10 @@ class FPVSApp(ctk.CTk):
                                                 command=self.add_event_map_entry, corner_radius=CORNER_RADIUS)
             self.add_map_button.pack(side="left")
 
-            # --- Bottom Frame: Log & Progress (Row 4 - NO VERTICAL EXPAND) ---
+            # --- Bottom Frame: Log & Progress (Row 3 - NO VERTICAL EXPAND) ---
             bottom_frame = ctk.CTkFrame(main_frame)
             # Use grid, fill horizontally, but DO NOT expand vertically
-            bottom_frame.grid(row=4, column=0, sticky="ew", padx=PAD_X, pady=(PAD_Y, 0))
+            bottom_frame.grid(row=3, column=0, sticky="ew", padx=PAD_X, pady=(PAD_Y, 0))
             bottom_frame.grid_columnconfigure(0, weight=1)  # Column containing log/progress expands horizontally
 
             # Log box Frame
