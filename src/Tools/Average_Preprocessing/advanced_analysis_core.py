@@ -1,12 +1,17 @@
 # advanced_analysis_core.py
 import os
 import gc
+import logging
 import traceback
+from pathlib import Path
 from typing import List, Dict, Any, Callable, Optional, Union
 
 import mne
 import numpy as np
 import threading
+
+# Set up module level logger
+logger = logging.getLogger(__name__)
 
 
 class PostProcessContextForAdvanced:
@@ -65,6 +70,37 @@ def run_advanced_averaging_processing(
         progress_callback: Callable[[float], None],
         stop_event: threading.Event
 ) -> bool:
+    """Run advanced averaging for each participant using provided groups.
+
+    Parameters
+    ----------
+    defined_groups : List[Dict[str, Any]]
+        Group definitions including file paths and mapping rules.
+    main_app_params : Dict[str, Any]
+        Validated parameters from the main application.
+    main_app_load_file_func : Callable[[str], Optional[mne.io.Raw]]
+        Function used to load raw EEG files.
+    main_app_preprocess_raw_func : Callable[[mne.io.Raw, Dict[str, Any]], Optional[mne.io.Raw]]
+        Function performing preprocessing on loaded data.
+    external_post_process_func : Callable[[Any, List[str]], None]
+        Callback invoked after averaging to run post-processing.
+    output_dir_str : str
+        Directory where results should be written.
+    pid_extraction_func : Callable[[Dict[str, Any]], str]
+        Function returning a participant ID based on group data.
+    log_callback : Callable[[str], None]
+        Callback used for logging messages to the UI.
+    progress_callback : Callable[[float], None]
+        Callback for updating progress in the UI.
+    stop_event : threading.Event
+        Event used to cancel processing.
+
+    Returns
+    -------
+    bool
+        ``True`` if processing completed without major errors, otherwise ``False``.
+    """
+
     log_callback("Starting advanced averaging core processing (per-participant output)...")
 
     # Estimate total operations for progress bar
@@ -105,7 +141,7 @@ def run_advanced_averaging_processing(
 
             participant_pid = pid_extraction_func({'file_paths': [participant_file_path]})
             log_callback(
-                f"  -- Processing Participant: {participant_pid} (File: {os.path.basename(participant_file_path)}) for Recipe: '{group_recipe_name}' --")
+                f"  -- Processing Participant: {participant_pid} (File: {Path(participant_file_path).name}) for Recipe: '{group_recipe_name}' --")
 
             averaged_data_for_this_participant: Dict[str, List[Union[mne.Epochs, mne.Evoked]]] = {}
 
@@ -126,7 +162,7 @@ def run_advanced_averaging_processing(
                     file_path_of_source = source_info['file_path']
                     original_event_label = source_info['original_label']
                     original_event_id = source_info['original_id']
-                    file_basename = os.path.basename(file_path_of_source)
+                    file_basename = Path(file_path_of_source).name
 
                     log_callback(
                         f"      Loading & Preprocessing: {file_basename} for Event ID {original_event_id} ('{original_event_label}')")
@@ -175,6 +211,7 @@ def run_advanced_averaging_processing(
                             log_callback(
                                 f"        No epochs created from {file_basename} for ID {original_event_id}.")
                     except Exception as e:
+                        logger.exception("Error during epoching for %s", file_basename)
                         log_callback(
                             f"      !!! Error during epoching for {file_basename}, ID {original_event_id} for {participant_pid}: {e}\n{traceback.format_exc()}")
                         overall_success = False
@@ -215,6 +252,7 @@ def run_advanced_averaging_processing(
                             log_callback(f"    Unknown averaging method: {averaging_method}. Skipping.")
                             overall_success = False
                     except Exception as e:
+                        logger.exception("Error during averaging for participant %s", participant_pid)
                         log_callback(
                             f"    !!! Error during averaging for '{output_label_for_average}', PID {participant_pid}: {e}\n{traceback.format_exc()}")
                         overall_success = False
@@ -242,6 +280,7 @@ def run_advanced_averaging_processing(
                     log_callback(
                         f"  --- Post-processing for {participant_pid} (Recipe: '{group_recipe_name}') completed. ---")
                 except Exception as e:
+                    logger.exception("Error during post-processing for participant %s", participant_pid)
                     log_callback(
                         f"  !!! Error during post-processing for {participant_pid} (Recipe: '{group_recipe_name}'): {e}\n{traceback.format_exc()}")
                     overall_success = False
