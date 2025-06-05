@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 import threading
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
 import traceback
 
 # Shared constants (with fallbacks)
@@ -37,7 +37,7 @@ try:
     from .advanced_analysis_core import run_advanced_averaging_processing
 
     # CORRECTED: Use ABSOLUTE import from src root for post_process
-    from src.post_process import post_process as _external_post_process_actual
+    from Main_App.post_process import post_process as _external_post_process_actual
 
 except ImportError as e:
     # Keep the error handling for robustness

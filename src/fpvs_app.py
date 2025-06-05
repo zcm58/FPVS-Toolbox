@@ -47,7 +47,6 @@ import customtkinter as ctk
 import mne
 import requests
 from packaging.version import parse as version_parse
-from typing import Optional, Dict, Any  # Add any other type hints you use, like List
 from Main_App.menu_bar import AppMenuBar
 from Main_App.eeg_preprocessing import perform_preprocessing
 from Main_App.ui_setup_panels import SetupPanelManager
@@ -61,11 +60,10 @@ from config import (
     CORNER_RADIUS,
     PAD_X
 )
-from post_process import post_process as _external_post_process
+from Main_App.post_process import post_process as _external_post_process
 
 # Advanced averaging UI and core function
 from Tools.Average_Preprocessing import AdvancedAnalysisWindow
-from Tools.Average_Preprocessing import run_advanced_averaging_processing
 
 # Image resizer
 from Tools.Image_Resizer import FPVSImageResizer
@@ -1071,7 +1069,6 @@ class FPVSApp(ctk.CTk):
         import traceback
         import mne
         import numpy as np
-        import pandas as pd
         import re
 
         event_id_map_from_gui = params.get('event_id_map', {})
