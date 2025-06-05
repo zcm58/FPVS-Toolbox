@@ -425,6 +425,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             cond_a,
             cond_b,
             rois_to_analyze,
+            selected_roi_option,
             self.log_to_main_app,
         )
         self.paired_tests_results_data = results

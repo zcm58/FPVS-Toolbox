@@ -85,9 +85,19 @@ def prepare_all_subject_summed_bca_data(subjects, conditions, subject_data, base
     return all_subject_data
 
 
-def run_paired_tests(all_subject_data, subjects, cond_a, cond_b, rois_to_analyze, log_func):
+def run_paired_tests(all_subject_data, subjects, cond_a, cond_b, rois_to_analyze, roi_label, log_func):
+    """Run paired t-tests and return text describing the results."""
+
     results = []
-    output_lines = []
+    output_lines = [
+        "============================================================",
+        "              Paired t-tests (Summed BCA)",
+        "============================================================\n",
+        f"Comparing Condition A: '{cond_a}'",
+        f"With Condition B:      '{cond_b}'",
+        f"ROIs Analyzed:         {roi_label}",
+        "(Significance level for p-values: p < 0.05)\n",
+    ]
     alpha = 0.05
     significant_overall = False
     for roi_name in rois_to_analyze:
@@ -119,6 +129,23 @@ def run_paired_tests(all_subject_data, subjects, cond_a, cond_b, rois_to_analyze
             output_lines.append(f"    - Average Summed BCA for '{cond_a}': {mean_a:.3f} (approx. uV)")
             output_lines.append(f"    - Average Summed BCA for '{cond_b}': {mean_b:.3f} (approx. uV)")
             output_lines.append(f"    - Mean Difference ('{cond_a}' - '{cond_b}'): {mean_diff:.3f} (approx. uV)")
+            if is_sig:
+                if mean_diff > 1e-9:
+                    output_lines.append(
+                        f"      Interpretation: On average, '{cond_a}' showed a significantly HIGHER Summed BCA than '{cond_b}'."
+                    )
+                elif mean_diff < -1e-9:
+                    output_lines.append(
+                        f"      Interpretation: On average, '{cond_b}' showed a significantly HIGHER Summed BCA than '{cond_a}'."
+                    )
+                else:
+                    output_lines.append(
+                        "      Interpretation: A significant difference was found, but the average values are very close."
+                    )
+            else:
+                output_lines.append(
+                    "      Interpretation: The observed difference in averages was not statistically significant."
+                )
             output_lines.append(f"    - Statistics: t({df_val}) = {t_stat:.2f}, p-value = {p_value_str}")
             output_lines.append(f"    - Number of pairs included: N = {n_pairs}\n")
             if is_sig:
@@ -141,6 +168,7 @@ def run_paired_tests(all_subject_data, subjects, cond_a, cond_b, rois_to_analyze
         output_lines.append("No statistically significant differences (p < 0.05) were found for any of the analyzed ROIs that had sufficient data.\n")
     else:
         output_lines.append("Tip: For a detailed table of significant findings, please use the 'Export Paired Results' feature.\n")
+    output_lines.append("============================================================")
     return "\n".join(output_lines), results
 
 
