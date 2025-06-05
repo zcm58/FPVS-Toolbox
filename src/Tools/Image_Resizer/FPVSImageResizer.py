@@ -182,7 +182,7 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
         self.overwrite_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
             self.settings_card,
-            text="Overwrite existing",
+            text="Overwrite existing images",
             variable=self.overwrite_var
         ).grid(row=3, column=0, columnspan=2, sticky="w", padx=PAD_X, pady=PAD_Y)
 
