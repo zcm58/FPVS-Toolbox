@@ -25,8 +25,8 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 
-from . import stats_export  # Assuming stats_export.py is in the same package
-from .repeated_m_anova import run_repeated_measures_anova  # Assuming repeated_m_anova.py
+from . import stats_export  # Excel export helpers
+from . import stats_analysis  # Heavy data processing functions
 
 # Regions of Interest (10-20 montage)
 ROIS = {
@@ -166,11 +166,27 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             side="left", padx=(0, 5), pady=5)
         ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
             side="left", padx=5, pady=5)
-        self.export_paired_tests_btn = ctk.CTkButton(buttons_summed_frame, text="Export Paired Results",
-                                                     state="disabled", command=self.export_paired_results)
+        self.export_paired_tests_btn = ctk.CTkButton(
+            buttons_summed_frame,
+            text="Export Paired Results",
+            state="disabled",
+            command=lambda: stats_export.export_paired_results_to_excel(
+                data=self.paired_tests_results_data,
+                parent_folder=self.stats_data_folder_var.get(),
+                log_func=self.log_to_main_app,
+            ),
+        )
         self.export_paired_tests_btn.pack(side="left", padx=5, pady=5)
-        self.export_rm_anova_btn = ctk.CTkButton(buttons_summed_frame, text="Export RM-ANOVA", state="disabled",
-                                                 command=self.export_rm_anova_results)
+        self.export_rm_anova_btn = ctk.CTkButton(
+            buttons_summed_frame,
+            text="Export RM-ANOVA",
+            state="disabled",
+            command=lambda: stats_export.export_rm_anova_results_to_excel(
+                anova_table=self.rm_anova_results_data,
+                parent_folder=self.stats_data_folder_var.get(),
+                log_func=self.log_to_main_app,
+            ),
+        )
         self.export_rm_anova_btn.pack(side="left", padx=5, pady=5)
 
         # --- Row 3: Section B - Harmonic Significance Check ---
@@ -192,8 +208,18 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                                                                                                                 column=4,
                                                                                                                 padx=15,
                                                                                                                 pady=5)
-        self.export_harmonic_check_btn = ctk.CTkButton(controls_harmonic_frame, text="Export Harmonic Results",
-                                                       state="disabled", command=self.export_harmonic_check_results)
+        self.export_harmonic_check_btn = ctk.CTkButton(
+            controls_harmonic_frame,
+            text="Export Harmonic Results",
+            state="disabled",
+            command=lambda: stats_export.export_significance_results_to_excel(
+                findings_dict=self._structure_harmonic_results(),
+                metric=self.harmonic_metric_var.get(),
+                threshold=float(self.harmonic_threshold_var.get()),
+                parent_folder=self.stats_data_folder_var.get(),
+                log_func=self.log_to_main_app,
+            ),
+        )
         self.export_harmonic_check_btn.grid(row=0, column=5, padx=5, pady=5)
         controls_harmonic_frame.grid_columnconfigure(1, weight=1)  # Allow metric menu to expand
 
@@ -337,202 +363,79 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.condition_B_var.set(valid_b_display[0] if valid_b_display else "")
 
     def _get_included_freqs(self, all_col_names):
-        try:
-            base_freq_val = float(self.base_freq_var.get())
-            if base_freq_val <= 0: raise ValueError("Base frequency must be positive.")
-        except ValueError as e:
-            self.log_to_main_app(f"Error: Invalid Base Frequency '{self.base_freq_var.get()}': {e}")
-            # messagebox.showerror("Input Error", f"Invalid Base Frequency: {self.base_freq_var.get()}") # Can be noisy
-            return []
-        numeric_freqs = []
-        for col_name in all_col_names:
-            if isinstance(col_name, str) and col_name.endswith('_Hz'):
-                try:
-                    numeric_freqs.append(float(col_name[:-3]))
-                except ValueError:
-                    self.log_to_main_app(f"Could not parse freq from col: {col_name}")
-        if not numeric_freqs: return []
-        sorted_numeric_freqs = sorted(list(set(numeric_freqs)))
-        excluded_freqs = {f_val for f_val in sorted_numeric_freqs if
-                          abs(f_val / base_freq_val - round(f_val / base_freq_val)) < 1e-6}
-        included_freqs = [f_val for f_val in sorted_numeric_freqs if f_val not in excluded_freqs]
-        return included_freqs
+        return stats_analysis.get_included_freqs(
+            self.base_freq_var.get(), all_col_names, self.log_to_main_app
+        )
 
     def aggregate_bca_sum(self, file_path, roi_name):
-        try:
-            df = pd.read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
-            roi_channels = ROIS.get(roi_name)
-            if not roi_channels: self.log_to_main_app(f"ROI {roi_name} not defined."); return np.nan
-            df_roi = df.reindex(roi_channels).dropna(how='all')
-            if df_roi.empty: self.log_to_main_app(f"No data for ROI {roi_name} in {file_path}."); return np.nan
-            included_freq_values = self._get_included_freqs(df.columns)
-            if not included_freq_values: self.log_to_main_app(f"No freqs to sum for BCA in {file_path}."); return np.nan
-            cols_to_sum = [f"{f:.1f}_Hz" for f in included_freq_values if f"{f:.1f}_Hz" in df_roi.columns]
-            if not cols_to_sum: self.log_to_main_app(
-                f"No matching BCA freq columns for ROI {roi_name} in {file_path}."); return np.nan
-            return df_roi[cols_to_sum].sum(axis=1).mean()
-        except Exception as e:
-            self.log_to_main_app(f"Error aggregating BCA for {os.path.basename(file_path)}, ROI {roi_name}: {e}")
-            return np.nan
+        return stats_analysis.aggregate_bca_sum(
+            file_path, roi_name, self.base_freq_var.get(), self.log_to_main_app
+        )
 
     def prepare_all_subject_summed_bca_data(self):
         self.log_to_main_app("Preparing summed BCA data...")
-        self.all_subject_data.clear()
-        if not self.subjects or not self.subject_data:
-            messagebox.showwarning("Data Error", "No subject data. Scan folder first.")
-            return False
-        for pid in self.subjects:
-            self.all_subject_data[pid] = {}
-            for cond_name in self.conditions:
-                file_path = self.subject_data.get(pid, {}).get(cond_name)
-                self.all_subject_data[pid].setdefault(cond_name, {})
-                for roi_name in ROIS.keys():
-                    sum_val = self.aggregate_bca_sum(file_path, roi_name) if file_path and os.path.exists(
-                        file_path) else np.nan
-                    self.all_subject_data[pid][cond_name][roi_name] = sum_val
-        self.log_to_main_app("Summed BCA data prep complete.")
-        return True
+        self.all_subject_data = stats_analysis.prepare_all_subject_summed_bca_data(
+            self.subjects,
+            self.conditions,
+            self.subject_data,
+            self.base_freq_var.get(),
+            self.log_to_main_app,
+        ) or {}
+        return bool(self.all_subject_data)
 
         # In stats.py
 
         # ... (other parts of the class) ...
 
     def run_paired_tests(self):
-            self.log_to_main_app("Running Paired Tests (Summed BCA)...")
-            self.results_textbox.configure(state="normal");
-            self.results_textbox.delete("1.0", tk.END)
-            self.export_paired_tests_btn.configure(state="disabled")
-            self.paired_tests_results_data.clear()
+        self.log_to_main_app("Running Paired Tests (Summed BCA)...")
+        self.results_textbox.configure(state="normal")
+        self.results_textbox.delete("1.0", tk.END)
+        self.export_paired_tests_btn.configure(state="disabled")
+        self.paired_tests_results_data.clear()
 
-            cond_a = self.condition_A_var.get()
-            cond_b = self.condition_B_var.get()
+        cond_a = self.condition_A_var.get()
+        cond_b = self.condition_B_var.get()
 
-            if not (cond_a and cond_a != "(Scan Folder)" and \
-                    cond_b and cond_b not in ["(Scan Folder)", "(No other conditions)", "(Select Condition A)"] and \
-                    cond_a != cond_b):
-                messagebox.showerror("Input Error",
-                                     "Please select two different and valid conditions for paired tests.")
-                self.results_textbox.configure(state="disabled");
-                return
-
-            if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
-                messagebox.showerror("Data Error",
-                                     "Summed BCA data could not be prepared. Please check logs or re-scan folder.")
-                self.results_textbox.configure(state="disabled");
-                return
-
-            rois_to_analyze = []
-            selected_roi_option = self.roi_var.get()
-            if selected_roi_option == ALL_ROIS_OPTION:
-                rois_to_analyze = list(ROIS.keys())
-            elif selected_roi_option in ROIS:
-                rois_to_analyze = [selected_roi_option]
-            else:
-                messagebox.showerror("Input Error", f"Invalid ROI selected: {selected_roi_option}")
-                self.results_textbox.configure(state="disabled");
-                return
-
-            # --- Start Building Output Text ---
-            output_text = f"============================================================\n"
-            output_text += f"              Paired t-tests (Summed BCA)\n"
-            output_text += f"============================================================\n\n"
-            output_text += f"Comparing Condition A: '{cond_a}'\n"
-            output_text += f"With Condition B:      '{cond_b}'\n"
-            output_text += f"ROIs Analyzed:         {selected_roi_option}\n"
-            output_text += f"(Significance level for p-values: p < 0.05)\n\n"
-
-            significant_tests_found_overall = False
-            alpha = 0.05
-
-            for roi_name in rois_to_analyze:
-                output_text += f"--- ROI: {roi_name} ---\n"
-
-                values_a, values_b = [], []
-                for pid in self.subjects:
-                    val_a = self.all_subject_data.get(pid, {}).get(cond_a, {}).get(roi_name, np.nan)
-                    val_b = self.all_subject_data.get(pid, {}).get(cond_b, {}).get(roi_name, np.nan)
-                    if not (pd.isna(val_a) or pd.isna(val_b)):
-                        values_a.append(val_a)
-                        values_b.append(val_b)
-
-                n_pairs = len(values_a)
-
-                if n_pairs < 3:  # Need at least 3 pairs for a meaningful t-test
-                    output_text += f"  Insufficient paired data (N={n_pairs}). Minimum 3 pairs required for a t-test.\n\n"
-                    continue
-
-                try:
-                    t_stat, p_value_raw = stats.ttest_rel(values_a, values_b)
-                    df_val = n_pairs - 1
-
-                    mean_a = np.mean(values_a)
-                    mean_b = np.mean(values_b)
-                    mean_diff = mean_a - mean_b
-
-                    is_significant = p_value_raw < alpha
-                    p_value_str = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
-
-                    if is_significant:
-                        significant_tests_found_overall = True
-                        output_text += f"  FINDING: SIGNIFICANT DIFFERENCE found between conditions.\n"
-                    else:
-                        output_text += f"  FINDING: NO SIGNIFICANT DIFFERENCE found between conditions.\n"
-
-                    output_text += f"    - Average Summed BCA for '{cond_a}': {mean_a:.3f} (approx. uV)\n"
-                    output_text += f"    - Average Summed BCA for '{cond_b}': {mean_b:.3f} (approx. uV)\n"
-                    output_text += f"    - Mean Difference ('{cond_a}' - '{cond_b}'): {mean_diff:.3f} (approx. uV)\n"
-
-                    if is_significant:
-                        if mean_diff > 1e-9:  # Check if meaningfully positive (accounting for float precision)
-                            output_text += f"      Interpretation: On average, '{cond_a}' showed a significantly HIGHER Summed BCA than '{cond_b}'.\n"
-                        elif mean_diff < -1e-9:  # Check if meaningfully negative
-                            output_text += f"      Interpretation: On average, '{cond_b}' showed a significantly HIGHER Summed BCA than '{cond_a}'.\n"
-                        else:  # Difference is very close to zero despite significance (unlikely with typical data if p is low)
-                            output_text += f"      Interpretation: A significant difference was found, but the average values are very close.\n"
-                    else:
-                        output_text += f"      Interpretation: The observed difference in averages was not statistically significant.\n"
-
-                    output_text += f"    - Statistics: t({df_val}) = {t_stat:.2f}, p-value = {p_value_str}\n"
-                    output_text += f"    - Number of pairs included: N = {n_pairs}\n\n"
-
-                    if is_significant:  # Store data for export only if significant
-                        self.paired_tests_results_data.append({
-                            'ROI': roi_name,
-                            'Condition_A': cond_a,
-                            'Condition_B': cond_b,
-                            'N_Pairs': n_pairs,
-                            'Mean_A': mean_a,
-                            'Mean_B': mean_b,
-                            'Mean_Difference': mean_diff,
-                            't_statistic': t_stat,
-                            'df': df_val,
-                            'p_value': p_value_raw  # Store raw p-value for export
-                        })
-
-                except Exception as e:
-                    output_text += f"  Error performing t-test for this ROI: {e}\n\n"
-                    self.log_to_main_app(
-                        f"Paired t-test error for ROI {roi_name} ({cond_a} vs {cond_b}): {e}\n{traceback.format_exc()}")
-
-            if not self.paired_tests_results_data:  # If no significant results were stored
-                output_text += "------------------------------------------------------------\n"
-                if not any(f"ROI: {r}" in output_text for r in rois_to_analyze if
-                           "Insufficient paired data" not in output_text and "Error performing t-test" not in output_text):  # Check if any ROI was actually tested without error/insufficient data
-                    output_text += "No ROIs had sufficient data for all paired tests.\n"
-                else:
-                    output_text += "No statistically significant differences (p < 0.05) were found for any of the analyzed ROIs that had sufficient data.\n"
-            else:
-                output_text += "------------------------------------------------------------\n"
-                output_text += "Tip: For a detailed table of significant findings, please use the 'Export Paired Results' feature.\n"
-
-            output_text += "============================================================\n"
-
-            self.results_textbox.insert("1.0", output_text)
-            if self.paired_tests_results_data:  # Enable export if there are structured significant results
-                self.export_paired_tests_btn.configure(state="normal")
-
+        if not (cond_a and cond_a != "(Scan Folder)" and
+                cond_b and cond_b not in ["(Scan Folder)", "(No other conditions)", "(Select Condition A)"] and
+                cond_a != cond_b):
+            messagebox.showerror("Input Error", "Please select two different and valid conditions for paired tests.")
             self.results_textbox.configure(state="disabled")
-            self.log_to_main_app("Paired tests (Summed BCA) complete.")
+            return
+
+        if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+            messagebox.showerror("Data Error", "Summed BCA data could not be prepared. Please check logs or re-scan folder.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        selected_roi_option = self.roi_var.get()
+        if selected_roi_option == ALL_ROIS_OPTION:
+            rois_to_analyze = list(ROIS.keys())
+        elif selected_roi_option in ROIS:
+            rois_to_analyze = [selected_roi_option]
+        else:
+            messagebox.showerror("Input Error", f"Invalid ROI selected: {selected_roi_option}")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        output_text, results = stats_analysis.run_paired_tests(
+            self.all_subject_data,
+            self.subjects,
+            cond_a,
+            cond_b,
+            rois_to_analyze,
+            selected_roi_option,
+            self.log_to_main_app,
+        )
+        self.paired_tests_results_data = results
+
+        self.results_textbox.insert("1.0", output_text)
+        if self.paired_tests_results_data:
+            self.export_paired_tests_btn.configure(state="normal")
+
+        self.results_textbox.configure(state="disabled")
+        self.log_to_main_app("Paired tests (Summed BCA) complete.")
 
     def run_rm_anova(self):
         self.log_to_main_app("Running RM-ANOVA (Summed BCA)...")
@@ -897,74 +800,23 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.results_textbox.configure(state="disabled")
         loaded_dataframes.clear()  # Clear cache after run completes
 
-    def export_paired_results(self):
-        self.log_to_main_app("Exporting Paired Test results...")
-        if not self.paired_tests_results_data: messagebox.showwarning("No Results",
-                                                                      "No paired results data to export."); return
-        try:
-            # Using keyword arguments for clarity and robustness
-            stats_export.export_paired_results_to_excel(
-                data=self.paired_tests_results_data,
-                parent_folder=self.stats_data_folder_var.get(),
-                log_func=self.log_to_main_app
-            )
-        except AttributeError:
-            messagebox.showerror("Export Error", "'export_paired_results_to_excel' is missing in stats_export.py.")
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Paired export failed: {e}\n{traceback.format_exc()}")
-
-    def export_rm_anova_results(self):
-        self.log_to_main_app("Exporting RM-ANOVA results...")
-        if self.rm_anova_results_data is None or (
-                isinstance(self.rm_anova_results_data, pd.DataFrame) and self.rm_anova_results_data.empty):
-            messagebox.showwarning("No Results", "No RM-ANOVA results data to export.");
-            return
-        try:
-            # Using keyword arguments
-            stats_export.export_rm_anova_results_to_excel(
-                anova_table=self.rm_anova_results_data,
-                parent_folder=self.stats_data_folder_var.get(),
-                log_func=self.log_to_main_app
-            )
-        except AttributeError:
-            messagebox.showerror("Export Error", "'export_rm_anova_results_to_excel' is missing in stats_export.py.")
-        except Exception as e:
-            messagebox.showerror("Export Error", f"RM-ANOVA export failed: {e}\n{traceback.format_exc()}")
-
-    def export_harmonic_check_results(self):
-        self.log_to_main_app("Exporting Per-Harmonic Check results...")
-        if not self.harmonic_check_results_data: messagebox.showwarning("No Results",
-                                                                        "No harmonic check results data to export."); return
-        findings_dict = {}
-        metric_key_name = f'Mean_{self.harmonic_metric_var.get().replace(" ", "_")}'  # Dynamic key for mean metric value
+    def _structure_harmonic_results(self):
+        """Return nested dict for exporting harmonic check results."""
+        metric_key_name = f"Mean_{self.harmonic_metric_var.get().replace(' ', '_')}"
+        findings = {}
         for item in self.harmonic_check_results_data:
             cond, roi = item['Condition'], item['ROI']
-            findings_dict.setdefault(cond, {}).setdefault(roi, []).append({
+            findings.setdefault(cond, {}).setdefault(roi, []).append({
                 'Frequency': item['Frequency'],
-                metric_key_name: item[metric_key_name],  # Use the dynamic key from item
+                metric_key_name: item[metric_key_name],
                 'N': item['N_Subjects'],
                 'T_Statistic': item['T_Statistic'],
                 'P_Value': item['P_Value'],
                 'df': item['df'],
-                'Threshold_Used': item['Threshold_Criteria_Mean_Value']  # The mean value threshold
+                'Threshold_Used': item['Threshold_Criteria_Mean_Value'],
             })
-        if not findings_dict: messagebox.showwarning("No Results",
-                                                     "Failed to structure harmonic results for export."); return
-        try:
-            # Using keyword arguments
-            stats_export.export_significance_results_to_excel(
-                findings_dict=findings_dict,
-                metric=self.harmonic_metric_var.get(),
-                threshold=float(self.harmonic_threshold_var.get()),  # This is the input mean value threshold
-                parent_folder=self.stats_data_folder_var.get(),
-                log_func=self.log_to_main_app
-            )
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Harmonic check export failed: {e}\n{traceback.format_exc()}")
+        return findings
 
-    def call_export_significance_results(self):  # Legacy
-        self.log_to_main_app("call_export_significance_results is legacy and unused.")
-        pass
 
 
 if __name__ == "__main__":
