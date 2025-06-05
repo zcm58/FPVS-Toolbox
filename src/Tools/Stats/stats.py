@@ -28,6 +28,7 @@ from .repeated_m_anova import run_repeated_measures_anova
 
 from . import stats_export  # Excel export helpers
 from . import stats_analysis  # Heavy data processing functions
+from .posthoc_tests import run_posthoc_pairwise_tests
 
 # Regions of Interest (10-20 montage)
 ROIS = {
@@ -60,6 +61,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.paired_tests_results_data = []
         self.rm_anova_results_data = None  # Will store ANOVA table (ideally DataFrame)
         self.harmonic_check_results_data = []
+        self.posthoc_results_data = None  # DataFrame from post-hoc pairwise tests
 
         # UI state variables
         self.stats_data_folder_var = tk.StringVar(master=self, value=default_folder)
@@ -70,6 +72,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.condition_B_var = tk.StringVar(master=self)
         self.harmonic_metric_var = tk.StringVar(master=self, value="SNR")
         self.harmonic_threshold_var = tk.StringVar(master=self, value="1.96")
+        self.posthoc_factor_var = tk.StringVar(master=self, value="condition")
 
         # UI Widget References (stored for potential future dynamic updates)
         self.roi_menu = None
@@ -81,6 +84,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.export_paired_tests_btn = None
         self.export_rm_anova_btn = None
         self.export_harmonic_check_btn = None
+        self.export_posthoc_btn = None
 
         self.create_widgets()
         if default_folder and os.path.isdir(default_folder):
@@ -156,6 +160,10 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                                             values=["(Scan Folder)"])  # Already stored
         self.condB_menu.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
 
+        ctk.CTkLabel(common_setup_frame, text="Post-hoc Factor:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkOptionMenu(common_setup_frame, variable=self.posthoc_factor_var,
+                          values=["condition", "roi"]).grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+
         # --- Row 2: Section A - Summed BCA Analysis ---
         summed_bca_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         summed_bca_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=(10, 5))
@@ -166,6 +174,8 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         ctk.CTkButton(buttons_summed_frame, text="Run Paired Tests (Summed BCA)", command=self.run_paired_tests).pack(
             side="left", padx=(0, 5), pady=5)
         ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
+            side="left", padx=5, pady=5)
+        ctk.CTkButton(buttons_summed_frame, text="Run Post-hoc Tests", command=self.run_posthoc_tests).pack(
             side="left", padx=5, pady=5)
         self.export_paired_tests_btn = ctk.CTkButton(
             buttons_summed_frame,
@@ -189,6 +199,18 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             ),
         )
         self.export_rm_anova_btn.pack(side="left", padx=5, pady=5)
+        self.export_posthoc_btn = ctk.CTkButton(
+            buttons_summed_frame,
+            text="Export Post-hoc Results",
+            state="disabled",
+            command=lambda: stats_export.export_posthoc_results_to_excel(
+                results_df=self.posthoc_results_data,
+                factor=self.posthoc_factor_var.get(),
+                parent_folder=self.stats_data_folder_var.get(),
+                log_func=self.log_to_main_app,
+            ),
+        )
+        self.export_posthoc_btn.pack(side="left", padx=5, pady=5)
 
         # --- Row 3: Section B - Harmonic Significance Check ---
         harmonic_check_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -606,6 +628,51 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.results_textbox.configure(state="disabled")
         self.log_to_main_app("RM-ANOVA (Summed BCA) attempt complete.")
 
+    def run_posthoc_tests(self):
+        self.log_to_main_app("Running post-hoc pairwise tests...")
+        self.results_textbox.configure(state="normal")
+        self.results_textbox.delete("1.0", tk.END)
+        self.export_posthoc_btn.configure(state="disabled")
+        self.posthoc_results_data = None
+
+        if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+            messagebox.showerror("Data Error", "Summed BCA data could not be prepared for post-hoc tests.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        long_format_data = []
+        for pid, cond_data in self.all_subject_data.items():
+            for cond_name, roi_data in cond_data.items():
+                for roi_name, value in roi_data.items():
+                    if not pd.isna(value):
+                        long_format_data.append({'subject': pid, 'condition': cond_name, 'roi': roi_name, 'value': value})
+
+        if not long_format_data:
+            messagebox.showerror("Data Error", "No valid data available for post-hoc tests after filtering NaNs.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        df_long = pd.DataFrame(long_format_data)
+        factor = self.posthoc_factor_var.get()
+        if factor not in ["condition", "roi"]:
+            messagebox.showerror("Input Error", f"Invalid factor selected for post-hoc tests: {factor}")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        output_text, results_df = run_posthoc_pairwise_tests(
+            data=df_long,
+            dv_col='value',
+            factor_col=factor,
+            subject_col='subject'
+        )
+
+        self.posthoc_results_data = results_df
+        self.results_textbox.insert("1.0", output_text)
+        if results_df is not None and not results_df.empty:
+            self.export_posthoc_btn.configure(state="normal")
+        self.results_textbox.configure(state="disabled")
+        self.log_to_main_app("Post-hoc pairwise tests complete.")
+
     def run_harmonic_check(self):
         self.log_to_main_app("Running Per-Harmonic Significance Check...")
         self.results_textbox.configure(state="normal");
@@ -842,6 +909,9 @@ if __name__ == "__main__":
             def export_significance_results_to_excel(self, findings_dict, metric, threshold, parent_folder,
                                                      log_func): log_func(
                 f"Mock: export_significance_results_to_excel called for {metric}")
+
+            def export_posthoc_results_to_excel(self, results_df, factor, parent_folder, log_func): log_func(
+                "Mock: export_posthoc_results_to_excel called")
 
 
         class MockRepeatedMAnova:
