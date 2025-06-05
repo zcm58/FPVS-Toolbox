@@ -3,7 +3,7 @@
 """
 FPVS all-in-one toolbox using MNE-Python and CustomTkinter.
 
-Version: 0.9.1 (May 2025) - the main app file (fpvs_app.py) has been refactored to remove roughly
+Version: 0.9.5 (June 2025) - the main app file (fpvs_app.py) has been refactored to remove roughly
 350 lines of code in an effort to simplify future development.
 
 Removed lines of code will be placed into new files under the Main_App package.
@@ -302,7 +302,7 @@ class FPVSApp(ctk.CTk):
     def show_about_dialog(self):
         messagebox.showinfo(
             "About FPVS ToolBox",
-            f"Version: 0.9.1 was developed by Zack Murphy at Mississippi State University."
+            f"Version: 0.9.5 was deceloped by Zack Murphy at Mississppi State University."
         )
 
     def quit(self):
