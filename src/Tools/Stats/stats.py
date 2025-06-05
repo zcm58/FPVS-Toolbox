@@ -24,6 +24,7 @@ from tkinter import filedialog, messagebox
 import pandas as pd
 import numpy as np
 import scipy.stats as stats
+from .repeated_m_anova import run_repeated_measures_anova
 
 from . import stats_export  # Excel export helpers
 from . import stats_analysis  # Heavy data processing functions
