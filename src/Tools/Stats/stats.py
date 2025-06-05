@@ -28,7 +28,10 @@ from .repeated_m_anova import run_repeated_measures_anova
 
 from . import stats_export  # Excel export helpers
 from . import stats_analysis  # Heavy data processing functions
-from .posthoc_tests import run_posthoc_pairwise_tests
+from .posthoc_tests import (
+    run_posthoc_pairwise_tests,
+    run_interaction_posthocs as perform_interaction_posthocs,
+)
 
 # Regions of Interest (10-20 montage)
 ROIS = {
@@ -161,8 +164,11 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.condB_menu.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
 
         ctk.CTkLabel(common_setup_frame, text="Post-hoc Factor:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
-        ctk.CTkOptionMenu(common_setup_frame, variable=self.posthoc_factor_var,
-                          values=["condition", "roi"]).grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkOptionMenu(
+            common_setup_frame,
+            variable=self.posthoc_factor_var,
+            values=["condition", "roi", "condition by roi"],
+        ).grid(row=3, column=1, padx=5, pady=5, sticky="ew")
 
         # --- Row 2: Section A - Summed BCA Analysis ---
         summed_bca_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -176,6 +182,8 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
             side="left", padx=5, pady=5)
         ctk.CTkButton(buttons_summed_frame, text="Run Post-hoc Tests", command=self.run_posthoc_tests).pack(
+            side="left", padx=5, pady=5)
+        ctk.CTkButton(buttons_summed_frame, text="Run Interaction Post-hocs", command=self.run_interaction_posthocs).pack(
             side="left", padx=5, pady=5)
         self.export_paired_tests_btn = ctk.CTkButton(
             buttons_summed_frame,
@@ -654,17 +662,26 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
 
         df_long = pd.DataFrame(long_format_data)
         factor = self.posthoc_factor_var.get()
-        if factor not in ["condition", "roi"]:
+        if factor not in ["condition", "roi", "condition by roi"]:
             messagebox.showerror("Input Error", f"Invalid factor selected for post-hoc tests: {factor}")
             self.results_textbox.configure(state="disabled")
             return
 
-        output_text, results_df = run_posthoc_pairwise_tests(
-            data=df_long,
-            dv_col='value',
-            factor_col=factor,
-            subject_col='subject'
-        )
+        if factor == "condition by roi":
+            output_text, results_df = perform_interaction_posthocs(
+                data=df_long,
+                dv_col='value',
+                roi_col='roi',
+                condition_col='condition',
+                subject_col='subject',
+            )
+        else:
+            output_text, results_df = run_posthoc_pairwise_tests(
+                data=df_long,
+                dv_col='value',
+                factor_col=factor,
+                subject_col='subject'
+            )
 
         self.posthoc_results_data = results_df
         self.results_textbox.insert("1.0", output_text)
@@ -672,6 +689,48 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.export_posthoc_btn.configure(state="normal")
         self.results_textbox.configure(state="disabled")
         self.log_to_main_app("Post-hoc pairwise tests complete.")
+
+    def run_interaction_posthocs(self):
+        """Run post-hoc comparisons for the condition factor within each ROI."""
+        self.log_to_main_app("Running interaction post-hoc tests...")
+        self.results_textbox.configure(state="normal")
+        self.results_textbox.delete("1.0", tk.END)
+        self.export_posthoc_btn.configure(state="disabled")
+        self.posthoc_results_data = None
+
+        if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+            messagebox.showerror("Data Error", "Summed BCA data could not be prepared for post-hoc tests.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        long_format_data = []
+        for pid, cond_data in self.all_subject_data.items():
+            for cond_name, roi_data in cond_data.items():
+                for roi_name, value in roi_data.items():
+                    if not pd.isna(value):
+                        long_format_data.append({'subject': pid, 'condition': cond_name, 'roi': roi_name, 'value': value})
+
+        if not long_format_data:
+            messagebox.showerror("Data Error", "No valid data available for post-hoc tests after filtering NaNs.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        df_long = pd.DataFrame(long_format_data)
+
+        output_text, results_df = perform_interaction_posthocs(
+            data=df_long,
+            dv_col='value',
+            roi_col='roi',
+            condition_col='condition',
+            subject_col='subject',
+        )
+
+        self.posthoc_results_data = results_df
+        self.results_textbox.insert("1.0", output_text)
+        if results_df is not None and not results_df.empty:
+            self.export_posthoc_btn.configure(state="normal")
+        self.results_textbox.configure(state="disabled")
+        self.log_to_main_app("Interaction post-hoc tests complete.")
 
     def run_harmonic_check(self):
         self.log_to_main_app("Running Per-Harmonic Significance Check...")

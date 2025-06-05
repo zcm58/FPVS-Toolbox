@@ -131,3 +131,74 @@ def run_posthoc_pairwise_tests(data, dv_col, factor_col, subject_col,
     output_lines.append("============================================================")
     results_df = pd.DataFrame(results_records)
     return "\n".join(output_lines), results_df
+
+
+def run_interaction_posthocs(data, dv_col, roi_col, condition_col, subject_col,
+                             correction="holm", alpha=0.05):
+    """Run condition-wise post-hoc tests separately for each ROI.
+
+    This helper performs pairwise comparisons of the ``condition`` factor
+    within each ROI level. It simply calls :func:`run_posthoc_pairwise_tests`
+    on subsets of ``data`` corresponding to each ROI so that activity from
+    different brain regions is never combined during a comparison.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Long-format table with columns for the dependent variable, ROI,
+        condition and subject identifier.
+    dv_col : str
+        Name of the dependent variable column.
+    roi_col : str
+        Column name indicating the ROI/brain region.
+    condition_col : str
+        Column name for the experimental condition factor.
+    subject_col : str
+        Column identifying subjects.
+    correction : str, optional
+        Method for p-value correction. Passed through to
+        :func:`run_posthoc_pairwise_tests`.
+    alpha : float, optional
+        Significance level used when interpreting corrected p-values.
+
+    Returns
+    -------
+    tuple
+        (log_output: str, results_df: pandas.DataFrame)
+    """
+
+    output_lines = [
+        "============================================================",
+        "         Post-hoc Comparisons: Condition by ROI",
+        "============================================================\n",
+    ]
+
+    if any(col not in data.columns for col in [dv_col, roi_col, condition_col, subject_col]):
+        output_lines.append("Required columns missing from data. Cannot run interaction post-hocs.")
+        return "\n".join(output_lines), pd.DataFrame()
+
+    unique_rois = data[roi_col].dropna().unique()
+    results_list = []
+
+    for roi in unique_rois:
+        output_lines.append(f"=== ROI: {roi} ===")
+        roi_subset = data[data[roi_col] == roi]
+        roi_text, roi_df = run_posthoc_pairwise_tests(
+            data=roi_subset,
+            dv_col=dv_col,
+            factor_col=condition_col,
+            subject_col=subject_col,
+            correction=correction,
+            alpha=alpha,
+        )
+        # Indent the ROI specific output for readability
+        roi_text_indented = "\n".join([f"  {line}" for line in roi_text.splitlines()])
+        output_lines.append(roi_text_indented)
+        if roi_df is not None and not roi_df.empty:
+            roi_df = roi_df.assign(ROI=roi)
+            results_list.append(roi_df)
+
+    results_df = pd.concat(results_list, ignore_index=True) if results_list else pd.DataFrame()
+    output_lines.append("============================================================")
+
+    return "\n".join(output_lines), results_df
