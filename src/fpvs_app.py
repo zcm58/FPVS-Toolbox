@@ -3,15 +3,12 @@
 """
 FPVS all-in-one toolbox using MNE-Python and CustomTkinter.
 
-Version: 0.9.5 (June 2025) - the main app file (fpvs_app.py) has been refactored to remove roughly
-350 lines of code in an effort to simplify future development.
-
-Removed lines of code will be placed into new files under the Main_App package.
-
+Version: 0.9.5 (June 2025) - the main app file (fpvs_app.py) has been refactored in an
+effort to simplify future development.
 
 Key functionalities:
 
-- Process BioSemi datafiles. (.BDF Format)
+- Process and clean BioSemi datafiles from FPVS experiments. (.BDF Format)
 - Allows the user to process one file at a time, or multiple files at once.
 
 - Preprocessing Steps:
@@ -23,7 +20,7 @@ Key functionalities:
     - Applies basic FIR bandpass filter.
     - Kurtosis-based channel rejection & interpolation.
     - Re-references to the average common reference.
-    - Extracts each PsychoPy condition separately.
+    - Extracts each PsychoPy condition separately
 
 - Extracts epochs based on numerical triggers from PsychoPy.
 - Post-processing using FFT, SNR, Z-score, BCA computation.
