@@ -38,6 +38,7 @@ import gc
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import webbrowser
+import logging
 import numpy as np
 import pandas as pd
 import customtkinter as ctk
@@ -60,9 +61,15 @@ from config import (
     FPVS_TOOLBOX_REPO_PAGE,
     DEFAULT_STIM_CHANNEL,
     CORNER_RADIUS,
-    PAD_X
+    PAD_X,
+    init_fonts,
+    FONT_MAIN,
+    FONT_BOLD,
+    FONT_HEADING
 )
+
 from Main_App.post_process import post_process as _external_post_process
+
 
 # Advanced averaging UI and core function
 from Tools.Average_Preprocessing import AdvancedAnalysisWindow
@@ -78,17 +85,21 @@ import Tools.Stats as stats
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
+
 class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
               EventDetectionMixin, ValidationMixin, ProcessingMixin):
+
     """ Main application class replicating MATLAB FPVS analysis workflow using numerical triggers. """
 
     def __init__(self):
         super().__init__()
 
+
         # --- App Version and Title ---
         from datetime import datetime
         self.title(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION} — {datetime.now():%Y-%m-%d}")
         self.minsize(750, 920)
+
 
         # --- Core State Variables ---
         self.busy = False
@@ -100,6 +111,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.gui_queue = queue.Queue()
         self._max_progress = 1
         self.validated_params = {}
+
 
         # --- Tkinter Variables for UI State ---
         self.file_mode = tk.StringVar(master=self, value="Single")
@@ -140,12 +152,15 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.validate_int_cmd = (self.register(self._validate_integer_input), '%P')
 
         # --- Build UI ---
+
         self.create_menu()
         self.create_widgets()  # This will call SetupPanelManager and EventMapManager
+
 
         # --- Initial UI State ---
         # The initial event map row is now added by EventMapManager._build_event_map_ui()
         # So, the explicit call to self.add_event_map_entry() is REMOVED from here.
+
 
         # --- Welcome and Logging ---
         self.log("Welcome to the FPVS Toolbox!")
@@ -305,8 +320,9 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     def show_about_dialog(self):
         messagebox.showinfo(
             "About FPVS ToolBox",
+
             f"Version: 0.9.5 was deceloped by Zack Murphy at Mississppi State University."
-        )
+
 
     def quit(self):
         if (self.processing_thread and self.processing_thread.is_alive()) or \
@@ -343,6 +359,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     def create_widgets(self):
         """Creates all the widgets for the main application window,
         delegating panel creation to respective managers."""
+
 
         # Attempt to import UI constants from config, with fallbacks
         try:

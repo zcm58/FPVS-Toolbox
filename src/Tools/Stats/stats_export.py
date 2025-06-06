@@ -99,7 +99,8 @@ def export_significance_results_to_excel(findings_dict, metric, threshold, paren
     Args:
         findings_dict (dict): Nested {condition: {roi: [finding_list]}}.
                               finding_list contains dicts with keys like 'Frequency',
-                              'Mean_MetricName', 'N_Subjects', 'T_Statistic', 'P_Value', 'df', 'Threshold_Used'.
+                              'Mean_MetricName', 'N_Subjects', 'T_Statistic', 'P_Value', 'df',
+                              'Threshold' (previously documented as 'Threshold_Used').
         metric (str): Metric analyzed (e.g., "SNR", "Z-Score").
         threshold (float): Mean value threshold used.
         parent_folder (str): Path for suggesting save location.
@@ -127,10 +128,12 @@ def export_significance_results_to_excel(findings_dict, metric, threshold, paren
                     'df': finding.get('df', np.nan),
                     'T_Statistic': finding.get('T_Statistic', np.nan),
                     'P_Value': finding.get('P_Value', np.nan),
+
                     # Attempt to use the explicit key from stats.py if present,
                     # otherwise fall back to any older key name
                     'Mean_Threshold_Used': finding.get('Threshold_Used',
                                                     finding.get('Threshold', np.nan))
+
                 }
                 flat_results.append(row)
 
@@ -197,7 +200,7 @@ def export_paired_results_to_excel(data, parent_folder, log_func=print):
     # Define preferred column order
     preferred_cols = ['ROI', 'Condition_A', 'Condition_B', 'N_Pairs',
                       'Mean_A', 'Mean_B', 'Mean_Difference',
-                      't_statistic', 'df', 'p_value']
+                      'Cohen_d', 't_statistic', 'df', 'p_value']
     df_export = df_export[[col for col in preferred_cols if col in df_export.columns]]
 
     # Suggest filename (try to get condition names if available from first result)
@@ -304,10 +307,11 @@ def export_posthoc_results_to_excel(results_df, factor, parent_folder, log_func=
             _auto_format_and_write_excel(writer, df_export, 'Post-hoc Results', log_func)
         log_func("Post-hoc results export successful.")
         messagebox.showinfo("Export Successful", f"Post-hoc results exported to:\n{save_path}")
+
     except PermissionError:
         err_msg = f"Permission denied writing to {save_path}. File may be open or folder write-protected."
         log_func(f"!!! Export Failed: {err_msg}")
         messagebox.showerror("Export Failed", err_msg)
     except Exception as e:
+
         log_func(f"!!! Post-hoc Export Failed: {e}\n{traceback.format_exc()}")
-        messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")

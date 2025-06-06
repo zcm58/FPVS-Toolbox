@@ -20,7 +20,6 @@ Dependencies:
 """
 import pandas as pd
 
-
 def run_repeated_measures_anova(data, dv_col, within_cols, subject_col):
     """
     Runs a repeated measures ANOVA using statsmodels AnovaRM.

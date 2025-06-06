@@ -16,6 +16,9 @@ import os
 import glob
 import re
 import traceback
+import logging
+
+logger = logging.getLogger(__name__)
 
 import customtkinter as ctk
 import tkinter as tk
@@ -26,12 +29,14 @@ import numpy as np
 import scipy.stats as stats
 from .repeated_m_anova import run_repeated_measures_anova
 
+
 from . import stats_export  # Excel export helpers
 from . import stats_analysis  # Heavy data processing functions
 from .posthoc_tests import (
     run_posthoc_pairwise_tests,
     run_interaction_posthocs as perform_interaction_posthocs,
 )
+
 
 # Regions of Interest (10-20 montage)
 ROIS = {
@@ -47,6 +52,15 @@ HARMONIC_CHECK_ALPHA = 0.05  # Significance level for one-sample t-test
 class StatsAnalysisWindow(ctk.CTkToplevel):
     def __init__(self, master, default_folder=""):
         super().__init__(master)
+
+        # Ensure fonts are initialised in case this window is launched
+        # independently of the main application.
+        init_fonts()
+        # ``option_add`` expects a concrete priority value.  Without it the
+        # ``None`` forwarded by ``tkinter.Misc.option_add`` can cause Tcl to
+        # complain about the number of arguments.  Using ``str`` and an
+        # explicit priority sidesteps that issue.
+        self.option_add("*Font", str(FONT_MAIN), 80)
         self.title("FPVS Statistical Analysis Tool")
         self.geometry("950x950")  # Adjusted for clarity of layout
         self.grab_set()
@@ -63,6 +77,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         # Results storage for export (structured data)
         self.paired_tests_results_data = []
         self.rm_anova_results_data = None  # Will store ANOVA table (ideally DataFrame)
+        self.mixed_model_results_data = None  # Will store MixedLM fixed effects table
         self.harmonic_check_results_data = []
         self.posthoc_results_data = None  # DataFrame from post-hoc pairwise tests
 
@@ -75,8 +90,10 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.condition_B_var = tk.StringVar(master=self)
         self.harmonic_metric_var = tk.StringVar(master=self, value="SNR")
         self.harmonic_threshold_var = tk.StringVar(master=self, value="1.96")
+
         # Only the interaction post-hoc is supported so default to that option
         self.posthoc_factor_var = tk.StringVar(master=self, value="condition by roi")
+
 
         # UI Widget References (stored for potential future dynamic updates)
         self.roi_menu = None
@@ -87,6 +104,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         # Export Buttons (instance variables to manage state)
         self.export_paired_tests_btn = None
         self.export_rm_anova_btn = None
+        self.export_mixed_model_btn = None
         self.export_harmonic_check_btn = None
         self.export_posthoc_btn = None
 
@@ -220,9 +238,9 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             if hasattr(self.master_app, 'log') and callable(self.master_app.log):
                 self.master_app.log(f"[Stats] {message}")
             else:
-                print(f"[Stats] {message}")
+                logger.info("[Stats] %s", message)
         except Exception as e:
-            print(f"[Stats Log Error] {e} | Original message: {message}")
+            logger.error("[Stats Log Error] %s | Original message: %s", e, message)
 
     def on_close(self):
         self.log_to_main_app("Closing Stats Analysis window.")
@@ -284,12 +302,14 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                                             values=["(Scan Folder)"])  # Already stored
         self.condB_menu.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
 
+
         # Post-hoc factor selection removed; only condition by ROI interaction is supported
+
 
         # --- Row 2: Section A - Summed BCA Analysis ---
         summed_bca_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         summed_bca_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=(10, 5))
-        ctk.CTkLabel(summed_bca_frame, text="Summed BCA Analysis:", font=ctk.CTkFont(weight="bold")).pack(anchor="w",
+        ctk.CTkLabel(summed_bca_frame, text="Summed BCA Analysis:", font=FONT_BOLD).pack(anchor="w",
                                                                                                           pady=(0, 5))
         buttons_summed_frame = ctk.CTkFrame(summed_bca_frame)
         buttons_summed_frame.pack(fill="x", padx=0, pady=0)  # Use pack for horizontal button layout
@@ -297,6 +317,8 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             side="left", padx=(0, 5), pady=5)
         ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
             side="left", padx=5, pady=5)
+
+        
         # Only the interaction post-hoc test is available
         self.run_posthoc_btn = ctk.CTkButton(buttons_summed_frame, text="Run Interaction Post-hocs", command=self.run_interaction_posthocs)
         self.run_posthoc_btn.pack(side="left", padx=5, pady=5)
@@ -310,6 +332,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                 log_func=self.log_to_main_app,
             ),
         )
+
         self.export_paired_tests_btn.pack(side="left", padx=5, pady=5)
         self.export_rm_anova_btn = ctk.CTkButton(
             buttons_summed_frame,
@@ -322,6 +345,8 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             ),
         )
         self.export_rm_anova_btn.pack(side="left", padx=5, pady=5)
+        
+
         self.export_posthoc_btn = ctk.CTkButton(
             buttons_summed_frame,
             text="Export Post-hoc Results",
@@ -335,11 +360,12 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         )
         self.export_posthoc_btn.pack(side="left", padx=5, pady=5)
 
+
         # --- Row 3: Section B - Harmonic Significance Check ---
         harmonic_check_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         harmonic_check_frame.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
         ctk.CTkLabel(harmonic_check_frame, text="Per-Harmonic Significance Check:",
-                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(0, 5))
+                     font=FONT_BOLD).pack(anchor="w", pady=(0, 5))
         controls_harmonic_frame = ctk.CTkFrame(harmonic_check_frame)
         controls_harmonic_frame.pack(fill="x", padx=0, pady=0)
         ctk.CTkLabel(controls_harmonic_frame, text="Metric:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
@@ -534,14 +560,17 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         # ... (other parts of the class) ...
 
     def run_paired_tests(self):
+
         self.log_to_main_app("Running Paired Tests (Summed BCA)...")
         self.results_textbox.configure(state="normal")
         self.results_textbox.delete("1.0", tk.END)
         self.export_paired_tests_btn.configure(state="disabled")
         self.paired_tests_results_data.clear()
 
+
         cond_a = self.condition_A_var.get()
         cond_b = self.condition_B_var.get()
+
 
         if not (cond_a and cond_a != "(Scan Folder)" and
                 cond_b and cond_b not in ["(Scan Folder)", "(No other conditions)", "(Select Condition A)"] and
@@ -550,10 +579,12 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.results_textbox.configure(state="disabled")
             return
 
+
         if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
             messagebox.showerror("Data Error", "Summed BCA data could not be prepared. Please check logs or re-scan folder.")
             self.results_textbox.configure(state="disabled")
             return
+
 
         selected_roi_option = self.roi_var.get()
         if selected_roi_option == ALL_ROIS_OPTION:
@@ -564,6 +595,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             messagebox.showerror("Input Error", f"Invalid ROI selected: {selected_roi_option}")
             self.results_textbox.configure(state="disabled")
             return
+
 
         output_text, results = stats_analysis.run_paired_tests(
             self.all_subject_data,
@@ -633,6 +665,18 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                                                            subject_col='subject')
 
             if anova_df_results is not None and not anova_df_results.empty:
+                # Calculate partial eta squared for each effect
+                pes_vals = []
+                for _, row in anova_df_results.iterrows():
+                    f_val = row.get('F Value', row.get('F', np.nan))
+                    df1 = row.get('Num DF', row.get('df1', row.get('ddof1', np.nan)))
+                    df2 = row.get('Den DF', row.get('df2', row.get('ddof2', np.nan)))
+                    if not pd.isna(f_val) and not pd.isna(df1) and not pd.isna(df2) and (f_val * df1 + df2) != 0:
+                        pes_vals.append((f_val * df1) / ((f_val * df1) + df2))
+                    else:
+                        pes_vals.append(np.nan)
+                anova_df_results['partial eta squared'] = pes_vals
+
                 # --- Display the Statistical Table ---
                 output_text += "------------------------------------------------------------\n"
                 output_text += "                 STATISTICAL TABLE (RM-ANOVA)\n"
@@ -645,7 +689,12 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                 output_text += "------------------------------------------------------------\n"
                 output_text += "           SIMPLIFIED EXPLANATION OF RESULTS\n"
                 output_text += "------------------------------------------------------------\n"
-                alpha = 0.05
+                try:
+                    alpha = float(self.alpha_var.get())
+                except ValueError:
+                    messagebox.showerror("Input Error", "Invalid alpha value. Please enter a numeric value.")
+                    self.results_textbox.configure(state="disabled");
+                    return
                 output_text += f"(A result is typically considered 'statistically significant' if its p-value ('Pr > F') is less than {alpha:.2f})\n\n"
 
                 for index, row in anova_df_results.iterrows():
@@ -667,7 +716,10 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                     # Format p-value for display in explanation
                     p_value_display_str = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
 
+                    eta_sq = row.get('Partial_Eta_Squared', np.nan)
+                    eta_sq_display = f"{eta_sq:.3f}" if not pd.isna(eta_sq) else "N/A"
                     output_text += f"  - Statistical Finding: {significance_status} (p-value = {p_value_display_str})\n"
+                    output_text += f"  - Partial Eta Squared: {eta_sq_display}\n"
 
                     explanation = ""
                     # Assuming within_cols are 'condition' and 'roi' for these interpretations
@@ -751,6 +803,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.results_textbox.configure(state="disabled")
         self.log_to_main_app("RM-ANOVA (Summed BCA) attempt complete.")
 
+
     def run_posthoc_tests(self):
         self.log_to_main_app("Running post-hoc pairwise tests...")
         self.results_textbox.configure(state="normal")
@@ -760,6 +813,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
 
         if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
             messagebox.showerror("Data Error", "Summed BCA data could not be prepared for post-hoc tests.")
+
             self.results_textbox.configure(state="disabled")
             return
 
@@ -771,11 +825,15 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                         long_format_data.append({'subject': pid, 'condition': cond_name, 'roi': roi_name, 'value': value})
 
         if not long_format_data:
+
             messagebox.showerror("Data Error", "No valid data available for post-hoc tests after filtering NaNs.")
+
             self.results_textbox.configure(state="disabled")
             return
 
         df_long = pd.DataFrame(long_format_data)
+        
+
         factor = self.posthoc_factor_var.get()
         if factor not in ["condition", "roi", "condition by roi"]:
             messagebox.showerror("Input Error", f"Invalid factor selected for post-hoc tests: {factor}")
@@ -846,6 +904,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.export_posthoc_btn.configure(state="normal")
         self.results_textbox.configure(state="disabled")
         self.log_to_main_app("Interaction post-hoc tests complete.")
+
 
     def run_harmonic_check(self):
         self.log_to_main_app("Running Per-Harmonic Significance Check...")
@@ -1042,10 +1101,12 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.results_textbox.configure(state="disabled")
         loaded_dataframes.clear()  # Clear cache after run completes
 
+
     def _structure_harmonic_results(self):
         """Return nested dict for exporting harmonic check results."""
         metric_key_name = f"Mean_{self.harmonic_metric_var.get().replace(' ', '_')}"
         findings = {}
+
         for item in self.harmonic_check_results_data:
             cond, roi = item['Condition'], item['ROI']
             findings.setdefault(cond, {}).setdefault(roi, []).append({
@@ -1055,7 +1116,9 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                 'T_Statistic': item['T_Statistic'],
                 'P_Value': item['P_Value'],
                 'df': item['df'],
+
                 'Threshold_Used': item['Threshold_Criteria_Mean_Value'],
+
             })
         return findings
 
@@ -1069,7 +1132,7 @@ if __name__ == "__main__":
 
 
         class TestMaster:
-            log = staticmethod(lambda msg: print(f"[TestHost] {msg}"))
+            log = staticmethod(lambda msg: logger.info("[TestHost] %s", msg))
 
 
         # Mock stats_export and repeated_m_anova for standalone testing if not available
@@ -1090,8 +1153,12 @@ if __name__ == "__main__":
 
         class MockRepeatedMAnova:
             def run_repeated_measures_anova(self, data, dv_col, within_cols, subject_col):
-                print(
-                    f"Mock: run_repeated_measures_anova called with DV:{dv_col}, Within:{within_cols}, Subj:{subject_col}")
+                logger.info(
+                    "Mock: run_repeated_measures_anova called with DV:%s, Within:%s, Subj:%s",
+                    dv_col,
+                    within_cols,
+                    subject_col,
+                )
                 return pd.DataFrame(
                     {'Source': ['condition', 'roi', 'condition:roi'], 'F': [1.0, 2.0, 3.0], 'p-unc': [0.5, 0.4, 0.3]})
 
@@ -1109,4 +1176,4 @@ if __name__ == "__main__":
                       command=lambda: StatsAnalysisWindow(master=TestMaster(), default_folder="")).pack(pady=20)
         root.mainloop()
     except Exception as e_main:
-        print(f"Error in __main__ block: {e_main}\n{traceback.format_exc()}")
+        logger.error("Error in __main__ block: %s\n%s", e_main, traceback.format_exc())
