@@ -320,9 +320,8 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     def show_about_dialog(self):
         messagebox.showinfo(
             "About FPVS ToolBox",
-
-            f"Version: 0.9.5 was deceloped by Zack Murphy at Mississppi State University."
-
+            f"Version: {FPVS_TOOLBOX_VERSION} was developed by Zack Murphy at Mississippi State University."
+        )
 
     def quit(self):
         if (self.processing_thread and self.processing_thread.is_alive()) or \
