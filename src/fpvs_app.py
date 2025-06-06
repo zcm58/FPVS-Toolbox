@@ -433,9 +433,6 @@ class FPVSApp(ctk.CTk, EventMapMixin, FileSelectionMixin,
         if hasattr(self, 'update_select_button_text'):
             self.update_select_button_text()
 
-
-
-
     # Override to use external function
     def post_process(self, condition_labels_present):
         _external_post_process(self, condition_labels_present)
