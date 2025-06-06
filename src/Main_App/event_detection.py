@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Mixins for event detection functionality."""
+""" This file handles the method for scanning the .BDF files to detect PsychoPy condition IDs."""
+
 import os
 import gc
 import threading
