@@ -4,10 +4,11 @@ import os
 import sys
 import subprocess
 import threading
+import time
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
-from PIL import Image
+from PIL import Image, ImageOps
 
 # layout constants
 PAD_X = 8
@@ -18,7 +19,7 @@ CORNER_RADIUS = 8
 def process_images_in_folder(input_folder, output_folder,
                              target_width, target_height,
                              desired_ext, update_callback,
-                             cancel_flag):
+                             cancel_flag, overwrite_all=False):
     valid_exts = [".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"]
     files = [f for f in os.listdir(input_folder)
              if os.path.isfile(os.path.join(input_folder, f))]
@@ -46,7 +47,17 @@ def process_images_in_folder(input_folder, output_folder,
 
         if ext in valid_exts:
             try:
-                img = Image.open(file_path)
+                with Image.open(file_path) as img:
+                    img = ImageOps.exif_transpose(img)
+                    orig_w, orig_h = img.size
+                    scale = max(target_width / orig_w, target_height / orig_h)
+                    new_size = (round(orig_w * scale), round(orig_h * scale))
+                    resized = img.resize(new_size, Image.Resampling.LANCZOS)
+                    left = (new_size[0] - target_width) // 2
+                    top = (new_size[1] - target_height) // 2
+                    final = resized.crop((left, top,
+                                          left + target_width,
+                                          top + target_height))
             except Exception as e:
                 skip_details.append((file, f"Read error: {e}"))
                 processed += 1
@@ -54,27 +65,15 @@ def process_images_in_folder(input_folder, output_folder,
                                 processed, total_files)
                 continue
 
-            orig_w, orig_h = img.size
-            scale = max(target_width / orig_w, target_height / orig_h)
-            new_size = (round(orig_w * scale), round(orig_h * scale))
-            resized = img.resize(new_size, Image.Resampling.LANCZOS)
-            left = (new_size[0] - target_width) // 2
-            top = (new_size[1] - target_height) // 2
-            final = resized.crop((left, top,
-                                  left + target_width,
-                                  top + target_height))
-
             base, _ = os.path.splitext(file)
             new_name = f"{base} Resized.{desired_ext}"
             out_path = os.path.join(output_folder, new_name)
 
             if os.path.exists(out_path):
-                if not messagebox.askyesno(
-                        "Overwrite?",
-                        f"{new_name} exists. Overwrite?"):
-                    skip_details.append((file, "User declined overwrite"))
+                if not overwrite_all:
+                    skip_details.append((file, "File exists"))
                     processed += 1
-                    update_callback(f"Skipped {file} (no overwrite)\n",
+                    update_callback(f"Skipped {file} (exists)\n",
                                     processed, total_files)
                     continue
 
@@ -180,6 +179,13 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
             values=[".jpg", ".png", ".bmp"]
         ).grid(row=2, column=1, padx=PAD_X, pady=PAD_Y)
 
+        self.overwrite_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            self.settings_card,
+            text="Overwrite existing images",
+            variable=self.overwrite_var
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=PAD_X, pady=PAD_Y)
+
         ctk.CTkButton(
             self.settings_card, text="Reset Defaults",
             command=self._reset_defaults
@@ -204,6 +210,9 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
         )
         self.open_btn.pack(side="left", padx=(PAD_X, 0))
         self.open_btn.pack_forget()
+
+        self.time_lbl = ctk.CTkLabel(action_bar, text="Elapsed: 0s")
+        self.time_lbl.pack(side="right", padx=(0, PAD_X))
 
         self.progress = ctk.CTkProgressBar(action_bar)
         self.progress.pack(side="right", fill="x", expand=True, padx=PAD_X)
@@ -240,6 +249,8 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
         self.height_entry.delete(0, "end")
         self.height_entry.insert(0, "512")
         self.ext_var.set(".jpg")
+        self.overwrite_var.set(False)
+        self.time_lbl.configure(text="Elapsed: 0s")
         self.status.configure(state="normal")
         self.status.delete("0.0", "end")
         self.status.configure(state="disabled")
@@ -267,9 +278,12 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
         self.start_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
 
+        self.start_time = time.time()
+        self.time_lbl.configure(text="Elapsed: 0s")
+
         threading.Thread(
             target=self._run,
-            args=(w, h, self.ext_var.get().strip(".")),
+            args=(w, h, self.ext_var.get().strip("."), self.overwrite_var.get()),
             daemon=True
         ).start()
 
@@ -279,16 +293,25 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
             self.status.insert("end", msg)
             self.status.see("end")
         self.progress.set(processed / total if total else 0)
+        if hasattr(self, 'start_time'):
+            elapsed = time.time() - self.start_time
+            if processed:
+                eta = (elapsed / processed) * (total - processed)
+                self.time_lbl.configure(
+                    text=f"Elapsed: {int(elapsed)}s, ETA: {int(eta)}s")
+            else:
+                self.time_lbl.configure(text=f"Elapsed: {int(elapsed)}s")
         self.status.configure(state="disabled")
 
-    def _run(self, width, height, ext):
+    def _run(self, width, height, ext, overwrite):
         skips, fails, done = process_images_in_folder(
             self.input_folder,
             self.output_folder,
             width, height,
             ext,
             update_callback=self._update,
-            cancel_flag=lambda: self.cancel_requested
+            cancel_flag=lambda: self.cancel_requested,
+            overwrite_all=overwrite
         )
         self.cancel_btn.configure(state="disabled")
         self.open_btn.pack(side="left", padx=PAD_X)
@@ -302,6 +325,8 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
             summary += f"\nWrite failures {len(fails)} files:\n"
             for f, e in fails:
                 summary += f"  - {f}: {e}\n"
+        elapsed = int(time.time() - self.start_time)
+        self.time_lbl.configure(text=f"Elapsed: {elapsed}s, ETA: 0s")
 
         messagebox.showinfo("Processing Summary", summary)
 

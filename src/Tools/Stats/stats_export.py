@@ -128,7 +128,12 @@ def export_significance_results_to_excel(findings_dict, metric, threshold, paren
                     'df': finding.get('df', np.nan),
                     'T_Statistic': finding.get('T_Statistic', np.nan),
                     'P_Value': finding.get('P_Value', np.nan),
-                    'Mean_Threshold_Used': finding.get('Threshold', np.nan)  # value from the 'Threshold' field
+
+                    # Attempt to use the explicit key from stats.py if present,
+                    # otherwise fall back to any older key name
+                    'Mean_Threshold_Used': finding.get('Threshold_Used',
+                                                    finding.get('Threshold', np.nan))
+
                 }
                 flat_results.append(row)
 
@@ -272,39 +277,41 @@ def export_rm_anova_results_to_excel(anova_table, parent_folder, log_func=print)
         messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
 
 
-# --- Export Function for Mixed Effects Model Results ---
-def export_mixedlm_results_to_excel(mixedlm_table, parent_folder, log_func=print):
-    """Exports MixedLM fixed effects table to a formatted Excel file."""
-    log_func("Attempting to export Mixed Model results...")
-    if mixedlm_table is None or not isinstance(mixedlm_table, pd.DataFrame) or mixedlm_table.empty:
-        log_func("No Mixed Model results data available or data is not a DataFrame.")
-        messagebox.showwarning("No Results", "No Mixed Model results available to export or data format is incorrect.")
+# --- Export Function for Post-hoc Pairwise Test Results ---
+def export_posthoc_results_to_excel(results_df, factor, parent_folder, log_func=print):
+    """Exports post-hoc pairwise test results to an Excel file."""
+    log_func("Attempting to export Post-hoc results...")
+    if results_df is None or not isinstance(results_df, pd.DataFrame) or results_df.empty:
+        log_func("No Post-hoc results data available to export.")
+        messagebox.showwarning("No Results", "No Post-hoc results to export.")
         return
 
-    df_export = mixedlm_table.copy()
+    df_export = results_df.copy()
+    preferred_cols = ['Level_A', 'Level_B', 'N_Pairs', 't_statistic', 'p_value', 'p_value_corrected', 'Significant']
+    df_export = df_export[[col for col in preferred_cols if col in df_export.columns]]
 
     initial_dir = parent_folder if os.path.isdir(parent_folder) else os.path.expanduser("~")
-    suggested_filename = "Stats_MixedModel_SummedBCA.xlsx"
+    factor_name = factor.replace(' ', '_')
+    suggested_filename = f"Stats_Posthoc_{factor_name}.xlsx"
 
     save_path = filedialog.asksaveasfilename(
-        title="Save Mixed Model Results (Summed BCA)",
+        title=f"Save Post-hoc Results ({factor})",
         initialdir=initial_dir, initialfile=suggested_filename, defaultextension=".xlsx",
         filetypes=[("Excel Workbook", "*.xlsx"), ("All Files", "*.*")]
     )
-    if not save_path:
-        log_func("Mixed Model export cancelled.")
-        return
+    if not save_path: log_func("Post-hoc export cancelled."); return
 
     try:
-        log_func(f"Exporting Mixed Model results to: {save_path}")
+        log_func(f"Exporting Post-hoc results to: {save_path}")
         with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
-            _auto_format_and_write_excel(writer, df_export, 'Mixed Model Results', log_func)
-        log_func("Mixed Model results export successful.")
-        messagebox.showinfo("Export Successful", f"Mixed Model results exported to:\n{save_path}")
+            _auto_format_and_write_excel(writer, df_export, 'Post-hoc Results', log_func)
+        log_func("Post-hoc results export successful.")
+        messagebox.showinfo("Export Successful", f"Post-hoc results exported to:\n{save_path}")
+
     except PermissionError:
         err_msg = f"Permission denied writing to {save_path}. File may be open or folder write-protected."
         log_func(f"!!! Export Failed: {err_msg}")
         messagebox.showerror("Export Failed", err_msg)
     except Exception as e:
-        log_func(f"!!! Mixed Model Export Failed: {e}\n{traceback.format_exc()}")
-        messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
+
+        log_func(f"!!! Post-hoc Export Failed: {e}\n{traceback.format_exc()}")

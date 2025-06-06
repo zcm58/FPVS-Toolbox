@@ -6,9 +6,10 @@ import customtkinter as ctk
 from customtkinter import CTkInputDialog
 import CTkMessagebox
 import os
+from pathlib import Path
 import re
 import threading
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
 import traceback
 import logging
 
@@ -39,7 +40,7 @@ try:
     from .advanced_analysis_core import run_advanced_averaging_processing
 
     # CORRECTED: Use ABSOLUTE import from src root for post_process
-    from src.post_process import post_process as _external_post_process_actual
+    from Main_App.post_process import post_process as _external_post_process_actual
 
 except ImportError as e:
     # Keep the error handling for robustness
@@ -255,6 +256,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self.master_app.log(f"[AdvAnalysis] {message}")
 
     def add_source_files(self):
+        """Prompt the user for EEG files and add them to the source list."""
+
         files = filedialog.askopenfilenames(
             title="Select EEG Files",
             filetypes=[("EEG files", "*.bdf *.set"), ("All files", "*.*")],
@@ -274,6 +277,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self.log(f"Added {added_count} source file(s). Total: {len(self.source_eeg_files)}.")
 
     def remove_source_files(self):
+        """Remove the files selected in the listbox from the source list."""
+
         selected_indices = self.source_files_listbox.curselection()
         if not selected_indices:
             self.log("No source files selected to remove.")
@@ -288,9 +293,11 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self._check_groups_for_removed_files(removed_file_paths)
 
     def _update_source_files_listbox(self):
+        """Refresh the source files listbox to match ``self.source_eeg_files``."""
+
         self.source_files_listbox.delete(0, tk.END)
         for f_path in self.source_eeg_files:
-            self.source_files_listbox.insert(tk.END, os.path.basename(f_path))
+            self.source_files_listbox.insert(tk.END, Path(f_path).name)
 
     def _check_groups_for_removed_files(self, removed_paths: List[str]):
         """
@@ -344,6 +351,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self._update_start_processing_button_state()
 
     def create_new_group(self):
+        """Prompt for details and create a new averaging group."""
+
         dlg_name = CTkInputDialog(title="New Averaging Group", text="Enter a name for this averaging group:")
         name = dlg_name.get_input()
         if not name or not name.strip():
@@ -405,6 +414,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self._update_start_processing_button_state()
 
     def delete_selected_group(self):
+        """Remove the currently selected averaging group."""
+
         if self.selected_group_index is None:
             self.log("No group selected to delete.");
             return
@@ -465,7 +476,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         ctk.CTkLabel(self.group_config_frame, text=f"Group Name: {group_data['name']}", font=ctk.CTkFont(weight="bold")) \
             .pack(anchor="w", padx=PAD_X, pady=PAD_Y)
 
-        files_display_text = "\n".join(os.path.basename(fp) for fp in group_data['file_paths'])
+        files_display_text = "\n".join(Path(fp).name for fp in group_data['file_paths'])
         if not files_display_text: files_display_text = "No files currently in this group."
         ctk.CTkLabel(self.group_config_frame, text="Files in this group:\n" + files_display_text, justify=tk.LEFT) \
             .pack(anchor="w", padx=PAD_X)
@@ -551,62 +562,114 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         # The _check_processing_thread method will handle UI finalization
         # when this wrapper function (and thus the thread) completes.
 
-    def start_advanced_processing(self) -> None:
-        """Validates main‐app params and group configs, then kicks off the background thread."""
-        self.log("=" * 30 + "\nAttempting to Start Advanced Processing...")
+    def _validate_processing_setup(self) -> Optional[tuple]:
+        """Validate configuration before launching the processing thread.
 
-        # 0) Validate and fetch main app parameters
-        main_app_params = None
-        if hasattr(self.master_app, "get_fpvs_params"):
-            self.log("[PARAM_CHECK] Attempting to fetch parameters from main app via get_fpvs_params().")
-            try:
-                main_app_params = self.master_app.get_fpvs_params()
-            except Exception as e:
-                self.log(f"[PARAM_CHECK] Error calling get_fpvs_params(): {traceback.format_exc()}")
-        else:
-            self.log("[PARAM_CHECK] master_app does not implement get_fpvs_params().")
+        Returns
+        -------
+        tuple[Dict[str, Any], str] or None
+            ``(main_app_params, output_directory)`` if validation succeeds,
+            otherwise ``None``.
+        """
 
-        if not main_app_params:
-            CTkMessagebox.CTkMessagebox(
-                title="Error",
-                message="Main application parameters could not be validated or are missing. Please check the main app settings.",
-                icon="cancel",
-                parent=self
-            )
-            return
 
-        # 1) Check that we have at least one fully‐defined, saved group
+        # 0) If the main app hasn't yet validated its entries, do so now.
+        self.log(
+            f"[PARAM_CHECK] Initial check: self.master_app has 'validated_params' attribute: {hasattr(self.master_app, 'validated_params')}" )
+        if hasattr(self.master_app, 'validated_params'):
+            current_params = getattr(self.master_app, 'validated_params', 'Attribute exists but is None')
+            self.log(
+                f"[PARAM_CHECK] Initial self.master_app.validated_params (type: {type(current_params)}): {current_params}")
+
+        main_app_params_are_set = bool(getattr(self.master_app, "validated_params", None))
+
+        if not main_app_params_are_set:
+            self.log(
+                "[PARAM_CHECK] Main app's 'validated_params' not set or is None/empty. Attempting to call _validate_inputs().")
+            ok = False
+            if hasattr(self.master_app, "_validate_inputs"):
+                self.log("[PARAM_CHECK] Calling self.master_app._validate_inputs()...")
+                try:
+                    ok = self.master_app._validate_inputs()
+                    self.log(f"[PARAM_CHECK] self.master_app._validate_inputs() returned: {ok}")
+
+                    if hasattr(self.master_app, 'validated_params'):
+                        current_params_after_call = getattr(self.master_app, 'validated_params', 'Attribute exists but is None')
+                        self.log(
+                            f"[PARAM_CHECK] After _validate_inputs(), self.master_app.validated_params (type: {type(current_params_after_call)}): {current_params_after_call}")
+                        main_app_params_are_set = bool(current_params_after_call)
+                    else:
+                        self.log(
+                            "[PARAM_CHECK] After _validate_inputs(), self.master_app still does not have 'validated_params' attribute.")
+                        main_app_params_are_set = False
+
+                except Exception as e:
+                    self.log(f"[PARAM_CHECK] Error during self.master_app._validate_inputs(): {traceback.format_exc()}")
+                    CTkMessagebox.CTkMessagebox(
+                        title="Error",
+                        message=f"An error occurred while validating main application inputs: {e}",
+                        icon="cancel",
+                        parent=self
+                    )
+                    return None
+            else:
+                self.log(
+                    "[PARAM_CHECK] Warning: Main app does not have a '_validate_inputs' method, and 'validated_params' was not already set.")
+
+            if not ok and not main_app_params_are_set:
+                self.log(
+                    "[PARAM_CHECK] Main app input validation failed or was not performed, and parameters are still not set.")
+                CTkMessagebox.CTkMessagebox(
+                    title="Error",
+                    message="Main application parameters could not be validated or are missing. Please check the main app settings and ensure they are confirmed/applied.",
+                    icon="cancel",
+                    parent=self
+                )
+                return None
+            elif ok and not main_app_params_are_set:
+                self.log(
+                    "[PARAM_CHECK] Warning: _validate_inputs returned True, but validated_params is still not set or is None/empty.")
+                CTkMessagebox.CTkMessagebox(
+                    title="Error",
+                    message="Main app validation reported success, but parameters are missing. Please check the main app's _validate_inputs method.",
+                    icon="cancel",
+                    parent=self
+                )
+                return None
+
+
         if not self.defined_groups:
-            CTkMessagebox.CTkMessagebox(title="Error", message="No averaging groups defined.", icon="cancel",
-                                        parent=self)
-            return
+            CTkMessagebox.CTkMessagebox(title="Error", message="No averaging groups defined.", icon="cancel", parent=self)
+            return None
 
         for i, group in enumerate(self.defined_groups):
             if not group.get("config_saved", False):
                 CTkMessagebox.CTkMessagebox(title="Error",
                                             message=f"Group '{group['name']}' has unsaved changes. Please save it first.",
                                             icon="cancel", parent=self)
-                self.groups_listbox.selection_set(i);
+                self.groups_listbox.selection_set(i)
                 self.on_group_select(None)
-                return
+                return None
             if not group.get("file_paths"):
                 CTkMessagebox.CTkMessagebox(title="Error", message=f"Group '{group['name']}' contains no files.",
                                             icon="cancel", parent=self)
-                self.groups_listbox.selection_set(i);
+                self.groups_listbox.selection_set(i)
                 self.on_group_select(None)
-                return
+                return None
             if not group.get("condition_mappings"):
                 CTkMessagebox.CTkMessagebox(title="Error",
                                             message=f"Group '{group['name']}' has no mapping rules defined.",
                                             icon="cancel", parent=self)
-                self.groups_listbox.selection_set(i);
+                self.groups_listbox.selection_set(i)
                 self.on_group_select(None)
-                return
+                return None
 
-        # 2) main_app_params now holds the validated parameters from the main app
+
+        main_app_params = getattr(self.master_app, 'validated_params', None)
+
         self.log(f"[PARAM_CHECK] Final fetched main_app_params to be used for processing: {main_app_params}")
 
-        if main_app_params is None or not main_app_params:  # Also check for empty dict if that's invalid
+        if main_app_params is None or not main_app_params:
             self.log("[PARAM_CHECK] Critical Error: main_app_params is None or empty after validation attempts.")
             CTkMessagebox.CTkMessagebox(
                 title="Critical Error",
@@ -614,9 +677,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 icon="cancel",
                 parent=self
             )
-            return
+            return None
 
-        # Check if it's a dictionary (basic check, core function will look for specific keys)
         if not isinstance(main_app_params, dict):
             self.log(
                 f"[PARAM_CHECK] Critical Error: main_app_params is not a dictionary (type: {type(main_app_params)}).")
@@ -626,30 +688,31 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 icon="cancel",
                 parent=self
             )
-            return
+            return None
 
-        # 3) Fetch & check the save‐folder path object
         save_folder_path_obj = getattr(self.master_app, "save_folder_path", None)
         if save_folder_path_obj is None or not hasattr(save_folder_path_obj, "get"):
             CTkMessagebox.CTkMessagebox(title="Error", message="Main application output folder path is not configured.",
                                         icon="cancel", parent=self)
-            return
+            return None
 
-        # 4) Extract the string and verify it's non‐empty
         output_directory = save_folder_path_obj.get()
         if not output_directory:
             CTkMessagebox.CTkMessagebox(title="Error", message="Main application output folder path is missing.",
                                         icon="cancel", parent=self)
-            return
+            return None
 
-        # 5) Core modules must be loaded
         if run_advanced_averaging_processing is None or _external_post_process_actual is None:
             CTkMessagebox.CTkMessagebox(title="Critical Error",
                                         message="Core processing module or post_process function not loaded.",
                                         icon="cancel", parent=self)
-            return
+            return None
 
-        # 6) All checks passed—kick off the thread
+        return main_app_params, output_directory
+
+    def _launch_processing_thread(self, main_app_params: Dict[str, Any], output_directory: str) -> None:
+        """Start the background thread that performs advanced averaging."""
+
         self.log("All configurations validated. Starting processing thread...")
         self.progress_bar.grid()
         self.progress_bar.set(0)
@@ -661,11 +724,10 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         preprocess_raw_method = self.master_app.preprocess_raw
 
         self.processing_thread = threading.Thread(
-
             target=self._thread_target_wrapper,
             args=(
                 self.defined_groups,
-                main_app_params,  # This is the crucial part
+                main_app_params,
                 load_file_method,
                 preprocess_raw_method,
                 _external_post_process_actual,
@@ -673,12 +735,24 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 self._extract_pid_for_group,
                 lambda msg: self.after(0, self.log, msg),
                 lambda val: self.after(0, self.progress_bar.set, val),
-                self._stop_requested
+                self._stop_requested,
             ),
-            daemon=True
+            daemon=True,
         )
         self.processing_thread.start()
         self.after(100, self._check_processing_thread)
+
+    def start_advanced_processing(self) -> None:
+        """Validate configuration and spawn the processing thread."""
+
+        self.log("=" * 30 + "\nAttempting to Start Advanced Processing...")
+
+        validation = self._validate_processing_setup()
+        if not validation:
+            return
+
+        main_app_params, output_directory = validation
+        self._launch_processing_thread(main_app_params, output_directory)
 
     def _check_processing_thread(self):
         if self.processing_thread and self.processing_thread.is_alive():
@@ -707,11 +781,13 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self.processing_thread = None
 
     def _extract_pid_for_group(self, group_data: Dict[str, Any]) -> str:
+        """Return a participant identifier extracted from a group's first file."""
+
         file_paths = group_data.get('file_paths', [])
         if not file_paths:
             return "UnknownPID"
 
-        base_name = os.path.splitext(os.path.basename(file_paths[0]))[0]  # e.g., "mooney_P1"
+        base_name = Path(file_paths[0]).stem  # e.g., "mooney_P1"
 
         # Primary Regex (should capture "P1" from "mooney_P1" or "P1_mooney" etc.)
         pid_regex_primary = r"\b(P\d+|S\d+|Sub\d+)\b"  # Added S\d+ as common alternative
@@ -782,7 +858,7 @@ if __name__ == "__main__":
                 "stim_channel": "Status"
             }
             self.save_folder_path = tk.StringVar(
-                value=os.path.join(os.getcwd(), "test_adv_output_standalone")
+                value=str(Path(os.getcwd()) / "test_adv_output_standalone")
             )
             try:
                 os.makedirs(self.save_folder_path.get(), exist_ok=True)
