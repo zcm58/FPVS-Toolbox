@@ -4,7 +4,7 @@ pyinstaller `
   --windowed `
   -n FPVS_Toolbox_0.9.5 `
   --paths=src `
-  -i "C:\Users\zackm\OneDrive - Mississippi State University\Office Desktop\ToolBox Icon.ico" `
+  -i "C:\Users\zcm58\OneDrive - Mississippi State University\Nerd Lab TA Stuff\6 - App Icons\ToolBox Icon.ico" `
   --collect-all mne `
   --hidden-import=mne.io.bdf `
   --hidden-import=mne.io.eeglab `
