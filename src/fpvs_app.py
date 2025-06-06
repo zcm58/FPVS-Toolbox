@@ -55,6 +55,7 @@ from Main_App.file_selection import FileSelectionMixin
 from Main_App.event_detection import EventDetectionMixin
 from Main_App.validation_mixins import ValidationMixin
 from Main_App.processing_utils import ProcessingMixin
+from Main_App.logging_mixin import LoggingMixin
 
 from config import (
     FPVS_TOOLBOX_VERSION,
@@ -80,7 +81,7 @@ import Tools.Stats as stats
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-class FPVSApp(ctk.CTk, EventMapMixin, FileSelectionMixin,
+class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
               EventDetectionMixin, ValidationMixin, ProcessingMixin):
     """ Main application class replicating MATLAB FPVS analysis workflow using numerical triggers. """
 
