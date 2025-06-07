@@ -25,6 +25,8 @@ if __name__ == "__main__":
 
         "--collect-all",
         "mne",
+        "--collect-data",
+        "mne",
         "--hidden-import",
         "mne.io.bdf",
         "--hidden-import",
