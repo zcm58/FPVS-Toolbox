@@ -153,7 +153,6 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.log_text = None
         self.progress_bar = None
         self.menubar = None
-        self.date_label = None
         self.debug_label = None
 
         # --- Register Validation Commands ---
@@ -406,8 +405,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         top_bar.grid_columnconfigure(0, weight=0)  # Select button
         top_bar.grid_columnconfigure(1, weight=1)  # Output folder button (centered)
         top_bar.grid_columnconfigure(2, weight=0)  # Start button
-        top_bar.grid_columnconfigure(3, weight=0)  # Date label
-        top_bar.grid_columnconfigure(4, weight=0)  # Debug label
+        top_bar.grid_columnconfigure(3, weight=0)  # Debug label
 
         self.select_button = ctk.CTkButton(top_bar, text="Select EEG File…",
                                            command=self.select_data_source,
@@ -426,12 +424,9 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
                                           font=ctk.CTkFont(weight="bold"))
         self.start_button.grid(row=0, column=2, sticky="e", padx=(PAD_X, 0))
 
-        from datetime import datetime
-        self.date_label = ctk.CTkLabel(top_bar, text=datetime.now().strftime("%Y-%m-%d"))
-        self.date_label.grid(row=0, column=3, padx=(PAD_X, 0))
         if self.settings.debug_enabled():
             self.debug_label = ctk.CTkLabel(top_bar, text="DEBUG MODE ENABLED", text_color="red")
-            self.debug_label.grid(row=0, column=4, padx=(PAD_X, 0))
+            self.debug_label.grid(row=0, column=3, padx=(PAD_X, 0))
 
         # --- Create Setup Panels using SetupPanelManager ---
         # (Options Panel on row=1, Params Panel on row=2, inside main_frame)
