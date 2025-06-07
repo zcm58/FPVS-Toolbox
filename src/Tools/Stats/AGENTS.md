@@ -25,3 +25,5 @@ into new files, but do not change the content of the code or the functionality.
 
 If you're adding a new statistical analysis method, we should always include a new
 button so that the user can access the new method. 
+
+Unless you are specifically asked to edit the Stats module, do not change anything in this directory. 
