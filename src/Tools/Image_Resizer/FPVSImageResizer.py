@@ -98,7 +98,7 @@ def process_images_in_folder(input_folder, output_folder,
 
 # === CustomTkinter UI ===
 
-ctk.set_appearance_mode("System")
+# Use the application's current appearance mode
 ctk.set_default_color_theme("blue")
 
 

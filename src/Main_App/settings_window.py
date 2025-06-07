@@ -98,4 +98,9 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('events','labels', self.cond_var.get())
         self.manager.set('events','ids', self.id_var.get())
         self.manager.save()
+
+        # Apply the new appearance mode immediately across the app
+        if hasattr(self.master, "set_appearance_mode"):
+            self.master.set_appearance_mode(self.mode_var.get())
+
         self.destroy()
