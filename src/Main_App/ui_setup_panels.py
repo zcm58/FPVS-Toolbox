@@ -9,13 +9,24 @@ import customtkinter as ctk
 
 # Attempt to import constants from config.py
 try:
-    from ..config import (
-        ENTRY_WIDTH, PAD_X, PAD_Y, CORNER_RADIUS
-        # DEFAULT_STIM_CHANNEL and STIM_CHANNEL_ENTRY_WIDTH are no longer needed here
-        # LABEL_ID_ENTRY_WIDTH is for event_map, not these panels
+    # When ``main.py`` is executed directly the package hierarchy is not
+    # recognised, so ``..config`` cannot be resolved.  Importing from
+    # ``config`` allows the app to run both as ``python src/main.py`` and
+    # ``python -m src.main``.
+    from config import (
+        ENTRY_WIDTH,
+        PAD_X,
+        PAD_Y,
+        CORNER_RADIUS,
+        # ``DEFAULT_STIM_CHANNEL`` and ``STIM_CHANNEL_ENTRY_WIDTH`` are no
+        # longer needed here. ``LABEL_ID_ENTRY_WIDTH`` is only used in the
+        # event map manager.
     )
 except ImportError:
-    print("Warning [ui_setup_panels.py]: Could not import from ..config. Using fallback UI constants.")
+    print(
+        "Warning [ui_setup_panels.py]: Could not import from config. "
+        "Using fallback UI constants."
+    )
     ENTRY_WIDTH = 80
     PAD_X = 5
     PAD_Y = 5

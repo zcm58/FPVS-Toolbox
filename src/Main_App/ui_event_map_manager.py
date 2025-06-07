@@ -10,10 +10,17 @@ import traceback
 from typing import Optional, Dict, Any
 
 try:
-    from ..config import PAD_X, PAD_Y, CORNER_RADIUS, LABEL_ID_ENTRY_WIDTH
-    # LABEL_ID_ENTRY_WIDTH is used for the Condition Label entry
+    # When running ``main.py`` directly, relative imports like ``..config``
+    # fail because the package hierarchy is not established. Importing from
+    # ``config`` ensures the constants are available regardless of how the app
+    # is launched.
+    from config import PAD_X, PAD_Y, CORNER_RADIUS, LABEL_ID_ENTRY_WIDTH
+    # ``LABEL_ID_ENTRY_WIDTH`` is used for the Condition Label entry.
 except ImportError:
-    print("Warning [ui_event_map_manager.py]: Could not import from ..config. Using fallback UI constants.")
+    print(
+        "Warning [ui_event_map_manager.py]: Could not import from config. "
+        "Using fallback UI constants."
+    )
     PAD_X = 5
     PAD_Y = 5
     CORNER_RADIUS = 6
