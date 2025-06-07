@@ -54,6 +54,7 @@ from Main_App.event_detection import EventDetectionMixin
 from Main_App.validation_mixins import ValidationMixin
 from Main_App.processing_utils import ProcessingMixin
 from Main_App.logging_mixin import LoggingMixin
+from Main_App import update_manager
 
 from config import (
     FPVS_TOOLBOX_VERSION,
@@ -194,6 +195,12 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             self.add_map_button,
         ]
         self._toggle_widgets = [widget for widget in self._toggle_widgets if widget is not None]
+
+        # Automatically check for updates without blocking the UI
+        try:
+            update_manager.check_for_updates_async(self)
+        except Exception as e:
+            self.log(f"Auto update check failed: {e}")
 
     def open_advanced_analysis_window(self):
         """Opens the Advanced Preprocessing Epoch Averaging window."""
