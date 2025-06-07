@@ -80,6 +80,8 @@ from Tools.Image_Resizer import FPVSImageResizer
 
 # Statistics toolbox
 import Tools.Stats as stats
+from Main_App.settings_manager import SettingsManager
+from Main_App.settings_window import SettingsWindow
 # =====================================================
 # GUI Configuration (unchanged)
 # =====================================================
@@ -95,11 +97,15 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     def __init__(self):
         super().__init__()
 
+        self.settings = SettingsManager()
+
 
         # --- App Version and Title ---
         from datetime import datetime
         self.title(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION} — {datetime.now():%Y-%m-%d}")
         self.minsize(750, 920)
+        self.geometry(self.settings.get('gui', 'main_size', '750x920'))
+        ctk.set_appearance_mode(self.settings.get('appearance', 'mode', 'System'))
 
 
         # --- Core State Variables ---
@@ -156,6 +162,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
         self.create_menu()
         self.create_widgets()  # This will call SetupPanelManager and EventMapManager
+        self._apply_loaded_settings()
 
 
         # --- Initial UI State ---
@@ -207,6 +214,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.log("Opening Advanced Analysis (Preprocessing Epoch Averaging) tool...")
         # AdvancedAnalysisWindow is imported from Tools.Average_Preprocessing
         adv_win = AdvancedAnalysisWindow(master=self)
+        adv_win.geometry(self.settings.get('gui', 'advanced_size', '1050x850'))
         adv_win.grab_set()  # Make it modal
 
     def _set_controls_enabled(self, enabled: bool):
@@ -234,14 +242,14 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         # Pass 'self' (the main FPVSApp instance) as the master window
         # Pass the folder path so the stats window can suggest it
         stats_win = stats.StatsAnalysisWindow(master=self, default_folder=last_output_folder)
-
-        # Make the stats window modal (user must close it before using main window)
+        stats_win.geometry(self.settings.get('gui', 'stats_size', '950x950'))
         stats_win.grab_set()
 
     def open_image_resizer(self):
         """Open the FPVS Image_Resizer tool in a new CTkToplevel."""
         # We pass `self` so the new window is a child of the main app:
         win = FPVSImageResizer(self)
+        win.geometry(self.settings.get('gui', 'resizer_size', '800x600'))
         win.grab_set()  # optional: make it modal
 
 
@@ -457,3 +465,34 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     # Override to use external function
     def post_process(self, condition_labels_present):
         _external_post_process(self, condition_labels_present)
+
+    def _apply_loaded_settings(self):
+        """Apply saved preferences to the GUI on startup."""
+        # Default directories
+        data_folder = self.settings.get('paths', 'data_folder', '')
+        if data_folder and os.path.isdir(data_folder):
+            self.log(f"Default data folder loaded: {data_folder}")
+            self.data_paths = [data_folder]
+
+        out_folder = self.settings.get('paths', 'output_folder', '')
+        if out_folder and os.path.isdir(out_folder):
+            self.save_folder_path.set(out_folder)
+
+        # Event map defaults
+        pairs = self.settings.get_event_pairs()
+        if pairs:
+            # Remove existing default row first
+            for entry in list(self.event_map_entries):
+                self.remove_event_map_entry(entry['frame'])
+            for label, id_val in pairs:
+                self.add_event_map_entry()
+                row = self.event_map_entries[-1]
+                row['label'].insert(0, label)
+                row['id'].insert(0, id_val)
+
+        # Stim channel override
+        global DEFAULT_STIM_CHANNEL
+        DEFAULT_STIM_CHANNEL = self.settings.get('stim', 'channel', DEFAULT_STIM_CHANNEL)
+
+    def open_settings_window(self):
+        SettingsWindow(self, self.settings)

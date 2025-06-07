@@ -31,12 +31,7 @@ class AppMenuBar:
         file_menu = tk.Menu(menubar_widget, tearoff=0)
         menubar_widget.add_cascade(label="File", menu=file_menu)
 
-        # Appearance submenu
-        appearance_menu = tk.Menu(file_menu, tearoff=0)
-        file_menu.add_cascade(label="Appearance", menu=appearance_menu)
-        appearance_menu.add_command(label="Dark Mode", command=lambda: self.app_ref.set_appearance_mode("Dark"))
-        appearance_menu.add_command(label="Light Mode", command=lambda: self.app_ref.set_appearance_mode("Light"))
-        appearance_menu.add_command(label="System Default", command=lambda: self.app_ref.set_appearance_mode("System"))
+        file_menu.add_command(label="Settings", command=self.app_ref.open_settings_window)
 
         file_menu.add_separator()
         file_menu.add_command(label="Check for Updates", command=self.app_ref.check_for_updates)
