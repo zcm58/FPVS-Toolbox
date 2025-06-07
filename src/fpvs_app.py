@@ -153,6 +153,8 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.log_text = None
         self.progress_bar = None
         self.menubar = None
+        self.date_label = None
+        self.debug_label = None
 
         # --- Register Validation Commands ---
         self.validate_num_cmd = (self.register(self._validate_numeric_input), '%P')
@@ -212,6 +214,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     def open_advanced_analysis_window(self):
         """Opens the Advanced Preprocessing Epoch Averaging window."""
         self.log("Opening Advanced Analysis (Preprocessing Epoch Averaging) tool...")
+        self.debug("Advanced analysis window requested")
         # AdvancedAnalysisWindow is imported from Tools.Average_Preprocessing
         adv_win = AdvancedAnalysisWindow(master=self)
         adv_win.geometry(self.settings.get('gui', 'advanced_size', '1050x850'))
@@ -232,6 +235,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     def open_stats_analyzer(self):
         """Opens the statistical analysis Toplevel window."""
         self.log("Opening Statistical Analysis tool...")  # Log the action
+        self.debug("Stats window requested")
 
         # Get the last used output folder path from the main GUI's variable
         last_output_folder = self.save_folder_path.get()
@@ -247,6 +251,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
     def open_image_resizer(self):
         """Open the FPVS Image_Resizer tool in a new CTkToplevel."""
+        self.debug("Image resizer window requested")
         # We pass `self` so the new window is a child of the main app:
         win = FPVSImageResizer(self)
         win.geometry(self.settings.get('gui', 'resizer_size', '800x600'))
@@ -401,6 +406,8 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         top_bar.grid_columnconfigure(0, weight=0)  # Select button
         top_bar.grid_columnconfigure(1, weight=1)  # Output folder button (centered)
         top_bar.grid_columnconfigure(2, weight=0)  # Start button
+        top_bar.grid_columnconfigure(3, weight=0)  # Date label
+        top_bar.grid_columnconfigure(4, weight=0)  # Debug label
 
         self.select_button = ctk.CTkButton(top_bar, text="Select EEG File…",
                                            command=self.select_data_source,
@@ -418,6 +425,13 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
                                           corner_radius=CORNER_RADIUS, width=180,
                                           font=ctk.CTkFont(weight="bold"))
         self.start_button.grid(row=0, column=2, sticky="e", padx=(PAD_X, 0))
+
+        from datetime import datetime
+        self.date_label = ctk.CTkLabel(top_bar, text=datetime.now().strftime("%Y-%m-%d"))
+        self.date_label.grid(row=0, column=3, padx=(PAD_X, 0))
+        if self.settings.debug_enabled():
+            self.debug_label = ctk.CTkLabel(top_bar, text="DEBUG MODE ENABLED", text_color="red")
+            self.debug_label.grid(row=0, column=4, padx=(PAD_X, 0))
 
         # --- Create Setup Panels using SetupPanelManager ---
         # (Options Panel on row=1, Params Panel on row=2, inside main_frame)

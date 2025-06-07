@@ -72,8 +72,12 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(self, textvariable=id_var).grid(row=10, column=1, columnspan=2, sticky="ew", padx=pad)
         self.id_var = id_var
 
+        debug_default = self.manager.get('debug', 'enabled', 'False').lower() == 'true'
+        self.debug_var = tk.BooleanVar(value=debug_default)
+        ctk.CTkLabel(self, text="Debug Mode").grid(row=11, column=0, sticky="w", padx=pad, pady=(pad,0))
+        ctk.CTkCheckBox(self, text="Enable", variable=self.debug_var).grid(row=11, column=1, sticky="w", padx=pad, pady=(pad,0))
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=11, column=0, columnspan=3, pady=(pad*2, pad))
+        btn_frame.grid(row=12, column=0, columnspan=3, pady=(pad*2, pad))
         ctk.CTkButton(btn_frame, text="Reset to Defaults", command=self._reset).pack(side="left", padx=pad)
         ctk.CTkButton(btn_frame, text="Save", command=self._save).pack(side="right", padx=pad)
 
@@ -97,10 +101,16 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('stim','channel', self.stim_var.get())
         self.manager.set('events','labels', self.cond_var.get())
         self.manager.set('events','ids', self.id_var.get())
+        prev_debug = self.manager.get('debug', 'enabled', 'False').lower() == 'true'
+        self.manager.set('debug','enabled', str(self.debug_var.get()))
         self.manager.save()
 
         # Apply the new appearance mode immediately across the app
         if hasattr(self.master, "set_appearance_mode"):
             self.master.set_appearance_mode(self.mode_var.get())
+
+        if prev_debug != self.debug_var.get():
+            from tkinter import messagebox
+            messagebox.showinfo("Restart Required", "Please restart the app for debug mode changes to take effect.")
 
         self.destroy()

@@ -23,6 +23,9 @@ DEFAULTS = {
     'events': {
         'labels': '',
         'ids': ''
+    },
+    'debug': {
+        'enabled': 'False'
     }
 }
 
@@ -77,3 +80,6 @@ class SettingsManager:
         ids = ','.join([p[1] for p in pairs])
         self.set('events', 'labels', labels)
         self.set('events', 'ids', ids)
+
+    def debug_enabled(self) -> bool:
+        return self.get('debug', 'enabled', 'False').lower() == 'true'
