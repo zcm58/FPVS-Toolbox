@@ -18,3 +18,7 @@ class LoggingMixin:
         except Exception as e:  # pragma: no cover - best effort logging
             print(f"[Log Error] {e}. Message: {message}")
         print(formatted, end="")
+
+    def debug(self, message: str) -> None:
+        if hasattr(self, 'settings') and getattr(self, 'settings').debug_enabled():
+            self.log(f"[DEBUG] {message}")
