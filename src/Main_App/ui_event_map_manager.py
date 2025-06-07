@@ -83,7 +83,10 @@ class EventMapManager:
         self.app_ref.add_map_button.pack(side="left")
 
 
-        self._add_new_event_row_ui(focus_new_row=True)
+        # The initial row should not request focus to avoid log spam about a
+        # missing widget during startup. Subsequent rows will still request
+        # focus when added via the "+ Add Condition" button.
+        self._add_new_event_row_ui(focus_new_row=False)
 
 
     def add_event_map_entry_from_manager(self, event=None):
