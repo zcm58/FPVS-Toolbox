@@ -24,6 +24,10 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+# Import fonts and initialization helper from the main config so the Stats
+# window uses the same style settings as the rest of the application.
+from config import init_fonts, FONT_MAIN, FONT_BOLD
+
 import pandas as pd
 import numpy as np
 import scipy.stats as stats
