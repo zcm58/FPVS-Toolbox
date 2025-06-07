@@ -102,6 +102,16 @@ class EventMapMixin:
         except Exception as e:
             self.log(f"Error removing Event Map row: {e}\n{traceback.format_exc()}")
 
+    def clear_event_map_entries(self):
+        """Remove all event map rows without adding a new blank row."""
+        if not hasattr(self, 'event_map_entries'):
+            return
+        for entry in list(self.event_map_entries):
+            frame = entry.get('frame')
+            if frame and frame.winfo_exists():
+                frame.destroy()
+        self.event_map_entries.clear()
+
     def _focus_next_id_entry(self, event):
         # (left intentionally blank)
         pass

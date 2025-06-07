@@ -480,15 +480,17 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
         # Event map defaults
         pairs = self.settings.get_event_pairs()
+        # Clear any existing rows without auto-adding a blank one
+        self.clear_event_map_entries()
         if pairs:
-            # Remove existing default row first
-            for entry in list(self.event_map_entries):
-                self.remove_event_map_entry(entry['frame'])
             for label, id_val in pairs:
                 self.add_event_map_entry()
                 row = self.event_map_entries[-1]
                 row['label'].insert(0, label)
                 row['id'].insert(0, id_val)
+        else:
+            # Ensure at least one empty row is present
+            self.add_event_map_entry()
 
         # Stim channel override
         global DEFAULT_STIM_CHANNEL
