@@ -13,7 +13,9 @@ class SettingsWindow(ctk.CTkToplevel):
         init_fonts()
         self.option_add("*Font", str(FONT_MAIN), 80)
         self.title("Settings")
-        self.geometry("420x600")
+        # Widen the window slightly so the debug checkbox
+        # is not clipped on some platforms
+        self.geometry("460x600")
         self.resizable(False, False)
         self._build_ui()
         self.grab_set()
