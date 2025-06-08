@@ -208,7 +208,9 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
         # Automatically check for updates without blocking the UI
         try:
-            update_manager.check_for_updates_async(self, silent=False)
+            update_manager.check_for_updates_async(
+                self, silent=False, notify_if_no_update=False
+            )
         except Exception as e:
             self.log(f"Auto update check failed: {e}")
 
