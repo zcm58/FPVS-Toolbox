@@ -176,60 +176,6 @@ def export_significance_results_to_excel(findings_dict, metric, threshold, paren
         messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
 
 
-# --- Export Function for Paired t-test Results (Summed BCA) ---
-def export_paired_results_to_excel(data, parent_folder, log_func=print):
-    """
-    Exports structured Paired t-test results to a formatted Excel file.
-
-    Args:
-        data (list of dict): List of dictionaries, each representing a significant paired test.
-                             Expected keys: 'ROI', 'Condition_A', 'Condition_B', 'N_Pairs',
-                                           't_statistic', 'df', 'p_value',
-                                           'Mean_A', 'Mean_B', 'Mean_Difference'.
-        parent_folder (str): Path for suggesting save location.
-        log_func (callable): Logging function.
-    """
-    log_func("Attempting to export Paired Test results...")
-    if not data:
-        log_func("No Paired Test results data available to export.")
-        messagebox.showwarning("No Results", "No Paired Test results to export.")
-        return
-
-    df_export = pd.DataFrame(data)
-
-    # Define preferred column order
-    preferred_cols = ['ROI', 'Condition_A', 'Condition_B', 'N_Pairs',
-                      'Mean_A', 'Mean_B', 'Mean_Difference',
-                      'Cohen_d', 't_statistic', 'df', 'p_value']
-    df_export = df_export[[col for col in preferred_cols if col in df_export.columns]]
-
-    # Suggest filename (try to get condition names if available from first result)
-    cond_a_name = data[0].get('Condition_A', 'CondA').replace(" ", "_")
-    cond_b_name = data[0].get('Condition_B', 'CondB').replace(" ", "_")
-    initial_dir = parent_folder if os.path.isdir(parent_folder) else os.path.expanduser("~")
-    suggested_filename = f"Stats_PairedTests_SummedBCA_{cond_a_name}_vs_{cond_b_name}.xlsx"
-
-    save_path = filedialog.asksaveasfilename(
-        title="Save Paired Test Results (Summed BCA)",
-        initialdir=initial_dir, initialfile=suggested_filename, defaultextension=".xlsx",
-        filetypes=[("Excel Workbook", "*.xlsx"), ("All Files", "*.*")]
-    )
-    if not save_path: log_func("Paired Test export cancelled."); return
-
-    try:
-        log_func(f"Exporting Paired Test results to: {save_path}")
-        with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
-            _auto_format_and_write_excel(writer, df_export, 'Paired Test Results', log_func)
-        log_func("Paired Test results export successful.")
-        messagebox.showinfo("Export Successful", f"Paired Test results exported to:\n{save_path}")
-    except PermissionError:
-        err_msg = f"Permission denied writing to {save_path}. File may be open or folder write-protected."
-        log_func(f"!!! Export Failed: {err_msg}")
-        messagebox.showerror("Export Failed", err_msg)
-    except Exception as e:
-        log_func(f"!!! Paired Test Export Failed: {e}\n{traceback.format_exc()}")
-        messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")
-
 
 # --- Export Function for RM-ANOVA Results (Summed BCA) ---
 def export_rm_anova_results_to_excel(anova_table, parent_folder, log_func=print):
