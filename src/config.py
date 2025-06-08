@@ -1,5 +1,6 @@
 import numpy as np
 import customtkinter as ctk
+from Main_App.settings_manager import SettingsManager
 
 # — FPVS Toolbox version & update API —
 
@@ -9,7 +10,38 @@ FPVS_TOOLBOX_UPDATE_API    = "https://api.github.com/repos/zcm58/FPVS-Toolbox-Re
 FPVS_TOOLBOX_REPO_PAGE     = "https://github.com/zcm58/FPVS-Toolbox-Repo/releases"
 
 # — metrics —
-TARGET_FREQUENCIES = np.arange(1.2, 16.8 + 1.2, 1.2)
+
+def _load_frequency_settings():
+    mgr = SettingsManager()
+    try:
+        odd = float(mgr.get('analysis', 'oddball_freq', '1.2'))
+    except ValueError:
+        odd = 1.2
+    try:
+        upper = float(mgr.get('analysis', 'bca_upper_limit', '16.8'))
+    except ValueError:
+        upper = 16.8
+    return odd, upper
+
+
+def _compute_freqs(odd: float, upper: float) -> np.ndarray:
+    if odd <= 0:
+        odd = 1.2
+    if upper < odd:
+        upper = 16.8
+    return np.arange(odd, upper + odd, odd)
+
+
+def update_target_frequencies(odd: float = None, upper: float = None) -> np.ndarray:
+    """Update the global TARGET_FREQUENCIES array."""
+    global TARGET_FREQUENCIES
+    if odd is None or upper is None:
+        odd, upper = _load_frequency_settings()
+    TARGET_FREQUENCIES = _compute_freqs(float(odd), float(upper))
+    return TARGET_FREQUENCIES
+
+
+TARGET_FREQUENCIES = update_target_frequencies()
 DEFAULT_ELECTRODE_NAMES_64 = [
     'Fp1','AF7','AF3','F1','F3','F5','F7','FT7','FC5','FC3','FC1','C1','C3','C5','T7','TP7',
     'CP5','CP3','CP1','P1','P3','P5','P7','P9','PO7','PO3','O1','Iz','Oz','POz','Pz','CPz',

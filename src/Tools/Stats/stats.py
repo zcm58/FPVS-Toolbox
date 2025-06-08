@@ -32,6 +32,7 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 from .repeated_m_anova import run_repeated_measures_anova
+from Main_App.settings_manager import SettingsManager
 
 
 from . import stats_export  # Excel export helpers
@@ -88,7 +89,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         # UI state variables
         self.stats_data_folder_var = tk.StringVar(master=self, value=default_folder)
         self.detected_info_var = tk.StringVar(master=self, value="Select folder containing FPVS results.")
-        self.base_freq_var = tk.StringVar(master=self, value="6.0")
+        self.base_freq = self._load_base_freq()
         self.roi_var = tk.StringVar(master=self, value=ALL_ROIS_OPTION)
         self.condition_A_var = tk.StringVar(master=self)
         self.condition_B_var = tk.StringVar(master=self)
@@ -251,6 +252,11 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.grab_release()
         self.destroy()
 
+    def _load_base_freq(self):
+        if hasattr(self.master_app, 'settings'):
+            return self.master_app.settings.get('analysis', 'base_freq', '6.0')
+        return SettingsManager().get('analysis', 'base_freq', '6.0')
+
     def _validate_numeric(self, P):
         if P in ("", "-"): return True
         try:
@@ -288,23 +294,20 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         common_setup_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
         common_setup_frame.grid_columnconfigure(1, weight=1)
         common_setup_frame.grid_columnconfigure(3, weight=1)
-        ctk.CTkLabel(common_setup_frame, text="Base Freq (Hz):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        ctk.CTkEntry(common_setup_frame, textvariable=self.base_freq_var, validate='key',
-                     validatecommand=validate_num_cmd, width=100).grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        ctk.CTkLabel(common_setup_frame, text="ROI (Paired/ANOVA):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(common_setup_frame, text="ROI (Paired/ANOVA):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         roi_options = [ALL_ROIS_OPTION] + list(ROIS.keys())
         self.roi_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.roi_var,
                                           values=roi_options)  # Stored instance
-        self.roi_menu.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        ctk.CTkLabel(common_setup_frame, text="Condition A (Paired):").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        self.roi_menu.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(common_setup_frame, text="Condition A (Paired):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.condA_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.condition_A_var, values=["(Scan Folder)"],
                                             command=lambda *_: self.update_condition_B_options())  # Already stored
-        self.condA_menu.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
-        ctk.CTkLabel(common_setup_frame, text="Condition B (Paired):").grid(row=2, column=2, padx=(15, 5), pady=5,
+        self.condA_menu.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(common_setup_frame, text="Condition B (Paired):").grid(row=1, column=2, padx=(15, 5), pady=5,
                                                                             sticky="w")
         self.condB_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.condition_B_var,
                                             values=["(Scan Folder)"])  # Already stored
-        self.condB_menu.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
+        self.condB_menu.grid(row=1, column=3, padx=5, pady=5, sticky="ew")
 
 
         # Post-hoc factor selection removed; only condition by ROI interaction is supported
@@ -540,12 +543,12 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
 
     def _get_included_freqs(self, all_col_names):
         return stats_analysis.get_included_freqs(
-            self.base_freq_var.get(), all_col_names, self.log_to_main_app
+            self.base_freq, all_col_names, self.log_to_main_app
         )
 
     def aggregate_bca_sum(self, file_path, roi_name):
         return stats_analysis.aggregate_bca_sum(
-            file_path, roi_name, self.base_freq_var.get(), self.log_to_main_app
+            file_path, roi_name, self.base_freq, self.log_to_main_app
         )
 
     def prepare_all_subject_summed_bca_data(self):
@@ -554,7 +557,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.subjects,
             self.conditions,
             self.subject_data,
-            self.base_freq_var.get(),
+            self.base_freq,
             self.log_to_main_app,
         ) or {}
         return bool(self.all_subject_data)
