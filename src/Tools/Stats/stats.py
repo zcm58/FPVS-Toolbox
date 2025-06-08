@@ -6,7 +6,7 @@ stats.py
 Provides a Toplevel window for statistical analysis of FPVS results.
 
 Dual-track workflow:
-  1. Summed BCA analysis (paired t-tests & RM-ANOVA) excluding base frequency multiples
+  1. Summed BCA analysis using RM-ANOVA, excluding base frequency multiples
   2. Per-harmonic significance check on SNR or Z-Score, excluding base frequency multiples
 
 Results are displayed in a textbox and exportable to Excel.
@@ -80,7 +80,6 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.conditions = []
 
         # Results storage for export (structured data)
-        self.paired_tests_results_data = []
         self.rm_anova_results_data = None  # Will store ANOVA table (ideally DataFrame)
         self.mixed_model_results_data = None  # Will store MixedLM fixed effects table
         self.harmonic_check_results_data = []
@@ -107,7 +106,6 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.harmonic_metric_menu = None
 
         # Export Buttons (instance variables to manage state)
-        self.export_paired_tests_btn = None
         self.export_rm_anova_btn = None
         self.export_mixed_model_btn = None
         self.export_harmonic_check_btn = None
@@ -294,16 +292,16 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         common_setup_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
         common_setup_frame.grid_columnconfigure(1, weight=1)
         common_setup_frame.grid_columnconfigure(3, weight=1)
-        ctk.CTkLabel(common_setup_frame, text="ROI (Paired/ANOVA):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(common_setup_frame, text="ROI (ANOVA):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         roi_options = [ALL_ROIS_OPTION] + list(ROIS.keys())
         self.roi_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.roi_var,
                                           values=roi_options)  # Stored instance
         self.roi_menu.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        ctk.CTkLabel(common_setup_frame, text="Condition A (Paired):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(common_setup_frame, text="Condition A:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.condA_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.condition_A_var, values=["(Scan Folder)"],
                                             command=lambda *_: self.update_condition_B_options())  # Already stored
         self.condA_menu.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        ctk.CTkLabel(common_setup_frame, text="Condition B (Paired):").grid(row=1, column=2, padx=(15, 5), pady=5,
+        ctk.CTkLabel(common_setup_frame, text="Condition B:").grid(row=1, column=2, padx=(15, 5), pady=5,
                                                                             sticky="w")
         self.condB_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.condition_B_var,
                                             values=["(Scan Folder)"])  # Already stored
@@ -320,8 +318,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                                                                                                           pady=(0, 5))
         buttons_summed_frame = ctk.CTkFrame(summed_bca_frame)
         buttons_summed_frame.pack(fill="x", padx=0, pady=0)  # Use pack for horizontal button layout
-        ctk.CTkButton(buttons_summed_frame, text="Run Paired Tests (Summed BCA)", command=self.run_paired_tests).pack(
-            side="left", padx=(0, 5), pady=5)
+        # Paired t-tests were removed; only RM-ANOVA remains
         ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
             side="left", padx=5, pady=5)
 
@@ -329,18 +326,6 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         # Only the interaction post-hoc test is available
         self.run_posthoc_btn = ctk.CTkButton(buttons_summed_frame, text="Run Interaction Post-hocs", command=self.run_interaction_posthocs)
         self.run_posthoc_btn.pack(side="left", padx=5, pady=5)
-        self.export_paired_tests_btn = ctk.CTkButton(
-            buttons_summed_frame,
-            text="Export Paired Results",
-            state="disabled",
-            command=lambda: stats_export.export_paired_results_to_excel(
-                data=self.paired_tests_results_data,
-                parent_folder=self.stats_data_folder_var.get(),
-                log_func=self.log_to_main_app,
-            ),
-        )
-
-        self.export_paired_tests_btn.pack(side="left", padx=5, pady=5)
         self.export_rm_anova_btn = ctk.CTkButton(
             buttons_summed_frame,
             text="Export RM-ANOVA",
@@ -511,7 +496,6 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
 
         # Reset pre-calculated data as new files are scanned
         self.all_subject_data.clear()
-        self.paired_tests_results_data.clear()
         self.rm_anova_results_data = None
         self.harmonic_check_results_data.clear()
 
@@ -561,66 +545,6 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             self.log_to_main_app,
         ) or {}
         return bool(self.all_subject_data)
-
-        # In stats.py
-
-        # ... (other parts of the class) ...
-
-    def run_paired_tests(self):
-
-        self.log_to_main_app("Running Paired Tests (Summed BCA)...")
-        self.results_textbox.configure(state="normal")
-        self.results_textbox.delete("1.0", tk.END)
-        self.export_paired_tests_btn.configure(state="disabled")
-        self.paired_tests_results_data.clear()
-
-
-        cond_a = self.condition_A_var.get()
-        cond_b = self.condition_B_var.get()
-
-
-        if not (cond_a and cond_a != "(Scan Folder)" and
-                cond_b and cond_b not in ["(Scan Folder)", "(No other conditions)", "(Select Condition A)"] and
-                cond_a != cond_b):
-            messagebox.showerror("Input Error", "Please select two different and valid conditions for paired tests.")
-            self.results_textbox.configure(state="disabled")
-            return
-
-
-        if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
-            messagebox.showerror("Data Error", "Summed BCA data could not be prepared. Please check logs or re-scan folder.")
-            self.results_textbox.configure(state="disabled")
-            return
-
-
-        selected_roi_option = self.roi_var.get()
-        if selected_roi_option == ALL_ROIS_OPTION:
-            rois_to_analyze = list(ROIS.keys())
-        elif selected_roi_option in ROIS:
-            rois_to_analyze = [selected_roi_option]
-        else:
-            messagebox.showerror("Input Error", f"Invalid ROI selected: {selected_roi_option}")
-            self.results_textbox.configure(state="disabled")
-            return
-
-
-        output_text, results = stats_analysis.run_paired_tests(
-            self.all_subject_data,
-            self.subjects,
-            cond_a,
-            cond_b,
-            rois_to_analyze,
-            selected_roi_option,
-            self.log_to_main_app,
-        )
-        self.paired_tests_results_data = results
-
-        self.results_textbox.insert("1.0", output_text)
-        if self.paired_tests_results_data:
-            self.export_paired_tests_btn.configure(state="normal")
-
-        self.results_textbox.configure(state="disabled")
-        self.log_to_main_app("Paired tests (Summed BCA) complete.")
 
     def run_rm_anova(self):
         self.log_to_main_app("Running RM-ANOVA (Summed BCA)...")
@@ -1144,9 +1068,6 @@ if __name__ == "__main__":
 
         # Mock stats_export and repeated_m_anova for standalone testing if not available
         class MockStatsExport:
-            def export_paired_results_to_excel(self, data, parent_folder, log_func): log_func(
-                "Mock: export_paired_results_to_excel called")
-
             def export_rm_anova_results_to_excel(self, anova_table, parent_folder, log_func): log_func(
                 "Mock: export_rm_anova_results_to_excel called")
 
