@@ -13,7 +13,7 @@ DEFAULTS = {
     },
     'gui': {
         'main_size': '750x920',
-        'stats_size': '950x950',
+        'stats_size': '700x650',
         'resizer_size': '800x600',
         'advanced_size': '1050x850'
     },

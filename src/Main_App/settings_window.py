@@ -15,7 +15,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.title("Settings")
         # Widen the window slightly so the debug checkbox
         # is not clipped on some platforms
-        self.geometry("460x600")
+        self.geometry("600x600")
         self.resizable(False, False)
         self._build_ui()
         self.grab_set()
