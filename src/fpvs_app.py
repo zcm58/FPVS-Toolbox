@@ -97,6 +97,8 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     def __init__(self):
         super().__init__()
 
+        update_manager.cleanup_old_executable()
+
         self.settings = SettingsManager()
 
 
@@ -206,7 +208,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
         # Automatically check for updates without blocking the UI
         try:
-            update_manager.check_for_updates_async(self)
+            update_manager.check_for_updates_async(self, silent=False)
         except Exception as e:
             self.log(f"Auto update check failed: {e}")
 
