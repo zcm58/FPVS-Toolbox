@@ -66,8 +66,8 @@ class EventMapManager:
 
         self.app_ref.event_map_scroll_frame = ctk.CTkScrollableFrame(self.parent_ui_frame, label_text="")
         self.app_ref.event_map_scroll_frame.grid(row=2, column=0, sticky="nsew", padx=PAD_X, pady=(0, PAD_Y))
-        self.app_ref.log(
-            f"DEBUG [EventMapManager]: self.app_ref.event_map_scroll_frame created: {self.app_ref.event_map_scroll_frame}")
+        self.app_ref.debug(
+            f"[EventMapManager] self.app_ref.event_map_scroll_frame created: {self.app_ref.event_map_scroll_frame}")
 
         event_map_button_frame = ctk.CTkFrame(self.parent_ui_frame, fg_color="transparent")
         event_map_button_frame.grid(row=3, column=0, sticky="ew", pady=(PAD_Y, 0), padx=PAD_X)
@@ -90,23 +90,23 @@ class EventMapManager:
 
 
     def add_event_map_entry_from_manager(self, event=None):
-        self.app_ref.log(
-            f"DEBUG [EventMapManager]: add_event_map_entry_from_manager called (event: {event is not None}).")
+        self.app_ref.debug(
+            f"[EventMapManager] add_event_map_entry_from_manager called (event: {event is not None}).")
         self._add_new_event_row_ui(event_details=None, focus_new_row=(event is None))
 
     def _add_new_event_row_ui(self, event_details: Optional[Dict] = None, focus_new_row: bool = True):
-        self.app_ref.log(f"DEBUG [EventMapManager]: _add_new_event_row_ui called. focus_new_row: {focus_new_row}")
+        self.app_ref.debug(f"[EventMapManager] _add_new_event_row_ui called. focus_new_row: {focus_new_row}")
 
         if not hasattr(self.app_ref, 'event_map_scroll_frame') or \
                 not self.app_ref.event_map_scroll_frame or \
                 not self.app_ref.event_map_scroll_frame.winfo_exists():
             self.app_ref.log("ERROR [EventMapManager]: Cannot add event map row, scroll frame not ready.")
             return
-        self.app_ref.log(f"DEBUG [EventMapManager]: Scroll frame found: {self.app_ref.event_map_scroll_frame}")
+        self.app_ref.debug(f"[EventMapManager] Scroll frame found: {self.app_ref.event_map_scroll_frame}")
 
         entry_frame = ctk.CTkFrame(self.app_ref.event_map_scroll_frame, fg_color="transparent")
         entry_frame.pack(fill="x", pady=1, padx=1)
-        self.app_ref.log(f"DEBUG [EventMapManager]: New entry_frame packed into scroll_frame.")
+        self.app_ref.debug(f"[EventMapManager] New entry_frame packed into scroll_frame.")
 
         # Configure columns within this specific entry_frame for alignment
         entry_frame.grid_columnconfigure(0, weight=1)  # Condition Label column (takes available space)
@@ -137,36 +137,36 @@ class EventMapManager:
                                    corner_radius=CORNER_RADIUS,
                                    command=lambda ef=entry_frame: self.remove_event_map_entry_from_manager(ef))
         remove_btn.grid(row=0, column=2, sticky="e", padx=(0, PAD_X))  # Add padx to not touch edge
-        self.app_ref.log(f"DEBUG [EventMapManager]: Widgets for new row created and gridded.")
+        self.app_ref.debug(f"[EventMapManager] Widgets for new row created and gridded.")
 
         new_entry_data = {'frame': entry_frame, 'label': label_entry, 'id': id_entry, 'button': remove_btn}
         self.app_ref.event_map_entries.append(new_entry_data)
-        self.app_ref.log(f"DEBUG [EventMapManager]: New entry appended. Count: {len(self.app_ref.event_map_entries)}")
+        self.app_ref.debug(f"[EventMapManager] New entry appended. Count: {len(self.app_ref.event_map_entries)}")
 
         if focus_new_row:
-            self.app_ref.log(f"DEBUG [EventMapManager]: Attempting to focus new label_entry (focus_new_row is True).")
+            self.app_ref.debug(f"[EventMapManager] Attempting to focus new label_entry (focus_new_row is True).")
             try:
                 def deferred_focus():
                     if label_entry.winfo_exists():
                         label_entry.focus_set()
                         label_entry.select_range(0, tk.END)
-                        self.app_ref.log(
-                            f"DEBUG [EventMapManager]: Deferred focus and select_range set on label_entry.")
+                        self.app_ref.debug(
+                            f"[EventMapManager] Deferred focus and select_range set on label_entry.")
                     else:
-                        self.app_ref.log(f"DEBUG [EventMapManager]: Deferred focus: label_entry does not exist.")
+                        self.app_ref.debug(f"[EventMapManager] Deferred focus: label_entry does not exist.")
 
                 self.app_ref.after(50, deferred_focus)
             except Exception as e:
                 self.app_ref.log(f"Warning [EventMapManager]: Error during focus attempt: {e}")
         else:
-            self.app_ref.log(f"DEBUG [EventMapManager]: Skipping focus (focus_new_row is False).")
+            self.app_ref.debug(f"[EventMapManager] Skipping focus (focus_new_row is False).")
 
         def deferred_scroll():
             if self.app_ref.event_map_scroll_frame and self.app_ref.event_map_scroll_frame.winfo_exists():
                 self.app_ref.event_map_scroll_frame._parent_canvas.yview_moveto(1.0)
-                self.app_ref.log(f"DEBUG [EventMapManager]: Deferred scroll of event_map_scroll_frame to bottom.")
+                self.app_ref.debug(f"[EventMapManager] Deferred scroll of event_map_scroll_frame to bottom.")
             else:
-                self.app_ref.log(f"DEBUG [EventMapManager]: Deferred scroll: scroll_frame does not exist.")
+                self.app_ref.debug(f"[EventMapManager] Deferred scroll: scroll_frame does not exist.")
 
         self.app_ref.after(100, deferred_scroll)
 
