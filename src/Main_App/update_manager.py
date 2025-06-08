@@ -10,6 +10,16 @@ from packaging.version import parse as version_parse
 from config import FPVS_TOOLBOX_VERSION, FPVS_TOOLBOX_UPDATE_API
 
 
+def cleanup_old_executable():
+    """Remove leftover backup executable after updating."""
+    backup = sys.executable + ".old"
+    try:
+        if os.path.exists(backup):
+            os.remove(backup)
+    except Exception:
+        pass
+
+
 def check_for_updates_async(app, silent=True):
     """Check for updates in a background thread.
 
@@ -23,7 +33,7 @@ def check_for_updates_async(app, silent=True):
 
 
 def _check_for_updates(app, silent=True):
-    """Perform the update check, optionally suppressing message boxes."""
+    """Fetch release info and schedule any UI dialogs on the main thread."""
     app.log("Checking for updates...")
     try:
         resp = requests.get(FPVS_TOOLBOX_UPDATE_API, timeout=5)
@@ -36,30 +46,41 @@ def _check_for_updates(app, silent=True):
 
         current = version_parse(FPVS_TOOLBOX_VERSION)
         remote = version_parse(latest.lstrip("v"))
+
         if remote > current:
             if silent:
                 app.log(
                     f"Update {latest} available. Use 'Check for Updates' in the File menu to update."
                 )
             else:
-                if messagebox.askyesno(
-                    "Update Available",
-                    f"A new version ({latest}) is available.\n",
-                    f"You have {FPVS_TOOLBOX_VERSION}.\n\n",
-                    "Download and install now?",
-                ):
-                    asset_url = _find_exe_asset(data)
-                    if asset_url:
-                        _perform_update(asset_url, latest, changelog, app)
-                    else:
-                        messagebox.showwarning(
-                            "Update Error",
-                            "No executable asset found in release.",
-                        )
+                def prompt():
+                    if messagebox.askyesno(
+                        "Update Available",
+                        f"A new version ({latest}) is available.\n"
+                        f"You have {FPVS_TOOLBOX_VERSION}.\n\n"
+                        "Download and install now?",
+                    ):
+                        asset_url = _find_exe_asset(data)
+                        if asset_url:
+                            _perform_update(asset_url, latest, changelog, app)
+                        else:
+                            messagebox.showwarning(
+                                "Update Error",
+                                "No executable asset found in release.",
+                            )
+                app.after(0, prompt)
         else:
-            app.log("No update available.")
+            if silent:
+                app.log("No update available.")
+            else:
+                app.after(0, lambda: messagebox.showinfo(
+                    "Up to Date",
+                    f"You are running the latest version ({FPVS_TOOLBOX_VERSION}).",
+                ))
     except Exception as e:
         app.log(f"Update check failed: {e}")
+        if not silent:
+            app.after(0, lambda: messagebox.showerror("Update Check Failed", str(e)))
 
 
 def _find_exe_asset(data):
