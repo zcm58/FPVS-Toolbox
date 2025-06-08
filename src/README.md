@@ -37,3 +37,17 @@ processing window:
 
 Adjust these as desired to better fit your screen or preferences.
 
+## Updating
+
+When the toolbox starts it checks the GitHub releases API to see if a newer
+version is available. If one is found you will be prompted to download and
+install it. The updater downloads the new executable, renames the current
+binary with a `.old` suffix and places the update in its place before
+restarting. Any previous backup copy is removed.
+
+The update check is controlled by constants in `config.py`:
+
+- `FPVS_TOOLBOX_VERSION` – the current running version
+- `FPVS_TOOLBOX_UPDATE_API` – URL queried for the latest release
+- `FPVS_TOOLBOX_REPO_PAGE` – page opened when downloading updates
+
