@@ -96,8 +96,8 @@ def _find_exe_asset(data):
     """
 
     for asset in data.get("assets", []):
-        name = asset.get("name", "")
-        if name.lower().endswith("-setup.exe"):
+        name = asset.get("name", "").lower()
+        if name.endswith("-setup.exe") or name.endswith("setup.exe") or name.endswith(".exe"):
             return asset.get("browser_download_url")
     return None
 
