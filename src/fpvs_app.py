@@ -221,7 +221,6 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         # AdvancedAnalysisWindow is imported from Tools.Average_Preprocessing
         adv_win = AdvancedAnalysisWindow(master=self)
         adv_win.geometry(self.settings.get('gui', 'advanced_size', '1050x850'))
-        adv_win.grab_set()  # Make it modal
 
     def _set_controls_enabled(self, enabled: bool):
         """
@@ -250,7 +249,6 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         # Pass the folder path so the stats window can suggest it
         stats_win = stats.StatsAnalysisWindow(master=self, default_folder=last_output_folder)
         stats_win.geometry(self.settings.get('gui', 'stats_size', '950x950'))
-        stats_win.grab_set()
 
     def open_image_resizer(self):
         """Open the FPVS Image_Resizer tool in a new CTkToplevel."""
@@ -258,7 +256,6 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         # We pass `self` so the new window is a child of the main app:
         win = FPVSImageResizer(self)
         win.geometry(self.settings.get('gui', 'resizer_size', '800x600'))
-        win.grab_set()  # optional: make it modal
 
 
     # --- Menu Methods ---
