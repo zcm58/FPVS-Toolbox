@@ -3,7 +3,7 @@
 """
 FPVS all-in-one toolbox using MNE-Python and CustomTkinter.
 
-Version: 0.9.9.1 (June 2025)
+Version: 0.9.9.2 (June 2025)
 
 Key functionalities:
 
