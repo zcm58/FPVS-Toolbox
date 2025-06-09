@@ -24,6 +24,13 @@ version.
 The build scripts locate the repository root automatically before running
 PyInstaller, so they work even if launched from another directory.
 
+## Packaging
+
+Releases now provide an Inno Setup installer. Running the installer creates a
+folder containing `FPVS_Toolbox.exe`, its required DLLs, and configuration
+files. Manual installations can download this installer directly from the
+GitHub release page and execute it to install the toolbox.
+
 ## Configuration
 
 The look and feel of the interface can be tweaked by editing constants in
@@ -41,9 +48,8 @@ Adjust these as desired to better fit your screen or preferences.
 
 When the toolbox starts it checks the GitHub releases API to see if a newer
 version is available. If one is found you will be prompted to download and
-install it. The updater downloads the new executable, renames the current
-binary with a `.old` suffix and places the update in its place before
-restarting. Any previous backup copy is removed.
+install it. The updater downloads the installer for the new version and runs it
+silently, replacing the existing installation.
 
 The update check is controlled by constants in `config.py`:
 
