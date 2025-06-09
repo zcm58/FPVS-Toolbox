@@ -193,14 +193,18 @@ class ProcessingMixin:
                         gui_queue.put({'type': 'log', 'message': f"Skipping file {f_name} due to load error."})
                         continue
 
-                    gui_queue.put(
-                        {'type': 'log', 'message': f"DEBUG [{f_name}]: Raw channel names after load: {raw.ch_names}"})
+                    if self.settings.debug_enabled():
+                        gui_queue.put(
+                            {'type': 'log', 'message': f"DEBUG [{f_name}]: Raw channel names after load: {raw.ch_names}"})
 
                     def thread_log_func_for_preprocess(message_from_preprocess):
+                        if message_from_preprocess.startswith("DEBUG") and not self.settings.debug_enabled():
+                            return
                         gui_queue.put({'type': 'log', 'message': message_from_preprocess})
 
-                    gui_queue.put({'type': 'log',
-                                   'message': f"DEBUG [{f_name}]: Calling perform_preprocessing. Stim_channel: '{stim_channel_name}'"})
+                    if self.settings.debug_enabled():
+                        gui_queue.put({'type': 'log',
+                                       'message': f"DEBUG [{f_name}]: Calling perform_preprocessing. Stim_channel: '{stim_channel_name}'"})
 
                     raw_proc, num_kurtosis_bads = perform_preprocessing(
                         raw_input=raw.copy(), params=params,
@@ -222,19 +226,22 @@ class ProcessingMixin:
                             'bad_channels_count': num_kurtosis_bads, 'threshold_used': max_bad_channels_alert_thresh
                         })
 
-                    gui_queue.put({'type': 'log',
-                                   'message': f"DEBUG [{f_name}]: Channels after perform_preprocessing: {raw_proc.ch_names}"})
+                    if self.settings.debug_enabled():
+                        gui_queue.put({'type': 'log',
+                                       'message': f"DEBUG [{f_name}]: Channels after perform_preprocessing: {raw_proc.ch_names}"})
 
                     file_extension = os.path.splitext(f_path)[1].lower()
                     if file_extension == ".set":
                         if hasattr(raw_proc, 'annotations') and raw_proc.annotations and len(raw_proc.annotations) > 0:
-                            gui_queue.put({'type': 'log',
-                                           'message': f"DEBUG [{f_name}]: Attempting event extraction using MNE Annotations for .set file."})
+                            if self.settings.debug_enabled():
+                                gui_queue.put({'type': 'log',
+                                               'message': f"DEBUG [{f_name}]: Attempting event extraction using MNE Annotations for .set file."})
                             mne_annots_event_id_map = {}
                             user_gui_int_ids = set(event_id_map_from_gui.values())
                             unique_raw_ann_descriptions = list(np.unique(raw_proc.annotations.description))
-                            gui_queue.put({'type': 'log',
-                                           'message': f"DEBUG [{f_name}]: Unique annotation descriptions in file: {unique_raw_ann_descriptions}"})
+                            if self.settings.debug_enabled():
+                                gui_queue.put({'type': 'log',
+                                               'message': f"DEBUG [{f_name}]: Unique annotation descriptions in file: {unique_raw_ann_descriptions}"})
                             for desc_str_from_file in unique_raw_ann_descriptions:
                                 mapped_id_for_this_desc = None
                                 if desc_str_from_file in event_id_map_from_gui:
@@ -253,8 +260,9 @@ class ProcessingMixin:
                                 gui_queue.put({'type': 'log',
                                                'message': f"WARNING [{f_name}]: For .set file, could not create MNE event_id map from annotations."})
                             else:
-                                gui_queue.put({'type': 'log',
-                                               'message': f"DEBUG [{f_name}]: Using MNE event_id map for annotations: {mne_annots_event_id_map}"})
+                                if self.settings.debug_enabled():
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"DEBUG [{f_name}]: Using MNE event_id map for annotations: {mne_annots_event_id_map}"})
                                 try:
                                     events, _ = mne.events_from_annotations(raw_proc, event_id=mne_annots_event_id_map,
                                                                             verbose=False, regexp=None)
@@ -270,8 +278,9 @@ class ProcessingMixin:
                         if events.size == 0: gui_queue.put({'type': 'log',
                                                             'message': f"FINAL WARNING [{f_name}]: No events extracted for this .set file from annotations."})
                     else:
-                        gui_queue.put({'type': 'log',
-                                       'message': f"DEBUG [{f_name}]: File is '{file_extension}'. Using mne.find_events on stim_channel '{stim_channel_name}'."})
+                        if self.settings.debug_enabled():
+                            gui_queue.put({'type': 'log',
+                                           'message': f"DEBUG [{f_name}]: File is '{file_extension}'. Using mne.find_events on stim_channel '{stim_channel_name}'."})
                         if stim_channel_name not in raw_proc.ch_names:
                             gui_queue.put({'type': 'log',
                                            'message': f"ERROR [{f_name}]: Stim_channel '{stim_channel_name}' NOT in preprocessed data."})
@@ -285,11 +294,13 @@ class ProcessingMixin:
                     if events.size == 0: gui_queue.put({'type': 'log',
                                                         'message': f"CRITICAL WARNING [{f_name}]: Event extraction resulted in empty events array."})
 
-                    gui_queue.put({'type': 'log',
-                                   'message': f"DEBUG [{f_name}]: Starting epoching based on GUI event_id_map: {event_id_map_from_gui}"})
-                    for lbl, num_id_val_gui in event_id_map_from_gui.items():
+                    if self.settings.debug_enabled():
                         gui_queue.put({'type': 'log',
-                                       'message': f"DEBUG [{f_name}]: Attempting to epoch for GUI label '{lbl}' (using Int ID: {num_id_val_gui}). Events array shape: {events.shape}"})
+                                       'message': f"DEBUG [{f_name}]: Starting epoching based on GUI event_id_map: {event_id_map_from_gui}"})
+                    for lbl, num_id_val_gui in event_id_map_from_gui.items():
+                        if self.settings.debug_enabled():
+                            gui_queue.put({'type': 'log',
+                                           'message': f"DEBUG [{f_name}]: Attempting to epoch for GUI label '{lbl}' (using Int ID: {num_id_val_gui}). Events array shape: {events.shape}"})
                         if events.size > 0 and num_id_val_gui in events[:, 2]:
                             try:
                                 epochs = mne.Epochs(raw_proc, events, event_id={lbl: num_id_val_gui},
@@ -306,17 +317,20 @@ class ProcessingMixin:
                                 gui_queue.put({'type': 'log',
                                                'message': f"!!! Epoching error for GUI label '{lbl}' in {f_name}: {e_epoch}\n{traceback.format_exc()}"})
                         else:
-                            gui_queue.put({'type': 'log',
-                                           'message': f"DEBUG [{f_name}]: Target Int ID {num_id_val_gui} for GUI label '{lbl}' not found in extracted events. Skipping."})
-                    gui_queue.put(
-                        {'type': 'log', 'message': f"DEBUG [{f_name}]: Epoching loop for all GUI labels finished."})
+                            if self.settings.debug_enabled():
+                                gui_queue.put({'type': 'log',
+                                               'message': f"DEBUG [{f_name}]: Target Int ID {num_id_val_gui} for GUI label '{lbl}' not found in extracted events. Skipping."})
+                    if self.settings.debug_enabled():
+                        gui_queue.put(
+                            {'type': 'log', 'message': f"DEBUG [{f_name}]: Epoching loop for all GUI labels finished."})
 
                 except Exception as file_proc_err:
                     gui_queue.put({'type': 'log',
                                    'message': f"!!! Error during main processing for {f_name}: {file_proc_err}\n{traceback.format_exc()}"})
 
                 finally:
-                    gui_queue.put({'type': 'log', 'message': f"DEBUG [{f_name}]: Entering finally block for file."})
+                    if self.settings.debug_enabled():
+                        gui_queue.put({'type': 'log', 'message': f"DEBUG [{f_name}]: Entering finally block for file."})
                     has_valid_data = False
                     if file_epochs:
                         has_valid_data = any(
@@ -325,8 +339,9 @@ class ProcessingMixin:
                                 elist[0].events) > 0
                             for elist in file_epochs.values()
                         )
-                    gui_queue.put(
-                        {'type': 'log', 'message': f"DEBUG [{f_name}]: Value of has_valid_data: {has_valid_data}"})
+                    if self.settings.debug_enabled():
+                        gui_queue.put(
+                            {'type': 'log', 'message': f"DEBUG [{f_name}]: Value of has_valid_data: {has_valid_data}"})
 
                     if raw_proc is not None and has_valid_data:
                         gui_queue.put({'type': 'log', 'message': f"--- Calling Post‐process for {f_name} ---"})
