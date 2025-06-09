@@ -112,10 +112,6 @@ class EventMapMixin:
                 frame.destroy()
         self.event_map_entries.clear()
 
-    def _focus_next_id_entry(self, event):
-        # (left intentionally blank)
-        pass
-
     def _add_row_and_focus_label(self, event):
         """Callback for Return/Enter key in event map entries to add a new row."""
         self.add_event_map_entry()
