@@ -9,6 +9,8 @@ from .settings_manager import SettingsManager
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, master, manager: SettingsManager):
         super().__init__(master)
+        # Ensure this window stays above its parent
+        self.transient(master)
         self.manager = manager
         init_fonts()
         self.option_add("*Font", str(FONT_MAIN), 80)

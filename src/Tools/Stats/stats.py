@@ -57,6 +57,8 @@ HARMONIC_CHECK_ALPHA = 0.05  # Significance level for one-sample t-test
 class StatsAnalysisWindow(ctk.CTkToplevel):
     def __init__(self, master, default_folder=""):
         super().__init__(master)
+        # Keep this window above its parent
+        self.transient(master)
 
         # Ensure fonts are initialised in case this window is launched
         # independently of the main application.
