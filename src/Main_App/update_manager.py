@@ -3,11 +3,16 @@ import sys
 import threading
 import tempfile
 import subprocess
+import webbrowser
 import requests
 from tkinter import messagebox
 from packaging.version import parse as version_parse
 
-from config import FPVS_TOOLBOX_VERSION, FPVS_TOOLBOX_UPDATE_API
+from config import (
+    FPVS_TOOLBOX_VERSION,
+    FPVS_TOOLBOX_UPDATE_API,
+    FPVS_TOOLBOX_REPO_PAGE,
+)
 
 
 def cleanup_old_executable():
@@ -60,16 +65,9 @@ def _check_for_updates(app, silent=True, notify_if_no_update=True):
                         "Update Available",
                         f"A new version ({latest}) is available.\n"
                         f"You have {FPVS_TOOLBOX_VERSION}.\n\n"
-                        "Download and install now?",
+                        "Would you like to open the release page?",
                     ):
-                        asset_url = _find_exe_asset(data)
-                        if asset_url:
-                            _perform_update(asset_url, latest, changelog, app)
-                        else:
-                            messagebox.showwarning(
-                                "Update Error",
-                                "No installer asset found in release.",
-                            )
+                        webbrowser.open(FPVS_TOOLBOX_REPO_PAGE)
                 app.after(0, prompt)
         else:
             if silent:
