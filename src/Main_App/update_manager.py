@@ -68,7 +68,7 @@ def _check_for_updates(app, silent=True, notify_if_no_update=True):
                         else:
                             messagebox.showwarning(
                                 "Update Error",
-                                "No executable asset found in release.",
+                                "No installer asset found in release.",
                             )
                 app.after(0, prompt)
         else:
@@ -87,15 +87,23 @@ def _check_for_updates(app, silent=True, notify_if_no_update=True):
 
 
 def _find_exe_asset(data):
+    """Return the download URL of the installer executable.
+
+    The release assets uploaded to GitHub include an installer built with
+    Inno Setup.  The filename convention used for the installer ends with
+    ``-Setup.exe``.  This helper searches the ``assets`` list of the GitHub
+    release response for such a file and returns its ``browser_download_url``.
+    """
+
     for asset in data.get("assets", []):
         name = asset.get("name", "")
-        if name.lower().endswith(".exe"):
+        if name.lower().endswith("-setup.exe"):
             return asset.get("browser_download_url")
     return None
 
 
 def _perform_update(url, version, changelog, app):
-    """Download the update and schedule replacement of the running executable."""
+    """Download the installer and run it silently."""
     try:
         app.log(f"Downloading update from {url}")
         with requests.get(url, stream=True, timeout=10) as r:
@@ -106,79 +114,17 @@ def _perform_update(url, version, changelog, app):
                         tmp.write(chunk)
                 tmp_path = tmp.name
 
-        current_exe = sys.executable
-        pid = os.getpid()
-        backup = current_exe + ".old"
-        script_ext = ".bat" if os.name == "nt" else ".sh"
-        script = tempfile.NamedTemporaryFile(delete=False, suffix=script_ext)
-        script_path = script.name
-        script.close()
-        log_path = script_path + ".log"
-
-        if os.name == "nt":
-            lines = f"""@echo off
-set EXE=\"{current_exe}\"
-set NEW=\"{tmp_path}\"
-set BACKUP=\"{backup}\"
-set LOG=\"{log_path}\"
-:wait
-tasklist /FI "PID eq {pid}" | find "{pid}" >nul
-if not errorlevel 1 (
-    timeout /T 1 >nul
-    goto wait
-)
-echo Updating >> "%LOG%" 2>&1
-move /Y "%EXE%" "%BACKUP%" >> "%LOG%" 2>&1
-if errorlevel 1 goto fail
-move /Y "%NEW%" "%EXE%" >> "%LOG%" 2>&1
-if errorlevel 1 goto fail
-start "" "%EXE%"
-del "%BACKUP%" >> "%LOG%" 2>&1
-del "%~f0"
-exit /b
-:fail
-echo Failed to replace executable >> "%LOG%" 2>&1
-exit /b 1
-"""
-        else:
-            lines = f"""#!/bin/sh
-EXE=\"{current_exe}\"
-NEW=\"{tmp_path}\"
-BACKUP=\"{backup}\"
-LOG=\"{log_path}\"
-while kill -0 {pid} 2>/dev/null; do
-    sleep 1
-done
-echo Updating >> "$LOG" 2>&1
-mv "$EXE" "$BACKUP" >> "$LOG" 2>&1
-if [ $? -ne 0 ]; then
-    echo Failed to backup executable >> "$LOG" 2>&1
-    exit 1
-fi
-mv "$NEW" "$EXE" >> "$LOG" 2>&1
-if [ $? -ne 0 ]; then
-    echo Failed to replace executable >> "$LOG" 2>&1
-    mv "$BACKUP" "$EXE" >> "$LOG" 2>&1
-    exit 1
-fi
-"$EXE" &
-rm -f "$BACKUP"
-rm -- "$0"
-"""
-
-        with open(script_path, "w", newline="\r\n" if os.name == "nt" else "\n") as f:
-            f.write(lines)
-        if os.name != "nt":
-            os.chmod(script_path, 0o755)
-
-        app.log(f"Launching update script {script_path}")
-        subprocess.Popen([script_path], close_fds=True)
+        app.log(f"Launching installer {tmp_path}")
+        subprocess.Popen([
+            tmp_path,
+            "/VERYSILENT",
+            "/NORESTART",
+        ], close_fds=True)
 
         messagebox.showinfo(
-            "Update Installed",
-            f"FPVS Toolbox has been updated to {version}.\n",
-            "The application will now restart.\n\n",
-            f"Changelog:\n{changelog}",
+            "Update Started",
+            "The application will close and the installer will run to "
+            "update FPVS Toolbox.",
         )
         app.destroy()
     except Exception as e:
