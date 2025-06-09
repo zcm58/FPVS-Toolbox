@@ -2,7 +2,7 @@ pyinstaller `
   --clean `
   --noconfirm `
   --windowed `
-  -n FPVS_Toolbox_0.9.9 `
+  -n FPVS_Toolbox_0.9.9.1 `
   --paths=src `
   -i "assets/ToolBox_Icon.ico" `
   --collect-all mne `
