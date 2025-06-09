@@ -6,6 +6,7 @@ UI panels for the FPVS Toolbox.
 """
 import tkinter as tk
 import customtkinter as ctk
+import warnings
 
 # Attempt to import constants from config.py
 try:
@@ -23,7 +24,7 @@ try:
         # event map manager.
     )
 except ImportError:
-    print(
+    warnings.warn(
         "Warning [ui_setup_panels.py]: Could not import from config. "
         "Using fallback UI constants."
     )

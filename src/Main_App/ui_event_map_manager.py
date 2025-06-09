@@ -7,6 +7,7 @@ of the FPVS Toolbox.
 import tkinter as tk
 import customtkinter as ctk
 import traceback
+import warnings
 from typing import Optional, Dict, Any
 
 try:
@@ -17,7 +18,7 @@ try:
     from config import PAD_X, PAD_Y, CORNER_RADIUS, LABEL_ID_ENTRY_WIDTH
     # ``LABEL_ID_ENTRY_WIDTH`` is used for the Condition Label entry.
 except ImportError:
-    print(
+    warnings.warn(
         "Warning [ui_event_map_manager.py]: Could not import from config. "
         "Using fallback UI constants."
     )
