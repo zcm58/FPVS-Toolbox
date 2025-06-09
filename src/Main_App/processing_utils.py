@@ -80,7 +80,8 @@ class ProcessingMixin:
                 elif t == 'error':
                     self.log("!!! THREAD ERROR: " + msg['message'])
                     if tb := msg.get('traceback'):
-                        print(tb)
+                        # Log the traceback through the standard logger
+                        self.log(tb)
                     done = True
 
                 elif t == 'done':
