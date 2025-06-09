@@ -88,6 +88,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.stats_data_folder_var = tk.StringVar(master=self, value=default_folder)
         self.detected_info_var = tk.StringVar(master=self, value="Select folder containing FPVS results.")
         self.base_freq = self._load_base_freq()
+        self.alpha_var = tk.StringVar(master=self, value=self._load_alpha())
         self.roi_var = tk.StringVar(master=self, value=ALL_ROIS_OPTION)
         self.condition_A_var = tk.StringVar(master=self)
         self.condition_B_var = tk.StringVar(master=self)
@@ -252,6 +253,11 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         if hasattr(self.master_app, 'settings'):
             return self.master_app.settings.get('analysis', 'base_freq', '6.0')
         return SettingsManager().get('analysis', 'base_freq', '6.0')
+
+    def _load_alpha(self):
+        if hasattr(self.master_app, 'settings'):
+            return self.master_app.settings.get('analysis', 'alpha', '0.05')
+        return SettingsManager().get('analysis', 'alpha', '0.05')
 
     def _validate_numeric(self, P):
         if P in ("", "-"): return True

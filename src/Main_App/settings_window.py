@@ -106,6 +106,11 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(stats_tab, textvariable=bca_var).grid(row=2, column=1, columnspan=2, sticky="ew", padx=pad)
         self.bca_var = bca_var
 
+        ctk.CTkLabel(stats_tab, text="Alpha Level").grid(row=3, column=0, sticky="w", padx=pad, pady=(pad, 0))
+        alpha_var = tk.StringVar(value=self.manager.get('analysis', 'alpha', '0.05'))
+        ctk.CTkEntry(stats_tab, textvariable=alpha_var).grid(row=3, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0))
+        self.alpha_var = alpha_var
+
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=1, column=0, pady=(0, pad))
         ctk.CTkButton(btn_frame, text="Reset to Defaults", command=self._reset).pack(side="left", padx=pad)
@@ -134,6 +139,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('analysis', 'base_freq', self.base_var.get())
         self.manager.set('analysis', 'oddball_freq', self.odd_var.get())
         self.manager.set('analysis', 'bca_upper_limit', self.bca_var.get())
+        self.manager.set('analysis', 'alpha', self.alpha_var.get())
         prev_debug = self.manager.get('debug', 'enabled', 'False').lower() == 'true'
         self.manager.set('debug', 'enabled', str(self.debug_var.get()))
         self.manager.save()

@@ -28,7 +28,8 @@ DEFAULTS = {
     'analysis': {
         'base_freq': '6.0',
         'oddball_freq': '1.2',
-        'bca_upper_limit': '16.8'
+        'bca_upper_limit': '16.8',
+        'alpha': '0.05'
     },
     'debug': {
         'enabled': 'False'
