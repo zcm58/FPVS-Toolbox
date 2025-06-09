@@ -18,7 +18,6 @@ class SettingsWindow(ctk.CTkToplevel):
         self.geometry("600x600")
         self.resizable(False, False)
         self._build_ui()
-        self.grab_set()
         self.focus_force()
 
     def _build_ui(self):

@@ -68,7 +68,6 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.option_add("*Font", str(FONT_MAIN), 80)
         self.title("FPVS Statistical Analysis Tool")
         self.geometry("950x950")  # Adjusted for clarity of layout
-        self.grab_set()
         self.focus_force()
 
         self.master_app = master
@@ -247,7 +246,6 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
 
     def on_close(self):
         self.log_to_main_app("Closing Stats Analysis window.")
-        self.grab_release()
         self.destroy()
 
     def _load_base_freq(self):

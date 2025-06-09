@@ -105,7 +105,6 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self.log("Advanced Averaging Analysis window initialized.")
         self._check_main_app_params()
 
-        self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._center_window)
         self._update_start_processing_button_state()
@@ -834,13 +833,11 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             else:
                 return
         else:
-            self.grab_release();
             self.destroy()
 
     def _force_destroy(self):
         if self.processing_thread and self.processing_thread.is_alive():
             self.log("Thread still active after timeout. Forcing close.")
-        self.grab_release();
         self.destroy()
 
 
