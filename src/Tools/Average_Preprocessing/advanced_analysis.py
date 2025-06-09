@@ -116,6 +116,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self.lift()
         self.attributes('-topmost', True)
         self.after(0, lambda: self.attributes('-topmost', False))
+        # Give the window focus so it appears above the main GUI
+        self.focus_force()
 
         self.source_eeg_files: List[str] = []
         self.defined_groups: List[Dict[str, Any]] = []
