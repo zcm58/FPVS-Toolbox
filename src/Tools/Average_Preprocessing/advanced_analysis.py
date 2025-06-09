@@ -90,6 +90,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
     def __init__(self, master: ctk.CTkBaseClass):
         super().__init__(master)
+        # Keep this window above its parent
+        self.transient(master)
         self.master_app = master
         self.title("Advanced Averaging Analysis")
 

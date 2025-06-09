@@ -105,6 +105,8 @@ ctk.set_default_color_theme("blue")
 class FPVSImageResizerCTK(ctk.CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
+        # Keep this window above the main application
+        self.transient(parent)
         self.title("FPVS Image_Resizer")
         self.geometry("800x600")
         # Ensure this window opens above the main application
