@@ -4,6 +4,7 @@ import os
 import traceback
 import tkinter as tk
 from tkinter import messagebox
+from config import DEFAULT_STIM_CHANNEL
 
 class ValidationMixin:
     def _validate_inputs(self):
