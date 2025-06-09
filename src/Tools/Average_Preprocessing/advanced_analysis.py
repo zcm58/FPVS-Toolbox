@@ -85,6 +85,31 @@ def create_themed_listbox(parent: ctk.CTkBaseClass, **kwargs) -> tk.Listbox:
         borderwidth=0, highlightthickness=1, activestyle="none", **kwargs)
 
 
+def attach_tooltip(widget: ctk.CTkBaseClass, text: str):
+    """Attach a tooltip to ``widget`` with ``text`` if possible."""
+    try:  # Prefer CTkToolTip from customtkinter if available
+        tooltip = ctk.CTkToolTip(widget, message=text)
+    except Exception:  # Fallback simple tooltip implementation
+        tooltip = tk.Toplevel(widget)
+        tooltip.withdraw()
+        tooltip.overrideredirect(True)
+        label = ctk.CTkLabel(tooltip, text=text)
+        label.pack(padx=2, pady=2)
+
+        def on_enter(_):
+            x = widget.winfo_rootx() + 20
+            y = widget.winfo_rooty() + 20
+            tooltip.geometry(f"+{x}+{y}")
+            tooltip.deiconify()
+
+        def on_leave(_):
+            tooltip.withdraw()
+
+        widget.bind("<Enter>", on_enter)
+        widget.bind("<Leave>", on_leave)
+    return tooltip
+
+
 class AdvancedAnalysisWindow(ctk.CTkToplevel):
     """Toplevel window for advanced averaging analysis."""
 
@@ -126,6 +151,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self.selected_group_index: Optional[int] = None
         self.processing_thread: Optional[threading.Thread] = None
         self._stop_requested = threading.Event()
+        self._tooltips = []
 
         self._build_ui()
         self.log("Advanced Averaging Analysis window initialized.")
@@ -231,12 +257,37 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         avgf.grid(row=4, column=0, padx=PAD_X, pady=PAD_Y, sticky="ew")
         ctk.CTkLabel(avgf, text="Averaging Method:").pack(side="left", padx=PAD_X)
         self.averaging_method_var = tk.StringVar(value="Pool Trials")
-        ctk.CTkRadioButton(avgf, text="Pool Trials", variable=self.averaging_method_var,
-                           value="Pool Trials", command=self._update_current_group_avg_method) \
-            .pack(side="left", padx=PAD_X)
-        ctk.CTkRadioButton(avgf, text="Average of Averages", variable=self.averaging_method_var,
-                           value="Average of Averages", command=self._update_current_group_avg_method) \
-            .pack(side="left", padx=PAD_X)
+        self.pool_trials_rb = ctk.CTkRadioButton(
+            avgf,
+            text="Pool Trials",
+            variable=self.averaging_method_var,
+            value="Pool Trials",
+            command=self._update_current_group_avg_method,
+        )
+        self.pool_trials_rb.pack(side="left", padx=PAD_X)
+        self._tooltips.append(
+            attach_tooltip(
+                self.pool_trials_rb,
+                "All epochs from all files are pooled and averaged simultaneously."
+                " Gives equal weight to every epoch and is typically preferred.",
+            )
+        )
+
+        self.avg_of_avgs_rb = ctk.CTkRadioButton(
+            avgf,
+            text="Average of Averages",
+            variable=self.averaging_method_var,
+            value="Average of Averages",
+            command=self._update_current_group_avg_method,
+        )
+        self.avg_of_avgs_rb.pack(side="left", padx=PAD_X)
+        self._tooltips.append(
+            attach_tooltip(
+                self.avg_of_avgs_rb,
+                "Each file is averaged separately before averaging those results."
+                " Gives equal weight to files rather than epochs.",
+            )
+        )
 
         self.save_group_config_button = ctk.CTkButton(
             right, text="Save Group Configuration", command=self.save_current_group_config,
