@@ -3,8 +3,7 @@
 """
 FPVS all-in-one toolbox using MNE-Python and CustomTkinter.
 
-Version: 0.9.9 (June 2025) - the main app file (fpvs_app.py) has been refactored in an
-effort to simplify future development.
+Version: 0.9.9.1 (June 2025)
 
 Key functionalities:
 
