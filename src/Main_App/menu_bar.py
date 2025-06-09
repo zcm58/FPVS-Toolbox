@@ -44,15 +44,13 @@ class AppMenuBar:
         tools_menu.add_command(label="Stats Toolbox", command=self.app_ref.open_stats_analyzer)
         tools_menu.add_separator()
         tools_menu.add_command(label="Image_Resizer", command=self.app_ref.open_image_resizer)
+        tools_menu.add_separator()
+        tools_menu.add_command(
+            label="Average Epochs in Pre-Processing Phase",
+            command=self.app_ref.open_advanced_analysis_window,
+        )
 
         # === Help menu ===
         help_menu = tk.Menu(menubar_widget, tearoff=0)
         menubar_widget.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="About...", command=self.app_ref.show_about_dialog)
-
-        # === Advanced Analysis menu ===
-        adv_menu = tk.Menu(menubar_widget, tearoff=0)
-        menubar_widget.add_cascade(label="Advanced Analysis", menu=adv_menu)
-        # This command will call a new method in FPVSApp that then instantiates AdvancedAnalysisWindow
-        adv_menu.add_command(label="Preprocessing Epoch Averaging",
-                             command=self.app_ref.open_advanced_analysis_window)
