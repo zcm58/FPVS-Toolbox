@@ -35,13 +35,15 @@ def preprocess_raw(app, raw, **params):
     try:
         orig_ch_names = list(raw.info['ch_names'])
         app.log(f"Preprocessing {len(orig_ch_names)} chans from '{current_filename}'...")
-        app.log(
-            f"DEBUG [preprocess_raw for {current_filename}]: Initial channel names ({len(orig_ch_names)}): {orig_ch_names}")
-        app.log(
-            f"DEBUG [preprocess_raw for {current_filename}]: Expected stim_ch for preservation: '{stim_ch}', max_idx_keep parameter: {max_keep}")
-        if stim_ch not in orig_ch_names:
+        if app.settings.debug_enabled():
             app.log(
-                f"DEBUG [preprocess_raw for {current_filename}]: WARNING - Expected stim_ch '{stim_ch}' is NOT in the initial channel list.")
+                f"DEBUG [preprocess_raw for {current_filename}]: Initial channel names ({len(orig_ch_names)}): {orig_ch_names}")
+            app.log(
+                f"DEBUG [preprocess_raw for {current_filename}]: Expected stim_ch for preservation: '{stim_ch}', max_idx_keep parameter: {max_keep}")
+        if stim_ch not in orig_ch_names:
+            if app.settings.debug_enabled():
+                app.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: WARNING - Expected stim_ch '{stim_ch}' is NOT in the initial channel list.")
 
         if ref1 and ref2 and ref1 in orig_ch_names and ref2 in orig_ch_names:
             try:
@@ -55,26 +57,31 @@ def preprocess_raw(app, raw, **params):
                 f"Skip initial referencing for {current_filename} (Ref channels '{ref1}', '{ref2}' not found or not specified).")
 
         current_names_before_drop = list(raw.info['ch_names'])
-        app.log(
-            f"DEBUG [preprocess_raw for {current_filename}]: Channel names BEFORE drop logic ({len(current_names_before_drop)}): {current_names_before_drop}")
+        if app.settings.debug_enabled():
+            app.log(
+                f"DEBUG [preprocess_raw for {current_filename}]: Channel names BEFORE drop logic ({len(current_names_before_drop)}): {current_names_before_drop}")
 
         if max_keep is not None and 0 < max_keep < len(current_names_before_drop):
             channels_to_keep_by_index = current_names_before_drop[:max_keep]
-            app.log(
-                f"DEBUG [preprocess_raw for {current_filename}]: Initial channels selected by index (first {max_keep}): {channels_to_keep_by_index}")
+            if app.settings.debug_enabled():
+                app.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: Initial channels selected by index (first {max_keep}): {channels_to_keep_by_index}")
 
             final_channels_to_keep = list(channels_to_keep_by_index)
             if stim_ch in current_names_before_drop:
                 if stim_ch not in final_channels_to_keep:
                     final_channels_to_keep.append(stim_ch)
-                    app.log(
-                        f"DEBUG [preprocess_raw for {current_filename}]: Stim_ch '{stim_ch}' was present in data and explicitly added to keep_channels.")
+                    if app.settings.debug_enabled():
+                        app.log(
+                            f"DEBUG [preprocess_raw for {current_filename}]: Stim_ch '{stim_ch}' was present in data and explicitly added to keep_channels.")
                 else:
-                    app.log(
-                        f"DEBUG [preprocess_raw for {current_filename}]: Stim_ch '{stim_ch}' was present and already within the first {max_keep} channels.")
+                    if app.settings.debug_enabled():
+                        app.log(
+                            f"DEBUG [preprocess_raw for {current_filename}]: Stim_ch '{stim_ch}' was present and already within the first {max_keep} channels.")
             else:
-                app.log(
-                    f"DEBUG [preprocess_raw for {current_filename}]: NOTE - Configured stim_ch '{stim_ch}' was NOT FOUND in current channel names before drop logic execution: {current_names_before_drop}.")
+                if app.settings.debug_enabled():
+                    app.log(
+                        f"DEBUG [preprocess_raw for {current_filename}]: NOTE - Configured stim_ch '{stim_ch}' was NOT FOUND in current channel names before drop logic execution: {current_names_before_drop}.")
 
             unique_set_to_keep = set(final_channels_to_keep)
             ordered_unique_keep_channels = [name for name in current_names_before_drop if
@@ -83,17 +90,19 @@ def preprocess_raw(app, raw, **params):
             channels_to_drop = [ch for ch in current_names_before_drop if
                                 ch not in ordered_unique_keep_channels]
 
-            app.log(
-                f"DEBUG [preprocess_raw for {current_filename}]: Final list of channels to KEEP ({len(ordered_unique_keep_channels)}): {ordered_unique_keep_channels}")
-            app.log(
-                f"DEBUG [preprocess_raw for {current_filename}]: Final list of channels to DROP ({len(channels_to_drop)}): {channels_to_drop}")
+            if app.settings.debug_enabled():
+                app.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: Final list of channels to KEEP ({len(ordered_unique_keep_channels)}): {ordered_unique_keep_channels}")
+                app.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: Final list of channels to DROP ({len(channels_to_drop)}): {channels_to_drop}")
 
             if channels_to_drop:
                 app.log(f"Attempting to drop {len(channels_to_drop)} channels from {current_filename}...")
                 raw.drop_channels(channels_to_drop, on_missing='warn')
                 app.log(f"{len(raw.ch_names)} channels remain in {current_filename} after drop operation.")
-                app.log(
-                    f"DEBUG [preprocess_raw for {current_filename}]: Channel names AFTER drop operation: {list(raw.info['ch_names'])}")
+                if app.settings.debug_enabled():
+                    app.log(
+                        f"DEBUG [preprocess_raw for {current_filename}]: Channel names AFTER drop operation: {list(raw.info['ch_names'])}")
             else:
                 app.log(f"No channels were ultimately selected to be dropped for {current_filename}.")
         else:
@@ -202,14 +211,15 @@ def preprocess_raw(app, raw, **params):
         app.log(
             f"Preprocessing OK for {current_filename}. {len(raw.ch_names)} channels, {raw.info['sfreq']:.1f}Hz.")
         final_ch_names = list(raw.info['ch_names'])
-        app.log(
-            f"DEBUG [preprocess_raw for {current_filename}]: Final channel names before returning ({len(final_ch_names)}): {final_ch_names}")
-        if stim_ch in final_ch_names:
+        if app.settings.debug_enabled():
             app.log(
-                f"DEBUG [preprocess_raw for {current_filename}]: Expected stim_ch '{stim_ch}' IS PRESENT at the VERY END of preprocessing.")
-        else:
-            app.log(
-                f"DEBUG [preprocess_raw for {current_filename}]: CRITICAL! Expected stim_ch '{stim_ch}' IS NOT PRESENT at the VERY END of preprocessing.")
+                f"DEBUG [preprocess_raw for {current_filename}]: Final channel names before returning ({len(final_ch_names)}): {final_ch_names}")
+            if stim_ch in final_ch_names:
+                app.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: Expected stim_ch '{stim_ch}' IS PRESENT at the VERY END of preprocessing.")
+            else:
+                app.log(
+                    f"DEBUG [preprocess_raw for {current_filename}]: CRITICAL! Expected stim_ch '{stim_ch}' IS NOT PRESENT at the VERY END of preprocessing.")
         return raw
 
     except Exception as e:
