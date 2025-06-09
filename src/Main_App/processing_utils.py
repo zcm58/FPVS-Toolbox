@@ -13,6 +13,7 @@ from tkinter import messagebox
 from config import DEFAULT_STIM_CHANNEL
 from Main_App.post_process import post_process as _external_post_process
 from Main_App.eeg_preprocessing import perform_preprocessing
+from Main_App.load_utils import load_eeg_file
 
 class ProcessingMixin:
     def start_processing(self):
@@ -384,36 +385,5 @@ class ProcessingMixin:
             self.preprocessed_data = original_app_preprocessed_data
 
     def load_eeg_file(self, filepath):
-        ext = os.path.splitext(filepath)[1].lower()
-        base = os.path.basename(filepath)
-        self.log(f"Loading: {base}...")
-        try:
-            kwargs = {'preload': True, 'verbose': False}
-            if ext == ".bdf":
-                with mne.utils.use_log_level('WARNING'):
-                    raw = mne.io.read_raw_bdf(filepath, **kwargs)
-                self.log("BDF loaded successfully.")
-            elif ext == ".set":
-                with mne.utils.use_log_level('WARNING'):
-                    raw = mne.io.read_raw_eeglab(filepath, **kwargs)
-                self.log("SET loaded successfully.")
-            else:
-                messagebox.showwarning("Unsupported File", f"Format '{ext}' not supported.")
-                return None
-
-            if raw is None:
-                raise ValueError("MNE load returned None.")
-
-            self.log(f"Load OK: {len(raw.ch_names)} channels @ {raw.info['sfreq']:.1f} Hz.")
-            self.log("Applying standard_1020 montage...")
-            try:
-                montage = mne.channels.make_standard_montage('standard_1020')
-                raw.set_montage(montage, on_missing='warn', match_case=False, verbose=False)
-                self.log("Montage applied.")
-            except Exception as e:
-                self.log(f"Warning: Montage error: {e}")
-            return raw
-        except Exception as e:
-            self.log(f"!!! Load Error {base}: {e}")
-            messagebox.showerror("Loading Error", f"Could not load: {base}\nError: {e}")
-            return None
+        """Wrapper around :func:`load_eeg_file` that passes ``self`` as the logger."""
+        return load_eeg_file(self, filepath)
