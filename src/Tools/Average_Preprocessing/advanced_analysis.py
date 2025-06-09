@@ -161,9 +161,12 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self._update_groups_listbox()
         self._update_start_processing_button_state()
         self.save_group_config_button.configure(state="disabled")
-        CTkMessagebox.CTkMessagebox(title="Configuration Saved",
-                                    message=f"Configuration for group '{group['name']}' has been saved.", icon="info",
-                                    parent=self)
+        CTkMessagebox.CTkMessagebox(
+            title="Configuration Saved",
+            message=f"Configuration for group '{group['name']}' has been saved.",
+            icon="info",
+            master=self,
+        )
         return True
 
     def _build_ui(self):
@@ -363,8 +366,12 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                             msg = (f"Mapping rule '{mapping_rule['output_label']}' in group "
                                    f"'{group['name']}' lost all its source files and was removed.")
                             self.log(f"Warning: {msg}")
-                            CTkMessagebox.CTkMessagebox(title="Mapping Rule Removed", message=msg, icon="warning",
-                                                        parent=self)
+                            CTkMessagebox.CTkMessagebox(
+                                title="Mapping Rule Removed",
+                                message=msg,
+                                icon="warning",
+                                master=self,
+                            )
 
                     group['condition_mappings'] = new_mappings_for_group
                     if not group['condition_mappings']:
@@ -385,8 +392,12 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             return
         name = name.strip()
         if any(g['name'] == name for g in self.defined_groups):
-            CTkMessagebox.CTkMessagebox(title="Error", message=f"A group named '{name}' already exists.", icon="cancel",
-                                        parent=self)
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message=f"A group named '{name}' already exists.",
+                icon="cancel",
+                master=self,
+            )
             return
 
         id_dlg = CTkInputDialog(title="Event IDs to Average",
@@ -398,17 +409,29 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         try:
             ids_to_average = [int(x.strip()) for x in id_str.split(",") if x.strip()]
         except ValueError:
-            CTkMessagebox.CTkMessagebox(title="Error", message="Enter only integers separated by commas.",
-                                        icon="cancel", parent=self)
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message="Enter only integers separated by commas.",
+                icon="cancel",
+                master=self,
+            )
             return
         if not ids_to_average:
-            CTkMessagebox.CTkMessagebox(title="Error", message="Enter at least one event ID.", icon="cancel",
-                                        parent=self)
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message="Enter at least one event ID.",
+                icon="cancel",
+                master=self,
+            )
             return
 
         if not self.source_eeg_files:
-            CTkMessagebox.CTkMessagebox(title="Error", message="No EEG files selected. Add files first.", icon="cancel",
-                                        parent=self)
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message="No EEG files selected. Add files first.",
+                icon="cancel",
+                master=self,
+            )
             return
 
         mapping_rule = {'output_label': name, 'sources': []}
@@ -446,9 +469,14 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             return
 
         group_name_to_delete = self.defined_groups[self.selected_group_index]['name']
-        msg_box = CTkMessagebox.CTkMessagebox(title="Confirm Delete",
-                                              message=f"Delete group '{group_name_to_delete}'?",
-                                              icon="question", option_1="No", option_2="Yes", parent=self)
+        msg_box = CTkMessagebox.CTkMessagebox(
+            title="Confirm Delete",
+            message=f"Delete group '{group_name_to_delete}'?",
+            icon="question",
+            option_1="No",
+            option_2="Yes",
+            master=self,
+        )
         if msg_box.get() == "Yes":
             del self.defined_groups[self.selected_group_index]
             self._update_groups_listbox()
@@ -634,7 +662,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                         title="Error",
                         message=f"An error occurred while validating main application inputs: {e}",
                         icon="cancel",
-                        parent=self
+                        master=self,
                     )
                     return None
             else:
@@ -648,7 +676,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                     title="Error",
                     message="Main application parameters could not be validated or are missing. Please check the main app settings and ensure they are confirmed/applied.",
                     icon="cancel",
-                    parent=self
+                    master=self,
                 )
                 return None
             elif ok and not main_app_params_are_set:
@@ -658,33 +686,48 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                     title="Error",
                     message="Main app validation reported success, but parameters are missing. Please check the main app's _validate_inputs method.",
                     icon="cancel",
-                    parent=self
+                    master=self,
                 )
                 return None
 
 
         if not self.defined_groups:
-            CTkMessagebox.CTkMessagebox(title="Error", message="No averaging groups defined.", icon="cancel", parent=self)
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message="No averaging groups defined.",
+                icon="cancel",
+                master=self,
+            )
             return None
 
         for i, group in enumerate(self.defined_groups):
             if not group.get("config_saved", False):
-                CTkMessagebox.CTkMessagebox(title="Error",
-                                            message=f"Group '{group['name']}' has unsaved changes. Please save it first.",
-                                            icon="cancel", parent=self)
+                CTkMessagebox.CTkMessagebox(
+                    title="Error",
+                    message=f"Group '{group['name']}' has unsaved changes. Please save it first.",
+                    icon="cancel",
+                    master=self,
+                )
                 self.groups_listbox.selection_set(i)
                 self.on_group_select(None)
                 return None
             if not group.get("file_paths"):
-                CTkMessagebox.CTkMessagebox(title="Error", message=f"Group '{group['name']}' contains no files.",
-                                            icon="cancel", parent=self)
+                CTkMessagebox.CTkMessagebox(
+                    title="Error",
+                    message=f"Group '{group['name']}' contains no files.",
+                    icon="cancel",
+                    master=self,
+                )
                 self.groups_listbox.selection_set(i)
                 self.on_group_select(None)
                 return None
             if not group.get("condition_mappings"):
-                CTkMessagebox.CTkMessagebox(title="Error",
-                                            message=f"Group '{group['name']}' has no mapping rules defined.",
-                                            icon="cancel", parent=self)
+                CTkMessagebox.CTkMessagebox(
+                    title="Error",
+                    message=f"Group '{group['name']}' has no mapping rules defined.",
+                    icon="cancel",
+                    master=self,
+                )
                 self.groups_listbox.selection_set(i)
                 self.on_group_select(None)
                 return None
@@ -700,7 +743,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 title="Critical Error",
                 message="Could not retrieve necessary parameters from the main application. Processing cannot start.",
                 icon="cancel",
-                parent=self
+                master=self,
             )
             return None
 
@@ -711,26 +754,37 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 title="Critical Error",
                 message=f"Main application parameters are not in the expected format (should be a dictionary, but got {type(main_app_params)}).",
                 icon="cancel",
-                parent=self
+                master=self,
             )
             return None
 
         save_folder_path_obj = getattr(self.master_app, "save_folder_path", None)
         if save_folder_path_obj is None or not hasattr(save_folder_path_obj, "get"):
-            CTkMessagebox.CTkMessagebox(title="Error", message="Main application output folder path is not configured.",
-                                        icon="cancel", parent=self)
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message="Main application output folder path is not configured.",
+                icon="cancel",
+                master=self,
+            )
             return None
 
         output_directory = save_folder_path_obj.get()
         if not output_directory:
-            CTkMessagebox.CTkMessagebox(title="Error", message="Main application output folder path is missing.",
-                                        icon="cancel", parent=self)
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message="Main application output folder path is missing.",
+                icon="cancel",
+                master=self,
+            )
             return None
 
         if run_advanced_averaging_processing is None or _external_post_process_actual is None:
-            CTkMessagebox.CTkMessagebox(title="Critical Error",
-                                        message="Core processing module or post_process function not loaded.",
-                                        icon="cancel", parent=self)
+            CTkMessagebox.CTkMessagebox(
+                title="Critical Error",
+                message="Core processing module or post_process function not loaded.",
+                icon="cancel",
+                master=self,
+            )
             return None
 
         return main_app_params, output_directory
@@ -850,7 +904,10 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             msg_box = CTkMessagebox.CTkMessagebox(
                 title="Confirm Close",
                 message="Processing is ongoing. Stop and close?",
-                icon="question", option_1="No", option_2="Yes", parent=self
+                icon="question",
+                option_1="No",
+                option_2="Yes",
+                master=self,
             )
             if msg_box.get() == "Yes":
                 self._stop_requested.set()
