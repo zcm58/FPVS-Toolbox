@@ -18,6 +18,10 @@ class SettingsWindow(ctk.CTkToplevel):
         self.geometry("600x600")
         self.resizable(False, False)
         self._build_ui()
+        # Bring settings window to the front when opened
+        self.lift()
+        self.attributes('-topmost', True)
+        self.after(0, lambda: self.attributes('-topmost', False))
         self.focus_force()
 
     def _build_ui(self):
