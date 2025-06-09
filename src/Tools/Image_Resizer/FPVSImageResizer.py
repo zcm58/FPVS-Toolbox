@@ -111,6 +111,8 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
         self.lift()
         self.attributes('-topmost', True)
         self.after(0, lambda: self.attributes('-topmost', False))
+        # Focus the window so it appears on top of the main GUI
+        self.focus_force()
         self.cancel_requested = False
         self.input_folder = ""
         self.output_folder = ""
