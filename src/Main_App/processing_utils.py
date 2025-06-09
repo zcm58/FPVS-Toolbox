@@ -204,7 +204,7 @@ class ProcessingMixin:
                         raw_input=raw.copy(), params=params,
                         log_func=thread_log_func_for_preprocess, filename_for_log=f_name
                     )
-                    del raw;
+                    del raw
                     gc.collect()
 
                     if raw_proc is None:
@@ -260,7 +260,8 @@ class ProcessingMixin:
                                                                         'message': f"WARNING [{f_name}]: mne.events_from_annotations returned no events with map: {mne_annots_event_id_map}."})
                                 except Exception as e_ann:
                                     gui_queue.put({'type': 'log',
-                                                   'message': f"ERROR [{f_name}]: Failed to get events from annotations: {e_ann}"}); events = np.array([])
+                                                   'message': f"ERROR [{f_name}]: Failed to get events from annotations: {e_ann}"})
+                                    events = np.array([])
                         else:
                             gui_queue.put({'type': 'log',
                                            'message': f"WARNING [{f_name}]: .set file has no MNE annotations on raw_proc."})
