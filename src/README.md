@@ -51,6 +51,7 @@ version is available. If one is found you will be prompted to download and
 install it. The updater downloads the installer for the new version and runs it
 silently, replacing the existing installation.
 
+
 The update check is controlled by constants in `config.py`:
 
 - `FPVS_TOOLBOX_VERSION` – the current running version
