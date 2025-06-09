@@ -41,9 +41,9 @@ Adjust these as desired to better fit your screen or preferences.
 
 When the toolbox starts it checks the GitHub releases API to see if a newer
 version is available. If one is found you will be prompted to download and
-install it. The updater downloads the new executable, renames the current
-binary with a `.old` suffix and places the update in its place before
-restarting. Any previous backup copy is removed.
+install it. The updater now downloads the Windows installer and executes it with
+Inno Setup's silent options. The running application then closes while the
+installer performs the update.
 
 The update check is controlled by constants in `config.py`:
 
