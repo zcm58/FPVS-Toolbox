@@ -92,8 +92,25 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         super().__init__(master)
         self.master_app = master
         self.title("Advanced Averaging Analysis")
-        self.geometry("1050x850")
-        self.minsize(950, 750)
+
+        # Respect custom window dimensions from settings if available
+        default_size = "1050x850"
+        size_str = default_size
+        if hasattr(master, "settings"):
+            try:
+                size_str = master.settings.get("gui", "advanced_size", default_size)
+            except Exception:
+                size_str = default_size
+
+        self.geometry(size_str)
+
+        # Try to parse width/height from the size string to set a matching
+        # ``minsize``.  Fall back to previous defaults if parsing fails.
+        try:
+            width, height = [int(x) for x in re.split("[xX]", size_str)]
+            self.minsize(width, height)
+        except Exception:
+            self.minsize(950, 750)
 
         self.source_eeg_files: List[str] = []
         self.defined_groups: List[Dict[str, Any]] = []
