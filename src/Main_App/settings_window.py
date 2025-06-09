@@ -105,12 +105,12 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(stats_tab, textvariable=odd_var).grid(row=1, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0))
         self.odd_var = odd_var
 
-        ctk.CTkLabel(stats_tab, text="BCA Upper Limit (Hz)").grid(row=2, column=0, sticky="w", padx=pad)
+        ctk.CTkLabel(stats_tab, text="BCA Harmonic Upper Limit (Hz)").grid(row=2, column=0, sticky="w", padx=pad)
         bca_var = tk.StringVar(value=self.manager.get('analysis', 'bca_upper_limit', '16.8'))
         ctk.CTkEntry(stats_tab, textvariable=bca_var).grid(row=2, column=1, columnspan=2, sticky="ew", padx=pad)
         self.bca_var = bca_var
 
-        ctk.CTkLabel(stats_tab, text="Alpha Level").grid(row=3, column=0, sticky="w", padx=pad, pady=(pad, 0))
+        ctk.CTkLabel(stats_tab, text="Alpha value for ANOVA").grid(row=3, column=0, sticky="w", padx=pad, pady=(pad, 0))
         alpha_var = tk.StringVar(value=self.manager.get('analysis', 'alpha', '0.05'))
         ctk.CTkEntry(stats_tab, textvariable=alpha_var).grid(row=3, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0))
         self.alpha_var = alpha_var
