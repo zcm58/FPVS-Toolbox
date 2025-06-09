@@ -1,4 +1,5 @@
 import os
+import sys
 import configparser
 from typing import List, Tuple
 
@@ -36,13 +37,20 @@ DEFAULTS = {
 
 INI_NAME = 'settings.ini'
 
+def _default_ini_path() -> str:
+    """Return the default path for the settings file in a user-writable location."""
+    if sys.platform.startswith('win'):
+        base = os.environ.get('APPDATA', os.path.expanduser('~'))
+    else:
+        base = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser('~'), '.config'))
+    return os.path.join(base, 'FPVS_Toolbox', INI_NAME)
+
 class SettingsManager:
     """Handles loading and saving user preferences to an INI file."""
 
     def __init__(self, ini_path: str = None):
         if ini_path is None:
-            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            ini_path = os.path.join(repo_root, INI_NAME)
+            ini_path = _default_ini_path()
         self.ini_path = ini_path
         self.config = configparser.ConfigParser()
         self.load()
@@ -55,6 +63,7 @@ class SettingsManager:
 
     def save(self) -> None:
         """Write the current settings to disk."""
+        os.makedirs(os.path.dirname(self.ini_path), exist_ok=True)
         with open(self.ini_path, 'w') as f:
             self.config.write(f)
 
