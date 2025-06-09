@@ -109,6 +109,11 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.geometry(self.settings.get('gui', 'main_size', '750x920'))
         ctk.set_appearance_mode(self.settings.get('appearance', 'mode', 'System'))
 
+        # Ensure the main window appears above other applications on launch
+        self.lift()
+        self.attributes('-topmost', True)
+        self.after(0, lambda: self.attributes('-topmost', False))
+
 
         # --- Core State Variables ---
         self.busy = False

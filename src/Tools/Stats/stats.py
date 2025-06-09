@@ -68,6 +68,10 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.option_add("*Font", str(FONT_MAIN), 80)
         self.title("FPVS Statistical Analysis Tool")
         self.geometry("950x950")  # Adjusted for clarity of layout
+        # Ensure stats window opens above the main app
+        self.lift()
+        self.attributes('-topmost', True)
+        self.after(0, lambda: self.attributes('-topmost', False))
         self.focus_force()
 
         self.master_app = master

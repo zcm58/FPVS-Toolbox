@@ -112,6 +112,11 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         except Exception:
             self.minsize(950, 750)
 
+        # Ensure this window opens above the main application
+        self.lift()
+        self.attributes('-topmost', True)
+        self.after(0, lambda: self.attributes('-topmost', False))
+
         self.source_eeg_files: List[str] = []
         self.defined_groups: List[Dict[str, Any]] = []
         self.selected_group_index: Optional[int] = None

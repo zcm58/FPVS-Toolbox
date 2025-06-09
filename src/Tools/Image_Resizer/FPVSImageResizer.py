@@ -107,6 +107,10 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
         super().__init__(parent)
         self.title("FPVS Image_Resizer")
         self.geometry("800x600")
+        # Ensure this window opens above the main application
+        self.lift()
+        self.attributes('-topmost', True)
+        self.after(0, lambda: self.attributes('-topmost', False))
         self.cancel_requested = False
         self.input_folder = ""
         self.output_folder = ""
