@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Processing-related mixins for the FPVS Toolbox."""
+"""Mixins that drive the background processing workflow.
+They start worker threads, load each file, call preprocessing and
+post-processing routines and update progress so the GUI stays
+responsive."""
 import gc
 import os
 import queue

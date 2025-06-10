@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Helper mixin for event map UI utilities."""
+"""Utility mixin for managing the Event Map interface.
+It lets the user add or remove rows that map condition labels to
+numeric IDs and validates the entries in the scrollable frame."""
 import tkinter as tk
 import customtkinter as ctk
 import traceback

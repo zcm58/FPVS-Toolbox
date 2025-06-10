@@ -1,4 +1,6 @@
-"""Mixin providing a simple logging helper for the FPVS app."""
+"""Mixin that timestamps and routes messages to the on-screen log
+and the console. It also exposes a tiny debug wrapper that respects
+the application's settings."""
 import tkinter as tk
 import pandas as pd
 

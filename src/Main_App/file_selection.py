@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""File and folder selection mixin."""
+"""Mixin used by the GUI to choose EEG files and output folders.
+It opens standard selection dialogs, stores the chosen paths and
+updates progress details before processing starts."""
 import os
 import glob
 from tkinter import filedialog, messagebox

@@ -1,4 +1,7 @@
-"""Core processing functions for FPVS Toolbox."""
+"""Handles the main preprocessing routine for the FPVS Toolbox.
+It manages referencing, filtering, resampling and kurtosis-based
+artifact rejection while logging progress for the user. Cleaned
+``mne.Raw`` objects are returned for further analysis."""
 
 import os
 import gc
