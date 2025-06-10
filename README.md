@@ -1,17 +1,22 @@
 # FPVS Toolbox
 
-The FPVS Toolbox is a graphical application for preprocessing, analyzing, and visualizing EEG data collected with the Fast Periodic Visual Stimulation (FPVS) paradigm on BioSemi systems. It combines automated cleaning routines, statistical analysis tools, and convenient utilities like image resizing in a single package.
+The FPVS Toolbox is a GUI based application for preprocessing, cleaning, and analyzing EEG data collected from Fast Periodic Visual Stimulation (FPVS) paradigm experiments on BioSemi systems. The purpose of this project is to standardize a processing method for FPVS data and to reduce the amount of time that researchers spend analyzing data. 
 
 ## Features
 
-- Batch processing of BioSemi `.BDF` and `.SET` data files
+- Batch processing of BioSemi `.BDF` data files
 - Automated preprocessing pipeline: referencing, filtering, resampling, kurtosis-based channel rejection and interpolation
 - Extraction of epochs and post-processing metrics (FFT, SNR, BCA, Z-score)
 - Statistical analysis window with repeated measures ANOVA and per-harmonic significance testing
-- Publication-quality figure generation and optional 3D brain heatmaps
-- Image Resizer utility for preparing stimulus assets for PsychoPy experiments
-- Averaging utility for combining epochs across files prior to post‑processing
-- Built-in update checker that downloads new releases from GitHub
+- Image Resizer tool for quickly resizing images for PsychoPy experiments
+- Averaging utility for combining epochs across files prior to post‑processing (useful if one needs to combine two similar FPVS experiments prior to calculating BCA)
+
+## Features currently under development:
+
+- Publication quality 2D heatmaps
+- Publication quality BCA frequency plots
+- Linear mixed-effects model analysis
+
 
 ## Installation
 
@@ -26,7 +31,7 @@ Always verify that you obtained the installer directly from this repository's Re
 
 ### Running from Source
 
-The application can also be launched from source on Windows, macOS, or Linux. Clone the repository and ensure you have Python 3.9+ with the following packages installed:
+The application can also be launched from source on Windows. Clone the repository and ensure you have Python 3.9+ with the following packages installed:
 
 - `mne`
 - `numpy`
@@ -40,10 +45,6 @@ After installing the dependencies, start the GUI with:
 ```bash
 python src/main.py
 ```
-
-### Building the Windows Executable
-
-A helper script in `src/Misc/Compiler Script.py` demonstrates the PyInstaller command used to package the toolbox. It collects all required modules and bundles them as a single executable. Adjust paths as needed and run the script to generate your own installer.
 
 ## Configuration and Settings
 
