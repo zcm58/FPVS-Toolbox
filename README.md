@@ -7,7 +7,7 @@ The FPVS Toolbox is a GUI based application for preprocessing, cleaning, and ana
 - Batch processing of BioSemi `.BDF` data files
 - Automated preprocessing pipeline: referencing, filtering, resampling, kurtosis-based channel rejection and interpolation
 - Extraction of epochs and post-processing metrics (FFT, SNR, BCA, Z-score)
-- Built in Statistical analysis tool with repeated-measures ANOVA & post-hoc pairwise tests to check for significant results in the Frontal, Central, Parietal, and Occipital lobes
+- Built in Statistical analysis tool with repeated-measures ANOVA & post-hoc pairwise tests to check for significant FPVS oddball results in the Frontal, Central, Parietal, and Occipital lobes
 - Image Resizer tool for quickly resizing images for PsychoPy experiments
 - Averaging utility for combining epochs across files prior to post‑processing (useful if one needs to combine two similar FPVS experiments prior to calculating BCA)
 
