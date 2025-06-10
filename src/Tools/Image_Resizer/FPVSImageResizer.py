@@ -1,4 +1,11 @@
 # FPVSImageResizer.py
+"""CustomTkinter interface for batch image resizing.
+
+This module provides a GUI that allows users to select input and output
+directories, choose desired image dimensions and file format, and then
+process all compatible images in the selected folder. It displays progress
+updates, allows cancellation, and opens the output folder when finished.
+"""
 
 import os
 import sys
