@@ -1,4 +1,11 @@
 # advanced_analysis.py
+"""GUI window for advanced averaging of multiple EEG files.
+
+This module defines :class:`AdvancedAnalysisWindow`, a stand-alone window used
+to configure and launch averaging of preprocessed EEG data from multiple files.
+Users can group source files together, choose an averaging method and then
+initiate processing via :mod:`advanced_analysis_core`.
+"""
 
 import tkinter as tk
 from tkinter import filedialog

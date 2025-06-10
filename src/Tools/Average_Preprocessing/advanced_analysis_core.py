@@ -1,4 +1,11 @@
 # advanced_analysis_core.py
+"""Core processing logic for the advanced averaging window.
+
+This module implements functions that take the groups configured in the
+``advanced_analysis`` GUI and perform the actual averaging, leveraging the main
+FPVS application's loading, preprocessing and post-processing callbacks.
+"""
+
 import os
 import gc
 import logging
