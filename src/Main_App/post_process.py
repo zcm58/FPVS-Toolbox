@@ -14,6 +14,8 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     """
     Calculates metrics (FFT, SNR, Z-score, BCA) and saves results to Excel.
     Handles single-file processing (FPVSApp) and per-participant averaged results (AdvancedAnalysis).
+
+    This file should NOT BE EDITED for any reason unless given explicit instructions to do so.
     """
     app.log("--- Post-processing: Calculating Metrics & Saving Excel ---")
     parent_folder = app.save_folder_path.get()
