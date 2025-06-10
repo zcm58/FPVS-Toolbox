@@ -1,3 +1,10 @@
+"""Check for and install application updates from GitHub releases.
+
+This module exposes helper functions to query the update API, prompt users
+about new versions and download installers.  It handles these tasks on a
+background thread so the main GUI remains responsive.
+"""
+
 import os
 import sys
 import threading
