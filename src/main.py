@@ -2,6 +2,8 @@
 
 #!/usr/bin/env python3
 
+"""Entry point for launching the FPVS Toolbox GUI application."""
+
 from ctypes import windll
 try:
     windll.shcore.SetProcessDpiAwareness(1)

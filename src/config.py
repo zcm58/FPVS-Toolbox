@@ -1,3 +1,12 @@
+"""FPVS Toolbox configuration and helper utilities.
+
+This module defines global constants used across the application such as
+version identifiers, default GUI dimensions and font configuration.  It also
+provides helper functions for loading frequency settings, computing the target
+frequency array and initialising ``customtkinter`` fonts once a Tk root window
+exists.
+"""
+
 import numpy as np
 import customtkinter as ctk
 from Main_App.settings_manager import SettingsManager
