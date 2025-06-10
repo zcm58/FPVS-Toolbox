@@ -1,3 +1,11 @@
+"""GUI window for editing FPVS Toolbox preferences.
+
+The :class:`SettingsWindow` presents tabs of configurable options such as file
+paths, appearance settings and analysis parameters.  It interfaces with
+``SettingsManager`` to load existing values and persist any changes made by the
+user.
+"""
+
 import tkinter as tk
 from tkinter import filedialog
 import customtkinter as ctk

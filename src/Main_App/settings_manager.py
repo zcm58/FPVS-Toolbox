@@ -1,3 +1,11 @@
+"""Utilities for storing and retrieving user preferences.
+
+This module defines :class:`SettingsManager` which reads and writes an INI file
+containing GUI options, analysis defaults and other persistent settings.  It
+also provides helpers for manipulating event label/ID pairs and detecting debug
+mode.
+"""
+
 import os
 import sys
 import configparser
