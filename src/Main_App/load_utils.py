@@ -1,4 +1,7 @@
-"""Utility functions for loading EEG files."""
+"""Helper functions for reading EEG recordings into MNE.
+Supported ``.bdf`` and ``.set`` files are loaded with the
+appropriate options, and warnings are shown for unsupported
+formats."""
 
 import os
 from tkinter import messagebox

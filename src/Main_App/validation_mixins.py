@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Validation logic separated from the main app."""
+"""Checks all user selections before processing begins.
+Paths and numeric parameters are verified and helpful error
+messages are shown when something is missing so the pipeline
+doesn't run with invalid settings."""
 import os
 import traceback
 import tkinter as tk
