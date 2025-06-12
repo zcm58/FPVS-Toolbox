@@ -88,7 +88,10 @@ def run_mixed_effects_model(data: pd.DataFrame, dv_col: str, group_col: str, fix
             df_result = pd.DataFrame(summary_table.data[1:], columns=summary_table.data[0])
         elif isinstance(summary_table, pd.DataFrame):
             logger.info("Summary returned as pandas DataFrame.")
-            df_result = summary_table.reset_index(drop=True)
+            # Preserve index which contains effect names
+            df_result = summary_table.reset_index()
+            if "Effect" not in df_result.columns:
+                df_result = df_result.rename(columns={df_result.columns[0]: "Effect"})
         else:
             logger.info(
                 "Summary format unexpected. Building table from model parameters and p-values."
