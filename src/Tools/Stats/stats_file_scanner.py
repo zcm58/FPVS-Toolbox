@@ -1,5 +1,11 @@
 # Functions moved from stats.py for file browsing and scanning
 
+import os
+import glob
+import re
+import traceback
+from tkinter import filedialog, messagebox
+
 
 def browse_folder(self):
     current_folder = self.stats_data_folder_var.get()
