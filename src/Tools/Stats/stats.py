@@ -33,6 +33,7 @@ import numpy as np
 import scipy.stats as stats
 from .repeated_m_anova import run_repeated_measures_anova
 from .mixed_effects_model import run_mixed_effects_model
+from .interpretation_helpers import generate_lme_summary
 from Main_App.settings_manager import SettingsManager
 
 
@@ -812,6 +813,11 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
                 output_text += "                 FIXED EFFECTS TABLE\n"
                 output_text += "--------------------------------------------\n"
                 output_text += mixed_results.to_string(index=False) + "\n"
+                try:
+                    alpha = float(self.alpha_var.get())
+                except Exception:
+                    alpha = 0.05
+                output_text += generate_lme_summary(mixed_results, alpha=alpha)
                 self.mixed_model_results_data = mixed_results
                 self.export_mixed_model_btn.configure(state="normal")
             else:
