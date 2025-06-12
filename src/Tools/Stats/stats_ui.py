@@ -1,5 +1,10 @@
 # UI creation method extracted from stats.py
 
+import customtkinter as ctk
+from config import FONT_BOLD
+from . import stats_export
+from .stats_analysis import ROIS, ALL_ROIS_OPTION
+
 
 def create_widgets(self):
     validate_num_cmd = (self.register(self._validate_numeric), '%P')
