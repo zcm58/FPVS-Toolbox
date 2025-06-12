@@ -261,3 +261,43 @@ def export_posthoc_results_to_excel(results_df, factor, parent_folder, log_func=
     except Exception as e:
 
         log_func(f"!!! Post-hoc Export Failed: {e}\n{traceback.format_exc()}")
+
+
+# --- Export Function for Mixed-Effects Model Results ---
+def export_mixed_model_results_to_excel(results_df, parent_folder, log_func=print):
+    """Exports linear mixed-effects model results to a formatted Excel file."""
+    log_func("Attempting to export Mixed Model results...")
+    if results_df is None or not isinstance(results_df, pd.DataFrame) or results_df.empty:
+        log_func("No Mixed Model results data available to export.")
+        messagebox.showwarning("No Results", "No Mixed Model results to export.")
+        return
+
+    df_export = results_df.copy()
+
+    initial_dir = parent_folder if os.path.isdir(parent_folder) else os.path.expanduser("~")
+    suggested_filename = "Stats_MixedModel.xlsx"
+
+    save_path = filedialog.asksaveasfilename(
+        title="Save Mixed Model Results",
+        initialdir=initial_dir,
+        initialfile=suggested_filename,
+        defaultextension=".xlsx",
+        filetypes=[("Excel Workbook", "*.xlsx"), ("All Files", "*.*")]
+    )
+    if not save_path:
+        log_func("Mixed Model export cancelled.")
+        return
+
+    try:
+        log_func(f"Exporting Mixed Model results to: {save_path}")
+        with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
+            _auto_format_and_write_excel(writer, df_export, 'Mixed Model', log_func)
+        log_func("Mixed Model results export successful.")
+        messagebox.showinfo("Export Successful", f"Mixed Model results exported to:\n{save_path}")
+    except PermissionError:
+        err_msg = f"Permission denied writing to {save_path}. File may be open or folder write-protected."
+        log_func(f"!!! Export Failed: {err_msg}")
+        messagebox.showerror("Export Failed", err_msg)
+    except Exception as e:
+        log_func(f"!!! Mixed Model Export Failed: {e}\n{traceback.format_exc()}")
+        messagebox.showerror("Export Failed", f"Could not save Excel file: {e}")

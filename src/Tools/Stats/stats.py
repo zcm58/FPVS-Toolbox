@@ -32,6 +32,7 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 from .repeated_m_anova import run_repeated_measures_anova
+from .mixed_effects_model import run_mixed_effects_model
 from Main_App.settings_manager import SettingsManager
 
 
@@ -332,6 +333,9 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
             side="left", padx=5, pady=5)
 
+        ctk.CTkButton(buttons_summed_frame, text="Run Mixed Model", command=self.run_mixed_model).pack(
+            side="left", padx=5, pady=5)
+
         
         # Only the interaction post-hoc test is available
         self.run_posthoc_btn = ctk.CTkButton(buttons_summed_frame, text="Run Interaction Post-hocs", command=self.run_interaction_posthocs)
@@ -347,6 +351,18 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
             ),
         )
         self.export_rm_anova_btn.pack(side="left", padx=5, pady=5)
+
+        self.export_mixed_model_btn = ctk.CTkButton(
+            buttons_summed_frame,
+            text="Export Mixed Model",
+            state="disabled",
+            command=lambda: stats_export.export_mixed_model_results_to_excel(
+                results_df=self.mixed_model_results_data,
+                parent_folder=self.stats_data_folder_var.get(),
+                log_func=self.log_to_main_app,
+            ),
+        )
+        self.export_mixed_model_btn.pack(side="left", padx=5, pady=5)
         
 
         self.export_posthoc_btn = ctk.CTkButton(
@@ -743,6 +759,75 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.results_textbox.insert("1.0", output_text)
         self.results_textbox.configure(state="disabled")
         self.log_to_main_app("RM-ANOVA (Summed BCA) attempt complete.")
+
+
+    def run_mixed_model(self):
+        """Run a linear mixed-effects model on the summed BCA data."""
+        self.log_to_main_app("Running Mixed Effects Model (Summed BCA)...")
+        self.results_textbox.configure(state="normal")
+        self.results_textbox.delete("1.0", tk.END)
+        self.export_mixed_model_btn.configure(state="disabled")
+        self.mixed_model_results_data = None
+
+        if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+            messagebox.showerror("Data Error", "Summed BCA data could not be prepared for Mixed Model.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        long_format_data = []
+        for pid, cond_data in self.all_subject_data.items():
+            for cond_name, roi_data in cond_data.items():
+                for roi_name, value in roi_data.items():
+                    if not pd.isna(value):
+                        long_format_data.append({'subject': pid, 'condition': cond_name, 'roi': roi_name, 'value': value})
+
+        if not long_format_data:
+            messagebox.showerror("Data Error", "No valid data available for Mixed Model after filtering NaNs.")
+            self.results_textbox.configure(state="disabled")
+            return
+
+        df_long = pd.DataFrame(long_format_data)
+
+        output_text = "============================================================\n"
+        output_text += "       Linear Mixed-Effects Model Results\n"
+        output_text += "       Analysis conducted on: Summed BCA Data\n"
+        output_text += "============================================================\n\n"
+        output_text += (
+            "This model accounts for repeated observations from each subject by including\n"
+            "a random intercept. Fixed effects assess how conditions and ROIs influence\n"
+            "Summed BCA values, including their interaction.\n\n"
+        )
+
+        try:
+            self.log_to_main_app(f"Calling run_mixed_effects_model with DataFrame of shape: {df_long.shape}")
+            mixed_results = run_mixed_effects_model(
+                data=df_long,
+                dv_col='value',
+                group_col='subject',
+                fixed_effects=['condition * roi']
+            )
+
+            if mixed_results is not None and not mixed_results.empty:
+                output_text += "--------------------------------------------\n"
+                output_text += "                 FIXED EFFECTS TABLE\n"
+                output_text += "--------------------------------------------\n"
+                output_text += mixed_results.to_string(index=False) + "\n"
+                self.mixed_model_results_data = mixed_results
+                self.export_mixed_model_btn.configure(state="normal")
+            else:
+                output_text += "Mixed effects model did not return any results or the result was empty.\n"
+                self.log_to_main_app("Mixed effects model returned no results or empty table.")
+        except ImportError:
+            output_text += "Error: The `statsmodels` package is required for mixed effects modeling.\n"
+            output_text += "Please install it via `pip install statsmodels`.\n"
+            self.log_to_main_app("ImportError during mixed model execution.")
+        except Exception as e:
+            output_text += f"Mixed effects model failed unexpectedly: {e}\n"
+            self.log_to_main_app(f"!!! Mixed Model Error: {e}\n{traceback.format_exc()}")
+
+        self.results_textbox.insert("1.0", output_text)
+        self.results_textbox.configure(state="disabled")
+        self.log_to_main_app("Mixed Effects Model attempt complete.")
 
 
     def run_posthoc_tests(self):
