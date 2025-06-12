@@ -1,5 +1,11 @@
 # Analysis routine methods extracted from stats.py
 
+import tkinter as tk
+from tkinter import messagebox
+import pandas as pd
+import numpy as np
+from scipy import stats
+
 
 def run_rm_anova(self):
     self.log_to_main_app("Running RM-ANOVA (Summed BCA)...")

@@ -1,5 +1,11 @@
 # Helper methods extracted from stats.py
 
+import logging
+from Main_App.settings_manager import SettingsManager
+from . import stats_analysis
+
+logger = logging.getLogger(__name__)
+
 
 def log_to_main_app(self, message):
     try:
