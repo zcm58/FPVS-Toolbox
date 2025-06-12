@@ -7,8 +7,14 @@ statsmodels MixedLM on long-format data.
 
 import pandas as pd
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_variables(term: str) -> set:
+    """Return variable names found within a fixed effects term."""
+    return {v.strip() for v in re.split(r"[*:+]", term) if v.strip()}
 
 
 def run_mixed_effects_model(data: pd.DataFrame, dv_col: str, group_col: str, fixed_effects: list):
@@ -48,7 +54,8 @@ def run_mixed_effects_model(data: pd.DataFrame, dv_col: str, group_col: str, fix
             "statsmodels is required for mixed effects modeling. Please install it via `pip install statsmodels`."
         )
 
-    required_cols = [dv_col, group_col] + fixed_effects
+    parsed_vars = sorted({var for term in fixed_effects for var in _extract_variables(term)})
+    required_cols = [dv_col, group_col] + parsed_vars
     logger.info("Checking for required columns: %s", required_cols)
     missing = [col for col in required_cols if col not in data.columns]
     if missing:
