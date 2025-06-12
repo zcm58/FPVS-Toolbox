@@ -5,6 +5,15 @@ from tkinter import messagebox
 import pandas as pd
 import numpy as np
 from scipy import stats
+import traceback
+
+from .repeated_m_anova import run_repeated_measures_anova
+from .mixed_effects_model import run_mixed_effects_model
+from .interpretation_helpers import generate_lme_summary
+from .posthoc_tests import (
+    run_posthoc_pairwise_tests,
+    run_interaction_posthocs as perform_interaction_posthocs,
+)
 
 
 def run_rm_anova(self):
