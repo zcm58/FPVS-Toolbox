@@ -53,4 +53,8 @@ class AppMenuBar:
         # === Help menu ===
         help_menu = tk.Menu(menubar_widget, tearoff=0)
         menubar_widget.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(
+            label="Relevant Publications",
+            command=self.app_ref.show_relevant_publications,
+        )
         help_menu.add_command(label="About...", command=self.app_ref.show_about_dialog)
