@@ -3,7 +3,6 @@
 import customtkinter as ctk
 from config import FONT_BOLD
 from . import stats_export
-from .stats_analysis import ROIS, ALL_ROIS_OPTION
 
 
 def create_widgets(self):
@@ -30,48 +29,35 @@ def create_widgets(self):
                          padx=5, pady=5,
                          sticky="w")
 
-    # --- Row 1: Common Setup ---
-    common_setup_frame = ctk.CTkFrame(main_frame)
-    common_setup_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-    common_setup_frame.grid_columnconfigure(1, weight=1)
-    common_setup_frame.grid_columnconfigure(3, weight=1)
-    ctk.CTkLabel(common_setup_frame, text="ROI (ANOVA):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-    roi_options = [ALL_ROIS_OPTION] + list(ROIS.keys())
-    self.roi_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.roi_var,
-                                      values=roi_options)  # Stored instance
-    self.roi_menu.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-    ctk.CTkLabel(common_setup_frame, text="Condition A:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-    self.condA_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.condition_A_var, values=["(Scan Folder)"],
-                                        command=lambda *_: self.update_condition_B_options())  # Already stored
-    self.condA_menu.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-    ctk.CTkLabel(common_setup_frame, text="Condition B:").grid(row=1, column=2, padx=(15, 5), pady=5,
-                                                                            sticky="w")
-    self.condB_menu = ctk.CTkOptionMenu(common_setup_frame, variable=self.condition_B_var,
-                                        values=["(Scan Folder)"])  # Already stored
-    self.condB_menu.grid(row=1, column=3, padx=5, pady=5, sticky="ew")
-
-
-    # Post-hoc factor selection removed; only condition by ROI interaction is supported
-
-
-    # --- Row 2: Section A - Summed BCA Analysis ---
+    # --- Row 1: Section A - Summed BCA Analysis ---
     summed_bca_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-    summed_bca_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=(10, 5))
+    summed_bca_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=(10, 5))
     ctk.CTkLabel(summed_bca_frame, text="Summed BCA Analysis:", font=FONT_BOLD).pack(anchor="w",
                           pady=(0, 5))
     buttons_summed_frame = ctk.CTkFrame(summed_bca_frame)
-    buttons_summed_frame.pack(fill="x", padx=0, pady=0)  # Use pack for horizontal button layout
+    buttons_summed_frame.pack(fill="x", padx=0, pady=0)
+    buttons_summed_frame.grid_columnconfigure(0, weight=1)
+    buttons_summed_frame.grid_columnconfigure(1, weight=1)
     # Paired t-tests were removed; only RM-ANOVA remains
-    ctk.CTkButton(buttons_summed_frame, text="Run RM-ANOVA (Summed BCA)", command=self.run_rm_anova).pack(
-        side="left", padx=5, pady=5)
+    ctk.CTkButton(
+        buttons_summed_frame,
+        text="Run RM-ANOVA (Summed BCA)",
+        command=self.run_rm_anova,
+    ).grid(row=0, column=0, padx=5, pady=(0, 5), sticky="ew")
 
-    ctk.CTkButton(buttons_summed_frame, text="Run Mixed Model", command=self.run_mixed_model).pack(
-        side="left", padx=5, pady=5)
+    ctk.CTkButton(
+        buttons_summed_frame,
+        text="Run Mixed Model",
+        command=self.run_mixed_model,
+    ).grid(row=1, column=0, padx=5, pady=(0, 5), sticky="ew")
 
+    self.run_posthoc_btn = ctk.CTkButton(
+        buttons_summed_frame,
+        text="Run Interaction Post-hocs",
+        command=self.run_interaction_posthocs,
+    )
+    self.run_posthoc_btn.grid(row=2, column=0, padx=5, pady=(0, 5), sticky="ew")
 
-    # Only the interaction post-hoc test is available
-    self.run_posthoc_btn = ctk.CTkButton(buttons_summed_frame, text="Run Interaction Post-hocs", command=self.run_interaction_posthocs)
-    self.run_posthoc_btn.pack(side="left", padx=5, pady=5)
     self.export_rm_anova_btn = ctk.CTkButton(
         buttons_summed_frame,
         text="Export RM-ANOVA",
@@ -82,7 +68,7 @@ def create_widgets(self):
             log_func=self.log_to_main_app,
         ),
     )
-    self.export_rm_anova_btn.pack(side="left", padx=5, pady=5)
+    self.export_rm_anova_btn.grid(row=0, column=1, padx=5, pady=(0, 5), sticky="ew")
 
     self.export_mixed_model_btn = ctk.CTkButton(
         buttons_summed_frame,
@@ -94,8 +80,7 @@ def create_widgets(self):
             log_func=self.log_to_main_app,
         ),
     )
-    self.export_mixed_model_btn.pack(side="left", padx=5, pady=5)
-
+    self.export_mixed_model_btn.grid(row=1, column=1, padx=5, pady=(0, 5), sticky="ew")
 
     self.export_posthoc_btn = ctk.CTkButton(
         buttons_summed_frame,
@@ -108,12 +93,12 @@ def create_widgets(self):
             log_func=self.log_to_main_app,
         ),
     )
-    self.export_posthoc_btn.pack(side="left", padx=5, pady=5)
+    self.export_posthoc_btn.grid(row=2, column=1, padx=5, pady=(0, 5), sticky="ew")
 
 
     # --- Row 3: Section B - Harmonic Significance Check ---
     harmonic_check_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-    harmonic_check_frame.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
+    harmonic_check_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
     ctk.CTkLabel(harmonic_check_frame, text="Per-Harmonic Significance Check:",
                  font=FONT_BOLD).pack(anchor="w", pady=(0, 5))
     controls_harmonic_frame = ctk.CTkFrame(harmonic_check_frame)
@@ -148,5 +133,5 @@ def create_widgets(self):
     # --- Row 4: Results Textbox ---
     self.results_textbox = ctk.CTkTextbox(main_frame, wrap="word", state="disabled",
                                           font=ctk.CTkFont(family="Courier New", size=12))
-    self.results_textbox.grid(row=4, column=0, sticky="nsew", padx=5, pady=(10, 5))
-    main_frame.grid_rowconfigure(4, weight=1)
+    self.results_textbox.grid(row=3, column=0, sticky="nsew", padx=5, pady=(10, 5))
+    main_frame.grid_rowconfigure(3, weight=1)
