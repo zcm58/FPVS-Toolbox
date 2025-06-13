@@ -79,6 +79,7 @@ from Tools.Image_Resizer import FPVSImageResizer
 
 # Statistics toolbox
 import Tools.Stats as stats
+from Main_App.relevant_publications_window import RelevantPublicationsWindow
 from Main_App.settings_manager import SettingsManager
 from Main_App.settings_window import SettingsWindow
 # =====================================================
@@ -346,6 +347,11 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             "About FPVS ToolBox",
             f"Version: {FPVS_TOOLBOX_VERSION} was developed by Zack Murphy at Mississippi State University."
         )
+
+    def show_relevant_publications(self):
+        """Display a window with supporting literature."""
+        win = RelevantPublicationsWindow(self)
+        win.geometry("600x600")
 
     def quit(self):
         if (self.processing_thread and self.processing_thread.is_alive()) or \
