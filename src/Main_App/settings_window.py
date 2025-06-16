@@ -12,6 +12,7 @@ import customtkinter as ctk
 
 from config import init_fonts, FONT_MAIN
 from .settings_manager import SettingsManager
+from .roi_settings_editor import ROISettingsEditor
 
 
 class SettingsWindow(ctk.CTkToplevel):
@@ -125,6 +126,13 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(stats_tab, textvariable=alpha_var).grid(row=3, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0))
         self.alpha_var = alpha_var
 
+        ctk.CTkLabel(stats_tab, text="Regions of Interest", font=ctk.CTkFont(weight="bold")).grid(row=4, column=0, columnspan=3, sticky="w", padx=pad, pady=(pad, 0))
+        roi_pairs = self.manager.get_roi_pairs()
+        self.roi_editor = ROISettingsEditor(stats_tab, roi_pairs)
+        self.roi_editor.scroll.grid(row=5, column=0, columnspan=3, sticky="nsew", padx=pad)
+        stats_tab.rowconfigure(5, weight=1)
+        ctk.CTkButton(stats_tab, text="+ Add ROI", command=self.roi_editor.add_entry).grid(row=6, column=0, columnspan=3, sticky="w", padx=pad, pady=(0, pad))
+
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=1, column=0, pady=(0, pad))
         ctk.CTkButton(btn_frame, text="Reset to Defaults", command=self._reset).pack(side="left", padx=pad)
@@ -154,6 +162,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('analysis', 'oddball_freq', self.odd_var.get())
         self.manager.set('analysis', 'bca_upper_limit', self.bca_var.get())
         self.manager.set('analysis', 'alpha', self.alpha_var.get())
+        self.manager.set_roi_pairs(self.roi_editor.get_pairs())
         prev_debug = self.manager.get('debug', 'enabled', 'False').lower() == 'true'
         self.manager.set('debug', 'enabled', str(self.debug_var.get()))
         self.manager.save()

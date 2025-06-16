@@ -6,6 +6,14 @@ from . import stats_analysis
 
 logger = logging.getLogger(__name__)
 
+# Default ROI definitions used when no user configuration exists
+DEFAULT_ROIS = {
+    "Frontal Lobe": ["F3", "F4", "Fz"],
+    "Occipital Lobe": ["O1", "O2", "Oz"],
+    "Parietal Lobe": ["P3", "P4", "Pz"],
+    "Central Lobe": ["C3", "C4", "Cz"],
+}
+
 
 def log_to_main_app(self, message):
     try:
@@ -65,3 +73,27 @@ def prepare_all_subject_summed_bca_data(self):
         self.log_to_main_app,
     ) or {}
     return bool(self.all_subject_data)
+
+
+def load_rois_from_settings(manager=None):
+    """Return ROI dictionary from settings, ensuring defaults exist."""
+    mgr = manager or SettingsManager()
+    pairs = mgr.get_roi_pairs() if hasattr(mgr, "get_roi_pairs") else []
+    rois = {}
+    for name, electrodes in pairs:
+        if name and electrodes:
+            rois[name] = [e.upper() for e in electrodes]
+    for name, default_chans in DEFAULT_ROIS.items():
+        rois.setdefault(name, default_chans)
+    return rois
+
+
+def apply_rois_to_modules(rois_dict):
+    """Update ROI dictionaries in related stats modules."""
+    import Tools.Stats.stats as stats_mod
+    import Tools.Stats.stats_analysis as analysis_mod
+    import Tools.Stats.stats_runners as runners_mod
+
+    stats_mod.ROIS = rois_dict
+    analysis_mod.set_rois(rois_dict)
+    runners_mod.ROIS = rois_dict
