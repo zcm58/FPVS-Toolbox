@@ -45,28 +45,7 @@ After installing the dependencies, start the GUI with:
 python src/main.py
 ```
 
-## Configuration and Settings
 
-User preferences are stored in `settings.ini` (generated automatically in a configuration folder such as `%APPDATA%\FPVS_Toolbox`). You can adjust appearance mode, default paths, event labels/IDs, and analysis parameters from the Settings window in the application.
-
-Several GUI dimensions are defined in `config.py` if you need to tweak control sizes:
-
-- `BUTTON_WIDTH`
-- `ADV_ENTRY_WIDTH`
-- `ADV_LABEL_ID_ENTRY_WIDTH`
-- `ADV_ID_ENTRY_WIDTH`
-
-## Repository Layout
-
-```
-src/                 Main application package
-    fpvs_app.py      Core GUI application
-    main.py          Entry point for running the toolbox
-    Main_App/        Modularized GUI and processing code
-    Tools/           Additional utilities (Image Resizer, Stats, Averaging)
-    config.py        Global configuration constants
-    settings.ini     Default settings file
-```
 
 ## License
 
