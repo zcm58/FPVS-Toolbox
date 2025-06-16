@@ -39,6 +39,10 @@ DEFAULTS = {
         'bca_upper_limit': '16.8',
         'alpha': '0.05'
     },
+    'rois': {
+        'names': 'Frontal Lobe;Central Lobe;Parietal Lobe;Occipital Lobe',
+        'electrodes': 'F3,F4,Fz;C3,C4,Cz;P3,P4,Pz;O1,O2,Oz'
+    },
     'debug': {
         'enabled': 'False'
     }
@@ -103,6 +107,22 @@ class SettingsManager:
         ids = ','.join([p[1] for p in pairs])
         self.set('events', 'labels', labels)
         self.set('events', 'ids', ids)
+
+    # --- Convenience helpers for ROI mappings ---
+    def get_roi_pairs(self) -> List[Tuple[str, List[str]]]:
+        names = [n.strip() for n in self.get('rois', 'names', '').split(';') if n.strip()]
+        groups = [g.strip() for g in self.get('rois', 'electrodes', '').split(';') if g.strip()]
+        pairs = []
+        for name, group in zip(names, groups):
+            electrodes = [e.strip().upper() for e in group.split(',') if e.strip()]
+            pairs.append((name, electrodes))
+        return pairs
+
+    def set_roi_pairs(self, pairs: List[Tuple[str, List[str]]]) -> None:
+        names = ';'.join([p[0] for p in pairs])
+        electrodes = ';'.join([','.join([e.upper() for e in p[1]]) for p in pairs])
+        self.set('rois', 'names', names)
+        self.set('rois', 'electrodes', electrodes)
 
     def debug_enabled(self) -> bool:
         return self.get('debug', 'enabled', 'False').lower() == 'true'

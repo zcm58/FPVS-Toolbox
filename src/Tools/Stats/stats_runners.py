@@ -15,6 +15,10 @@ from .posthoc_tests import (
     run_interaction_posthocs as perform_interaction_posthocs,
 )
 
+# These variables are set from settings at runtime
+ROIS = {}
+HARMONIC_CHECK_ALPHA = 0.05
+
 
 def run_rm_anova(self):
     self.log_to_main_app("Running RM-ANOVA (Summed BCA)...")

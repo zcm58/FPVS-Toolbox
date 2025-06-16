@@ -8,14 +8,33 @@ import numpy as np
 import scipy.stats as stats
 
 from .repeated_m_anova import run_repeated_measures_anova
+from Main_App.settings_manager import SettingsManager
 
 # Regions of Interest (10-20 montage)
-ROIS = {
+DEFAULT_ROIS = {
     "Frontal Lobe": ["F3", "F4", "Fz"],
     "Occipital Lobe": ["O1", "O2", "Oz"],
     "Parietal Lobe": ["P3", "P4", "Pz"],
     "Central Lobe": ["C3", "C4", "Cz"],
 }
+
+def _load_rois():
+    mgr = SettingsManager()
+    pairs = mgr.get_roi_pairs()
+    rois = {}
+    for name, electrodes in pairs:
+        if name and electrodes:
+            rois[name] = [e.upper() for e in electrodes]
+    for name, default_chans in DEFAULT_ROIS.items():
+        rois.setdefault(name, default_chans)
+    return rois
+
+ROIS = _load_rois()
+
+def set_rois(rois_dict):
+    """Update the module-level ROI dictionary."""
+    global ROIS
+    ROIS = {name: [e.upper() for e in chans] for name, chans in rois_dict.items()}
 ALL_ROIS_OPTION = "(All ROIs)"
 HARMONIC_CHECK_ALPHA = 0.05
 

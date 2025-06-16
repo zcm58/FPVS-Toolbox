@@ -62,16 +62,14 @@ from .stats_helpers import (
     prepare_all_subject_summed_bca_data,
     log_to_main_app,
     on_close,
+    load_rois_from_settings,
+    apply_rois_to_modules,
 )
 
 
 # Regions of Interest (10-20 montage)
-ROIS = {
-    "Frontal Lobe": ["F3", "F4", "Fz"],
-    "Occipital Lobe": ["O1", "O2", "Oz"],
-    "Parietal Lobe": ["P3", "P4", "Pz"],
-    "Central Lobe": ["C3", "C4", "Cz"]
-}
+ROIS = load_rois_from_settings()
+apply_rois_to_modules(ROIS)
 ALL_ROIS_OPTION = "(All ROIs)"
 HARMONIC_CHECK_ALPHA = 0.05  # Significance level for one-sample t-test
 
@@ -99,6 +97,10 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.focus_force()
 
         self.master_app = master
+
+        # Reload ROI configuration in case settings changed
+        rois_from_settings = load_rois_from_settings(getattr(self.master_app, 'settings', None))
+        apply_rois_to_modules(rois_from_settings)
 
         # Data structures
         self.subject_data = {}
