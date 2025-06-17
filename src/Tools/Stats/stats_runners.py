@@ -29,7 +29,8 @@ def run_rm_anova(self):
     self.export_rm_anova_btn.configure(state="disabled");
     self.rm_anova_results_data = None
 
-    if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+    self.all_subject_data.clear()
+    if not self.prepare_all_subject_summed_bca_data():
         messagebox.showerror("Data Error", "Summed BCA data could not be prepared for RM-ANOVA.");
         self.results_textbox.configure(state="disabled");
         return
@@ -220,7 +221,8 @@ def run_mixed_model(self):
     self.export_mixed_model_btn.configure(state="disabled")
     self.mixed_model_results_data = None
 
-    if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+    self.all_subject_data.clear()
+    if not self.prepare_all_subject_summed_bca_data():
         messagebox.showerror("Data Error", "Summed BCA data could not be prepared for Mixed Model.")
         self.results_textbox.configure(state="disabled")
         return
@@ -294,7 +296,8 @@ def run_posthoc_tests(self):
     self.export_posthoc_btn.configure(state="disabled")
     self.posthoc_results_data = None
 
-    if not self.all_subject_data and not self.prepare_all_subject_summed_bca_data():
+    self.all_subject_data.clear()
+    if not self.prepare_all_subject_summed_bca_data():
         messagebox.showerror("Data Error", "Summed BCA data could not be prepared for post-hoc tests.")
 
         self.results_textbox.configure(state="disabled")
@@ -356,13 +359,15 @@ def run_interaction_posthocs(self):
     self.log_to_main_app("Running post-hoc tests for ANOVA interaction...")
     self.run_posthoc_btn.configure(state="disabled")
 
-    if self.rm_anova_results_data is None:
-        messagebox.showwarning("No ANOVA Data", "Please run a successful RM-ANOVA first.")
+    self.all_subject_data.clear()
+    if not self.prepare_all_subject_summed_bca_data():
+        messagebox.showwarning("No Data", "Summed BCA data not found. Please re-run the main analysis pipeline.")
         self.run_posthoc_btn.configure(state="normal")
         return
 
-    if not self.all_subject_data:
-        messagebox.showwarning("No Data", "Summed BCA data not found. Please re-run the main analysis pipeline.")
+    if self.rm_anova_results_data is None:
+        messagebox.showwarning("No ANOVA Data", "Please run a successful RM-ANOVA first.")
+        self.run_posthoc_btn.configure(state="normal")
         return
 
     long_format_data = []
