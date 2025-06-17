@@ -14,6 +14,7 @@ from .posthoc_tests import (
     run_posthoc_pairwise_tests,
     run_interaction_posthocs as perform_interaction_posthocs,
 )
+from .stats_helpers import load_rois_from_settings, apply_rois_to_modules
 
 # These variables are set from settings at runtime
 ROIS = {}
@@ -21,6 +22,7 @@ HARMONIC_CHECK_ALPHA = 0.05
 
 
 def run_rm_anova(self):
+    self.refresh_rois()
     self.log_to_main_app("Running RM-ANOVA (Summed BCA)...")
     self.results_textbox.configure(state="normal");
     self.results_textbox.delete("1.0", tk.END)  # Clear textbox
@@ -210,6 +212,7 @@ def run_rm_anova(self):
 
 
 def run_mixed_model(self):
+    self.refresh_rois()
     """Run a linear mixed-effects model on the summed BCA data."""
     self.log_to_main_app("Running Mixed Effects Model (Summed BCA)...")
     self.results_textbox.configure(state="normal")
@@ -284,6 +287,7 @@ def run_mixed_model(self):
 
 
 def run_posthoc_tests(self):
+    self.refresh_rois()
     self.log_to_main_app("Running post-hoc pairwise tests...")
     self.results_textbox.configure(state="normal")
     self.results_textbox.delete("1.0", tk.END)
@@ -344,6 +348,7 @@ def run_posthoc_tests(self):
 
 
 def run_interaction_posthocs(self):
+    self.refresh_rois()
     """
     Runs post-hoc tests to break down a significant interaction from the last RM-ANOVA.
     This version builds a summary of significant findings and places it at the top of the output.
@@ -465,6 +470,7 @@ def run_interaction_posthocs(self):
 
 
 def run_harmonic_check(self):
+    self.refresh_rois()
     self.log_to_main_app("Running Per-Harmonic Significance Check...")
     self.results_textbox.configure(state="normal");
     self.results_textbox.delete("1.0", tk.END)

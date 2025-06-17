@@ -99,8 +99,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.master_app = master
 
         # Reload ROI configuration in case settings changed
-        rois_from_settings = load_rois_from_settings(getattr(self.master_app, 'settings', None))
-        apply_rois_to_modules(rois_from_settings)
+        self.refresh_rois()
 
         # Data structures
         self.subject_data = {}
@@ -145,6 +144,11 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         if default_folder and os.path.isdir(default_folder):
             self.scan_folder()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def refresh_rois(self):
+        """Reload ROI definitions from settings and update all modules."""
+        rois_from_settings = load_rois_from_settings(getattr(self.master_app, "settings", None))
+        apply_rois_to_modules(rois_from_settings)
 
     # Bind imported methods to keep class API unchanged
     browse_folder = browse_folder
