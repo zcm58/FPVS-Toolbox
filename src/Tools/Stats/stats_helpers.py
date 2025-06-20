@@ -63,7 +63,7 @@ def aggregate_bca_sum(self, file_path, roi_name):
     )
 
 
-def prepare_all_subject_summed_bca_data(self):
+def prepare_all_subject_summed_bca_data(self, roi_filter=None):
     self.log_to_main_app("Preparing summed BCA data...")
     self.all_subject_data = stats_analysis.prepare_all_subject_summed_bca_data(
         self.subjects,
@@ -71,6 +71,7 @@ def prepare_all_subject_summed_bca_data(self):
         self.subject_data,
         self.base_freq,
         self.log_to_main_app,
+        roi_filter=roi_filter,
     ) or {}
     return bool(self.all_subject_data)
 

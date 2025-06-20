@@ -15,6 +15,7 @@ from .posthoc_tests import (
     run_interaction_posthocs as perform_interaction_posthocs,
 )
 from .stats_helpers import load_rois_from_settings, apply_rois_to_modules
+from .stats_analysis import ALL_ROIS_OPTION
 
 # These variables are set from settings at runtime
 ROIS = {}
@@ -30,7 +31,8 @@ def run_rm_anova(self):
     self.rm_anova_results_data = None
 
     self.all_subject_data.clear()
-    if not self.prepare_all_subject_summed_bca_data():
+    roi_list = None if self.roi_var.get() == ALL_ROIS_OPTION else [self.roi_var.get()]
+    if not self.prepare_all_subject_summed_bca_data(roi_filter=roi_list):
         messagebox.showerror("Data Error", "Summed BCA data could not be prepared for RM-ANOVA.");
         self.results_textbox.configure(state="disabled");
         return
@@ -222,7 +224,8 @@ def run_mixed_model(self):
     self.mixed_model_results_data = None
 
     self.all_subject_data.clear()
-    if not self.prepare_all_subject_summed_bca_data():
+    roi_list = None if self.roi_var.get() == ALL_ROIS_OPTION else [self.roi_var.get()]
+    if not self.prepare_all_subject_summed_bca_data(roi_filter=roi_list):
         messagebox.showerror("Data Error", "Summed BCA data could not be prepared for Mixed Model.")
         self.results_textbox.configure(state="disabled")
         return
@@ -297,7 +300,8 @@ def run_posthoc_tests(self):
     self.posthoc_results_data = None
 
     self.all_subject_data.clear()
-    if not self.prepare_all_subject_summed_bca_data():
+    roi_list = None if self.roi_var.get() == ALL_ROIS_OPTION else [self.roi_var.get()]
+    if not self.prepare_all_subject_summed_bca_data(roi_filter=roi_list):
         messagebox.showerror("Data Error", "Summed BCA data could not be prepared for post-hoc tests.")
 
         self.results_textbox.configure(state="disabled")
@@ -360,7 +364,8 @@ def run_interaction_posthocs(self):
     self.run_posthoc_btn.configure(state="disabled")
 
     self.all_subject_data.clear()
-    if not self.prepare_all_subject_summed_bca_data():
+    roi_list = None if self.roi_var.get() == ALL_ROIS_OPTION else [self.roi_var.get()]
+    if not self.prepare_all_subject_summed_bca_data(roi_filter=roi_list):
         messagebox.showwarning("No Data", "Summed BCA data not found. Please re-run the main analysis pipeline.")
         self.run_posthoc_btn.configure(state="normal")
         return
@@ -397,7 +402,10 @@ def run_interaction_posthocs(self):
             f"NOTE: Post-hoc tests will be run only on the {len(complete_subjects)} subjects with complete data.")
 
     # --- Loop through ROIs, run post-hocs, and collect results ---
-    all_rois = sorted(df_long_balanced['roi'].unique())
+    if self.roi_var.get() == ALL_ROIS_OPTION:
+        all_rois = sorted(df_long_balanced['roi'].unique())
+    else:
+        all_rois = [self.roi_var.get()] if self.roi_var.get() in df_long_balanced['roi'].unique() else []
     full_details_output = ""  # For the detailed breakdown
     significant_findings_for_summary = []  # For the top-level summary
 
@@ -505,11 +513,12 @@ def run_harmonic_check(self):
     any_significant_found_overall = False
     loaded_dataframes = {}  # Cache for loaded DataFrames: {file_path: df}
 
+    roi_list = list(ROIS.keys()) if self.roi_var.get() == ALL_ROIS_OPTION else [self.roi_var.get()]
     for cond_name in self.conditions:
         output_text += f"\n=== Condition: {cond_name} ===\n"
         found_significant_in_this_condition = False
 
-        for roi_name in ROIS.keys():
+        for roi_name in roi_list:
             # Determine included frequencies based on a sample file for this condition
             sample_file_path = None
             for pid_s in self.subjects:  # Find first subject with data for this condition
@@ -532,6 +541,7 @@ def run_harmonic_check(self):
                     loaded_dataframes[sample_file_path] = pd.read_excel(sample_file_path,
                                                                         sheet_name=selected_metric,
                                                                         index_col="Electrode")
+                    loaded_dataframes[sample_file_path].index = loaded_dataframes[sample_file_path].index.str.upper()
 
                 sample_df_cols = loaded_dataframes[sample_file_path].columns
                 included_freq_values = self._get_included_freqs(sample_df_cols)
@@ -566,6 +576,7 @@ def run_harmonic_check(self):
                             self.log_to_main_app(
                                 f"Cache miss for {os.path.basename(file_path)}. Loading sheet: '{selected_metric}'")
                             current_df = pd.read_excel(file_path, sheet_name=selected_metric, index_col="Electrode")
+                            current_df.index = current_df.index.str.upper()
                             loaded_dataframes[file_path] = current_df  # Cache it
                         except FileNotFoundError:
                             self.log_to_main_app(

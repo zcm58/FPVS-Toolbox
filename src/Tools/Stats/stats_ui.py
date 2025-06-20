@@ -3,6 +3,7 @@
 import customtkinter as ctk
 from config import FONT_BOLD
 from . import stats_export
+from .stats_analysis import ROIS, ALL_ROIS_OPTION
 
 
 def create_widgets(self):
@@ -94,6 +95,15 @@ def create_widgets(self):
         ),
     )
     self.export_posthoc_btn.grid(row=2, column=1, padx=5, pady=(0, 5), sticky="ew")
+
+    # ROI selection menu
+    roi_frame = ctk.CTkFrame(summed_bca_frame, fg_color="transparent")
+    roi_frame.pack(fill="x", padx=0, pady=(5, 0))
+    ctk.CTkLabel(roi_frame, text="ROI:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
+    self.roi_menu = ctk.CTkOptionMenu(roi_frame, variable=self.roi_var,
+                                      values=[ALL_ROIS_OPTION] + list(ROIS.keys()))
+    self.roi_menu.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+    roi_frame.grid_columnconfigure(1, weight=1)
 
 
     # --- Row 3: Section B - Harmonic Significance Check ---
