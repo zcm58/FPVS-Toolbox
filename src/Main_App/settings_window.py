@@ -167,6 +167,18 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('debug', 'enabled', str(self.debug_var.get()))
         self.manager.save()
 
+        # Update ROI definitions in any open Stats windows
+        try:
+            from Tools.Stats.stats_helpers import load_rois_from_settings, apply_rois_to_modules
+            from Tools.Stats.stats import StatsAnalysisWindow
+            rois = load_rois_from_settings(self.manager)
+            apply_rois_to_modules(rois)
+            for child in self.master.winfo_children():
+                if isinstance(child, StatsAnalysisWindow):
+                    child.refresh_rois()
+        except Exception:
+            pass
+
         try:
             from config import update_target_frequencies
             update_target_frequencies(float(self.odd_var.get()), float(self.bca_var.get()))

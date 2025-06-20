@@ -65,6 +65,7 @@ def get_included_freqs(base_freq, all_col_names, log_func):
 def aggregate_bca_sum(file_path, roi_name, base_freq, log_func):
     try:
         df = pd.read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
+        df.index = df.index.str.upper()
         roi_channels = ROIS.get(roi_name)
         if not roi_channels:
             log_func(f"ROI {roi_name} not defined.")
@@ -87,17 +88,18 @@ def aggregate_bca_sum(file_path, roi_name, base_freq, log_func):
         return np.nan
 
 
-def prepare_all_subject_summed_bca_data(subjects, conditions, subject_data, base_freq, log_func):
+def prepare_all_subject_summed_bca_data(subjects, conditions, subject_data, base_freq, log_func, roi_filter=None):
     all_subject_data = {}
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
         return None
+    roi_names = roi_filter or ROIS.keys()
     for pid in subjects:
         all_subject_data[pid] = {}
         for cond_name in conditions:
             file_path = subject_data.get(pid, {}).get(cond_name)
             all_subject_data[pid].setdefault(cond_name, {})
-            for roi_name in ROIS.keys():
+            for roi_name in roi_names:
                 sum_val = aggregate_bca_sum(file_path, roi_name, base_freq, log_func) if file_path and os.path.exists(file_path) else np.nan
                 all_subject_data[pid][cond_name][roi_name] = sum_val
     log_func("Summed BCA data prep complete.")
@@ -153,6 +155,7 @@ def run_harmonic_check(subject_data, subjects, conditions, selected_metric, mean
             try:
                 if sample_file not in loaded_dataframes:
                     loaded_dataframes[sample_file] = pd.read_excel(sample_file, sheet_name=selected_metric, index_col="Electrode")
+                    loaded_dataframes[sample_file].index = loaded_dataframes[sample_file].index.str.upper()
                 sample_df_cols = loaded_dataframes[sample_file].columns
                 included_freq_values = get_included_freqs(base_freq, sample_df_cols, log_func)
             except Exception as e:
@@ -177,6 +180,7 @@ def run_harmonic_check(subject_data, subjects, conditions, selected_metric, mean
                     if current_df is None:
                         try:
                             current_df = pd.read_excel(f_path, sheet_name=selected_metric, index_col="Electrode")
+                            current_df.index = current_df.index.str.upper()
                             loaded_dataframes[f_path] = current_df
                         except FileNotFoundError:
                             log_func(f"Error: File not found {f_path} for PID {pid}, Cond {cond_name}.")
