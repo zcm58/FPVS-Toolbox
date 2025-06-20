@@ -204,6 +204,9 @@ def run_rm_anova(self):
     except ImportError:
         output_text += "Error: The `repeated_m_anova.py` module or its dependency `statsmodels` could not be loaded.\nPlease ensure `statsmodels` is installed (`pip install statsmodels`).\nContact developer if issues persist.\n"
         self.log_to_main_app("ImportError during RM-ANOVA execution, likely statsmodels or the custom module.")
+    except ValueError as e:
+        output_text += f"RM-ANOVA failed: {e}\n"
+        self.log_to_main_app(f"RM-ANOVA failed: {e}")
     except Exception as e:
         output_text += f"RM-ANOVA analysis failed unexpectedly: {e}\n"
         output_text += "Common issues include insufficient data after removing missing values, or data not having\nenough variation or levels for each factor (e.g., needing at least 2 conditions).\n"

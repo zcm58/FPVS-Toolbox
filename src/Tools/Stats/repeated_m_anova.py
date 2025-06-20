@@ -19,6 +19,35 @@ Dependencies:
     pandas, statsmodels
 """
 import pandas as pd
+import numpy as np
+from itertools import product
+
+
+from typing import Optional
+
+
+def _check_balance(df: pd.DataFrame, subject_col: str, within_cols: list, dv_col: Optional[str] = None) -> None:
+    """Validate that each subject has exactly one observation per condition/ROI."""
+    levels = [sorted(df[col].unique()) for col in within_cols]
+    expected_combos = list(product(*levels))
+
+    issues = []
+    for subject, grp in df.groupby(subject_col):
+        combos = [tuple(x) for x in grp[within_cols].itertuples(index=False, name=None)]
+        for combo in expected_combos:
+            count = combos.count(combo)
+            if count == 0:
+                cond_str = " ".join(f"{col} {val}" for col, val in zip(within_cols, combo))
+                issues.append(f"Subject {subject} missing {cond_str}")
+            elif count > 1:
+                cond_str = " ".join(f"{col} {val}" for col, val in zip(within_cols, combo))
+                issues.append(f"Subject {subject} has {count} duplicates for {cond_str}")
+
+        if dv_col and grp[dv_col].var() < np.finfo(float).eps:
+            issues.append(f"Subject {subject} has nearly zero variance across conditions")
+
+    if issues:
+        raise ValueError("Data is unbalanced. " + "; ".join(issues))
 
 def run_repeated_measures_anova(data, dv_col, within_cols, subject_col):
     """
@@ -48,6 +77,9 @@ def run_repeated_measures_anova(data, dv_col, within_cols, subject_col):
     df = data.dropna(subset=required_cols)
     if df.empty:
         raise ValueError("After dropping missing values, no data remain for ANOVA.")
+
+    # Ensure balanced design: each subject must have one row per combination
+    _check_balance(df, subject_col, within_cols, dv_col)
 
     # Fit the repeated measures model
     try:
