@@ -42,6 +42,12 @@ def _load_alpha(self):
     return SettingsManager().get('analysis', 'alpha', '0.05')
 
 
+def _load_bca_upper_limit(self):
+    if hasattr(self.master_app, 'settings'):
+        return self.master_app.settings.get('analysis', 'bca_upper_limit', '16.8')
+    return SettingsManager().get('analysis', 'bca_upper_limit', '16.8')
+
+
 def _validate_numeric(self, P):
     if P in ("", "-"): return True
     try:
@@ -53,7 +59,10 @@ def _validate_numeric(self, P):
 
 def _get_included_freqs(self, all_col_names):
     return stats_analysis.get_included_freqs(
-        self.base_freq, all_col_names, self.log_to_main_app
+        self.base_freq,
+        all_col_names,
+        self.log_to_main_app,
+        max_freq=self.bca_upper_limit,
     )
 
 
