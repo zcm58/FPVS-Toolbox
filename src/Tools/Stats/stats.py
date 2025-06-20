@@ -55,6 +55,7 @@ from .stats_runners import (
 )
 from .stats_helpers import (
     _load_base_freq,
+    _load_bca_upper_limit,
     _load_alpha,
     _validate_numeric,
     _get_included_freqs,
@@ -117,6 +118,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         self.stats_data_folder_var = tk.StringVar(master=self, value=default_folder)
         self.detected_info_var = tk.StringVar(master=self, value="Select folder containing FPVS results.")
         self.base_freq = self._load_base_freq()
+        self.bca_upper_limit = self._load_bca_upper_limit()
         self.alpha_var = tk.StringVar(master=self, value=self._load_alpha())
         self.roi_var = tk.StringVar(master=self, value=ALL_ROIS_OPTION)
         self.condition_A_var = tk.StringVar(master=self)
@@ -169,6 +171,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
     log_to_main_app = log_to_main_app
     on_close = on_close
     _load_base_freq = _load_base_freq
+    _load_bca_upper_limit = _load_bca_upper_limit
     _load_alpha = _load_alpha
     _validate_numeric = _validate_numeric
     _get_included_freqs = _get_included_freqs

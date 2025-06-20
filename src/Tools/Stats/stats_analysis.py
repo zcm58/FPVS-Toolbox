@@ -39,7 +39,7 @@ ALL_ROIS_OPTION = "(All ROIs)"
 HARMONIC_CHECK_ALPHA = 0.05
 
 
-def get_included_freqs(base_freq, all_col_names, log_func):
+def get_included_freqs(base_freq, all_col_names, log_func, max_freq=None):
     try:
         base_freq_val = float(base_freq)
         if base_freq_val <= 0:
@@ -58,6 +58,15 @@ def get_included_freqs(base_freq, all_col_names, log_func):
     if not numeric_freqs:
         return []
     sorted_numeric_freqs = sorted(set(numeric_freqs))
+    if max_freq is not None:
+        try:
+            max_freq_val = float(max_freq)
+        except ValueError:
+            log_func(f"Invalid max frequency '{max_freq}'. Using no upper limit.")
+            max_freq_val = None
+        if max_freq_val is not None:
+            sorted_numeric_freqs = [f for f in sorted_numeric_freqs if f <= max_freq_val]
+
     excluded = {f for f in sorted_numeric_freqs if abs(f / base_freq_val - round(f / base_freq_val)) < 1e-6}
     return [f for f in sorted_numeric_freqs if f not in excluded]
 
@@ -130,7 +139,7 @@ def run_rm_anova(all_subject_data, log_func):
     return anova_df_results.to_string(index=False), anova_df_results
 
 
-def run_harmonic_check(subject_data, subjects, conditions, selected_metric, mean_value_threshold, base_freq, log_func):
+def run_harmonic_check(subject_data, subjects, conditions, selected_metric, mean_value_threshold, base_freq, log_func, max_freq=None):
     findings = []
     output_lines = [f"===== Per-Harmonic Significance Check ({selected_metric}) ====="]
     output_lines.append("A harmonic is flagged as 'Significant' if:")
@@ -157,7 +166,7 @@ def run_harmonic_check(subject_data, subjects, conditions, selected_metric, mean
                     loaded_dataframes[sample_file] = pd.read_excel(sample_file, sheet_name=selected_metric, index_col="Electrode")
                     loaded_dataframes[sample_file].index = loaded_dataframes[sample_file].index.str.upper()
                 sample_df_cols = loaded_dataframes[sample_file].columns
-                included_freq_values = get_included_freqs(base_freq, sample_df_cols, log_func)
+                included_freq_values = get_included_freqs(base_freq, sample_df_cols, log_func, max_freq)
             except Exception as e:
                 log_func(f"Error reading columns for ROI '{roi_name}', Cond '{cond_name}': {e}")
                 output_lines.append(f"  --- ROI: {roi_name} ---")

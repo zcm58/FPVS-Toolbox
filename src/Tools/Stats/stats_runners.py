@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import traceback
+import os
 
 from .repeated_m_anova import run_repeated_measures_anova
 from .mixed_effects_model import run_mixed_effects_model
