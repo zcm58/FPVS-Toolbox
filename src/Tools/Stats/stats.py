@@ -149,7 +149,7 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
         """Reload ROI definitions from settings and update all modules."""
         rois_from_settings = load_rois_from_settings(getattr(self.master_app, "settings", None))
         apply_rois_to_modules(rois_from_settings)
-        if self.roi_menu is not None:
+        if getattr(self, "roi_menu", None) is not None:
             new_values = [ALL_ROIS_OPTION] + list(rois_from_settings.keys())
             self.roi_menu.configure(values=new_values)
             if self.roi_var.get() not in new_values:
