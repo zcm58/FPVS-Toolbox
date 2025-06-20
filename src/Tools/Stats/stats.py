@@ -129,7 +129,6 @@ class StatsAnalysisWindow(ctk.CTkToplevel):
 
 
         # UI Widget References (stored for potential future dynamic updates)
-        self.roi_menu = None
         self.condA_menu = None
         self.condB_menu = None
         self.harmonic_metric_menu = None
