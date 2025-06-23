@@ -14,6 +14,7 @@ The FPVS Toolbox is a GUI based application for preprocessing, cleaning, and ana
 - Interactive eLORETA/sLORETA source localization with 3‑D glass brain viewer
   (automatically downloads the `fsaverage` template if no MRI is specified)
 
+
 ## Features currently under development:
 
 - Publication quality 2D heatmaps
@@ -52,8 +53,10 @@ python src/main.py
 
 Enable the **Save Preprocessed .fif** option in the main window before starting
 a run. The toolbox creates a subfolder named `.fif files` inside your output
+
 directory and writes one `.fif` file for each condition of every input BDF.
 These files can be selected when running the source localization tool.
+
 
 ### Source Localization
 
