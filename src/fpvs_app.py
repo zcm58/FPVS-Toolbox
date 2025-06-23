@@ -79,6 +79,7 @@ from Tools.Image_Resizer import FPVSImageResizer
 
 # Statistics toolbox
 import Tools.Stats as stats
+from Main_App.eloreta_launcher import open_eloreta_tool
 from Main_App.relevant_publications_window import RelevantPublicationsWindow
 from Main_App.settings_manager import SettingsManager
 from Main_App.settings_window import SettingsWindow

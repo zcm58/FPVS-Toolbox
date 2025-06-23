@@ -10,6 +10,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog
 import customtkinter as ctk
+from mne.datasets import fetch_fsaverage
 
 from config import init_fonts, FONT_MAIN
 from .settings_manager import SettingsManager
@@ -151,7 +152,10 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(stats_tab, text="+ Add ROI", command=self.roi_editor.add_entry).grid(row=6, column=0, columnspan=3, sticky="w", padx=pad, pady=(0, pad))
 
         # --- LORETA Tab ---
-        fs_default = _find_fsaverage_dir()
+
+
+        fs_default = fetch_fsaverage(verbose=False)
+
         ctk.CTkLabel(loreta_tab, text="MRI Directory").grid(row=0, column=0, sticky="w", padx=pad, pady=(pad, 0))
         mri_var = tk.StringVar(value=self.manager.get('loreta', 'mri_path', fs_default))
         ctk.CTkEntry(loreta_tab, textvariable=mri_var).grid(row=0, column=1, sticky="ew", padx=pad, pady=(pad, 0))
