@@ -365,7 +365,7 @@ class ProcessingMixin:
                             fif_dir = os.path.join(save_folder, ".fif files")
                             os.makedirs(fif_dir, exist_ok=True)
                             fif_path = os.path.join(fif_dir, os.path.splitext(f_name)[0] + '.fif')
-                            mne.io.write_raw_fif(raw_proc, fif_path, overwrite=True)
+                            raw_proc.save(fif_path, overwrite=True)
                             gui_queue.put({'type': 'log', 'message': f"Preprocessed FIF saved to: {fif_path}"})
                         except Exception as e_save:
                             gui_queue.put({'type': 'log', 'message': f"Error saving FIF for {f_name}: {e_save}"})
