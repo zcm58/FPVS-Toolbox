@@ -14,6 +14,8 @@ The FPVS Toolbox is a GUI based application for preprocessing, cleaning, and ana
 - Interactive eLORETA/sLORETA source localization with 3‑D glass brain viewer
   (automatically downloads the `fsaverage` template if no MRI is specified)
 
+
+
 ## Features currently under development:
 
 - Publication quality 2D heatmaps
@@ -55,6 +57,7 @@ a run. The toolbox creates a subfolder named `.fif files` inside your output
 directory and writes one `*-epo.fif` file for each condition of every input BDF
 (for example, `P1_Return_Fruit_vs_Veg-epo.fif`).
 These files can be selected when running the source localization tool.
+
 
 ### Source Localization
 
