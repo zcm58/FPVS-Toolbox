@@ -132,7 +132,8 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.file_mode = tk.StringVar(master=self, value="Single")
         self.file_type = tk.StringVar(master=self, value=".BDF")
         self.save_folder_path = tk.StringVar(master=self)
-        self.save_fif_var = tk.BooleanVar(master=self, value=False)
+        # Save preprocessed FIF files by default
+        self.save_fif_var = tk.BooleanVar(master=self, value=True)
 
         # --- Initialize Widget Attributes ---
         self.select_button = None

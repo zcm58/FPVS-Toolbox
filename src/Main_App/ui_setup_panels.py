@@ -183,8 +183,8 @@ class SetupPanelManager:
         self.app_ref.max_bad_channels_alert_entry.grid(row=5, column=3, padx=PAD_X, pady=PAD_Y,
                                                        sticky="w")  # Moved to row 5, col 3
 
-        # Row 6: Save preprocessed FIF option
-        self.app_ref.save_fif_var = tk.BooleanVar(value=False)
+        # Row 6: Save preprocessed FIF option (enabled by default)
+        self.app_ref.save_fif_var = tk.BooleanVar(value=True)
         self.app_ref.save_fif_checkbox = ctk.CTkCheckBox(
             self.app_ref.params_frame,
             text="Save Preprocessed .fif",
