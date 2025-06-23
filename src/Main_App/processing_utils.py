@@ -395,9 +395,15 @@ class ProcessingMixin:
                         try:
                             fif_dir = os.path.join(save_folder, ".fif files")
                             os.makedirs(fif_dir, exist_ok=True)
-                            fif_path = os.path.join(fif_dir, os.path.splitext(f_name)[0] + '.fif')
-                            raw_proc.save(fif_path, overwrite=True)
-                            gui_queue.put({'type': 'log', 'message': f"Preprocessed FIF saved to: {fif_path}"})
+
+                            for cond_label, epoch_list in file_epochs.items():
+                                if not epoch_list or not isinstance(epoch_list[0], mne.Epochs):
+                                    continue
+                                cond_fname = f"{os.path.splitext(f_name)[0]}_{cond_label.replace(' ', '_')}.fif"
+                                cond_path = os.path.join(fif_dir, cond_fname)
+                                epoch_list[0].save(cond_path, overwrite=True)
+                                gui_queue.put({'type': 'log', 'message': f"Condition FIF saved to: {cond_path}"})
+
                         except Exception as e_save:
                             gui_queue.put({'type': 'log', 'message': f"Error saving FIF for {f_name}: {e_save}"})
                     elif raw_proc is not None:

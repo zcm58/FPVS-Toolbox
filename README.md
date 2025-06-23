@@ -53,8 +53,10 @@ python src/main.py
 
 Enable the **Save Preprocessed .fif** option in the main window before starting
 a run. The toolbox creates a subfolder named `.fif files` inside your output
-directory and writes one `.fif` file per input BDF. These files can be selected
-when running the source localization tool.
+
+directory and writes one `.fif` file for each condition of every input BDF.
+These files can be selected when running the source localization tool.
+
 
 ### Source Localization
 
