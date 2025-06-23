@@ -6,6 +6,7 @@ paths, appearance settings and analysis parameters.  It interfaces with
 user.
 """
 
+import os
 import tkinter as tk
 from tkinter import filedialog
 import customtkinter as ctk
@@ -14,6 +15,20 @@ from mne.datasets import fetch_fsaverage
 from config import init_fonts, FONT_MAIN
 from .settings_manager import SettingsManager
 from .roi_settings_editor import ROISettingsEditor
+
+
+def _find_fsaverage_dir() -> str:
+    """Return the fsaverage directory if it exists locally."""
+    try:
+        import mne
+        subjects_dir = mne.get_config('SUBJECTS_DIR', os.getenv('SUBJECTS_DIR'))
+        if subjects_dir:
+            path = os.path.join(subjects_dir, 'fsaverage')
+            if os.path.isdir(path):
+                return path
+    except Exception:
+        pass
+    return ''
 
 
 class SettingsWindow(ctk.CTkToplevel):
@@ -137,7 +152,10 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(stats_tab, text="+ Add ROI", command=self.roi_editor.add_entry).grid(row=6, column=0, columnspan=3, sticky="w", padx=pad, pady=(0, pad))
 
         # --- LORETA Tab ---
+
+
         fs_default = fetch_fsaverage(verbose=False)
+
         ctk.CTkLabel(loreta_tab, text="MRI Directory").grid(row=0, column=0, sticky="w", padx=pad, pady=(pad, 0))
         mri_var = tk.StringVar(value=self.manager.get('loreta', 'mri_path', fs_default))
         ctk.CTkEntry(loreta_tab, textvariable=mri_var).grid(row=0, column=1, sticky="ew", padx=pad, pady=(pad, 0))
@@ -205,3 +223,4 @@ class SettingsWindow(ctk.CTkToplevel):
             messagebox.showinfo("Restart Required", "Please restart the app for debug mode changes to take effect.")
 
         self.destroy()
+
