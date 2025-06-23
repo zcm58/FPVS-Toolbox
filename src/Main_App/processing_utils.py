@@ -360,6 +360,15 @@ class ProcessingMixin:
                         finally:
                             self.data_paths = temp_original_data_paths
                             self.preprocessed_data = temp_original_preprocessed_data
+                    if raw_proc is not None and getattr(self, 'save_fif_var', None) and getattr(self.save_fif_var, 'get', lambda: False)():
+                        try:
+                            fif_dir = os.path.join(save_folder, ".fif files")
+                            os.makedirs(fif_dir, exist_ok=True)
+                            fif_path = os.path.join(fif_dir, os.path.splitext(f_name)[0] + '.fif')
+                            mne.io.write_raw_fif(raw_proc, fif_path, overwrite=True)
+                            gui_queue.put({'type': 'log', 'message': f"Preprocessed FIF saved to: {fif_path}"})
+                        except Exception as e_save:
+                            gui_queue.put({'type': 'log', 'message': f"Error saving FIF for {f_name}: {e_save}"})
                     elif raw_proc is not None:
                         gui_queue.put(
                             {'type': 'log', 'message': f"Skipping Excel generation for {f_name} (no valid epochs)."})

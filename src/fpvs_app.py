@@ -131,7 +131,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.file_mode = tk.StringVar(master=self, value="Single")
         self.file_type = tk.StringVar(master=self, value=".BDF")
         self.save_folder_path = tk.StringVar(master=self)
-        # self.save_preprocessed (BooleanVar) was REMOVED
+        self.save_fif_var = tk.BooleanVar(master=self, value=False)
 
         # --- Initialize Widget Attributes ---
         self.select_button = None
@@ -153,6 +153,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.ref_channel2_entry = None
         self.max_idx_keep_entry = None
         self.max_bad_channels_alert_entry = None
+        self.save_fif_checkbox = None
         self.event_map_outer_frame = None
         self.event_map_scroll_frame = None
         self.detect_button = None
@@ -205,7 +206,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             self.low_pass_entry, self.high_pass_entry, self.downsample_entry,
             self.epoch_start_entry, self.epoch_end_entry, self.reject_thresh_entry,
             self.ref_channel1_entry, self.ref_channel2_entry, self.max_idx_keep_entry,
-            self.max_bad_channels_alert_entry,
+            self.max_bad_channels_alert_entry, self.save_fif_checkbox,
             self.detect_button,
             self.add_map_button,
         ]
