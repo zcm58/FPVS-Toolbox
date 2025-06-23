@@ -52,11 +52,13 @@ python src/main.py
 
 ### Saving Preprocessed FIF Files
 
-Enable the **Save Preprocessed .fif** option in the main window before starting
-a run. The toolbox creates a subfolder named `.fif files` inside your output
-directory and writes one `*-epo.fif` file for each condition of every input BDF
-(for example, `P1_Return_Fruit_vs_Veg-epo.fif`).
-These files can be selected when running the source localization tool.
+
+The app saves preprocessed data as FIF files by default (you can uncheck
+the **Save Preprocessed .fif** option if not needed). A `.fif files`
+subfolder is created in your output directory, and one `*-epo.fif` file is
+written for each condition of every input BDF (for example,
+`P1_Return_Fruit_vs_Veg-epo.fif`). These files can be selected when running the
+source localization tool.
 
 
 ### Source Localization

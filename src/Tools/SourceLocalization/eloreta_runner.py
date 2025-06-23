@@ -26,11 +26,21 @@ def _default_template_location() -> str:
     return os.path.join(base_dir, "fsaverage")
 
 
-def _prepare_forward(evoked: mne.Evoked, settings: SettingsManager) -> tuple[mne.Forward, str, str]:
+
+def _prepare_forward(
+    evoked: mne.Evoked,
+    settings: SettingsManager,
+    log_func: Callable[[str], None],
+) -> tuple[mne.Forward, str, str]:
+
     """Construct a forward model using MRI info from settings or fsaverage."""
     subjects_dir = settings.get("loreta", "mri_path", "")
     subject = "fsaverage"
     if not subjects_dir or not os.path.isdir(subjects_dir):
+        log_func(
+            "Default MRI template not found. Downloading 'fsaverage'. This may take a few minutes..."
+        )
+
         install_parent = os.path.dirname(_default_template_location())
         try:
             subjects_dir = mne.datasets.fetch_fsaverage(subjects_dir=install_parent, verbose=True)
@@ -41,6 +51,9 @@ def _prepare_forward(evoked: mne.Evoked, settings: SettingsManager) -> tuple[mne
             settings.save()
         except Exception:
             pass
+
+        log_func(f"Template downloaded to: {subjects_dir}")
+
     # Use fsaverage transformation if no custom trans file is specified
     trans = settings.get("paths", "trans_file", "fsaverage")
     src = mne.setup_source_space(subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False)
@@ -68,7 +81,7 @@ def run_source_localization(
     evoked = _load_data(fif_path)
 
     log_func("Preparing forward model ...")
-    fwd, subject, subjects_dir = _prepare_forward(evoked, settings)
+    fwd, subject, subjects_dir = _prepare_forward(evoked, settings, log_func)
 
     noise_cov = mne.compute_covariance([evoked], tmax=0.0)
     inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)

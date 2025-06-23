@@ -450,6 +450,7 @@ class ProcessingMixin:
                                 epoch_list[0].save(cond_path, overwrite=True)
                                 gui_queue.put({'type': 'log', 'message': f"Condition FIF saved to: {cond_path}"})
 
+
                         except Exception as e_save:
                             gui_queue.put({'type': 'log', 'message': f"Error saving FIF for {f_name}: {e_save}"})
                     elif raw_proc is not None:

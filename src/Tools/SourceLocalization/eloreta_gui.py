@@ -75,11 +75,22 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             return
         method = self.method_var.get()
         thr = self.threshold_var.get()
-        threading.Thread(target=self._run_thread, args=(fif_path, out_dir, method, thr), daemon=True).start()
+        threading.Thread(
+            target=self._run_thread,
+            args=(fif_path, out_dir, method, thr),
+            daemon=True
+        ).start()
 
     def _run_thread(self, fif_path, out_dir, method, thr):
+        log_func = getattr(self.master, "log", print)
         try:
-            eloreta_runner.run_source_localization(fif_path, out_dir, method=method, threshold=thr)
-            messagebox.showinfo("Done", "Source localization finished.")
+            eloreta_runner.run_source_localization(
+                fif_path,
+                out_dir,
+                method=method,
+                threshold=thr,
+                log_func=log_func,
+            )
+            self.after(0, lambda: messagebox.showinfo("Done", "Source localization finished."))
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
