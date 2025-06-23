@@ -12,9 +12,9 @@ def open_eloreta_tool(app):
         Parent window from which the tool is launched.
     """
     # Import inside the function to avoid heavy dependencies at startup
-    from . import eloreta_gui
+    from Tools.SourceLocalization import SourceLocalizationWindow
 
-    tool = eloreta_gui.ELORETATool(master=app)
+    tool = SourceLocalizationWindow(master=app)
     try:
         # Respect any stored geometry settings if available
         geometry = app.settings.get("gui", "eloreta_size", "900x700")
