@@ -74,6 +74,14 @@ def run_source_localization(
 
     # Visualise in a separate Brain window
     brain = stc.plot(subject=subject, subjects_dir=subjects_dir, time_viewer=False)
+    try:
+        labels = mne.read_labels_from_annot(subject, parc="aparc", subjects_dir=subjects_dir)
+        for label in labels:
+            brain.add_label(label, borders=True)
+    except Exception:
+        # If annotations aren't available just continue without borders
+        pass
+
     for view, name in [("lat", "side"), ("rostral", "frontal"), ("dorsal", "top")]:
         brain.show_view(view)
         brain.save_image(os.path.join(output_dir, f"{name}.png"))
