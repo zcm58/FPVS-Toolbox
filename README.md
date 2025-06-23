@@ -14,6 +14,7 @@ The FPVS Toolbox is a GUI based application for preprocessing, cleaning, and ana
 - Interactive eLORETA/sLORETA source localization with 3‑D glass brain viewer
   (automatically downloads the `fsaverage` template if no MRI is specified)
 
+
 ## Features currently under development:
 
 - Publication quality 2D heatmaps
