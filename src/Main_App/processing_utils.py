@@ -8,6 +8,7 @@ import os
 import queue
 import threading
 import traceback
+import time
 import mne
 import numpy as np
 import pandas as pd
@@ -34,7 +35,14 @@ class ProcessingMixin:
 
         self.preprocessed_data = {}
         self.progress_bar.set(0)
+        self._current_progress = 0.0
+        self._target_progress = 0.0
         self._max_progress = len(self.data_paths)
+        self._start_time = time.time()
+        self._processed_count = 0
+        if hasattr(self, 'remaining_time_var') and self.remaining_time_var is not None:
+            self.remaining_time_var.set("")
+            self.after(0, self._update_time_remaining)
         self.busy = True
         self._set_controls_enabled(False)
 
@@ -55,9 +63,9 @@ class ProcessingMixin:
                     self.log(msg['message'])
 
                 elif t == 'progress':
+                    self._processed_count = msg['value']
                     frac = msg['value'] / self._max_progress
-                    self.progress_bar.set(frac)
-                    self.update_idletasks()
+                    self._animate_progress_to(frac)
 
                 elif t == 'post':
                     fname       = msg['file']
@@ -130,6 +138,12 @@ class ProcessingMixin:
         self.data_paths = []
         self._max_progress = 1
         self.progress_bar.set(0.0)
+        self._current_progress = 0.0
+        self._target_progress = 0.0
+        self._start_time = None
+        self._processed_count = 0
+        if hasattr(self, 'remaining_time_var') and self.remaining_time_var is not None:
+            self.remaining_time_var.set("")
         self.preprocessed_data = {}
 
         if hasattr(self, 'log_text') and self.log_text.winfo_exists():
@@ -146,6 +160,39 @@ class ProcessingMixin:
         gc.collect()
 
         self.log("--- State Reset. Ready for next run. ---")
+
+    def _animate_progress_to(self, target: float) -> None:
+        self._target_progress = max(0.0, min(1.0, target))
+        if not self._animating_progress:
+            self._animating_progress = True
+            self.after(0, self._animate_progress_step)
+
+    def _animate_progress_step(self):
+        diff = self._target_progress - self._current_progress
+        if abs(diff) < 0.005:
+            self._current_progress = self._target_progress
+            self.progress_bar.set(self._current_progress)
+            self._animating_progress = False
+            return
+        self._current_progress += 0.01 if diff > 0 else -0.01
+        self.progress_bar.set(self._current_progress)
+        self.after(20, self._animate_progress_step)
+
+    def _update_time_remaining(self) -> None:
+        if self._start_time is None:
+            return
+        elapsed = time.time() - self._start_time
+        if self._processed_count > 0:
+            avg = elapsed / self._processed_count
+            remaining = max(0.0, avg * (self._max_progress - self._processed_count))
+            mins, secs = divmod(int(remaining), 60)
+            text = f"Estimated time remaining: {mins:02d}:{secs:02d}"
+        else:
+            text = ""
+        if hasattr(self, 'remaining_time_var') and self.remaining_time_var is not None:
+            self.remaining_time_var.set(text)
+        if self.processing_thread and self.processing_thread.is_alive():
+            self.after(1000, self._update_time_remaining)
 
     def _processing_thread_func(self, data_paths, params, gui_queue):
         import os
@@ -402,6 +449,7 @@ class ProcessingMixin:
                                 cond_path = os.path.join(fif_dir, cond_fname)
                                 epoch_list[0].save(cond_path, overwrite=True)
                                 gui_queue.put({'type': 'log', 'message': f"Condition FIF saved to: {cond_path}"})
+
                         except Exception as e_save:
                             gui_queue.put({'type': 'log', 'message': f"Error saving FIF for {f_name}: {e_save}"})
                     elif raw_proc is not None:

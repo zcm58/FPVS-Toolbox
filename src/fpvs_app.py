@@ -3,7 +3,7 @@
 """
 FPVS all-in-one toolbox using MNE-Python and CustomTkinter.
 
-Version: 1.0.3
+Version: 1.1.0
 
 Key functionalities:
 
@@ -42,6 +42,7 @@ import numpy as np
 import pandas as pd
 import customtkinter as ctk
 import mne
+import time
 import requests
 from packaging.version import parse as version_parse
 from Main_App.menu_bar import AppMenuBar
@@ -164,6 +165,14 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.progress_bar = None
         self.menubar = None
         self.debug_label = None
+        self.remaining_time_var = None
+        self.remaining_time_label = None
+
+        self._start_time = None
+        self._processed_count = 0
+        self._current_progress = 0.0
+        self._target_progress = 0.0
+        self._animating_progress = False
 
         # --- Register Validation Commands ---
         self.validate_num_cmd = (self.register(self._validate_numeric_input), '%P')
@@ -477,8 +486,16 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         prog_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
         prog_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=PAD_Y)
         prog_frame.grid_columnconfigure(0, weight=1)
-        self.progress_bar = ctk.CTkProgressBar(prog_frame, orientation="horizontal", height=20)
-        self.progress_bar.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
+
+        self.remaining_time_var = tk.StringVar(value="")
+        self.remaining_time_label = ctk.CTkLabel(prog_frame, textvariable=self.remaining_time_var)
+        self.remaining_time_label.grid(row=0, column=0, sticky="w", padx=0, pady=(0, 2))
+
+        self.progress_bar = ctk.CTkProgressBar(
+            prog_frame, orientation="horizontal", height=20,
+            progress_color="#4caf50"
+        )
+        self.progress_bar.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
         self.progress_bar.set(0)
 
         # Sync select button label initially

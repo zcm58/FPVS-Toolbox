@@ -26,11 +26,13 @@ def _default_template_location() -> str:
     return os.path.join(base_dir, "fsaverage")
 
 
+
 def _prepare_forward(
     evoked: mne.Evoked,
     settings: SettingsManager,
     log_func: Callable[[str], None],
 ) -> tuple[mne.Forward, str, str]:
+
     """Construct a forward model using MRI info from settings or fsaverage."""
     subjects_dir = settings.get("loreta", "mri_path", "")
     subject = "fsaverage"
@@ -38,6 +40,7 @@ def _prepare_forward(
         log_func(
             "Default MRI template not found. Downloading 'fsaverage'. This may take a few minutes..."
         )
+
         install_parent = os.path.dirname(_default_template_location())
         try:
             subjects_dir = mne.datasets.fetch_fsaverage(subjects_dir=install_parent, verbose=True)
@@ -48,7 +51,9 @@ def _prepare_forward(
             settings.save()
         except Exception:
             pass
+
         log_func(f"Template downloaded to: {subjects_dir}")
+
     # Use fsaverage transformation if no custom trans file is specified
     trans = settings.get("paths", "trans_file", "fsaverage")
     src = mne.setup_source_space(subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False)
