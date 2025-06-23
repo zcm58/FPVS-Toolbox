@@ -93,10 +93,6 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             )
             self.after(0, lambda: messagebox.showinfo("Done", "Source localization finished."))
         except Exception as e:
-            err_msg = str(e)
 
-            def _show_error(msg=err_msg, widget=self):
-                if widget.winfo_exists():
-                    messagebox.showerror("Error", msg, parent=widget)
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
 
-            self.after(0, _show_error)

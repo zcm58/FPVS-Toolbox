@@ -21,6 +21,7 @@ from PIL import Image, ImageOps
 PAD_X = 8
 PAD_Y = 8
 CORNER_RADIUS = 8
+ETA_ALPHA = 0.3  # smoothing factor for ETA updates
 
 # === Image processing logic ===
 def process_images_in_folder(input_folder, output_folder,
@@ -125,6 +126,7 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
         self.cancel_requested = False
         self.input_folder = ""
         self.output_folder = ""
+        self._eta_smooth = None
         self._build_ui()
 
     def _build_ui(self):
@@ -266,6 +268,7 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
         self.ext_var.set(".jpg")
         self.overwrite_var.set(False)
         self.time_lbl.configure(text="Elapsed: 0s")
+        self._eta_smooth = None
         self.status.configure(state="normal")
         self.status.delete("0.0", "end")
         self.status.configure(state="disabled")
@@ -273,6 +276,7 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
     def _cancel(self):
         self.cancel_requested = True
         self.cancel_btn.configure(state="disabled")
+        self._eta_smooth = None
 
     def _start(self):
         try:
@@ -295,6 +299,7 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
 
         self.start_time = time.time()
         self.time_lbl.configure(text="Elapsed: 0s")
+        self._eta_smooth = None
 
         threading.Thread(
             target=self._run,
@@ -311,9 +316,15 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
         if hasattr(self, 'start_time'):
             elapsed = time.time() - self.start_time
             if processed:
-                eta = (elapsed / processed) * (total - processed)
+                raw_eta = (elapsed / processed) * (total - processed)
+                if self._eta_smooth is None:
+                    self._eta_smooth = raw_eta
+                else:
+                    self._eta_smooth = (
+                        ETA_ALPHA * raw_eta + (1 - ETA_ALPHA) * self._eta_smooth
+                    )
                 self.time_lbl.configure(
-                    text=f"Elapsed: {int(elapsed)}s, ETA: {int(eta)}s")
+                    text=f"Elapsed: {int(elapsed)}s, ETA: {int(self._eta_smooth)}s")
             else:
                 self.time_lbl.configure(text=f"Elapsed: {int(elapsed)}s")
         self.status.configure(state="disabled")
@@ -342,6 +353,7 @@ class FPVSImageResizerCTK(ctk.CTkToplevel):
                 summary += f"  - {f}: {e}\n"
         elapsed = int(time.time() - self.start_time)
         self.time_lbl.configure(text=f"Elapsed: {elapsed}s, ETA: 0s")
+        self._eta_smooth = None
 
         messagebox.showinfo("Processing Summary", summary)
 
