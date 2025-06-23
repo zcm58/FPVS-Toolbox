@@ -10,6 +10,9 @@ The FPVS Toolbox is a GUI based application for preprocessing, cleaning, and ana
 - Built in Statistical analysis tool with repeated-measures ANOVA, linear mixed-effects models, and post-hoc pairwise tests to check for significant FPVS oddball responses in the Frontal, Central, Parietal, and Occipital lobes
 - Image Resizer tool for quickly resizing images for PsychoPy experiments
 - Averaging utility for combining epochs across files prior to post‑processing (useful if one needs to combine two similar FPVS experiments prior to calculating BCA)
+- Optional saving of preprocessed data as `.fif` files for advanced analyses
+- Interactive eLORETA/sLORETA source localization with 3‑D glass brain viewer
+  (automatically downloads the `fsaverage` template if no MRI is specified)
 
 ## Features currently under development:
 
@@ -44,6 +47,20 @@ After installing the dependencies, start the GUI with:
 ```bash
 python src/main.py
 ```
+
+### Saving Preprocessed FIF Files
+
+Enable the **Save Preprocessed .fif** option in the main window before starting
+a run. The toolbox creates a subfolder named `.fif files` inside your output
+directory and writes one `.fif` file for each condition of every input BDF.
+These files can be selected when running the source localization tool.
+
+### Source Localization
+
+Choose **Source Localization (eLORETA/sLORETA)** from the Tools menu to run an
+inverse solution on a preprocessed `.fif` file. Select the desired method and an
+output folder. An interactive 3‑D viewer will open with anatomical labels, and
+side, frontal and top screenshots are automatically saved in the chosen folder.
 
 
 
