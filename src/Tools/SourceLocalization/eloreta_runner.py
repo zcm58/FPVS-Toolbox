@@ -20,13 +20,35 @@ def _load_data(fif_path: str) -> mne.Evoked:
     return mne.read_evokeds(fif_path, condition=0, baseline=(None, 0))
 
 
-def _prepare_forward(evoked: mne.Evoked, settings: SettingsManager) -> tuple[mne.Forward, str, str]:
+def _default_template_location() -> str:
+    """Return the directory where the template MRI should reside."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_dir, "fsaverage")
+
+
+def _prepare_forward(
+    evoked: mne.Evoked,
+    settings: SettingsManager,
+    log_func: Callable[[str], None],
+) -> tuple[mne.Forward, str, str]:
     """Construct a forward model using MRI info from settings or fsaverage."""
-    subjects_dir = settings.get("paths", "mri_subjects_dir", "")
-    subject = settings.get("paths", "mri_subject", "fsaverage")
+    subjects_dir = settings.get("loreta", "mri_path", "")
+    subject = "fsaverage"
     if not subjects_dir or not os.path.isdir(subjects_dir):
-        subjects_dir = mne.datasets.fetch_fsaverage(verbose=True)
-        subject = "fsaverage"
+        log_func(
+            "Default MRI template not found. Downloading 'fsaverage'. This may take a few minutes..."
+        )
+        install_parent = os.path.dirname(_default_template_location())
+        try:
+            subjects_dir = mne.datasets.fetch_fsaverage(subjects_dir=install_parent, verbose=True)
+        except Exception:
+            subjects_dir = mne.datasets.fetch_fsaverage(verbose=True)
+        settings.set("loreta", "mri_path", subjects_dir)
+        try:
+            settings.save()
+        except Exception:
+            pass
+        log_func(f"Template downloaded to: {subjects_dir}")
     # Use fsaverage transformation if no custom trans file is specified
     trans = settings.get("paths", "trans_file", "fsaverage")
     src = mne.setup_source_space(subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False)
@@ -54,7 +76,7 @@ def run_source_localization(
     evoked = _load_data(fif_path)
 
     log_func("Preparing forward model ...")
-    fwd, subject, subjects_dir = _prepare_forward(evoked, settings)
+    fwd, subject, subjects_dir = _prepare_forward(evoked, settings, log_func)
 
     noise_cov = mne.compute_covariance([evoked], tmax=0.0)
     inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)
@@ -74,6 +96,14 @@ def run_source_localization(
 
     # Visualise in a separate Brain window
     brain = stc.plot(subject=subject, subjects_dir=subjects_dir, time_viewer=False)
+    try:
+        labels = mne.read_labels_from_annot(subject, parc="aparc", subjects_dir=subjects_dir)
+        for label in labels:
+            brain.add_label(label, borders=True)
+    except Exception:
+        # If annotations aren't available just continue without borders
+        pass
+
     for view, name in [("lat", "side"), ("rostral", "frontal"), ("dorsal", "top")]:
         brain.show_view(view)
         brain.save_image(os.path.join(output_dir, f"{name}.png"))
