@@ -154,7 +154,8 @@ class SettingsWindow(ctk.CTkToplevel):
         # --- LORETA Tab ---
 
 
-        fs_default = fetch_fsaverage(verbose=False)
+        install_base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        fs_default = fetch_fsaverage(subjects_dir=install_base, verbose=False)
 
         ctk.CTkLabel(loreta_tab, text="MRI Directory").grid(row=0, column=0, sticky="w", padx=pad, pady=(pad, 0))
         mri_var = tk.StringVar(value=self.manager.get('loreta', 'mri_path', fs_default))
