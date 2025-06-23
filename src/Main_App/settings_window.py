@@ -9,6 +9,7 @@ user.
 import tkinter as tk
 from tkinter import filedialog
 import customtkinter as ctk
+from mne.datasets import fetch_fsaverage
 
 from config import init_fonts, FONT_MAIN
 from .settings_manager import SettingsManager
@@ -44,8 +45,10 @@ class SettingsWindow(ctk.CTkToplevel):
         tabview.grid(row=0, column=0, padx=pad, pady=pad, sticky="nsew")
         gen_tab = tabview.add("General")
         stats_tab = tabview.add("Stats")
+        loreta_tab = tabview.add("LORETA")
         gen_tab.columnconfigure(1, weight=1)
         stats_tab.columnconfigure(1, weight=1)
+        loreta_tab.columnconfigure(1, weight=1)
 
         # --- General Tab ---
         ctk.CTkLabel(gen_tab, text="Appearance", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=2, pady=(pad, 0))
@@ -133,6 +136,14 @@ class SettingsWindow(ctk.CTkToplevel):
         stats_tab.rowconfigure(5, weight=1)
         ctk.CTkButton(stats_tab, text="+ Add ROI", command=self.roi_editor.add_entry).grid(row=6, column=0, columnspan=3, sticky="w", padx=pad, pady=(0, pad))
 
+        # --- LORETA Tab ---
+        fs_default = fetch_fsaverage(verbose=False)
+        ctk.CTkLabel(loreta_tab, text="MRI Directory").grid(row=0, column=0, sticky="w", padx=pad, pady=(pad, 0))
+        mri_var = tk.StringVar(value=self.manager.get('loreta', 'mri_path', fs_default))
+        ctk.CTkEntry(loreta_tab, textvariable=mri_var).grid(row=0, column=1, sticky="ew", padx=pad, pady=(pad, 0))
+        ctk.CTkButton(loreta_tab, text="Browse", command=lambda: self._select_folder(mri_var)).grid(row=0, column=2, padx=(0, pad), pady=(pad, 0))
+        self.mri_var = mri_var
+
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=1, column=0, pady=(0, pad))
         ctk.CTkButton(btn_frame, text="Reset to Defaults", command=self._reset).pack(side="left", padx=pad)
@@ -163,6 +174,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('analysis', 'bca_upper_limit', self.bca_var.get())
         self.manager.set('analysis', 'alpha', self.alpha_var.get())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
+        self.manager.set('loreta', 'mri_path', self.mri_var.get())
         prev_debug = self.manager.get('debug', 'enabled', 'False').lower() == 'true'
         self.manager.set('debug', 'enabled', str(self.debug_var.get()))
         self.manager.save()
