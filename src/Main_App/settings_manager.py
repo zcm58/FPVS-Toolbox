@@ -43,6 +43,9 @@ DEFAULTS = {
         'names': 'Frontal Lobe;Central Lobe;Parietal Lobe;Occipital Lobe',
         'electrodes': 'F3,F4,Fz;C3,C4,Cz;P3,P4,Pz;O1,O2,Oz'
     },
+    'loreta': {
+        'mri_path': ''
+    },
     'debug': {
         'enabled': 'False'
     }
@@ -71,8 +74,15 @@ class SettingsManager:
     def load(self) -> None:
         """Load settings from disk, applying defaults where needed."""
         self.config.read_dict(DEFAULTS)
+        missing_loreta = False
         if os.path.exists(self.ini_path):
+            existing = configparser.ConfigParser()
+            existing.read(self.ini_path)
+            if not existing.has_section('loreta') or not existing.has_option('loreta', 'mri_path'):
+                missing_loreta = True
             self.config.read(self.ini_path)
+        if missing_loreta:
+            self.save()
 
     def save(self) -> None:
         """Write the current settings to disk."""
