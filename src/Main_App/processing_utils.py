@@ -360,6 +360,37 @@ class ProcessingMixin:
                         finally:
                             self.data_paths = temp_original_data_paths
                             self.preprocessed_data = temp_original_preprocessed_data
+
+                        # === Source localization ===
+                        try:
+                            import source_model
+
+                            fwd, subj, subj_dir = source_model.prepare_head_model(raw_proc)
+                            noise_cov = source_model.estimate_noise_cov(raw_proc)
+                            inv = source_model.make_inverse_operator(raw_proc, fwd, noise_cov)
+                            stc_dict = source_model.apply_sloreta(file_epochs, inv)
+
+                            for cond_label, stc in stc_dict.items():
+                                cond_folder = os.path.join(save_folder, cond_label.replace(' ', '_'))
+                                os.makedirs(cond_folder, exist_ok=True)
+                                stc_base = os.path.join(cond_folder, os.path.splitext(f_name)[0] + '_' + cond_label.replace(' ', '_'))
+                                stc.save(stc_base)
+
+                                brain = stc.plot(subject=subj, subjects_dir=subj_dir, time_viewer=False)
+                                for view, name in [('dorsal', 'top'), ('rostral', 'frontal'), ('lat', 'side')]:
+                                    brain.show_view(view)
+                                    brain.save_image(f"{stc_base}_{name}.png")
+                                brain.close()
+
+                                excel_name = f"{extracted_pid_for_flagging}_{cond_label.replace(' ', '_')}_Results.xlsx"
+                                excel_path = os.path.join(cond_folder, excel_name)
+                                try:
+                                    df = source_model.source_to_dataframe(stc)
+                                    source_model.append_source_to_excel(excel_path, f"{cond_label}_Source", df)
+                                except Exception as e_xl:
+                                    gui_queue.put({'type': 'log', 'message': f"Error appending source results: {e_xl}"})
+                        except Exception as e_src:
+                            gui_queue.put({'type': 'log', 'message': f"Source localization error for {f_name}: {e_src}"})
                     if raw_proc is not None and getattr(self, 'save_fif_var', None) and getattr(self.save_fif_var, 'get', lambda: False)():
                         try:
                             fif_dir = os.path.join(save_folder, ".fif files")
