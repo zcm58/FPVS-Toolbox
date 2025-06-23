@@ -49,7 +49,18 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         method_menu.grid(row=2, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
 
         ctk.CTkLabel(frame, text="Threshold:").grid(row=3, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
-        ctk.CTkSlider(frame, from_=0.0, to=1.0, variable=self.threshold_var).grid(row=3, column=1, sticky="we", padx=PAD_X, pady=PAD_Y)
+        self.threshold_slider = ctk.CTkSlider(
+            frame,
+            from_=0.0,
+            to=1.0,
+            variable=self.threshold_var,
+            command=self._on_threshold_slider,
+        )
+        self.threshold_slider.grid(row=3, column=1, sticky="we", padx=PAD_X, pady=PAD_Y)
+        self.threshold_entry = ctk.CTkEntry(frame, textvariable=self.threshold_var, width=60)
+        self.threshold_entry.grid(row=3, column=2, sticky="w", padx=PAD_X, pady=PAD_Y)
+        self.threshold_entry.bind("<Return>", self._on_threshold_entry)
+        self.threshold_entry.bind("<FocusOut>", self._on_threshold_entry)
 
         run_btn = ctk.CTkButton(frame, text="Run", command=self._run)
         run_btn.grid(row=4, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
@@ -95,4 +106,21 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         except Exception as e:
 
             self.after(0, lambda: messagebox.showerror("Error", str(e)))
+
+    def _on_threshold_slider(self, value: float) -> None:
+        """Update variable when slider moves."""
+        try:
+            self.threshold_var.set(round(float(value), 3))
+        except tk.TclError:
+            pass
+
+    def _on_threshold_entry(self, _event=None) -> None:
+        """Validate entry value and update slider."""
+        try:
+            value = float(self.threshold_var.get())
+        except (ValueError, tk.TclError):
+            return
+        value = max(0.0, min(1.0, value))
+        self.threshold_var.set(value)
+        self.threshold_slider.set(value)
 
