@@ -401,11 +401,9 @@ class ProcessingMixin:
                         except Exception as e_save:
                             gui_queue.put({'type': 'log', 'message': f"Error saving FIF for {f_name}: {e_save}"})
                     elif raw_proc is not None:
-                        gui_queue.put(
-                            {'type': 'log', 'message': f"Skipping Excel generation for {f_name} (no valid epochs)."})
-                    elif raw_proc is None:
-                        gui_queue.put({'type': 'log',
-                                       'message': f"Skipping Excel generation for {f_name} (no preprocessed data)."})
+                        gui_queue.put({'type': 'log', 'message': 'FIF saving disabled.'})
+                    else:
+                        gui_queue.put({'type': 'log', 'message': f'Skipping FIF save for {f_name} (no preprocessed data).'})
 
                     gui_queue.put({'type': 'log', 'message': f"Cleaning up memory for {f_name}..."})
                     if isinstance(file_epochs, dict):
