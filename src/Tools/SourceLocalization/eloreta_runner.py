@@ -28,22 +28,35 @@ def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
 
 def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     """Set the transparency of a Brain viewer in a version robust way."""
+    logger.debug("_set_brain_alpha called with %s", alpha)
     try:
         if hasattr(brain, "set_alpha"):
+            logger.debug("Using Brain.set_alpha")
             brain.set_alpha(alpha)  # type: ignore[call-arg]
-            return
+        else:
+            logger.debug("Falling back to setting Brain.alpha attribute")
+            setattr(brain, "alpha", alpha)
     except Exception:
-        pass
-    try:
-        setattr(brain, "alpha", alpha)
-    except Exception:
+        logger.debug("Direct alpha methods failed", exc_info=True)
         try:
             for hemi in getattr(brain, "_hemi_data", {}).values():
                 mesh = getattr(hemi, "mesh", None)
                 if mesh is not None and hasattr(mesh, "actor"):
                     mesh.actor.GetProperty().SetOpacity(alpha)
+                for layer in getattr(hemi, "layers", {}).values():
+                    actor = getattr(layer, "actor", None)
+                    if actor is not None:
+                        actor.GetProperty().SetOpacity(alpha)
         except Exception:
-            logger.debug("Failed to set brain alpha", exc_info=True)
+            logger.debug("Failed to set brain alpha via mesh actors", exc_info=True)
+    try:
+        renderer = getattr(brain, "_renderer", None)
+        plotter = getattr(renderer, "plotter", None)
+        if plotter is not None and hasattr(plotter, "render"):
+            logger.debug("Triggering plotter.render()")
+            plotter.render()
+    except Exception:
+        logger.debug("Plotter render failed", exc_info=True)
 
 
 def _load_data(fif_path: str) -> mne.Evoked:
