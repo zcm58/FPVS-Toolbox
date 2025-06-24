@@ -276,6 +276,7 @@ def run_source_localization(
     log_func(f"Results saved to {output_dir}")
     if progress_cb:
         progress_cb(1.0)
+
     return stc_path, brain
 
 
@@ -302,6 +303,7 @@ def view_source_estimate(
     else:
         subjects_dir = stored_dir if stored_dir else os.path.dirname(_default_template_location())
 
+
     brain = stc.plot(
         subject=subject,
         subjects_dir=subjects_dir,
@@ -309,4 +311,5 @@ def view_source_estimate(
         hemi="split",
     )
     brain.set_alpha(alpha)
+
     return brain

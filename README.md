@@ -13,7 +13,9 @@ The FPVS Toolbox is a GUI based application for preprocessing, cleaning, and ana
 - Optional saving of preprocessed data as `.fif` files for advanced analyses
 - Interactive eLORETA/sLORETA source localization with 3‑D glass brain viewer
   (automatically downloads the `fsaverage` template if no MRI is specified) and
+
   a viewer tool to open saved results with adjustable transparency
+
 
 
 ## Features currently under development:
@@ -71,6 +73,7 @@ anatomical labels. Side, frontal and top screenshots are automatically saved in
 the chosen folder. You can also open any saved `source-lh.stc`/`source-rh.stc`
 pair later using the **View STC** button to inspect the results interactively and
 adjust the brain transparency.
+
 
 
 

@@ -92,11 +92,16 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         view_btn = ctk.CTkButton(frame, text="View STC", command=self._view_stc)
         view_btn.grid(row=6, column=0, columnspan=3, pady=(0, PAD_Y))
 
+        view_btn = ctk.CTkButton(frame, text="View STC", command=self._view_stc)
+        view_btn.grid(row=5, column=0, columnspan=3, pady=(0, PAD_Y))
+
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
+
         self.progress_bar.grid(row=7, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
         self.progress_bar.set(0)
 
         ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=8, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+
 
     def _browse_file(self):
         path = filedialog.askopenfilename(title="Select FIF file", filetypes=[("FIF files", "*.fif")], parent=self)
@@ -119,11 +124,13 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         if path.endswith("-lh.stc") or path.endswith("-rh.stc"):
             path = path[:-7]
         try:
+
             self.brain = eloreta_runner.view_source_estimate(
                 path,
                 threshold=self.threshold_var.get(),
                 alpha=self.alpha_var.get(),
             )
+
         except Exception as err:
             messagebox.showerror("Error", str(err))
 
