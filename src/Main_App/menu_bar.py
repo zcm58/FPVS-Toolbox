@@ -63,4 +63,5 @@ class AppMenuBar:
             label="Relevant Publications",
             command=self.app_ref.show_relevant_publications,
         )
+        help_menu.add_separator()
         help_menu.add_command(label="About...", command=self.app_ref.show_about_dialog)
