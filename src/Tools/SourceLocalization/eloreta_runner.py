@@ -44,7 +44,25 @@ def _dir_size_mb(path: str) -> float:
     return total / (1024 * 1024)
 
 
-def fetch_fsaverage_with_progress(subjects_dir: str, log_func: Callable[[str], None] = logger.info) -> str:
+def _threshold_stc(stc: mne.SourceEstimate, thr: float) -> mne.SourceEstimate:
+    """Return a copy of ``stc`` with values below ``thr`` zeroed.
+
+    The threshold may be specified either as an absolute value or as a
+    fraction between 0 and 1. If ``thr`` is between 0 and 1, it is treated as a
+    fraction of the maximum absolute amplitude in ``stc``.
+    """
+    stc = stc.copy()
+    if 0 < thr < 1:
+        thr_val = thr * np.max(np.abs(stc.data))
+    else:
+        thr_val = thr
+    stc.data[np.abs(stc.data) < thr_val] = 0
+    return stc
+
+
+def fetch_fsaverage_with_progress(
+    subjects_dir: str, log_func: Callable[[str], None] = logger.info
+) -> str:
     """Download ``fsaverage`` while logging progress to ``log_func``."""
 
     stop_event = threading.Event()
@@ -72,13 +90,11 @@ def fetch_fsaverage_with_progress(subjects_dir: str, log_func: Callable[[str], N
     return path
 
 
-
 def _prepare_forward(
     evoked: mne.Evoked,
     settings: SettingsManager,
     log_func: Callable[[str], None],
 ) -> tuple[mne.Forward, str, str]:
-
     """Construct a forward model using MRI info from settings or fsaverage."""
     stored_dir = settings.get("loreta", "mri_path", "")
     subject = "fsaverage"
@@ -95,17 +111,19 @@ def _prepare_forward(
         try:
             fs_path = fetch_fsaverage_with_progress(install_parent, log_func)
         except Exception as err:
-            log_func(f"Progress download failed ({err}). Falling back to mne.datasets.fetch_fsaverage")
-            fs_path = mne.datasets.fetch_fsaverage(subjects_dir=install_parent, verbose=True)
+            log_func(
+                f"Progress download failed ({err}). Falling back to mne.datasets.fetch_fsaverage"
+            )
+            fs_path = mne.datasets.fetch_fsaverage(
+                subjects_dir=install_parent, verbose=True
+            )
         # ``configparser.ConfigParser`` requires string values
         settings.set("loreta", "mri_path", str(fs_path))
-
 
         try:
             settings.save()
         except Exception:
             pass
-
 
         log_func(f"Template downloaded to: {fs_path}")
 
@@ -123,17 +141,22 @@ def _prepare_forward(
     surf_dir = os.path.join(subjects_dir, subject, "surf")
     log_func(f"Expecting surface files in: {surf_dir}")
 
-
     # Use fsaverage transformation if no custom trans file is specified
     trans = settings.get("paths", "trans_file", "fsaverage")
     log_func(f"Using trans file: {trans}")
-    log_func(f"Building source space using subjects_dir={subjects_dir}, subject={subject}")
-    src = mne.setup_source_space(subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False)
+    log_func(
+        f"Building source space using subjects_dir={subjects_dir}, subject={subject}"
+    )
+    src = mne.setup_source_space(
+        subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False
+    )
     log_func("Creating BEM model ...")
     model = mne.make_bem_model(subject=subject, subjects_dir=subjects_dir, ico=4)
     bem = mne.make_bem_solution(model)
     log_func("Computing forward solution ...")
-    fwd = mne.make_forward_solution(evoked.info, trans=trans, src=src, bem=bem, eeg=True)
+    fwd = mne.make_forward_solution(
+        evoked.info, trans=trans, src=src, bem=bem, eeg=True
+    )
     return fwd, subject, subjects_dir
 
 
@@ -178,7 +201,9 @@ def run_source_localization(
         )
         noise_cov = mne.compute_covariance(temp_epochs, tmax=0.0)
     except Exception as err:
-        log_func(f"Noise covariance estimation failed ({err}). Using ad-hoc covariance.")
+        log_func(
+            f"Noise covariance estimation failed ({err}). Using ad-hoc covariance."
+        )
         noise_cov = mne.make_ad_hoc_cov(evoked.info)
     step += 1
     if progress_cb:
@@ -197,7 +222,7 @@ def run_source_localization(
     mne_method = "eLORETA" if method_lower == "eloreta" else "sLORETA"
     stc = mne.minimum_norm.apply_inverse(evoked, inv, method=mne_method)
     if threshold:
-        stc = stc.threshold(threshold)
+        stc = _threshold_stc(stc, threshold)
     step += 1
     if progress_cb:
         progress_cb(step / total)
@@ -212,7 +237,9 @@ def run_source_localization(
     # Visualise in a separate Brain window
     brain = stc.plot(subject=subject, subjects_dir=subjects_dir, time_viewer=False)
     try:
-        labels = mne.read_labels_from_annot(subject, parc="aparc", subjects_dir=subjects_dir)
+        labels = mne.read_labels_from_annot(
+            subject, parc="aparc", subjects_dir=subjects_dir
+        )
         for label in labels:
             brain.add_label(label, borders=True)
     except Exception:
