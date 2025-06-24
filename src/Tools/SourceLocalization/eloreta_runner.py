@@ -6,6 +6,7 @@ import os
 import logging
 import threading
 import time
+import importlib
 from typing import Callable, Optional, Tuple, List
 
 import numpy as np
@@ -14,6 +15,25 @@ from Main_App.settings_manager import SettingsManager
 from . import source_localization
 
 logger = logging.getLogger(__name__)
+
+# Log versions and backend availability at import time for easier debugging
+try:  # pragma: no cover - best effort environment logging
+    logger.debug("MNE version: %s", mne.__version__)
+    if hasattr(mne.viz, "get_3d_backend"):
+        logger.debug("MNE 3D backend: %s", mne.viz.get_3d_backend())
+except Exception as err:
+    logger.debug("Failed to query MNE backend info: %s", err)
+
+for mod in ("pyvista", "pyvistaqt"):
+    spec = importlib.util.find_spec(mod)
+    logger.debug("%s available: %s", mod, spec is not None)
+    if spec is not None:
+        try:
+            module = importlib.import_module(mod)
+            ver = getattr(module, "__version__", "unknown")
+            logger.debug("%s version: %s", mod, ver)
+        except Exception as err:  # pragma: no cover - optional
+            logger.debug("%s version lookup failed: %s", mod, err)
 
 
 def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
@@ -273,6 +293,27 @@ def run_source_localization(
     """
     if log_func is None:
         log_func = logger.info
+
+    logger.debug(
+        "run_source_localization called with %s", {
+            "fif_path": fif_path,
+            "output_dir": output_dir,
+            "method": method,
+            "threshold": threshold,
+            "alpha": alpha,
+            "hemi": hemi,
+            "low_freq": low_freq,
+            "high_freq": high_freq,
+            "harmonics": harmonics,
+            "snr": snr,
+            "oddball": oddball,
+        },
+    )
+    logger.debug(
+        "QT_API=%s QT_QPA_PLATFORM=%s",
+        os.environ.get("QT_API"),
+        os.environ.get("QT_QPA_PLATFORM"),
+    )
     step = 0
     total = 7
     if progress_cb:
@@ -399,20 +440,30 @@ def run_source_localization(
 
     )
     try:
+        logger.debug(
+            "Calling stc.plot with hemi=%s subjects_dir=%s subject=%s",
+            hemi,
+            subjects_dir,
+            subject,
+        )
         brain = stc.plot(
             subject=subject,
             subjects_dir=subjects_dir,
             time_viewer=False,
             hemi=hemi,
         )
+        logger.debug("stc.plot succeeded")
     except Exception as err:
         logger.warning("hemi=%s failed: %s; falling back to default", hemi, err)
+        logger.debug("Retrying stc.plot with default hemisphere")
         brain = stc.plot(
             subject=subject,
             subjects_dir=subjects_dir,
             time_viewer=False,
         )
+        logger.debug("stc.plot succeeded on retry")
     _set_brain_alpha(brain, alpha)
+    logger.debug("Brain alpha set to %s", alpha)
     _set_brain_title(brain, os.path.basename(stc_path))
     try:
         labels = mne.read_labels_from_annot(
@@ -500,12 +551,18 @@ def view_source_estimate(
 
 
     try:
+        logger.debug(
+            "Calling stc.plot in view_source_estimate subjects_dir=%s subject=%s",
+            subjects_dir,
+            subject,
+        )
         brain = stc.plot(
             subject=subject,
             subjects_dir=subjects_dir,
             time_viewer=False,
             hemi="split",
         )
+        logger.debug("stc.plot succeeded in view_source_estimate")
     except Exception as err:
         logger.warning("hemi='split' failed: %s; falling back to default", err)
         brain = stc.plot(
@@ -513,8 +570,10 @@ def view_source_estimate(
             subjects_dir=subjects_dir,
             time_viewer=False,
         )
+        logger.debug("stc.plot succeeded on fallback in view_source_estimate")
 
     _set_brain_alpha(brain, alpha)
+    logger.debug("Brain alpha set to %s", alpha)
     _set_brain_title(brain, window_title or os.path.basename(stc_path))
 
     return brain
