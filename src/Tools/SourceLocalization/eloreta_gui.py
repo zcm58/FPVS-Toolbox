@@ -125,12 +125,19 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         ctk.CTkCheckBox(frame, text="Oddball localization", variable=self.oddball_var).grid(row=9, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=PAD_Y)
 
+
+        run_btn = ctk.CTkButton(frame, text="Run LORETA", command=self._run)
+        run_btn.grid(row=10, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
+
+
         view_btn = ctk.CTkButton(
             frame,
             text="View 3D brain heatmap",
             command=self._view_stc,
         )
-        view_btn.grid(row=10, column=0, columnspan=3, pady=(0, PAD_Y))
+
+        view_btn.grid(row=11, column=0, columnspan=3, pady=(0, PAD_Y))
+
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
         self.progress_bar.grid(row=12, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))

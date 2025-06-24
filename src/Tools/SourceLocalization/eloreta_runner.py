@@ -233,6 +233,12 @@ def run_source_localization(
     snr: Optional[float] = None,
     oddball: bool = False,
 
+    low_freq: Optional[float] = None,
+    high_freq: Optional[float] = None,
+    harmonics: Optional[list[float]] = None,
+    snr: Optional[float] = None,
+    oddball: bool = False,
+
     hemi: str = "split",
 
     log_func: Optional[Callable[[str], None]] = None,
