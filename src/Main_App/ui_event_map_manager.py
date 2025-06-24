@@ -133,10 +133,19 @@ class EventMapManager:
         id_entry.insert(0, id_text)
         id_entry.grid(row=0, column=1, sticky="w", padx=(0, PAD_X))  # Sticky west, fixed width
 
-        remove_btn = ctk.CTkButton(entry_frame, text="✕", width=REMOVE_BUTTON_WIDTH, height=REMOVE_BUTTON_WIDTH,
-                                   # Consistent size
-                                   corner_radius=CORNER_RADIUS,
-                                   command=lambda ef=entry_frame: self.remove_event_map_entry_from_manager(ef))
+        remove_btn = ctk.CTkButton(
+            entry_frame,
+            text="✕",
+            width=REMOVE_BUTTON_WIDTH,
+            height=REMOVE_BUTTON_WIDTH,
+            # Consistent size
+            corner_radius=CORNER_RADIUS,
+            fg_color="red",
+            hover_color="#cc0000",  # Slightly darker on hover
+            text_color="white",
+            font=ctk.CTkFont(weight="bold"),
+            command=lambda ef=entry_frame: self.remove_event_map_entry_from_manager(ef),
+        )
         remove_btn.grid(row=0, column=2, sticky="e", padx=(0, PAD_X))  # Add padx to not touch edge
         self.app_ref.debug(f"[EventMapManager] Widgets for new row created and gridded.")
 
