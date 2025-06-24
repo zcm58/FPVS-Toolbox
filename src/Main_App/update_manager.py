@@ -88,7 +88,7 @@ def _check_for_updates(app, silent=True, notify_if_no_update=True):
     except Exception as e:
         app.log(f"Update check failed: {e}")
         if not silent:
-            app.after(0, lambda: messagebox.showerror("Update Check Failed", str(e)))
+            app.after(0, lambda err=e: messagebox.showerror("Update Check Failed", str(err)))
 
 
 def _find_exe_asset(data):
