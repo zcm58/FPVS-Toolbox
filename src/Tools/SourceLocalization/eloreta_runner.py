@@ -77,34 +77,55 @@ def _prepare_forward(
 ) -> tuple[mne.Forward, str, str]:
 
     """Construct a forward model using MRI info from settings or fsaverage."""
-    subjects_dir = settings.get("loreta", "mri_path", "")
+    stored_dir = settings.get("loreta", "mri_path", "")
     subject = "fsaverage"
-    if not subjects_dir or not os.path.isdir(subjects_dir):
+    log_func(f"Initial stored MRI directory: {stored_dir}")
+
+    if not stored_dir or not os.path.isdir(stored_dir):
         log_func(
             "Default MRI template not found. Downloading 'fsaverage'. This may take a few minutes..."
         )
 
         install_parent = os.path.dirname(_default_template_location())
+        log_func(f"Attempting download to: {install_parent}")
         try:
-            subjects_dir = fetch_fsaverage_with_progress(install_parent, log_func)
-        except Exception:
-
-            subjects_dir = mne.datasets.fetch_fsaverage(verbose=True)
+            fs_path = fetch_fsaverage_with_progress(install_parent, log_func)
+        except Exception as err:
+            log_func(f"Progress download failed ({err}). Falling back to mne.datasets.fetch_fsaverage")
+            fs_path = mne.datasets.fetch_fsaverage(subjects_dir=install_parent, verbose=True)
         # ``configparser.ConfigParser`` requires string values
-        settings.set("loreta", "mri_path", str(subjects_dir))
+        settings.set("loreta", "mri_path", str(fs_path))
 
         try:
             settings.save()
         except Exception:
             pass
 
-        log_func(f"Template downloaded to: {subjects_dir}")
+        log_func(f"Template downloaded to: {fs_path}")
+
+        stored_dir = fs_path
+    else:
+        log_func(f"Using existing MRI directory: {stored_dir}")
+
+    if os.path.basename(stored_dir) == subject:
+        subjects_dir = os.path.dirname(stored_dir)
+        log_func(f"Parent directory for subjects set to: {subjects_dir}")
+    else:
+        subjects_dir = stored_dir
+        log_func(f"Subjects directory resolved to: {subjects_dir}")
+
+    surf_dir = os.path.join(subjects_dir, subject, "surf")
+    log_func(f"Expecting surface files in: {surf_dir}")
 
     # Use fsaverage transformation if no custom trans file is specified
     trans = settings.get("paths", "trans_file", "fsaverage")
+    log_func(f"Using trans file: {trans}")
+    log_func(f"Building source space using subjects_dir={subjects_dir}, subject={subject}")
     src = mne.setup_source_space(subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False)
+    log_func("Creating BEM model ...")
     model = mne.make_bem_model(subject=subject, subjects_dir=subjects_dir, ico=4)
     bem = mne.make_bem_solution(model)
+    log_func("Computing forward solution ...")
     fwd = mne.make_forward_solution(evoked.info, trans=trans, src=src, bem=bem, eeg=True)
     return fwd, subject, subjects_dir
 
@@ -128,6 +149,7 @@ def run_source_localization(
 
     log_func("Preparing forward model ...")
     fwd, subject, subjects_dir = _prepare_forward(evoked, settings, log_func)
+    log_func(f"Forward model ready. subjects_dir={subjects_dir}, subject={subject}")
 
     noise_cov = mne.compute_covariance([evoked], tmax=0.0)
     inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)
