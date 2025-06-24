@@ -11,6 +11,7 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 import mne
 from Main_App.settings_manager import SettingsManager
+from . import source_localization
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,12 @@ def run_source_localization(
     threshold: Optional[float] = None,
     alpha: float = 0.4,
 
+    low_freq: Optional[float] = None,
+    high_freq: Optional[float] = None,
+    harmonics: Optional[list[float]] = None,
+    snr: Optional[float] = None,
+    oddball: bool = False,
+
     hemi: str = "split",
 
     log_func: Optional[Callable[[str], None]] = None,
@@ -257,7 +264,42 @@ def run_source_localization(
         progress_cb(0.0)
     log_func(f"Loading data from {fif_path}")
     settings = SettingsManager()
-    evoked = _load_data(fif_path)
+    if low_freq is None:
+        try:
+            low_freq = float(settings.get("loreta", "loreta_low_freq", "0.1"))
+        except ValueError:
+            low_freq = None
+    if high_freq is None:
+        try:
+            high_freq = float(settings.get("loreta", "loreta_high_freq", "40.0"))
+        except ValueError:
+            high_freq = None
+    if harmonics is None:
+        harm_str = settings.get("loreta", "oddball_harmonics", "1,2,3")
+        try:
+            harmonics = [float(h) for h in harm_str.split(',') if h.strip()]
+        except Exception:
+            harmonics = []
+    if snr is None:
+        try:
+            snr = float(settings.get("loreta", "loreta_snr", "3.0"))
+        except ValueError:
+            snr = 3.0
+    oddball_freq = float(settings.get("analysis", "oddball_freq", "1.2"))
+
+    if oddball and fif_path.endswith("-epo.fif"):
+        epochs = mne.read_epochs(fif_path, preload=True)
+        if low_freq or high_freq:
+            epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
+        cycle_epochs = source_localization.extract_cycles(epochs, oddball_freq)
+        evoked = source_localization.average_cycles(cycle_epochs)
+        harmonic_freqs = [h * oddball_freq for h in harmonics]
+        if harmonic_freqs:
+            evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
+    else:
+        evoked = _load_data(fif_path)
+        if low_freq or high_freq:
+            evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
     step += 1
     if progress_cb:
         progress_cb(step / total)
@@ -286,18 +328,25 @@ def run_source_localization(
     if progress_cb:
         progress_cb(step / total)
 
-    inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)
-    step += 1
-    if progress_cb:
-        progress_cb(step / total)
+    if oddball:
+        inv = source_localization.build_inverse_operator(evoked, subjects_dir)
+        step += 1
+        if progress_cb:
+            progress_cb(step / total)
+        stc = source_localization.apply_sloreta(evoked, inv, snr)
+    else:
+        inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)
+        step += 1
+        if progress_cb:
+            progress_cb(step / total)
 
-    method_lower = method.lower()
-    if method_lower not in {"eloreta", "sloreta"}:
-        raise ValueError("Method must be 'eLORETA' or 'sLORETA'")
+        method_lower = method.lower()
+        if method_lower not in {"eloreta", "sloreta"}:
+            raise ValueError("Method must be 'eLORETA' or 'sLORETA'")
 
-    log_func(f"Applying {method_lower} ...")
-    mne_method = "eLORETA" if method_lower == "eloreta" else "sLORETA"
-    stc = mne.minimum_norm.apply_inverse(evoked, inv, method=mne_method)
+        log_func(f"Applying {method_lower} ...")
+        mne_method = "eLORETA" if method_lower == "eloreta" else "sLORETA"
+        stc = mne.minimum_norm.apply_inverse(evoked, inv, method=mne_method)
     if threshold:
         stc = _threshold_stc(stc, threshold)
     step += 1

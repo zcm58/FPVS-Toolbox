@@ -163,6 +163,26 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(loreta_tab, text="Browse", command=lambda: self._select_folder(mri_var)).grid(row=0, column=2, padx=(0, pad), pady=(pad, 0))
         self.mri_var = mri_var
 
+        ctk.CTkLabel(loreta_tab, text="Low Freq (Hz)").grid(row=1, column=0, sticky="w", padx=pad)
+        low_var = tk.StringVar(value=self.manager.get('loreta', 'loreta_low_freq', '0.1'))
+        ctk.CTkEntry(loreta_tab, textvariable=low_var).grid(row=1, column=1, sticky="ew", padx=pad)
+        self.low_var = low_var
+
+        ctk.CTkLabel(loreta_tab, text="High Freq (Hz)").grid(row=2, column=0, sticky="w", padx=pad)
+        high_var = tk.StringVar(value=self.manager.get('loreta', 'loreta_high_freq', '40.0'))
+        ctk.CTkEntry(loreta_tab, textvariable=high_var).grid(row=2, column=1, sticky="ew", padx=pad)
+        self.high_var = high_var
+
+        ctk.CTkLabel(loreta_tab, text="Oddball Harmonics").grid(row=3, column=0, sticky="w", padx=pad)
+        harm_var = tk.StringVar(value=self.manager.get('loreta', 'oddball_harmonics', '1,2,3'))
+        ctk.CTkEntry(loreta_tab, textvariable=harm_var).grid(row=3, column=1, sticky="ew", padx=pad)
+        self.harm_var = harm_var
+
+        ctk.CTkLabel(loreta_tab, text="SNR").grid(row=4, column=0, sticky="w", padx=pad)
+        snr_var = tk.StringVar(value=self.manager.get('loreta', 'loreta_snr', '3.0'))
+        ctk.CTkEntry(loreta_tab, textvariable=snr_var).grid(row=4, column=1, sticky="ew", padx=pad)
+        self.snr_var = snr_var
+
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=1, column=0, pady=(0, pad))
         ctk.CTkButton(btn_frame, text="Reset to Defaults", command=self._reset).pack(side="left", padx=pad)
@@ -194,6 +214,10 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('analysis', 'alpha', self.alpha_var.get())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
         self.manager.set('loreta', 'mri_path', self.mri_var.get())
+        self.manager.set('loreta', 'loreta_low_freq', self.low_var.get())
+        self.manager.set('loreta', 'loreta_high_freq', self.high_var.get())
+        self.manager.set('loreta', 'oddball_harmonics', self.harm_var.get())
+        self.manager.set('loreta', 'loreta_snr', self.snr_var.get())
         prev_debug = self.manager.get('debug', 'enabled', 'False').lower() == 'true'
         self.manager.set('debug', 'enabled', str(self.debug_var.get()))
         self.manager.save()

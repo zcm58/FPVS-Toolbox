@@ -44,7 +44,11 @@ DEFAULTS = {
         'electrodes': 'F3,F4,Fz;C3,C4,Cz;P3,P4,Pz;O1,O2,Oz'
     },
     'loreta': {
-        'mri_path': ''
+        'mri_path': '',
+        'loreta_low_freq': '0.1',
+        'loreta_high_freq': '40.0',
+        'oddball_harmonics': '1,2,3',
+        'loreta_snr': '3.0'
     },
     'debug': {
         'enabled': 'False'
@@ -80,6 +84,9 @@ class SettingsManager:
             existing.read(self.ini_path)
             if not existing.has_section('loreta') or not existing.has_option('loreta', 'mri_path'):
                 missing_loreta = True
+            for opt in ('loreta_low_freq', 'loreta_high_freq', 'oddball_harmonics', 'loreta_snr'):
+                if not existing.has_option('loreta', opt):
+                    missing_loreta = True
             self.config.read(self.ini_path)
         if missing_loreta:
             self.save()
