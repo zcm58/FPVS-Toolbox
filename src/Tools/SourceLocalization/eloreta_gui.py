@@ -90,14 +90,12 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.alpha_entry.bind("<FocusOut>", self._on_alpha_entry)
 
 
-
         view_btn = ctk.CTkButton(
             frame,
             text="View 3D brain heatmap",
             command=self._view_stc,
         )
         view_btn.grid(row=6, column=0, columnspan=3, pady=(0, PAD_Y))
-
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
         self.progress_bar.grid(row=8, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
@@ -135,7 +133,6 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 path,
                 threshold=self.threshold_var.get(),
                 alpha=self.alpha_var.get(),
-
                 window_title=title,
 
             )

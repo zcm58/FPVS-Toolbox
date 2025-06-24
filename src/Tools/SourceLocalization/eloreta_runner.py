@@ -265,16 +265,23 @@ def run_source_localization(
     # Visualise in a separate Brain window
     logger.debug(
         "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
-    )
-    brain = stc.plot(
-        subject=subject,
-        subjects_dir=subjects_dir,
-        time_viewer=False,
 
-        hemi=hemi,
-        colormap="Reds",
 
     )
+    try:
+        brain = stc.plot(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            time_viewer=False,
+            hemi="split",
+        )
+    except Exception as err:
+        logger.warning("hemi='split' failed: %s; falling back to default", err)
+        brain = stc.plot(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            time_viewer=False,
+        )
     brain.set_alpha(alpha)
     _set_brain_title(brain, os.path.basename(stc_path))
     try:
@@ -351,13 +358,22 @@ def view_source_estimate(
         )
     logger.debug("subjects_dir resolved to %s", subjects_dir)
 
-    brain = stc.plot(
-        subject=subject,
-        subjects_dir=subjects_dir,
-        time_viewer=False,
-        hemi=hemi,
-        colormap="Reds",
-    )
+
+    try:
+        brain = stc.plot(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            time_viewer=False,
+            hemi="split",
+        )
+    except Exception as err:
+        logger.warning("hemi='split' failed: %s; falling back to default", err)
+        brain = stc.plot(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            time_viewer=False,
+        )
+
     brain.set_alpha(alpha)
     _set_brain_title(brain, window_title or os.path.basename(stc_path))
 
