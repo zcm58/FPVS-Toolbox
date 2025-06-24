@@ -30,6 +30,9 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.output_var = tk.StringVar(master=self)
         self.method_var = tk.StringVar(master=self, value="eLORETA")
         self.threshold_var = tk.DoubleVar(master=self, value=0.0)
+        self.alpha_var = tk.DoubleVar(master=self, value=1.0)
+
+        self.brain = None
 
         self.progress_var = tk.DoubleVar(master=self, value=0.0)
         self.remaining_var = tk.StringVar(master=self, value="")
@@ -69,14 +72,31 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.threshold_entry.bind("<Return>", self._on_threshold_entry)
         self.threshold_entry.bind("<FocusOut>", self._on_threshold_entry)
 
+        ctk.CTkLabel(frame, text="Transparency:").grid(row=4, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        self.alpha_slider = ctk.CTkSlider(
+            frame,
+            from_=0.1,
+            to=1.0,
+            variable=self.alpha_var,
+            command=self._on_alpha_slider,
+        )
+        self.alpha_slider.grid(row=4, column=1, sticky="we", padx=PAD_X, pady=PAD_Y)
+        self.alpha_entry = ctk.CTkEntry(frame, textvariable=self.alpha_var, width=60)
+        self.alpha_entry.grid(row=4, column=2, sticky="w", padx=PAD_X, pady=PAD_Y)
+        self.alpha_entry.bind("<Return>", self._on_alpha_entry)
+        self.alpha_entry.bind("<FocusOut>", self._on_alpha_entry)
+
         run_btn = ctk.CTkButton(frame, text="Run", command=self._run)
-        run_btn.grid(row=4, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
+        run_btn.grid(row=5, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
+
+        view_btn = ctk.CTkButton(frame, text="View STC", command=self._view_stc)
+        view_btn.grid(row=6, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
-        self.progress_bar.grid(row=5, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
+        self.progress_bar.grid(row=7, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
         self.progress_bar.set(0)
 
-        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=6, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=8, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
 
     def _browse_file(self):
         path = filedialog.askopenfilename(title="Select FIF file", filetypes=[("FIF files", "*.fif")], parent=self)
@@ -87,6 +107,25 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         folder = filedialog.askdirectory(title="Select Output Folder", parent=self)
         if folder:
             self.output_var.set(folder)
+
+    def _view_stc(self):
+        path = filedialog.askopenfilename(
+            title="Select SourceEstimate file",
+            filetypes=[("SourceEstimate", "*-lh.stc"), ("All files", "*")],
+            parent=self,
+        )
+        if not path:
+            return
+        if path.endswith("-lh.stc") or path.endswith("-rh.stc"):
+            path = path[:-7]
+        try:
+            self.brain = eloreta_runner.view_source_estimate(
+                path,
+                threshold=self.threshold_var.get(),
+                alpha=self.alpha_var.get(),
+            )
+        except Exception as err:
+            messagebox.showerror("Error", str(err))
 
     def _run(self):
         fif_path = self.input_var.get()
@@ -104,20 +143,21 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self._start_time = time.time()
         self.processing_thread = threading.Thread(
             target=self._run_thread,
-            args=(fif_path, out_dir, method, thr),
+            args=(fif_path, out_dir, method, thr, self.alpha_var.get()),
             daemon=True
         )
         self.processing_thread.start()
         self.after(100, self._update_time_remaining)
 
-    def _run_thread(self, fif_path, out_dir, method, thr):
+    def _run_thread(self, fif_path, out_dir, method, thr, alpha):
         log_func = getattr(self.master, "log", print)
         try:
-            eloreta_runner.run_source_localization(
+            _stc_path, self.brain = eloreta_runner.run_source_localization(
                 fif_path,
                 out_dir,
                 method=method,
                 threshold=thr,
+                alpha=alpha,
                 log_func=log_func,
                 progress_cb=lambda f: self.after(0, self._update_progress, f),
             )
@@ -167,4 +207,25 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         value = max(0.0, min(1.0, value))
         self.threshold_var.set(value)
         self.threshold_slider.set(value)
+
+    def _on_alpha_slider(self, value: float) -> None:
+        """Update alpha when slider moves."""
+        try:
+            self.alpha_var.set(round(float(value), 2))
+        except tk.TclError:
+            return
+        if self.brain is not None:
+            self.brain.set_alpha(self.alpha_var.get())
+
+    def _on_alpha_entry(self, _event=None) -> None:
+        """Validate entry value and update slider."""
+        try:
+            value = float(self.alpha_var.get())
+        except (ValueError, tk.TclError):
+            return
+        value = max(0.1, min(1.0, value))
+        self.alpha_var.set(value)
+        self.alpha_slider.set(value)
+        if self.brain is not None:
+            self.brain.set_alpha(value)
 
