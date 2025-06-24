@@ -121,6 +121,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         )
         if not path:
             return
+        title = os.path.basename(path)
         if path.endswith("-lh.stc") or path.endswith("-rh.stc"):
             path = path[:-7]
         try:
@@ -129,6 +130,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 path,
                 threshold=self.threshold_var.get(),
                 alpha=self.alpha_var.get(),
+                window_title=title,
             )
 
         except Exception as err:
