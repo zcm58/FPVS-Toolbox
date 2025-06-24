@@ -24,7 +24,9 @@ def _load_data(fif_path: str) -> mne.Evoked:
 
 def _default_template_location() -> str:
     """Return the directory where the template MRI should reside."""
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    )
     return os.path.join(base_dir, "fsaverage")
 
 
@@ -80,25 +82,27 @@ def _prepare_forward(
     subjects_dir = settings.get("loreta", "mri_path", "")
     subject = "fsaverage"
     if not subjects_dir or not os.path.isdir(subjects_dir):
-        log_func(
-            "Default MRI template not found. Downloading 'fsaverage'. This may take a few minutes..."
-        )
+        default_dir = _default_template_location()
+        if os.path.isdir(default_dir):
+            subjects_dir = default_dir
+        else:
+            log_func(
+                "Default MRI template not found. Downloading 'fsaverage'. This may take a few minutes..."
+            )
+            install_parent = os.path.dirname(default_dir)
+            try:
+                subjects_dir = fetch_fsaverage_with_progress(install_parent, log_func)
+            except Exception:
+                subjects_dir = fetch_fsaverage_with_progress(os.getcwd(), log_func)
+            log_func(f"Template downloaded to: {subjects_dir}")
 
-        install_parent = os.path.dirname(_default_template_location())
-        try:
-            subjects_dir = fetch_fsaverage_with_progress(install_parent, log_func)
-        except Exception:
 
-            subjects_dir = mne.datasets.fetch_fsaverage(verbose=True)
-        # ``configparser.ConfigParser`` requires string values
-        settings.set("loreta", "mri_path", str(subjects_dir))
+        settings.set("loreta", "mri_path", subjects_dir)
 
         try:
             settings.save()
         except Exception:
             pass
-
-        log_func(f"Template downloaded to: {subjects_dir}")
 
     # Use fsaverage transformation if no custom trans file is specified
     trans = settings.get("paths", "trans_file", "fsaverage")
