@@ -169,19 +169,21 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             path = path[:-7]
         log_func = getattr(self.master, "log", print)
         log_func(f"Opening STC viewer for {path}")
-        try:
 
-            self.brain = eloreta_runner.view_source_estimate(
-                path,
-                threshold=self.threshold_var.get(),
-                alpha=self.alpha_var.get(),
-                window_title=title,
+        def _open_viewer():
+            try:
+                brain = eloreta_runner.view_source_estimate(
+                    path,
+                    threshold=self.threshold_var.get(),
+                    alpha=self.alpha_var.get(),
+                    window_title=title,
+                )
+                self.brain = brain
+            except Exception as err:
+                log_func(f"STC viewer failed: {err}")
+                self.after(0, messagebox.showerror, "Error", str(err))
 
-            )
-
-        except Exception as err:
-            log_func(f"STC viewer failed: {err}")
-            messagebox.showerror("Error", str(err))
+        threading.Thread(target=_open_viewer, daemon=True).start()
 
     def _run(self):
         fif_path = self.input_var.get()
