@@ -478,8 +478,6 @@ def run_source_localization(
     for view, name in [("lat", "side"), ("rostral", "frontal"), ("dorsal", "top")]:
         brain.show_view(view)
         brain.save_image(os.path.join(output_dir, f"{name}.png"))
-    # Save the current view as an additional screenshot
-    brain.save_image(os.path.join(output_dir, "overview.png"))
     # Keep the brain window open so the user can interact with it
 
     if export_rois:
