@@ -210,13 +210,22 @@ def _prepare_forward(
     src = mne.setup_source_space(
         subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False
     )
-    log_func("Creating BEM model ...")
-    model = mne.make_bem_model(subject=subject, subjects_dir=subjects_dir, ico=4)
-    bem = mne.make_bem_solution(model)
-    log_func("Computing forward solution ...")
-    fwd = mne.make_forward_solution(
-        evoked.info, trans=trans, src=src, bem=bem, eeg=True
-    )
+    cache_dir = os.path.join(subjects_dir, "fpvs_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    fwd_file = os.path.join(cache_dir, f"forward-{subject}.fif")
+
+    if os.path.isfile(fwd_file):
+        log_func(f"Loading cached forward model from {fwd_file}")
+        fwd = mne.read_forward_solution(fwd_file)
+    else:
+        log_func("Creating BEM model ...")
+        model = mne.make_bem_model(subject=subject, subjects_dir=subjects_dir, ico=4)
+        bem = mne.make_bem_solution(model)
+        log_func("Computing forward solution ...")
+        fwd = mne.make_forward_solution(
+            evoked.info, trans=trans, src=src, bem=bem, eeg=True
+        )
+        mne.write_forward_solution(fwd_file, fwd, overwrite=True)
     return fwd, subject, subjects_dir
 
 
@@ -233,16 +242,11 @@ def run_source_localization(
     snr: Optional[float] = None,
     oddball: bool = False,
 
-    low_freq: Optional[float] = None,
-    high_freq: Optional[float] = None,
-    harmonics: Optional[list[float]] = None,
-    snr: Optional[float] = None,
-    oddball: bool = False,
-
     hemi: str = "split",
 
     log_func: Optional[Callable[[str], None]] = None,
     progress_cb: Optional[Callable[[float], None]] = None,
+    export_rois: bool = False,
 
 ) -> Tuple[str, mne.viz.Brain]:
     """Run source localization on ``fif_path`` and save results to ``output_dir``.
@@ -254,6 +258,9 @@ def run_source_localization(
         Defaults to ``0.4`` (60% transparent).
     hemi : {"lh", "rh", "both", "split"}
         Which hemisphere(s) to display in the interactive viewer.
+    export_rois : bool
+        If ``True`` an additional CSV summarising ROI amplitudes is saved
+        in ``output_dir``.
 
 
     Returns
@@ -280,6 +287,13 @@ def run_source_localization(
             high_freq = float(settings.get("loreta", "loreta_high_freq", "40.0"))
         except ValueError:
             high_freq = None
+
+    default_low = float(settings.get("loreta", "loreta_low_freq", "0.1"))
+    default_high = float(settings.get("loreta", "loreta_high_freq", "40.0"))
+    if oddball and low_freq == default_low and high_freq == default_high:
+        # avoid redundant filtering when using oddball pipeline
+        low_freq = None
+        high_freq = None
     if harmonics is None:
         harm_str = settings.get("loreta", "oddball_harmonics", "1,2,3")
         try:
@@ -404,6 +418,15 @@ def run_source_localization(
     # Save the current view as an additional screenshot
     brain.save_image(os.path.join(output_dir, "overview.png"))
     # Keep the brain window open so the user can interact with it
+
+    if export_rois:
+        try:
+            roi_path = os.path.join(output_dir, "roi_values.csv")
+            source_localization.export_roi_means(stc, subject, subjects_dir, roi_path)
+            log_func(f"ROI values exported to {roi_path}")
+        except Exception as err:
+            log_func(f"ROI export failed: {err}")
+
     step += 1
     if progress_cb:
         progress_cb(step / total)

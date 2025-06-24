@@ -217,6 +217,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 harmonics,
                 self.snr_var.get(),
                 self.oddball_var.get(),
+                False,
             ),
             daemon=True
         )
@@ -237,6 +238,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         harmonics,
         snr,
         oddball,
+        export_rois,
     ):
 
         log_func = getattr(self.master, "log", print)
@@ -254,6 +256,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 harmonics=harmonics,
                 snr=snr,
                 oddball=oddball,
+                export_rois=export_rois,
                 log_func=log_func,
                 progress_cb=lambda f: self.after(0, self._update_progress, f),
             )
