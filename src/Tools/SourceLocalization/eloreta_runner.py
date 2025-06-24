@@ -310,13 +310,23 @@ def run_source_localization(
     oddball_freq = float(settings.get("analysis", "oddball_freq", "1.2"))
 
     if oddball and fif_path.endswith("-epo.fif"):
+        log_func("Oddball mode enabled. Loading epochs ...")
         epochs = mne.read_epochs(fif_path, preload=True)
+        log_func(f"Loaded {len(epochs)} epoch(s)")
         if low_freq or high_freq:
             epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
         cycle_epochs = source_localization.extract_cycles(epochs, oddball_freq)
+        log_func(
+            f"Extracted {len(cycle_epochs)} cycles of {1.0 / oddball_freq:.3f}s each"
+        )
         evoked = source_localization.average_cycles(cycle_epochs)
+        log_func("Averaged cycles into Evoked")
         harmonic_freqs = [h * oddball_freq for h in harmonics]
         if harmonic_freqs:
+            log_func(
+                "Reconstructing harmonics: "
+                + ", ".join(f"{h:.2f}Hz" for h in harmonic_freqs)
+            )
             evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
     else:
         evoked = _load_data(fif_path)
