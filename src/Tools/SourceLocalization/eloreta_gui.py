@@ -7,6 +7,8 @@ import threading
 import time
 from typing import Optional
 
+from Main_App.settings_manager import SettingsManager
+
 import customtkinter as ctk
 
 from config import PAD_X, PAD_Y, CORNER_RADIUS, init_fonts, FONT_MAIN
@@ -33,6 +35,25 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.alpha_var = tk.DoubleVar(master=self, value=1.0)
 
         self.hemi_var = tk.StringVar(master=self, value="both")
+
+        settings = SettingsManager()
+        try:
+            low = float(settings.get('loreta', 'loreta_low_freq', '0.1'))
+        except ValueError:
+            low = 0.1
+        try:
+            high = float(settings.get('loreta', 'loreta_high_freq', '40.0'))
+        except ValueError:
+            high = 40.0
+        self.low_var = tk.DoubleVar(master=self, value=low)
+        self.high_var = tk.DoubleVar(master=self, value=high)
+        self.harm_var = tk.StringVar(master=self, value=settings.get('loreta', 'oddball_harmonics', '1,2,3'))
+        try:
+            snr = float(settings.get('loreta', 'loreta_snr', '3.0'))
+        except ValueError:
+            snr = 3.0
+        self.snr_var = tk.DoubleVar(master=self, value=snr)
+        self.oddball_var = tk.BooleanVar(master=self, value=False)
 
 
         self.brain = None
@@ -89,19 +110,32 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.alpha_entry.bind("<Return>", self._on_alpha_entry)
         self.alpha_entry.bind("<FocusOut>", self._on_alpha_entry)
 
+        ctk.CTkLabel(frame, text="Low Freq (Hz)").grid(row=5, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkEntry(frame, textvariable=self.low_var, width=60).grid(row=5, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+
+        ctk.CTkLabel(frame, text="High Freq (Hz)").grid(row=6, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkEntry(frame, textvariable=self.high_var, width=60).grid(row=6, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+
+        ctk.CTkLabel(frame, text="Oddball Harmonics").grid(row=7, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkEntry(frame, textvariable=self.harm_var, width=100).grid(row=7, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+
+        ctk.CTkLabel(frame, text="SNR").grid(row=8, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkEntry(frame, textvariable=self.snr_var, width=60).grid(row=8, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+
+        ctk.CTkCheckBox(frame, text="Oddball localization", variable=self.oddball_var).grid(row=9, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=PAD_Y)
 
         view_btn = ctk.CTkButton(
             frame,
             text="View 3D brain heatmap",
             command=self._view_stc,
         )
-        view_btn.grid(row=6, column=0, columnspan=3, pady=(0, PAD_Y))
+        view_btn.grid(row=10, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
-        self.progress_bar.grid(row=8, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
+        self.progress_bar.grid(row=12, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
         self.progress_bar.set(0)
 
-        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=9, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=13, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
 
 
     def _browse_file(self):
@@ -155,18 +189,47 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.progress_var.set(0)
         self.remaining_var.set("")
         self._start_time = time.time()
+        harmonics = []
+        for h in self.harm_var.get().split(','):
+            try:
+                harmonics.append(float(h))
+            except ValueError:
+                pass
         self.processing_thread = threading.Thread(
             target=self._run_thread,
-
-            args=(fif_path, out_dir, method, thr, self.alpha_var.get(), self.hemi_var.get()),
-
+            args=(
+                fif_path,
+                out_dir,
+                method,
+                thr,
+                self.alpha_var.get(),
+                self.hemi_var.get(),
+                self.low_var.get(),
+                self.high_var.get(),
+                harmonics,
+                self.snr_var.get(),
+                self.oddball_var.get(),
+            ),
             daemon=True
         )
         self.processing_thread.start()
         self.after(100, self._update_time_remaining)
 
 
-    def _run_thread(self, fif_path, out_dir, method, thr, alpha, hemi):
+    def _run_thread(
+        self,
+        fif_path,
+        out_dir,
+        method,
+        thr,
+        alpha,
+        hemi,
+        low_freq,
+        high_freq,
+        harmonics,
+        snr,
+        oddball,
+    ):
 
         log_func = getattr(self.master, "log", print)
         try:
@@ -178,7 +241,11 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 alpha=alpha,
 
                 hemi=hemi,
-
+                low_freq=low_freq,
+                high_freq=high_freq,
+                harmonics=harmonics,
+                snr=snr,
+                oddball=oddball,
                 log_func=log_func,
                 progress_cb=lambda f: self.after(0, self._update_progress, f),
             )
