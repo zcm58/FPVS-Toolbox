@@ -6,7 +6,7 @@ import os
 import logging
 import threading
 import time
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, List
 
 import numpy as np
 import mne
@@ -236,6 +236,12 @@ def run_source_localization(
     low_freq: Optional[float] = None,
     high_freq: Optional[float] = None,
     harmonics: Optional[list[float]] = None,
+    snr: Optional[float] = None,
+    oddball: bool = False,
+
+    low_freq: Optional[float] = None,
+    high_freq: Optional[float] = None,
+    harmonics: Optional[List[float]] = None,
     snr: Optional[float] = None,
     oddball: bool = False,
 
