@@ -9,6 +9,9 @@ import mne
 import numpy as np
 import pandas as pd
 
+from typing import Sequence
+
+
 
 def extract_cycles(epochs: mne.Epochs, oddball_freq: float) -> mne.Epochs:
     """Segment epochs into single oddball cycles aligned to the trigger."""
@@ -37,7 +40,9 @@ def average_cycles(cycle_epochs: mne.Epochs) -> mne.Evoked:
     return cycle_epochs.average()
 
 
-def reconstruct_harmonics(evoked: mne.Evoked, harmonics: list[float]) -> mne.Evoked:
+
+def reconstruct_harmonics(evoked: mne.Evoked, harmonics: Sequence[float]) -> mne.Evoked:
+
     """Reconstruct an evoked signal using only the specified harmonic frequencies."""
     sfreq = evoked.info["sfreq"]
     data = np.fft.fft(evoked.data)
