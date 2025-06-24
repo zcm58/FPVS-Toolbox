@@ -105,7 +105,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             self.after(0, lambda: messagebox.showinfo("Done", "Source localization finished."))
         except Exception as e:
 
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
+            self.after(0, lambda err=e: messagebox.showerror("Error", str(err)))
 
     def _on_threshold_slider(self, value: float) -> None:
         """Update variable when slider moves."""
