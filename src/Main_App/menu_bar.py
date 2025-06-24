@@ -43,6 +43,7 @@ class AppMenuBar:
         tools_menu = tk.Menu(menubar_widget, tearoff=0)
         menubar_widget.add_cascade(label="Tools", menu=tools_menu)
         tools_menu.add_command(label="Stats Toolbox", command=self.app_ref.open_stats_analyzer)
+        tools_menu.add_separator()
         tools_menu.add_command(
             label="Source Localization (eLORETA/sLORETA)",
             command=lambda: open_eloreta_tool(self.app_ref),
