@@ -28,22 +28,44 @@ def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
 
 def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     """Set the transparency of a Brain viewer in a version robust way."""
+    logger.debug("_set_brain_alpha called with %s", alpha)
     try:
         if hasattr(brain, "set_alpha"):
+            logger.debug("Using Brain.set_alpha")
             brain.set_alpha(alpha)  # type: ignore[call-arg]
-            return
+        else:
+            logger.debug("Falling back to setting Brain.alpha attribute")
+            setattr(brain, "alpha", alpha)
     except Exception:
-        pass
-    try:
-        setattr(brain, "alpha", alpha)
-    except Exception:
+        logger.debug("Direct alpha methods failed", exc_info=True)
         try:
             for hemi in getattr(brain, "_hemi_data", {}).values():
                 mesh = getattr(hemi, "mesh", None)
                 if mesh is not None and hasattr(mesh, "actor"):
                     mesh.actor.GetProperty().SetOpacity(alpha)
+                for layer in getattr(hemi, "layers", {}).values():
+                    actor = getattr(layer, "actor", None)
+                    if actor is not None:
+                        actor.GetProperty().SetOpacity(alpha)
+            # PyVista backend stores additional actors in _layered_meshes
+            for hemi_layers in getattr(brain, "_layered_meshes", {}).values():
+                for layer in hemi_layers.values():
+                    actor = getattr(layer, "actor", None)
+                    if actor is not None:
+                        actor.GetProperty().SetOpacity(alpha)
         except Exception:
-            logger.debug("Failed to set brain alpha", exc_info=True)
+            logger.debug("Failed to set brain alpha via mesh actors", exc_info=True)
+    try:
+        renderer = getattr(brain, "_renderer", None)
+        plotter = getattr(renderer, "plotter", None)
+        if plotter is not None and hasattr(plotter, "render"):
+            logger.debug("Triggering plotter.render()")
+            plotter.render()
+        elif renderer is not None and hasattr(renderer, "_update"):
+            logger.debug("Triggering renderer._update()")
+            renderer._update()
+    except Exception:
+        logger.debug("Plotter render failed", exc_info=True)
 
 
 def _load_data(fif_path: str) -> mne.Evoked:
@@ -196,7 +218,7 @@ def run_source_localization(
     output_dir: str,
     method: str = "eLORETA",
     threshold: Optional[float] = None,
-    alpha: float = 1.0,
+    alpha: float = 0.4,
 
     hemi: str = "split",
 
@@ -210,6 +232,7 @@ def run_source_localization(
     ----------
     alpha : float
         Initial transparency for the brain surface where ``1.0`` is opaque.
+        Defaults to ``0.4`` (60% transparent).
     hemi : {"lh", "rh", "both", "split"}
         Which hemisphere(s) to display in the interactive viewer.
 
@@ -335,7 +358,7 @@ def run_source_localization(
 def view_source_estimate(
     stc_path: str,
     threshold: Optional[float] = None,
-    alpha: float = 1.0,
+    alpha: float = 0.4,
     window_title: Optional[str] = None,
 
 ) -> mne.viz.Brain:
@@ -345,6 +368,7 @@ def view_source_estimate(
     ----------
     alpha : float
         Transparency for the brain surface where ``1.0`` is opaque.
+        Defaults to ``0.4`` (60% transparent).
 
     hemi : {"lh", "rh", "both", "split"}
         Which hemisphere(s) to display in the interactive viewer.
