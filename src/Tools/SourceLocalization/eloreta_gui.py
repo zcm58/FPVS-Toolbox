@@ -72,11 +72,14 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         run_btn = ctk.CTkButton(frame, text="Run", command=self._run)
         run_btn.grid(row=4, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
 
+        view_btn = ctk.CTkButton(frame, text="View STC", command=self._view_stc)
+        view_btn.grid(row=5, column=0, columnspan=3, pady=(0, PAD_Y))
+
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
-        self.progress_bar.grid(row=5, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
+        self.progress_bar.grid(row=6, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
         self.progress_bar.set(0)
 
-        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=6, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=7, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
 
     def _browse_file(self):
         path = filedialog.askopenfilename(title="Select FIF file", filetypes=[("FIF files", "*.fif")], parent=self)
@@ -87,6 +90,21 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         folder = filedialog.askdirectory(title="Select Output Folder", parent=self)
         if folder:
             self.output_var.set(folder)
+
+    def _view_stc(self):
+        path = filedialog.askopenfilename(
+            title="Select SourceEstimate file",
+            filetypes=[("SourceEstimate", "*-lh.stc"), ("All files", "*")],
+            parent=self,
+        )
+        if not path:
+            return
+        if path.endswith("-lh.stc") or path.endswith("-rh.stc"):
+            path = path[:-7]
+        try:
+            eloreta_runner.view_source_estimate(path, threshold=self.threshold_var.get())
+        except Exception as err:
+            messagebox.showerror("Error", str(err))
 
     def _run(self):
         fif_path = self.input_var.get()

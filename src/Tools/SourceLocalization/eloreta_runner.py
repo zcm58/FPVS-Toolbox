@@ -251,7 +251,7 @@ def run_source_localization(
         brain.save_image(os.path.join(output_dir, f"{name}.png"))
     # Save the current view as an additional screenshot
     brain.save_image(os.path.join(output_dir, "overview.png"))
-    brain.close()
+    # Keep the brain window open so the user can interact with it
     step += 1
     if progress_cb:
         progress_cb(step / total)
@@ -260,3 +260,22 @@ def run_source_localization(
     if progress_cb:
         progress_cb(1.0)
     return stc_path
+
+
+def view_source_estimate(stc_path: str, threshold: Optional[float] = None) -> mne.viz.Brain:
+    """Open a saved :class:`~mne.SourceEstimate` in an interactive viewer."""
+
+    stc = mne.read_source_estimate(stc_path)
+    if threshold:
+        stc = _threshold_stc(stc, threshold)
+
+    settings = SettingsManager()
+    stored_dir = settings.get("loreta", "mri_path", "")
+    subject = "fsaverage"
+    if os.path.basename(stored_dir) == subject:
+        subjects_dir = os.path.dirname(stored_dir)
+    else:
+        subjects_dir = stored_dir if stored_dir else os.path.dirname(_default_template_location())
+
+    brain = stc.plot(subject=subject, subjects_dir=subjects_dir, time_viewer=False)
+    return brain
