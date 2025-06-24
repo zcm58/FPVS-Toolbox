@@ -183,6 +183,14 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(loreta_tab, textvariable=snr_var).grid(row=4, column=1, sticky="ew", padx=pad)
         self.snr_var = snr_var
 
+        auto_loc_default = self.manager.get('loreta', 'auto_oddball_localization', 'False').lower() == 'true'
+        self.auto_loc_var = tk.BooleanVar(value=auto_loc_default)
+        ctk.CTkCheckBox(
+            loreta_tab,
+            text="Auto Oddball Localization",
+            variable=self.auto_loc_var,
+        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=pad)
+
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=1, column=0, pady=(0, pad))
         ctk.CTkButton(btn_frame, text="Reset to Defaults", command=self._reset).pack(side="left", padx=pad)
@@ -218,6 +226,11 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('loreta', 'loreta_high_freq', self.high_var.get())
         self.manager.set('loreta', 'oddball_harmonics', self.harm_var.get())
         self.manager.set('loreta', 'loreta_snr', self.snr_var.get())
+        self.manager.set(
+            'loreta',
+            'auto_oddball_localization',
+            str(self.auto_loc_var.get()),
+        )
         prev_debug = self.manager.get('debug', 'enabled', 'False').lower() == 'true'
         self.manager.set('debug', 'enabled', str(self.debug_var.get()))
         self.manager.save()

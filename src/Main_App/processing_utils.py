@@ -16,6 +16,7 @@ import re
 from tkinter import messagebox
 import tkinter as tk
 from config import DEFAULT_STIM_CHANNEL
+from Tools.SourceLocalization import eloreta_runner
 from Main_App.post_process import post_process as _external_post_process
 from Main_App.eeg_preprocessing import perform_preprocessing
 from Main_App.load_utils import load_eeg_file
@@ -450,6 +451,29 @@ class ProcessingMixin:
                                 cond_path = os.path.join(fif_dir, cond_fname)
                                 epoch_list[0].save(cond_path, overwrite=True)
                                 gui_queue.put({'type': 'log', 'message': f"Condition FIF saved to: {cond_path}"})
+
+                                auto_loc = self.settings.get(
+                                    'loreta',
+                                    'auto_oddball_localization',
+                                    'False',
+                                ).lower() == 'true'
+                                if auto_loc:
+                                    sanitized = cond_label.replace(' ', '_').replace('/', '-').replace('\\', '-').strip()
+                                    sanitized = re.sub(r'^\d+\s*-\s*', '', sanitized)
+                                    out_folder = os.path.join(save_folder, sanitized)
+                                    os.makedirs(out_folder, exist_ok=True)
+                                    try:
+                                        gui_queue.put({'type': 'log', 'message': f"Running oddball localization for {cond_label}..."})
+                                        eloreta_runner.run_source_localization(
+                                            cond_path,
+                                            out_folder,
+                                            oddball=True,
+                                            log_func=lambda m: gui_queue.put({'type': 'log', 'message': m}),
+                                            progress_cb=lambda f: gui_queue.put({'type': 'log', 'message': f"Localization {cond_label}: {int(f*100)}%"}),
+                                        )
+                                        gui_queue.put({'type': 'log', 'message': f"Localization complete for {cond_label}."})
+                                    except Exception as e_loc:
+                                        gui_queue.put({'type': 'log', 'message': f"Localization failed for {cond_label}: {e_loc}"})
 
                         except Exception as e_save:
                             gui_queue.put({'type': 'log', 'message': f"Error saving FIF for {f_name}: {e_save}"})
