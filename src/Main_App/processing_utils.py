@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import re
 from tkinter import messagebox
+import tkinter as tk
 from config import DEFAULT_STIM_CHANNEL
 from Main_App.post_process import post_process as _external_post_process
 from Main_App.eeg_preprocessing import perform_preprocessing
