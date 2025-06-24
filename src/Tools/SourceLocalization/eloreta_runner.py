@@ -178,12 +178,13 @@ def run_source_localization(
     if progress_cb:
         progress_cb(step / total)
 
-    method = method.lower()
-    if method not in {"eloreta", "sloreta"}:
+    method_lower = method.lower()
+    if method_lower not in {"eloreta", "sloreta"}:
         raise ValueError("Method must be 'eLORETA' or 'sLORETA'")
 
-    log_func(f"Applying {method} ...")
-    stc = mne.minimum_norm.apply_inverse(evoked, inv, method=method)
+    log_func(f"Applying {method_lower} ...")
+    mne_method = "eLORETA" if method_lower == "eloreta" else "sLORETA"
+    stc = mne.minimum_norm.apply_inverse(evoked, inv, method=mne_method)
     if threshold:
         stc = stc.threshold(threshold)
     step += 1
