@@ -72,7 +72,9 @@ output folder. An interactive 3‑D viewer will open showing both hemispheres wi
 anatomical labels. Side, frontal and top screenshots are automatically saved in
 the chosen folder. You can also open any saved `source-lh.stc`/`source-rh.stc`
 pair later using the **View STC** button to inspect the results interactively and
-adjust the brain transparency.
+adjust the brain transparency. A hemisphere selector lets you view the left
+hemisphere, right hemisphere, both together, or a split layout. Activity is
+displayed with a red heatmap so you can easily spot the peak response.
 
 
 
