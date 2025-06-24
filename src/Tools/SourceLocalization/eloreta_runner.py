@@ -172,6 +172,7 @@ def run_source_localization(
     step += 1
     if progress_cb:
         progress_cb(step / total)
+
     inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)
     step += 1
     if progress_cb:
