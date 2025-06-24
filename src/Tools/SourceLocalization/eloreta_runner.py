@@ -157,7 +157,12 @@ def run_source_localization(
     fwd, subject, subjects_dir = _prepare_forward(evoked, settings, log_func)
     log_func(f"Forward model ready. subjects_dir={subjects_dir}, subject={subject}")
 
-    noise_cov = mne.compute_covariance([evoked], tmax=0.0)
+    try:
+        noise_cov = mne.compute_covariance([evoked], tmax=0.0)
+    except AttributeError:
+        # ``compute_covariance`` expects an Epochs object. Fall back to
+        # an ad-hoc estimate when only Evoked data are available.
+        noise_cov = mne.make_ad_hoc_cov(evoked.info)
     inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)
 
     method = method.lower()
