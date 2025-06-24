@@ -8,6 +8,7 @@ import threading
 import time
 from typing import Callable, Optional
 
+import numpy as np
 import mne
 from Main_App.settings_manager import SettingsManager
 
@@ -168,7 +169,17 @@ def run_source_localization(
     if progress_cb:
         progress_cb(step / total)
 
-    noise_cov = mne.compute_covariance([evoked], tmax=0.0)
+    try:
+        temp_epochs = mne.EpochsArray(
+            evoked.data[np.newaxis, ...],
+            evoked.info,
+            tmin=evoked.times[0],
+            verbose=False,
+        )
+        noise_cov = mne.compute_covariance(temp_epochs, tmax=0.0)
+    except Exception as err:
+        log_func(f"Noise covariance estimation failed ({err}). Using ad-hoc covariance.")
+        noise_cov = mne.make_ad_hoc_cov(evoked.info)
     step += 1
     if progress_cb:
         progress_cb(step / total)
