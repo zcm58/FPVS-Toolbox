@@ -50,8 +50,14 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
                     actor = getattr(layer, "actor", None)
                     if actor is not None:
                         actor.GetProperty().SetOpacity(alpha)
-        except Exception:
 
+            # PyVista backend stores additional actors in _layered_meshes
+            for hemi_layers in getattr(brain, "_layered_meshes", {}).values():
+                for layer in hemi_layers.values():
+                    actor = getattr(layer, "actor", None)
+                    if actor is not None:
+                        actor.GetProperty().SetOpacity(alpha)
+        except Exception:
             logger.debug("Failed to set brain alpha via mesh actors", exc_info=True)
 
     try:
@@ -61,6 +67,9 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
 
             logger.debug("Triggering plotter.render()")
             plotter.render()
+        elif renderer is not None and hasattr(renderer, "_update"):
+            logger.debug("Triggering renderer._update()")
+            renderer._update()
     except Exception:
         logger.debug("Plotter render failed", exc_info=True)
 
@@ -216,7 +225,13 @@ def run_source_localization(
     output_dir: str,
     method: str = "eLORETA",
     threshold: Optional[float] = None,
-    alpha: float = 1.0,
+    alpha: float = 0.4,
+
+    low_freq: Optional[float] = None,
+    high_freq: Optional[float] = None,
+    harmonics: Optional[list[float]] = None,
+    snr: Optional[float] = None,
+    oddball: bool = False,
 
     low_freq: Optional[float] = None,
     high_freq: Optional[float] = None,
@@ -236,6 +251,7 @@ def run_source_localization(
     ----------
     alpha : float
         Initial transparency for the brain surface where ``1.0`` is opaque.
+        Defaults to ``0.4`` (60% transparent).
     hemi : {"lh", "rh", "both", "split"}
         Which hemisphere(s) to display in the interactive viewer.
 
@@ -403,7 +419,7 @@ def run_source_localization(
 def view_source_estimate(
     stc_path: str,
     threshold: Optional[float] = None,
-    alpha: float = 1.0,
+    alpha: float = 0.4,
     window_title: Optional[str] = None,
 
 ) -> mne.viz.Brain:
@@ -413,6 +429,7 @@ def view_source_estimate(
     ----------
     alpha : float
         Transparency for the brain surface where ``1.0`` is opaque.
+        Defaults to ``0.4`` (60% transparent).
 
     hemi : {"lh", "rh", "both", "split"}
         Which hemisphere(s) to display in the interactive viewer.
