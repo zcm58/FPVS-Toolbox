@@ -443,6 +443,7 @@ def run_source_localization(
         logger.debug(
             "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
         )
+
         try:
             logger.debug(
                 "Calling stc.plot with hemi=%s subjects_dir=%s subject=%s",
@@ -482,6 +483,7 @@ def run_source_localization(
         except Exception:
             # If annotations aren't available just continue without borders
             pass
+
 
         for view, name in [
             ("lat", "side"),
