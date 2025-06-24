@@ -181,9 +181,10 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 self.brain = brain
             except Exception as err:
                 log_func(f"STC viewer failed: {err}")
-                self.after(0, messagebox.showerror, "Error", str(err))
+                messagebox.showerror("Error", str(err))
 
-        threading.Thread(target=_open_viewer, daemon=True).start()
+        # Schedule opening the viewer on the main thread to avoid Qt issues
+        self.after(0, _open_viewer)
 
     def _run(self):
         fif_path = self.input_var.get()
@@ -245,7 +246,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         log_func = getattr(self.master, "log", print)
         try:
-            _stc_path, self.brain = eloreta_runner.run_source_localization(
+            _stc_path, _ = eloreta_runner.run_source_localization(
                 fif_path,
                 out_dir,
                 method=method,
@@ -261,6 +262,13 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 export_rois=export_rois,
                 log_func=log_func,
                 progress_cb=lambda f: self.after(0, self._update_progress, f),
+                show_brain=False,
+            )
+            self.after(
+                0,
+                lambda: self._open_brain(
+                    _stc_path, thr, alpha, os.path.basename(_stc_path)
+                ),
             )
             self.after(0, self._on_finish, None)
         except Exception as e:
@@ -335,4 +343,18 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 "_on_alpha_entry updating brain to %s", value
             )
             eloreta_runner._set_brain_alpha(self.brain, value)
+
+    def _open_brain(self, stc_path: str, thr: float, alpha: float, title: str) -> None:
+        """Open a SourceEstimate in the interactive viewer on the main thread."""
+        log_func = getattr(self.master, "log", print)
+        try:
+            self.brain = eloreta_runner.view_source_estimate(
+                stc_path,
+                threshold=thr,
+                alpha=alpha,
+                window_title=title,
+            )
+        except Exception as err:
+            log_func(f"STC viewer failed: {err}")
+            messagebox.showerror("Error", str(err))
 

@@ -268,9 +268,9 @@ def run_source_localization(
     log_func: Optional[Callable[[str], None]] = None,
     progress_cb: Optional[Callable[[float], None]] = None,
     export_rois: bool = False,
+    show_brain: bool = True,
 
-
-) -> Tuple[str, mne.viz.Brain]:
+) -> Tuple[str, Optional[mne.viz.Brain]]:
     """Run source localization on ``fif_path`` and save results to ``output_dir``.
 
     Parameters
@@ -283,13 +283,17 @@ def run_source_localization(
     export_rois : bool
         If ``True`` an additional CSV summarising ROI amplitudes is saved
         in ``output_dir``.
+    show_brain : bool
+        If ``True`` display the interactive brain window. When running in a
+        background thread this should typically be ``False``.
 
 
     Returns
     -------
-    Tuple[str, :class:`mne.viz.Brain`]
+    Tuple[str, Optional[:class:`mne.viz.Brain`]]
         Path to the saved :class:`~mne.SourceEstimate` (without hemisphere
-        suffix) and the interactive brain window.
+        suffix) and the interactive brain window (``None`` if ``show_brain`` is
+        ``False``).
     """
     if log_func is None:
         log_func = logger.info
@@ -433,53 +437,63 @@ def run_source_localization(
     if progress_cb:
         progress_cb(step / total)
 
-    # Visualise in a separate Brain window
-    logger.debug(
-        "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
-
-
-    )
-    try:
+    brain = None
+    if show_brain:
+        # Visualise in a separate Brain window
         logger.debug(
-            "Calling stc.plot with hemi=%s subjects_dir=%s subject=%s",
-            hemi,
-            subjects_dir,
-            subject,
+            "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
         )
-        brain = stc.plot(
-            subject=subject,
-            subjects_dir=subjects_dir,
-            time_viewer=False,
-            hemi=hemi,
-        )
-        logger.debug("stc.plot succeeded")
-    except Exception as err:
-        logger.warning("hemi=%s failed: %s; falling back to default", hemi, err)
-        logger.debug("Retrying stc.plot with default hemisphere")
-        brain = stc.plot(
-            subject=subject,
-            subjects_dir=subjects_dir,
-            time_viewer=False,
-        )
-        logger.debug("stc.plot succeeded on retry")
-    _set_brain_alpha(brain, alpha)
-    logger.debug("Brain alpha set to %s", alpha)
-    _set_brain_title(brain, os.path.basename(stc_path))
-    try:
-        labels = mne.read_labels_from_annot(
-            subject, parc="aparc", subjects_dir=subjects_dir
-        )
-        for label in labels:
-            brain.add_label(label, borders=True)
-    except Exception:
-        # If annotations aren't available just continue without borders
-        pass
 
-    for view, name in [("lat", "side"), ("rostral", "frontal"), ("dorsal", "top")]:
-        brain.show_view(view)
-        brain.save_image(os.path.join(output_dir, f"{name}.png"))
-    # Keep the brain window open so the user can interact with it
+        try:
+            logger.debug(
+                "Calling stc.plot with hemi=%s subjects_dir=%s subject=%s",
+                hemi,
+                subjects_dir,
+                subject,
+            )
+            brain = stc.plot(
+                subject=subject,
+                subjects_dir=subjects_dir,
+                time_viewer=False,
+                hemi=hemi,
+            )
+            logger.debug("stc.plot succeeded")
+        except Exception as err:
+            logger.warning(
+                "hemi=%s failed: %s; falling back to default",
+                hemi,
+                err,
+            )
+            logger.debug("Retrying stc.plot with default hemisphere")
+            brain = stc.plot(
+                subject=subject,
+                subjects_dir=subjects_dir,
+                time_viewer=False,
+            )
+            logger.debug("stc.plot succeeded on retry")
+        _set_brain_alpha(brain, alpha)
+        logger.debug("Brain alpha set to %s", alpha)
+        _set_brain_title(brain, os.path.basename(stc_path))
+        try:
+            labels = mne.read_labels_from_annot(
+                subject, parc="aparc", subjects_dir=subjects_dir
+            )
+            for label in labels:
+                brain.add_label(label, borders=True)
+        except Exception:
+            # If annotations aren't available just continue without borders
+            pass
 
+
+        for view, name in [
+            ("lat", "side"),
+            ("rostral", "frontal"),
+            ("dorsal", "top"),
+        ]:
+            brain.show_view(view)
+            brain.save_image(os.path.join(output_dir, f"{name}.png"))
+        # Save the current view as an additional screenshot
+        brain.save_image(os.path.join(output_dir, "overview.png"))
     if export_rois:
         try:
             roi_path = os.path.join(output_dir, "roi_values.csv")
