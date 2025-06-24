@@ -31,19 +31,27 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     try:
         if hasattr(brain, "set_alpha"):
             brain.set_alpha(alpha)  # type: ignore[call-arg]
-            return
-    except Exception:
-        pass
-    try:
-        setattr(brain, "alpha", alpha)
+        else:
+            setattr(brain, "alpha", alpha)
     except Exception:
         try:
             for hemi in getattr(brain, "_hemi_data", {}).values():
                 mesh = getattr(hemi, "mesh", None)
                 if mesh is not None and hasattr(mesh, "actor"):
                     mesh.actor.GetProperty().SetOpacity(alpha)
+                for layer in getattr(hemi, "layers", {}).values():
+                    actor = getattr(layer, "actor", None)
+                    if actor is not None:
+                        actor.GetProperty().SetOpacity(alpha)
         except Exception:
             logger.debug("Failed to set brain alpha", exc_info=True)
+    try:
+        renderer = getattr(brain, "_renderer", None)
+        plotter = getattr(renderer, "plotter", None)
+        if plotter is not None and hasattr(plotter, "render"):
+            plotter.render()
+    except Exception:
+        pass
 
 
 def _load_data(fif_path: str) -> mne.Evoked:
