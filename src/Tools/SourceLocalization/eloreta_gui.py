@@ -90,19 +90,14 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.alpha_entry.bind("<FocusOut>", self._on_alpha_entry)
 
 
-        ctk.CTkLabel(frame, text="Hemisphere:").grid(row=5, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
-        hemi_menu = ctk.CTkOptionMenu(
+
+        view_btn = ctk.CTkButton(
             frame,
-            variable=self.hemi_var,
-            values=["both", "split", "lh", "rh"],
+            text="View 3D brain heatmap",
+            command=self._view_stc,
         )
-        hemi_menu.grid(row=5, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+        view_btn.grid(row=6, column=0, columnspan=3, pady=(0, PAD_Y))
 
-        run_btn = ctk.CTkButton(frame, text="Run", command=self._run)
-        run_btn.grid(row=6, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
-
-        view_btn = ctk.CTkButton(frame, text="View STC", command=self._view_stc)
-        view_btn.grid(row=7, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
         self.progress_bar.grid(row=8, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
@@ -132,6 +127,8 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         title = os.path.basename(path)
         if path.endswith("-lh.stc") or path.endswith("-rh.stc"):
             path = path[:-7]
+        log_func = getattr(self.master, "log", print)
+        log_func(f"Opening STC viewer for {path}")
         try:
 
             self.brain = eloreta_runner.view_source_estimate(
@@ -144,6 +141,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             )
 
         except Exception as err:
+            log_func(f"STC viewer failed: {err}")
             messagebox.showerror("Error", str(err))
 
     def _run(self):

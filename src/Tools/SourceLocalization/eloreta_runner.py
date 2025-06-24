@@ -263,6 +263,9 @@ def run_source_localization(
         progress_cb(step / total)
 
     # Visualise in a separate Brain window
+    logger.debug(
+        "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
+    )
     brain = stc.plot(
         subject=subject,
         subjects_dir=subjects_dir,
@@ -321,7 +324,19 @@ def view_source_estimate(
 
     """
 
+    logger.debug(
+        "view_source_estimate called with %s, threshold=%s, alpha=%s",
+        stc_path,
+        threshold,
+        alpha,
+    )
+    lh_file = stc_path + "-lh.stc"
+    rh_file = stc_path + "-rh.stc"
+    logger.debug("LH file exists: %s", os.path.exists(lh_file))
+    logger.debug("RH file exists: %s", os.path.exists(rh_file))
+
     stc = mne.read_source_estimate(stc_path)
+    logger.debug("Loaded STC with shape %s", stc.data.shape)
     if threshold:
         stc = _threshold_stc(stc, threshold)
 
@@ -331,7 +346,10 @@ def view_source_estimate(
     if os.path.basename(stored_dir) == subject:
         subjects_dir = os.path.dirname(stored_dir)
     else:
-        subjects_dir = stored_dir if stored_dir else os.path.dirname(_default_template_location())
+        subjects_dir = (
+            stored_dir if stored_dir else os.path.dirname(_default_template_location())
+        )
+    logger.debug("subjects_dir resolved to %s", subjects_dir)
 
     brain = stc.plot(
         subject=subject,
