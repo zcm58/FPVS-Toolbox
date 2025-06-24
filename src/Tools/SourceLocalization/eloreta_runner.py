@@ -46,7 +46,8 @@ def _prepare_forward(
             subjects_dir = mne.datasets.fetch_fsaverage(subjects_dir=install_parent, verbose=True)
         except Exception:
             subjects_dir = mne.datasets.fetch_fsaverage(verbose=True)
-        settings.set("loreta", "mri_path", subjects_dir)
+        # ``configparser.ConfigParser`` requires string values
+        settings.set("loreta", "mri_path", str(subjects_dir))
         try:
             settings.save()
         except Exception:
