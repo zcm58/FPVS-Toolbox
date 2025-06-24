@@ -94,6 +94,25 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
         logger.debug("Plotter render failed", exc_info=True)
 
 
+def _add_brain_labels(brain: mne.viz.Brain, left: str, right: str) -> None:
+    """Add file name labels above each hemisphere view.
+
+    Parameters
+    ----------
+    brain
+        The :class:`~mne.viz.Brain` instance to annotate.
+    left
+        Label text for the left hemisphere view.
+    right
+        Label text for the right hemisphere view.
+    """
+
+    try:
+        brain.add_text(0.25, 0.95, left, name="lh_label", font_size=10)
+        brain.add_text(0.75, 0.95, right, name="rh_label", font_size=10)
+    except Exception:
+        logger.debug("Failed to add hemisphere labels", exc_info=True)
+
 
 def _load_data(fif_path: str) -> mne.Evoked:
     """Load epochs or evoked data and return an Evoked instance."""
@@ -532,6 +551,10 @@ def view_source_estimate(
     hemi : {"lh", "rh", "both", "split"}
         Which hemisphere(s) to display in the interactive viewer.
 
+    Notes
+    -----
+    When ``hemi`` is ``split`` the names of the ``*-lh.stc`` and ``*-rh.stc``
+    files are displayed above the left and right hemispheres respectively.
     """
 
     logger.debug(
@@ -587,5 +610,6 @@ def view_source_estimate(
     _set_brain_alpha(brain, alpha)
     logger.debug("Brain alpha set to %s", alpha)
     _set_brain_title(brain, window_title or os.path.basename(stc_path))
+    _add_brain_labels(brain, os.path.basename(lh_file), os.path.basename(rh_file))
 
     return brain
