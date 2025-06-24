@@ -96,7 +96,9 @@ def _prepare_forward(
                 subjects_dir = fetch_fsaverage_with_progress(os.getcwd(), log_func)
             log_func(f"Template downloaded to: {subjects_dir}")
 
+
         settings.set("loreta", "mri_path", subjects_dir)
+
         try:
             settings.save()
         except Exception:
