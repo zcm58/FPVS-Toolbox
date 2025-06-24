@@ -34,7 +34,9 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
             logger.debug("Using Brain.set_alpha")
             brain.set_alpha(alpha)  # type: ignore[call-arg]
         else:
+
             logger.debug("Falling back to setting Brain.alpha attribute")
+
             setattr(brain, "alpha", alpha)
     except Exception:
         logger.debug("Direct alpha methods failed", exc_info=True)
@@ -47,6 +49,7 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
                     actor = getattr(layer, "actor", None)
                     if actor is not None:
                         actor.GetProperty().SetOpacity(alpha)
+
             # PyVista backend stores additional actors in _layered_meshes
             for hemi_layers in getattr(brain, "_layered_meshes", {}).values():
                 for layer in hemi_layers.values():
@@ -55,10 +58,12 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
                         actor.GetProperty().SetOpacity(alpha)
         except Exception:
             logger.debug("Failed to set brain alpha via mesh actors", exc_info=True)
+
     try:
         renderer = getattr(brain, "_renderer", None)
         plotter = getattr(renderer, "plotter", None)
         if plotter is not None and hasattr(plotter, "render"):
+
             logger.debug("Triggering plotter.render()")
             plotter.render()
         elif renderer is not None and hasattr(renderer, "_update"):
@@ -66,6 +71,7 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
             renderer._update()
     except Exception:
         logger.debug("Plotter render failed", exc_info=True)
+
 
 
 def _load_data(fif_path: str) -> mne.Evoked:
