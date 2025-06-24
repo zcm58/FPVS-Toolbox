@@ -47,11 +47,16 @@ class EventMapMixin:
         id_entry._entry.bind("<KP_Enter>", self._add_row_and_focus_label)
 
         # Create Remove Button
-        remove_btn = ctk.CTkButton(entry_frame, text="✕",  # Use a clear 'X' symbol
-                                   width=28, height=28,
-                                   corner_radius=CORNER_RADIUS,
-                                   # Pass the specific frame to remove
-                                   command=lambda ef=entry_frame: self.remove_event_map_entry(ef))
+        remove_btn = ctk.CTkButton(
+            entry_frame,
+            text="✕",  # Use a clear 'X' symbol
+            width=28,
+            height=28,
+            corner_radius=CORNER_RADIUS,
+            text_color="red",  # Show remove buttons in red for clarity
+            # Pass the specific frame to remove
+            command=lambda ef=entry_frame: self.remove_event_map_entry(ef),
+        )
         remove_btn.pack(side="right")
 
         # Store references to the widgets for this row
