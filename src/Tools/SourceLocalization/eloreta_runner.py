@@ -226,30 +226,14 @@ def run_source_localization(
     method: str = "eLORETA",
     threshold: Optional[float] = None,
     alpha: float = 0.4,
-
-    low_freq: Optional[float] = None,
-    high_freq: Optional[float] = None,
-    harmonics: Optional[list[float]] = None,
-    snr: Optional[float] = None,
-    oddball: bool = False,
-
-    low_freq: Optional[float] = None,
-    high_freq: Optional[float] = None,
-    harmonics: Optional[list[float]] = None,
-    snr: Optional[float] = None,
-    oddball: bool = False,
-
+    hemi: str = "split",
     low_freq: Optional[float] = None,
     high_freq: Optional[float] = None,
     harmonics: Optional[List[float]] = None,
     snr: Optional[float] = None,
     oddball: bool = False,
-
-    hemi: str = "split",
-
     log_func: Optional[Callable[[str], None]] = None,
     progress_cb: Optional[Callable[[float], None]] = None,
-
 ) -> Tuple[str, mne.viz.Brain]:
     """Run source localization on ``fif_path`` and save results to ``output_dir``.
 
@@ -383,10 +367,10 @@ def run_source_localization(
             subject=subject,
             subjects_dir=subjects_dir,
             time_viewer=False,
-            hemi="split",
+            hemi=hemi,
         )
     except Exception as err:
-        logger.warning("hemi='split' failed: %s; falling back to default", err)
+        logger.warning("hemi=%s failed: %s; falling back to default", hemi, err)
         brain = stc.plot(
             subject=subject,
             subjects_dir=subjects_dir,
