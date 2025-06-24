@@ -15,6 +15,17 @@ from Main_App.settings_manager import SettingsManager
 logger = logging.getLogger(__name__)
 
 
+def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
+    """Safely set the window title of a Brain viewer."""
+    try:
+        plotter = brain._renderer.plotter  # type: ignore[attr-defined]
+        if hasattr(plotter, "app_window"):
+            plotter.app_window.setWindowTitle(title)
+    except Exception:
+        # Setting the title is best-effort only
+        pass
+
+
 def _load_data(fif_path: str) -> mne.Evoked:
     """Load epochs or evoked data and return an Evoked instance."""
     if fif_path.endswith("-epo.fif"):
@@ -262,6 +273,7 @@ def run_source_localization(
 
     )
     brain.set_alpha(alpha)
+    _set_brain_title(brain, os.path.basename(stc_path))
     try:
         labels = mne.read_labels_from_annot(
             subject, parc="aparc", subjects_dir=subjects_dir
@@ -291,11 +303,10 @@ def run_source_localization(
 
 
 def view_source_estimate(
-
     stc_path: str,
     threshold: Optional[float] = None,
     alpha: float = 1.0,
-    hemi: str = "split",
+    window_title: Optional[str] = None,
 
 ) -> mne.viz.Brain:
     """Open a saved :class:`~mne.SourceEstimate` in an interactive viewer.
@@ -330,5 +341,6 @@ def view_source_estimate(
         colormap="Reds",
     )
     brain.set_alpha(alpha)
+    _set_brain_title(brain, window_title or os.path.basename(stc_path))
 
     return brain
