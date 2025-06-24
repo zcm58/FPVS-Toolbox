@@ -30,7 +30,8 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.output_var = tk.StringVar(master=self)
         self.method_var = tk.StringVar(master=self, value="eLORETA")
         self.threshold_var = tk.DoubleVar(master=self, value=0.0)
-        self.alpha_var = tk.DoubleVar(master=self, value=1.0)
+        # Default to 60% transparency (alpha = 0.4)
+        self.alpha_var = tk.DoubleVar(master=self, value=0.4)
 
         self.hemi_var = tk.StringVar(master=self, value="both")
 
