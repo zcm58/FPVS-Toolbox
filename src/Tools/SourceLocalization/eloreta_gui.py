@@ -31,7 +31,9 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.method_var = tk.StringVar(master=self, value="eLORETA")
         self.threshold_var = tk.DoubleVar(master=self, value=0.0)
         self.alpha_var = tk.DoubleVar(master=self, value=1.0)
+
         self.hemi_var = tk.StringVar(master=self, value="both")
+
 
         self.brain = None
 
@@ -87,6 +89,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.alpha_entry.bind("<Return>", self._on_alpha_entry)
         self.alpha_entry.bind("<FocusOut>", self._on_alpha_entry)
 
+
         ctk.CTkLabel(frame, text="Hemisphere:").grid(row=5, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
         hemi_menu = ctk.CTkOptionMenu(
             frame,
@@ -106,6 +109,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.progress_bar.set(0)
 
         ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=9, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+
 
     def _browse_file(self):
         path = filedialog.askopenfilename(title="Select FIF file", filetypes=[("FIF files", "*.fif")], parent=self)
@@ -128,12 +132,14 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         if path.endswith("-lh.stc") or path.endswith("-rh.stc"):
             path = path[:-7]
         try:
+
             self.brain = eloreta_runner.view_source_estimate(
                 path,
                 threshold=self.threshold_var.get(),
                 alpha=self.alpha_var.get(),
                 hemi=self.hemi_var.get(),
             )
+
         except Exception as err:
             messagebox.showerror("Error", str(err))
 
@@ -153,13 +159,17 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self._start_time = time.time()
         self.processing_thread = threading.Thread(
             target=self._run_thread,
+
             args=(fif_path, out_dir, method, thr, self.alpha_var.get(), self.hemi_var.get()),
+
             daemon=True
         )
         self.processing_thread.start()
         self.after(100, self._update_time_remaining)
 
+
     def _run_thread(self, fif_path, out_dir, method, thr, alpha, hemi):
+
         log_func = getattr(self.master, "log", print)
         try:
             _stc_path, self.brain = eloreta_runner.run_source_localization(
@@ -168,7 +178,9 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 method=method,
                 threshold=thr,
                 alpha=alpha,
+
                 hemi=hemi,
+
                 log_func=log_func,
                 progress_cb=lambda f: self.after(0, self._update_progress, f),
             )

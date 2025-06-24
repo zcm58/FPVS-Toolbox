@@ -166,7 +166,9 @@ def run_source_localization(
     method: str = "eLORETA",
     threshold: Optional[float] = None,
     alpha: float = 1.0,
+
     hemi: str = "split",
+
     log_func: Optional[Callable[[str], None]] = None,
     progress_cb: Optional[Callable[[float], None]] = None,
 
@@ -179,6 +181,7 @@ def run_source_localization(
         Initial transparency for the brain surface where ``1.0`` is opaque.
     hemi : {"lh", "rh", "both", "split"}
         Which hemisphere(s) to display in the interactive viewer.
+
 
     Returns
     -------
@@ -253,8 +256,10 @@ def run_source_localization(
         subject=subject,
         subjects_dir=subjects_dir,
         time_viewer=False,
+
         hemi=hemi,
         colormap="Reds",
+
     )
     brain.set_alpha(alpha)
     try:
@@ -280,14 +285,18 @@ def run_source_localization(
     log_func(f"Results saved to {output_dir}")
     if progress_cb:
         progress_cb(1.0)
+
+
     return stc_path, brain
 
 
 def view_source_estimate(
+
     stc_path: str,
     threshold: Optional[float] = None,
     alpha: float = 1.0,
     hemi: str = "split",
+
 ) -> mne.viz.Brain:
     """Open a saved :class:`~mne.SourceEstimate` in an interactive viewer.
 
@@ -295,8 +304,10 @@ def view_source_estimate(
     ----------
     alpha : float
         Transparency for the brain surface where ``1.0`` is opaque.
+
     hemi : {"lh", "rh", "both", "split"}
         Which hemisphere(s) to display in the interactive viewer.
+
     """
 
     stc = mne.read_source_estimate(stc_path)
@@ -319,4 +330,5 @@ def view_source_estimate(
         colormap="Reds",
     )
     brain.set_alpha(alpha)
+
     return brain
