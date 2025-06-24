@@ -12,7 +12,8 @@ The FPVS Toolbox is a GUI based application for preprocessing, cleaning, and ana
 - Averaging utility for combining epochs across files prior to post‑processing (useful if one needs to combine two similar FPVS experiments prior to calculating BCA)
 - Optional saving of preprocessed data as `.fif` files for advanced analyses
 - Interactive eLORETA/sLORETA source localization with 3‑D glass brain viewer
-  (automatically downloads the `fsaverage` template if no MRI is specified)
+  (automatically downloads the `fsaverage` template if no MRI is specified) and
+  a viewer tool to open saved results with adjustable transparency
 
 
 ## Features currently under development:
@@ -65,8 +66,13 @@ source localization tool.
 
 Choose **Source Localization (eLORETA/sLORETA)** from the Tools menu to run an
 inverse solution on a preprocessed `.fif` file. Select the desired method and an
-output folder. An interactive 3‑D viewer will open with anatomical labels, and
-side, frontal and top screenshots are automatically saved in the chosen folder.
+output folder. An interactive 3‑D viewer will open showing both hemispheres with
+anatomical labels. Side, frontal and top screenshots are automatically saved in
+the chosen folder. You can also open any saved `source-lh.stc`/`source-rh.stc`
+pair later using the **View STC** button to inspect the results interactively and
+adjust the brain transparency. A hemisphere selector lets you view the left
+hemisphere, right hemisphere, both together, or a split layout. Activity is
+displayed with a red heatmap so you can easily spot the peak response.
 
 
 

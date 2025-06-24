@@ -6,7 +6,7 @@ import os
 import logging
 import threading
 import time
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 import mne
@@ -165,12 +165,26 @@ def run_source_localization(
     output_dir: str,
     method: str = "eLORETA",
     threshold: Optional[float] = None,
+    alpha: float = 1.0,
+    hemi: str = "split",
     log_func: Optional[Callable[[str], None]] = None,
     progress_cb: Optional[Callable[[float], None]] = None,
-) -> str:
+
+) -> Tuple[str, mne.viz.Brain]:
     """Run source localization on ``fif_path`` and save results to ``output_dir``.
 
-    Returns the path to the saved :class:`~mne.SourceEstimate` file.
+    Parameters
+    ----------
+    alpha : float
+        Initial transparency for the brain surface where ``1.0`` is opaque.
+    hemi : {"lh", "rh", "both", "split"}
+        Which hemisphere(s) to display in the interactive viewer.
+
+    Returns
+    -------
+    Tuple[str, :class:`mne.viz.Brain`]
+        Path to the saved :class:`~mne.SourceEstimate` (without hemisphere
+        suffix) and the interactive brain window.
     """
     if log_func is None:
         log_func = logger.info
@@ -235,7 +249,14 @@ def run_source_localization(
         progress_cb(step / total)
 
     # Visualise in a separate Brain window
-    brain = stc.plot(subject=subject, subjects_dir=subjects_dir, time_viewer=False)
+    brain = stc.plot(
+        subject=subject,
+        subjects_dir=subjects_dir,
+        time_viewer=False,
+        hemi=hemi,
+        colormap="Reds",
+    )
+    brain.set_alpha(alpha)
     try:
         labels = mne.read_labels_from_annot(
             subject, parc="aparc", subjects_dir=subjects_dir
@@ -251,7 +272,7 @@ def run_source_localization(
         brain.save_image(os.path.join(output_dir, f"{name}.png"))
     # Save the current view as an additional screenshot
     brain.save_image(os.path.join(output_dir, "overview.png"))
-    brain.close()
+    # Keep the brain window open so the user can interact with it
     step += 1
     if progress_cb:
         progress_cb(step / total)
@@ -259,4 +280,43 @@ def run_source_localization(
     log_func(f"Results saved to {output_dir}")
     if progress_cb:
         progress_cb(1.0)
-    return stc_path
+    return stc_path, brain
+
+
+def view_source_estimate(
+    stc_path: str,
+    threshold: Optional[float] = None,
+    alpha: float = 1.0,
+    hemi: str = "split",
+) -> mne.viz.Brain:
+    """Open a saved :class:`~mne.SourceEstimate` in an interactive viewer.
+
+    Parameters
+    ----------
+    alpha : float
+        Transparency for the brain surface where ``1.0`` is opaque.
+    hemi : {"lh", "rh", "both", "split"}
+        Which hemisphere(s) to display in the interactive viewer.
+    """
+
+    stc = mne.read_source_estimate(stc_path)
+    if threshold:
+        stc = _threshold_stc(stc, threshold)
+
+    settings = SettingsManager()
+    stored_dir = settings.get("loreta", "mri_path", "")
+    subject = "fsaverage"
+    if os.path.basename(stored_dir) == subject:
+        subjects_dir = os.path.dirname(stored_dir)
+    else:
+        subjects_dir = stored_dir if stored_dir else os.path.dirname(_default_template_location())
+
+    brain = stc.plot(
+        subject=subject,
+        subjects_dir=subjects_dir,
+        time_viewer=False,
+        hemi=hemi,
+        colormap="Reds",
+    )
+    brain.set_alpha(alpha)
+    return brain
