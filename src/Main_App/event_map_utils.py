@@ -53,10 +53,12 @@ class EventMapMixin:
             width=28,
             height=28,
             corner_radius=CORNER_RADIUS,
+
             fg_color="red",  # Red background for better visibility
             hover_color="#cc0000",  # Slightly darker on hover
             text_color="white",  # White "X"
             font=ctk.CTkFont(weight="bold"),  # Bold text for clarity
+
             # Pass the specific frame to remove
             command=lambda ef=entry_frame: self.remove_event_map_entry(ef),
         )
