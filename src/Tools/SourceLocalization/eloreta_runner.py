@@ -142,6 +142,7 @@ def run_source_localization(
     method: str = "eLORETA",
     threshold: Optional[float] = None,
     log_func: Optional[Callable[[str], None]] = None,
+    progress_cb: Optional[Callable[[float], None]] = None,
 ) -> str:
     """Run source localization on ``fif_path`` and save results to ``output_dir``.
 
@@ -149,16 +150,32 @@ def run_source_localization(
     """
     if log_func is None:
         log_func = logger.info
+    step = 0
+    total = 7
+    if progress_cb:
+        progress_cb(0.0)
     log_func(f"Loading data from {fif_path}")
     settings = SettingsManager()
     evoked = _load_data(fif_path)
+    step += 1
+    if progress_cb:
+        progress_cb(step / total)
 
     log_func("Preparing forward model ...")
     fwd, subject, subjects_dir = _prepare_forward(evoked, settings, log_func)
     log_func(f"Forward model ready. subjects_dir={subjects_dir}, subject={subject}")
+    step += 1
+    if progress_cb:
+        progress_cb(step / total)
 
     noise_cov = mne.compute_covariance([evoked], tmax=0.0)
+    step += 1
+    if progress_cb:
+        progress_cb(step / total)
     inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)
+    step += 1
+    if progress_cb:
+        progress_cb(step / total)
 
     method = method.lower()
     if method not in {"eloreta", "sloreta"}:
@@ -168,10 +185,16 @@ def run_source_localization(
     stc = mne.minimum_norm.apply_inverse(evoked, inv, method=method)
     if threshold:
         stc = stc.threshold(threshold)
+    step += 1
+    if progress_cb:
+        progress_cb(step / total)
 
     os.makedirs(output_dir, exist_ok=True)
     stc_path = os.path.join(output_dir, "source")
     stc.save(stc_path)
+    step += 1
+    if progress_cb:
+        progress_cb(step / total)
 
     # Visualise in a separate Brain window
     brain = stc.plot(subject=subject, subjects_dir=subjects_dir, time_viewer=False)
@@ -189,6 +212,11 @@ def run_source_localization(
     # Save the current view as an additional screenshot
     brain.save_image(os.path.join(output_dir, "overview.png"))
     brain.close()
+    step += 1
+    if progress_cb:
+        progress_cb(step / total)
 
     log_func(f"Results saved to {output_dir}")
+    if progress_cb:
+        progress_cb(1.0)
     return stc_path

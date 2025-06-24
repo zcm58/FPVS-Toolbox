@@ -4,6 +4,8 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
+import time
+from typing import Optional
 
 import customtkinter as ctk
 
@@ -28,6 +30,11 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.output_var = tk.StringVar(master=self)
         self.method_var = tk.StringVar(master=self, value="eLORETA")
         self.threshold_var = tk.DoubleVar(master=self, value=0.0)
+
+        self.progress_var = tk.DoubleVar(master=self, value=0.0)
+        self.remaining_var = tk.StringVar(master=self, value="")
+        self._start_time = None
+        self.processing_thread = None
 
         self._build_ui()
 
@@ -65,6 +72,12 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         run_btn = ctk.CTkButton(frame, text="Run", command=self._run)
         run_btn.grid(row=4, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
 
+        self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
+        self.progress_bar.grid(row=5, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
+        self.progress_bar.set(0)
+
+        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=6, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+
     def _browse_file(self):
         path = filedialog.askopenfilename(title="Select FIF file", filetypes=[("FIF files", "*.fif")], parent=self)
         if path:
@@ -86,11 +99,16 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             return
         method = self.method_var.get()
         thr = self.threshold_var.get()
-        threading.Thread(
+        self.progress_var.set(0)
+        self.remaining_var.set("")
+        self._start_time = time.time()
+        self.processing_thread = threading.Thread(
             target=self._run_thread,
             args=(fif_path, out_dir, method, thr),
             daemon=True
-        ).start()
+        )
+        self.processing_thread.start()
+        self.after(100, self._update_time_remaining)
 
     def _run_thread(self, fif_path, out_dir, method, thr):
         log_func = getattr(self.master, "log", print)
@@ -101,11 +119,37 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 method=method,
                 threshold=thr,
                 log_func=log_func,
+                progress_cb=lambda f: self.after(0, self._update_progress, f),
             )
-            self.after(0, lambda: messagebox.showinfo("Done", "Source localization finished."))
+            self.after(0, self._on_finish, None)
         except Exception as e:
+            self.after(0, self._on_finish, e)
 
-            self.after(0, lambda err=e: messagebox.showerror("Error", str(err)))
+    def _update_progress(self, fraction: float) -> None:
+        self.progress_var.set(fraction)
+
+    def _on_finish(self, error: Optional[Exception]) -> None:
+        self.processing_thread = None
+        self._start_time = None
+        self.remaining_var.set("")
+        if error is None:
+            messagebox.showinfo("Done", "Source localization finished.")
+        else:
+            messagebox.showerror("Error", str(error))
+
+    def _update_time_remaining(self) -> None:
+        if self._start_time is None:
+            return
+        elapsed = time.time() - self._start_time
+        frac = self.progress_var.get()
+        if frac > 0:
+            remaining = elapsed * (1 - frac) / frac
+            mins, secs = divmod(int(remaining), 60)
+            self.remaining_var.set(f"Estimated time remaining: {mins:02d}:{secs:02d}")
+        else:
+            self.remaining_var.set("")
+        if self.processing_thread and self.processing_thread.is_alive():
+            self.after(1000, self._update_time_remaining)
 
     def _on_threshold_slider(self, value: float) -> None:
         """Update variable when slider moves."""
