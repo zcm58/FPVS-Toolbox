@@ -32,6 +32,9 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.threshold_var = tk.DoubleVar(master=self, value=0.0)
         self.alpha_var = tk.DoubleVar(master=self, value=1.0)
 
+        self.hemi_var = tk.StringVar(master=self, value="both")
+
+
         self.brain = None
 
         self.progress_var = tk.DoubleVar(master=self, value=0.0)
@@ -86,21 +89,26 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.alpha_entry.bind("<Return>", self._on_alpha_entry)
         self.alpha_entry.bind("<FocusOut>", self._on_alpha_entry)
 
+
+        ctk.CTkLabel(frame, text="Hemisphere:").grid(row=5, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        hemi_menu = ctk.CTkOptionMenu(
+            frame,
+            variable=self.hemi_var,
+            values=["both", "split", "lh", "rh"],
+        )
+        hemi_menu.grid(row=5, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+
         run_btn = ctk.CTkButton(frame, text="Run", command=self._run)
-        run_btn.grid(row=5, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
+        run_btn.grid(row=6, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
 
         view_btn = ctk.CTkButton(frame, text="View STC", command=self._view_stc)
-        view_btn.grid(row=6, column=0, columnspan=3, pady=(0, PAD_Y))
-
-        view_btn = ctk.CTkButton(frame, text="View STC", command=self._view_stc)
-        view_btn.grid(row=5, column=0, columnspan=3, pady=(0, PAD_Y))
+        view_btn.grid(row=7, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
-
-        self.progress_bar.grid(row=7, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
+        self.progress_bar.grid(row=8, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
         self.progress_bar.set(0)
 
-        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=8, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=9, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
 
 
     def _browse_file(self):
@@ -129,6 +137,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 path,
                 threshold=self.threshold_var.get(),
                 alpha=self.alpha_var.get(),
+                hemi=self.hemi_var.get(),
             )
 
         except Exception as err:
@@ -150,13 +159,17 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self._start_time = time.time()
         self.processing_thread = threading.Thread(
             target=self._run_thread,
-            args=(fif_path, out_dir, method, thr, self.alpha_var.get()),
+
+            args=(fif_path, out_dir, method, thr, self.alpha_var.get(), self.hemi_var.get()),
+
             daemon=True
         )
         self.processing_thread.start()
         self.after(100, self._update_time_remaining)
 
-    def _run_thread(self, fif_path, out_dir, method, thr, alpha):
+
+    def _run_thread(self, fif_path, out_dir, method, thr, alpha, hemi):
+
         log_func = getattr(self.master, "log", print)
         try:
             _stc_path, self.brain = eloreta_runner.run_source_localization(
@@ -165,6 +178,9 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 method=method,
                 threshold=thr,
                 alpha=alpha,
+
+                hemi=hemi,
+
                 log_func=log_func,
                 progress_cb=lambda f: self.after(0, self._update_progress, f),
             )
