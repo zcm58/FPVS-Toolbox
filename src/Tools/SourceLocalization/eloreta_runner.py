@@ -15,6 +15,17 @@ from Main_App.settings_manager import SettingsManager
 logger = logging.getLogger(__name__)
 
 
+def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
+    """Safely set the window title of a Brain viewer."""
+    try:
+        plotter = brain._renderer.plotter  # type: ignore[attr-defined]
+        if hasattr(plotter, "app_window"):
+            plotter.app_window.setWindowTitle(title)
+    except Exception:
+        # Setting the title is best-effort only
+        pass
+
+
 def _load_data(fif_path: str) -> mne.Evoked:
     """Load epochs or evoked data and return an Evoked instance."""
     if fif_path.endswith("-epo.fif"):
@@ -246,13 +257,25 @@ def run_source_localization(
         progress_cb(step / total)
 
     # Visualise in a separate Brain window
-    brain = stc.plot(
-        subject=subject,
-        subjects_dir=subjects_dir,
-        time_viewer=False,
-        hemi="split",
+    logger.debug(
+        "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
     )
+    try:
+        brain = stc.plot(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            time_viewer=False,
+            hemi="split",
+        )
+    except Exception as err:
+        logger.warning("hemi='split' failed: %s; falling back to default", err)
+        brain = stc.plot(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            time_viewer=False,
+        )
     brain.set_alpha(alpha)
+    _set_brain_title(brain, os.path.basename(stc_path))
     try:
         labels = mne.read_labels_from_annot(
             subject, parc="aparc", subjects_dir=subjects_dir
@@ -281,7 +304,10 @@ def run_source_localization(
 
 
 def view_source_estimate(
-    stc_path: str, threshold: Optional[float] = None, alpha: float = 1.0
+    stc_path: str,
+    threshold: Optional[float] = None,
+    alpha: float = 1.0,
+    window_title: Optional[str] = None,
 ) -> mne.viz.Brain:
     """Open a saved :class:`~mne.SourceEstimate` in an interactive viewer.
 
@@ -291,7 +317,19 @@ def view_source_estimate(
         Transparency for the brain surface where ``1.0`` is opaque.
     """
 
+    logger.debug(
+        "view_source_estimate called with %s, threshold=%s, alpha=%s",
+        stc_path,
+        threshold,
+        alpha,
+    )
+    lh_file = stc_path + "-lh.stc"
+    rh_file = stc_path + "-rh.stc"
+    logger.debug("LH file exists: %s", os.path.exists(lh_file))
+    logger.debug("RH file exists: %s", os.path.exists(rh_file))
+
     stc = mne.read_source_estimate(stc_path)
+    logger.debug("Loaded STC with shape %s", stc.data.shape)
     if threshold:
         stc = _threshold_stc(stc, threshold)
 
@@ -301,15 +339,27 @@ def view_source_estimate(
     if os.path.basename(stored_dir) == subject:
         subjects_dir = os.path.dirname(stored_dir)
     else:
-        subjects_dir = stored_dir if stored_dir else os.path.dirname(_default_template_location())
+        subjects_dir = (
+            stored_dir if stored_dir else os.path.dirname(_default_template_location())
+        )
+    logger.debug("subjects_dir resolved to %s", subjects_dir)
 
 
-    brain = stc.plot(
-        subject=subject,
-        subjects_dir=subjects_dir,
-        time_viewer=False,
-        hemi="split",
-    )
+    try:
+        brain = stc.plot(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            time_viewer=False,
+            hemi="split",
+        )
+    except Exception as err:
+        logger.warning("hemi='split' failed: %s; falling back to default", err)
+        brain = stc.plot(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            time_viewer=False,
+        )
     brain.set_alpha(alpha)
+    _set_brain_title(brain, window_title or os.path.basename(stc_path))
 
     return brain

@@ -89,11 +89,12 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         run_btn = ctk.CTkButton(frame, text="Run", command=self._run)
         run_btn.grid(row=5, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
 
-        view_btn = ctk.CTkButton(frame, text="View STC", command=self._view_stc)
+        view_btn = ctk.CTkButton(
+            frame,
+            text="View 3D brain heatmap",
+            command=self._view_stc,
+        )
         view_btn.grid(row=6, column=0, columnspan=3, pady=(0, PAD_Y))
-
-        view_btn = ctk.CTkButton(frame, text="View STC", command=self._view_stc)
-        view_btn.grid(row=5, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
 
@@ -121,17 +122,22 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         )
         if not path:
             return
+        title = os.path.basename(path)
         if path.endswith("-lh.stc") or path.endswith("-rh.stc"):
             path = path[:-7]
+        log_func = getattr(self.master, "log", print)
+        log_func(f"Opening STC viewer for {path}")
         try:
 
             self.brain = eloreta_runner.view_source_estimate(
                 path,
                 threshold=self.threshold_var.get(),
                 alpha=self.alpha_var.get(),
+                window_title=title,
             )
 
         except Exception as err:
+            log_func(f"STC viewer failed: {err}")
             messagebox.showerror("Error", str(err))
 
     def _run(self):
