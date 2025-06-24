@@ -236,7 +236,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         except tk.TclError:
             return
         if self.brain is not None:
-            self.brain.set_alpha(self.alpha_var.get())
+            eloreta_runner._set_brain_alpha(self.brain, self.alpha_var.get())
 
     def _on_alpha_entry(self, _event=None) -> None:
         """Validate entry value and update slider."""
@@ -248,5 +248,5 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.alpha_var.set(value)
         self.alpha_slider.set(value)
         if self.brain is not None:
-            self.brain.set_alpha(value)
+            eloreta_runner._set_brain_alpha(self.brain, value)
 

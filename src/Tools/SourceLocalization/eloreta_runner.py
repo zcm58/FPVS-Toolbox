@@ -26,6 +26,26 @@ def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
         pass
 
 
+def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
+    """Set the transparency of a Brain viewer in a version robust way."""
+    try:
+        if hasattr(brain, "set_alpha"):
+            brain.set_alpha(alpha)  # type: ignore[call-arg]
+            return
+    except Exception:
+        pass
+    try:
+        setattr(brain, "alpha", alpha)
+    except Exception:
+        try:
+            for hemi in getattr(brain, "_hemi_data", {}).values():
+                mesh = getattr(hemi, "mesh", None)
+                if mesh is not None and hasattr(mesh, "actor"):
+                    mesh.actor.GetProperty().SetOpacity(alpha)
+        except Exception:
+            logger.debug("Failed to set brain alpha", exc_info=True)
+
+
 def _load_data(fif_path: str) -> mne.Evoked:
     """Load epochs or evoked data and return an Evoked instance."""
     if fif_path.endswith("-epo.fif"):
@@ -282,7 +302,7 @@ def run_source_localization(
             subjects_dir=subjects_dir,
             time_viewer=False,
         )
-    brain.set_alpha(alpha)
+    _set_brain_alpha(brain, alpha)
     _set_brain_title(brain, os.path.basename(stc_path))
     try:
         labels = mne.read_labels_from_annot(
@@ -374,7 +394,7 @@ def view_source_estimate(
             time_viewer=False,
         )
 
-    brain.set_alpha(alpha)
+    _set_brain_alpha(brain, alpha)
     _set_brain_title(brain, window_title or os.path.basename(stc_path))
 
     return brain
