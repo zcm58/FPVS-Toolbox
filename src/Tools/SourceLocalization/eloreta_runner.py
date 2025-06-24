@@ -177,6 +177,9 @@ def run_source_localization(
     method: str = "eLORETA",
     threshold: Optional[float] = None,
     alpha: float = 1.0,
+
+    hemi: str = "split",
+
     log_func: Optional[Callable[[str], None]] = None,
     progress_cb: Optional[Callable[[float], None]] = None,
 
@@ -187,6 +190,9 @@ def run_source_localization(
     ----------
     alpha : float
         Initial transparency for the brain surface where ``1.0`` is opaque.
+    hemi : {"lh", "rh", "both", "split"}
+        Which hemisphere(s) to display in the interactive viewer.
+
 
     Returns
     -------
@@ -259,6 +265,8 @@ def run_source_localization(
     # Visualise in a separate Brain window
     logger.debug(
         "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
+
+
     )
     try:
         brain = stc.plot(
@@ -300,6 +308,7 @@ def run_source_localization(
     if progress_cb:
         progress_cb(1.0)
 
+
     return stc_path, brain
 
 
@@ -308,6 +317,7 @@ def view_source_estimate(
     threshold: Optional[float] = None,
     alpha: float = 1.0,
     window_title: Optional[str] = None,
+
 ) -> mne.viz.Brain:
     """Open a saved :class:`~mne.SourceEstimate` in an interactive viewer.
 
@@ -315,6 +325,10 @@ def view_source_estimate(
     ----------
     alpha : float
         Transparency for the brain surface where ``1.0`` is opaque.
+
+    hemi : {"lh", "rh", "both", "split"}
+        Which hemisphere(s) to display in the interactive viewer.
+
     """
 
     logger.debug(
@@ -359,6 +373,7 @@ def view_source_estimate(
             subjects_dir=subjects_dir,
             time_viewer=False,
         )
+
     brain.set_alpha(alpha)
     _set_brain_title(brain, window_title or os.path.basename(stc_path))
 
