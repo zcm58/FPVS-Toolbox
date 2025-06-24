@@ -76,6 +76,12 @@ adjust the brain transparency. A hemisphere selector lets you view the left
 hemisphere, right hemisphere, both together, or a split layout. Activity is
 displayed with a red heatmap so you can easily spot the peak response.
 
+Additional parameters for band‑pass filtering and oddball cycle localisation can be
+configured under the **LORETA** tab in the Settings window. Here you may define
+the low and high filter bounds, choose which oddball harmonics to reconstruct and
+set the SNR value used when applying sLORETA. These values are populated in the
+Source Localization dialog so they can be tweaked per analysis.
+
 
 
 
