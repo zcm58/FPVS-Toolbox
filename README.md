@@ -42,6 +42,7 @@ The application can also be launched from source on Windows. Clone the repositor
 - `scipy`
 - `customtkinter`
 - `statsmodels` (for statistical analyses)
+- `nibabel` (required for source localization)
 
 After installing the dependencies, start the GUI with:
 
