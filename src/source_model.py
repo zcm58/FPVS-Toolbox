@@ -6,6 +6,7 @@ import os
 from typing import Dict, List, Optional
 
 import mne
+from Tools.SourceLocalization.eloreta_runner import fetch_fsaverage_with_progress
 
 
 def prepare_head_model(raw: mne.io.BaseRaw, template: str = "fsaverage") -> tuple[mne.Forward, str, str]:
@@ -22,7 +23,7 @@ def prepare_head_model(raw: mne.io.BaseRaw, template: str = "fsaverage") -> tupl
     tuple
         forward solution, subject name, subjects_dir
     """
-    subjects_dir = mne.datasets.fetch_fsaverage(verbose=False)
+    subjects_dir = fetch_fsaverage_with_progress(os.getcwd(), log_func=print)
     src = mne.setup_source_space(template, spacing="oct6", subjects_dir=subjects_dir, add_dist=False)
     model = mne.make_bem_model(subject=template, subjects_dir=subjects_dir, ico=4)
     bem = mne.make_bem_solution(model)

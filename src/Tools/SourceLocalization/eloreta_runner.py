@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import logging
+import threading
+import time
 from typing import Callable, Optional
 
 import mne
@@ -26,6 +28,47 @@ def _default_template_location() -> str:
     return os.path.join(base_dir, "fsaverage")
 
 
+def _dir_size_mb(path: str) -> float:
+    """Return the size of ``path`` in megabytes."""
+    total = 0
+    for root, _, files in os.walk(path):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            try:
+                total += os.path.getsize(fpath)
+            except OSError:
+                pass
+    return total / (1024 * 1024)
+
+
+def fetch_fsaverage_with_progress(subjects_dir: str, log_func: Callable[[str], None] = logger.info) -> str:
+    """Download ``fsaverage`` while logging progress to ``log_func``."""
+
+    stop_event = threading.Event()
+
+    def _report():
+        dest = os.path.join(subjects_dir, "fsaverage")
+        last = -1.0
+        while not stop_event.is_set():
+            if os.path.isdir(dest):
+                size = _dir_size_mb(dest)
+                if size != last:
+                    log_func(f"Downloaded {size:.1f} MB...")
+                    last = size
+            time.sleep(1)
+
+    thread = threading.Thread(target=_report, daemon=True)
+    thread.start()
+    try:
+        path = mne.datasets.fetch_fsaverage(subjects_dir=subjects_dir, verbose=True)
+    finally:
+        stop_event.set()
+        thread.join()
+
+    log_func(f"Download complete. Total size: {_dir_size_mb(path):.1f} MB")
+    return path
+
+
 
 def _prepare_forward(
     evoked: mne.Evoked,
@@ -43,9 +86,9 @@ def _prepare_forward(
 
         install_parent = os.path.dirname(_default_template_location())
         try:
-            subjects_dir = mne.datasets.fetch_fsaverage(subjects_dir=install_parent, verbose=True)
+            subjects_dir = fetch_fsaverage_with_progress(install_parent, log_func)
         except Exception:
-            subjects_dir = mne.datasets.fetch_fsaverage(verbose=True)
+            subjects_dir = fetch_fsaverage_with_progress(os.getcwd(), log_func)
         settings.set("loreta", "mri_path", subjects_dir)
         try:
             settings.save()
