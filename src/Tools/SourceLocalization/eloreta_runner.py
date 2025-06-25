@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 import importlib
+import inspect
 from typing import Callable, Optional, Tuple, List
 
 # Force PyVistaQt backend before MNE is imported so the interactive viewer
@@ -200,13 +201,16 @@ def _plot_with_alpha(
     subject: str,
     alpha: float,
 ) -> mne.viz.Brain:
+
     """Call :meth:`mne.SourceEstimate.plot` using whichever alpha argument works."""
+
     plot_kwargs = dict(
         subject=subject,
         subjects_dir=subjects_dir,
         time_viewer=False,
         hemi=hemi,
     )
+
 
     for arg in ("brain_alpha", "initial_alpha"):
         try:
@@ -220,6 +224,7 @@ def _plot_with_alpha(
 
     brain = stc.plot(**plot_kwargs)
     _set_brain_alpha(brain, alpha)
+
     return brain
 
 
@@ -544,7 +549,9 @@ def run_source_localization(
         )
         evoked = source_localization.average_cycles(cycle_epochs)
         log_func("Averaged cycles into Evoked")
-        harmonic_freqs = [h * oddball_freq for h in harmonics]
+        # harmonics are specified in Hz in the settings dialog. Use them
+        # directly rather than scaling by the oddball frequency.
+        harmonic_freqs = harmonics
         if harmonic_freqs:
             log_func(
                 "Reconstructing harmonics: "
