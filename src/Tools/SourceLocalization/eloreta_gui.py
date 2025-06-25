@@ -191,6 +191,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                     threshold=self.threshold_var.get(),
                     alpha=self.alpha_var.get(),
                     window_title=title,
+                    log_func=log_func,
                 )
                 self.brain = brain
             except Exception as err:
@@ -415,6 +416,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 threshold=thr,
                 alpha=alpha,
                 window_title=title,
+                log_func=log_func,
             )
         except Exception as err:
             log_func(f"STC viewer failed: {err}")

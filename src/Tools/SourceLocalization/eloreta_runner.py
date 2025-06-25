@@ -587,6 +587,7 @@ def run_source_localization(
     brain = None
     if show_brain:
         _ensure_pyvista_backend()
+        log_func(f"Using 3D backend: {get_current_backend()}")
         # Visualise in a separate Brain window
         logger.debug(
             "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
@@ -676,6 +677,7 @@ def view_source_estimate(
     threshold: Optional[float] = None,
     alpha: float = 0.4,
     window_title: Optional[str] = None,
+    log_func: Optional[Callable[[str], None]] = None,
 
 ) -> mne.viz.Brain:
     """Open a saved :class:`~mne.SourceEstimate` in an interactive viewer.
@@ -685,6 +687,9 @@ def view_source_estimate(
     alpha : float
         Transparency for the brain surface where ``1.0`` is opaque.
         Defaults to ``0.4`` (60% transparent).
+    log_func : Callable[[str], None] | None
+        Logging callback used to print messages to the GUI and console.
+        ``logger.info`` is used when not provided.
 
     Notes
     -----
@@ -720,7 +725,11 @@ def view_source_estimate(
         )
     logger.debug("subjects_dir resolved to %s", subjects_dir)
 
+    if log_func is None:
+        log_func = logger.info
+
     _ensure_pyvista_backend()
+    log_func(f"Using 3D backend: {get_current_backend()}")
 
     try:
         logger.debug(
