@@ -76,7 +76,9 @@ the chosen folder. You can also open any saved `source-lh.stc`/`source-rh.stc`
 pair later using the **View STC** button to inspect the results interactively and
 adjust the brain transparency. A hemisphere selector lets you view the left
 hemisphere, right hemisphere, both together, or a split layout. Activity is
-displayed with a red heatmap so you can easily spot the peak response.
+displayed with a red heatmap so you can easily spot the peak response. The
+color bar at the bottom of the viewer shows the magnitude of the estimated
+current density and is labeled **Source amplitude** for clarity.
 
 The underlying module exposes an `is_pyvistaqt_backend()` helper which
 returns ``True`` when the viewer will use the interactive PyVistaQt

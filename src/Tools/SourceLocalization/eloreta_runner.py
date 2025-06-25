@@ -192,6 +192,25 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
         logger.debug("Plotter render failed", exc_info=True)
 
 
+def _set_colorbar_label(brain: mne.viz.Brain, label: str) -> None:
+    """Set the colorbar title in a robust way."""
+    try:
+        renderer = getattr(brain, "_renderer", None)
+        cbar = None
+        if renderer is not None:
+            cbar = getattr(renderer, "scalar_bar", None)
+            if cbar is None:
+                plotter = getattr(renderer, "plotter", None)
+                cbar = getattr(plotter, "scalar_bar", None)
+        if cbar is not None:
+            if hasattr(cbar, "SetTitle"):
+                cbar.SetTitle(label)
+            elif hasattr(cbar, "title"):
+                cbar.title = label
+    except Exception:
+        logger.debug("Failed to set colorbar label", exc_info=True)
+
+
 def _add_brain_labels(brain: mne.viz.Brain, left: str, right: str) -> None:
     """Add file name labels above each hemisphere view.
 
@@ -611,6 +630,7 @@ def run_source_localization(
         _set_brain_alpha(brain, alpha)
         logger.debug("Brain alpha set to %s", alpha)
         _set_brain_title(brain, os.path.basename(stc_path))
+        _set_colorbar_label(brain, "Source amplitude")
         try:
             labels = mne.read_labels_from_annot(
                 subject, parc="aparc", subjects_dir=subjects_dir
@@ -738,6 +758,7 @@ def view_source_estimate(
     _set_brain_alpha(brain, alpha)
     logger.debug("Brain alpha set to %s", alpha)
     _set_brain_title(brain, window_title or os.path.basename(stc_path))
+    _set_colorbar_label(brain, "Source amplitude")
     try:
         labels = mne.read_labels_from_annot(
             subject, parc="aparc", subjects_dir=subjects_dir
