@@ -73,9 +73,11 @@ except Exception as err:  # pragma: no cover - optional
 def run_source_localization(
     fif_path: str,
     output_dir: str,
+    *,
     method: str = "eLORETA",
     threshold: Optional[float] = None,
     alpha: float = 0.5,
+    stc_basename: Optional[str] = None,
 
 
     low_freq: Optional[float] = None,
@@ -96,6 +98,9 @@ def run_source_localization(
 
     Parameters
     ----------
+    stc_basename : str | None
+        Base filename (without hemisphere suffix) for the saved ``.stc`` files.
+        Defaults to ``"source"``.
     alpha : float
         Initial transparency for the brain surface where ``1.0`` is opaque.
         Defaults to ``0.5`` (50% transparent).
@@ -254,7 +259,8 @@ def run_source_localization(
         progress_cb(step / total)
 
     os.makedirs(output_dir, exist_ok=True)
-    stc_path = os.path.join(output_dir, "source")
+    base_name = stc_basename or "source"
+    stc_path = os.path.join(output_dir, base_name)
     stc.save(stc_path)
     step += 1
     if progress_cb:

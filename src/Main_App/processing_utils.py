@@ -21,6 +21,23 @@ from Main_App.post_process import post_process as _external_post_process
 from Main_App.eeg_preprocessing import perform_preprocessing
 from Main_App.load_utils import load_eeg_file
 
+
+def _sanitize_folder_name(label: str) -> str:
+    """Return a filesystem-safe folder name without underscores."""
+    sanitized = label.replace('_', ' ').replace('/', '-').replace('\\', '-')
+    sanitized = sanitized.strip()
+    sanitized = re.sub(r'^\d+\s*-\s*', '', sanitized)
+    return sanitized
+
+
+def _stc_basename_from_fif(path: str) -> str:
+    """Generate a SourceEstimate base filename from a FIF file path."""
+    name = os.path.splitext(os.path.basename(path))[0]
+    name = re.sub(r'[\s_-]*epo$', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\s+', '_', name.strip())
+    name = re.sub(r'_+', '_', name)
+    return name
+
 class ProcessingMixin:
     def start_processing(self):
         if self.processing_thread and self.processing_thread.is_alive():
@@ -451,9 +468,16 @@ class ProcessingMixin:
                             stc_dict = source_model.apply_sloreta(file_epochs, inv)
 
                             for cond_label, stc in stc_dict.items():
-                                cond_folder = os.path.join(save_folder, cond_label.replace(' ', '_'))
+                                cond_folder = os.path.join(
+                                    save_folder,
+                                    "LORETA RESULTS",
+                                    _sanitize_folder_name(cond_label),
+                                )
                                 os.makedirs(cond_folder, exist_ok=True)
-                                stc_base = os.path.join(cond_folder, os.path.splitext(f_name)[0] + '_' + cond_label.replace(' ', '_'))
+                                base_name = _stc_basename_from_fif(
+                                    f"{os.path.splitext(f_name)[0]} {cond_label}.fif"
+                                )
+                                stc_base = os.path.join(cond_folder, base_name)
                                 stc.save(stc_base)
 
                                 brain = stc.plot(subject=subj, subjects_dir=subj_dir, time_viewer=False)
@@ -478,22 +502,30 @@ class ProcessingMixin:
                             for cond_label, epoch_list in file_epochs.items():
                                 if not epoch_list or not isinstance(epoch_list[0], mne.Epochs):
                                     continue
-                                cond_subfolder = os.path.join(fif_dir, cond_label.replace(' ', '_'))
+                                cond_subfolder = os.path.join(
+                                    fif_dir, _sanitize_folder_name(cond_label)
+                                )
                                 os.makedirs(cond_subfolder, exist_ok=True)
-                                cond_fname = f"{os.path.splitext(f_name)[0]}_{cond_label.replace(' ', '_')}-epo.fif"
+                                cond_fname = (
+                                    f"{os.path.splitext(f_name)[0]}_{cond_label.replace(' ', '_')}-epo.fif"
+                                )
                                 cond_path = os.path.join(cond_subfolder, cond_fname)
                                 epoch_list[0].save(cond_path, overwrite=True)
                                 gui_queue.put({'type': 'log', 'message': f"Condition FIF saved to: {cond_path}"})
 
-                                auto_loc = self.settings.get(
-                                    'loreta',
-                                    'auto_oddball_localization',
-                                    'False',
-                                ).lower() == 'true'
+                                auto_loc = (
+                                    self.settings.get(
+                                        'loreta',
+                                        'auto_oddball_localization',
+                                        'False',
+                                    ).lower()
+                                    == 'true'
+                                )
                                 if auto_loc:
-                                    sanitized = cond_label.replace(' ', '_').replace('/', '-').replace('\\', '-').strip()
-                                    sanitized = re.sub(r'^\d+\s*-\s*', '', sanitized)
-                                    out_folder = os.path.join(save_folder, sanitized)
+                                    sanitized_folder = _sanitize_folder_name(cond_label)
+                                    out_folder = os.path.join(
+                                        save_folder, 'LORETA RESULTS', sanitized_folder
+                                    )
                                     os.makedirs(out_folder, exist_ok=True)
                                     try:
                                         gui_queue.put({'type': 'log', 'message': f"Running oddball localization for {cond_label}..."})
@@ -501,6 +533,7 @@ class ProcessingMixin:
                                             cond_path,
                                             out_folder,
                                             oddball=True,
+                                            stc_basename=_stc_basename_from_fif(cond_path),
                                             log_func=lambda m: gui_queue.put({'type': 'log', 'message': m}),
                                             progress_cb=lambda f: gui_queue.put({'type': 'log', 'message': f"Localization {cond_label}: {int(f*100)}%"}),
                                             show_brain=not batch_mode,
