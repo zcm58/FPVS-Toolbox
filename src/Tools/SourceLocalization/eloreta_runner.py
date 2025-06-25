@@ -201,19 +201,30 @@ def _plot_with_alpha(
     subject: str,
     alpha: float,
 ) -> mne.viz.Brain:
-    """Call :meth:`mne.SourceEstimate.plot` with the correct alpha argument."""
+
+    """Call :meth:`mne.SourceEstimate.plot` using whichever alpha argument works."""
+
     plot_kwargs = dict(
         subject=subject,
         subjects_dir=subjects_dir,
         time_viewer=False,
         hemi=hemi,
     )
-    params = inspect.signature(stc.plot).parameters
-    if "brain_alpha" in params:
-        plot_kwargs["brain_alpha"] = alpha
-    elif "initial_alpha" in params:
-        plot_kwargs["initial_alpha"] = alpha
+
+
+    for arg in ("brain_alpha", "initial_alpha"):
+        try:
+            brain = stc.plot(**plot_kwargs, **{arg: alpha})
+        except TypeError as err:
+            if "unexpected keyword argument" in str(err):
+                continue
+            raise
+        else:
+            return brain
+
     brain = stc.plot(**plot_kwargs)
+    _set_brain_alpha(brain, alpha)
+
     return brain
 
 
