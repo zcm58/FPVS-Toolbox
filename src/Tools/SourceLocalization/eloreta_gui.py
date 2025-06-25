@@ -36,10 +36,10 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         # values don't raise TclError
         self.threshold_str = tk.StringVar(master=self, value="0.0")
 
-        # Default to 60% transparency (alpha = 0.4)
-        self.alpha_var = tk.DoubleVar(master=self, value=0.4)
+        # Default to 50% transparency (alpha = 0.5)
+        self.alpha_var = tk.DoubleVar(master=self, value=0.5)
         # similarly, the entry uses a StringVar to avoid invalid double strings
-        self.alpha_str = tk.StringVar(master=self, value="0.4")
+        self.alpha_str = tk.StringVar(master=self, value="0.5")
 
         self.hemi_var = tk.StringVar(master=self, value="both")
 
