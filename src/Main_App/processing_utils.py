@@ -476,8 +476,10 @@ class ProcessingMixin:
                             for cond_label, epoch_list in file_epochs.items():
                                 if not epoch_list or not isinstance(epoch_list[0], mne.Epochs):
                                     continue
+                                cond_subfolder = os.path.join(fif_dir, cond_label.replace(' ', '_'))
+                                os.makedirs(cond_subfolder, exist_ok=True)
                                 cond_fname = f"{os.path.splitext(f_name)[0]}_{cond_label.replace(' ', '_')}-epo.fif"
-                                cond_path = os.path.join(fif_dir, cond_fname)
+                                cond_path = os.path.join(cond_subfolder, cond_fname)
                                 epoch_list[0].save(cond_path, overwrite=True)
                                 gui_queue.put({'type': 'log', 'message': f"Condition FIF saved to: {cond_path}"})
 
