@@ -613,3 +613,38 @@ def view_source_estimate(
     _add_brain_labels(brain, os.path.basename(lh_file), os.path.basename(rh_file))
 
     return brain
+
+
+def compare_source_estimates(
+    stc_a: str,
+    stc_b: str,
+    threshold: Optional[float] = None,
+    alpha: float = 0.4,
+    window_title: str = "Compare STCs",
+) -> Tuple[mne.viz.Brain, mne.viz.Brain]:
+    """Open two :class:`~mne.SourceEstimate` files side by side for comparison."""
+
+    logger.debug(
+        "compare_source_estimates called with %s and %s", stc_a, stc_b
+    )
+
+    brain_left = view_source_estimate(
+        stc_a, threshold=threshold, alpha=alpha, window_title=window_title
+    )
+    brain_right = view_source_estimate(
+        stc_b, threshold=threshold, alpha=alpha, window_title=window_title
+    )
+
+    try:
+        left_win = brain_left._renderer.plotter.app_window  # type: ignore[attr-defined]
+        right_win = brain_right._renderer.plotter.app_window  # type: ignore[attr-defined]
+        geo = left_win.geometry()
+        width = geo.width() // 2
+        height = geo.height()
+        left_win.resize(width, height)
+        right_win.resize(width, height)
+        right_win.move(left_win.x() + width, left_win.y())
+    except Exception:
+        logger.debug("Failed to arrange compare windows", exc_info=True)
+
+    return brain_left, brain_right
