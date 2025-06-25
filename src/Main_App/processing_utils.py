@@ -16,7 +16,7 @@ import re
 from tkinter import messagebox
 import tkinter as tk
 from config import DEFAULT_STIM_CHANNEL
-from Tools.SourceLocalization import eloreta_runner
+from Tools.SourceLocalization import runner as eloreta_runner
 from Main_App.post_process import post_process as _external_post_process
 from Main_App.eeg_preprocessing import perform_preprocessing
 from Main_App.load_utils import load_eeg_file

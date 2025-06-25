@@ -12,7 +12,7 @@ from Main_App.settings_manager import SettingsManager
 import customtkinter as ctk
 
 from config import PAD_X, PAD_Y, CORNER_RADIUS, init_fonts, FONT_MAIN
-from . import eloreta_runner
+from . import runner, visualization
 
 
 class SourceLocalizationWindow(ctk.CTkToplevel):
@@ -186,7 +186,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         def _open_viewer():
             try:
-                brain = eloreta_runner.view_source_estimate(
+                brain = visualization.view_source_estimate(
                     path,
                     threshold=self.threshold_var.get(),
                     alpha=self.alpha_var.get(),
@@ -228,7 +228,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         def _open_viewer():
             try:
-                eloreta_runner.compare_source_estimates(
+                visualization.compare_source_estimates(
                     path_a,
                     path_b,
                     threshold=self.threshold_var.get(),
@@ -303,7 +303,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         log_func = getattr(self.master, "log", print)
         try:
-            _stc_path, _ = eloreta_runner.run_source_localization(
+            _stc_path, _ = runner.run_source_localization(
                 fif_path,
                 out_dir,
                 method=method,
@@ -386,10 +386,10 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         except tk.TclError:
             return
         if self.brain is not None:
-            eloreta_runner.logger.debug(
+            runner.logger.debug(
                 "_on_alpha_slider updating brain to %s", self.alpha_var.get()
             )
-            eloreta_runner._set_brain_alpha(self.brain, self.alpha_var.get())
+            visualization._set_brain_alpha(self.brain, self.alpha_var.get())
 
     def _on_alpha_entry(self, _event=None) -> None:
         """Validate entry value and update slider."""
@@ -402,16 +402,16 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.alpha_str.set(str(value))
         self.alpha_slider.set(value)
         if self.brain is not None:
-            eloreta_runner.logger.debug(
+            runner.logger.debug(
                 "_on_alpha_entry updating brain to %s", value
             )
-            eloreta_runner._set_brain_alpha(self.brain, value)
+            visualization._set_brain_alpha(self.brain, value)
 
     def _open_brain(self, stc_path: str, thr: float, alpha: float, title: str) -> None:
         """Open a SourceEstimate in the interactive viewer on the main thread."""
         log_func = getattr(self.master, "log", print)
         try:
-            self.brain = eloreta_runner.view_source_estimate(
+            self.brain = visualization.view_source_estimate(
                 stc_path,
                 threshold=thr,
                 alpha=alpha,

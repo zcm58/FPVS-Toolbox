@@ -8,7 +8,7 @@ import threading
 import time
 import importlib
 import inspect
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, List
 
 # Force PyVistaQt backend before MNE is imported so the interactive viewer
 # respects transparency updates.
