@@ -2,10 +2,8 @@
 """Utility mixin for managing the Event Map interface.
 It lets the user add or remove rows that map condition labels to
 numeric IDs and validates the entries in the scrollable frame."""
-import tkinter as tk
 import customtkinter as ctk
 import traceback
-from tkinter import filedialog, messagebox
 from config import CORNER_RADIUS, PAD_X
 
 class EventMapMixin:

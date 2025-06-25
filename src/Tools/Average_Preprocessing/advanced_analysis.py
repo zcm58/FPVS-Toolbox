@@ -78,7 +78,8 @@ def create_themed_listbox(parent: ctk.CTkBaseClass, **kwargs) -> tk.Listbox:
             )
             default_bg = "white" if appearance == "Light" else "#2B2B2B"
             default_fg = "black" if appearance == "Light" else "white"
-            if "background" in property_key or "fg_color" in property_key: return default_bg
+        if "background" in property_key or "fg_color" in property_key:
+            return default_bg
             return default_fg
 
     return tk.Listbox(
@@ -347,9 +348,10 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         files = filedialog.askopenfilenames(
             title="Select EEG Files",
             filetypes=[("EEG files", "*.bdf *.set"), ("All files", "*.*")],
-            parent=self
+            parent=self,
         )
-        if not files: return
+        if not files:
+            return
 
         added_count = 0
         for f_path in files:
@@ -360,7 +362,9 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         if added_count > 0:
             self.source_eeg_files.sort()
             self._update_source_files_listbox()
-            self.log(f"Added {added_count} source file(s). Total: {len(self.source_eeg_files)}.")
+            self.log(
+                f"Added {added_count} source file(s). Total: {len(self.source_eeg_files)}."
+            )
 
     def remove_source_files(self):
         """Remove the files selected in the listbox from the source list."""
@@ -446,7 +450,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         dlg_name = CTkInputDialog(title="New Averaging Group", text="Enter a name for this averaging group:")
         name = dlg_name.get_input()
         if not name or not name.strip():
-            self.log("Group creation cancelled.");
+            self.log("Group creation cancelled.")
             return
         name = name.strip()
         if any(g['name'] == name for g in self.defined_groups):
@@ -462,7 +466,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                                 text="Enter the event IDs to average within each participant,\nseparated by commas (e.g. 11,12):")
         id_str = id_dlg.get_input()
         if not id_str:
-            self.log("Group creation cancelled (no IDs).");
+            self.log("Group creation cancelled (no IDs).")
             return
         try:
             ids_to_average = [int(x.strip()) for x in id_str.split(",") if x.strip()]
@@ -523,7 +527,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         """Remove the currently selected averaging group."""
 
         if self.selected_group_index is None:
-            self.log("No group selected to delete.");
+            self.log("No group selected to delete.")
             return
 
         group_name_to_delete = self.defined_groups[self.selected_group_index]['name']
@@ -558,12 +562,15 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
     def on_group_select(self, event: Optional[tk.Event] = None):
         selected_indices = self.groups_listbox.curselection()
-        if not selected_indices: return
+        if not selected_indices:
+            return
 
         newly_selected_idx = selected_indices[0]
         if self.selected_group_index != newly_selected_idx:
             self.selected_group_index = newly_selected_idx
-            self.log(f"Selected group: {self.defined_groups[newly_selected_idx]['name']}")
+            self.log(
+                f"Selected group: {self.defined_groups[newly_selected_idx]['name']}"
+            )
 
         self._display_group_configuration()
         self.save_group_config_button.configure(
@@ -571,8 +578,10 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         )
 
     def _clear_group_config_display(self):
-        for widget in self.group_config_frame.winfo_children(): widget.destroy()
-        for widget in self.condition_mapping_frame.winfo_children(): widget.destroy()
+        for widget in self.group_config_frame.winfo_children():
+            widget.destroy()
+        for widget in self.condition_mapping_frame.winfo_children():
+            widget.destroy()
         ctk.CTkLabel(self.condition_mapping_frame, text="Select or create a group.") \
             .pack(padx=PAD_X, pady=PAD_Y)
         self.save_group_config_button.configure(state="disabled")
@@ -581,18 +590,23 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
     def _display_group_configuration(self):
         self._clear_group_config_display()
         idx = self.selected_group_index
-        if idx is None or idx >= len(self.defined_groups): return
+        if idx is None or idx >= len(self.defined_groups):
+            return
 
         group_data = self.defined_groups[idx]
         ctk.CTkLabel(self.group_config_frame, text=f"Group Name: {group_data['name']}", font=ctk.CTkFont(weight="bold")) \
             .pack(anchor="w", padx=PAD_X, pady=PAD_Y)
 
-        files_display_text = "\n".join(Path(fp).name for fp in group_data['file_paths'])
-        if not files_display_text: files_display_text = "No files currently in this group."
+        files_display_text = "\n".join(
+            Path(fp).name for fp in group_data['file_paths']
+        )
+        if not files_display_text:
+            files_display_text = "No files currently in this group."
         ctk.CTkLabel(self.group_config_frame, text="Files in this group:\n" + files_display_text, justify=tk.LEFT) \
             .pack(anchor="w", padx=PAD_X)
 
-        for widget in self.condition_mapping_frame.winfo_children(): widget.destroy()
+        for widget in self.condition_mapping_frame.winfo_children():
+            widget.destroy()
 
         if group_data.get('condition_mappings'):
             mapping_rule = group_data['condition_mappings'][0]
@@ -614,7 +628,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
     def _update_current_group_avg_method(self):
         idx = self.selected_group_index
-        if idx is None: return
+        if idx is None:
+            return
 
         group_data = self.defined_groups[idx]
         new_method = self.averaging_method_var.get()
@@ -662,7 +677,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 progress_callback_arg,
                 stop_event_arg
             )
-        except Exception as e:
+        except Exception:
             # Log the full traceback from the crashed thread
             detailed_error = traceback.format_exc()
             # Ensure logging happens in the main GUI thread using self.after
@@ -988,7 +1003,7 @@ if __name__ == "__main__":
 
     class DummyMasterApp(ctk.CTk):
         def __init__(self):
-            super().__init__();
+            super().__init__()
             self.withdraw()
             self.validated_params = {
                 "low_pass": 0.1, "high_pass": 50,

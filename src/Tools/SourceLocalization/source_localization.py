@@ -109,7 +109,7 @@ def export_roi_means(
     src = mne.setup_source_space(subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False)
     tc = mne.extract_label_time_course(stc, atlas_labels, src, mode="mean")
     mean_vals = tc.mean(axis=1)
-    df = pd.DataFrame({"ROI": [l.name for l in atlas_labels], "MeanCurrent": mean_vals})
+    df = pd.DataFrame({"ROI": [label.name for label in atlas_labels], "MeanCurrent": mean_vals})
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df.to_csv(output_path, index=False)
     return output_path

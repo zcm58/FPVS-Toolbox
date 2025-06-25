@@ -107,14 +107,14 @@ class SetupPanelManager:
                                                                             pady=PAD_Y)
         self.app_ref.low_pass_entry = ctk.CTkEntry(self.app_ref.params_frame, width=ENTRY_WIDTH, validate='key',
                                                    validatecommand=self.validate_num_cmd, corner_radius=CORNER_RADIUS)
-        self.app_ref.low_pass_entry.insert(0, "0.1");
+        self.app_ref.low_pass_entry.insert(0, "0.1")
         self.app_ref.low_pass_entry.grid(row=1, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         ctk.CTkLabel(self.app_ref.params_frame, text="High Pass (Hz):").grid(row=1, column=2, sticky="w", padx=PAD_X,
                                                                              pady=PAD_Y)
         self.app_ref.high_pass_entry = ctk.CTkEntry(self.app_ref.params_frame, width=ENTRY_WIDTH, validate='key',
                                                     validatecommand=self.validate_num_cmd, corner_radius=CORNER_RADIUS)
-        self.app_ref.high_pass_entry.insert(0, "50");
+        self.app_ref.high_pass_entry.insert(0, "50")
         self.app_ref.high_pass_entry.grid(row=1, column=3, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         # Row 2: Downsample / Epoch Start
@@ -122,7 +122,7 @@ class SetupPanelManager:
                                                                               pady=PAD_Y)
         self.app_ref.downsample_entry = ctk.CTkEntry(self.app_ref.params_frame, width=ENTRY_WIDTH, validate='key',
                                                      validatecommand=self.validate_num_cmd, corner_radius=CORNER_RADIUS)
-        self.app_ref.downsample_entry.insert(0, "256");
+        self.app_ref.downsample_entry.insert(0, "256")
         self.app_ref.downsample_entry.grid(row=2, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         ctk.CTkLabel(self.app_ref.params_frame, text="Epoch Start (s):").grid(row=2, column=2, sticky="w", padx=PAD_X,
@@ -130,7 +130,7 @@ class SetupPanelManager:
         self.app_ref.epoch_start_entry = ctk.CTkEntry(self.app_ref.params_frame, width=ENTRY_WIDTH, validate='key',
                                                       validatecommand=self.validate_num_cmd,
                                                       corner_radius=CORNER_RADIUS)
-        self.app_ref.epoch_start_entry.insert(0, "-1");
+        self.app_ref.epoch_start_entry.insert(0, "-1")
         self.app_ref.epoch_start_entry.grid(row=2, column=3, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         # Row 3: Reject Thresh / Epoch End
@@ -139,14 +139,14 @@ class SetupPanelManager:
         self.app_ref.reject_thresh_entry = ctk.CTkEntry(self.app_ref.params_frame, width=ENTRY_WIDTH, validate='key',
                                                         validatecommand=self.validate_num_cmd,
                                                         corner_radius=CORNER_RADIUS)
-        self.app_ref.reject_thresh_entry.insert(0, "5");
+        self.app_ref.reject_thresh_entry.insert(0, "5")
         self.app_ref.reject_thresh_entry.grid(row=3, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         ctk.CTkLabel(self.app_ref.params_frame, text="Epoch End (s):").grid(row=3, column=2, sticky="w", padx=PAD_X,
                                                                             pady=PAD_Y)
         self.app_ref.epoch_end_entry = ctk.CTkEntry(self.app_ref.params_frame, width=ENTRY_WIDTH, validate='key',
                                                     validatecommand=self.validate_num_cmd, corner_radius=CORNER_RADIUS)
-        self.app_ref.epoch_end_entry.insert(0, "125");
+        self.app_ref.epoch_end_entry.insert(0, "125")
         self.app_ref.epoch_end_entry.grid(row=3, column=3, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         # Row 4: Initial Reference Channels
@@ -154,14 +154,14 @@ class SetupPanelManager:
                                                                          pady=PAD_Y)
         self.app_ref.ref_channel1_entry = ctk.CTkEntry(self.app_ref.params_frame, width=ENTRY_WIDTH,
                                                        corner_radius=CORNER_RADIUS)
-        self.app_ref.ref_channel1_entry.insert(0, "EXG1");
+        self.app_ref.ref_channel1_entry.insert(0, "EXG1")
         self.app_ref.ref_channel1_entry.grid(row=4, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         ctk.CTkLabel(self.app_ref.params_frame, text="Ref Chan 2:").grid(row=4, column=2, sticky="w", padx=PAD_X,
                                                                          pady=PAD_Y)
         self.app_ref.ref_channel2_entry = ctk.CTkEntry(self.app_ref.params_frame, width=ENTRY_WIDTH,
                                                        corner_radius=CORNER_RADIUS)
-        self.app_ref.ref_channel2_entry.insert(0, "EXG2");
+        self.app_ref.ref_channel2_entry.insert(0, "EXG2")
         self.app_ref.ref_channel2_entry.grid(row=4, column=3, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         # Row 5: Max Chan Idx Keep / Max Bad Chans (Flag)
@@ -170,7 +170,7 @@ class SetupPanelManager:
         self.app_ref.max_idx_keep_entry = ctk.CTkEntry(self.app_ref.params_frame, width=ENTRY_WIDTH,
                                                        corner_radius=CORNER_RADIUS,
                                                        validate='key', validatecommand=self.validate_int_cmd)
-        self.app_ref.max_idx_keep_entry.insert(0, "64");
+        self.app_ref.max_idx_keep_entry.insert(0, "64")
         self.app_ref.max_idx_keep_entry.grid(row=5, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         ctk.CTkLabel(self.app_ref.params_frame, text="Max Bad Chans (Flag):").grid(row=5, column=2, sticky="w",

@@ -3,7 +3,6 @@
 """
 Handles the EEG preprocessing pipeline for the FPVS Toolbox.
 """
-import os
 import mne
 import numpy as np
 from scipy.stats import kurtosis
@@ -162,13 +161,13 @@ def perform_preprocessing(raw_input: mne.io.BaseRaw,
                 [stim_ch] if stim_ch in raw.ch_names and raw.get_channel_types(picks=stim_ch)[0] != 'eeg' else []))
             if len(eeg_picks_for_kurtosis) >= 2:
                 data = raw.get_data(picks=eeg_picks_for_kurtosis)
-                k_values = kurtosis(data, axis=1, fisher=True, bias=False);
+                k_values = kurtosis(data, axis=1, fisher=True, bias=False)
                 k_values = np.nan_to_num(k_values)
-                proportion_to_cut = 0.1;
-                n_k = len(k_values);
+                proportion_to_cut = 0.1
+                n_k = len(k_values)
                 trim_count = int(np.floor(n_k * proportion_to_cut))
                 if n_k - 2 * trim_count > 1:
-                    k_sorted = np.sort(k_values);
+                    k_sorted = np.sort(k_values)
                     k_trimmed = k_sorted[trim_count: n_k - trim_count]
                     m_trimmed, s_trimmed = np.mean(k_trimmed), np.std(k_trimmed)
                     log_func(
@@ -191,13 +190,16 @@ def perform_preprocessing(raw_input: mne.io.BaseRaw,
             else:
                 log_func(f"Skip Kurtosis for {filename_for_log} ( < 2 good EEG channels).")
             new_bads_from_kurtosis = [b for b in bad_k_auto if b not in raw.info['bads']]
-            if new_bads_from_kurtosis: raw.info['bads'].extend(new_bads_from_kurtosis)
+            if new_bads_from_kurtosis:
+                raw.info['bads'].extend(new_bads_from_kurtosis)
             if raw.info['bads']:
                 log_func(f"Interpolating bads in {filename_for_log}: {raw.info['bads']}")
                 if raw.get_montage():
                     try:
-                        raw.interpolate_bads(reset_bads=True, mode='accurate', verbose=False); log_func(
-                            f"Interpolation OK for {filename_for_log}.")
+                        raw.interpolate_bads(
+                            reset_bads=True, mode='accurate', verbose=False
+                        )
+                        log_func(f"Interpolation OK for {filename_for_log}.")
                     except Exception as e:
                         log_func(f"Warn: Interpolation failed for {filename_for_log}: {e}")
                 else:
