@@ -41,6 +41,9 @@ for mod in ("pyvista", "pyvistaqt"):
         except Exception as err:  # pragma: no cover - optional
             logger.debug("%s version lookup failed: %s", mod, err)
 
+logger.debug("NumPy version: %s", np.__version__)
+logger.debug("source_localization module: %s", source_localization.__file__)
+
 # Ensure we use the interactive PyVista backend if available so that
 # transparency updates take effect at runtime.
 try:  # pragma: no cover - best effort
@@ -133,6 +136,7 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     """Set the transparency of a Brain viewer in a version robust way."""
     logger.debug("_set_brain_alpha called with %s", alpha)
     success = False
+    actor_count = 0
     try:
         if hasattr(brain, "set_alpha"):
             logger.debug("Using Brain.set_alpha")
@@ -203,6 +207,42 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
         logger.debug("Alpha update success: %s", success)
     except Exception:
         logger.debug("Plotter render failed", exc_info=True)
+
+    logger.debug(
+        "_set_brain_alpha success=%s actors=%d", success, actor_count
+    )
+
+
+def _plot_with_alpha(
+    stc: mne.BaseSourceEstimate,
+    *,
+    hemi: str,
+    subjects_dir: str,
+    subject: str,
+    alpha: float,
+) -> mne.viz.Brain:
+    """Call :meth:`mne.SourceEstimate.plot` while applying ``alpha`` robustly."""
+    plot_kwargs = dict(
+        subject=subject,
+        subjects_dir=subjects_dir,
+        time_viewer=False,
+        hemi=hemi,
+    )
+
+    for arg in ("brain_alpha", "initial_alpha"):
+        try:
+            logger.debug("Attempting stc.plot with %s=%s", arg, alpha)
+            brain = stc.plot(**plot_kwargs, **{arg: alpha})
+            logger.debug("stc.plot succeeded with %s", arg)
+            return brain
+        except TypeError as err:
+            logger.debug("%s failed: %s", arg, err)
+
+    logger.debug("Falling back to manual alpha application")
+    brain = stc.plot(**plot_kwargs)
+    _set_brain_alpha(brain, alpha)
+    logger.debug("Alpha applied manually")
+    return brain
 
 
 def _plot_with_alpha(
@@ -667,6 +707,11 @@ def run_source_localization(
                 subjects_dir=subjects_dir,
                 subject=subject,
                 alpha=alpha,
+
+            )
+            logger.debug(
+                "Brain alpha after plot: %s", getattr(brain, "alpha", "unknown")
+
             )
             logger.debug("stc.plot succeeded")
         except Exception as err:
@@ -683,6 +728,11 @@ def run_source_localization(
                 subjects_dir=subjects_dir,
                 subject=subject,
                 alpha=alpha,
+
+            )
+            logger.debug(
+                "Brain alpha after retry: %s", getattr(brain, "alpha", "unknown")
+
             )
             logger.debug("stc.plot succeeded on retry")
         _set_brain_alpha(brain, alpha)
@@ -806,6 +856,11 @@ def view_source_estimate(
             subjects_dir=subjects_dir,
             subject=subject,
             alpha=alpha,
+
+        )
+        logger.debug(
+            "Brain alpha after plot: %s", getattr(brain, "alpha", "unknown")
+
         )
         logger.debug("stc.plot succeeded in view_source_estimate")
     except Exception as err:
@@ -820,6 +875,11 @@ def view_source_estimate(
             subjects_dir=subjects_dir,
             subject=subject,
             alpha=alpha,
+
+        )
+        logger.debug(
+            "Brain alpha after fallback: %s", getattr(brain, "alpha", "unknown")
+
         )
         logger.debug("stc.plot succeeded on fallback in view_source_estimate")
 
