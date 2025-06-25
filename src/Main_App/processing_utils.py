@@ -201,9 +201,10 @@ class ProcessingMixin:
         if self._start_time is None:
             return
         elapsed = time.time() - self._start_time
-        if self._processed_count > 0:
-            avg = elapsed / self._processed_count
-            remaining = max(0.0, avg * (self._max_progress - self._processed_count))
+        progress = self._current_progress
+        if progress > 0:
+            total_est = elapsed / progress
+            remaining = max(0.0, total_est - elapsed)
             mins, secs = divmod(int(remaining), 60)
             text = f"Estimated time remaining: {mins:02d}:{secs:02d}"
         else:
