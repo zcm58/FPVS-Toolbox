@@ -6,7 +6,7 @@ import os
 from typing import Dict, List, Optional
 
 import mne
-from Tools.SourceLocalization.runner import fetch_fsaverage_with_progress
+from Tools.SourceLocalization.data_utils import fetch_fsaverage_with_progress
 
 
 def prepare_head_model(raw: mne.io.BaseRaw, template: str = "fsaverage") -> tuple[mne.Forward, str, str]:
