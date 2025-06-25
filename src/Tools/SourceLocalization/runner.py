@@ -359,3 +359,108 @@ def run_source_localization(
     return stc_path, brain
 
 
+def average_stc_files(stcs: list) -> mne.SourceEstimate:
+    """Return the element-wise mean of multiple :class:`mne.SourceEstimate` objects.
+
+    Parameters
+    ----------
+    stcs : list of :class:`mne.SourceEstimate` or file paths
+        Source estimates or paths to ``.stc`` files that should be averaged.
+
+    Returns
+    -------
+    :class:`mne.SourceEstimate`
+        A new source estimate containing the average data.
+    """
+
+    if not stcs:
+        raise ValueError("No source estimates provided")
+
+    loaded = []
+    for stc in stcs:
+        if isinstance(stc, str):
+            loaded.append(mne.read_source_estimate(stc))
+        else:
+            loaded.append(stc)
+
+    template = loaded[0].copy()
+    sum_data = np.zeros_like(template.data)
+    for stc in loaded:
+        sum_data += stc.data
+    template.data = sum_data / len(loaded)
+    return template
+
+
+def average_stc_directory(
+    condition_dir: str, *, output_basename: str | None = None, log_func: Callable[[str], None] = logger.info
+) -> str:
+    """Average all ``*-lh.stc`` and ``*-rh.stc`` files in ``condition_dir``.
+
+    Parameters
+    ----------
+    condition_dir : str
+        Directory containing the individual participant ``.stc`` files.
+    output_basename : str | None
+        Base name for the saved averaged files. If ``None``, ``"Average <folder>"``
+        is used where ``<folder>`` is the name of ``condition_dir``.
+    log_func : callable
+        Optional logging function.
+
+    Returns
+    -------
+    str
+        Path to the saved averaged ``.stc`` file (without hemisphere suffix).
+    """
+
+    lh_files = [os.path.join(condition_dir, f) for f in os.listdir(condition_dir) if f.endswith("-lh.stc")]
+    rh_files = [os.path.join(condition_dir, f) for f in os.listdir(condition_dir) if f.endswith("-rh.stc")]
+    if not lh_files and not rh_files:
+        raise FileNotFoundError("No STC files found in directory")
+
+    base = output_basename or f"Average {os.path.basename(condition_dir)}"
+    out_path = os.path.join(condition_dir, base)
+
+    if lh_files:
+        log_func(f"Averaging {len(lh_files)} LH files in {condition_dir}")
+        lh_stc = average_stc_files(lh_files)
+        lh_stc.save(out_path + "-lh")
+    if rh_files:
+        log_func(f"Averaging {len(rh_files)} RH files in {condition_dir}")
+        rh_stc = average_stc_files(rh_files)
+        rh_stc.save(out_path + "-rh")
+
+    return out_path
+
+
+def average_conditions_dir(
+    results_dir: str,
+    *,
+    log_func: Callable[[str], None] = logger.info,
+) -> list[str]:
+    """Average STC files in each subdirectory of ``results_dir``.
+
+    Parameters
+    ----------
+    results_dir : str
+        Directory containing condition subfolders with ``.stc`` files.
+    log_func : callable
+        Optional logging function.
+
+    Returns
+    -------
+    list[str]
+        Paths to the saved averaged ``.stc`` files (without hemisphere suffix).
+    """
+
+    averaged = []
+    for name in sorted(os.listdir(results_dir)):
+        subdir = os.path.join(results_dir, name)
+        if not os.path.isdir(subdir):
+            continue
+        try:
+            path = average_stc_directory(subdir, log_func=log_func)
+        except Exception as err:  # pragma: no cover - best effort logging
+            log_func(f"Skipping {subdir}: {err}")
+        else:
+            averaged.append(path)
+    return averaged

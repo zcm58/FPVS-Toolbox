@@ -152,12 +152,19 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         compare_btn.grid(row=12, column=0, columnspan=3, pady=(0, PAD_Y))
 
+        avg_btn = ctk.CTkButton(
+            frame,
+            text="Average LORETA results",
+            command=self._average_results,
+        )
+
+        avg_btn.grid(row=13, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
-        self.progress_bar.grid(row=13, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
+        self.progress_bar.grid(row=14, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
         self.progress_bar.set(0)
 
-        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=14, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=15, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
 
 
     def _browse_file(self):
@@ -239,6 +246,25 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 messagebox.showerror("Error", str(err))
 
         self.after(0, _open_viewer)
+
+    def _average_results(self):
+        folder = filedialog.askdirectory(
+            title="Select LORETA RESULTS folder", parent=self
+        )
+        if not folder:
+            return
+
+        log_func = getattr(self.master, "log", print)
+
+        def _task():
+            try:
+                runner.average_conditions_dir(folder, log_func=log_func)
+                self.after(0, lambda: messagebox.showinfo("Done", "Averaging complete."))
+            except Exception as err:
+                err_str = str(err)
+                self.after(0, lambda e=err_str: messagebox.showerror("Error", e))
+
+        threading.Thread(target=_task, daemon=True).start()
 
     def _run(self):
         fif_path = self.input_var.get()
