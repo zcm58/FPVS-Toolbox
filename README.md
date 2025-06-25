@@ -14,7 +14,8 @@ The FPVS Toolbox is a GUI based application for preprocessing, cleaning, and ana
 - Interactive eLORETA/sLORETA source localization with 3‑D glass brain viewer
   (automatically downloads the `fsaverage` template if no MRI is specified) and
 
-  a viewer tool to open saved results with adjustable transparency
+  a viewer tool to open saved results with adjustable transparency. The 3‑D
+  viewer uses the `PyVistaQt` backend which provides interactive window support.
 
 
 
@@ -46,6 +47,7 @@ The application can also be launched from source on Windows. Clone the repositor
 - `customtkinter`
 - `statsmodels` (for statistical analyses)
 - `nibabel` (required for source localization)
+- `pyvista` and `pyvistaqt` (for the 3‑D viewer)
 
 After installing the dependencies, start the GUI with:
 
