@@ -26,3 +26,6 @@ happens to be deeper in the brain than just surface. This functionality is not c
 
 Additions or edits within this directory should be made with these goals in mind. Try to keep the code modular and 
 if possible, 500 lines or less per file. We should design this module with future updates in mind. 
+
+As of right now, the transparency functionality is not working, so we will need to 
+think of multiple ways to fix this. 

@@ -152,6 +152,7 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     if not success:
         try:
             actors = []
+            actor_count = 0
             for hemi in getattr(brain, "_hemi_data", {}).values():
                 mesh = getattr(hemi, "mesh", None)
                 if mesh is not None and hasattr(mesh, "actor"):
@@ -167,6 +168,14 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
                     if actor is not None:
                         actors.append(actor)
 
+            for overlay in getattr(brain, "_data", {}).values():
+                if hasattr(overlay, "actor"):
+                    actors.append(overlay.actor)
+                elif isinstance(overlay, dict):
+                    for item in overlay.values():
+                        a = getattr(item, "actor", None)
+                        if a is not None:
+                            actors.append(a)
             for actor in getattr(brain, "_actors", {}).values():
                 if hasattr(actor, "GetProperty"):
                     actors.append(actor)
@@ -181,6 +190,7 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
                     actor.GetProperty().SetOpacity(alpha)
                 except Exception:
                     pass
+            logger.debug("Opacity set on %d actors", actor_count)
             success = bool(actors)
         except Exception:
             logger.debug("Failed to set brain alpha via mesh actors", exc_info=True)
@@ -194,6 +204,7 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
         elif renderer is not None and hasattr(renderer, "_update"):
             logger.debug("Triggering renderer._update()")
             renderer._update()
+        logger.debug("Alpha update success: %s", success)
     except Exception:
         logger.debug("Plotter render failed", exc_info=True)
 
@@ -231,6 +242,45 @@ def _plot_with_alpha(
     brain = stc.plot(**plot_kwargs)
     _set_brain_alpha(brain, alpha)
     logger.debug("Alpha applied manually")
+    return brain
+
+
+def _plot_with_alpha(
+    stc: mne.BaseSourceEstimate,
+    *,
+    hemi: str,
+    subjects_dir: str,
+    subject: str,
+    alpha: float,
+) -> mne.viz.Brain:
+
+    """Call :meth:`mne.SourceEstimate.plot` using whichever alpha argument works."""
+
+    plot_kwargs = dict(
+        subject=subject,
+        subjects_dir=subjects_dir,
+        time_viewer=False,
+        hemi=hemi,
+    )
+
+
+    arg_name = None
+    try:
+        sig = inspect.signature(stc.plot)  # type: ignore[attr-defined]
+        if "brain_alpha" in sig.parameters:
+            arg_name = "brain_alpha"
+        elif "initial_alpha" in sig.parameters:
+            arg_name = "initial_alpha"
+    except Exception:
+        pass
+
+    if arg_name:
+        brain = stc.plot(**plot_kwargs, **{arg_name: alpha})
+    else:
+        brain = stc.plot(**plot_kwargs)
+        _set_brain_alpha(brain, alpha)
+
+
     return brain
 
 
@@ -555,7 +605,9 @@ def run_source_localization(
         )
         evoked = source_localization.average_cycles(cycle_epochs)
         log_func("Averaged cycles into Evoked")
-        harmonic_freqs = [h * oddball_freq for h in harmonics]
+        # harmonics are specified in Hz in the settings dialog. Use them
+        # directly rather than scaling by the oddball frequency.
+        harmonic_freqs = harmonics
         if harmonic_freqs:
             log_func(
                 "Reconstructing harmonics: "
@@ -655,9 +707,11 @@ def run_source_localization(
                 subjects_dir=subjects_dir,
                 subject=subject,
                 alpha=alpha,
+
             )
             logger.debug(
                 "Brain alpha after plot: %s", getattr(brain, "alpha", "unknown")
+
             )
             logger.debug("stc.plot succeeded")
         except Exception as err:
@@ -674,9 +728,11 @@ def run_source_localization(
                 subjects_dir=subjects_dir,
                 subject=subject,
                 alpha=alpha,
+
             )
             logger.debug(
                 "Brain alpha after retry: %s", getattr(brain, "alpha", "unknown")
+
             )
             logger.debug("stc.plot succeeded on retry")
         _set_brain_alpha(brain, alpha)
@@ -800,9 +856,11 @@ def view_source_estimate(
             subjects_dir=subjects_dir,
             subject=subject,
             alpha=alpha,
+
         )
         logger.debug(
             "Brain alpha after plot: %s", getattr(brain, "alpha", "unknown")
+
         )
         logger.debug("stc.plot succeeded in view_source_estimate")
     except Exception as err:
@@ -817,9 +875,11 @@ def view_source_estimate(
             subjects_dir=subjects_dir,
             subject=subject,
             alpha=alpha,
+
         )
         logger.debug(
             "Brain alpha after fallback: %s", getattr(brain, "alpha", "unknown")
+
         )
         logger.debug("stc.plot succeeded on fallback in view_source_estimate")
 
