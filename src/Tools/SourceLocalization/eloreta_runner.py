@@ -214,14 +214,7 @@ def _plot_with_alpha(
     alpha: float,
 ) -> mne.viz.Brain:
 
-    """Plot a SourceEstimate while trying multiple alpha keywords.
-
-    The function attempts to pass different transparency keywords
-    (``brain_alpha`` and ``initial_alpha``) to
-    :meth:`mne.SourceEstimate.plot`. If none are accepted, it falls
-    back to calling the method without an alpha argument and then
-    manually sets the transparency.
-    """
+    """Call :meth:`mne.SourceEstimate.plot` using whichever alpha argument works."""
 
     plot_kwargs = dict(
         subject=subject,
@@ -231,20 +224,22 @@ def _plot_with_alpha(
     )
 
 
-    for arg in ("brain_alpha", "initial_alpha"):
-        try:
-            brain = stc.plot(**plot_kwargs, **{arg: alpha})
-        except TypeError as err:
-            if "unexpected keyword argument" in str(err):
-                continue
-            raise
-        else:
-            logger.debug("alpha keyword used: %s", arg)
-            return brain
+    arg_name = None
+    try:
+        sig = inspect.signature(stc.plot)  # type: ignore[attr-defined]
+        if "brain_alpha" in sig.parameters:
+            arg_name = "brain_alpha"
+        elif "initial_alpha" in sig.parameters:
+            arg_name = "initial_alpha"
+    except Exception:
+        pass
 
-    brain = stc.plot(**plot_kwargs)
-    logger.debug("all alpha keywords failed; using manual fallback")
-    _set_brain_alpha(brain, alpha)
+    if arg_name:
+        brain = stc.plot(**plot_kwargs, **{arg_name: alpha})
+    else:
+        brain = stc.plot(**plot_kwargs)
+        _set_brain_alpha(brain, alpha)
+
 
     return brain
 
