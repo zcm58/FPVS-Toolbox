@@ -138,12 +138,20 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         view_btn.grid(row=11, column=0, columnspan=3, pady=(0, PAD_Y))
 
+        compare_btn = ctk.CTkButton(
+            frame,
+            text="Compare two STC files",
+            command=self._compare_stc,
+        )
+
+        compare_btn.grid(row=12, column=0, columnspan=3, pady=(0, PAD_Y))
+
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
-        self.progress_bar.grid(row=12, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
+        self.progress_bar.grid(row=13, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
         self.progress_bar.set(0)
 
-        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=13, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=14, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
 
 
     def _browse_file(self):
@@ -184,6 +192,36 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 messagebox.showerror("Error", str(err))
 
         # Schedule opening the viewer on the main thread to avoid Qt issues
+        self.after(0, _open_viewer)
+
+    def _compare_stc(self):
+        paths = filedialog.askopenfilenames(
+            title="Select two SourceEstimate files",
+            filetypes=[("SourceEstimate", "*-lh.stc"), ("All files", "*")],
+            parent=self,
+        )
+        if len(paths) != 2:
+            return
+        path_a, path_b = paths
+        if path_a.endswith("-lh.stc") or path_a.endswith("-rh.stc"):
+            path_a = path_a[:-7]
+        if path_b.endswith("-lh.stc") or path_b.endswith("-rh.stc"):
+            path_b = path_b[:-7]
+        log_func = getattr(self.master, "log", print)
+        log_func(f"Comparing STCs {path_a} and {path_b}")
+
+        def _open_viewer():
+            try:
+                eloreta_runner.compare_source_estimates(
+                    path_a,
+                    path_b,
+                    threshold=self.threshold_var.get(),
+                    alpha=self.alpha_var.get(),
+                )
+            except Exception as err:
+                log_func(f"STC compare failed: {err}")
+                messagebox.showerror("Error", str(err))
+
         self.after(0, _open_viewer)
 
     def _run(self):
