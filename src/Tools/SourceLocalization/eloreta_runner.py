@@ -49,6 +49,33 @@ except Exception as err:  # pragma: no cover - optional
     logger.debug("Failed to set 3D backend: %s", err)
 
 
+def _ensure_pyvista_backend() -> None:
+    """Force the MNE 3D backend to PyVista."""
+    if not hasattr(mne.viz, "set_3d_backend"):
+        return
+
+    current = None
+    if hasattr(mne.viz, "get_3d_backend"):
+        current = mne.viz.get_3d_backend()
+    if current in {"pyvistaqt", "pyvista"}:
+        return
+
+    for backend in ("pyvistaqt", "pyvista"):
+        try:
+            mne.viz.set_3d_backend(backend)
+            os.environ["MNE_3D_BACKEND"] = backend
+        except Exception as err:  # pragma: no cover - optional
+            logger.debug("Failed to set backend %s: %s", backend, err)
+            continue
+        if not hasattr(mne.viz, "get_3d_backend"):
+            return
+        if mne.viz.get_3d_backend() == backend:
+            logger.debug("Using 3D backend %s", backend)
+            return
+
+    raise RuntimeError("PyVista backend ('pyvistaqt' or 'pyvista') is required")
+
+
 def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
     """Safely set the window title of a Brain viewer."""
     try:
@@ -499,6 +526,7 @@ def run_source_localization(
 
     brain = None
     if show_brain:
+        _ensure_pyvista_backend()
         # Visualise in a separate Brain window
         logger.debug(
             "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
@@ -625,6 +653,7 @@ def view_source_estimate(
         )
     logger.debug("subjects_dir resolved to %s", subjects_dir)
 
+    _ensure_pyvista_backend()
 
     try:
         logger.debug(
