@@ -643,13 +643,11 @@ def view_source_estimate(
         Transparency for the brain surface where ``1.0`` is opaque.
         Defaults to ``0.4`` (60% transparent).
 
-    hemi : {"lh", "rh", "both", "split"}
-        Which hemisphere(s) to display in the interactive viewer.
-
     Notes
     -----
-    When ``hemi`` is ``split`` the names of the ``*-lh.stc`` and ``*-rh.stc``
-    files are displayed above the left and right hemispheres respectively.
+    The viewer always uses ``hemi='split'`` so that the left and right
+    hemispheres are displayed side by side. The names of the ``*-lh.stc`` and
+    ``*-rh.stc`` files appear above their respective hemispheres.
     """
 
     logger.debug(
