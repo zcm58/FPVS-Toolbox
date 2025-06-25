@@ -94,6 +94,24 @@ def _ensure_pyvista_backend() -> None:
     raise RuntimeError(msg)
 
 
+def get_current_backend() -> str:
+    """Return the currently active MNE 3D backend."""
+    backend = None
+    if hasattr(mne.viz, "get_3d_backend"):
+        try:
+            backend = mne.viz.get_3d_backend()
+        except Exception:
+            backend = None
+    if not backend:
+        backend = os.environ.get("MNE_3D_BACKEND", "")
+    return str(backend).lower()
+
+
+def is_pyvista_backend() -> bool:
+    """Check if the PyVistaQt backend is active."""
+    return get_current_backend() == "pyvistaqt"
+
+
 def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
     """Safely set the window title of a Brain viewer."""
     try:
