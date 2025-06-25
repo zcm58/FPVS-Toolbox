@@ -83,7 +83,9 @@ current density and is labeled **Source amplitude** for clarity.
 The underlying module exposes an `is_pyvistaqt_backend()` helper which
 returns ``True`` when the viewer will use the interactive PyVistaQt
 backend. This can be queried before opening any 3‑D windows to ensure
-that PyVistaQt is active.
+that PyVistaQt is active. The selected backend is also printed to the
+on‑screen log whenever a 3‑D viewer is opened so you can verify it
+directly from the GUI.
 
 Additional parameters for band‑pass filtering and oddball cycle localisation can be
 configured under the **LORETA** tab in the Settings window. Here you may define
