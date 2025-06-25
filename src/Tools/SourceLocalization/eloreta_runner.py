@@ -401,7 +401,7 @@ def run_source_localization(
     output_dir: str,
     method: str = "eLORETA",
     threshold: Optional[float] = None,
-    alpha: float = 0.4,
+    alpha: float = 0.5,
 
 
     low_freq: Optional[float] = None,
@@ -424,7 +424,7 @@ def run_source_localization(
     ----------
     alpha : float
         Initial transparency for the brain surface where ``1.0`` is opaque.
-        Defaults to ``0.4`` (60% transparent).
+        Defaults to ``0.5`` (50% transparent).
     hemi : {"lh", "rh", "both", "split"}
         Which hemisphere(s) to display in the interactive viewer.
     export_rois : bool
@@ -612,6 +612,7 @@ def run_source_localization(
                 subjects_dir=subjects_dir,
                 time_viewer=False,
                 hemi=hemi,
+                brain_alpha=alpha,
             )
             logger.debug("stc.plot succeeded")
         except Exception as err:
@@ -626,6 +627,7 @@ def run_source_localization(
                 subject=subject,
                 subjects_dir=subjects_dir,
                 time_viewer=False,
+                brain_alpha=alpha,
             )
             logger.debug("stc.plot succeeded on retry")
         _set_brain_alpha(brain, alpha)
@@ -675,7 +677,7 @@ def run_source_localization(
 def view_source_estimate(
     stc_path: str,
     threshold: Optional[float] = None,
-    alpha: float = 0.4,
+    alpha: float = 0.5,
     window_title: Optional[str] = None,
     log_func: Optional[Callable[[str], None]] = None,
 
@@ -686,10 +688,9 @@ def view_source_estimate(
     ----------
     alpha : float
         Transparency for the brain surface where ``1.0`` is opaque.
-        Defaults to ``0.4`` (60% transparent).
-    log_func : Callable[[str], None] | None
-        Logging callback used to print messages to the GUI and console.
-        ``logger.info`` is used when not provided.
+
+        Defaults to ``0.5`` (50% transparent).
+
 
     Notes
     -----
@@ -749,6 +750,7 @@ def view_source_estimate(
             subjects_dir=subjects_dir,
             time_viewer=False,
             hemi="split",
+            brain_alpha=alpha,
         )
         logger.debug("stc.plot succeeded in view_source_estimate")
     except Exception as err:
@@ -761,6 +763,7 @@ def view_source_estimate(
             subject=subject,
             subjects_dir=subjects_dir,
             time_viewer=False,
+            brain_alpha=alpha,
         )
         logger.debug("stc.plot succeeded on fallback in view_source_estimate")
 
@@ -786,7 +789,7 @@ def compare_source_estimates(
     stc_a: str,
     stc_b: str,
     threshold: Optional[float] = None,
-    alpha: float = 0.4,
+    alpha: float = 0.5,
     window_title: str = "Compare STCs",
 ) -> Tuple[mne.viz.Brain, mne.viz.Brain]:
     """Open two :class:`~mne.SourceEstimate` files side by side for comparison."""
