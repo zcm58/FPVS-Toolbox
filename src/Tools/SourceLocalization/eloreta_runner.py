@@ -54,6 +54,8 @@ except Exception as err:  # pragma: no cover - optional
     logger.debug("Failed to set 3D backend: %s", err)
 
 
+
+
 def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
     """Safely set the window title of a Brain viewer."""
     try:
@@ -504,6 +506,7 @@ def run_source_localization(
 
     brain = None
     if show_brain:
+        _ensure_pyvista_backend()
         # Visualise in a separate Brain window
         logger.debug(
             "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
@@ -630,6 +633,7 @@ def view_source_estimate(
         )
     logger.debug("subjects_dir resolved to %s", subjects_dir)
 
+    _ensure_pyvista_backend()
 
     try:
         logger.debug(
