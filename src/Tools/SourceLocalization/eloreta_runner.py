@@ -9,6 +9,11 @@ import time
 import importlib
 from typing import Callable, Optional, Tuple, List
 
+# Force PyVistaQt backend before MNE is imported so the interactive viewer
+# respects transparency updates.
+if os.environ.get("MNE_3D_BACKEND", "").lower() != "pyvistaqt":
+    os.environ["MNE_3D_BACKEND"] = "pyvistaqt"
+
 import numpy as np
 import mne
 from Main_App.settings_manager import SettingsManager
@@ -49,31 +54,6 @@ except Exception as err:  # pragma: no cover - optional
     logger.debug("Failed to set 3D backend: %s", err)
 
 
-def _ensure_pyvista_backend() -> None:
-    """Force the MNE 3D backend to PyVista."""
-    if not hasattr(mne.viz, "set_3d_backend"):
-        return
-
-    current = None
-    if hasattr(mne.viz, "get_3d_backend"):
-        current = mne.viz.get_3d_backend()
-    if current in {"pyvistaqt", "pyvista"}:
-        return
-
-    for backend in ("pyvistaqt", "pyvista"):
-        try:
-            mne.viz.set_3d_backend(backend)
-            os.environ["MNE_3D_BACKEND"] = backend
-        except Exception as err:  # pragma: no cover - optional
-            logger.debug("Failed to set backend %s: %s", backend, err)
-            continue
-        if not hasattr(mne.viz, "get_3d_backend"):
-            return
-        if mne.viz.get_3d_backend() == backend:
-            logger.debug("Using 3D backend %s", backend)
-            return
-
-    raise RuntimeError("PyVista backend ('pyvistaqt' or 'pyvista') is required")
 
 
 def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
