@@ -35,6 +35,19 @@ for mod in ("pyvista", "pyvistaqt"):
         except Exception as err:  # pragma: no cover - optional
             logger.debug("%s version lookup failed: %s", mod, err)
 
+# Ensure we use the interactive PyVista backend if available so that
+# transparency updates take effect at runtime.
+try:  # pragma: no cover - best effort
+    if (
+        hasattr(mne.viz, "set_3d_backend")
+        and hasattr(mne.viz, "get_3d_backend")
+        and mne.viz.get_3d_backend() != "pyvistaqt"
+    ):
+        mne.viz.set_3d_backend("pyvistaqt", verbose=False)
+        logger.debug("3D backend set to pyvistaqt")
+except Exception as err:  # pragma: no cover - optional
+    logger.debug("Failed to set 3D backend: %s", err)
+
 
 def _ensure_pyvista_backend() -> None:
     """Force the MNE 3D backend to PyVista."""
@@ -77,33 +90,51 @@ def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
 def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     """Set the transparency of a Brain viewer in a version robust way."""
     logger.debug("_set_brain_alpha called with %s", alpha)
+    success = False
     try:
         if hasattr(brain, "set_alpha"):
             logger.debug("Using Brain.set_alpha")
             brain.set_alpha(alpha)  # type: ignore[call-arg]
-        else:
-
-            logger.debug("Falling back to setting Brain.alpha attribute")
-
+            success = True
+        elif hasattr(brain, "alpha"):
+            logger.debug("Setting Brain.alpha attribute")
             setattr(brain, "alpha", alpha)
+            success = True
     except Exception:
         logger.debug("Direct alpha methods failed", exc_info=True)
+
+    if not success:
         try:
+            actors = []
             for hemi in getattr(brain, "_hemi_data", {}).values():
                 mesh = getattr(hemi, "mesh", None)
                 if mesh is not None and hasattr(mesh, "actor"):
-                    mesh.actor.GetProperty().SetOpacity(alpha)
+                    actors.append(mesh.actor)
                 for layer in getattr(hemi, "layers", {}).values():
                     actor = getattr(layer, "actor", None)
                     if actor is not None:
-                        actor.GetProperty().SetOpacity(alpha)
+                        actors.append(actor)
 
-            # PyVista backend stores additional actors in _layered_meshes
             for hemi_layers in getattr(brain, "_layered_meshes", {}).values():
                 for layer in hemi_layers.values():
                     actor = getattr(layer, "actor", None)
                     if actor is not None:
-                        actor.GetProperty().SetOpacity(alpha)
+                        actors.append(actor)
+
+            for actor in getattr(brain, "_actors", {}).values():
+                if hasattr(actor, "GetProperty"):
+                    actors.append(actor)
+                elif hasattr(actor, "actor"):
+                    a = getattr(actor, "actor", None)
+                    if a is not None:
+                        actors.append(a)
+
+            for actor in actors:
+                try:
+                    actor.GetProperty().SetOpacity(alpha)
+                except Exception:
+                    pass
+            success = bool(actors)
         except Exception:
             logger.debug("Failed to set brain alpha via mesh actors", exc_info=True)
 
@@ -111,7 +142,6 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
         renderer = getattr(brain, "_renderer", None)
         plotter = getattr(renderer, "plotter", None)
         if plotter is not None and hasattr(plotter, "render"):
-
             logger.debug("Triggering plotter.render()")
             plotter.render()
         elif renderer is not None and hasattr(renderer, "_update"):
@@ -135,6 +165,7 @@ def _add_brain_labels(brain: mne.viz.Brain, left: str, right: str) -> None:
     """
 
     try:
+
         renderer = getattr(brain, "_renderer", None)
 
         # Add the left label in the left subplot
@@ -145,6 +176,7 @@ def _add_brain_labels(brain: mne.viz.Brain, left: str, right: str) -> None:
         # Add the right label in the right subplot
         if renderer is not None and hasattr(renderer, "subplot"):
             renderer.subplot(0, 1)
+
         brain.add_text(0.5, 0.95, right, name="rh_label", font_size=10)
     except Exception:
         logger.debug("Failed to add hemisphere labels", exc_info=True)
@@ -648,6 +680,15 @@ def view_source_estimate(
     _set_brain_alpha(brain, alpha)
     logger.debug("Brain alpha set to %s", alpha)
     _set_brain_title(brain, window_title or os.path.basename(stc_path))
+    try:
+        labels = mne.read_labels_from_annot(
+            subject, parc="aparc", subjects_dir=subjects_dir
+        )
+        for label in labels:
+            brain.add_label(label, borders=True)
+    except Exception:
+        # If annotations aren't available just continue without borders
+        pass
     _add_brain_labels(brain, os.path.basename(lh_file), os.path.basename(rh_file))
 
     return brain
