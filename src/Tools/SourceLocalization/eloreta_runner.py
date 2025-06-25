@@ -800,8 +800,9 @@ def view_source_estimate(
     Notes
     -----
     The viewer always uses ``hemi='split'`` so that the left and right
-    hemispheres are displayed side by side. The names of the ``*-lh.stc`` and
-    ``*-rh.stc`` files appear above their respective hemispheres.
+    hemispheres are displayed side by side.
+    The window title shows the file name of the ``*.stc`` being viewed
+    instead of labeling each hemisphere inside the figure.
     """
 
     logger.debug(
@@ -896,7 +897,9 @@ def view_source_estimate(
     except Exception:
         # If annotations aren't available just continue without borders
         pass
-    _add_brain_labels(brain, os.path.basename(lh_file), os.path.basename(rh_file))
+
+    # Remove in-figure filename labels; rely on the window title instead
+    # so the viewer window isn't cluttered.
 
     return brain
 
