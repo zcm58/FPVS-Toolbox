@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 import importlib
+import inspect
 from typing import Callable, Optional, Tuple, List
 
 # Force PyVistaQt backend before MNE is imported so the interactive viewer
@@ -190,6 +191,30 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
             renderer._update()
     except Exception:
         logger.debug("Plotter render failed", exc_info=True)
+
+
+def _plot_with_alpha(
+    stc: mne.BaseSourceEstimate,
+    *,
+    hemi: str,
+    subjects_dir: str,
+    subject: str,
+    alpha: float,
+) -> mne.viz.Brain:
+    """Call :meth:`mne.SourceEstimate.plot` with the correct alpha argument."""
+    plot_kwargs = dict(
+        subject=subject,
+        subjects_dir=subjects_dir,
+        time_viewer=False,
+        hemi=hemi,
+    )
+    params = inspect.signature(stc.plot).parameters
+    if "brain_alpha" in params:
+        plot_kwargs["brain_alpha"] = alpha
+    elif "initial_alpha" in params:
+        plot_kwargs["initial_alpha"] = alpha
+    brain = stc.plot(**plot_kwargs)
+    return brain
 
 
 def _set_colorbar_label(brain: mne.viz.Brain, label: str) -> None:
@@ -607,12 +632,12 @@ def run_source_localization(
                 os.environ.get("QT_API"),
                 os.environ.get("QT_QPA_PLATFORM"),
             )
-            brain = stc.plot(
-                subject=subject,
-                subjects_dir=subjects_dir,
-                time_viewer=False,
+            brain = _plot_with_alpha(
+                stc,
                 hemi=hemi,
-                brain_alpha=alpha,
+                subjects_dir=subjects_dir,
+                subject=subject,
+                alpha=alpha,
             )
             logger.debug("stc.plot succeeded")
         except Exception as err:
@@ -623,11 +648,12 @@ def run_source_localization(
                 mne.viz.get_3d_backend(),
             )
             logger.debug("Retrying stc.plot with default hemisphere")
-            brain = stc.plot(
-                subject=subject,
+            brain = _plot_with_alpha(
+                stc,
+                hemi="split",
                 subjects_dir=subjects_dir,
-                time_viewer=False,
-                brain_alpha=alpha,
+                subject=subject,
+                alpha=alpha,
             )
             logger.debug("stc.plot succeeded on retry")
         _set_brain_alpha(brain, alpha)
@@ -745,12 +771,12 @@ def view_source_estimate(
             os.environ.get("QT_API"),
             os.environ.get("QT_QPA_PLATFORM"),
         )
-        brain = stc.plot(
-            subject=subject,
-            subjects_dir=subjects_dir,
-            time_viewer=False,
+        brain = _plot_with_alpha(
+            stc,
             hemi="split",
-            brain_alpha=alpha,
+            subjects_dir=subjects_dir,
+            subject=subject,
+            alpha=alpha,
         )
         logger.debug("stc.plot succeeded in view_source_estimate")
     except Exception as err:
@@ -759,11 +785,12 @@ def view_source_estimate(
             err,
             mne.viz.get_3d_backend(),
         )
-        brain = stc.plot(
-            subject=subject,
+        brain = _plot_with_alpha(
+            stc,
+            hemi="split",
             subjects_dir=subjects_dir,
-            time_viewer=False,
-            brain_alpha=alpha,
+            subject=subject,
+            alpha=alpha,
         )
         logger.debug("stc.plot succeeded on fallback in view_source_estimate")
 
