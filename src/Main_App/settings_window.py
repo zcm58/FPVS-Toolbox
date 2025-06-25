@@ -10,7 +10,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog
 import customtkinter as ctk
-from Tools.SourceLocalization.runner import fetch_fsaverage_with_progress
+from Tools.SourceLocalization.data_utils import fetch_fsaverage_with_progress
 
 from config import init_fonts, FONT_MAIN
 from .settings_manager import SettingsManager
