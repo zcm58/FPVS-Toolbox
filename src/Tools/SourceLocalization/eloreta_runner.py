@@ -108,8 +108,17 @@ def _add_brain_labels(brain: mne.viz.Brain, left: str, right: str) -> None:
     """
 
     try:
-        brain.add_text(0.25, 0.95, left, name="lh_label", font_size=10)
-        brain.add_text(0.75, 0.95, right, name="rh_label", font_size=10)
+        renderer = getattr(brain, "_renderer", None)
+
+        # Add the left label in the left subplot
+        if renderer is not None and hasattr(renderer, "subplot"):
+            renderer.subplot(0, 0)
+        brain.add_text(0.5, 0.95, left, name="lh_label", font_size=10)
+
+        # Add the right label in the right subplot
+        if renderer is not None and hasattr(renderer, "subplot"):
+            renderer.subplot(0, 1)
+        brain.add_text(0.5, 0.95, right, name="rh_label", font_size=10)
     except Exception:
         logger.debug("Failed to add hemisphere labels", exc_info=True)
 
