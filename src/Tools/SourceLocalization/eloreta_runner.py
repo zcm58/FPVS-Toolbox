@@ -557,6 +557,13 @@ def run_source_localization(
                 subjects_dir,
                 subject,
             )
+            logger.debug(
+                "Backend before stc.plot: %s (MNE_3D_BACKEND=%s QT_API=%s QT_QPA_PLATFORM=%s)",
+                mne.viz.get_3d_backend(),
+                os.environ.get("MNE_3D_BACKEND"),
+                os.environ.get("QT_API"),
+                os.environ.get("QT_QPA_PLATFORM"),
+            )
             brain = stc.plot(
                 subject=subject,
                 subjects_dir=subjects_dir,
@@ -566,9 +573,10 @@ def run_source_localization(
             logger.debug("stc.plot succeeded")
         except Exception as err:
             logger.warning(
-                "hemi=%s failed: %s; falling back to default",
+                "hemi=%s failed: %s; backend=%s; falling back to default",
                 hemi,
                 err,
+                mne.viz.get_3d_backend(),
             )
             logger.debug("Retrying stc.plot with default hemisphere")
             brain = stc.plot(
@@ -679,6 +687,13 @@ def view_source_estimate(
             subjects_dir,
             subject,
         )
+        logger.debug(
+            "Backend before stc.plot: %s (MNE_3D_BACKEND=%s QT_API=%s QT_QPA_PLATFORM=%s)",
+            mne.viz.get_3d_backend(),
+            os.environ.get("MNE_3D_BACKEND"),
+            os.environ.get("QT_API"),
+            os.environ.get("QT_QPA_PLATFORM"),
+        )
         brain = stc.plot(
             subject=subject,
             subjects_dir=subjects_dir,
@@ -687,7 +702,11 @@ def view_source_estimate(
         )
         logger.debug("stc.plot succeeded in view_source_estimate")
     except Exception as err:
-        logger.warning("hemi='split' failed: %s; falling back to default", err)
+        logger.warning(
+            "hemi='split' failed: %s; backend=%s; falling back to default",
+            err,
+            mne.viz.get_3d_backend(),
+        )
         brain = stc.plot(
             subject=subject,
             subjects_dir=subjects_dir,
