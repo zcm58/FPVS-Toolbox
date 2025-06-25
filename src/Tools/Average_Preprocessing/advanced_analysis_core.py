@@ -6,7 +6,6 @@ This module implements functions that take the groups configured in the
 FPVS application's loading, preprocessing and post-processing callbacks.
 """
 
-import os
 import gc
 import logging
 import traceback
@@ -14,7 +13,6 @@ from pathlib import Path
 from typing import List, Dict, Any, Callable, Optional, Union
 
 import mne
-import numpy as np
 import threading
 
 # Set up module level logger
@@ -144,7 +142,8 @@ def run_advanced_averaging_processing(
 
         # Loop through each unique participant file associated with this group recipe
         for participant_file_path in unique_participant_files:
-            if stop_event.is_set(): return False
+            if stop_event.is_set():
+                return False
 
             participant_pid = pid_extraction_func({'file_paths': [participant_file_path]})
             log_callback(
@@ -153,7 +152,8 @@ def run_advanced_averaging_processing(
             averaged_data_for_this_participant: Dict[str, List[Union[mne.Epochs, mne.Evoked]]] = {}
 
             for mapping_rule in group_definition.get('condition_mappings', []):
-                if stop_event.is_set(): return False
+                if stop_event.is_set():
+                    return False
 
                 output_label_for_average = mapping_rule['output_label']
                 log_callback(f"    Applying rule for: '{output_label_for_average}' to participant {participant_pid}")
@@ -161,7 +161,8 @@ def run_advanced_averaging_processing(
                 epochs_for_this_participant_this_rule: List[mne.Epochs] = []
 
                 for source_info in mapping_rule.get('sources', []):
-                    if stop_event.is_set(): return False
+                    if stop_event.is_set():
+                        return False
 
                     if source_info['file_path'] != participant_file_path:
                         continue
@@ -182,7 +183,7 @@ def run_advanced_averaging_processing(
                         raw = main_app_load_file_func(file_path_of_source)
                         if raw is None or stop_event.is_set():
                             log_callback(f"      Skipping {file_basename} (load failed or stop event).")
-                            overall_success = False;
+                            overall_success = False
                             continue
 
                         raw_copy_for_preproc = raw.copy()
@@ -193,7 +194,7 @@ def run_advanced_averaging_processing(
 
                         if raw_proc is None or stop_event.is_set():
                             log_callback(f"      Skipping {file_basename} (preprocess failed or stop event).")
-                            overall_success = False;
+                            overall_success = False
                             continue
 
                         stim_channel = main_app_params.get('stim_channel', 'Status')
@@ -223,10 +224,14 @@ def run_advanced_averaging_processing(
                             f"      !!! Error during epoching for {file_basename}, ID {original_event_id} for {participant_pid}: {e}\n{traceback.format_exc()}")
                         overall_success = False
                     finally:
-                        if raw_proc is not None: del raw_proc
-                        if raw_copy_for_preproc is not None: del raw_copy_for_preproc
-                        if raw is not None: del raw
-                        if participant_source_epochs is not None: del participant_source_epochs  # MODIFICATION: Cleanup added
+                        if raw_proc is not None:
+                            del raw_proc
+                        if raw_copy_for_preproc is not None:
+                            del raw_copy_for_preproc
+                        if raw is not None:
+                            del raw
+                        if participant_source_epochs is not None:
+                            del participant_source_epochs  # MODIFICATION: Cleanup added
                         gc.collect()
 
                     current_operation_count += 1
@@ -267,11 +272,12 @@ def run_advanced_averaging_processing(
                     log_callback(
                         f"    No epochs collected for rule '{output_label_for_average}' for participant {participant_pid}. Cannot average.")
 
-                del epochs_for_this_participant_this_rule;
+                del epochs_for_this_participant_this_rule
                 gc.collect()
 
             if averaged_data_for_this_participant:
-                if stop_event.is_set(): return False
+                if stop_event.is_set():
+                    return False
                 log_callback(
                     f"  --- Initiating Post-Processing for Participant {participant_pid} (Recipe: '{group_recipe_name}') ---")
 
@@ -298,7 +304,7 @@ def run_advanced_averaging_processing(
                 log_callback(
                     f"  No data averaged for participant {participant_pid} (Recipe: '{group_recipe_name}'). Skipping post-processing.")
 
-            del averaged_data_for_this_participant;
+            del averaged_data_for_this_participant
             gc.collect()
             log_callback(
                 f"  -- Finished processing for Participant: {participant_pid} (Recipe: '{group_recipe_name}') --")

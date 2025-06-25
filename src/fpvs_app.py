@@ -29,20 +29,11 @@ Key functionalities:
 
 # === Dependencies ===
 import os
-import glob
-import threading
 import queue
-import traceback
-import gc
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 import webbrowser
-import logging
-import numpy as np
-import pandas as pd
 import customtkinter as ctk
-import mne
-import time
 import requests
 from packaging.version import parse as version_parse
 from Main_App.menu_bar import AppMenuBar
@@ -60,13 +51,7 @@ from config import (
     FPVS_TOOLBOX_VERSION,
     FPVS_TOOLBOX_UPDATE_API,
     FPVS_TOOLBOX_REPO_PAGE,
-    DEFAULT_STIM_CHANNEL,
-    CORNER_RADIUS,
-    PAD_X,
-    init_fonts,
-    FONT_MAIN,
-    FONT_BOLD,
-    FONT_HEADING
+    DEFAULT_STIM_CHANNEL
 )
 
 from Main_App.post_process import post_process as _external_post_process
@@ -80,7 +65,6 @@ from Tools.Image_Resizer import FPVSImageResizer
 
 # Statistics toolbox
 import Tools.Stats as stats
-from Main_App.eloreta_launcher import open_eloreta_tool
 from Main_App.relevant_publications_window import RelevantPublicationsWindow
 from Main_App.settings_manager import SettingsManager
 from Main_App.settings_window import SettingsWindow
@@ -466,7 +450,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         # Instantiate EventMapManager to build the event map UI
         # The EventMapManager's __init__ calls its _build_event_map_ui method,
         # which now also adds the initial event map row.
-        event_map_manager = EventMapManager(app_reference=self, parent_ui_frame=self.event_map_outer_frame)
+        EventMapManager(app_reference=self, parent_ui_frame=self.event_map_outer_frame)
         # No further calls to event_map_manager needed here if its __init__ builds the UI.
 
         # --- Bottom Frame: Log & Progress (Row 4) ---

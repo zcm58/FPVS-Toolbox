@@ -54,7 +54,7 @@ def _check_for_updates(app, silent=True, notify_if_no_update=True):
         resp.raise_for_status()
         data = resp.json()
         latest = data.get("tag_name") or data.get("version")
-        changelog = data.get("body", "")
+        _ = data.get("body", "")
         if not latest:
             raise ValueError("No version field in update response.")
 

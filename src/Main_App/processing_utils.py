@@ -197,12 +197,7 @@ class ProcessingMixin:
             self.after(1000, self._update_time_remaining)
 
     def _processing_thread_func(self, data_paths, params, gui_queue):
-        import os
         import gc
-        import traceback
-        import mne
-        import numpy as np
-        import re
 
         event_id_map_from_gui = params.get('event_id_map', {})
         stim_channel_name = params.get('stim_channel', DEFAULT_STIM_CHANNEL)
@@ -237,7 +232,8 @@ class ProcessingMixin:
                         r'(_unamb|_ambig|_mid|_run\d*|_sess\d*|_task\w*|_eeg|_fpvs|_raw|_preproc|_ica|_EventsUpdated).*$',
                         '', pid_base_for_flagging, flags=re.IGNORECASE)
                     temp_pid = re.sub(r'[^a-zA-Z0-9]', '', temp_pid)
-                    if temp_pid: extracted_pid_for_flagging = temp_pid
+                    if temp_pid:
+                        extracted_pid_for_flagging = temp_pid
 
                 try:
                     raw = self.load_eeg_file(f_path)
@@ -303,11 +299,19 @@ class ProcessingMixin:
                                     if numeric_part_match:
                                         try:
                                             extracted_num_from_desc = int(numeric_part_match.group(0))
-                                            if extracted_num_from_desc in user_gui_int_ids: mapped_id_for_this_desc = extracted_num_from_desc
+                                            if (
+                                                extracted_num_from_desc
+                                                in user_gui_int_ids
+                                            ):
+                                                mapped_id_for_this_desc = (
+                                                    extracted_num_from_desc
+                                                )
                                         except ValueError:
                                             pass
-                                if mapped_id_for_this_desc is not None: mne_annots_event_id_map[
-                                    desc_str_from_file] = mapped_id_for_this_desc
+                                if mapped_id_for_this_desc is not None:
+                                    mne_annots_event_id_map[desc_str_from_file] = (
+                                        mapped_id_for_this_desc
+                                    )
                             if not mne_annots_event_id_map:
                                 gui_queue.put({'type': 'log',
                                                'message': f"WARNING [{f_name}]: For .set file, could not create MNE event_id map from annotations."})
@@ -318,17 +322,37 @@ class ProcessingMixin:
                                 try:
                                     events, _ = mne.events_from_annotations(raw_proc, event_id=mne_annots_event_id_map,
                                                                             verbose=False, regexp=None)
-                                    if events.size == 0: gui_queue.put({'type': 'log',
-                                                                        'message': f"WARNING [{f_name}]: mne.events_from_annotations returned no events with map: {mne_annots_event_id_map}."})
+                                    if events.size == 0:
+                                        gui_queue.put(
+                                            {
+                                                'type': 'log',
+                                                'message': (
+                                                    f"WARNING [{f_name}]: mne.events_from_annotations returned no events with map: {mne_annots_event_id_map}."
+                                                ),
+                                            }
+                                        )
                                 except Exception as e_ann:
-                                    gui_queue.put({'type': 'log',
-                                                   'message': f"ERROR [{f_name}]: Failed to get events from annotations: {e_ann}"})
+                                    gui_queue.put(
+                                        {
+                                            'type': 'log',
+                                            'message': f"ERROR [{f_name}]: Failed to get events from annotations: {e_ann}",
+                                        }
+                                    )
                                     events = np.array([])
                         else:
-                            gui_queue.put({'type': 'log',
-                                           'message': f"WARNING [{f_name}]: .set file has no MNE annotations on raw_proc."})
-                        if events.size == 0: gui_queue.put({'type': 'log',
-                                                            'message': f"FINAL WARNING [{f_name}]: No events extracted for this .set file from annotations."})
+                            gui_queue.put(
+                                {
+                                    'type': 'log',
+                                    'message': f"WARNING [{f_name}]: .set file has no MNE annotations on raw_proc.",
+                                }
+                            )
+                        if events.size == 0:
+                            gui_queue.put(
+                                {
+                                    'type': 'log',
+                                    'message': f"FINAL WARNING [{f_name}]: No events extracted for this .set file from annotations.",
+                                }
+                            )
                     else:
                         if self.settings.debug_enabled():
                             gui_queue.put({'type': 'log',
@@ -343,8 +367,13 @@ class ProcessingMixin:
                             except Exception as e_find:
                                 gui_queue.put({'type': 'log',
                                                'message': f"ERROR [{f_name}]: Exception mne.find_events: {e_find}"})
-                    if events.size == 0: gui_queue.put({'type': 'log',
-                                                        'message': f"CRITICAL WARNING [{f_name}]: Event extraction resulted in empty events array."})
+                        if events.size == 0:
+                            gui_queue.put(
+                                {
+                                    'type': 'log',
+                                    'message': f"CRITICAL WARNING [{f_name}]: Event extraction resulted in empty events array.",
+                                }
+                            )
 
                     if self.settings.debug_enabled():
                         gui_queue.put({'type': 'log',
@@ -490,7 +519,8 @@ class ProcessingMixin:
                                     del epochs_list_to_del[0]._data
                                 del epochs_list_to_del[0]
                         file_epochs.clear()
-                    if isinstance(raw_proc, mne.io.BaseRaw): del raw_proc
+                    if isinstance(raw_proc, mne.io.BaseRaw):
+                        del raw_proc
                     gc.collect()
                     gui_queue.put({'type': 'log', 'message': f"Memory cleanup for {f_name} complete."})
 

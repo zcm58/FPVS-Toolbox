@@ -119,7 +119,7 @@ class SettingsManager:
 
     # --- Convenience helpers for event mappings ---
     def get_event_pairs(self) -> List[Tuple[str, str]]:
-        labels = [l.strip() for l in self.get('events', 'labels', '').split(',') if l.strip()]
+        labels = [label_part.strip() for label_part in self.get('events', 'labels', '').split(',') if label_part.strip()]
         ids = [i.strip() for i in self.get('events', 'ids', '').split(',') if i.strip()]
         pairs = []
         for label, id_val in zip(labels, ids):
