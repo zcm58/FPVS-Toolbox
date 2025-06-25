@@ -618,6 +618,15 @@ def view_source_estimate(
     _set_brain_alpha(brain, alpha)
     logger.debug("Brain alpha set to %s", alpha)
     _set_brain_title(brain, window_title or os.path.basename(stc_path))
+    try:
+        labels = mne.read_labels_from_annot(
+            subject, parc="aparc", subjects_dir=subjects_dir
+        )
+        for label in labels:
+            brain.add_label(label, borders=True)
+    except Exception:
+        # If annotations aren't available just continue without borders
+        pass
     _add_brain_labels(brain, os.path.basename(lh_file), os.path.basename(rh_file))
 
     return brain
