@@ -148,6 +148,7 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     if not success:
         try:
             actors = []
+            actor_count = 0
             for hemi in getattr(brain, "_hemi_data", {}).values():
                 mesh = getattr(hemi, "mesh", None)
                 if mesh is not None and hasattr(mesh, "actor"):
@@ -163,6 +164,14 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
                     if actor is not None:
                         actors.append(actor)
 
+            for overlay in getattr(brain, "_data", {}).values():
+                if hasattr(overlay, "actor"):
+                    actors.append(overlay.actor)
+                elif isinstance(overlay, dict):
+                    for item in overlay.values():
+                        a = getattr(item, "actor", None)
+                        if a is not None:
+                            actors.append(a)
             for actor in getattr(brain, "_actors", {}).values():
                 if hasattr(actor, "GetProperty"):
                     actors.append(actor)
@@ -171,11 +180,13 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
                     if a is not None:
                         actors.append(a)
 
+            actor_count = len(actors)
             for actor in actors:
                 try:
                     actor.GetProperty().SetOpacity(alpha)
                 except Exception:
                     pass
+            logger.debug("Opacity set on %d actors", actor_count)
             success = bool(actors)
         except Exception:
             logger.debug("Failed to set brain alpha via mesh actors", exc_info=True)
@@ -189,6 +200,7 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
         elif renderer is not None and hasattr(renderer, "_update"):
             logger.debug("Triggering renderer._update()")
             renderer._update()
+        logger.debug("Alpha update success: %s", success)
     except Exception:
         logger.debug("Plotter render failed", exc_info=True)
 
