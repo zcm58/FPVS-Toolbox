@@ -1,14 +1,11 @@
 """Helper routines for FPVS source localization."""
 
 from __future__ import annotations
-
 import os
 from typing import Iterable
-
 import mne
 import numpy as np
 import pandas as pd
-
 from typing import Sequence
 
 
