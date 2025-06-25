@@ -309,6 +309,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 method=method,
                 threshold=thr,
                 alpha=alpha,
+                stc_basename=None,
 
                 hemi=hemi,
                 low_freq=low_freq,
