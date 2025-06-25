@@ -202,7 +202,14 @@ def _plot_with_alpha(
     alpha: float,
 ) -> mne.viz.Brain:
 
-    """Call :meth:`mne.SourceEstimate.plot` using whichever alpha argument works."""
+    """Plot a SourceEstimate while trying multiple alpha keywords.
+
+    The function attempts to pass different transparency keywords
+    (``brain_alpha`` and ``initial_alpha``) to
+    :meth:`mne.SourceEstimate.plot`. If none are accepted, it falls
+    back to calling the method without an alpha argument and then
+    manually sets the transparency.
+    """
 
     plot_kwargs = dict(
         subject=subject,
@@ -220,9 +227,11 @@ def _plot_with_alpha(
                 continue
             raise
         else:
+            logger.debug("alpha keyword used: %s", arg)
             return brain
 
     brain = stc.plot(**plot_kwargs)
+    logger.debug("all alpha keywords failed; using manual fallback")
     _set_brain_alpha(brain, alpha)
 
     return brain
