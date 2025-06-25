@@ -6,6 +6,10 @@ import re
 import traceback
 from tkinter import filedialog, messagebox
 
+# Folders that should always be ignored when scanning for condition
+# subdirectories.  Stored in lower case for case-insensitive matching.
+IGNORED_FOLDERS = {".fif files", "loreta results"}
+
 
 def browse_folder(self):
     current_folder = self.stats_data_folder_var.get()
@@ -41,6 +45,9 @@ def scan_folder(self):
         for item_name in os.listdir(parent_folder):  # These are expected to be condition subfolders
             item_path = os.path.join(parent_folder, item_name)
             if os.path.isdir(item_path):
+                if item_name.lower() in IGNORED_FOLDERS:
+                    self.log_to_main_app(f"  Skipping ignored folder '{item_name}'.")
+                    continue
                 condition_name_raw = item_name
                 # Clean condition name (remove leading numbers/hyphens/spaces if any)
                 condition_name = re.sub(r'^\d+\s*[-_]*\s*', '', condition_name_raw).strip()
