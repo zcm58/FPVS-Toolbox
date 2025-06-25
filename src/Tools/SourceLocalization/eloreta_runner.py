@@ -36,6 +36,33 @@ for mod in ("pyvista", "pyvistaqt"):
             logger.debug("%s version lookup failed: %s", mod, err)
 
 
+def _ensure_pyvista_backend() -> None:
+    """Force the MNE 3D backend to PyVista."""
+    if not hasattr(mne.viz, "set_3d_backend"):
+        return
+
+    current = None
+    if hasattr(mne.viz, "get_3d_backend"):
+        current = mne.viz.get_3d_backend()
+    if current in {"pyvistaqt", "pyvista"}:
+        return
+
+    for backend in ("pyvistaqt", "pyvista"):
+        try:
+            mne.viz.set_3d_backend(backend)
+            os.environ["MNE_3D_BACKEND"] = backend
+        except Exception as err:  # pragma: no cover - optional
+            logger.debug("Failed to set backend %s: %s", backend, err)
+            continue
+        if not hasattr(mne.viz, "get_3d_backend"):
+            return
+        if mne.viz.get_3d_backend() == backend:
+            logger.debug("Using 3D backend %s", backend)
+            return
+
+    raise RuntimeError("PyVista backend ('pyvistaqt' or 'pyvista') is required")
+
+
 def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
     """Safely set the window title of a Brain viewer."""
     try:
@@ -108,8 +135,17 @@ def _add_brain_labels(brain: mne.viz.Brain, left: str, right: str) -> None:
     """
 
     try:
-        brain.add_text(0.25, 0.95, left, name="lh_label", font_size=10)
-        brain.add_text(0.75, 0.95, right, name="rh_label", font_size=10)
+        renderer = getattr(brain, "_renderer", None)
+
+        # Add the left label in the left subplot
+        if renderer is not None and hasattr(renderer, "subplot"):
+            renderer.subplot(0, 0)
+        brain.add_text(0.5, 0.95, left, name="lh_label", font_size=10)
+
+        # Add the right label in the right subplot
+        if renderer is not None and hasattr(renderer, "subplot"):
+            renderer.subplot(0, 1)
+        brain.add_text(0.5, 0.95, right, name="rh_label", font_size=10)
     except Exception:
         logger.debug("Failed to add hemisphere labels", exc_info=True)
 
@@ -458,6 +494,7 @@ def run_source_localization(
 
     brain = None
     if show_brain:
+        _ensure_pyvista_backend()
         # Visualise in a separate Brain window
         logger.debug(
             "Plotting STC with subjects_dir=%s, subject=%s", subjects_dir, subject
@@ -584,6 +621,7 @@ def view_source_estimate(
         )
     logger.debug("subjects_dir resolved to %s", subjects_dir)
 
+    _ensure_pyvista_backend()
 
     try:
         logger.debug(
