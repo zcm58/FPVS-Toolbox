@@ -195,18 +195,27 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.after(0, _open_viewer)
 
     def _compare_stc(self):
-        paths = filedialog.askopenfilenames(
-            title="Select two SourceEstimate files",
+        path_a = filedialog.askopenfilename(
+            title="Select the first SourceEstimate file",
             filetypes=[("SourceEstimate", "*-lh.stc"), ("All files", "*")],
             parent=self,
         )
-        if len(paths) != 2:
+        if not path_a:
             return
-        path_a, path_b = paths
+
+        path_b = filedialog.askopenfilename(
+            title="Select the second SourceEstimate file",
+            filetypes=[("SourceEstimate", "*-lh.stc"), ("All files", "*")],
+            parent=self,
+        )
+        if not path_b:
+            return
+
         if path_a.endswith("-lh.stc") or path_a.endswith("-rh.stc"):
             path_a = path_a[:-7]
         if path_b.endswith("-lh.stc") or path_b.endswith("-rh.stc"):
             path_b = path_b[:-7]
+
         log_func = getattr(self.master, "log", print)
         log_func(f"Comparing STCs {path_a} and {path_b}")
 
