@@ -61,16 +61,25 @@ def _ensure_pyvista_backend() -> None:
     if not hasattr(mne.viz, "set_3d_backend"):
         return
 
+    logger.debug("MNE_3D_BACKEND: %s", os.environ.get("MNE_3D_BACKEND"))
+    logger.debug("QT_API: %s", os.environ.get("QT_API"))
+    logger.debug("QT_QPA_PLATFORM: %s", os.environ.get("QT_QPA_PLATFORM"))
     current = None
     if hasattr(mne.viz, "get_3d_backend"):
         current = mne.viz.get_3d_backend()
+        logger.debug("Existing MNE 3D backend: %s", current)
     if current in {"pyvistaqt", "pyvista"}:
         return
 
     for backend in ("pyvistaqt", "pyvista"):
+        logger.debug("Attempting backend %s", backend)
         try:
             mne.viz.set_3d_backend(backend)
             os.environ["MNE_3D_BACKEND"] = backend
+            if hasattr(mne.viz, "get_3d_backend"):
+                logger.debug(
+                    "Backend after set: %s", mne.viz.get_3d_backend()
+                )
         except Exception as err:  # pragma: no cover - optional
             logger.debug("Failed to set backend %s: %s", backend, err)
             continue
@@ -80,7 +89,9 @@ def _ensure_pyvista_backend() -> None:
             logger.debug("Using 3D backend %s", backend)
             return
 
-    raise RuntimeError("PyVista backend ('pyvistaqt' or 'pyvista') is required")
+    msg = "PyVista backend ('pyvistaqt' or 'pyvista') is required"
+    logger.error(msg, exc_info=True)
+    raise RuntimeError(msg)
 
 
 def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
