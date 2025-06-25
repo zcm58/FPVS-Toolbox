@@ -5,7 +5,6 @@ messages are shown when something is missing so the pipeline
 doesn't run with invalid settings."""
 import os
 import traceback
-import tkinter as tk
 from tkinter import messagebox
 from config import DEFAULT_STIM_CHANNEL
 
@@ -45,40 +44,59 @@ class ValidationMixin:
             self.debug("DEBUG_VALIDATE: Attempting to parse numeric parameters...")
             def get_float(entry_widget, field_name_for_error="value"):
                 val_str = entry_widget.get().strip()
-                if not val_str: return None
-                try: return float(val_str)
-                except ValueError: raise ValueError(f"Invalid numeric input for {field_name_for_error}: '{val_str}'")
+                if not val_str:
+                    return None
+                try:
+                    return float(val_str)
+                except ValueError:
+                    raise ValueError(
+                        f"Invalid numeric input for {field_name_for_error}: '{val_str}'"
+                    )
 
             def get_int(entry_widget, field_name_for_error="value"):
                 val_str = entry_widget.get().strip()
-                if not val_str: return None
-                try: return int(val_str)
-                except ValueError: raise ValueError(f"Invalid integer input for {field_name_for_error}: '{val_str}'")
+                if not val_str:
+                    return None
+                try:
+                    return int(val_str)
+                except ValueError:
+                    raise ValueError(
+                        f"Invalid integer input for {field_name_for_error}: '{val_str}'"
+                    )
 
             params['low_pass'] = get_float(self.low_pass_entry, "Low Pass (Hz)")
-            if params['low_pass'] is not None: assert params['low_pass'] >= 0, "Low Pass (Hz) must be zero or positive."
+            if params['low_pass'] is not None:
+                assert params['low_pass'] >= 0, "Low Pass (Hz) must be zero or positive."
 
             params['high_pass'] = get_float(self.high_pass_entry, "High Pass (Hz)")
-            if params['high_pass'] is not None: assert params['high_pass'] > 0, "High Pass (Hz) must be positive."
+            if params['high_pass'] is not None:
+                assert params['high_pass'] > 0, "High Pass (Hz) must be positive."
 
             if params['low_pass'] is not None and params['high_pass'] is not None:
-                assert params['low_pass'] < params['high_pass'], "Low Pass (Hz) must be less than High Pass (Hz)."
+                assert (
+                    params['low_pass'] < params['high_pass']
+                ), "Low Pass (Hz) must be less than High Pass (Hz)."
 
             params['downsample_rate'] = get_float(self.downsample_entry, "Downsample (Hz)")
-            if params['downsample_rate'] is not None: assert params['downsample_rate'] > 0, "Downsample (Hz) must be positive."
+            if params['downsample_rate'] is not None:
+                assert params['downsample_rate'] > 0, "Downsample (Hz) must be positive."
 
-            params['epoch_start'] = get_float(self.epoch_start_entry, "Epoch Start (s)"); assert params['epoch_start'] is not None, "Epoch Start (s) cannot be empty."
-            params['epoch_end'] = get_float(self.epoch_end_entry, "Epoch End (s)"); assert params['epoch_end'] is not None, "Epoch End (s) cannot be empty."
+            params['epoch_start'] = get_float(self.epoch_start_entry, "Epoch Start (s)")
+            assert params['epoch_start'] is not None, "Epoch Start (s) cannot be empty."
+            params['epoch_end'] = get_float(self.epoch_end_entry, "Epoch End (s)")
+            assert params['epoch_end'] is not None, "Epoch End (s) cannot be empty."
             assert params['epoch_start'] < params['epoch_end'], "Epoch Start (s) must be less than Epoch End (s)."
 
             params['reject_thresh'] = get_float(self.reject_thresh_entry, "Rejection Z-Thresh")
-            if params['reject_thresh'] is not None: assert params['reject_thresh'] > 0, "Rejection Z-Thresh must be positive."
+            if params['reject_thresh'] is not None:
+                assert params['reject_thresh'] > 0, "Rejection Z-Thresh must be positive."
 
             params['ref_channel1'] = self.ref_channel1_entry.get().strip()
             params['ref_channel2'] = self.ref_channel2_entry.get().strip()
 
             params['max_idx_keep'] = get_int(self.max_idx_keep_entry, "Max Chan Idx Keep")
-            if params['max_idx_keep'] is not None: assert params['max_idx_keep'] > 0, "Max Chan Idx Keep must be positive."
+            if params['max_idx_keep'] is not None:
+                assert params['max_idx_keep'] > 0, "Max Chan Idx Keep must be positive."
 
             params['stim_channel'] = DEFAULT_STIM_CHANNEL
             self.log(f"Using Stimulus Channel: '{params['stim_channel']}' (from configuration)")
@@ -110,13 +128,13 @@ class ValidationMixin:
             if not self.event_map_entries:
                 self.log("Validation Error: Event Map is empty (no rows defined).")
                 messagebox.showerror("Event Map Error", "The Event Map is empty. Please use '+ Add Condition' to define at least one event.")
-                if hasattr(self, 'add_map_button') and self.add_map_button: self.add_map_button.focus_set()
+                if hasattr(self, 'add_map_button') and self.add_map_button:
+                    self.add_map_button.focus_set()
                 self.debug("DEBUG_VALIDATE: Returning False - Event Map has no rows.")
                 return False
 
             labels_seen = set()
 
-            is_event_map_effectively_empty = True
             for i, entry_widgets in enumerate(self.event_map_entries):
                 self.debug(f"DEBUG_VALIDATE: Processing event map row {i+1}")
                 label_widget = entry_widgets.get('label')
@@ -132,8 +150,7 @@ class ValidationMixin:
                 id_str = id_widget.get().strip()
                 self.debug(f"DEBUG_VALIDATE: Row {i+1}: Label='{lbl_str}', ID='{id_str}'")
 
-                if lbl_str or id_str:
-                    is_event_map_effectively_empty = False
+
 
                 if not lbl_str and not id_str:
                     if len(self.event_map_entries) == 1:

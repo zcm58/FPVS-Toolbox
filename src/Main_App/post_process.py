@@ -7,7 +7,7 @@ import gc
 import mne
 import re
 from config import TARGET_FREQUENCIES, DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
-from typing import List, Dict, Any, Union
+from typing import List, Any
 
 
 def post_process(app: Any, condition_labels_present: List[str]) -> None:
@@ -112,18 +112,25 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         for data_idx, data_object in enumerate(data_list):  # Should be one Evoked for advanced
             is_evoked = isinstance(data_object, mne.Evoked)
             if not (hasattr(data_object, 'info') and (is_evoked or hasattr(data_object, 'get_data'))):
-                app.log(f"    Item {data_idx + 1} is not a valid MNE data object. Skipping.");
+                app.log(f"    Item {data_idx + 1} is not a valid MNE data object. Skipping.")
                 continue
             app.log(f"  Processing data object {data_idx + 1}/{len(data_list)} for '{cond_label_from_keys}'...")
             gc.collect()
             try:
                 if not is_evoked:  # Epochs
-                    if not data_object.preload: data_object.load_data()
-                    if len(data_object.events) == 0: app.log("    Epochs object 0 events. Skip."); continue
+                    if not data_object.preload:
+                        data_object.load_data()
+                    if len(data_object.events) == 0:
+                        app.log("    Epochs object 0 events. Skip.")
+                        continue
 
                     # ...
-                data_eeg = data_object.copy().pick('eeg', exclude='bads' if not is_evoked else [])
-                if not data_eeg.ch_names: app.log("    No good EEG channels. Skip."); continue
+                data_eeg = data_object.copy().pick(
+                    'eeg', exclude='bads' if not is_evoked else []
+                )
+                if not data_eeg.ch_names:
+                    app.log("    No good EEG channels. Skip.")
+                    continue
 
                 if is_evoked:
                         avg_data = data_eeg.data
@@ -145,21 +152,24 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     app.log(f"    Standardized channel order to {len(ordered_electrode_names_for_df)} channels.")
                 elif num_channels == len(DEFAULT_ELECTRODE_NAMES_64):
                     app.log(
-                        f"    Warn: Found {num_channels} channels, names don't match default. Using default order/names.");
+                        f"    Warn: Found {num_channels} channels, names don't match default. Using default order/names.")
                     ordered_electrode_names_for_df = DEFAULT_ELECTRODE_NAMES_64
                 else:
-                    app.log(f"    Warn: Found {num_channels} channels. Using actual names/order.");
+                    app.log(f"    Warn: Found {num_channels} channels. Using actual names/order.")
                     ordered_electrode_names_for_df = current_ch_names_from_obj
 
                 if valid_data_count == 0:
                     final_num_channels = num_channels
                     final_electrode_names_ordered = ordered_electrode_names_for_df
                 if num_channels != final_num_channels or ordered_electrode_names_for_df != final_electrode_names_ordered:
-                    app.log(f"    Error: Channel mismatch. Skipping object.");
+                    app.log("    Error: Channel mismatch. Skipping object.")
                     continue
 
                 avg_data_uv = avg_data * 1e6
-                if data_idx == 0: app.log(f"    Scaling to uV. Max: {np.max(np.abs(avg_data_uv)):.2f} uV")
+                if data_idx == 0:
+                    app.log(
+                        f"    Scaling to uV. Max: {np.max(np.abs(avg_data_uv)):.2f} uV"
+                    )
 
                 sfreq = data_eeg.info['sfreq']
                 num_fft_bins = num_times // 2 + 1
@@ -176,7 +186,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 for chan_idx in range(final_num_channels):
                     for freq_idx, target_freq in enumerate(TARGET_FREQUENCIES):
                         if not (fft_frequencies[0] <= target_freq <= fft_frequencies[-1]):
-                            if chan_idx == 0 and data_idx == 0: app.log(f"    Skipping target freq {target_freq} Hz.");
+                            if chan_idx == 0 and data_idx == 0:
+                                app.log(
+                                    f"    Skipping target freq {target_freq} Hz."
+                                )
                             continue
                         target_bin_index = np.argmin(np.abs(fft_frequencies - target_freq))
                         noise_bin_low = target_bin_index - 12
@@ -208,15 +221,15 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 if accum['fft'] is None:
                     accum = {'fft': metrics_fft, 'snr': metrics_snr, 'z': metrics_z, 'bca': metrics_bca}
                 else:
-                    accum['fft'] += metrics_fft;
-                    accum['snr'] += metrics_snr;
-                    accum['z'] += metrics_z;
-                    accum['bca'] += metrics_bca;
+                    accum['fft'] += metrics_fft
+                    accum['snr'] += metrics_snr
+                    accum['z'] += metrics_z
+                    accum['bca'] += metrics_bca
                 valid_data_count += 1
             except Exception as e:
                 app.log(f"!!! Error post-processing data object {data_idx + 1}: {e}\n{traceback.format_exc()}")
             finally:
-                del data_eeg;
+                del data_eeg
                 gc.collect()
 
         if valid_data_count > 0 and final_electrode_names_ordered:
@@ -255,6 +268,6 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
     if not any_results_saved:
         app.log("Warning: Post-processing completed, but no Excel files were saved.")
-    del current_epochs_data_source;
+    del current_epochs_data_source
     gc.collect()
     app.log("--- Post-processing finished. ---")

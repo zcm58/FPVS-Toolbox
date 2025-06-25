@@ -4,16 +4,13 @@ artifact rejection while logging progress for the user. Cleaned
 ``mne.Raw`` objects are returned for further analysis."""
 
 import os
-import gc
 import traceback
-from tkinter import messagebox
 
 import mne
 import numpy as np
 from scipy.stats import kurtosis
 
 from config import DEFAULT_STIM_CHANNEL
-from Main_App.load_utils import load_eeg_file
 
 
 

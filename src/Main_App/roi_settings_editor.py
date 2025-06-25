@@ -1,5 +1,4 @@
 import customtkinter as ctk
-import tkinter as tk
 
 class ROISettingsEditor:
     def __init__(self, parent, initial_pairs):

@@ -8,7 +8,7 @@ import tkinter as tk
 import customtkinter as ctk
 import traceback
 import warnings
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 
 try:
     # When running ``main.py`` directly, relative imports like ``..config``
@@ -107,7 +107,7 @@ class EventMapManager:
 
         entry_frame = ctk.CTkFrame(self.app_ref.event_map_scroll_frame, fg_color="transparent")
         entry_frame.pack(fill="x", pady=1, padx=1)
-        self.app_ref.debug(f"[EventMapManager] New entry_frame packed into scroll_frame.")
+        self.app_ref.debug("[EventMapManager] New entry_frame packed into scroll_frame.")
 
         # Configure columns within this specific entry_frame for alignment
         entry_frame.grid_columnconfigure(0, weight=1)  # Condition Label column (takes available space)
@@ -149,36 +149,36 @@ class EventMapManager:
             command=lambda ef=entry_frame: self.remove_event_map_entry_from_manager(ef),
         )
         remove_btn.grid(row=0, column=2, sticky="e", padx=(0, PAD_X))  # Add padx to not touch edge
-        self.app_ref.debug(f"[EventMapManager] Widgets for new row created and gridded.")
+        self.app_ref.debug("[EventMapManager] Widgets for new row created and gridded.")
 
         new_entry_data = {'frame': entry_frame, 'label': label_entry, 'id': id_entry, 'button': remove_btn}
         self.app_ref.event_map_entries.append(new_entry_data)
         self.app_ref.debug(f"[EventMapManager] New entry appended. Count: {len(self.app_ref.event_map_entries)}")
 
         if focus_new_row:
-            self.app_ref.debug(f"[EventMapManager] Attempting to focus new label_entry (focus_new_row is True).")
+            self.app_ref.debug("[EventMapManager] Attempting to focus new label_entry (focus_new_row is True).")
             try:
                 def deferred_focus():
                     if label_entry.winfo_exists():
                         label_entry.focus_set()
                         label_entry.select_range(0, tk.END)
                         self.app_ref.debug(
-                            f"[EventMapManager] Deferred focus and select_range set on label_entry.")
+                            "[EventMapManager] Deferred focus and select_range set on label_entry.")
                     else:
-                        self.app_ref.debug(f"[EventMapManager] Deferred focus: label_entry does not exist.")
+                        self.app_ref.debug("[EventMapManager] Deferred focus: label_entry does not exist.")
 
                 self.app_ref.after(50, deferred_focus)
             except Exception as e:
                 self.app_ref.log(f"Warning [EventMapManager]: Error during focus attempt: {e}")
         else:
-            self.app_ref.debug(f"[EventMapManager] Skipping focus (focus_new_row is False).")
+            self.app_ref.debug("[EventMapManager] Skipping focus (focus_new_row is False).")
 
         def deferred_scroll():
             if self.app_ref.event_map_scroll_frame and self.app_ref.event_map_scroll_frame.winfo_exists():
                 self.app_ref.event_map_scroll_frame._parent_canvas.yview_moveto(1.0)
-                self.app_ref.debug(f"[EventMapManager] Deferred scroll of event_map_scroll_frame to bottom.")
+                self.app_ref.debug("[EventMapManager] Deferred scroll of event_map_scroll_frame to bottom.")
             else:
-                self.app_ref.debug(f"[EventMapManager] Deferred scroll: scroll_frame does not exist.")
+                self.app_ref.debug("[EventMapManager] Deferred scroll: scroll_frame does not exist.")
 
         self.app_ref.after(100, deferred_scroll)
 
@@ -190,7 +190,8 @@ class EventMapManager:
                     entry_to_remove_idx = i
                     break
             if entry_to_remove_idx != -1:
-                if entry_frame_to_remove.winfo_exists(): entry_frame_to_remove.destroy()
+                if entry_frame_to_remove.winfo_exists():
+                    entry_frame_to_remove.destroy()
                 del self.app_ref.event_map_entries[entry_to_remove_idx]
                 self.app_ref.log("Event map row removed.")
                 if not self.app_ref.event_map_entries:
@@ -208,5 +209,6 @@ class EventMapManager:
         self.add_event_map_entry_from_manager(event=event)
         if self.app_ref.event_map_entries:
             newly_added_row_label = self.app_ref.event_map_entries[-1]['label']
-            if newly_added_row_label.winfo_exists(): newly_added_row_label.focus_set()
+            if newly_added_row_label.winfo_exists():
+                newly_added_row_label.focus_set()
         return "break"
