@@ -513,7 +513,9 @@ def run_source_localization(
         )
         evoked = source_localization.average_cycles(cycle_epochs)
         log_func("Averaged cycles into Evoked")
-        harmonic_freqs = [h * oddball_freq for h in harmonics]
+        # harmonics are specified in Hz in the settings dialog. Use them
+        # directly rather than scaling by the oddball frequency.
+        harmonic_freqs = harmonics
         if harmonic_freqs:
             log_func(
                 "Reconstructing harmonics: "

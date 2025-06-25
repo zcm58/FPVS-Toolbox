@@ -89,9 +89,10 @@ directly from the GUI.
 
 Additional parameters for band‑pass filtering and oddball cycle localisation can be
 configured under the **LORETA** tab in the Settings window. Here you may define
-the low and high filter bounds, choose which oddball harmonics to reconstruct and
-set the SNR value used when applying sLORETA. These values are populated in the
-Source Localization dialog so they can be tweaked per analysis.
+the low and high filter bounds, choose which oddball harmonics to reconstruct
+(specified in Hz, e.g. ``1.2, 2.4, 3.6``) and set the SNR value used when
+applying sLORETA. These values are populated in the Source Localization dialog
+so they can be tweaked per analysis.
 
 
 
