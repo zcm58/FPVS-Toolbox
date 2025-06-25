@@ -32,8 +32,14 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.output_var = tk.StringVar(master=self)
         self.method_var = tk.StringVar(master=self, value="eLORETA")
         self.threshold_var = tk.DoubleVar(master=self, value=0.0)
+        # use a separate StringVar for the entry widget so partially typed
+        # values don't raise TclError
+        self.threshold_str = tk.StringVar(master=self, value="0.0")
+
         # Default to 60% transparency (alpha = 0.4)
         self.alpha_var = tk.DoubleVar(master=self, value=0.4)
+        # similarly, the entry uses a StringVar to avoid invalid double strings
+        self.alpha_str = tk.StringVar(master=self, value="0.4")
 
         self.hemi_var = tk.StringVar(master=self, value="both")
 
@@ -92,7 +98,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             command=self._on_threshold_slider,
         )
         self.threshold_slider.grid(row=3, column=1, sticky="we", padx=PAD_X, pady=PAD_Y)
-        self.threshold_entry = ctk.CTkEntry(frame, textvariable=self.threshold_var, width=60)
+        self.threshold_entry = ctk.CTkEntry(frame, textvariable=self.threshold_str, width=60)
         self.threshold_entry.grid(row=3, column=2, sticky="w", padx=PAD_X, pady=PAD_Y)
         self.threshold_entry.bind("<Return>", self._on_threshold_entry)
         self.threshold_entry.bind("<FocusOut>", self._on_threshold_entry)
@@ -106,7 +112,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             command=self._on_alpha_slider,
         )
         self.alpha_slider.grid(row=4, column=1, sticky="we", padx=PAD_X, pady=PAD_Y)
-        self.alpha_entry = ctk.CTkEntry(frame, textvariable=self.alpha_var, width=60)
+        self.alpha_entry = ctk.CTkEntry(frame, textvariable=self.alpha_str, width=60)
         self.alpha_entry.grid(row=4, column=2, sticky="w", padx=PAD_X, pady=PAD_Y)
         self.alpha_entry.bind("<Return>", self._on_alpha_entry)
         self.alpha_entry.bind("<FocusOut>", self._on_alpha_entry)
@@ -243,6 +249,9 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             messagebox.showerror("Error", "Select an output folder.")
             return
         method = self.method_var.get()
+        # ensure any in-progress edits are parsed
+        self._on_threshold_entry()
+        self._on_alpha_entry()
         thr = self.threshold_var.get()
         self.progress_var.set(0)
         self.remaining_var.set("")
@@ -350,24 +359,29 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
     def _on_threshold_slider(self, value: float) -> None:
         """Update variable when slider moves."""
         try:
-            self.threshold_var.set(round(float(value), 3))
+            new_val = round(float(value), 3)
+            self.threshold_var.set(new_val)
+            self.threshold_str.set(str(new_val))
         except tk.TclError:
             pass
 
     def _on_threshold_entry(self, _event=None) -> None:
         """Validate entry value and update slider."""
         try:
-            value = float(self.threshold_var.get())
+            value = float(self.threshold_str.get())
         except (ValueError, tk.TclError):
             return
         value = max(0.0, min(1.0, value))
         self.threshold_var.set(value)
+        self.threshold_str.set(str(value))
         self.threshold_slider.set(value)
 
     def _on_alpha_slider(self, value: float) -> None:
         """Update alpha when slider moves."""
         try:
-            self.alpha_var.set(round(float(value), 2))
+            new_val = round(float(value), 2)
+            self.alpha_var.set(new_val)
+            self.alpha_str.set(str(new_val))
         except tk.TclError:
             return
         if self.brain is not None:
@@ -379,11 +393,12 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
     def _on_alpha_entry(self, _event=None) -> None:
         """Validate entry value and update slider."""
         try:
-            value = float(self.alpha_var.get())
+            value = float(self.alpha_str.get())
         except (ValueError, tk.TclError):
             return
         value = max(0.1, min(1.0, value))
         self.alpha_var.set(value)
+        self.alpha_str.set(str(value))
         self.alpha_slider.set(value)
         if self.brain is not None:
             eloreta_runner.logger.debug(
