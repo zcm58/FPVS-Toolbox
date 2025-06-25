@@ -35,6 +35,19 @@ for mod in ("pyvista", "pyvistaqt"):
         except Exception as err:  # pragma: no cover - optional
             logger.debug("%s version lookup failed: %s", mod, err)
 
+# Ensure we use the interactive PyVista backend if available so that
+# transparency updates take effect at runtime.
+try:  # pragma: no cover - best effort
+    if (
+        hasattr(mne.viz, "set_3d_backend")
+        and hasattr(mne.viz, "get_3d_backend")
+        and mne.viz.get_3d_backend() != "pyvistaqt"
+    ):
+        mne.viz.set_3d_backend("pyvistaqt", verbose=False)
+        logger.debug("3D backend set to pyvistaqt")
+except Exception as err:  # pragma: no cover - optional
+    logger.debug("Failed to set 3D backend: %s", err)
+
 
 def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
     """Safely set the window title of a Brain viewer."""
@@ -50,33 +63,51 @@ def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
 def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     """Set the transparency of a Brain viewer in a version robust way."""
     logger.debug("_set_brain_alpha called with %s", alpha)
+    success = False
     try:
         if hasattr(brain, "set_alpha"):
             logger.debug("Using Brain.set_alpha")
             brain.set_alpha(alpha)  # type: ignore[call-arg]
-        else:
-
-            logger.debug("Falling back to setting Brain.alpha attribute")
-
+            success = True
+        elif hasattr(brain, "alpha"):
+            logger.debug("Setting Brain.alpha attribute")
             setattr(brain, "alpha", alpha)
+            success = True
     except Exception:
         logger.debug("Direct alpha methods failed", exc_info=True)
+
+    if not success:
         try:
+            actors = []
             for hemi in getattr(brain, "_hemi_data", {}).values():
                 mesh = getattr(hemi, "mesh", None)
                 if mesh is not None and hasattr(mesh, "actor"):
-                    mesh.actor.GetProperty().SetOpacity(alpha)
+                    actors.append(mesh.actor)
                 for layer in getattr(hemi, "layers", {}).values():
                     actor = getattr(layer, "actor", None)
                     if actor is not None:
-                        actor.GetProperty().SetOpacity(alpha)
+                        actors.append(actor)
 
-            # PyVista backend stores additional actors in _layered_meshes
             for hemi_layers in getattr(brain, "_layered_meshes", {}).values():
                 for layer in hemi_layers.values():
                     actor = getattr(layer, "actor", None)
                     if actor is not None:
-                        actor.GetProperty().SetOpacity(alpha)
+                        actors.append(actor)
+
+            for actor in getattr(brain, "_actors", {}).values():
+                if hasattr(actor, "GetProperty"):
+                    actors.append(actor)
+                elif hasattr(actor, "actor"):
+                    a = getattr(actor, "actor", None)
+                    if a is not None:
+                        actors.append(a)
+
+            for actor in actors:
+                try:
+                    actor.GetProperty().SetOpacity(alpha)
+                except Exception:
+                    pass
+            success = bool(actors)
         except Exception:
             logger.debug("Failed to set brain alpha via mesh actors", exc_info=True)
 
@@ -84,7 +115,6 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
         renderer = getattr(brain, "_renderer", None)
         plotter = getattr(renderer, "plotter", None)
         if plotter is not None and hasattr(plotter, "render"):
-
             logger.debug("Triggering plotter.render()")
             plotter.render()
         elif renderer is not None and hasattr(renderer, "_update"):
