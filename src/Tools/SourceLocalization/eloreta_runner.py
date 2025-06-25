@@ -107,9 +107,14 @@ def get_current_backend() -> str:
     return str(backend).lower()
 
 
-def is_pyvista_backend() -> bool:
+def is_pyvistaqt_backend() -> bool:
     """Check if the PyVistaQt backend is active."""
     return get_current_backend() == "pyvistaqt"
+
+
+def is_pyvista_backend() -> bool:
+    """Alias for :func:`is_pyvistaqt_backend`."""
+    return is_pyvistaqt_backend()
 
 
 def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:

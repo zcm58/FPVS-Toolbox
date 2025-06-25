@@ -78,7 +78,7 @@ adjust the brain transparency. A hemisphere selector lets you view the left
 hemisphere, right hemisphere, both together, or a split layout. Activity is
 displayed with a red heatmap so you can easily spot the peak response.
 
-The underlying module exposes an `is_pyvista_backend()` helper which
+The underlying module exposes an `is_pyvistaqt_backend()` helper which
 returns ``True`` when the viewer will use the interactive PyVistaQt
 backend. This can be queried before opening any 3‑D windows to ensure
 that PyVistaQt is active.
