@@ -159,6 +159,8 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self._target_progress = 0.0
         self._animating_progress = False
         self._settings_win = None
+        self._queue_job_id = None
+        self._detect_job_id = None
 
         # --- Register Validation Commands ---
         self.validate_num_cmd = (self.register(self._validate_numeric_input), '%P')
@@ -169,6 +171,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.create_menu()
         self.create_widgets()  # This will call SetupPanelManager and EventMapManager
         self._apply_loaded_settings()
+        self.protocol("WM_DELETE_WINDOW", self.quit)
 
 
         # --- Initial UI State ---
@@ -354,10 +357,21 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     def quit(self):
         if (self.processing_thread and self.processing_thread.is_alive()) or \
            (self.detection_thread and self.detection_thread.is_alive()):
-            if messagebox.askyesno("Exit Confirmation", "Processing or detection ongoing. Stop and exit?"):
-                self.destroy()
-        else:
-            self.destroy()
+            if not messagebox.askyesno(
+                "Exit Confirmation",
+                "Processing or detection ongoing. Stop and exit?",
+            ):
+                return
+
+        # Cancel any pending Tk jobs before quitting
+        for job_id in (getattr(self, "_queue_job_id", None), getattr(self, "_detect_job_id", None)):
+            if job_id is not None:
+                try:
+                    self.after_cancel(job_id)
+                except Exception:
+                    pass
+
+        self.destroy()
 
 
     # --- Validation Methods ---

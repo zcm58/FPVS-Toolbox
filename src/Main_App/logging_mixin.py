@@ -17,6 +17,8 @@ class LoggingMixin:
 
     def log(self, message: str, level: int = logging.INFO) -> None:
         """Write ``message`` to the GUI log widget and :mod:`logging`."""
+        if tk is None:  # During interpreter shutdown ``tk`` may be ``None``
+            return
         ts = pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]
         formatted = f"{ts} [GUI]: {message}\n"
 

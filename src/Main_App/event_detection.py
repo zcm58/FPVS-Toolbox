@@ -12,6 +12,7 @@ from tkinter import messagebox
 import config
 
 class EventDetectionMixin:
+    _detect_job_id = None
     def detect_and_show_event_ids(self):
         self.busy = True
         self._set_controls_enabled(False)
@@ -37,7 +38,7 @@ class EventDetectionMixin:
                 daemon=True,
             )
             self.detection_thread.start()
-            self.after(100, self._periodic_detection_queue_check)
+            self._detect_job_id = self.after(100, self._periodic_detection_queue_check)
         except Exception as start_err:
             self.log(f"Error starting detection thread: {start_err}")
             messagebox.showerror("Thread Error", f"Could not start detection thread:\n{start_err}")
@@ -112,9 +113,11 @@ class EventDetectionMixin:
 
             self.detection_thread = None
             gc.collect()
+            self._detect_job_id = None
         else:
             if self.detection_thread and self.detection_thread.is_alive():
-                self.after(100, self._periodic_detection_queue_check)
+                self._detect_job_id = self.after(100, self._periodic_detection_queue_check)
             else:
                 self.log("Warning: Detection thread ended unexpectedly.")
                 self.busy = False
+                self._detect_job_id = None

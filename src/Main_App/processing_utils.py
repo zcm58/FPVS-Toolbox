@@ -39,6 +39,7 @@ def _stc_basename_from_fif(path: str) -> str:
     return name
 
 class ProcessingMixin:
+    _queue_job_id = None
     def start_processing(self):
         if self.processing_thread and self.processing_thread.is_alive():
             messagebox.showwarning("Busy", "Processing is already running.")
@@ -69,7 +70,7 @@ class ProcessingMixin:
         args = (list(self.data_paths), self.validated_params.copy(), self.gui_queue)
         self.processing_thread = threading.Thread(target=self._processing_thread_func, args=args, daemon=True)
         self.processing_thread.start()
-        self.after(100, self._periodic_queue_check)
+        self._queue_job_id = self.after(100, self._periodic_queue_check)
 
     def _periodic_queue_check(self):
         done = False
@@ -122,7 +123,7 @@ class ProcessingMixin:
             pass
 
         if not done and self.processing_thread and self.processing_thread.is_alive():
-            self.after(100, self._periodic_queue_check)
+            self._queue_job_id = self.after(100, self._periodic_queue_check)
         else:
             self._finalize_processing(done)
 
@@ -176,6 +177,7 @@ class ProcessingMixin:
             self.log_text.configure(state="disabled")
 
         self.processing_thread = None
+        self._queue_job_id = None
         gc.collect()
 
         self.log("--- State Reset. Ready for next run. ---")
