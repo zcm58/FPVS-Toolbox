@@ -16,7 +16,7 @@ import re
 from tkinter import messagebox
 import tkinter as tk
 import config
-from Tools.SourceLocalization import runner as eloreta_runner
+from Tools.SourceLocalization import runner as eloreta_runner, source_model
 from Main_App.post_process import post_process as _external_post_process
 from Main_App.eeg_preprocessing import perform_preprocessing
 from Main_App.load_utils import load_eeg_file
@@ -463,7 +463,6 @@ class ProcessingMixin:
 
                         # === Source localization ===
                         try:
-                            import source_model
 
                             fwd, subj, subj_dir = source_model.prepare_head_model(raw_proc)
                             noise_cov = source_model.estimate_noise_cov(raw_proc)
@@ -530,6 +529,20 @@ class ProcessingMixin:
                                     os.makedirs(out_folder, exist_ok=True)
                                     try:
                                         gui_queue.put({'type': 'log', 'message': f"Running oddball localization for {cond_label}..."})
+                                        thr_str = self.settings.get('loreta', 'loreta_threshold', '0.0')
+                                        try:
+                                            thr_val = float(thr_str)
+                                        except ValueError:
+                                            thr_val = None
+                                        start_ms = self.settings.get('loreta', 'time_window_start_ms', '')
+                                        end_ms = self.settings.get('loreta', 'time_window_end_ms', '')
+                                        try:
+                                            t_window = (
+                                                float(start_ms),
+                                                float(end_ms),
+                                            ) if start_ms and end_ms else None
+                                        except ValueError:
+                                            t_window = None
                                         eloreta_runner.run_source_localization(
                                             cond_path,
                                             out_folder,
@@ -539,6 +552,8 @@ class ProcessingMixin:
                                             progress_cb=lambda f: gui_queue.put({'type': 'log', 'message': f"Localization {cond_label}: {int(f*100)}%"}),
                                             show_brain=not batch_mode,
                                             epochs=epoch_list[0],
+                                            threshold=thr_val,
+                                            time_window=t_window,
                                         )
                                         gui_queue.put({'type': 'log', 'message': f"Localization complete for {cond_label}."})
                                     except Exception as e_loc:

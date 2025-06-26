@@ -188,13 +188,28 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(loreta_tab, textvariable=snr_var).grid(row=3, column=1, sticky="ew", padx=pad)
         self.snr_var = snr_var
 
+        ctk.CTkLabel(loreta_tab, text="Threshold").grid(row=5, column=0, sticky="w", padx=pad)
+        thr_var = tk.StringVar(value=self.manager.get('loreta', 'loreta_threshold', '0.0'))
+        ctk.CTkEntry(loreta_tab, textvariable=thr_var).grid(row=5, column=1, sticky="ew", padx=pad)
+        self.thr_var = thr_var
+
+        ctk.CTkLabel(loreta_tab, text="Time Window (ms)").grid(row=6, column=0, sticky="w", padx=pad)
+        t_start_var = tk.StringVar(value=self.manager.get('loreta', 'time_window_start_ms', ''))
+        t_end_var = tk.StringVar(value=self.manager.get('loreta', 'time_window_end_ms', ''))
+        ctk.CTkEntry(loreta_tab, textvariable=t_start_var, width=80).grid(row=6, column=1, sticky="w", padx=pad)
+        ctk.CTkEntry(loreta_tab, textvariable=t_end_var, width=80).grid(row=6, column=2, sticky="w", padx=pad)
+        self.t_start_var = t_start_var
+        self.t_end_var = t_end_var
+
         auto_loc_default = self.manager.get('loreta', 'auto_oddball_localization', 'False').lower() == 'true'
         self.auto_loc_var = tk.BooleanVar(value=auto_loc_default)
         ctk.CTkCheckBox(
             loreta_tab,
             text="Auto Oddball Localization",
             variable=self.auto_loc_var,
+
         ).grid(row=4, column=0, columnspan=2, sticky="w", padx=pad)
+
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=1, column=0, pady=(0, pad))
@@ -231,6 +246,9 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('loreta', 'loreta_high_freq', self.high_var.get())
         self.manager.set('loreta', 'oddball_harmonics', self.harm_var.get())
         self.manager.set('loreta', 'loreta_snr', self.snr_var.get())
+        self.manager.set('loreta', 'loreta_threshold', self.thr_var.get())
+        self.manager.set('loreta', 'time_window_start_ms', self.t_start_var.get())
+        self.manager.set('loreta', 'time_window_end_ms', self.t_end_var.get())
         self.manager.set(
             'loreta',
             'auto_oddball_localization',

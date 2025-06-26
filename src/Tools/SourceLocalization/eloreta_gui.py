@@ -34,10 +34,16 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.input_var = tk.StringVar(master=self)
         self.output_var = tk.StringVar(master=self)
         self.method_var = tk.StringVar(master=self, value="eLORETA")
-        self.threshold_var = tk.DoubleVar(master=self, value=0.0)
+
+        settings = SettingsManager()
+        try:
+            thr = float(settings.get('loreta', 'loreta_threshold', '0.0'))
+        except ValueError:
+            thr = 0.0
+        self.threshold_var = tk.DoubleVar(master=self, value=thr)
         # use a separate StringVar for the entry widget so partially typed
         # values don't raise TclError
-        self.threshold_str = tk.StringVar(master=self, value="0.0")
+        self.threshold_str = tk.StringVar(master=self, value=str(thr))
 
         # Default to 50% transparency (alpha = 0.5)
         self.alpha_var = tk.DoubleVar(master=self, value=0.5)
@@ -46,7 +52,6 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         self.hemi_var = tk.StringVar(master=self, value="both")
 
-        settings = SettingsManager()
         try:
             low = float(settings.get('loreta', 'loreta_low_freq', '0.1'))
         except ValueError:
@@ -64,8 +69,12 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             snr = 3.0
         self.snr_var = tk.DoubleVar(master=self, value=snr)
         self.oddball_var = tk.BooleanVar(master=self, value=False)
-        self.time_start_var = tk.StringVar(master=self, value="")
-        self.time_end_var = tk.StringVar(master=self, value="")
+        self.time_start_var = tk.StringVar(
+            master=self, value=settings.get('loreta', 'time_window_start_ms', '')
+        )
+        self.time_end_var = tk.StringVar(
+            master=self, value=settings.get('loreta', 'time_window_end_ms', '')
+        )
 
         self.avg_mode_var = tk.StringVar(master=self, value="Raw amplitudes")
 
