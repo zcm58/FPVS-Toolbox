@@ -10,7 +10,7 @@ import mne
 import numpy as np
 from scipy.stats import kurtosis
 
-from config import DEFAULT_STIM_CHANNEL
+import config
 
 
 
@@ -24,7 +24,7 @@ def preprocess_raw(app, raw, **params):
     ref1 = params.get('ref_channel1')
     ref2 = params.get('ref_channel2')
     max_keep = params.get('max_idx_keep')
-    stim_ch = params.get('stim_channel', DEFAULT_STIM_CHANNEL)
+    stim_ch = params.get('stim_channel', config.DEFAULT_STIM_CHANNEL)
 
     current_filename = "UnknownFile"
     if raw.filenames and raw.filenames[0]:

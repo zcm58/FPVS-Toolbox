@@ -15,7 +15,7 @@ import pandas as pd
 import re
 from tkinter import messagebox
 import tkinter as tk
-from config import DEFAULT_STIM_CHANNEL
+import config
 from Tools.SourceLocalization import runner as eloreta_runner
 from Main_App.post_process import post_process as _external_post_process
 from Main_App.eeg_preprocessing import perform_preprocessing
@@ -218,7 +218,7 @@ class ProcessingMixin:
         import gc
 
         event_id_map_from_gui = params.get('event_id_map', {})
-        stim_channel_name = params.get('stim_channel', DEFAULT_STIM_CHANNEL)
+        stim_channel_name = params.get('stim_channel', config.DEFAULT_STIM_CHANNEL)
         save_folder = self.save_folder_path.get()
         max_bad_channels_alert_thresh = params.get('max_bad_channels_alert_thresh', 9999)
 

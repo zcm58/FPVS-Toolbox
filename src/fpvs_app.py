@@ -53,6 +53,7 @@ from config import (
     FPVS_TOOLBOX_REPO_PAGE,
     DEFAULT_STIM_CHANNEL
 )
+import config
 
 from Main_App.post_process import post_process as _external_post_process
 
@@ -522,6 +523,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         # Stim channel override
         global DEFAULT_STIM_CHANNEL
         DEFAULT_STIM_CHANNEL = self.settings.get('stim', 'channel', DEFAULT_STIM_CHANNEL)
+        config.DEFAULT_STIM_CHANNEL = DEFAULT_STIM_CHANNEL
 
     def open_settings_window(self):
         """Open the Settings window if not already open."""
