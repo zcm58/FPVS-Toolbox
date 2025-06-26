@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 import logging
+from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 import numpy as np
@@ -23,22 +23,20 @@ def _load_data(fif_path: str) -> mne.Evoked:
     return mne.read_evokeds(fif_path, condition=0, baseline=(None, 0))
 
 
-def _default_template_location() -> str:
+def _default_template_location() -> Path:
     """Return the directory where the template MRI should reside."""
-    base_dir = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "..")
-    )
-    return os.path.join(base_dir, "fsaverage")
+    base_dir = Path(__file__).resolve().parents[2]
+    return base_dir / "fsaverage"
 
 
-def _dir_size_mb(path: str) -> float:
+def _dir_size_mb(path: str | Path) -> float:
     """Return the size of ``path`` in megabytes."""
+    path = Path(path)
     total = 0
-    for root, _, files in os.walk(path):
-        for fname in files:
-            fpath = os.path.join(root, fname)
+    for child in path.rglob("*"):
+        if child.is_file():
             try:
-                total += os.path.getsize(fpath)
+                total += child.stat().st_size
             except OSError:
                 pass
     return total / (1024 * 1024)
@@ -80,16 +78,17 @@ def _estimate_epochs_covariance(
 
 
 def fetch_fsaverage_with_progress(
-    subjects_dir: str, log_func: Callable[[str], None] = logger.info
+    subjects_dir: str | Path, log_func: Callable[[str], None] = logger.info
 ) -> str:
     """Download ``fsaverage`` while logging progress to ``log_func``."""
+    subjects_dir = Path(subjects_dir)
     stop_event = threading.Event()
 
     def _report():
-        dest = os.path.join(subjects_dir, "fsaverage")
+        dest = subjects_dir / "fsaverage"
         last = -1.0
         while not stop_event.is_set():
-            if os.path.isdir(dest):
+            if dest.is_dir():
                 size = _dir_size_mb(dest)
                 if size != last:
                     log_func(f"Downloaded {size:.1f} MB...")
@@ -99,13 +98,15 @@ def fetch_fsaverage_with_progress(
     thread = threading.Thread(target=_report, daemon=True)
     thread.start()
     try:
-        path = mne.datasets.fetch_fsaverage(subjects_dir=subjects_dir, verbose=True)
+        path = Path(
+            mne.datasets.fetch_fsaverage(subjects_dir=str(subjects_dir), verbose=True)
+        )
     finally:
         stop_event.set()
         thread.join()
 
     log_func(f"Download complete. Total size: {_dir_size_mb(path):.1f} MB")
-    return path
+    return str(path)
 
 
 def _prepare_forward(
@@ -115,18 +116,19 @@ def _prepare_forward(
 ) -> tuple[mne.Forward, str, str]:
     """Construct a forward model using MRI info from settings or fsaverage."""
     stored_dir = settings.get("loreta", "mri_path", "")
+    stored_dir_path: Path | None = None
     if stored_dir:
-        stored_dir = os.path.normpath(stored_dir)
+        stored_dir_path = Path(stored_dir).resolve()
     subject = "fsaverage"
 
-    log_func(f"Initial stored MRI directory: {stored_dir}")
+    log_func(f"Initial stored MRI directory: {stored_dir_path or stored_dir}")
 
-    if not stored_dir or not os.path.isdir(stored_dir):
+    if stored_dir_path is None or not stored_dir_path.is_dir():
         log_func(
             "Default MRI template not found. Downloading 'fsaverage'. This may take a few minutes..."
         )
 
-        install_parent = os.path.dirname(_default_template_location())
+        install_parent = _default_template_location().parent
         log_func(f"Attempting download to: {install_parent}")
         try:
             fs_path = fetch_fsaverage_with_progress(install_parent, log_func)
@@ -134,8 +136,8 @@ def _prepare_forward(
             log_func(
                 f"Progress download failed ({err}). Falling back to mne.datasets.fetch_fsaverage"
             )
-            fs_path = mne.datasets.fetch_fsaverage(
-                subjects_dir=install_parent, verbose=True
+            fs_path = Path(
+                mne.datasets.fetch_fsaverage(subjects_dir=str(install_parent), verbose=True)
             )
         settings.set("loreta", "mri_path", str(fs_path))
 
@@ -146,45 +148,45 @@ def _prepare_forward(
 
         log_func(f"Template downloaded to: {fs_path}")
 
-        stored_dir = fs_path
+        stored_dir_path = Path(fs_path)
     else:
-        log_func(f"Using existing MRI directory: {stored_dir}")
+        log_func(f"Using existing MRI directory: {stored_dir_path}")
 
-    if os.path.basename(stored_dir) == subject:
-        subjects_dir = os.path.dirname(stored_dir)
-        log_func(f"Parent directory for subjects set to: {subjects_dir}")
+    if stored_dir_path is not None and stored_dir_path.name == subject:
+        subjects_dir_path = stored_dir_path.parent
+        log_func(f"Parent directory for subjects set to: {subjects_dir_path}")
     else:
-        subjects_dir = stored_dir
-        log_func(f"Subjects directory resolved to: {subjects_dir}")
+        subjects_dir_path = stored_dir_path or _default_template_location().parent
+        log_func(f"Subjects directory resolved to: {subjects_dir_path}")
 
-    surf_dir = os.path.join(subjects_dir, subject, "surf")
+    surf_dir = subjects_dir_path / subject / "surf"
     log_func(f"Expecting surface files in: {surf_dir}")
 
     trans = settings.get("paths", "trans_file", "fsaverage")
     log_func(f"Using trans file: {trans}")
 
-    cache_dir = os.path.join(subjects_dir, "fpvs_cache")
-    os.makedirs(cache_dir, exist_ok=True)
-    fwd_file = os.path.join(cache_dir, f"forward-{subject}.fif")
+    cache_dir = subjects_dir_path / "fpvs_cache"
+    cache_dir.mkdir(exist_ok=True)
+    fwd_file = cache_dir / f"forward-{subject}.fif"
 
-    if os.path.isfile(fwd_file):
+    if fwd_file.is_file():
         log_func(f"Loading cached forward model from {fwd_file}")
-        fwd = mne.read_forward_solution(fwd_file)
-        return fwd, subject, subjects_dir
+        fwd = mne.read_forward_solution(str(fwd_file))
+        return fwd, subject, str(subjects_dir_path)
 
     log_func(
-        f"Building source space using subjects_dir={subjects_dir}, subject={subject}"
+        f"Building source space using subjects_dir={subjects_dir_path}, subject={subject}"
     )
     src = mne.setup_source_space(
-        subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False
+        subject, spacing="oct6", subjects_dir=str(subjects_dir_path), add_dist=False
     )
 
     log_func("Creating BEM model ...")
-    model = mne.make_bem_model(subject=subject, subjects_dir=subjects_dir, ico=4)
+    model = mne.make_bem_model(subject=subject, subjects_dir=str(subjects_dir_path), ico=4)
     bem = mne.make_bem_solution(model)
     log_func("Computing forward solution ...")
     fwd = mne.make_forward_solution(
         evoked.info, trans=trans, src=src, bem=bem, eeg=True
     )
-    mne.write_forward_solution(fwd_file, fwd, overwrite=True)
-    return fwd, subject, subjects_dir
+    mne.write_forward_solution(str(fwd_file), fwd, overwrite=True)
+    return fwd, subject, str(subjects_dir_path)
