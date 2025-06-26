@@ -12,17 +12,12 @@ For example, if we have 30 participants and 5 conditions in this format:
 - Condition 3: Green Fruit vs Green Veg
 - Condition 4: Green Veg vs Red Veg
 - Condition 5: Red Fruit vs Green Fruit
-
-We would want to average the loreta data for Condition 1, Condition 2, Condition 3, etc separately so that we'd 
-have an average source localization for each condition across all participants. This way we could report the average
-location of the oddball response for Fruit vs Veg, Veg vs Fruit, etc. This functionality is not currently implemented. 
+ 
 
 We also want to be able to view this average source localization in a 3D glass brain viewer so we can visually compare
 the responses across conditions. This functionality is not currently implemented, but the 3D glass brain viewer is 
 partially working. 
 
-Finally, we need to be able to output screenshots with partial transparency so that we can see the response if it 
-happens to be deeper in the brain than just surface. This functionality is not currently implemented. 
 
 Additions or edits within this directory should be made with these goals in mind. Try to keep the code modular and 
 if possible, 500 lines or less per file. We should design this module with future updates in mind. 
