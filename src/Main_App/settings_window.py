@@ -21,9 +21,13 @@ def _find_fsaverage_dir() -> str:
     """Return the fsaverage directory if it exists locally."""
     try:
         import mne
-        subjects_dir = mne.get_config('SUBJECTS_DIR', os.getenv('SUBJECTS_DIR'))
+        subjects_dir = mne.get_config("SUBJECTS_DIR", os.getenv("SUBJECTS_DIR"))
         if subjects_dir:
-            path = os.path.join(subjects_dir, 'fsaverage')
+            subjects_dir = os.path.expanduser(subjects_dir)
+            if os.path.basename(subjects_dir) == "fsaverage":
+                path = subjects_dir
+            else:
+                path = os.path.join(subjects_dir, "fsaverage")
             if os.path.isdir(path):
                 return path
     except Exception:
