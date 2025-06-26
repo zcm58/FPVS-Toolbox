@@ -154,20 +154,6 @@ def _set_colorbar_label(brain: mne.viz.Brain, label: str) -> None:
         logger.debug("Failed to set colorbar label", exc_info=True)
 
 
-def _add_brain_labels(brain: mne.viz.Brain, left: str, right: str) -> None:
-    """Add file name labels above each hemisphere view."""
-    try:
-        renderer = getattr(brain, "_renderer", None)
-        if renderer is not None and hasattr(renderer, "subplot"):
-            renderer.subplot(0, 0)
-        brain.add_text(0.5, 0.95, left, name="lh_label", font_size=10)
-        if renderer is not None and hasattr(renderer, "subplot"):
-            renderer.subplot(0, 1)
-        brain.add_text(0.5, 0.95, right, name="rh_label", font_size=10)
-    except Exception:
-        logger.debug("Failed to add hemisphere labels", exc_info=True)
-
-
 def save_brain_screenshots(
     brain: mne.viz.Brain,
     output_dir: str,
