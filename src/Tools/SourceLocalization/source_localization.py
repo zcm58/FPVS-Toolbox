@@ -9,6 +9,40 @@ import pandas as pd
 from typing import Sequence
 
 
+def morph_to_fsaverage(
+    stc: mne.SourceEstimate,
+    subject: str,
+    subjects_dir: str,
+    smooth: float = 5.0,
+) -> mne.SourceEstimate:
+    """Morph ``stc`` from ``subject`` to ``fsaverage``.
+
+    Parameters
+    ----------
+    stc
+        The source estimate to morph.
+    subject
+        Name of the subject the estimate belongs to.
+    subjects_dir
+        Directory containing the ``subject`` MRI and ``fsaverage`` template.
+    smooth
+        Optional smoothing (FWHM in mm) applied during morphing. Defaults to
+        ``5.0``.
+
+    Returns
+    -------
+    :class:`mne.SourceEstimate`
+        The morphed source estimate.
+    """
+
+    return stc.morph(
+        subject_to="fsaverage",
+        subject_from=subject,
+        subjects_dir=subjects_dir,
+        smooth=smooth,
+    )
+
+
 
 def extract_cycles(epochs: mne.Epochs, oddball_freq: float) -> mne.Epochs:
     """Segment epochs into single oddball cycles aligned to the trigger."""
