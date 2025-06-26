@@ -11,7 +11,10 @@ except Exception:
     pass
 
 from fpvs_app import FPVSApp
+from Main_App.debug_utils import configure_logging, get_settings
 
 if __name__ == "__main__":
+    settings = get_settings()
+    configure_logging(settings.debug_enabled())
     app = FPVSApp()
     app.mainloop()
