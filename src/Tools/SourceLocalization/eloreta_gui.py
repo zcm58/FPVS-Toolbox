@@ -65,6 +65,8 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.snr_var = tk.DoubleVar(master=self, value=snr)
         self.oddball_var = tk.BooleanVar(master=self, value=False)
 
+        self.avg_mode_var = tk.StringVar(master=self, value="Raw amplitudes")
+
 
         self.brain = None
 
@@ -155,19 +157,29 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         compare_btn.grid(row=12, column=0, columnspan=3, pady=(0, PAD_Y))
 
+        self.avgModeLabel = ctk.CTkLabel(frame, text="Averaging mode:")
+        self.avgModeLabel.grid(row=13, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        self.avgModeOptions = ctk.CTkOptionMenu(
+            frame,
+            variable=self.avg_mode_var,
+            values=["Raw amplitudes", "Normalized"],
+            command=self._on_avg_mode_change,
+        )
+        self.avgModeOptions.grid(row=13, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+
         avg_btn = ctk.CTkButton(
             frame,
             text="Average LORETA results",
             command=self._average_results,
         )
 
-        avg_btn.grid(row=13, column=0, columnspan=3, pady=(0, PAD_Y))
+        avg_btn.grid(row=14, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
-        self.progress_bar.grid(row=14, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
+        self.progress_bar.grid(row=15, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
         self.progress_bar.set(0)
 
-        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=15, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=16, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
 
 
     def _browse_file(self):
@@ -298,8 +310,14 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         def _task():
             try:
+                mode = self.avgModeOptions.get()
+                normalize = mode == "Normalized"
+                log_func(f"Averaging mode: {mode}")
                 runner.average_conditions_to_fsaverage(
-                    folder, subjects_dir, log_func=log_func
+                    folder,
+                    subjects_dir,
+                    log_func=log_func,
+                    normalize=normalize,
                 )
                 self.after(
                     0,
@@ -500,6 +518,10 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 "_on_alpha_entry updating brain to %s", value
             )
             visualization._set_brain_alpha(self.brain, value)
+
+    def _on_avg_mode_change(self, value: str) -> None:
+        """Callback when the averaging mode option is changed."""
+        self.avg_mode_var.set(value)
 
     def _open_brain(self, stc_path: str, thr: float, alpha: float, title: str) -> None:
         """Open a SourceEstimate in the interactive viewer on the main thread."""
