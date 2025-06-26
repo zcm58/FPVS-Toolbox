@@ -42,6 +42,13 @@ class DummyRenderer:
         self.plotter = DummyPlotter()
 
 
+class DummyLayeredMesh:
+    """Simplified stand-in for mne.viz._LayeredMesh."""
+
+    def __init__(self):
+        self.actor = DummyActor()
+
+
 def test_set_brain_alpha_applies_and_renders(monkeypatch):
     module = _import_brain_utils(monkeypatch)
     brain = types.SimpleNamespace(
@@ -71,3 +78,19 @@ def test_save_brain_screenshots(tmp_path, monkeypatch):
     assert views == ["lat", "rostral", "dorsal"]
     assert len(saved) == 4
     assert all(path.startswith(str(tmp_path)) for path in saved)
+
+
+def test_set_brain_alpha_layered_mesh(monkeypatch):
+    module = _import_brain_utils(monkeypatch)
+    layered = DummyLayeredMesh()
+    brain = types.SimpleNamespace(
+        _renderer=DummyRenderer(),
+        _actors={"a": DummyActor()},
+        _layered_meshes={"lh": {"pial": layered}},
+    )
+
+    module._set_brain_alpha(brain, 0.75)
+
+    assert brain._actors["a"].opacity == 0.75
+    assert layered.actor.opacity == 0.75
+    assert brain._renderer.plotter.render_calls == 1
