@@ -71,6 +71,13 @@ except Exception as err:  # pragma: no cover - optional
     logger.debug("Failed to set 3D backend: %s", err)
 
 
+def _update_progress(
+    progress_cb: Optional[Callable[[float], None]], step: int, total: int
+) -> None:
+    """Call ``progress_cb`` with the completed fraction if provided."""
+
+    if progress_cb:
+        progress_cb(step / total)
 
 
 def run_source_localization(
@@ -155,8 +162,7 @@ def run_source_localization(
     )
     step = 0
     total = 7
-    if progress_cb:
-        progress_cb(0.0)
+    _update_progress(progress_cb, step, total)
     if epochs is not None:
         log_func("Using in-memory epochs")
     else:
@@ -265,31 +271,27 @@ def run_source_localization(
             )
             noise_cov = mne.make_ad_hoc_cov(evoked.info)
     step += 1
-    if progress_cb:
-        progress_cb(step / total)
+    _update_progress(progress_cb, step, total)
 
     log_func("Preparing forward model ...")
     fwd, subject, subjects_dir = _prepare_forward(evoked, settings, log_func)
     log_func(f"Forward model ready. subjects_dir={subjects_dir}, subject={subject}")
     step += 1
-    if progress_cb:
-        progress_cb(step / total)
+    _update_progress(progress_cb, step, total)
 
 
 
     if oddball:
         inv = source_localization.build_inverse_operator(evoked, subjects_dir)
         step += 1
-        if progress_cb:
-            progress_cb(step / total)
+        _update_progress(progress_cb, step, total)
         stc = source_localization.apply_sloreta(evoked, inv, snr)
     else:
         inv = mne.minimum_norm.make_inverse_operator(
             evoked.info, fwd, noise_cov, reg=0.05
         )
         step += 1
-        if progress_cb:
-            progress_cb(step / total)
+        _update_progress(progress_cb, step, total)
 
         method_lower = method.lower()
         if method_lower not in {"eloreta", "sloreta"}:
@@ -301,16 +303,14 @@ def run_source_localization(
     if threshold:
         stc = _threshold_stc(stc, threshold)
     step += 1
-    if progress_cb:
-        progress_cb(step / total)
+    _update_progress(progress_cb, step, total)
 
     os.makedirs(output_dir, exist_ok=True)
     base_name = stc_basename or "source"
     stc_path = os.path.join(output_dir, base_name)
     stc.save(stc_path)
     step += 1
-    if progress_cb:
-        progress_cb(step / total)
+    _update_progress(progress_cb, step, total)
 
     brain = None
     if show_brain:
@@ -394,12 +394,10 @@ def run_source_localization(
             log_func(f"ROI export failed: {err}")
 
     step += 1
-    if progress_cb:
-        progress_cb(step / total)
+    _update_progress(progress_cb, step, total)
 
     log_func(f"Results saved to {output_dir}")
-    if progress_cb:
-        progress_cb(1.0)
+    _update_progress(progress_cb, step, total)
 
 
     return stc_path, brain
