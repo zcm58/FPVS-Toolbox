@@ -3,10 +3,13 @@
 """
 Handles the EEG preprocessing pipeline for the FPVS Toolbox.
 """
+import logging
 import mne
 import numpy as np
 from scipy.stats import kurtosis
 import traceback
+
+logger = logging.getLogger(__name__)
 
 # Import configuration with a graceful fallback when run standalone
 try:
@@ -16,8 +19,10 @@ except ImportError:  # pragma: no cover - fallback for isolated execution
         DEFAULT_STIM_CHANNEL = "Status"
 
     config = _DummyConfig()
-    print(
-        f"Warning [eeg_preprocessing.py]: Could not import config. Using '{config.DEFAULT_STIM_CHANNEL}'.")
+    logger.warning(
+        "Warning [eeg_preprocessing.py]: Could not import config. Using '%s'.",
+        config.DEFAULT_STIM_CHANNEL,
+    )
 
 
 def perform_preprocessing(raw_input: mne.io.BaseRaw,
