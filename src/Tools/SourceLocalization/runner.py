@@ -216,11 +216,15 @@ def run_source_localization(
                 epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
             if baseline is not None:
                 epochs.apply_baseline(baseline)
+
+            # compute covariance before cropping away the baseline interval
+            noise_cov = _estimate_epochs_covariance(epochs, log_func, baseline)
+
             cycle_epochs = source_localization.extract_cycles(epochs, oddball_freq)
             log_func(
                 f"Extracted {len(cycle_epochs)} cycles of {1.0 / oddball_freq:.3f}s each"
             )
-            noise_cov = _estimate_epochs_covariance(cycle_epochs, log_func, baseline)
+
             evoked = source_localization.average_cycles(cycle_epochs)
             log_func("Averaged cycles into Evoked")
             harmonic_freqs = harmonics
@@ -230,8 +234,7 @@ def run_source_localization(
                     + ", ".join(f"{h:.2f}Hz" for h in harmonic_freqs)
                 )
                 evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
-                if baseline is not None:
-                    evoked.apply_baseline(baseline)
+
             evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
             if time_window is not None:
                 tmin, tmax = time_window
@@ -253,11 +256,13 @@ def run_source_localization(
             epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
         if baseline is not None:
             epochs.apply_baseline(baseline)
+        # estimate covariance before segmenting into cycles
+        noise_cov = _estimate_epochs_covariance(epochs, log_func, baseline)
+
         cycle_epochs = source_localization.extract_cycles(epochs, oddball_freq)
         log_func(
             f"Extracted {len(cycle_epochs)} cycles of {1.0 / oddball_freq:.3f}s each"
         )
-        noise_cov = _estimate_epochs_covariance(cycle_epochs, log_func, baseline)
         evoked = source_localization.average_cycles(cycle_epochs)
         log_func("Averaged cycles into Evoked")
         harmonic_freqs = harmonics
@@ -267,8 +272,6 @@ def run_source_localization(
                 + ", ".join(f"{h:.2f}Hz" for h in harmonic_freqs)
             )
             evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
-            if baseline is not None:
-                evoked.apply_baseline(baseline)
         evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
         if time_window is not None:
             tmin, tmax = time_window
