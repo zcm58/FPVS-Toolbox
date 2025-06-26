@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import logging
 import importlib
+from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 import numpy as np
@@ -73,6 +74,13 @@ except Exception as err:  # pragma: no cover - optional
     logger.debug("Failed to set 3D backend: %s", err)
 
 
+def _update_progress(
+    progress_cb: Optional[Callable[[float], None]], step: int, total: int
+) -> None:
+    """Call ``progress_cb`` with the completed fraction if provided."""
+
+    if progress_cb:
+        progress_cb(step / total)
 
 def run_source_localization(
     fif_path: str | None,
@@ -127,7 +135,9 @@ def run_source_localization(
     )
     step = 0
     total = 7
+
     update_progress(step, total, progress_cb)
+
     if epochs is not None:
         log_func("Using in-memory epochs")
     else:
@@ -236,25 +246,32 @@ def run_source_localization(
             )
             noise_cov = mne.make_ad_hoc_cov(evoked.info)
     step += 1
+
     update_progress(step, total, progress_cb)
+
 
     log_func("Preparing forward model ...")
     fwd, subject, subjects_dir = _prepare_forward(evoked, settings, log_func)
     log_func(f"Forward model ready. subjects_dir={subjects_dir}, subject={subject}")
     step += 1
+
     update_progress(step, total, progress_cb)
+
 
     if oddball:
         inv = source_localization.build_inverse_operator(evoked, subjects_dir)
         step += 1
         update_progress(step, total, progress_cb)
+
         stc = source_localization.apply_sloreta(evoked, inv, snr)
     else:
         inv = mne.minimum_norm.make_inverse_operator(
             evoked.info, fwd, noise_cov, reg=0.05
         )
         step += 1
+
         update_progress(step, total, progress_cb)
+
 
         method_lower = method.lower()
         if method_lower not in {"eloreta", "sloreta"}:
@@ -266,14 +283,19 @@ def run_source_localization(
     if threshold:
         stc = _threshold_stc(stc, threshold)
     step += 1
+
     update_progress(step, total, progress_cb)
 
-    os.makedirs(output_dir, exist_ok=True)
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     base_name = stc_basename or "source"
-    stc_path = os.path.join(output_dir, base_name)
-    stc.save(stc_path)
+    stc_path = out_dir / base_name
+    stc.save(str(stc_path))
     step += 1
+
     update_progress(step, total, progress_cb)
+
 
     brain = None
     if show_brain:
@@ -334,7 +356,7 @@ def run_source_localization(
             logger.debug("stc.plot succeeded on retry")
         _set_brain_alpha(brain, alpha)
         logger.debug("Brain alpha set to %s", alpha)
-        _set_brain_title(brain, os.path.basename(stc_path))
+        _set_brain_title(brain, stc_path.name)
         _set_colorbar_label(brain, "Source amplitude")
         try:
             labels = mne.read_labels_from_annot(
@@ -349,19 +371,22 @@ def run_source_localization(
         save_brain_screenshots(brain, output_dir)
     if export_rois:
         try:
-            roi_path = os.path.join(output_dir, "roi_values.csv")
-            source_localization.export_roi_means(stc, subject, subjects_dir, roi_path)
+            roi_path = Path(output_dir) / "roi_values.csv"
+            source_localization.export_roi_means(stc, subject, subjects_dir, str(roi_path))
             log_func(f"ROI values exported to {roi_path}")
         except Exception as err:
             log_func(f"ROI export failed: {err}")
 
     step += 1
+
     update_progress(step, total, progress_cb)
 
     log_func(f"Results saved to {output_dir}")
     update_progress(total, total, progress_cb)
 
-    return stc_path, brain
+
+    return str(stc_path), brain
+
 
 __all__ = [
     "run_source_localization",
@@ -371,3 +396,4 @@ __all__ = [
     "average_conditions_to_fsaverage",
     "morph_to_fsaverage",
 ]
+

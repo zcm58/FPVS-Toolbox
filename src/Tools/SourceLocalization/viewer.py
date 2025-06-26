@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import logging
 import inspect
+from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 import mne
@@ -44,10 +45,11 @@ def view_source_estimate(
         threshold,
         alpha,
     )
-    lh_file = stc_path + "-lh.stc"
-    rh_file = stc_path + "-rh.stc"
-    logger.debug("LH file exists: %s", os.path.exists(lh_file))
-    logger.debug("RH file exists: %s", os.path.exists(rh_file))
+    stc_path = Path(stc_path)
+    lh_file = stc_path.with_name(stc_path.name + "-lh.stc")
+    rh_file = stc_path.with_name(stc_path.name + "-rh.stc")
+    logger.debug("LH file exists: %s", lh_file.exists())
+    logger.debug("RH file exists: %s", rh_file.exists())
 
     stc = mne.read_source_estimate(stc_path)
     logger.debug("Loaded STC with shape %s", stc.data.shape)
@@ -66,16 +68,15 @@ def view_source_estimate(
 
     settings = SettingsManager()
     stored_dir = settings.get("loreta", "mri_path", "")
+    stored_dir_path: Path | None = None
     if stored_dir:
-        stored_dir = os.path.normpath(stored_dir)
+        stored_dir_path = Path(stored_dir).resolve()
     subject = "fsaverage"
-    if os.path.basename(stored_dir) == subject:
-        subjects_dir = os.path.dirname(stored_dir)
+    if stored_dir_path is not None and stored_dir_path.name == subject:
+        subjects_dir_path = stored_dir_path.parent
     else:
-        subjects_dir = (
-            stored_dir if stored_dir else os.path.dirname(_default_template_location())
-        )
-    logger.debug("subjects_dir resolved to %s", subjects_dir)
+        subjects_dir_path = stored_dir_path if stored_dir_path else _default_template_location().parent
+    logger.debug("subjects_dir resolved to %s", subjects_dir_path)
 
     if log_func is None:
         log_func = logger.info
@@ -86,7 +87,7 @@ def view_source_estimate(
     try:
         logger.debug(
             "Calling stc.plot in view_source_estimate subjects_dir=%s subject=%s",
-            subjects_dir,
+            subjects_dir_path,
             subject,
         )
         logger.debug(
@@ -98,7 +99,7 @@ def view_source_estimate(
         )
         plot_kwargs = dict(
             hemi="split",
-            subjects_dir=subjects_dir,
+            subjects_dir=str(subjects_dir_path),
             subject=subject,
             time_viewer=False,
         )
@@ -130,7 +131,7 @@ def view_source_estimate(
         )
         plot_kwargs = dict(
             hemi="split",
-            subjects_dir=subjects_dir,
+            subjects_dir=str(subjects_dir_path),
             subject=subject,
             time_viewer=False,
         )
@@ -157,11 +158,11 @@ def view_source_estimate(
 
     _set_brain_alpha(brain, alpha)
     logger.debug("Brain alpha set to %s", alpha)
-    _set_brain_title(brain, window_title or os.path.basename(stc_path))
+    _set_brain_title(brain, window_title or stc_path.name)
     _set_colorbar_label(brain, "Source amplitude")
     try:
         labels = mne.read_labels_from_annot(
-            subject, parc="aparc", subjects_dir=subjects_dir
+            subject, parc="aparc", subjects_dir=str(subjects_dir_path)
         )
         for label in labels:
             brain.add_label(label, borders=True)
