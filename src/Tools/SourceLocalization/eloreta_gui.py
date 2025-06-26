@@ -64,6 +64,8 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             snr = 3.0
         self.snr_var = tk.DoubleVar(master=self, value=snr)
         self.oddball_var = tk.BooleanVar(master=self, value=False)
+        self.time_start_var = tk.StringVar(master=self, value="")
+        self.time_end_var = tk.StringVar(master=self, value="")
 
         self.avg_mode_var = tk.StringVar(master=self, value="Raw amplitudes")
 
@@ -134,11 +136,15 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         ctk.CTkLabel(frame, text="SNR").grid(row=8, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
         ctk.CTkEntry(frame, textvariable=self.snr_var, width=60).grid(row=8, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
 
-        ctk.CTkCheckBox(frame, text="Oddball localization", variable=self.oddball_var).grid(row=9, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkLabel(frame, text="LORETA time window (ms)").grid(row=9, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkEntry(frame, textvariable=self.time_start_var, width=60).grid(row=9, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkEntry(frame, textvariable=self.time_end_var, width=60).grid(row=9, column=2, sticky="w", padx=PAD_X, pady=PAD_Y)
+
+        ctk.CTkCheckBox(frame, text="Oddball localization", variable=self.oddball_var).grid(row=10, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=PAD_Y)
 
 
         run_btn = ctk.CTkButton(frame, text="Run LORETA", command=self._run)
-        run_btn.grid(row=10, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
+        run_btn.grid(row=11, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
 
 
         view_btn = ctk.CTkButton(
@@ -147,7 +153,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             command=self._view_stc,
         )
 
-        view_btn.grid(row=11, column=0, columnspan=3, pady=(0, PAD_Y))
+        view_btn.grid(row=12, column=0, columnspan=3, pady=(0, PAD_Y))
 
         compare_btn = ctk.CTkButton(
             frame,
@@ -155,7 +161,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             command=self._compare_stc,
         )
 
-        compare_btn.grid(row=12, column=0, columnspan=3, pady=(0, PAD_Y))
+        compare_btn.grid(row=13, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.avgModeLabel = ctk.CTkLabel(frame, text="Averaging mode:")
         self.avgModeLabel.grid(row=13, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
@@ -359,6 +365,12 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             baseline = (b_start, b_end)
         except ValueError:
             baseline = None
+        try:
+            start_ms = float(self.time_start_var.get())
+            end_ms = float(self.time_end_var.get())
+            time_window = (start_ms, end_ms)
+        except ValueError:
+            time_window = None
         self.processing_thread = threading.Thread(
             target=self._run_thread,
             args=(
@@ -375,6 +387,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 self.oddball_var.get(),
                 False,
                 baseline,
+                time_window,
             ),
             daemon=True
         )
@@ -397,6 +410,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         oddball,
         export_rois,
         baseline,
+        time_window,
     ):
         log_func = getattr(self.master, "log", print)
         q = mp.Queue()
@@ -417,6 +431,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 oddball=oddball,
                 export_rois=export_rois,
                 baseline=baseline,
+                time_window=time_window,
                 queue=q,
             )
 
