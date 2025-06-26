@@ -17,6 +17,8 @@ class LoggingMixin:
 
     def log(self, message: str, level: int = logging.INFO) -> None:
         """Write ``message`` to the GUI log widget and :mod:`logging`."""
+        if tk is None:  # During interpreter shutdown ``tk`` may be ``None``
+            return
         ts = pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]
         formatted = f"{ts} [GUI]: {message}\n"
 
@@ -30,7 +32,16 @@ class LoggingMixin:
         except Exception as e:  # pragma: no cover - best effort logging
             logger.exception("Error writing log message to GUI: %s", e)
 
-        logger.log(level, message)
+        if level == logging.DEBUG:
+            logger.debug(message)
+        elif level == logging.WARNING:
+            logger.warning(message)
+        elif level == logging.ERROR:
+            logger.error(message)
+        elif level == logging.CRITICAL:
+            logger.critical(message)
+        else:
+            logger.info(message)
 
     def debug(self, message: str) -> None:
         if logger.isEnabledFor(logging.DEBUG):

@@ -30,6 +30,7 @@ from .data_utils import (
     _load_data,
     _threshold_stc,
     _prepare_forward,
+    _estimate_epochs_covariance,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,7 @@ def run_source_localization(
             snr = 3.0
     oddball_freq = float(settings.get("analysis", "oddball_freq", "1.2"))
 
+    noise_cov = None
     if epochs is not None:
         if oddball:
             if low_freq or high_freq:
@@ -194,6 +196,7 @@ def run_source_localization(
             log_func(
                 f"Extracted {len(cycle_epochs)} cycles of {1.0 / oddball_freq:.3f}s each"
             )
+            noise_cov = _estimate_epochs_covariance(cycle_epochs, log_func)
             evoked = source_localization.average_cycles(cycle_epochs)
             log_func("Averaged cycles into Evoked")
             harmonic_freqs = harmonics
@@ -206,6 +209,7 @@ def run_source_localization(
             evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
             evoked = combine_evoked([evoked], weights="equal")
         else:
+            noise_cov = _estimate_epochs_covariance(epochs, log_func)
             evoked = epochs.average()
             if low_freq or high_freq:
                 evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
@@ -219,6 +223,7 @@ def run_source_localization(
         log_func(
             f"Extracted {len(cycle_epochs)} cycles of {1.0 / oddball_freq:.3f}s each"
         )
+        noise_cov = _estimate_epochs_covariance(cycle_epochs, log_func)
         evoked = source_localization.average_cycles(cycle_epochs)
         log_func("Averaged cycles into Evoked")
         harmonic_freqs = harmonics
@@ -230,12 +235,26 @@ def run_source_localization(
             evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
         evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
         evoked = combine_evoked([evoked], weights="equal")
+    
     else:
         if fif_path is None:
             raise ValueError("fif_path must be provided if epochs is None")
         evoked = _load_data(fif_path)
         if low_freq or high_freq:
             evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
+        try:
+            temp_epochs = mne.EpochsArray(
+                evoked.data[np.newaxis, ...],
+                evoked.info,
+                tmin=evoked.times[0],
+                verbose=False,
+            )
+            noise_cov = mne.compute_covariance(temp_epochs, tmax=0.0)
+        except Exception as err:
+            log_func(
+                f"Noise covariance estimation failed ({err}). Using ad-hoc covariance."
+            )
+            noise_cov = mne.make_ad_hoc_cov(evoked.info)
     step += 1
     if progress_cb:
         progress_cb(step / total)
@@ -247,22 +266,7 @@ def run_source_localization(
     if progress_cb:
         progress_cb(step / total)
 
-    try:
-        temp_epochs = mne.EpochsArray(
-            evoked.data[np.newaxis, ...],
-            evoked.info,
-            tmin=evoked.times[0],
-            verbose=False,
-        )
-        noise_cov = mne.compute_covariance(temp_epochs, tmax=0.0)
-    except Exception as err:
-        log_func(
-            f"Noise covariance estimation failed ({err}). Using ad-hoc covariance."
-        )
-        noise_cov = mne.make_ad_hoc_cov(evoked.info)
-    step += 1
-    if progress_cb:
-        progress_cb(step / total)
+
 
     if oddball:
         inv = source_localization.build_inverse_operator(evoked, subjects_dir)
@@ -271,7 +275,9 @@ def run_source_localization(
             progress_cb(step / total)
         stc = source_localization.apply_sloreta(evoked, inv, snr)
     else:
-        inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)
+        inv = mne.minimum_norm.make_inverse_operator(
+            evoked.info, fwd, noise_cov, reg=0.05
+        )
         step += 1
         if progress_cb:
             progress_cb(step / total)

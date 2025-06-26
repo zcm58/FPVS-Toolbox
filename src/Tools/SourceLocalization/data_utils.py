@@ -55,6 +55,23 @@ def _threshold_stc(stc: mne.SourceEstimate, thr: float) -> mne.SourceEstimate:
     return stc
 
 
+def _estimate_epochs_covariance(
+    epochs: mne.Epochs, log_func: Callable[[str], None] = logger.info
+) -> mne.Covariance:
+    """Return a noise covariance estimated from ``epochs``.
+
+    If more than one epoch is available, ``mne.compute_covariance`` is used
+    with ``tmax=0.0``. Otherwise an ad-hoc covariance is returned and a log
+    message is emitted.
+    """
+
+    if len(epochs) > 1:
+        return mne.compute_covariance(epochs, tmax=0.0)
+
+    log_func("Only one epoch available. Using ad-hoc covariance.")
+    return mne.make_ad_hoc_cov(epochs.info)
+
+
 def fetch_fsaverage_with_progress(
     subjects_dir: str, log_func: Callable[[str], None] = logger.info
 ) -> str:

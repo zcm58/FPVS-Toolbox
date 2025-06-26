@@ -58,3 +58,11 @@ The update check is controlled by constants in `config.py`:
 - `FPVS_TOOLBOX_UPDATE_API` – URL queried for the latest release
 - `FPVS_TOOLBOX_REPO_PAGE` – page opened when downloading updates
 
+## Debug Logging
+
+The toolbox routes messages through Python's ``logging`` module. At startup the
+MNE-Python logger is set to ``WARNING`` to reduce output. Enable **Debug** mode
+in the settings window and restart the application to raise the global log level
+to ``DEBUG``. When debug mode is active the MNE logger is also increased to
+``INFO`` so detailed processing information is visible.
+

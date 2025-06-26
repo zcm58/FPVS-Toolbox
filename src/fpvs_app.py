@@ -35,6 +35,7 @@ from tkinter import messagebox
 import webbrowser
 import customtkinter as ctk
 import requests
+import logging
 from packaging.version import parse as version_parse
 from Main_App.menu_bar import AppMenuBar
 from Main_App.ui_setup_panels import SetupPanelManager
@@ -69,6 +70,9 @@ import Tools.Stats as stats
 from Main_App.relevant_publications_window import RelevantPublicationsWindow
 from Main_App.settings_manager import SettingsManager
 from Main_App.settings_window import SettingsWindow
+
+logger = logging.getLogger(__name__)
+
 # =====================================================
 # GUI Configuration (unchanged)
 # =====================================================
@@ -159,6 +163,8 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self._target_progress = 0.0
         self._animating_progress = False
         self._settings_win = None
+        self._queue_job_id = None
+        self._detect_job_id = None
 
         # --- Register Validation Commands ---
         self.validate_num_cmd = (self.register(self._validate_numeric_input), '%P')
@@ -169,6 +175,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self.create_menu()
         self.create_widgets()  # This will call SetupPanelManager and EventMapManager
         self._apply_loaded_settings()
+        self.protocol("WM_DELETE_WINDOW", self.quit)
 
 
         # --- Initial UI State ---
@@ -354,10 +361,21 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
     def quit(self):
         if (self.processing_thread and self.processing_thread.is_alive()) or \
            (self.detection_thread and self.detection_thread.is_alive()):
-            if messagebox.askyesno("Exit Confirmation", "Processing or detection ongoing. Stop and exit?"):
-                self.destroy()
-        else:
-            self.destroy()
+            if not messagebox.askyesno(
+                "Exit Confirmation",
+                "Processing or detection ongoing. Stop and exit?",
+            ):
+                return
+
+        # Cancel any pending Tk jobs before quitting
+        for job_id in (getattr(self, "_queue_job_id", None), getattr(self, "_detect_job_id", None)):
+            if job_id is not None:
+                try:
+                    self.after_cancel(job_id)
+                except Exception:
+                    pass
+
+        self.destroy()
 
 
     # --- Validation Methods ---
@@ -396,7 +414,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             PAD_X = 5
             PAD_Y = 5
             CORNER_RADIUS = 6
-            print(
+            logger.warning(
                 "Warning [FPVSApp.create_widgets]: Could not import UI constants from config. Using fallbacks."
             )
 
