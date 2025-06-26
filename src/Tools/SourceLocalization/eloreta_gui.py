@@ -257,6 +257,29 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         if not folder:
             return
 
+        # Check for previously averaged STC files
+        existing = []
+        for root_dir, _, files in os.walk(folder):
+            for name in files:
+                if not name.endswith(".stc"):
+                    continue
+                base = name[:-7] if name.endswith(("-lh.stc", "-rh.stc")) else name
+                if base.startswith("Average ") or base == "fsaverage":
+                    existing.append(os.path.join(root_dir, name))
+
+        if existing:
+            msg = (
+                "Existing averaged files were found.\n"
+                "Do you want to overwrite them?"
+            )
+            if not messagebox.askyesno("Overwrite?", msg, parent=self):
+                return
+            for path in existing:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+
         log_func = getattr(self.master, "log", print)
 
         settings = SettingsManager()
