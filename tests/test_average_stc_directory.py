@@ -54,6 +54,14 @@ def _import_runner(monkeypatch):
     spec = importlib.util.spec_from_file_location("runner", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    calls = []
+
+    def _dummy_morph(stc, subject, subjects_dir, smooth=5.0):
+        calls.append((subject, subjects_dir, smooth))
+        return stc
+
+    monkeypatch.setattr(module.source_localization, "morph_to_fsaverage", _dummy_morph)
+    module._morph_calls = calls
     return module
 
 
@@ -72,3 +80,6 @@ def test_average_stc_directory_two_files(tmp_path, monkeypatch):
     assert out == os.path.join(str(tmp_path), "avg")
     avg_files = sorted(p.name for p in tmp_path.glob("avg-*.stc"))
     assert avg_files == ["avg-lh.stc", "avg-rh.stc"]
+    subjects = {call[0] for call in runner._morph_calls}
+    assert subjects == {"sub1", "sub2"}
+    assert all(call[2] == 5.0 for call in runner._morph_calls)

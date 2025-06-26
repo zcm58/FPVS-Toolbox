@@ -8,6 +8,7 @@ from .runner import (
     average_stc_directory,
     average_conditions_dir,
 )
+from .source_localization import morph_to_fsaverage
 from .visualization import view_source_estimate
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "average_stc_directory",
     "average_conditions_dir",
     "run_localization_worker",
+    "morph_to_fsaverage",
 ]

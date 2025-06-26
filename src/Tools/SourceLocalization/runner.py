@@ -429,7 +429,12 @@ def average_stc_files(stcs: list) -> mne.SourceEstimate:
 
 
 def average_stc_directory(
-    condition_dir: str, *, output_basename: str | None = None, log_func: Callable[[str], None] = logger.info
+    condition_dir: str,
+    *,
+    output_basename: str | None = None,
+    log_func: Callable[[str], None] = logger.info,
+    subjects_dir: str = "",
+    smooth: float = 5.0,
 ) -> str:
     """Average all ``*-lh.stc`` and ``*-rh.stc`` files in ``condition_dir``.
 
@@ -446,6 +451,11 @@ def average_stc_directory(
         is used where ``<folder>`` is the name of ``condition_dir``.
     log_func : callable
         Optional logging function.
+    subjects_dir : str
+        Directory containing the MRI subjects including ``fsaverage``.
+    smooth : float
+        Full width at half maximum (FWHM) in millimetres used when morphing
+        individual STCs to ``fsaverage``.
 
     Returns
     -------
@@ -453,21 +463,37 @@ def average_stc_directory(
         Path to the saved averaged ``.stc`` file (without hemisphere suffix).
     """
 
-    lh_files = [os.path.join(condition_dir, f) for f in os.listdir(condition_dir) if f.endswith("-lh.stc")]
-    rh_files = [os.path.join(condition_dir, f) for f in os.listdir(condition_dir) if f.endswith("-rh.stc")]
-    if not lh_files and not rh_files:
+    stc_paths = [
+        os.path.join(condition_dir, f)
+        for f in os.listdir(condition_dir)
+        if f.endswith("-lh.stc") or f.endswith("-rh.stc")
+    ]
+    if not stc_paths:
         raise FileNotFoundError("No STC files found in directory")
+
+    groups: dict[str, list[mne.SourceEstimate]] = {"lh": [], "rh": []}
+    for path in stc_paths:
+        stc = mne.read_source_estimate(path)
+        hemi = "lh" if path.endswith("-lh.stc") else "rh"
+        subject = os.path.basename(path).rsplit("-", 1)[0]
+        stc = source_localization.morph_to_fsaverage(
+            stc,
+            subject,
+            subjects_dir,
+            smooth=smooth,
+        )
+        groups[hemi].append(stc)
 
     base = output_basename or f"Average {os.path.basename(condition_dir)}"
     out_path = os.path.join(condition_dir, base)
 
     lh_stc = rh_stc = None
-    if lh_files:
-        log_func(f"Averaging {len(lh_files)} LH files in {condition_dir}")
-        lh_stc = average_stc_files(lh_files)
-    if rh_files:
-        log_func(f"Averaging {len(rh_files)} RH files in {condition_dir}")
-        rh_stc = average_stc_files(rh_files)
+    if groups["lh"]:
+        log_func(f"Averaging {len(groups['lh'])} LH files in {condition_dir}")
+        lh_stc = average_stc_files(groups["lh"])
+    if groups["rh"]:
+        log_func(f"Averaging {len(groups['rh'])} RH files in {condition_dir}")
+        rh_stc = average_stc_files(groups["rh"])
 
     if lh_stc is not None:
         lh_stc.save(out_path)
@@ -481,6 +507,8 @@ def average_conditions_dir(
     results_dir: str,
     *,
     log_func: Callable[[str], None] = logger.info,
+    subjects_dir: str = "",
+    smooth: float = 5.0,
 ) -> list[str]:
     """Average STC files in each subdirectory of ``results_dir``.
 
@@ -490,6 +518,10 @@ def average_conditions_dir(
         Directory containing condition subfolders with ``.stc`` files.
     log_func : callable
         Optional logging function.
+    subjects_dir : str
+        Directory containing the MRI subjects including ``fsaverage``.
+    smooth : float
+        FWHM in millimetres passed through to :func:`average_stc_directory`.
 
     Returns
     -------
@@ -503,7 +535,12 @@ def average_conditions_dir(
         if not os.path.isdir(subdir):
             continue
         try:
-            path = average_stc_directory(subdir, log_func=log_func)
+            path = average_stc_directory(
+                subdir,
+                log_func=log_func,
+                subjects_dir=subjects_dir,
+                smooth=smooth,
+            )
         except Exception as err:  # pragma: no cover - best effort logging
             log_func(f"Skipping {subdir}: {err}")
         else:
