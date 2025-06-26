@@ -83,3 +83,23 @@ def test_average_stc_directory_two_files(tmp_path, monkeypatch):
     subjects = {call[0] for call in runner._morph_calls}
     assert subjects == {"sub1", "sub2"}
     assert all(call[2] == 5.0 for call in runner._morph_calls)
+
+
+def test_average_stc_directory_infer_name(tmp_path, monkeypatch):
+    runner = _import_runner(monkeypatch)
+
+    stc = DummyStc([[1]])
+    stc.save(os.path.join(tmp_path, "SC_P1_Green_Fruit_vs_Green_Veg"))
+    stc.save(os.path.join(tmp_path, "SC_P2_Green_Fruit_vs_Green_Veg"))
+
+    out = runner.average_stc_directory(str(tmp_path), log_func=lambda x: None)
+
+    expected = os.path.join(
+        str(tmp_path), "Average Green Fruit vs Green Veg Response"
+    )
+    assert out == expected
+    avg_files = sorted(p.name for p in tmp_path.glob("Average*"))
+    assert avg_files == [
+        "Average Green Fruit vs Green Veg Response-lh.stc",
+        "Average Green Fruit vs Green Veg Response-rh.stc",
+    ]
