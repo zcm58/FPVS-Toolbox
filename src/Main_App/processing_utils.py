@@ -52,6 +52,17 @@ class ProcessingMixin:
 
         self.log("="*50)
         self.log("START PROCESSING Initiated...")
+        if getattr(self, 'run_loreta_var', None) and getattr(self.run_loreta_var, 'get', lambda: False)():
+            if not messagebox.askyesno(
+                "Run LORETA",
+                (
+                    "WARNING: Enabling LORETA will significantly increase the "
+                    "processing time of your dataset. Do you wish to continue?"
+                ),
+            ):
+                self.log("User canceled processing after LORETA warning.")
+                return
+
         if not self._validate_inputs():
             return
 
@@ -225,6 +236,10 @@ class ProcessingMixin:
         stim_channel_name = params.get('stim_channel', config.DEFAULT_STIM_CHANNEL)
         save_folder = self.save_folder_path.get()
         max_bad_channels_alert_thresh = params.get('max_bad_channels_alert_thresh', 9999)
+        run_loreta_enabled = (
+            getattr(self, 'run_loreta_var', None)
+            and getattr(self.run_loreta_var, 'get', lambda: False)()
+        )
 
         original_app_data_paths = list(self.data_paths)
         original_app_preprocessed_data = dict(self.preprocessed_data)
@@ -462,41 +477,42 @@ class ProcessingMixin:
                             self.preprocessed_data = temp_original_preprocessed_data
 
                         # === Source localization ===
-                        try:
+                        if run_loreta_enabled:
+                            try:
 
-                            fwd, subj, subj_dir = source_model.prepare_head_model(raw_proc)
-                            noise_cov = source_model.estimate_noise_cov(raw_proc)
-                            inv = source_model.make_inverse_operator(raw_proc, fwd, noise_cov)
-                            stc_dict = source_model.apply_sloreta(file_epochs, inv)
+                                fwd, subj, subj_dir = source_model.prepare_head_model(raw_proc)
+                                noise_cov = source_model.estimate_noise_cov(raw_proc)
+                                inv = source_model.make_inverse_operator(raw_proc, fwd, noise_cov)
+                                stc_dict = source_model.apply_sloreta(file_epochs, inv)
 
-                            for cond_label, stc in stc_dict.items():
-                                cond_folder = os.path.join(
-                                    save_folder,
-                                    "LORETA RESULTS",
-                                    _sanitize_folder_name(cond_label),
-                                )
-                                os.makedirs(cond_folder, exist_ok=True)
-                                base_name = _stc_basename_from_fif(
-                                    f"{os.path.splitext(f_name)[0]} {cond_label}.fif"
-                                )
-                                stc_base = os.path.join(cond_folder, base_name)
-                                stc.save(stc_base)
+                                for cond_label, stc in stc_dict.items():
+                                    cond_folder = os.path.join(
+                                        save_folder,
+                                        "LORETA RESULTS",
+                                        _sanitize_folder_name(cond_label),
+                                    )
+                                    os.makedirs(cond_folder, exist_ok=True)
+                                    base_name = _stc_basename_from_fif(
+                                        f"{os.path.splitext(f_name)[0]} {cond_label}.fif"
+                                    )
+                                    stc_base = os.path.join(cond_folder, base_name)
+                                    stc.save(stc_base)
 
-                                brain = stc.plot(subject=subj, subjects_dir=subj_dir, time_viewer=False)
-                                for view, name in [('dorsal', 'top'), ('rostral', 'frontal'), ('lat', 'side')]:
-                                    brain.show_view(view)
-                                    brain.save_image(f"{stc_base}_{name}.png")
-                                brain.close()
+                                    brain = stc.plot(subject=subj, subjects_dir=subj_dir, time_viewer=False)
+                                    for view, name in [('dorsal', 'top'), ('rostral', 'frontal'), ('lat', 'side')]:
+                                        brain.show_view(view)
+                                        brain.save_image(f"{stc_base}_{name}.png")
+                                    brain.close()
 
-                                excel_name = f"{extracted_pid_for_flagging}_{cond_label.replace(' ', '_')}_Results.xlsx"
-                                excel_path = os.path.join(cond_folder, excel_name)
-                                try:
-                                    df = source_model.source_to_dataframe(stc)
-                                    source_model.append_source_to_excel(excel_path, f"{cond_label}_Source", df)
-                                except Exception as e_xl:
-                                    gui_queue.put({'type': 'log', 'message': f"Error appending source results: {e_xl}"})
-                        except Exception as e_src:
-                            gui_queue.put({'type': 'log', 'message': f"Source localization error for {f_name}: {e_src}"})
+                                    excel_name = f"{extracted_pid_for_flagging}_{cond_label.replace(' ', '_')}_Results.xlsx"
+                                    excel_path = os.path.join(cond_folder, excel_name)
+                                    try:
+                                        df = source_model.source_to_dataframe(stc)
+                                        source_model.append_source_to_excel(excel_path, f"{cond_label}_Source", df)
+                                    except Exception as e_xl:
+                                        gui_queue.put({'type': 'log', 'message': f"Error appending source results: {e_xl}"})
+                            except Exception as e_src:
+                                gui_queue.put({'type': 'log', 'message': f"Source localization error for {f_name}: {e_src}"})
                     if raw_proc is not None and getattr(self, 'save_fif_var', None) and getattr(self.save_fif_var, 'get', lambda: False)():
                         try:
                             fif_dir = os.path.join(save_folder, ".fif files")
@@ -520,7 +536,7 @@ class ProcessingMixin:
                                         'False',
                                     ).lower()
                                     == 'true'
-                                )
+                                ) and run_loreta_enabled
                                 if auto_loc:
                                     sanitized_folder = _sanitize_folder_name(cond_label)
                                     out_folder = os.path.join(
