@@ -18,7 +18,6 @@ from .brain_utils import (
     _plot_with_alpha,
     _set_brain_alpha,
     _set_brain_title,
-    save_brain_screenshots,
     _set_colorbar_label,
 )
 from .data_utils import (
@@ -423,7 +422,6 @@ def run_source_localization(
             # If annotations aren't available just continue without borders
             pass
 
-        save_brain_screenshots(brain, output_dir)
     if export_rois:
         try:
             roi_path = Path(output_dir) / "roi_values.csv"
