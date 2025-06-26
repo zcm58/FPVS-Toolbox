@@ -259,10 +259,29 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         log_func = getattr(self.master, "log", print)
 
+        settings = SettingsManager()
+        stored_dir = settings.get("loreta", "mri_path", "")
+        if stored_dir:
+            stored_dir = os.path.normpath(stored_dir)
+        subject = "fsaverage"
+        if os.path.basename(stored_dir) == subject:
+            subjects_dir = os.path.dirname(stored_dir)
+        else:
+            from .data_utils import _default_template_location
+
+            subjects_dir = stored_dir if stored_dir else os.path.dirname(
+                _default_template_location()
+            )
+
         def _task():
             try:
-                runner.average_conditions_dir(folder, log_func=log_func)
-                self.after(0, lambda: messagebox.showinfo("Done", "Averaging complete."))
+                runner.average_conditions_to_fsaverage(
+                    folder, subjects_dir, log_func=log_func
+                )
+                self.after(
+                    0,
+                    lambda: messagebox.showinfo("Done", "Averaging complete."),
+                )
             except Exception as err:
                 err_str = str(err)
                 self.after(0, lambda e=err_str: messagebox.showerror("Error", e))
