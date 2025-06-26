@@ -210,7 +210,9 @@ def average_conditions_to_fsaverage(
         if morphed:
             log_func(f"Averaging {len(morphed)} morphed files in {subdir}")
             avg = average_stc_files(morphed)
-            out_path = os.path.join(subdir, "fsaverage")
+            name_hint = os.path.basename(sorted(bases)[0]) + "-lh.stc"
+            base = _infer_average_name([name_hint])
+            out_path = os.path.join(subdir, base)
             avg.save(out_path)
             averaged.append(out_path)
     return averaged

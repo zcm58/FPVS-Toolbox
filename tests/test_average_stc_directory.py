@@ -61,6 +61,7 @@ def _import_runner(monkeypatch):
         return stc
 
     monkeypatch.setattr(module.source_localization, "morph_to_fsaverage", _dummy_morph)
+    monkeypatch.setattr(module, "_morph_to_fsaverage", lambda stc, subjects_dir, smooth=20, subject=None: stc)
     module._morph_calls = calls
     return module
 
@@ -103,3 +104,25 @@ def test_average_stc_directory_infer_name(tmp_path, monkeypatch):
         "Average Green Fruit vs Green Veg Response-lh.stc",
         "Average Green Fruit vs Green Veg Response-rh.stc",
     ]
+
+
+
+def test_average_conditions_to_fsaverage_infer_name(tmp_path, monkeypatch):
+    runner = _import_runner(monkeypatch)
+
+    cond = tmp_path / "Green_Fruit_vs_Green_Veg"
+    cond.mkdir()
+    stc = DummyStc([[1]])
+    stc.save(cond / "SC_P1_Green_Fruit_vs_Green_Veg")
+    stc.save(cond / "SC_P2_Green_Fruit_vs_Green_Veg")
+
+    outs = runner.average_conditions_to_fsaverage(str(tmp_path), str(tmp_path))
+
+    expected = cond / "Average Green Fruit vs Green Veg Response"
+    assert outs == [str(expected)]
+    avg_files = sorted(p.name for p in cond.glob("Average*"))
+    assert avg_files == [
+        "Average Green Fruit vs Green Veg Response-lh.stc",
+        "Average Green Fruit vs Green Veg Response-rh.stc",
+    ]
+
