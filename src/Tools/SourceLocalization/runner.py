@@ -234,7 +234,8 @@ def run_source_localization(
                 )
                 evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
 
-            evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
+            tmax = min(evoked.times[-1], 1.0 / oddball_freq)
+            evoked = evoked.copy().crop(tmin=0.0, tmax=tmax)
             if time_window is not None:
                 tmin, tmax = time_window
                 evoked = evoked.copy().crop(tmin=tmin, tmax=tmax)
@@ -271,7 +272,8 @@ def run_source_localization(
                 + ", ".join(f"{h:.2f}Hz" for h in harmonic_freqs)
             )
             evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
-        evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
+        tmax = min(evoked.times[-1], 1.0 / oddball_freq)
+        evoked = evoked.copy().crop(tmin=0.0, tmax=tmax)
         if time_window is not None:
             tmin, tmax = time_window
             evoked = evoked.copy().crop(tmin=tmin, tmax=tmax)
