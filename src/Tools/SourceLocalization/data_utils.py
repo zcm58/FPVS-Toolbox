@@ -156,7 +156,9 @@ def _prepare_forward(
         subjects_dir_path = _default_template_location().parent
     else:
         stored_dir_path = stored_dir_path.resolve()
-        if stored_dir_path.name == subject:
+        if stored_dir_path.parts[-2:] == (subject, subject):
+            subjects_dir_path = stored_dir_path.parent.parent
+        elif stored_dir_path.name.lower() == subject.lower():
             subjects_dir_path = stored_dir_path.parent
         elif (stored_dir_path / subject).is_dir():
             subjects_dir_path = stored_dir_path
