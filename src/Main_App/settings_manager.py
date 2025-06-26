@@ -47,11 +47,14 @@ DEFAULTS = {
         'mri_path': '',
         'loreta_low_freq': '0.1',
         'loreta_high_freq': '40.0',
+        'loreta_threshold': '0.0',
         'oddball_harmonics': '1,2,3',
         'loreta_snr': '3.0',
         'auto_oddball_localization': 'False',
         'baseline_tmin': '-0.2',
-        'baseline_tmax': '0.0'
+        'baseline_tmax': '0.0',
+        'time_window_start_ms': '',
+        'time_window_end_ms': ''
     },
     'debug': {
         'enabled': 'False'
@@ -90,11 +93,14 @@ class SettingsManager:
             for opt in (
                 'loreta_low_freq',
                 'loreta_high_freq',
+                'loreta_threshold',
                 'oddball_harmonics',
                 'loreta_snr',
                 'auto_oddball_localization',
                 'baseline_tmin',
                 'baseline_tmax',
+                'time_window_start_ms',
+                'time_window_end_ms',
             ):
                 if not existing.has_option('loreta', opt):
                     missing_loreta = True
