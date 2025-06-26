@@ -511,8 +511,6 @@ class ProcessingMixin:
                                     f"{os.path.splitext(f_name)[0]}_{cond_label.replace(' ', '_')}-epo.fif"
                                 )
                                 cond_path = os.path.join(cond_subfolder, cond_fname)
-                                epoch_list[0].save(cond_path, overwrite=True)
-                                gui_queue.put({'type': 'log', 'message': f"Condition FIF saved to: {cond_path}"})
 
                                 auto_loc = (
                                     self.settings.get(
@@ -538,10 +536,14 @@ class ProcessingMixin:
                                             log_func=lambda m: gui_queue.put({'type': 'log', 'message': m}),
                                             progress_cb=lambda f: gui_queue.put({'type': 'log', 'message': f"Localization {cond_label}: {int(f*100)}%"}),
                                             show_brain=not batch_mode,
+                                            epochs=epoch_list[0],
                                         )
                                         gui_queue.put({'type': 'log', 'message': f"Localization complete for {cond_label}."})
                                     except Exception as e_loc:
                                         gui_queue.put({'type': 'log', 'message': f"Localization failed for {cond_label}: {e_loc}"})
+
+                                epoch_list[0].save(cond_path, overwrite=True)
+                                gui_queue.put({'type': 'log', 'message': f"Condition FIF saved to: {cond_path}"})
 
                         except Exception as e_save:
                             gui_queue.put({'type': 'log', 'message': f"Error saving FIF for {f_name}: {e_save}"})
