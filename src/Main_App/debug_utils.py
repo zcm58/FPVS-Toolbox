@@ -2,9 +2,22 @@ import logging
 
 from .settings_manager import SettingsManager
 
+import mne
 
-def configure_logging(debug_enabled: bool, log_file: str | None = None) -> None:
-    """Attach console/file handlers and set global logging level."""
+
+
+def configure_logging(debug_enabled: bool) -> None:
+    """Configure root logging and MNE log levels.
+
+    Parameters
+    ----------
+    debug_enabled : bool
+        When ``True`` the root logger is set to ``DEBUG`` and MNE logs are
+        raised to ``INFO`` for verbose output. Otherwise only ``INFO`` messages
+        are shown and MNE logs are restricted to ``WARNING``.
+    """
+
+
     level = logging.DEBUG if debug_enabled else logging.INFO
 
     root_logger = logging.getLogger()
@@ -24,6 +37,8 @@ def configure_logging(debug_enabled: bool, log_file: str | None = None) -> None:
         file_handler.setLevel(level)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
+
+    mne.set_log_level("INFO" if debug_enabled else "WARNING")
 
 
 def get_settings() -> SettingsManager:
