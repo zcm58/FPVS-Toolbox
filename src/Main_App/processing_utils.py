@@ -529,6 +529,20 @@ class ProcessingMixin:
                                     os.makedirs(out_folder, exist_ok=True)
                                     try:
                                         gui_queue.put({'type': 'log', 'message': f"Running oddball localization for {cond_label}..."})
+                                        thr_str = self.settings.get('loreta', 'loreta_threshold', '0.0')
+                                        try:
+                                            thr_val = float(thr_str)
+                                        except ValueError:
+                                            thr_val = None
+                                        start_ms = self.settings.get('loreta', 'time_window_start_ms', '')
+                                        end_ms = self.settings.get('loreta', 'time_window_end_ms', '')
+                                        try:
+                                            t_window = (
+                                                float(start_ms),
+                                                float(end_ms),
+                                            ) if start_ms and end_ms else None
+                                        except ValueError:
+                                            t_window = None
                                         eloreta_runner.run_source_localization(
                                             cond_path,
                                             out_folder,
@@ -538,6 +552,8 @@ class ProcessingMixin:
                                             progress_cb=lambda f: gui_queue.put({'type': 'log', 'message': f"Localization {cond_label}: {int(f*100)}%"}),
                                             show_brain=not batch_mode,
                                             epochs=epoch_list[0],
+                                            threshold=thr_val,
+                                            time_window=t_window,
                                         )
                                         gui_queue.put({'type': 'log', 'message': f"Localization complete for {cond_label}."})
                                     except Exception as e_loc:
