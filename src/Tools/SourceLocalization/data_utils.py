@@ -6,7 +6,7 @@ import os
 import threading
 import time
 import logging
-from typing import Callable
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 import mne
@@ -56,16 +56,23 @@ def _threshold_stc(stc: mne.SourceEstimate, thr: float) -> mne.SourceEstimate:
 
 
 def _estimate_epochs_covariance(
-    epochs: mne.Epochs, log_func: Callable[[str], None] = logger.info
+    epochs: mne.Epochs,
+    log_func: Callable[[str], None] = logger.info,
+    baseline: Optional[Tuple[float | None, float | None]] = None,
 ) -> mne.Covariance:
     """Return a noise covariance estimated from ``epochs``.
 
-    If more than one epoch is available, ``mne.compute_covariance`` is used
-    with ``tmax=0.0``. Otherwise an ad-hoc covariance is returned and a log
-    message is emitted.
+    If more than one epoch is available ``mne.compute_covariance`` is used.
+    When ``baseline`` is provided the same time window is passed to
+    :func:`mne.compute_covariance` via ``tmin``/``tmax``. Otherwise ``tmax=0.0``
+    is used. If only a single epoch is present an ad-hoc covariance is returned
+    and a message logged via ``log_func``.
     """
 
     if len(epochs) > 1:
+        if baseline is not None:
+            tmin, tmax = baseline
+            return mne.compute_covariance(epochs, tmin=tmin, tmax=tmax)
         return mne.compute_covariance(epochs, tmax=0.0)
 
     log_func("Only one epoch available. Using ad-hoc covariance.")

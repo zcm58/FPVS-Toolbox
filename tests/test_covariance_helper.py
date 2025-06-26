@@ -20,5 +20,5 @@ def test_estimate_epochs_covariance_two_epochs():
     data = runner.np.random.RandomState(0).randn(2, 3, 4)
     info = runner.mne.create_info(3, 1000.0, ch_types='eeg')
     epochs = runner.mne.EpochsArray(data, info, verbose=False)
-    cov = func(epochs, log_func=lambda x: None)
+    cov = func(epochs, log_func=lambda x: None, baseline=(None, 0))
     assert isinstance(cov, runner.mne.Covariance)

@@ -90,6 +90,8 @@ def run_source_localization(
     snr: Optional[float] = None,
     oddball: bool = False,
 
+    baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
+
     hemi: str = "split",
 
     log_func: Optional[Callable[[str], None]] = None,
@@ -116,6 +118,9 @@ def run_source_localization(
     show_brain : bool
         If ``True`` display the interactive brain window. When running in a
         background thread this should typically be ``False``.
+    baseline : tuple | None
+        ``(tmin, tmax)`` time window used for baseline correction and noise
+        covariance estimation when provided.
 
 
     Returns
@@ -192,11 +197,13 @@ def run_source_localization(
         if oddball:
             if low_freq or high_freq:
                 epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
+            if baseline is not None:
+                epochs.apply_baseline(baseline)
             cycle_epochs = source_localization.extract_cycles(epochs, oddball_freq)
             log_func(
                 f"Extracted {len(cycle_epochs)} cycles of {1.0 / oddball_freq:.3f}s each"
             )
-            noise_cov = _estimate_epochs_covariance(cycle_epochs, log_func)
+            noise_cov = _estimate_epochs_covariance(cycle_epochs, log_func, baseline)
             evoked = source_localization.average_cycles(cycle_epochs)
             log_func("Averaged cycles into Evoked")
             harmonic_freqs = harmonics
@@ -209,7 +216,7 @@ def run_source_localization(
             evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
             evoked = combine_evoked([evoked], weights="equal")
         else:
-            noise_cov = _estimate_epochs_covariance(epochs, log_func)
+            noise_cov = _estimate_epochs_covariance(epochs, log_func, baseline)
             evoked = epochs.average()
             if low_freq or high_freq:
                 evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
@@ -219,11 +226,13 @@ def run_source_localization(
         log_func(f"Loaded {len(epochs)} epoch(s)")
         if low_freq or high_freq:
             epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
+        if baseline is not None:
+            epochs.apply_baseline(baseline)
         cycle_epochs = source_localization.extract_cycles(epochs, oddball_freq)
         log_func(
             f"Extracted {len(cycle_epochs)} cycles of {1.0 / oddball_freq:.3f}s each"
         )
-        noise_cov = _estimate_epochs_covariance(cycle_epochs, log_func)
+        noise_cov = _estimate_epochs_covariance(cycle_epochs, log_func, baseline)
         evoked = source_localization.average_cycles(cycle_epochs)
         log_func("Averaged cycles into Evoked")
         harmonic_freqs = harmonics
