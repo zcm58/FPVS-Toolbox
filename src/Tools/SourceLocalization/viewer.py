@@ -47,6 +47,8 @@ def view_source_estimate(
 
     settings = SettingsManager()
     stored_dir = settings.get("loreta", "mri_path", "")
+    if stored_dir:
+        stored_dir = os.path.normpath(stored_dir)
     subject = "fsaverage"
     if os.path.basename(stored_dir) == subject:
         subjects_dir = os.path.dirname(stored_dir)

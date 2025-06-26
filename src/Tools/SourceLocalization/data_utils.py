@@ -91,6 +91,8 @@ def _prepare_forward(
 ) -> tuple[mne.Forward, str, str]:
     """Construct a forward model using MRI info from settings or fsaverage."""
     stored_dir = settings.get("loreta", "mri_path", "")
+    if stored_dir:
+        stored_dir = os.path.normpath(stored_dir)
     subject = "fsaverage"
 
     log_func(f"Initial stored MRI directory: {stored_dir}")
