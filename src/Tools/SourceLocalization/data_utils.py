@@ -29,6 +29,28 @@ def _default_template_location() -> Path:
     return base_dir / "fsaverage"
 
 
+def _resolve_subjects_dir(path: Path | None, subject: str) -> Path:
+    """Normalize ``path`` so that it points to the subjects directory.
+
+    If ``path`` directly references the subject folder or redundantly includes
+    the subject name twice (``.../fsaverage/fsaverage``), the parent directory is
+    returned so that MNE can locate files using ``<subjects_dir>/<subject>``.
+    """
+
+    if path is None:
+        return _default_template_location().parent
+
+    path = path.resolve()
+
+    if path.parts[-2:] == (subject, subject):
+        return path.parent.parent
+    if path.name.lower() == subject.lower():
+        return path.parent
+    if (path / subject).is_dir():
+        return path
+    return path
+
+
 def _dir_size_mb(path: str | Path) -> float:
     """Return the size of ``path`` in megabytes."""
     path = Path(path)
@@ -152,18 +174,7 @@ def _prepare_forward(
     else:
         log_func(f"Using existing MRI directory: {stored_dir_path}")
 
-    if stored_dir_path is None:
-        subjects_dir_path = _default_template_location().parent
-    else:
-        stored_dir_path = stored_dir_path.resolve()
-        if stored_dir_path.parts[-2:] == (subject, subject):
-            subjects_dir_path = stored_dir_path.parent.parent
-        elif stored_dir_path.name.lower() == subject.lower():
-            subjects_dir_path = stored_dir_path.parent
-        elif (stored_dir_path / subject).is_dir():
-            subjects_dir_path = stored_dir_path
-        else:
-            subjects_dir_path = stored_dir_path
+    subjects_dir_path = _resolve_subjects_dir(stored_dir_path, subject)
     log_func(f"Subjects directory resolved to: {subjects_dir_path}")
 
     surf_dir = subjects_dir_path / subject / "surf"

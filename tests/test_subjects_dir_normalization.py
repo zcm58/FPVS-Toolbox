@@ -40,3 +40,26 @@ def test_prepare_forward_trailing_slash(tmp_path):
         _, _, subjects_dir = module._prepare_forward(dummy_evoked, settings, lambda x: None)
 
     assert subjects_dir == str(tmp_path)
+
+
+def test_prepare_forward_double_fsaverage(tmp_path):
+    _check_deps()
+    module = _import_data_utils()
+    SettingsManager = importlib.import_module('Main_App.settings_manager').SettingsManager
+    settings = SettingsManager()
+
+    nested = tmp_path / 'fsaverage' / 'fsaverage'
+    nested.mkdir(parents=True)
+    settings.set('loreta', 'mri_path', str(nested))
+
+    dummy_evoked = types.SimpleNamespace(info={}, data=[], times=[])
+
+    with mock.patch.object(module.mne, 'setup_source_space', return_value='src'), \
+         mock.patch.object(module.mne, 'make_bem_model', return_value='model'), \
+         mock.patch.object(module.mne, 'make_bem_solution', return_value='bem'), \
+         mock.patch.object(module.mne, 'make_forward_solution', return_value='fwd'), \
+         mock.patch.object(module.mne, 'write_forward_solution'), \
+         mock.patch('os.path.isfile', return_value=False):
+        _, _, subjects_dir = module._prepare_forward(dummy_evoked, settings, lambda x: None)
+
+    assert subjects_dir == str(tmp_path)
