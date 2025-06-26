@@ -24,7 +24,13 @@ if possible, 500 lines or less per file. We should design this module with futur
 As of right now, the transparency functionality is not working, so we will need to 
 think of multiple ways to fix this. 
 
+IMPORTANT RULES FOR CODEX:
+
 When editing or adding features, please ensure that no screenshots are to be saved of the 3-D glass brain viewer. 
 This is not necessary. 
 
 Additionally, do not change the way the fsaverage directory is saved unless specifically instructed to do so.
+
+The 3D glass brain viewer should NOT ever open automatically when standard processing of a file is occuring. It should 
+only open if the user chooses to run the 3-D viewer from the Source Localization tool. Do not add functionality
+to have the 3D viewer open automatically either in batch processing mode or single file mode. 
