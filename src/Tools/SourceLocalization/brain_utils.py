@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import inspect
 import os
+from typing import Optional, Tuple
+
 import mne
 
 logger = logging.getLogger(__name__)
@@ -167,13 +169,31 @@ def _add_brain_labels(brain: mne.viz.Brain, left: str, right: str) -> None:
         logger.debug("Failed to add hemisphere labels", exc_info=True)
 
 
-def save_brain_screenshots(brain: mne.viz.Brain, output_dir: str) -> None:
-    """Save standard view screenshots to ``output_dir``."""
+def save_brain_screenshots(
+    brain: mne.viz.Brain,
+    output_dir: str,
+    time: Optional[Tuple[float, float] | float] = None,
+) -> None:
+    """Save standard view screenshots to ``output_dir``.
+
+    If ``time`` is provided, a suffix containing the time information is added
+    to the output file names.
+    """
+    if time is not None:
+        if isinstance(time, (tuple, list)):
+            tmin, tmax = float(time[0]), float(time[1])
+            suffix = f"_{tmin:.3f}-{tmax:.3f}s"
+        else:
+            tmin = float(time)
+            suffix = f"_{tmin:.3f}s"
+    else:
+        suffix = ""
+
     for view, name in [
         ("lat", "side"),
         ("rostral", "frontal"),
         ("dorsal", "top"),
     ]:
         brain.show_view(view)
-        brain.save_image(os.path.join(output_dir, f"{name}.png"))
-    brain.save_image(os.path.join(output_dir, "overview.png"))
+        brain.save_image(os.path.join(output_dir, f"{name}{suffix}.png"))
+    brain.save_image(os.path.join(output_dir, f"overview{suffix}.png"))
