@@ -15,7 +15,7 @@ if os.environ.get("MNE_3D_BACKEND", "").lower() != "pyvistaqt":
 
 import numpy as np
 import mne
-from mne import combine_evoked
+from mne import combine_evoked, compute_source_morph
 from Main_App.settings_manager import SettingsManager
 from . import source_localization
 from .backend_utils import _ensure_pyvista_backend, get_current_backend
@@ -554,6 +554,85 @@ def average_conditions_dir(
             log_func(f"Skipping {subdir}: {err}")
         else:
             averaged.append(path)
+    return averaged
+
+
+def _morph_to_fsaverage(
+    stc: mne.SourceEstimate, subjects_dir: str, smooth: int = 2
+) -> mne.SourceEstimate:
+    """Return ``stc`` morphed to the ``fsaverage`` template."""
+
+    morph = compute_source_morph(
+        stc,
+        subject_from=stc.subject,
+        subject_to="fsaverage",
+        subjects_dir=subjects_dir,
+        smooth=smooth,
+    )
+    return morph.apply(stc)
+
+
+def average_conditions_to_fsaverage(
+    results_dir: str,
+    subjects_dir: str,
+    *,
+    log_func: Callable[[str], None] = logger.info,
+) -> list[str]:
+    """Morph and average condition STCs to ``fsaverage``.
+
+    For each subdirectory of ``results_dir`` all ``.stc`` files are morphed to
+    ``fsaverage`` with light smoothing and then averaged using
+    :func:`average_stc_files`.
+
+    Parameters
+    ----------
+    results_dir : str
+        Directory containing condition subfolders with participant STCs.
+    subjects_dir : str
+        FreeSurfer subjects directory containing the ``fsaverage`` subject.
+    log_func : callable
+        Optional logging function.
+
+    Returns
+    -------
+    list[str]
+        Paths to the averaged ``fsaverage`` STCs (without hemisphere suffix).
+    """
+
+    averaged: list[str] = []
+    for name in sorted(os.listdir(results_dir)):
+        subdir = os.path.join(results_dir, name)
+        if not os.path.isdir(subdir):
+            continue
+
+        bases = {
+            os.path.join(subdir, f[:-7])
+            for f in os.listdir(subdir)
+            if f.endswith(("-lh.stc", "-rh.stc"))
+        }
+        # Skip previously averaged or morphed files
+        bases = [
+            b
+            for b in bases
+            if not os.path.basename(b).startswith("Average ")
+            and os.path.basename(b) != "fsaverage"
+        ]
+
+        morphed = []
+        for base in sorted(bases):
+            try:
+                stc = mne.read_source_estimate(base)
+                fs_stc = _morph_to_fsaverage(stc, subjects_dir)
+                morphed.append(fs_stc)
+            except Exception as err:  # pragma: no cover - best effort
+                log_func(f"Skipping {base}: {err}")
+
+        if morphed:
+            log_func(f"Averaging {len(morphed)} morphed files in {subdir}")
+            avg = average_stc_files(morphed)
+            out_path = os.path.join(subdir, "fsaverage")
+            avg.save(out_path)
+            averaged.append(out_path)
     return averaged
 
 
