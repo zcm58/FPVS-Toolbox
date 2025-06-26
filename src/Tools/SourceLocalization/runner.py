@@ -7,16 +7,10 @@ import logging
 import importlib
 from pathlib import Path
 from typing import Callable, Optional, Tuple
-from multiprocessing import Queue
-
-# Force PyVistaQt backend before MNE is imported so the interactive viewer
-# respects transparency updates.
-if os.environ.get("MNE_3D_BACKEND", "").lower() != "pyvistaqt":
-    os.environ["MNE_3D_BACKEND"] = "pyvistaqt"
 
 import numpy as np
 import mne
-from mne import combine_evoked, compute_source_morph
+from mne import combine_evoked
 from Main_App.settings_manager import SettingsManager
 from . import source_localization
 from .backend_utils import _ensure_pyvista_backend, get_current_backend
@@ -32,6 +26,14 @@ from .data_utils import (
     _threshold_stc,
     _prepare_forward,
     _estimate_epochs_covariance,
+)
+from .progress import update_progress
+from .stc_utils import (
+    average_stc_files,
+    average_stc_directory,
+    average_conditions_dir,
+    average_conditions_to_fsaverage,
+    morph_to_fsaverage,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,7 +82,6 @@ def _update_progress(
     if progress_cb:
         progress_cb(step / total)
 
-
 def run_source_localization(
     fif_path: str | None,
     output_dir: str,
@@ -90,7 +91,6 @@ def run_source_localization(
     threshold: Optional[float] = None,
     alpha: float = 0.5,
     stc_basename: Optional[str] = None,
-
 
     low_freq: Optional[float] = None,
     high_freq: Optional[float] = None,
@@ -108,41 +108,13 @@ def run_source_localization(
     show_brain: bool = True,
 
 ) -> Tuple[str, Optional[mne.viz.Brain]]:
-    """Run source localization on ``fif_path`` and save results to ``output_dir``.
-
-    Parameters
-    ----------
-    stc_basename : str | None
-        Base filename (without hemisphere suffix) for the saved ``.stc`` files.
-        Defaults to ``"source"``.
-    alpha : float
-        Initial transparency for the brain surface where ``1.0`` is opaque.
-        Defaults to ``0.5`` (50% transparent).
-    hemi : {"lh", "rh", "both", "split"}
-        Which hemisphere(s) to display in the interactive viewer.
-    export_rois : bool
-        If ``True`` an additional CSV summarising ROI amplitudes is saved
-        in ``output_dir``.
-    show_brain : bool
-        If ``True`` display the interactive brain window. When running in a
-        background thread this should typically be ``False``.
-    baseline : tuple | None
-        ``(tmin, tmax)`` time window used for baseline correction and noise
-        covariance estimation when provided.
-
-
-    Returns
-    -------
-    Tuple[str, Optional[:class:`mne.viz.Brain`]]
-        Path to the saved :class:`~mne.SourceEstimate` (without hemisphere
-        suffix) and the interactive brain window (``None`` if ``show_brain`` is
-        ``False``).
-    """
+    """Run source localization on ``fif_path`` and save results to ``output_dir``."""
     if log_func is None:
         log_func = logger.info
 
     logger.debug(
-        "run_source_localization called with %s", {
+        "run_source_localization called with %s",
+        {
             "fif_path": fif_path,
             "output_dir": output_dir,
             "method": method,
@@ -163,7 +135,9 @@ def run_source_localization(
     )
     step = 0
     total = 7
-    _update_progress(progress_cb, step, total)
+
+    update_progress(step, total, progress_cb)
+
     if epochs is not None:
         log_func("Using in-memory epochs")
     else:
@@ -251,7 +225,7 @@ def run_source_localization(
             evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
         evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
         evoked = combine_evoked([evoked], weights="equal")
-    
+
     else:
         if fif_path is None:
             raise ValueError("fif_path must be provided if epochs is None")
@@ -272,27 +246,32 @@ def run_source_localization(
             )
             noise_cov = mne.make_ad_hoc_cov(evoked.info)
     step += 1
-    _update_progress(progress_cb, step, total)
+
+    update_progress(step, total, progress_cb)
+
 
     log_func("Preparing forward model ...")
     fwd, subject, subjects_dir = _prepare_forward(evoked, settings, log_func)
     log_func(f"Forward model ready. subjects_dir={subjects_dir}, subject={subject}")
     step += 1
-    _update_progress(progress_cb, step, total)
 
+    update_progress(step, total, progress_cb)
 
 
     if oddball:
         inv = source_localization.build_inverse_operator(evoked, subjects_dir)
         step += 1
-        _update_progress(progress_cb, step, total)
+        update_progress(step, total, progress_cb)
+
         stc = source_localization.apply_sloreta(evoked, inv, snr)
     else:
         inv = mne.minimum_norm.make_inverse_operator(
             evoked.info, fwd, noise_cov, reg=0.05
         )
         step += 1
-        _update_progress(progress_cb, step, total)
+
+        update_progress(step, total, progress_cb)
+
 
         method_lower = method.lower()
         if method_lower not in {"eloreta", "sloreta"}:
@@ -304,7 +283,9 @@ def run_source_localization(
     if threshold:
         stc = _threshold_stc(stc, threshold)
     step += 1
-    _update_progress(progress_cb, step, total)
+
+    update_progress(step, total, progress_cb)
+
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -312,7 +293,9 @@ def run_source_localization(
     stc_path = out_dir / base_name
     stc.save(str(stc_path))
     step += 1
-    _update_progress(progress_cb, step, total)
+
+    update_progress(step, total, progress_cb)
+
 
     brain = None
     if show_brain:
@@ -385,7 +368,6 @@ def run_source_localization(
             # If annotations aren't available just continue without borders
             pass
 
-
         save_brain_screenshots(brain, output_dir)
     if export_rois:
         try:
@@ -396,284 +378,22 @@ def run_source_localization(
             log_func(f"ROI export failed: {err}")
 
     step += 1
-    _update_progress(progress_cb, step, total)
+
+    update_progress(step, total, progress_cb)
 
     log_func(f"Results saved to {output_dir}")
-    _update_progress(progress_cb, step, total)
+    update_progress(total, total, progress_cb)
 
 
     return str(stc_path), brain
 
 
-def average_stc_files(stcs: list) -> mne.SourceEstimate:
-    """Return the element-wise mean of multiple :class:`mne.SourceEstimate` objects.
+__all__ = [
+    "run_source_localization",
+    "average_stc_files",
+    "average_stc_directory",
+    "average_conditions_dir",
+    "average_conditions_to_fsaverage",
+    "morph_to_fsaverage",
+]
 
-    Parameters
-    ----------
-    stcs : list of :class:`mne.SourceEstimate` or file paths
-        Source estimates or paths to ``.stc`` files that should be averaged.
-
-    Returns
-    -------
-    :class:`mne.SourceEstimate`
-        A new source estimate containing the average data.
-    """
-
-    if not stcs:
-        raise ValueError("No source estimates provided")
-
-    loaded = []
-    for stc in stcs:
-        if isinstance(stc, str):
-            loaded.append(mne.read_source_estimate(stc))
-        else:
-            loaded.append(stc)
-
-    template = loaded[0].copy()
-    sum_data = np.zeros_like(template.data)
-    for stc in loaded:
-        sum_data += stc.data
-    template.data = sum_data / len(loaded)
-    return template
-
-
-def average_stc_directory(
-    condition_dir: str,
-    *,
-    output_basename: str | None = None,
-    log_func: Callable[[str], None] = logger.info,
-    subjects_dir: str = "",
-    smooth: float = 5.0,
-) -> str:
-    """Average all ``*-lh.stc`` and ``*-rh.stc`` files in ``condition_dir``.
-
-    Two files named ``<basename>-lh.stc`` and ``<basename>-rh.stc`` will be
-    created where ``<basename>`` is either ``output_basename`` or ``"Average
-    <folder>"`` if ``output_basename`` is ``None``.
-
-    Parameters
-    ----------
-    condition_dir : str
-        Directory containing the individual participant ``.stc`` files.
-    output_basename : str | None
-        Base name for the saved averaged files. If ``None``, ``"Average <folder>"``
-        is used where ``<folder>`` is the name of ``condition_dir``.
-    log_func : callable
-        Optional logging function.
-    subjects_dir : str
-        Directory containing the MRI subjects including ``fsaverage``.
-    smooth : float
-        Full width at half maximum (FWHM) in millimetres used when morphing
-        individual STCs to ``fsaverage``.
-
-    Returns
-    -------
-    str
-        Path to the saved averaged ``.stc`` file (without hemisphere suffix).
-    """
-
-    cond_path = Path(condition_dir)
-    stc_paths = [
-        cond_path / f
-        for f in os.listdir(cond_path)
-        if f.endswith("-lh.stc") or f.endswith("-rh.stc")
-    ]
-    if not stc_paths:
-        raise FileNotFoundError("No STC files found in directory")
-
-    groups: dict[str, list[mne.SourceEstimate]] = {"lh": [], "rh": []}
-    for path in stc_paths:
-        stc = mne.read_source_estimate(str(path))
-        hemi = "lh" if str(path).endswith("-lh.stc") else "rh"
-        subject = path.name.rsplit("-", 1)[0]
-        stc = source_localization.morph_to_fsaverage(
-            stc,
-            subject,
-            subjects_dir,
-            smooth=smooth,
-        )
-        groups[hemi].append(stc)
-
-    base = output_basename or f"Average {cond_path.name}"
-    out_path = cond_path / base
-
-    lh_stc = rh_stc = None
-    if groups["lh"]:
-        log_func(f"Averaging {len(groups['lh'])} LH files in {condition_dir}")
-        lh_stc = average_stc_files(groups["lh"])
-    if groups["rh"]:
-        log_func(f"Averaging {len(groups['rh'])} RH files in {condition_dir}")
-        rh_stc = average_stc_files(groups["rh"])
-
-    if lh_stc is not None:
-        lh_stc.save(str(out_path))
-    if rh_stc is not None:
-        rh_stc.save(str(out_path))
-    return str(out_path)
-
-
-def average_conditions_dir(
-    results_dir: str,
-    *,
-    log_func: Callable[[str], None] = logger.info,
-    subjects_dir: str = "",
-    smooth: float = 5.0,
-) -> list[str]:
-    """Average STC files in each subdirectory of ``results_dir``.
-
-    Parameters
-    ----------
-    results_dir : str
-        Directory containing condition subfolders with ``.stc`` files.
-    log_func : callable
-        Optional logging function.
-    subjects_dir : str
-        Directory containing the MRI subjects including ``fsaverage``.
-    smooth : float
-        FWHM in millimetres passed through to :func:`average_stc_directory`.
-
-    Returns
-    -------
-    list[str]
-        Paths to the saved averaged ``.stc`` files (without hemisphere suffix).
-    """
-
-    averaged = []
-    results_path = Path(results_dir)
-    for name in sorted(os.listdir(results_path)):
-        subdir = results_path / name
-        if not subdir.is_dir():
-            continue
-        try:
-            path = average_stc_directory(
-                str(subdir),
-                log_func=log_func,
-                subjects_dir=subjects_dir,
-                smooth=smooth,
-            )
-        except Exception as err:  # pragma: no cover - best effort logging
-            log_func(f"Skipping {subdir}: {err}")
-        else:
-            averaged.append(path)
-    return averaged
-
-
-def _morph_to_fsaverage(
-    stc: mne.SourceEstimate, subjects_dir: str, smooth: int = 2
-) -> mne.SourceEstimate:
-    """Return ``stc`` morphed to the ``fsaverage`` template.
-
-    Parameters
-    ----------
-    stc
-        Source estimate to morph. If the ``subject`` attribute is missing
-        (``None``), ``fsaverage`` is assumed as the origin space.
-    subjects_dir
-        FreeSurfer subjects directory containing ``fsaverage``.
-    smooth
-        Smoothing parameter passed to :func:`mne.compute_source_morph`.
-    """
-
-    subject = stc.subject or "fsaverage"
-    morph = compute_source_morph(
-        stc,
-        subject_from=subject,
-        subject_to="fsaverage",
-        subjects_dir=subjects_dir,
-        smooth=smooth,
-    )
-    return morph.apply(stc)
-
-
-def average_conditions_to_fsaverage(
-    results_dir: str,
-    subjects_dir: str,
-    *,
-    log_func: Callable[[str], None] = logger.info,
-) -> list[str]:
-    """Morph and average condition STCs to ``fsaverage``.
-
-    For each subdirectory of ``results_dir`` all ``.stc`` files are morphed to
-    ``fsaverage`` with light smoothing and then averaged using
-    :func:`average_stc_files`.
-
-    Parameters
-    ----------
-    results_dir : str
-        Directory containing condition subfolders with participant STCs.
-    subjects_dir : str
-        FreeSurfer subjects directory containing the ``fsaverage`` subject.
-    log_func : callable
-        Optional logging function.
-
-    Returns
-    -------
-    list[str]
-        Paths to the averaged ``fsaverage`` STCs (without hemisphere suffix).
-    """
-
-    averaged: list[str] = []
-    results_path = Path(results_dir)
-    for name in sorted(os.listdir(results_path)):
-        subdir = results_path / name
-        if not subdir.is_dir():
-            continue
-
-        bases = {
-            (subdir / f[:-7])
-            for f in os.listdir(subdir)
-            if f.endswith(("-lh.stc", "-rh.stc"))
-        }
-        # Skip previously averaged or morphed files
-        bases = [
-            b
-            for b in bases
-            if not b.name.startswith("Average ") and b.name != "fsaverage"
-        ]
-
-        morphed = []
-        for base in sorted(bases):
-            try:
-                stc = mne.read_source_estimate(str(base))
-                fs_stc = _morph_to_fsaverage(stc, subjects_dir)
-                morphed.append(fs_stc)
-            except Exception as err:  # pragma: no cover - best effort
-                log_func(f"Skipping {base}: {err}")
-
-        if morphed:
-            log_func(f"Averaging {len(morphed)} morphed files in {subdir}")
-            avg = average_stc_files(morphed)
-            out_path = subdir / "fsaverage"
-            avg.save(str(out_path))
-            averaged.append(str(out_path))
-    return averaged
-
-
-def run_localization_worker(
-    fif_path: str,
-    output_dir: str,
-    *,
-    queue: Queue,
-    **kwargs,
-) -> Tuple[str, None]:
-    """Run :func:`run_source_localization` in a separate process.
-
-    Progress updates and log messages are placed onto ``queue`` as
-    dictionaries with ``{"type": "progress", "value": float}`` or
-    ``{"type": "log", "message": str}``.
-    """
-
-    def _log(msg: str) -> None:
-        queue.put({"type": "log", "message": msg})
-
-    def _progress(val: float) -> None:
-        queue.put({"type": "progress", "value": val})
-
-    return run_source_localization(
-        fif_path,
-        output_dir,
-        log_func=_log,
-        progress_cb=_progress,
-        show_brain=False,
-        **kwargs,
-    )
