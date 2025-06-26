@@ -8,19 +8,12 @@ from typing import Callable, Optional, Tuple
 
 import mne
 
-from .backend_utils import (
-    _ensure_pyvista_backend,
-    get_current_backend,
-    is_pyvistaqt_backend,
-    is_pyvista_backend,
-)
+from .backend_utils import _ensure_pyvista_backend, get_current_backend
 from .brain_utils import (
     _set_brain_title,
     _set_brain_alpha,
     _plot_with_alpha,
     _set_colorbar_label,
-    _add_brain_labels,
-    save_brain_screenshots,
 )
 
 logger = logging.getLogger(__name__)
