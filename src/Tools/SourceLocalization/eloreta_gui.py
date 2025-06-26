@@ -292,6 +292,13 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 harmonics.append(float(h))
             except ValueError:
                 pass
+        settings = SettingsManager()
+        try:
+            b_start = float(settings.get('loreta', 'baseline_tmin', '0'))
+            b_end = float(settings.get('loreta', 'baseline_tmax', '0'))
+            baseline = (b_start, b_end)
+        except ValueError:
+            baseline = None
         self.processing_thread = threading.Thread(
             target=self._run_thread,
             args=(
@@ -307,6 +314,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 self.snr_var.get(),
                 self.oddball_var.get(),
                 False,
+                baseline,
             ),
             daemon=True
         )
@@ -328,6 +336,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         snr,
         oddball,
         export_rois,
+        baseline,
     ):
         log_func = getattr(self.master, "log", print)
         q = mp.Queue()
@@ -347,6 +356,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 snr=snr,
                 oddball=oddball,
                 export_rois=export_rois,
+                baseline=baseline,
                 queue=q,
             )
 

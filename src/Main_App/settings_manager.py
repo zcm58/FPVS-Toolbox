@@ -49,7 +49,9 @@ DEFAULTS = {
         'loreta_high_freq': '40.0',
         'oddball_harmonics': '1,2,3',
         'loreta_snr': '3.0',
-        'auto_oddball_localization': 'False'
+        'auto_oddball_localization': 'False',
+        'baseline_tmin': '-0.2',
+        'baseline_tmax': '0.0'
     },
     'debug': {
         'enabled': 'False'
@@ -91,6 +93,8 @@ class SettingsManager:
                 'oddball_harmonics',
                 'loreta_snr',
                 'auto_oddball_localization',
+                'baseline_tmin',
+                'baseline_tmax',
             ):
                 if not existing.has_option('loreta', opt):
                     missing_loreta = True
