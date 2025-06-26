@@ -201,6 +201,14 @@ def run_source_localization(
             snr = 3.0
     oddball_freq = float(settings.get("analysis", "oddball_freq", "1.2"))
 
+    if baseline is None:
+        try:
+            b_start = float(settings.get("loreta", "baseline_tmin", "0"))
+            b_end = float(settings.get("loreta", "baseline_tmax", "0"))
+            baseline = (b_start, b_end)
+        except ValueError:
+            baseline = None
+
     noise_cov = None
     if epochs is not None:
         if oddball:
@@ -222,6 +230,8 @@ def run_source_localization(
                     + ", ".join(f"{h:.2f}Hz" for h in harmonic_freqs)
                 )
                 evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
+                if baseline is not None:
+                    evoked.apply_baseline(baseline)
             evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
             if time_window is not None:
                 tmin, tmax = time_window
@@ -257,6 +267,8 @@ def run_source_localization(
                 + ", ".join(f"{h:.2f}Hz" for h in harmonic_freqs)
             )
             evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
+            if baseline is not None:
+                evoked.apply_baseline(baseline)
         evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
         if time_window is not None:
             tmin, tmax = time_window
