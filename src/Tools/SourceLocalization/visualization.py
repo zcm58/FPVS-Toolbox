@@ -234,6 +234,16 @@ def _add_brain_labels(brain: mne.viz.Brain, left: str, right: str) -> None:
         logger.debug("Failed to add hemisphere labels", exc_info=True)
 
 
+def _derive_title(path: str) -> str:
+    """Create a clean window title from an STC filepath."""
+    name = os.path.basename(path)
+    if name.endswith(("-lh.stc", "-rh.stc")):
+        name = name[:-7]
+    if name.endswith(("-lh", "-rh")):
+        name = name[:-3]
+    return f"{name} Response"
+
+
 def save_brain_screenshots(brain: mne.viz.Brain, output_dir: str) -> None:
     """Save standard view screenshots to ``output_dir``."""
     for view, name in [
@@ -358,7 +368,7 @@ def compare_source_estimates(
     stc_b: str,
     threshold: Optional[float] = None,
     alpha: float = 0.5,
-    window_title: str = "Compare STCs",
+    window_title: Optional[str] = None,
 ) -> Tuple[mne.viz.Brain, mne.viz.Brain]:
     """Open two :class:`~mne.SourceEstimate` files side by side for comparison."""
 
@@ -366,11 +376,14 @@ def compare_source_estimates(
         "compare_source_estimates called with %s and %s", stc_a, stc_b
     )
 
+    left_title = window_title or _derive_title(stc_a)
+    right_title = window_title or _derive_title(stc_b)
+
     brain_left = view_source_estimate(
-        stc_a, threshold=threshold, alpha=alpha, window_title=window_title
+        stc_a, threshold=threshold, alpha=alpha, window_title=left_title
     )
     brain_right = view_source_estimate(
-        stc_b, threshold=threshold, alpha=alpha, window_title=window_title
+        stc_b, threshold=threshold, alpha=alpha, window_title=right_title
     )
 
     try:
