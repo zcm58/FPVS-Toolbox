@@ -62,4 +62,4 @@ def test_prepare_forward_double_fsaverage(tmp_path):
          mock.patch('os.path.isfile', return_value=False):
         _, _, subjects_dir = module._prepare_forward(dummy_evoked, settings, lambda x: None)
 
-    assert subjects_dir == str(tmp_path)
+    assert subjects_dir == str(tmp_path / 'fsaverage')
