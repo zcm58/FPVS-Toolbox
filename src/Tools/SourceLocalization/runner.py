@@ -141,8 +141,6 @@ def run_source_localization(
         },
     )
 
-    if time_window is not None:
-        time_window = (time_window[0] / 1000.0, time_window[1] / 1000.0)
     logger.debug(
         "QT_API=%s QT_QPA_PLATFORM=%s",
         os.environ.get("QT_API"),
@@ -158,6 +156,21 @@ def run_source_localization(
     else:
         log_func(f"Loading data from {fif_path}")
     settings = SettingsManager()
+    if threshold is None:
+        try:
+            threshold = float(settings.get("loreta", "loreta_threshold", "0.0"))
+        except ValueError:
+            threshold = None
+    if time_window is None:
+        start_ms = settings.get("loreta", "time_window_start_ms", "")
+        end_ms = settings.get("loreta", "time_window_end_ms", "")
+        try:
+            if start_ms and end_ms:
+                time_window = (float(start_ms), float(end_ms))
+        except ValueError:
+            time_window = None
+    if time_window is not None:
+        time_window = (time_window[0] / 1000.0, time_window[1] / 1000.0)
     if low_freq is None:
         try:
             low_freq = float(settings.get("loreta", "loreta_low_freq", "0.1"))
