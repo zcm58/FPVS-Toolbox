@@ -227,8 +227,6 @@ class ProcessingMixin:
         original_app_data_paths = list(self.data_paths)
         original_app_preprocessed_data = dict(self.preprocessed_data)
 
-        batch_mode = len(data_paths) > 1
-
         quality_flagged_files_info_for_run = []
 
         try:
@@ -550,7 +548,7 @@ class ProcessingMixin:
                                             stc_basename=_stc_basename_from_fif(cond_path),
                                             log_func=lambda m: gui_queue.put({'type': 'log', 'message': m}),
                                             progress_cb=lambda f: gui_queue.put({'type': 'log', 'message': f"Localization {cond_label}: {int(f*100)}%"}),
-                                            show_brain=not batch_mode,
+                                            show_brain=False,
                                             epochs=epoch_list[0],
                                             threshold=thr_val,
                                             time_window=t_window,
