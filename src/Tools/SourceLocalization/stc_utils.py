@@ -122,13 +122,24 @@ def average_conditions_dir(
 
 
 def _morph_to_fsaverage(
-    stc: mne.SourceEstimate, subjects_dir: str, smooth: int = 2
+    stc: mne.SourceEstimate,
+    subjects_dir: str,
+    smooth: int = 2,
+    *,
+    subject: str | None = None,
 ) -> mne.SourceEstimate:
-    """Return ``stc`` morphed to the ``fsaverage`` template."""
+    """Return ``stc`` morphed to the ``fsaverage`` template.
+
+    Older ``.stc`` files may miss the subject information entirely.  In that
+    case ``fsaverage`` is assumed to avoid ``compute_source_morph`` failing with
+    ``subject_from could not be inferred``.
+    """
+
+    subj = subject or stc.subject or "fsaverage"
 
     morph = compute_source_morph(
         stc,
-        subject_from=stc.subject,
+        subject_from=subj,
         subject_to="fsaverage",
         subjects_dir=subjects_dir,
         smooth=smooth,
