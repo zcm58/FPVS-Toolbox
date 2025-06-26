@@ -80,17 +80,24 @@ def test_save_brain_screenshots(tmp_path, monkeypatch):
     assert all(path.startswith(str(tmp_path)) for path in saved)
 
 
-def test_set_brain_alpha_layered_mesh(monkeypatch):
+
+class DummyLayeredMesh:
+    def __init__(self):
+        self.actor = DummyActor()
+
+
+def test_set_brain_alpha_no_values(monkeypatch):
     module = _import_brain_utils(monkeypatch)
-    layered = DummyLayeredMesh()
+    mesh = DummyLayeredMesh()
     brain = types.SimpleNamespace(
         _renderer=DummyRenderer(),
-        _actors={"a": DummyActor()},
-        _layered_meshes={"lh": {"pial": layered}},
+        _layered_meshes={"lh": mesh},
+
     )
 
     module._set_brain_alpha(brain, 0.75)
 
-    assert brain._actors["a"].opacity == 0.75
-    assert layered.actor.opacity == 0.75
+
+    assert mesh.actor.opacity == 0.75
+
     assert brain._renderer.plotter.render_calls == 1

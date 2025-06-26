@@ -52,7 +52,12 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
                         actors.append(actor)
 
             for hemi_layers in getattr(brain, "_layered_meshes", {}).values():
-                for layer in hemi_layers.values():
+                layers = (
+                    hemi_layers.values()
+                    if hasattr(hemi_layers, "values")
+                    else [hemi_layers]
+                )
+                for layer in layers:
                     actor = getattr(layer, "actor", None)
                     if actor is not None:
                         actors.append(actor)
