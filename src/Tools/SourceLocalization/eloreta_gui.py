@@ -5,6 +5,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
 import time
+import queue
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 from typing import Optional
 
 from Main_App.settings_manager import SettingsManager
@@ -326,17 +329,17 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         oddball,
         export_rois,
     ):
-
         log_func = getattr(self.master, "log", print)
-        try:
-            _stc_path, _ = runner.run_source_localization(
+        q = mp.Queue()
+
+        with ProcessPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(
+                runner.run_localization_worker,
                 fif_path,
                 out_dir,
                 method=method,
                 threshold=thr,
                 alpha=alpha,
-                stc_basename=None,
-
                 hemi=hemi,
                 low_freq=low_freq,
                 high_freq=high_freq,
@@ -344,19 +347,31 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
                 snr=snr,
                 oddball=oddball,
                 export_rois=export_rois,
-                log_func=log_func,
-                progress_cb=lambda f: self.after(0, self._update_progress, f),
-                show_brain=False,
+                queue=q,
             )
-            self.after(
-                0,
-                lambda: self._open_brain(
-                    _stc_path, thr, alpha, os.path.basename(_stc_path)
-                ),
-            )
-            self.after(0, self._on_finish, None)
-        except Exception as e:
-            self.after(0, self._on_finish, e)
+
+            while True:
+                try:
+                    msg = q.get(timeout=0.1)
+                    if msg["type"] == "progress":
+                        self.after(0, self._update_progress, msg["value"])
+                    elif msg["type"] == "log":
+                        self.after(0, log_func, msg["message"])
+                except queue.Empty:
+                    if future.done():
+                        break
+
+            try:
+                _stc_path, _ = future.result()
+                self.after(
+                    0,
+                    lambda: self._open_brain(
+                        _stc_path, thr, alpha, os.path.basename(_stc_path)
+                    ),
+                )
+                self.after(0, self._on_finish, None)
+            except Exception as e:
+                self.after(0, self._on_finish, e)
 
     def _update_progress(self, fraction: float) -> None:
         self.progress_var.set(fraction)
