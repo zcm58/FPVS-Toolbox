@@ -15,7 +15,7 @@ from Main_App.settings_manager import SettingsManager
 import customtkinter as ctk
 
 from config import PAD_X, PAD_Y, CORNER_RADIUS, init_fonts, FONT_MAIN
-from . import runner, visualization
+from . import runner, worker, visualization
 
 
 class SourceLocalizationWindow(ctk.CTkToplevel):
@@ -426,7 +426,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         with ProcessPoolExecutor(max_workers=1) as ex:
             future = ex.submit(
-                runner.run_localization_worker,
+                worker.run_localization_worker,
                 fif_path,
                 out_dir,
                 method=method,
