@@ -89,7 +89,7 @@ def test_defaults_from_settings(monkeypatch):
             "time_window_end_ms": "200",
             "loreta_low_freq": "0.1",
             "loreta_high_freq": "40.0",
-            "oddball_harmonics": "1,2,3",
+            "oddball_harmonics": "1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8",
             "loreta_snr": "3.0",
         }
         return values.get(option, fallback)
