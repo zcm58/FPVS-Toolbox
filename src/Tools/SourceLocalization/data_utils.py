@@ -122,6 +122,14 @@ def fetch_fsaverage_with_progress(
     directory holding the actual template files.
     """
     subjects_dir = Path(subjects_dir)
+    dest = subjects_dir / "fsaverage"
+
+    if (dest / "fsaverage" / "surf" / "lh.white").exists() and (
+        dest / "fsaverage" / "bem" / "fsaverage-5120-bem.fif"
+    ).exists():
+        _wrap_fsaverage(subjects_dir, subject="fsaverage")
+        return str(dest / "fsaverage")
+
     stop_event = threading.Event()
 
     def _report():
