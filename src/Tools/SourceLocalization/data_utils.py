@@ -152,12 +152,17 @@ def _prepare_forward(
     else:
         log_func(f"Using existing MRI directory: {stored_dir_path}")
 
-    if stored_dir_path is not None and stored_dir_path.name == subject:
-        subjects_dir_path = stored_dir_path.parent
-        log_func(f"Parent directory for subjects set to: {subjects_dir_path}")
+    if stored_dir_path is None:
+        subjects_dir_path = _default_template_location().parent
     else:
-        subjects_dir_path = stored_dir_path or _default_template_location().parent
-        log_func(f"Subjects directory resolved to: {subjects_dir_path}")
+        stored_dir_path = stored_dir_path.resolve()
+        if stored_dir_path.name == subject:
+            subjects_dir_path = stored_dir_path.parent
+        elif (stored_dir_path / subject).is_dir():
+            subjects_dir_path = stored_dir_path
+        else:
+            subjects_dir_path = stored_dir_path
+    log_func(f"Subjects directory resolved to: {subjects_dir_path}")
 
     surf_dir = subjects_dir_path / subject / "surf"
     log_func(f"Expecting surface files in: {surf_dir}")
