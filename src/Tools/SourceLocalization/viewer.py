@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import logging
+import inspect
 from typing import Callable, Optional, Tuple
 
 import mne
@@ -11,7 +12,6 @@ from Main_App.settings_manager import SettingsManager
 
 from .backend_utils import _ensure_pyvista_backend, get_current_backend
 from .brain_utils import (
-    _plot_with_alpha,
     _set_brain_alpha,
     _set_brain_title,
     _set_colorbar_label,
@@ -27,8 +27,17 @@ def view_source_estimate(
     alpha: float = 0.5,
     window_title: Optional[str] = None,
     log_func: Optional[Callable[[str], None]] = None,
+    time: Optional[Tuple[float, float] | float] = None,
 ) -> mne.viz.Brain:
-    """Open a saved :class:`mne.SourceEstimate` in an interactive viewer."""
+    """Open a saved :class:`mne.SourceEstimate` in an interactive viewer.
+
+    Parameters
+    ----------
+    time : tuple | float | None
+        Optional time window (``tmin``, ``tmax``) or single time point in
+        seconds. When provided the source estimate is cropped and the viewer
+        is opened with ``initial_time`` set to the midpoint of the range.
+    """
     logger.debug(
         "view_source_estimate called with %s, threshold=%s, alpha=%s",
         stc_path,
@@ -44,6 +53,16 @@ def view_source_estimate(
     logger.debug("Loaded STC with shape %s", stc.data.shape)
     if threshold:
         stc = _threshold_stc(stc, threshold)
+
+    midpoint = None
+    if time is not None:
+        if isinstance(time, (tuple, list)):
+            tmin, tmax = float(time[0]), float(time[1])
+        else:
+            tmin = tmax = float(time)
+        midpoint = (tmin + tmax) / 2
+        logger.debug("Cropping STC to %s-%s", tmin, tmax)
+        stc = stc.copy().crop(tmin=tmin, tmax=tmax)
 
     settings = SettingsManager()
     stored_dir = settings.get("loreta", "mri_path", "")
@@ -77,13 +96,30 @@ def view_source_estimate(
             os.environ.get("QT_API"),
             os.environ.get("QT_QPA_PLATFORM"),
         )
-        brain = _plot_with_alpha(
-            stc,
+        plot_kwargs = dict(
             hemi="split",
             subjects_dir=subjects_dir,
             subject=subject,
-            alpha=alpha,
+            time_viewer=False,
         )
+        if midpoint is not None:
+            plot_kwargs.update(time_label=None, initial_time=midpoint)
+
+        arg_name = None
+        try:
+            sig = inspect.signature(stc.plot)  # type: ignore[attr-defined]
+            if "brain_alpha" in sig.parameters:
+                arg_name = "brain_alpha"
+            elif "initial_alpha" in sig.parameters:
+                arg_name = "initial_alpha"
+        except Exception:
+            pass
+
+        if arg_name:
+            brain = stc.plot(**plot_kwargs, **{arg_name: alpha})
+        else:
+            brain = stc.plot(**plot_kwargs)
+            _set_brain_alpha(brain, alpha)
         logger.debug("Brain alpha after plot: %s", getattr(brain, "alpha", "unknown"))
         logger.debug("stc.plot succeeded in view_source_estimate")
     except Exception as err:
@@ -92,13 +128,30 @@ def view_source_estimate(
             err,
             mne.viz.get_3d_backend(),
         )
-        brain = _plot_with_alpha(
-            stc,
+        plot_kwargs = dict(
             hemi="split",
             subjects_dir=subjects_dir,
             subject=subject,
-            alpha=alpha,
+            time_viewer=False,
         )
+        if midpoint is not None:
+            plot_kwargs.update(time_label=None, initial_time=midpoint)
+
+        arg_name = None
+        try:
+            sig = inspect.signature(stc.plot)  # type: ignore[attr-defined]
+            if "brain_alpha" in sig.parameters:
+                arg_name = "brain_alpha"
+            elif "initial_alpha" in sig.parameters:
+                arg_name = "initial_alpha"
+        except Exception:
+            pass
+
+        if arg_name:
+            brain = stc.plot(**plot_kwargs, **{arg_name: alpha})
+        else:
+            brain = stc.plot(**plot_kwargs)
+            _set_brain_alpha(brain, alpha)
         logger.debug("Brain alpha after fallback: %s", getattr(brain, "alpha", "unknown"))
         logger.debug("stc.plot succeeded on fallback in view_source_estimate")
 
