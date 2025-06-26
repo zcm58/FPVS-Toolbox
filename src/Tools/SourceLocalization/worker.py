@@ -13,7 +13,11 @@ def run_localization_worker(
     queue: Queue,
     **kwargs: Any,
 ) -> tuple[str, None]:
-    """Run :func:`run_source_localization` in a separate process."""
+    """Run :func:`run_source_localization` in a separate process.
+
+    Additional keyword arguments such as ``time_window`` (specified in
+    milliseconds) are forwarded to :func:`run_source_localization`.
+    """
 
     from .runner import run_source_localization
 

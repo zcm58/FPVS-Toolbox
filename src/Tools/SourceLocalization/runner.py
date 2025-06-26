@@ -100,6 +100,8 @@ def run_source_localization(
 
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
 
+    time_window: Optional[Tuple[float, float]] = None,
+
     hemi: str = "split",
 
     log_func: Optional[Callable[[str], None]] = None,
@@ -108,7 +110,16 @@ def run_source_localization(
     show_brain: bool = True,
 
 ) -> Tuple[str, Optional[mne.viz.Brain]]:
-    """Run source localization on ``fif_path`` and save results to ``output_dir``."""
+    """Run source localization on ``fif_path`` and save results to ``output_dir``.
+
+    Parameters
+    ----------
+    time_window
+        Optional ``(tmin_ms, tmax_ms)`` pair specifying the time range of the
+        evoked response to analyze **in milliseconds**. When provided, the
+        evoked data will be cropped to this window after filtering, baselining
+        and harmonic reconstruction but before computing the inverse solution.
+    """
     if log_func is None:
         log_func = logger.info
 
@@ -126,8 +137,12 @@ def run_source_localization(
             "harmonics": harmonics,
             "snr": snr,
             "oddball": oddball,
+            "time_window": time_window,
         },
     )
+
+    if time_window is not None:
+        time_window = (time_window[0] / 1000.0, time_window[1] / 1000.0)
     logger.debug(
         "QT_API=%s QT_QPA_PLATFORM=%s",
         os.environ.get("QT_API"),
@@ -195,12 +210,18 @@ def run_source_localization(
                 )
                 evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
             evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
+            if time_window is not None:
+                tmin, tmax = time_window
+                evoked = evoked.copy().crop(tmin=tmin, tmax=tmax)
             evoked = combine_evoked([evoked], weights="equal")
         else:
             noise_cov = _estimate_epochs_covariance(epochs, log_func, baseline)
             evoked = epochs.average()
             if low_freq or high_freq:
                 evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
+            if time_window is not None:
+                tmin, tmax = time_window
+                evoked = evoked.copy().crop(tmin=tmin, tmax=tmax)
     elif oddball and fif_path and fif_path.endswith("-epo.fif"):
         log_func("Oddball mode enabled. Loading epochs ...")
         epochs = mne.read_epochs(fif_path, preload=True)
@@ -224,6 +245,9 @@ def run_source_localization(
             )
             evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
         evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
+        if time_window is not None:
+            tmin, tmax = time_window
+            evoked = evoked.copy().crop(tmin=tmin, tmax=tmax)
         evoked = combine_evoked([evoked], weights="equal")
 
     else:
@@ -232,6 +256,9 @@ def run_source_localization(
         evoked = _load_data(fif_path)
         if low_freq or high_freq:
             evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
+        if time_window is not None:
+            tmin, tmax = time_window
+            evoked = evoked.copy().crop(tmin=tmin, tmax=tmax)
         try:
             temp_epochs = mne.EpochsArray(
                 evoked.data[np.newaxis, ...],
