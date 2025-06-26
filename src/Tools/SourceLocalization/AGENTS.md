@@ -24,3 +24,8 @@ if possible, 500 lines or less per file. We should design this module with futur
 
 As of right now, the transparency functionality is not working, so we will need to 
 think of multiple ways to fix this. 
+
+When editing or adding features, please ensure that no screenshots are to be saved of the 3-D glass brain viewer. 
+This is not necessary. 
+
+Additionally, do not change the way the fsaverage directory is saved. 

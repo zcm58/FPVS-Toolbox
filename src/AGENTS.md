@@ -14,3 +14,5 @@ the Main_App directory. You can add imports into the fpvs_app.py file where need
 Do not edit the spacing or the size of the buttons on the top of the app (Select Input Folder, Select Output Folder, 
 Star Processing) unless specifically instructed to do so. Do not adjust the frame or the spacing unless instructed
 to do so. 
+
+When adding new features, please try to keep the code modular and under 500 lines per file.
