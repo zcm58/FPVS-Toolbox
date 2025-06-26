@@ -24,6 +24,7 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     """Set the transparency of a Brain viewer in a version robust way."""
     logger.debug("_set_brain_alpha called with %s", alpha)
     success = False
+    actors: list = []
     actor_count = 0
     try:
         if hasattr(brain, "set_alpha"):
@@ -39,8 +40,6 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
 
     if not success:
         try:
-            actors = []
-            actor_count = 0
             for hemi in getattr(brain, "_hemi_data", {}).values():
                 mesh = getattr(hemi, "mesh", None)
                 if mesh is not None and hasattr(mesh, "actor"):
@@ -83,9 +82,9 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
         except Exception:
             logger.debug("Failed to set brain alpha via mesh actors", exc_info=True)
 
+    renderer = getattr(brain, "_renderer", None)
+    plotter = getattr(renderer, "plotter", None)
     try:
-        renderer = getattr(brain, "_renderer", None)
-        plotter = getattr(renderer, "plotter", None)
         if plotter is not None and hasattr(plotter, "render"):
             logger.debug("Triggering plotter.render()")
             plotter.render()
