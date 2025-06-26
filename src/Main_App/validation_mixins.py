@@ -6,7 +6,7 @@ doesn't run with invalid settings."""
 import os
 import traceback
 from tkinter import messagebox
-from config import DEFAULT_STIM_CHANNEL
+import config
 
 class ValidationMixin:
     def _validate_inputs(self):
@@ -98,7 +98,7 @@ class ValidationMixin:
             if params['max_idx_keep'] is not None:
                 assert params['max_idx_keep'] > 0, "Max Chan Idx Keep must be positive."
 
-            params['stim_channel'] = DEFAULT_STIM_CHANNEL
+            params['stim_channel'] = config.DEFAULT_STIM_CHANNEL
             self.log(f"Using Stimulus Channel: '{params['stim_channel']}' (from configuration)")
             self.debug(f"DEBUG_VALIDATE: Using Stimulus Channel: '{params['stim_channel']}'")
 

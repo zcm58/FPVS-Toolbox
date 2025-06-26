@@ -8,19 +8,16 @@ import numpy as np
 from scipy.stats import kurtosis
 import traceback
 
-# Import DEFAULT_STIM_CHANNEL from config, assuming config.py is accessible
-# If config.py is in src, and Main_App is in src, this import needs adjustment
-# Assuming Main_App is a package, and config is at the same level as Main_App's parent (src)
-# For direct execution or if PYTHONPATH is set to include src:
+# Import configuration with a graceful fallback when run standalone
 try:
-    from config import DEFAULT_STIM_CHANNEL
-except ImportError:
-    # Fallback if run in a context where config isn't directly on path
-    # This might happen if eeg_preprocessing.py is tested standalone without proper path setup.
-    # For the app, the import from fpvs_app.py (which calls this) should work if config is importable there.
-    DEFAULT_STIM_CHANNEL = "Status"  # Sensible fallback
+    import config
+except ImportError:  # pragma: no cover - fallback for isolated execution
+    class _DummyConfig:
+        DEFAULT_STIM_CHANNEL = "Status"
+
+    config = _DummyConfig()
     print(
-        f"Warning [eeg_preprocessing.py]: Could not import DEFAULT_STIM_CHANNEL from config. Using '{DEFAULT_STIM_CHANNEL}'.")
+        f"Warning [eeg_preprocessing.py]: Could not import config. Using '{config.DEFAULT_STIM_CHANNEL}'.")
 
 
 def perform_preprocessing(raw_input: mne.io.BaseRaw,
@@ -54,7 +51,7 @@ def perform_preprocessing(raw_input: mne.io.BaseRaw,
     ref1 = params.get('ref_channel1')
     ref2 = params.get('ref_channel2')
     max_keep = params.get('max_idx_keep')
-    stim_ch = params.get('stim_channel', DEFAULT_STIM_CHANNEL)
+    stim_ch = params.get('stim_channel', config.DEFAULT_STIM_CHANNEL)
 
     num_kurtosis_bads_identified = 0
 

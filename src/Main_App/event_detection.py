@@ -9,7 +9,7 @@ import traceback
 import numpy as np
 import mne
 from tkinter import messagebox
-from config import DEFAULT_STIM_CHANNEL
+import config
 
 class EventDetectionMixin:
     def detect_and_show_event_ids(self):
@@ -24,7 +24,7 @@ class EventDetectionMixin:
             self.log("Detection failed: No data selected.")
             return
 
-        stim_channel_name = DEFAULT_STIM_CHANNEL
+        stim_channel_name = config.DEFAULT_STIM_CHANNEL
         self.log(f"Using stim channel: {stim_channel_name}")
         representative_file = self.data_paths[0]
         self.busy = True
