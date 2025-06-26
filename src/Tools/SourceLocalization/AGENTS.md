@@ -18,7 +18,6 @@ We also want to be able to view this average source localization in a 3D glass b
 the responses across conditions. This functionality is not currently implemented, but the 3D glass brain viewer is 
 partially working. 
 
-
 Additions or edits within this directory should be made with these goals in mind. Try to keep the code modular and 
 if possible, 500 lines or less per file. We should design this module with future updates in mind. 
 
