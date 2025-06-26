@@ -22,8 +22,12 @@ __all__ = [
 ]
 
 
-def average_stc_files(stcs: list) -> mne.SourceEstimate:
-    """Return the element-wise mean of multiple :class:`mne.SourceEstimate` objects."""
+def average_stc_files(stcs: list, *, normalize: bool = False) -> mne.SourceEstimate:
+    """Return the element-wise mean of multiple :class:`mne.SourceEstimate` objects.
+
+    If ``normalize`` is ``True`` each estimate is scaled by its peak absolute
+    amplitude before averaging so that all subjects contribute equally.
+    """
 
     if not stcs:
         raise ValueError("No source estimates provided")
@@ -31,9 +35,13 @@ def average_stc_files(stcs: list) -> mne.SourceEstimate:
     loaded = []
     for stc in stcs:
         if isinstance(stc, str):
-            loaded.append(mne.read_source_estimate(stc))
-        else:
-            loaded.append(stc)
+            stc = mne.read_source_estimate(stc)
+        if normalize:
+            stc = stc.copy()
+            peak = np.abs(stc.data).max()
+            if peak > 0:
+                stc.data /= peak
+        loaded.append(stc)
 
     template = loaded[0].copy()
     sum_data = np.zeros_like(template.data)
@@ -72,6 +80,7 @@ def average_stc_directory(
     log_func: Callable[[str], None] = print,
     subjects_dir: str = "",
     smooth: float = 5.0,
+    normalize: bool = False,
 ) -> str:
     """Average all ``*-lh.stc`` and ``*-rh.stc`` files in ``condition_dir``."""
 
@@ -105,10 +114,10 @@ def average_stc_directory(
     lh_stc = rh_stc = None
     if groups["lh"]:
         log_func(f"Averaging {len(groups['lh'])} LH files in {condition_dir}")
-        lh_stc = average_stc_files(groups["lh"])
+        lh_stc = average_stc_files(groups["lh"], normalize=normalize)
     if groups["rh"]:
         log_func(f"Averaging {len(groups['rh'])} RH files in {condition_dir}")
-        rh_stc = average_stc_files(groups["rh"])
+        rh_stc = average_stc_files(groups["rh"], normalize=normalize)
 
     if lh_stc is not None:
         lh_stc.save(out_path)
@@ -124,6 +133,7 @@ def average_conditions_dir(
     log_func: Callable[[str], None] = print,
     subjects_dir: str = "",
     smooth: float = 5.0,
+    normalize: bool = False,
 ) -> list[str]:
     """Average STC files in each subdirectory of ``results_dir``."""
 
@@ -138,6 +148,7 @@ def average_conditions_dir(
                 log_func=log_func,
                 subjects_dir=subjects_dir,
                 smooth=smooth,
+                normalize=normalize,
             )
         except Exception as err:
             log_func(f"Skipping {subdir}: {err}")
@@ -177,6 +188,7 @@ def average_conditions_to_fsaverage(
     subjects_dir: str,
     *,
     log_func: Callable[[str], None] = print,
+    normalize: bool = False,
 ) -> list[str]:
     """Morph and average condition STCs to ``fsaverage``."""
 
@@ -209,7 +221,7 @@ def average_conditions_to_fsaverage(
 
         if morphed:
             log_func(f"Averaging {len(morphed)} morphed files in {subdir}")
-            avg = average_stc_files(morphed)
+            avg = average_stc_files(morphed, normalize=normalize)
             name_hint = os.path.basename(sorted(bases)[0]) + "-lh.stc"
             base = _infer_average_name([name_hint])
             out_path = os.path.join(subdir, base)

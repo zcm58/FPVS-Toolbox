@@ -31,3 +31,22 @@ def test_average_stc_files():
     result = avg_func([stc1, stc2])
     expected = module.np.array([[3, 4], [5, 6]])
     assert module.np.allclose(result.data, expected)
+
+
+def test_average_stc_files_normalized():
+    module = _import_eloreta_runner()
+    avg_func = getattr(module, 'average_stc_files', None)
+    if avg_func is None:
+        pytest.skip('average_stc_files not implemented')
+
+    class DummyStc:
+        def __init__(self, data):
+            self.data = module.np.array(data, dtype=float)
+        def copy(self):
+            return DummyStc(self.data.copy())
+
+    stc1 = DummyStc([[1, 2], [3, 4]])
+    stc2 = DummyStc([[5, 6], [7, 8]])
+    result = avg_func([stc1, stc2], normalize=True)
+    expected = module.np.array([[0.4375, 0.625], [0.8125, 1.0]])
+    assert module.np.allclose(result.data, expected)

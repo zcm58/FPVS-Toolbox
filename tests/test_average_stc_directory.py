@@ -86,6 +86,27 @@ def test_average_stc_directory_two_files(tmp_path, monkeypatch):
     assert all(call[2] == 5.0 for call in runner._morph_calls)
 
 
+def test_average_stc_directory_normalize_flag(tmp_path, monkeypatch):
+    runner = _import_runner(monkeypatch)
+
+    stc = DummyStc([[1]])
+    stc.save(os.path.join(tmp_path, "sub1"))
+
+    calls = []
+
+    def dummy_avg(stcs, *, normalize=False):
+        calls.append(normalize)
+        return DummyStc([[0]])
+
+    monkeypatch.setattr(runner, "average_stc_files", dummy_avg)
+
+    runner.average_stc_directory(
+        str(tmp_path), output_basename="avg", log_func=lambda x: None, normalize=True
+    )
+
+    assert calls == [True, True]
+
+
 def test_average_stc_directory_infer_name(tmp_path, monkeypatch):
     runner = _import_runner(monkeypatch)
 
@@ -125,4 +146,27 @@ def test_average_conditions_to_fsaverage_infer_name(tmp_path, monkeypatch):
         "Average Green Fruit vs Green Veg Response-lh.stc",
         "Average Green Fruit vs Green Veg Response-rh.stc",
     ]
+
+
+def test_average_conditions_to_fsaverage_normalize_flag(tmp_path, monkeypatch):
+    runner = _import_runner(monkeypatch)
+
+    cond = tmp_path / "Cond"
+    cond.mkdir()
+    stc = DummyStc([[1]])
+    stc.save(cond / "sub1")
+
+    calls = []
+
+    def dummy_avg(stcs, *, normalize=False):
+        calls.append(normalize)
+        return DummyStc([[0]])
+
+    monkeypatch.setattr(runner, "average_stc_files", dummy_avg)
+
+    runner.average_conditions_to_fsaverage(
+        str(tmp_path), str(tmp_path), normalize=True
+    )
+
+    assert calls == [True]
 
