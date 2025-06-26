@@ -60,9 +60,11 @@ class SettingsWindow(ctk.CTkToplevel):
         tabview.grid(row=0, column=0, padx=pad, pady=pad, sticky="nsew")
         gen_tab = tabview.add("General")
         stats_tab = tabview.add("Stats")
+        oddball_tab = tabview.add("Oddball")
         loreta_tab = tabview.add("LORETA")
         gen_tab.columnconfigure(1, weight=1)
         stats_tab.columnconfigure(1, weight=1)
+        oddball_tab.columnconfigure(1, weight=1)
         loreta_tab.columnconfigure(1, weight=1)
 
         # --- General Tab ---
@@ -129,27 +131,33 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(stats_tab, textvariable=base_var).grid(row=0, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0))
         self.base_var = base_var
 
-        ctk.CTkLabel(stats_tab, text="Oddball Frequency (Hz)").grid(row=1, column=0, sticky="w", padx=pad, pady=(pad, 0))
-        odd_var = tk.StringVar(value=self.manager.get('analysis', 'oddball_freq', '1.2'))
-        ctk.CTkEntry(stats_tab, textvariable=odd_var).grid(row=1, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0))
-        self.odd_var = odd_var
-
-        ctk.CTkLabel(stats_tab, text="BCA Harmonic Upper Limit (Hz)").grid(row=2, column=0, sticky="w", padx=pad)
+        ctk.CTkLabel(stats_tab, text="BCA Harmonic Upper Limit (Hz)").grid(row=1, column=0, sticky="w", padx=pad)
         bca_var = tk.StringVar(value=self.manager.get('analysis', 'bca_upper_limit', '16.8'))
-        ctk.CTkEntry(stats_tab, textvariable=bca_var).grid(row=2, column=1, columnspan=2, sticky="ew", padx=pad)
+        ctk.CTkEntry(stats_tab, textvariable=bca_var).grid(row=1, column=1, columnspan=2, sticky="ew", padx=pad)
         self.bca_var = bca_var
 
-        ctk.CTkLabel(stats_tab, text="Alpha value for ANOVA").grid(row=3, column=0, sticky="w", padx=pad, pady=(pad, 0))
+        ctk.CTkLabel(stats_tab, text="Alpha value for ANOVA").grid(row=2, column=0, sticky="w", padx=pad, pady=(pad, 0))
         alpha_var = tk.StringVar(value=self.manager.get('analysis', 'alpha', '0.05'))
-        ctk.CTkEntry(stats_tab, textvariable=alpha_var).grid(row=3, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0))
+        ctk.CTkEntry(stats_tab, textvariable=alpha_var).grid(row=2, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0))
         self.alpha_var = alpha_var
 
-        ctk.CTkLabel(stats_tab, text="Regions of Interest", font=ctk.CTkFont(weight="bold")).grid(row=4, column=0, columnspan=3, sticky="w", padx=pad, pady=(pad, 0))
+        ctk.CTkLabel(stats_tab, text="Regions of Interest", font=ctk.CTkFont(weight="bold")).grid(row=3, column=0, columnspan=3, sticky="w", padx=pad, pady=(pad, 0))
         roi_pairs = self.manager.get_roi_pairs()
         self.roi_editor = ROISettingsEditor(stats_tab, roi_pairs)
-        self.roi_editor.scroll.grid(row=5, column=0, columnspan=3, sticky="nsew", padx=pad)
-        stats_tab.rowconfigure(5, weight=1)
-        ctk.CTkButton(stats_tab, text="+ Add ROI", command=self.roi_editor.add_entry).grid(row=6, column=0, columnspan=3, sticky="w", padx=pad, pady=(0, pad))
+        self.roi_editor.scroll.grid(row=4, column=0, columnspan=3, sticky="nsew", padx=pad)
+        stats_tab.rowconfigure(4, weight=1)
+        ctk.CTkButton(stats_tab, text="+ Add ROI", command=self.roi_editor.add_entry).grid(row=5, column=0, columnspan=3, sticky="w", padx=pad, pady=(0, pad))
+
+        # --- Oddball Tab ---
+        ctk.CTkLabel(oddball_tab, text="Oddball Frequency (Hz)").grid(row=0, column=0, sticky="w", padx=pad, pady=(pad, 0))
+        odd_var = tk.StringVar(value=self.manager.get('analysis', 'oddball_freq', '1.2'))
+        ctk.CTkEntry(oddball_tab, textvariable=odd_var).grid(row=0, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0))
+        self.odd_var = odd_var
+
+        ctk.CTkLabel(oddball_tab, text="Oddball Harmonics").grid(row=1, column=0, sticky="w", padx=pad)
+        harm_var = tk.StringVar(value=self.manager.get('loreta', 'oddball_harmonics', '1,2,3'))
+        ctk.CTkEntry(oddball_tab, textvariable=harm_var).grid(row=1, column=1, columnspan=2, sticky="ew", padx=pad)
+        self.harm_var = harm_var
 
         # --- LORETA Tab ---
 
@@ -175,14 +183,9 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(loreta_tab, textvariable=high_var).grid(row=2, column=1, sticky="ew", padx=pad)
         self.high_var = high_var
 
-        ctk.CTkLabel(loreta_tab, text="Oddball Harmonics").grid(row=3, column=0, sticky="w", padx=pad)
-        harm_var = tk.StringVar(value=self.manager.get('loreta', 'oddball_harmonics', '1,2,3'))
-        ctk.CTkEntry(loreta_tab, textvariable=harm_var).grid(row=3, column=1, sticky="ew", padx=pad)
-        self.harm_var = harm_var
-
-        ctk.CTkLabel(loreta_tab, text="SNR").grid(row=4, column=0, sticky="w", padx=pad)
+        ctk.CTkLabel(loreta_tab, text="SNR").grid(row=3, column=0, sticky="w", padx=pad)
         snr_var = tk.StringVar(value=self.manager.get('loreta', 'loreta_snr', '3.0'))
-        ctk.CTkEntry(loreta_tab, textvariable=snr_var).grid(row=4, column=1, sticky="ew", padx=pad)
+        ctk.CTkEntry(loreta_tab, textvariable=snr_var).grid(row=3, column=1, sticky="ew", padx=pad)
         self.snr_var = snr_var
 
         ctk.CTkLabel(loreta_tab, text="Threshold").grid(row=5, column=0, sticky="w", padx=pad)
@@ -204,7 +207,9 @@ class SettingsWindow(ctk.CTkToplevel):
             loreta_tab,
             text="Auto Oddball Localization",
             variable=self.auto_loc_var,
-        ).grid(row=7, column=0, columnspan=2, sticky="w", padx=pad)
+
+        ).grid(row=4, column=0, columnspan=2, sticky="w", padx=pad)
+
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.grid(row=1, column=0, pady=(0, pad))
