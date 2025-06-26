@@ -80,6 +80,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
 
         self.brain = None
+        self.last_stc_path: Optional[str] = None
 
         self.progress_var = tk.DoubleVar(master=self, value=0.0)
         self.remaining_var = tk.StringVar(master=self, value="")
@@ -457,12 +458,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
             try:
                 _stc_path, _ = future.result()
-                self.after(
-                    0,
-                    lambda: self._open_brain(
-                        _stc_path, thr, alpha, os.path.basename(_stc_path)
-                    ),
-                )
+                self.last_stc_path = _stc_path
                 self.after(0, self._on_finish, None)
             except Exception as e:
                 self.after(0, self._on_finish, e)
