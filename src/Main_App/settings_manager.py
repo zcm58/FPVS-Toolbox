@@ -45,9 +45,9 @@ DEFAULTS = {
     },
     'loreta': {
         'mri_path': '',
-        'loreta_low_freq': '0.1',
-        'loreta_high_freq': '40.0',
-        'loreta_threshold': '0.0',
+        'loreta_low_freq': '1.1',
+        'loreta_high_freq': '1.3',
+        'loreta_threshold': '0.3',
         'oddball_harmonics': '1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8',
         'loreta_snr': '3.0',
         'auto_oddball_localization': 'False',
