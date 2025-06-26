@@ -43,6 +43,28 @@ def average_stc_files(stcs: list) -> mne.SourceEstimate:
     return template
 
 
+def _infer_average_name(files: list[str]) -> str:
+    """Return a descriptive base name for averaged STC files."""
+
+    if not files:
+        return "Average"
+
+    # use the first file as template to derive the condition name
+    name = os.path.basename(files[0])
+    if name.endswith(('-lh.stc', '-rh.stc')):
+        name = name[:-7]
+
+    # drop subject specific prefixes by splitting on the first two underscores
+    parts = name.split('_', 2)
+    if len(parts) == 3:
+        cond = parts[2]
+    else:
+        cond = parts[-1]
+
+    cond = cond.replace('_', ' ').strip()
+    return f"Average {cond} Response"
+
+
 def average_stc_directory(
     condition_dir: str,
     *,
@@ -74,7 +96,10 @@ def average_stc_directory(
         )
         groups[hemi].append(stc)
 
-    base = output_basename or f"Average {os.path.basename(condition_dir)}"
+    if output_basename is None:
+        base = _infer_average_name(stc_paths)
+    else:
+        base = output_basename
     out_path = os.path.join(condition_dir, base)
 
     lh_stc = rh_stc = None
@@ -124,7 +149,7 @@ def average_conditions_dir(
 def _morph_to_fsaverage(
     stc: mne.SourceEstimate,
     subjects_dir: str,
-    smooth: int = 2,
+    smooth: int = 20,
     *,
     subject: str | None = None,
 ) -> mne.SourceEstimate:
