@@ -15,6 +15,7 @@ if os.environ.get("MNE_3D_BACKEND", "").lower() != "pyvistaqt":
 
 import numpy as np
 import mne
+from mne import combine_evoked
 from Main_App.settings_manager import SettingsManager
 from . import source_localization
 from .backend_utils import _ensure_pyvista_backend, get_current_backend
@@ -205,6 +206,8 @@ def run_source_localization(
                     + ", ".join(f"{h:.2f}Hz" for h in harmonic_freqs)
                 )
                 evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
+            evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
+            evoked = combine_evoked([evoked], weights="equal")
         else:
             noise_cov = _estimate_epochs_covariance(epochs, log_func)
             evoked = epochs.average()
@@ -230,16 +233,9 @@ def run_source_localization(
                 + ", ".join(f"{h:.2f}Hz" for h in harmonic_freqs)
             )
             evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
-    elif fif_path and fif_path.endswith("-epo.fif"):
-        log_func("Loading epochs ...")
-        epochs = mne.read_epochs(fif_path, preload=True)
-        log_func(f"Loaded {len(epochs)} epoch(s)")
-        if low_freq or high_freq:
-            epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
-        noise_cov = _estimate_epochs_covariance(epochs, log_func)
-        evoked = epochs.average()
-        if low_freq or high_freq:
-            evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
+        evoked = evoked.copy().crop(tmin=0.0, tmax=1.0 / oddball_freq)
+        evoked = combine_evoked([evoked], weights="equal")
+    
     else:
         if fif_path is None:
             raise ValueError("fif_path must be provided if epochs is None")
