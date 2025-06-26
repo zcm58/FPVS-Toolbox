@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 import logging
+import shutil
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
@@ -29,6 +30,18 @@ def _default_template_location() -> Path:
     return base_dir / "fsaverage"
 
 
+def _wrap_fsaverage(subjects_dir: Path, subject: str = "fsaverage") -> None:
+    """Ensure ``subjects_dir/subject`` contains a nested ``subject`` folder."""
+    flat = subjects_dir / subject
+    nested = flat / subject
+    if flat.is_dir() and not nested.exists():
+        nested.mkdir()
+        for child in flat.iterdir():
+            if child.name == subject:
+                continue
+            shutil.move(str(child), str(nested / child.name))
+
+
 def _resolve_subjects_dir(path: Path | None, subject: str) -> Path:
     """Normalize ``path`` so that it points to the subjects directory.
 
@@ -42,12 +55,12 @@ def _resolve_subjects_dir(path: Path | None, subject: str) -> Path:
 
     path = path.resolve()
 
-    if path.parts[-2:] == (subject, subject):
-        return path.parent.parent
-    if path.name.lower() == subject.lower():
-        return path.parent
     if (path / subject).is_dir():
         return path
+    if path.parts[-2:] == (subject, subject):
+        return path.parent
+    if path.name.lower() == subject.lower():
+        return path.parent
     return path
 
 
@@ -102,7 +115,12 @@ def _estimate_epochs_covariance(
 def fetch_fsaverage_with_progress(
     subjects_dir: str | Path, log_func: Callable[[str], None] = logger.info
 ) -> str:
-    """Download ``fsaverage`` while logging progress to ``log_func``."""
+    """Download ``fsaverage`` while logging progress to ``log_func``.
+
+    Returns the path to the downloaded ``fsaverage`` directory. The folder is
+    wrapped so that ``subjects_dir/fsaverage`` contains another ``fsaverage``
+    directory holding the actual template files.
+    """
     subjects_dir = Path(subjects_dir)
     stop_event = threading.Event()
 
@@ -126,6 +144,8 @@ def fetch_fsaverage_with_progress(
     finally:
         stop_event.set()
         thread.join()
+
+    _wrap_fsaverage(subjects_dir, subject="fsaverage")
 
     log_func(f"Download complete. Total size: {_dir_size_mb(path):.1f} MB")
     return str(path)

@@ -2,7 +2,6 @@ import importlib.util
 import os
 import sys
 import types
-from unittest import mock
 import pytest
 
 
@@ -63,5 +62,5 @@ def test_view_source_estimate_normalizes_subjects_dir(tmp_path, monkeypatch):
 
     module.view_source_estimate(str(tmp_path / "dummy"), log_func=lambda x: None)
 
-    assert captured["subjects_dir"] == str(tmp_path)
+    assert captured["subjects_dir"] == str(tmp_path / "fsaverage")
 

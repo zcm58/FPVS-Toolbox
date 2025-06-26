@@ -80,12 +80,6 @@ def test_save_brain_screenshots(tmp_path, monkeypatch):
     assert all(path.startswith(str(tmp_path)) for path in saved)
 
 
-
-class DummyLayeredMesh:
-    def __init__(self):
-        self.actor = DummyActor()
-
-
 def test_set_brain_alpha_no_values(monkeypatch):
     module = _import_brain_utils(monkeypatch)
     mesh = DummyLayeredMesh()
