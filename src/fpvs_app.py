@@ -386,15 +386,17 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         delegating panel creation to respective managers."""
 
 
-        # Attempt to import UI constants from config, with fallbacks
+        # Attempt to obtain UI constants from config via helper
         try:
-            from config import PAD_X, PAD_Y, CORNER_RADIUS
-            # LABEL_ID_ENTRY_WIDTH is now primarily used within EventMapManager
-        except ImportError:
+            from config import get_ui_constants
+            PAD_X, PAD_Y, CORNER_RADIUS, _, _ = get_ui_constants()
+        except Exception:
             PAD_X = 5
             PAD_Y = 5
             CORNER_RADIUS = 6
-            print("Warning [FPVSApp.create_widgets]: Could not import UI constants from config. Using fallbacks.")
+            print(
+                "Warning [FPVSApp.create_widgets]: Could not import UI constants from config. Using fallbacks."
+            )
 
         # Main container
         main_frame = ctk.CTkFrame(self, corner_radius=0)

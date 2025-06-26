@@ -103,3 +103,8 @@ def init_fonts() -> None:
     if FONT_HEADING is None:
         FONT_HEADING = ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold")
 
+
+def get_ui_constants() -> tuple[int, int, int, int, int]:
+    """Return the common UI dimension constants used throughout the app."""
+    return PAD_X, PAD_Y, CORNER_RADIUS, ENTRY_WIDTH, LABEL_ID_ENTRY_WIDTH
+
