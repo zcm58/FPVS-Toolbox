@@ -27,4 +27,4 @@ think of multiple ways to fix this.
 When editing or adding features, please ensure that no screenshots are to be saved of the 3-D glass brain viewer. 
 This is not necessary. 
 
-Additionally, do not change the way the fsaverage directory is saved. 
+Additionally, do not change the way the fsaverage directory is saved unless specifically instructed to do so.
