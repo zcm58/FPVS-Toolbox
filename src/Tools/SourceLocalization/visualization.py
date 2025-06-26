@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import logging
+from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 import mne
@@ -15,6 +16,7 @@ from .brain_utils import (
     _plot_with_alpha,
     _set_colorbar_label,
 )
+from .data_utils import _resolve_subjects_dir
 
 logger = logging.getLogger(__name__)
 
@@ -62,15 +64,10 @@ def view_source_estimate(
 
     settings = SettingsManager()
     stored_dir = settings.get("loreta", "mri_path", "")
-    if stored_dir:
-        stored_dir = os.path.normpath(stored_dir)
+    stored_path = Path(stored_dir).resolve() if stored_dir else None
     subject = "fsaverage"
-    if os.path.basename(stored_dir) == subject:
-        subjects_dir = os.path.dirname(stored_dir)
-    else:
-        subjects_dir = (
-            stored_dir if stored_dir else os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        )
+    subjects_dir = _resolve_subjects_dir(stored_path, subject)
+    subjects_dir = str(subjects_dir)
     logger.debug("subjects_dir resolved to %s", subjects_dir)
 
     if log_func is None:
