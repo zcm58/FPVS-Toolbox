@@ -159,7 +159,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.odd_var = odd_var
 
         ctk.CTkLabel(oddball_tab, text="Oddball Harmonics").grid(row=1, column=0, sticky="w", padx=pad)
-        harm_var = tk.StringVar(value=self.manager.get('loreta', 'oddball_harmonics', '1,2,3'))
+        harm_var = tk.StringVar(value=self.manager.get('loreta', 'oddball_harmonics', '1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8'))
         ctk.CTkEntry(oddball_tab, textvariable=harm_var).grid(row=1, column=1, columnspan=2, sticky="ew", padx=pad)
         self.harm_var = harm_var
 

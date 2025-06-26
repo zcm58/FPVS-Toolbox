@@ -62,7 +62,14 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             high = 40.0
         self.low_var = tk.DoubleVar(master=self, value=low)
         self.high_var = tk.DoubleVar(master=self, value=high)
-        self.harm_var = tk.StringVar(master=self, value=settings.get('loreta', 'oddball_harmonics', '1,2,3'))
+        self.harm_var = tk.StringVar(
+            master=self,
+            value=settings.get(
+                'loreta',
+                'oddball_harmonics',
+                '1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8',
+            ),
+        )
         try:
             snr = float(settings.get('loreta', 'loreta_snr', '3.0'))
         except ValueError:

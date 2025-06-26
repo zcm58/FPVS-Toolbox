@@ -188,7 +188,11 @@ def run_source_localization(
         low_freq = None
         high_freq = None
     if harmonics is None:
-        harm_str = settings.get("loreta", "oddball_harmonics", "1,2,3")
+        harm_str = settings.get(
+            "loreta",
+            "oddball_harmonics",
+            "1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8",
+        )
         try:
             harmonics = [float(h) for h in harm_str.split(',') if h.strip()]
         except Exception:
