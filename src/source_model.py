@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
+import logging
 from typing import Dict, List, Optional
 
 import mne
 from Tools.SourceLocalization.data_utils import fetch_fsaverage_with_progress
+
+logger = logging.getLogger(__name__)
 
 
 def prepare_head_model(raw: mne.io.BaseRaw, template: str = "fsaverage") -> tuple[mne.Forward, str, str]:
@@ -23,7 +26,8 @@ def prepare_head_model(raw: mne.io.BaseRaw, template: str = "fsaverage") -> tupl
     tuple
         forward solution, subject name, subjects_dir
     """
-    subjects_dir = fetch_fsaverage_with_progress(os.getcwd(), log_func=print)
+    logger.debug("Fetching fsaverage template to prepare head model")
+    subjects_dir = fetch_fsaverage_with_progress(os.getcwd(), log_func=logger.info)
     src = mne.setup_source_space(template, spacing="oct6", subjects_dir=subjects_dir, add_dist=False)
     model = mne.make_bem_model(subject=template, subjects_dir=subjects_dir, ico=4)
     bem = mne.make_bem_solution(model)
@@ -44,6 +48,7 @@ def make_inverse_operator(raw: mne.io.BaseRaw, fwd: mne.Forward, noise_cov: mne.
 
 def apply_sloreta(epochs_dict: Dict[str, List[mne.Epochs]], inv: mne.minimum_norm.InverseOperator, snr: float = 3.0) -> Dict[str, mne.SourceEstimate]:
     """Apply sLORETA to each condition's epochs and return SourceEstimates."""
+    logger.debug("Applying sLORETA with snr=%s", snr)
     lambda2 = 1.0 / snr ** 2
     stcs: Dict[str, mne.SourceEstimate] = {}
     for label, ep_list in epochs_dict.items():
@@ -54,6 +59,7 @@ def apply_sloreta(epochs_dict: Dict[str, List[mne.Epochs]], inv: mne.minimum_nor
             evoked = ep.average()
         else:
             evoked = ep
+        logger.debug("Applying inverse operator for label %s", label)
         stc = mne.minimum_norm.apply_inverse(evoked, inv, lambda2=lambda2, method="sLORETA")
         stcs[label] = stc
     return stcs
@@ -62,7 +68,7 @@ def apply_sloreta(epochs_dict: Dict[str, List[mne.Epochs]], inv: mne.minimum_nor
 def source_to_dataframe(stc: mne.SourceEstimate):
     """Convert a SourceEstimate to a simple DataFrame of vertex amplitudes."""
     import pandas as pd
-
+    logger.debug("Converting SourceEstimate to DataFrame")
     peak = stc.data.max(axis=1)
     return pd.DataFrame({"Vertex": range(len(peak)), "Amplitude": peak})
 
@@ -70,6 +76,8 @@ def source_to_dataframe(stc: mne.SourceEstimate):
 def append_source_to_excel(excel_path: str, sheet_name: str, df):
     """Append DataFrame ``df`` to ``excel_path`` under ``sheet_name``."""
     import pandas as pd
+
+    logger.debug("Appending source data to %s (sheet=%s)", excel_path, sheet_name)
 
     with pd.ExcelWriter(excel_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
