@@ -560,11 +560,23 @@ def average_conditions_dir(
 def _morph_to_fsaverage(
     stc: mne.SourceEstimate, subjects_dir: str, smooth: int = 2
 ) -> mne.SourceEstimate:
-    """Return ``stc`` morphed to the ``fsaverage`` template."""
+    """Return ``stc`` morphed to the ``fsaverage`` template.
 
+    Parameters
+    ----------
+    stc
+        Source estimate to morph. If the ``subject`` attribute is missing
+        (``None``), ``fsaverage`` is assumed as the origin space.
+    subjects_dir
+        FreeSurfer subjects directory containing ``fsaverage``.
+    smooth
+        Smoothing parameter passed to :func:`mne.compute_source_morph`.
+    """
+
+    subject = stc.subject or "fsaverage"
     morph = compute_source_morph(
         stc,
-        subject_from=stc.subject,
+        subject_from=subject,
         subject_to="fsaverage",
         subjects_dir=subjects_dir,
         smooth=smooth,
