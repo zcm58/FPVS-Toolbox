@@ -6,7 +6,7 @@ import mne
 
 
 
-def configure_logging(debug_enabled: bool) -> None:
+def configure_logging(debug_enabled: bool, log_file: str | None = None) -> None:
     """Configure root logging and MNE log levels.
 
     Parameters
@@ -15,6 +15,9 @@ def configure_logging(debug_enabled: bool) -> None:
         When ``True`` the root logger is set to ``DEBUG`` and MNE logs are
         raised to ``INFO`` for verbose output. Otherwise only ``INFO`` messages
         are shown and MNE logs are restricted to ``WARNING``.
+    log_file : str | None, optional
+        Optional path to a log file. When provided, log messages will also be
+        written to this file using UTF-8 encoding.
     """
 
 
