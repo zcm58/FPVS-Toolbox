@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from multiprocessing import Queue
 from typing import Any
+import logging
+
+from .logging_utils import QueueLogHandler
 
 
 def run_localization_worker(
@@ -27,14 +30,21 @@ def run_localization_worker(
     def _progress(val: float) -> None:
         queue.put({"type": "progress", "value": val})
 
-    return run_source_localization(
-        fif_path,
-        output_dir,
-        log_func=_log,
-        progress_cb=_progress,
-        show_brain=False,
-        **kwargs,
-    )
+    handler = QueueLogHandler(queue)
+    pkg_logger = logging.getLogger("Tools.SourceLocalization")
+    pkg_logger.addHandler(handler)
+
+    try:
+        return run_source_localization(
+            fif_path,
+            output_dir,
+            log_func=_log,
+            progress_cb=_progress,
+            show_brain=False,
+            **kwargs,
+        )
+    finally:
+        pkg_logger.removeHandler(handler)
 
 __all__ = ["run_localization_worker"]
 
