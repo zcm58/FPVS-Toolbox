@@ -155,12 +155,7 @@ def _prepare_forward(
 
     trans = settings.get("paths", "trans_file", "fsaverage")
     log_func(f"Using trans file: {trans}")
-    log_func(
-        f"Building source space using subjects_dir={subjects_dir}, subject={subject}"
-    )
-    src = mne.setup_source_space(
-        subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False
-    )
+
     cache_dir = os.path.join(subjects_dir, "fpvs_cache")
     os.makedirs(cache_dir, exist_ok=True)
     fwd_file = os.path.join(cache_dir, f"forward-{subject}.fif")
@@ -168,13 +163,21 @@ def _prepare_forward(
     if os.path.isfile(fwd_file):
         log_func(f"Loading cached forward model from {fwd_file}")
         fwd = mne.read_forward_solution(fwd_file)
-    else:
-        log_func("Creating BEM model ...")
-        model = mne.make_bem_model(subject=subject, subjects_dir=subjects_dir, ico=4)
-        bem = mne.make_bem_solution(model)
-        log_func("Computing forward solution ...")
-        fwd = mne.make_forward_solution(
-            evoked.info, trans=trans, src=src, bem=bem, eeg=True
-        )
-        mne.write_forward_solution(fwd_file, fwd, overwrite=True)
+        return fwd, subject, subjects_dir
+
+    log_func(
+        f"Building source space using subjects_dir={subjects_dir}, subject={subject}"
+    )
+    src = mne.setup_source_space(
+        subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False
+    )
+
+    log_func("Creating BEM model ...")
+    model = mne.make_bem_model(subject=subject, subjects_dir=subjects_dir, ico=4)
+    bem = mne.make_bem_solution(model)
+    log_func("Computing forward solution ...")
+    fwd = mne.make_forward_solution(
+        evoked.info, trans=trans, src=src, bem=bem, eeg=True
+    )
+    mne.write_forward_solution(fwd_file, fwd, overwrite=True)
     return fwd, subject, subjects_dir
