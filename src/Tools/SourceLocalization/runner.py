@@ -6,6 +6,7 @@ import os
 import logging
 import importlib
 from typing import Callable, Optional, Tuple
+from multiprocessing import Queue
 
 # Force PyVistaQt backend before MNE is imported so the interactive viewer
 # respects transparency updates.
@@ -464,3 +465,33 @@ def average_conditions_dir(
         else:
             averaged.append(path)
     return averaged
+
+
+def run_localization_worker(
+    fif_path: str,
+    output_dir: str,
+    *,
+    queue: Queue,
+    **kwargs,
+) -> Tuple[str, None]:
+    """Run :func:`run_source_localization` in a separate process.
+
+    Progress updates and log messages are placed onto ``queue`` as
+    dictionaries with ``{"type": "progress", "value": float}`` or
+    ``{"type": "log", "message": str}``.
+    """
+
+    def _log(msg: str) -> None:
+        queue.put({"type": "log", "message": msg})
+
+    def _progress(val: float) -> None:
+        queue.put({"type": "progress", "value": val})
+
+    return run_source_localization(
+        fif_path,
+        output_dir,
+        log_func=_log,
+        progress_cb=_progress,
+        show_brain=False,
+        **kwargs,
+    )
