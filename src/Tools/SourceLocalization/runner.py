@@ -71,9 +71,10 @@ except Exception as err:  # pragma: no cover - optional
 
 
 def run_source_localization(
-    fif_path: str,
+    fif_path: str | None,
     output_dir: str,
     *,
+    epochs: mne.Epochs | None = None,
     method: str = "eLORETA",
     threshold: Optional[float] = None,
     alpha: float = 0.5,
@@ -148,7 +149,10 @@ def run_source_localization(
     total = 7
     if progress_cb:
         progress_cb(0.0)
-    log_func(f"Loading data from {fif_path}")
+    if epochs is not None:
+        log_func("Using in-memory epochs")
+    else:
+        log_func(f"Loading data from {fif_path}")
     settings = SettingsManager()
     if low_freq is None:
         try:
@@ -180,7 +184,28 @@ def run_source_localization(
             snr = 3.0
     oddball_freq = float(settings.get("analysis", "oddball_freq", "1.2"))
 
-    if oddball and fif_path.endswith("-epo.fif"):
+    if epochs is not None:
+        if oddball:
+            if low_freq or high_freq:
+                epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
+            cycle_epochs = source_localization.extract_cycles(epochs, oddball_freq)
+            log_func(
+                f"Extracted {len(cycle_epochs)} cycles of {1.0 / oddball_freq:.3f}s each"
+            )
+            evoked = source_localization.average_cycles(cycle_epochs)
+            log_func("Averaged cycles into Evoked")
+            harmonic_freqs = harmonics
+            if harmonic_freqs:
+                log_func(
+                    "Reconstructing harmonics: "
+                    + ", ".join(f"{h:.2f}Hz" for h in harmonic_freqs)
+                )
+                evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
+        else:
+            evoked = epochs.average()
+            if low_freq or high_freq:
+                evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
+    elif oddball and fif_path and fif_path.endswith("-epo.fif"):
         log_func("Oddball mode enabled. Loading epochs ...")
         epochs = mne.read_epochs(fif_path, preload=True)
         log_func(f"Loaded {len(epochs)} epoch(s)")
@@ -192,8 +217,6 @@ def run_source_localization(
         )
         evoked = source_localization.average_cycles(cycle_epochs)
         log_func("Averaged cycles into Evoked")
-        # harmonics are specified in Hz in the settings dialog. Use them
-        # directly rather than scaling by the oddball frequency.
         harmonic_freqs = harmonics
         if harmonic_freqs:
             log_func(
@@ -202,6 +225,8 @@ def run_source_localization(
             )
             evoked = source_localization.reconstruct_harmonics(evoked, harmonic_freqs)
     else:
+        if fif_path is None:
+            raise ValueError("fif_path must be provided if epochs is None")
         evoked = _load_data(fif_path)
         if low_freq or high_freq:
             evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
