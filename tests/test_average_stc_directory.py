@@ -106,6 +106,7 @@ def test_average_stc_directory_infer_name(tmp_path, monkeypatch):
     ]
 
 
+
 def test_average_conditions_to_fsaverage_infer_name(tmp_path, monkeypatch):
     runner = _import_runner(monkeypatch)
 
@@ -124,3 +125,4 @@ def test_average_conditions_to_fsaverage_infer_name(tmp_path, monkeypatch):
         "Average Green Fruit vs Green Veg Response-lh.stc",
         "Average Green Fruit vs Green Veg Response-rh.stc",
     ]
+
