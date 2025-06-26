@@ -11,21 +11,16 @@ import warnings
 from typing import Optional, Dict
 
 try:
-    # When running ``main.py`` directly, relative imports like ``..config``
-    # fail because the package hierarchy is not established. Importing from
-    # ``config`` ensures the constants are available regardless of how the app
-    # is launched.
-    from config import PAD_X, PAD_Y, CORNER_RADIUS, LABEL_ID_ENTRY_WIDTH
-    # ``LABEL_ID_ENTRY_WIDTH`` is used for the Condition Label entry.
-except ImportError:
+    from config import get_ui_constants
+    PAD_X, PAD_Y, CORNER_RADIUS, ENTRY_WIDTH, LABEL_ID_ENTRY_WIDTH = get_ui_constants()
+except Exception:
     warnings.warn(
         "Warning [ui_event_map_manager.py]: Could not import from config. "
         "Using fallback UI constants."
     )
-    PAD_X = 5
-    PAD_Y = 5
-    CORNER_RADIUS = 6
-    LABEL_ID_ENTRY_WIDTH = 100  # Fallback for Condition Label, ID entry will have its own width
+    PAD_X, PAD_Y, CORNER_RADIUS = 5, 5, 6
+    ENTRY_WIDTH = 100
+    LABEL_ID_ENTRY_WIDTH = 100  # Condition Label width fallback
 
 NUMERICAL_ID_ENTRY_FIXED_WIDTH = 140  # Fixed width for the ID entry box
 REMOVE_BUTTON_WIDTH = 28
