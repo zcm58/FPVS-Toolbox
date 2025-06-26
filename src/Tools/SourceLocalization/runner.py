@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import logging
 import importlib
+from pathlib import Path
 from typing import Callable, Optional, Tuple
 from multiprocessing import Queue
 
@@ -305,10 +306,11 @@ def run_source_localization(
     step += 1
     _update_progress(progress_cb, step, total)
 
-    os.makedirs(output_dir, exist_ok=True)
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     base_name = stc_basename or "source"
-    stc_path = os.path.join(output_dir, base_name)
-    stc.save(stc_path)
+    stc_path = out_dir / base_name
+    stc.save(str(stc_path))
     step += 1
     _update_progress(progress_cb, step, total)
 
@@ -371,7 +373,7 @@ def run_source_localization(
             logger.debug("stc.plot succeeded on retry")
         _set_brain_alpha(brain, alpha)
         logger.debug("Brain alpha set to %s", alpha)
-        _set_brain_title(brain, os.path.basename(stc_path))
+        _set_brain_title(brain, stc_path.name)
         _set_colorbar_label(brain, "Source amplitude")
         try:
             labels = mne.read_labels_from_annot(
@@ -387,8 +389,8 @@ def run_source_localization(
         save_brain_screenshots(brain, output_dir)
     if export_rois:
         try:
-            roi_path = os.path.join(output_dir, "roi_values.csv")
-            source_localization.export_roi_means(stc, subject, subjects_dir, roi_path)
+            roi_path = Path(output_dir) / "roi_values.csv"
+            source_localization.export_roi_means(stc, subject, subjects_dir, str(roi_path))
             log_func(f"ROI values exported to {roi_path}")
         except Exception as err:
             log_func(f"ROI export failed: {err}")
@@ -400,7 +402,7 @@ def run_source_localization(
     _update_progress(progress_cb, step, total)
 
 
-    return stc_path, brain
+    return str(stc_path), brain
 
 
 def average_stc_files(stcs: list) -> mne.SourceEstimate:
@@ -470,9 +472,10 @@ def average_stc_directory(
         Path to the saved averaged ``.stc`` file (without hemisphere suffix).
     """
 
+    cond_path = Path(condition_dir)
     stc_paths = [
-        os.path.join(condition_dir, f)
-        for f in os.listdir(condition_dir)
+        cond_path / f
+        for f in os.listdir(cond_path)
         if f.endswith("-lh.stc") or f.endswith("-rh.stc")
     ]
     if not stc_paths:
@@ -480,9 +483,9 @@ def average_stc_directory(
 
     groups: dict[str, list[mne.SourceEstimate]] = {"lh": [], "rh": []}
     for path in stc_paths:
-        stc = mne.read_source_estimate(path)
-        hemi = "lh" if path.endswith("-lh.stc") else "rh"
-        subject = os.path.basename(path).rsplit("-", 1)[0]
+        stc = mne.read_source_estimate(str(path))
+        hemi = "lh" if str(path).endswith("-lh.stc") else "rh"
+        subject = path.name.rsplit("-", 1)[0]
         stc = source_localization.morph_to_fsaverage(
             stc,
             subject,
@@ -491,8 +494,8 @@ def average_stc_directory(
         )
         groups[hemi].append(stc)
 
-    base = output_basename or f"Average {os.path.basename(condition_dir)}"
-    out_path = os.path.join(condition_dir, base)
+    base = output_basename or f"Average {cond_path.name}"
+    out_path = cond_path / base
 
     lh_stc = rh_stc = None
     if groups["lh"]:
@@ -503,11 +506,10 @@ def average_stc_directory(
         rh_stc = average_stc_files(groups["rh"])
 
     if lh_stc is not None:
-        lh_stc.save(out_path)
+        lh_stc.save(str(out_path))
     if rh_stc is not None:
-        rh_stc.save(out_path)
-
-    return out_path
+        rh_stc.save(str(out_path))
+    return str(out_path)
 
 
 def average_conditions_dir(
@@ -537,13 +539,14 @@ def average_conditions_dir(
     """
 
     averaged = []
-    for name in sorted(os.listdir(results_dir)):
-        subdir = os.path.join(results_dir, name)
-        if not os.path.isdir(subdir):
+    results_path = Path(results_dir)
+    for name in sorted(os.listdir(results_path)):
+        subdir = results_path / name
+        if not subdir.is_dir():
             continue
         try:
             path = average_stc_directory(
-                subdir,
+                str(subdir),
                 log_func=log_func,
                 subjects_dir=subjects_dir,
                 smooth=smooth,
@@ -610,13 +613,14 @@ def average_conditions_to_fsaverage(
     """
 
     averaged: list[str] = []
-    for name in sorted(os.listdir(results_dir)):
-        subdir = os.path.join(results_dir, name)
-        if not os.path.isdir(subdir):
+    results_path = Path(results_dir)
+    for name in sorted(os.listdir(results_path)):
+        subdir = results_path / name
+        if not subdir.is_dir():
             continue
 
         bases = {
-            os.path.join(subdir, f[:-7])
+            (subdir / f[:-7])
             for f in os.listdir(subdir)
             if f.endswith(("-lh.stc", "-rh.stc"))
         }
@@ -624,14 +628,13 @@ def average_conditions_to_fsaverage(
         bases = [
             b
             for b in bases
-            if not os.path.basename(b).startswith("Average ")
-            and os.path.basename(b) != "fsaverage"
+            if not b.name.startswith("Average ") and b.name != "fsaverage"
         ]
 
         morphed = []
         for base in sorted(bases):
             try:
-                stc = mne.read_source_estimate(base)
+                stc = mne.read_source_estimate(str(base))
                 fs_stc = _morph_to_fsaverage(stc, subjects_dir)
                 morphed.append(fs_stc)
             except Exception as err:  # pragma: no cover - best effort
@@ -640,9 +643,9 @@ def average_conditions_to_fsaverage(
         if morphed:
             log_func(f"Averaging {len(morphed)} morphed files in {subdir}")
             avg = average_stc_files(morphed)
-            out_path = os.path.join(subdir, "fsaverage")
-            avg.save(out_path)
-            averaged.append(out_path)
+            out_path = subdir / "fsaverage"
+            avg.save(str(out_path))
+            averaged.append(str(out_path))
     return averaged
 
 
