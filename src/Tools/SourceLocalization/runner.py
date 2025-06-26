@@ -457,13 +457,17 @@ def average_stc_directory(
     base = output_basename or f"Average {os.path.basename(condition_dir)}"
     out_path = os.path.join(condition_dir, base)
 
+    lh_stc = rh_stc = None
     if lh_files:
         log_func(f"Averaging {len(lh_files)} LH files in {condition_dir}")
         lh_stc = average_stc_files(lh_files)
-        lh_stc.save(out_path + "-lh")
     if rh_files:
         log_func(f"Averaging {len(rh_files)} RH files in {condition_dir}")
         rh_stc = average_stc_files(rh_files)
+
+    if lh_stc is not None:
+        lh_stc.save(out_path + "-lh")
+    if rh_stc is not None:
         rh_stc.save(out_path + "-rh")
 
     return out_path
