@@ -157,6 +157,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         self._current_progress = 0.0
         self._target_progress = 0.0
         self._animating_progress = False
+        self._settings_win = None
 
         # --- Register Validation Commands ---
         self.validate_num_cmd = (self.register(self._validate_numeric_input), '%P')
@@ -523,4 +524,16 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         DEFAULT_STIM_CHANNEL = self.settings.get('stim', 'channel', DEFAULT_STIM_CHANNEL)
 
     def open_settings_window(self):
-        SettingsWindow(self, self.settings)
+        """Open the Settings window if not already open."""
+        if self._settings_win and self._settings_win.winfo_exists():
+            self._settings_win.lift()
+            self._settings_win.focus_force()
+            return
+
+        self._settings_win = SettingsWindow(self, self.settings)
+        self._settings_win.protocol("WM_DELETE_WINDOW", self._on_settings_closed)
+
+    def _on_settings_closed(self):
+        if self._settings_win and self._settings_win.winfo_exists():
+            self._settings_win.destroy()
+        self._settings_win = None
