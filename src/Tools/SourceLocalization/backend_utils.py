@@ -4,15 +4,38 @@ from __future__ import annotations
 
 import os
 import logging
+import importlib
 import mne
 
 logger = logging.getLogger(__name__)
+
+
+def _log_backend_imports() -> None:
+    """Log backend import information when debug mode is enabled."""
+    try:
+        from Main_App.settings_manager import SettingsManager
+    except Exception:
+        return
+
+    if not SettingsManager().debug_enabled():
+        return
+
+    for mod_name in ("pyvistaqt", "pyvista", "PyQt5", "PySide6"):
+        try:
+            module = importlib.import_module(mod_name)
+            version = getattr(module, "__version__", "unknown")
+            path = getattr(module, "__file__", "built-in")
+            logger.debug("Import OK: %s %s (%s)", mod_name, version, path)
+        except Exception as err:  # pragma: no cover - optional
+            logger.debug("Import failed: %s (%s)", mod_name, err)
 
 
 def _ensure_pyvista_backend() -> None:
     """Force the MNE 3D backend to PyVista."""
     if not hasattr(mne.viz, "set_3d_backend"):
         return
+
+    _log_backend_imports()
 
     logger.debug("MNE_3D_BACKEND: %s", os.environ.get("MNE_3D_BACKEND"))
     logger.debug("QT_API: %s", os.environ.get("QT_API"))
