@@ -35,6 +35,7 @@ from tkinter import messagebox
 import webbrowser
 import customtkinter as ctk
 import requests
+import logging
 from packaging.version import parse as version_parse
 from Main_App.menu_bar import AppMenuBar
 from Main_App.ui_setup_panels import SetupPanelManager
@@ -69,6 +70,9 @@ import Tools.Stats as stats
 from Main_App.relevant_publications_window import RelevantPublicationsWindow
 from Main_App.settings_manager import SettingsManager
 from Main_App.settings_window import SettingsWindow
+
+logger = logging.getLogger(__name__)
+
 # =====================================================
 # GUI Configuration (unchanged)
 # =====================================================
@@ -396,7 +400,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             PAD_X = 5
             PAD_Y = 5
             CORNER_RADIUS = 6
-            print(
+            logger.warning(
                 "Warning [FPVSApp.create_widgets]: Could not import UI constants from config. Using fallbacks."
             )
 
