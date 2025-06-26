@@ -9,6 +9,7 @@ import queue
 import threading
 import traceback
 import time
+import logging
 import mne
 import numpy as np
 import pandas as pd
@@ -17,6 +18,7 @@ from tkinter import messagebox
 import tkinter as tk
 import config
 from Tools.SourceLocalization import runner as eloreta_runner, source_model
+from Tools.SourceLocalization.logging_utils import QueueLogHandler
 from Main_App.post_process import post_process as _external_post_process
 from Main_App.eeg_preprocessing import perform_preprocessing
 from Main_App.load_utils import load_eeg_file
@@ -541,18 +543,24 @@ class ProcessingMixin:
                                             ) if start_ms and end_ms else None
                                         except ValueError:
                                             t_window = None
-                                        eloreta_runner.run_source_localization(
-                                            cond_path,
-                                            out_folder,
-                                            oddball=True,
-                                            stc_basename=_stc_basename_from_fif(cond_path),
-                                            log_func=lambda m: gui_queue.put({'type': 'log', 'message': m}),
-                                            progress_cb=lambda f: gui_queue.put({'type': 'log', 'message': f"Localization {cond_label}: {int(f*100)}%"}),
-                                            show_brain=False,
-                                            epochs=epoch_list[0],
-                                            threshold=thr_val,
-                                            time_window=t_window,
-                                        )
+                                        handler = QueueLogHandler(gui_queue)
+                                        pkg_logger = logging.getLogger("Tools.SourceLocalization")
+                                        pkg_logger.addHandler(handler)
+                                        try:
+                                            eloreta_runner.run_source_localization(
+                                                cond_path,
+                                                out_folder,
+                                                oddball=True,
+                                                stc_basename=_stc_basename_from_fif(cond_path),
+                                                log_func=lambda m: gui_queue.put({'type': 'log', 'message': m}),
+                                                progress_cb=lambda f: gui_queue.put({'type': 'log', 'message': f"Localization {cond_label}: {int(f*100)}%"}),
+                                                show_brain=False,
+                                                epochs=epoch_list[0],
+                                                threshold=thr_val,
+                                                time_window=t_window,
+                                            )
+                                        finally:
+                                            pkg_logger.removeHandler(handler)
                                         gui_queue.put({'type': 'log', 'message': f"Localization complete for {cond_label}."})
                                     except Exception as e_loc:
                                         gui_queue.put({'type': 'log', 'message': f"Localization failed for {cond_label}: {e_loc}"})
