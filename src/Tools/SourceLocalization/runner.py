@@ -433,6 +433,10 @@ def average_stc_directory(
 ) -> str:
     """Average all ``*-lh.stc`` and ``*-rh.stc`` files in ``condition_dir``.
 
+    Two files named ``<basename>-lh.stc`` and ``<basename>-rh.stc`` will be
+    created where ``<basename>`` is either ``output_basename`` or ``"Average
+    <folder>"`` if ``output_basename`` is ``None``.
+
     Parameters
     ----------
     condition_dir : str
@@ -466,9 +470,9 @@ def average_stc_directory(
         rh_stc = average_stc_files(rh_files)
 
     if lh_stc is not None:
-        lh_stc.save(out_path + "-lh")
+        lh_stc.save(out_path)
     if rh_stc is not None:
-        rh_stc.save(out_path + "-rh")
+        rh_stc.save(out_path)
 
     return out_path
 
