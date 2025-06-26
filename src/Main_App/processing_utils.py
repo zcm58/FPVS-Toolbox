@@ -16,7 +16,7 @@ import re
 from tkinter import messagebox
 import tkinter as tk
 import config
-from Tools.SourceLocalization import runner as eloreta_runner
+from Tools.SourceLocalization import runner as eloreta_runner, source_model
 from Main_App.post_process import post_process as _external_post_process
 from Main_App.eeg_preprocessing import perform_preprocessing
 from Main_App.load_utils import load_eeg_file
@@ -463,7 +463,6 @@ class ProcessingMixin:
 
                         # === Source localization ===
                         try:
-                            import source_model
 
                             fwd, subj, subj_dir = source_model.prepare_head_model(raw_proc)
                             noise_cov = source_model.estimate_noise_cov(raw_proc)
