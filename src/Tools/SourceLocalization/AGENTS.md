@@ -34,3 +34,8 @@ Additionally, do not change the way the fsaverage directory is saved unless spec
 The 3D glass brain viewer should NOT ever open automatically when standard processing of a file is occurring. It should 
 only open if the user chooses to run the 3-D viewer from the Source Localization tool. Do not add functionality
 to have the 3D viewer open automatically either in batch processing mode or single file mode. 
+
+If you're asked to try to speed up processing, please keep in mind that we will not process the same .fif file more
+than once in a normal processing run. This rules out things like caching the noise covariance or the inverse operator.
+Do not ever suggest or implement these things. Parallel processing is an option. We also can never reuse filtered or
+cropped epochs. 
