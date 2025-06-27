@@ -13,7 +13,7 @@ Key functionalities:
 - Preprocessing Steps:
 
     - Imports the data and subtracts the average reference from the mastoid electrodes.
-    - Downsamples the data to 256Hz if necessary.
+    - Downsamples the data to 256Hz if necessary.pi
     - Apply standard_1020 montage for channel locations.
     - Removes all channels except the 64 main electrodes.
     - Applies basic FIR bandpass filter.

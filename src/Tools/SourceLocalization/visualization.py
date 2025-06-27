@@ -71,46 +71,52 @@ def view_source_estimate(
         _ensure_pyvista_backend()
         log_func(f"Using 3D backend: {get_current_backend()}")
 
-        # --- Final Plotting Call with try...except for version compatibility ---
+        # --- FINAL ROBUST PLOTTING LOGIC ---
 
-        common_kwargs = {
-            'surface': 'pial',
-            'hemi': 'split',
-            'subjects_dir': subjects_dir,
-            'subject': subject,
-            'time_viewer': False,
-            'backend': 'pyvistaqt'
-        }
+        # This approach uses stc.plot() which is the high-level, recommended API.
+        # We will try the modern call first, then fall back to a legacy call
+        # that removes parameters older MNE versions don't recognize.
 
-        brain = None
         try:
-            # TRY THE MODERN WAY FIRST (for MNE v0.23+)
-            log_func(f"Attempting to plot using modern 'brain_alpha' parameter...")
+            # TRY THE MODERN WAY FIRST (for MNE >= 1.0)
+            log_func(f"Attempting to plot with modern 'brain_alpha' parameter...")
             brain = stc.plot(
-                brain_alpha=alpha,  # Set brain transparency
-                alpha=1.0,  # Keep heatmap opaque
-                **common_kwargs
+                subjects_dir=subjects_dir,
+                subject=subject,
+                surface='pial',
+                hemi='split',
+                brain_alpha=alpha,  # Controls brain surface transparency
+                alpha=1.0,  # Keeps heatmap opaque
+                backend='pyvistaqt',
+                time_viewer=False
             )
             log_func("Modern plotting method successful.")
 
         except TypeError as e:
-            # If the modern way fails with a TypeError about 'brain_alpha'...
-            if "unexpected keyword argument 'brain_alpha'" in str(e):
-                log_func("Modern 'brain_alpha' not supported, falling back to older method.")
+            # If the modern way fails, check the error message and try a legacy call
+            error_string = str(e).lower()
+            if "unexpected keyword argument 'brain_alpha'" in error_string or \
+                    "unexpected keyword argument 'backend'" in error_string:
+
+                log_func(f"Modern plot failed ('{e}'). Falling back to legacy stc.plot() call.")
                 try:
-                    # TRY THE OLD WAY (for MNE < v0.23)
-                    # In older versions, 'alpha' controlled the brain surface.
+                    # TRY THE OLD WAY (for MNE < ~1.0)
+                    # This version removes 'brain_alpha' and 'backend' arguments.
+                    # In these older versions, 'alpha' controlled the brain surface.
                     brain = stc.plot(
+                        subjects_dir=subjects_dir,
+                        subject=subject,
+                        surface='pial',
+                        hemi='split',
                         alpha=alpha,  # This now targets the brain surface
-                        **common_kwargs
+                        time_viewer=False
                     )
                     log_func("Legacy plotting method successful.")
                 except Exception as e_old:
-                    # If even the old way fails, log the error.
-                    log_func(f"ERROR: Fallback plotting method also failed: {e_old}")
+                    log_func(f"ERROR: Fallback legacy plotting method also failed: {e_old}")
                     raise e_old  # Re-raise the error to be caught by the outer block
             else:
-                # If it was a different TypeError, re-raise it.
+                # If it was a different TypeError we don't know how to handle, re-raise it
                 raise e
 
         if brain is None:
@@ -118,7 +124,7 @@ def view_source_estimate(
 
         # --- Post-Plot Adjustments ---
         _set_brain_title(brain, window_title or _derive_title(stc_path))
-        _set_colorbar_label(brain, "Source amplitude")
+        _set_colorbar_label(brain, "Source Amplitude")
 
         try:
             labels = mne.read_labels_from_annot(subject, parc="aparc", subjects_dir=subjects_dir)
