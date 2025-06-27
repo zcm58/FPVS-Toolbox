@@ -107,6 +107,7 @@ def run_source_localization(
     progress_cb: Optional[Callable[[float], None]] = None,
     export_rois: bool = False,
     show_brain: bool = True,
+    n_jobs: Optional[int] = None,
 
 ) -> Tuple[str, Optional[mne.viz.Brain]]:
     """Run source localization on ``fif_path`` and save results to ``output_dir``.
@@ -118,6 +119,9 @@ def run_source_localization(
         evoked response to analyze **in milliseconds**. When provided, the
         evoked data will be cropped to this window after filtering, baselining
         and harmonic reconstruction but before computing the inverse solution.
+    n_jobs
+        Number of CPU cores to use for processing. If ``None`` (default) the
+        value is read from the ``loreta`` section of ``settings.ini``.
     """
     if log_func is None:
         log_func = logger.info
@@ -155,6 +159,11 @@ def run_source_localization(
     else:
         log_func(f"Loading data from {fif_path}")
     settings = SettingsManager()
+    if n_jobs is None:
+        try:
+            n_jobs = int(settings.get("loreta", "n_jobs", "1"))
+        except ValueError:
+            n_jobs = 1
     if threshold is None:
         try:
             threshold = float(settings.get("loreta", "loreta_threshold", "0.0"))
@@ -216,12 +225,16 @@ def run_source_localization(
     if epochs is not None:
         if oddball:
             if low_freq or high_freq:
-                epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
+                epochs = epochs.copy().filter(
+                    l_freq=low_freq, h_freq=high_freq, n_jobs=n_jobs
+                )
             if baseline is not None:
                 epochs.apply_baseline(baseline)
 
             # compute covariance before cropping away the baseline interval
-            noise_cov = _estimate_epochs_covariance(epochs, log_func, baseline)
+            noise_cov = _estimate_epochs_covariance(
+                epochs, log_func, baseline, n_jobs=n_jobs
+            )
 
             cycle_epochs = source_localization.extract_cycles(epochs, oddball_freq)
             log_func(
@@ -245,10 +258,14 @@ def run_source_localization(
                 evoked = evoked.copy().crop(tmin=tmin, tmax=tmax)
             evoked = combine_evoked([evoked], weights="equal")
         else:
-            noise_cov = _estimate_epochs_covariance(epochs, log_func, baseline)
+            noise_cov = _estimate_epochs_covariance(
+                epochs, log_func, baseline, n_jobs=n_jobs
+            )
             evoked = epochs.average()
             if low_freq or high_freq:
-                evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
+                evoked = evoked.copy().filter(
+                    l_freq=low_freq, h_freq=high_freq, n_jobs=n_jobs
+                )
             if time_window is not None:
                 tmin, tmax = time_window
                 evoked = evoked.copy().crop(tmin=tmin, tmax=tmax)
@@ -257,11 +274,15 @@ def run_source_localization(
         epochs = mne.read_epochs(fif_path, preload=True)
         log_func(f"Loaded {len(epochs)} epoch(s)")
         if low_freq or high_freq:
-            epochs = epochs.copy().filter(l_freq=low_freq, h_freq=high_freq)
+            epochs = epochs.copy().filter(
+                l_freq=low_freq, h_freq=high_freq, n_jobs=n_jobs
+            )
         if baseline is not None:
             epochs.apply_baseline(baseline)
         # estimate covariance before segmenting into cycles
-        noise_cov = _estimate_epochs_covariance(epochs, log_func, baseline)
+        noise_cov = _estimate_epochs_covariance(
+            epochs, log_func, baseline, n_jobs=n_jobs
+        )
 
         cycle_epochs = source_localization.extract_cycles(epochs, oddball_freq)
         log_func(
@@ -288,7 +309,9 @@ def run_source_localization(
             raise ValueError("fif_path must be provided if epochs is None")
         evoked = _load_data(fif_path)
         if low_freq or high_freq:
-            evoked = evoked.copy().filter(l_freq=low_freq, h_freq=high_freq)
+            evoked = evoked.copy().filter(
+                l_freq=low_freq, h_freq=high_freq, n_jobs=n_jobs
+            )
         if time_window is not None:
             tmin, tmax = time_window
             evoked = evoked.copy().crop(tmin=tmin, tmax=tmax)
@@ -299,7 +322,9 @@ def run_source_localization(
                 tmin=evoked.times[0],
                 verbose=False,
             )
-            noise_cov = mne.compute_covariance(temp_epochs, tmax=0.0)
+            noise_cov = mne.compute_covariance(
+                temp_epochs, tmax=0.0, n_jobs=n_jobs
+            )
         except Exception as err:
             log_func(
                 f"Noise covariance estimation failed ({err}). Using ad-hoc covariance."
@@ -339,7 +364,9 @@ def run_source_localization(
 
         log_func(f"Applying {method_lower} ...")
         mne_method = "eLORETA" if method_lower == "eloreta" else "sLORETA"
-        stc = mne.minimum_norm.apply_inverse(evoked, inv, method=mne_method)
+        stc = mne.minimum_norm.apply_inverse(
+            evoked, inv, method=mne_method, n_jobs=n_jobs
+        )
     if threshold:
         stc = _threshold_stc(stc, threshold)
     step += 1

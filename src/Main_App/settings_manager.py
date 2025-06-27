@@ -54,7 +54,8 @@ DEFAULTS = {
         'baseline_tmin': '-0.2',
         'baseline_tmax': '0.0',
         'time_window_start_ms': '10',
-        'time_window_end_ms': '100'
+        'time_window_end_ms': '100',
+        'n_jobs': '1'
     },
     'debug': {
         'enabled': 'False'
@@ -101,6 +102,7 @@ class SettingsManager:
                 'baseline_tmax',
                 'time_window_start_ms',
                 'time_window_end_ms',
+                'n_jobs',
             ):
                 if not existing.has_option('loreta', opt):
                     missing_loreta = True
