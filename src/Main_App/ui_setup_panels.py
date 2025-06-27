@@ -74,6 +74,16 @@ class SetupPanelManager:
                                                     corner_radius=CORNER_RADIUS)
         self.app_ref.radio_set.grid(row=2, column=2, padx=PAD_X, pady=PAD_Y, sticky="w")
 
+        # Row 3: Option to run LORETA during processing
+        self.app_ref.run_loreta_var = tk.BooleanVar(value=False)
+        self.app_ref.run_loreta_checkbox = ctk.CTkCheckBox(
+            self.app_ref.options_frame,
+            text="Run LORETA during processing?",
+            variable=self.app_ref.run_loreta_var,
+            corner_radius=CORNER_RADIUS
+        )
+        self.app_ref.run_loreta_checkbox.grid(row=3, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=PAD_Y)
+
     def _create_params_panel(self):
         """Creates the 'Preprocessing Parameters' panel."""
         self.app_ref.params_frame = ctk.CTkFrame(self.main_parent_frame)
