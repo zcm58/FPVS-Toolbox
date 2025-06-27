@@ -1,7 +1,9 @@
 Instructions for Codex: 
 
-Please review the AGENTS.md file in each directory for specific instructions
-before making major edits. 
+If you are instructed to make edits in a specific directory that will not affect other directories, please reivew 
+the AGENTS.md file in that directory for specific instructions. To save time, you do not have to review the AGENTS.md
+file of other directors if your edits will not affect them. If your edits will affect other directories, please review 
+the AGENTS.md file in each directory for specific instructions before making major edits. 
 
 In general, the app GUI should not be altered significantly unless a new button or
 toolbar option is needed when adding new features.
@@ -15,4 +17,5 @@ Do not edit the spacing or the size of the buttons on the top of the app (Select
 Star Processing) unless specifically instructed to do so. Do not adjust the frame or the spacing unless instructed
 to do so. 
 
-When adding new features, please try to keep the code modular and under 500 lines per file.
+When adding new features, please try to keep the code modular and under 500 lines per file. You are allowed to import
+functions from other files into the fpvs_app.py file, but please do not add new functions to the fpvs_app.py file. 
