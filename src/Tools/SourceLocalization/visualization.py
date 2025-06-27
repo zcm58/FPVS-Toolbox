@@ -126,6 +126,7 @@ def view_source_estimate(
     stc_path: str,
     threshold: Optional[float] = None,
     alpha: Optional[float] = None,
+    time_ms: Optional[float] = None,
     window_title: Optional[str] = None,
     log_func: Optional[Callable[[str], None]] = None,
 ) -> pv.Plotter | None:
@@ -167,11 +168,24 @@ def view_source_estimate(
         if not Path(subjects_dir).exists():
             subjects_dir = str(fetch_fsaverage(verbose=False).parent)
 
-        time_idx = settings.get('visualization', 'time_index', fallback=0)
+
+        if time_ms is None:
+            try:
+                time_ms = float(settings.get('visualization', 'time_index_ms', '50'))
+            except ValueError:
+                time_ms = 50.0
+        else:
+            settings.set('visualization', 'time_index_ms', str(time_ms))
+            settings.save()
+
+        time_idx = int(round((time_ms / 1000 - stc.tmin) / stc.tstep))
+        time_idx = max(0, min(time_idx, stc.data.shape[1] - 1))
         if debug:
             logger.debug(
-                "Using time index %s of %s", time_idx, stc.data.shape[1]
+                "Using time index %s of %s (time_ms=%s)", time_idx, stc.data.shape[1], time_ms
             )
+
+
         pl = view_source_estimate_pyvista(stc, subjects_dir, time_idx, cortex_alpha, cortex_alpha)
         pl.show(title=window_title or _derive_title(stc_path))
         return pl

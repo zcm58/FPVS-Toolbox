@@ -153,15 +153,20 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         ctk.CTkLabel(frame, text="SNR").grid(row=8, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
         ctk.CTkEntry(frame, textvariable=self.snr_var, width=60).grid(row=8, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
 
-        ctk.CTkLabel(frame, text="LORETA time window (ms)").grid(row=9, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
-        ctk.CTkEntry(frame, textvariable=self.time_start_var, width=60).grid(row=9, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
-        ctk.CTkEntry(frame, textvariable=self.time_end_var, width=60).grid(row=9, column=2, sticky="w", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkLabel(frame, text="Display time (ms)").grid(row=9, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        self.time_index_entry = ctk.CTkEntry(frame, textvariable=self.time_index_str, width=60)
+        self.time_index_entry.grid(row=9, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+        self.time_index_entry.bind("<Return>", self._on_time_index_entry)
+        self.time_index_entry.bind("<FocusOut>", self._on_time_index_entry)
 
-        ctk.CTkCheckBox(frame, text="Oddball localization", variable=self.oddball_var).grid(row=10, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkLabel(frame, text="LORETA time window (ms)").grid(row=10, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkEntry(frame, textvariable=self.time_start_var, width=60).grid(row=10, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+        ctk.CTkEntry(frame, textvariable=self.time_end_var, width=60).grid(row=10, column=2, sticky="w", padx=PAD_X, pady=PAD_Y)
 
+        ctk.CTkCheckBox(frame, text="Oddball localization", variable=self.oddball_var).grid(row=11, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=PAD_Y)
 
         run_btn = ctk.CTkButton(frame, text="Run LORETA", command=self._run)
-        run_btn.grid(row=11, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
+        run_btn.grid(row=12, column=0, columnspan=3, pady=(PAD_Y * 2, PAD_Y))
 
 
         view_btn = ctk.CTkButton(
@@ -170,7 +175,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             command=self._view_stc,
         )
 
-        view_btn.grid(row=12, column=0, columnspan=3, pady=(0, PAD_Y))
+        view_btn.grid(row=13, column=0, columnspan=3, pady=(0, PAD_Y))
 
         compare_btn = ctk.CTkButton(
             frame,
@@ -178,17 +183,17 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             command=self._compare_stc,
         )
 
-        compare_btn.grid(row=13, column=0, columnspan=3, pady=(0, PAD_Y))
+        compare_btn.grid(row=14, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.avgModeLabel = ctk.CTkLabel(frame, text="Averaging mode:")
-        self.avgModeLabel.grid(row=13, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
+        self.avgModeLabel.grid(row=14, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
         self.avgModeOptions = ctk.CTkOptionMenu(
             frame,
             variable=self.avg_mode_var,
             values=["Raw amplitudes", "Normalized"],
             command=self._on_avg_mode_change,
         )
-        self.avgModeOptions.grid(row=13, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
+        self.avgModeOptions.grid(row=14, column=1, sticky="w", padx=PAD_X, pady=PAD_Y)
 
         avg_btn = ctk.CTkButton(
             frame,
@@ -196,13 +201,13 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             command=self._average_results,
         )
 
-        avg_btn.grid(row=14, column=0, columnspan=3, pady=(0, PAD_Y))
+        avg_btn.grid(row=15, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.progress_bar = ctk.CTkProgressBar(frame, orientation="horizontal", variable=self.progress_var)
-        self.progress_bar.grid(row=15, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
+        self.progress_bar.grid(row=16, column=0, columnspan=3, sticky="ew", padx=PAD_X, pady=(0, PAD_Y))
         self.progress_bar.set(0)
 
-        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=16, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
+        ctk.CTkLabel(frame, textvariable=self.remaining_var).grid(row=17, column=0, columnspan=3, sticky="w", padx=PAD_X, pady=(0, PAD_Y))
 
 
     def _browse_file(self):
@@ -231,10 +236,15 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         def _open_viewer():
             try:
+                self._on_time_index_entry()
+                settings = SettingsManager()
+                settings.set('visualization', 'time_index_ms', str(self.time_index_var.get()))
+                settings.save()
                 brain = visualization.view_source_estimate(
                     path,
                     threshold=self.threshold_var.get(),
                     alpha=self.alpha_var.get(),
+                    time_ms=self.time_index_var.get(),
                     window_title=title,
                     log_func=log_func,
                 )
@@ -546,6 +556,16 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             )
             visualization._set_brain_alpha(self.brain, value)
 
+    def _on_time_index_entry(self, _event=None) -> None:
+        """Validate time entry value."""
+        try:
+            value = float(self.time_index_str.get())
+        except (ValueError, tk.TclError):
+            return
+        value = max(0.0, value)
+        self.time_index_var.set(value)
+        self.time_index_str.set(str(value))
+
     def _on_avg_mode_change(self, value: str) -> None:
         """Callback when the averaging mode option is changed."""
         self.avg_mode_var.set(value)
@@ -554,10 +574,15 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         """Open a SourceEstimate in the interactive viewer on the main thread."""
         log_func = getattr(self.master, "log", print)
         try:
+            self._on_time_index_entry()
+            settings = SettingsManager()
+            settings.set('visualization', 'time_index_ms', str(self.time_index_var.get()))
+            settings.save()
             self.brain = visualization.view_source_estimate(
                 stc_path,
                 threshold=thr,
                 alpha=alpha,
+                time_ms=self.time_index_var.get(),
                 window_title=title,
                 log_func=log_func,
             )
