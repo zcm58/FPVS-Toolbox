@@ -57,6 +57,11 @@ DEFAULTS = {
         'time_window_end_ms': '100',
         'n_jobs': '2'
     },
+    'visualization': {
+        'threshold': '0.0',
+        'surface_opacity': '0.5',
+        'time_index_ms': '50'
+    },
     'debug': {
         'enabled': 'False'
     }
