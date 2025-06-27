@@ -62,23 +62,6 @@ def test_set_brain_alpha_applies_and_renders(monkeypatch):
     assert brain._renderer.plotter.render_calls == 1
 
 
-def test_save_brain_screenshots(tmp_path, monkeypatch):
-    module = _import_brain_utils(monkeypatch)
-    views, saved = [], []
-    brain = types.SimpleNamespace(
-        _renderer=DummyRenderer(),
-        _actors={"a": DummyActor()},
-        show_view=lambda view: views.append(view),
-        save_image=lambda path: saved.append(path),
-    )
-
-    module._set_brain_alpha(brain, 0.5)
-    module.save_brain_screenshots(brain, str(tmp_path))
-
-    assert views == ["lat", "rostral", "dorsal"]
-    assert len(saved) == 4
-    assert all(path.startswith(str(tmp_path)) for path in saved)
-
 
 def test_set_brain_alpha_no_values(monkeypatch):
     module = _import_brain_utils(monkeypatch)

@@ -71,8 +71,7 @@ source localization tool.
 Choose **Source Localization (eLORETA/sLORETA)** from the Tools menu to run an
 inverse solution on a preprocessed `.fif` file. Select the desired method and an
 output folder. An interactive 3‑D viewer will open showing both hemispheres with
-anatomical labels. Side, frontal and top screenshots are automatically saved in
-the chosen folder. You can also open any saved `source-lh.stc`/`source-rh.stc`
+anatomical labels. You can open any saved `source-lh.stc`/`source-rh.stc`
 pair later using the **View STC** button to inspect the results interactively and
 adjust the brain transparency. A hemisphere selector lets you view the left
 hemisphere, right hemisphere, both together, or a split layout. Activity is
