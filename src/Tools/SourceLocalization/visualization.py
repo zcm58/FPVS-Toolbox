@@ -168,6 +168,7 @@ def view_source_estimate(
         if not Path(subjects_dir).exists():
             subjects_dir = str(fetch_fsaverage(verbose=False).parent)
 
+
         if time_ms is None:
             try:
                 time_ms = float(settings.get('visualization', 'time_index_ms', '50'))
@@ -183,6 +184,7 @@ def view_source_estimate(
             logger.debug(
                 "Using time index %s of %s (time_ms=%s)", time_idx, stc.data.shape[1], time_ms
             )
+
 
         pl = view_source_estimate_pyvista(stc, subjects_dir, time_idx, cortex_alpha, cortex_alpha)
         pl.show(title=window_title or _derive_title(stc_path))
