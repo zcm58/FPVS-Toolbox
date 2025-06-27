@@ -55,7 +55,7 @@ DEFAULTS = {
         'baseline_tmax': '0.0',
         'time_window_start_ms': '10',
         'time_window_end_ms': '100',
-        'n_jobs': '1'
+        'n_jobs': '2'
     },
     'debug': {
         'enabled': 'False'

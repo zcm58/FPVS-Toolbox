@@ -161,9 +161,9 @@ def run_source_localization(
     settings = SettingsManager()
     if n_jobs is None:
         try:
-            n_jobs = int(settings.get("loreta", "n_jobs", "1"))
+            n_jobs = int(settings.get("loreta", "n_jobs", "2"))
         except ValueError:
-            n_jobs = 1
+            n_jobs = 2
     if threshold is None:
         try:
             threshold = float(settings.get("loreta", "loreta_threshold", "0.0"))

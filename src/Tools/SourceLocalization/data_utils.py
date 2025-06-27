@@ -92,7 +92,7 @@ def _estimate_epochs_covariance(
     epochs: mne.Epochs,
     log_func: Callable[[str], None] = logger.info,
     baseline: Optional[Tuple[float | None, float | None]] = None,
-    n_jobs: int = 1,
+    n_jobs: int = 2,
 ) -> mne.Covariance:
     """Return a noise covariance estimated from ``epochs``.
 

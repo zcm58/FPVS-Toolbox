@@ -133,7 +133,7 @@ class SettingsWindow(ctk.CTkToplevel):
             gen_tab,
             text="Number of CPU cores to use for processing",
         ).grid(row=12, column=0, sticky="w", padx=pad, pady=(pad, 0))
-        jobs_var = tk.StringVar(value=self.manager.get("loreta", "n_jobs", "1"))
+        jobs_var = tk.StringVar(value=self.manager.get("loreta", "n_jobs", "2"))
         ctk.CTkEntry(gen_tab, textvariable=jobs_var).grid(
             row=12, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0)
         )
