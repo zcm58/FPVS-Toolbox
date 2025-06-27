@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 import inspect
-import os
-from typing import Optional, Tuple
+
 
 import mne
 
@@ -159,31 +158,3 @@ def _set_colorbar_label(brain: mne.viz.Brain, label: str) -> None:
         logger.debug("Failed to set colorbar label", exc_info=True)
 
 
-def save_brain_screenshots(
-    brain: mne.viz.Brain,
-    output_dir: str,
-    time: Optional[Tuple[float, float] | float] = None,
-) -> None:
-    """Save standard view screenshots to ``output_dir``.
-
-    If ``time`` is provided, a suffix containing the time information is added
-    to the output file names.
-    """
-    if time is not None:
-        if isinstance(time, (tuple, list)):
-            tmin, tmax = float(time[0]), float(time[1])
-            suffix = f"_{tmin:.3f}-{tmax:.3f}s"
-        else:
-            tmin = float(time)
-            suffix = f"_{tmin:.3f}s"
-    else:
-        suffix = ""
-
-    for view, name in [
-        ("lat", "side"),
-        ("rostral", "frontal"),
-        ("dorsal", "top"),
-    ]:
-        brain.show_view(view)
-        brain.save_image(os.path.join(output_dir, f"{name}{suffix}.png"))
-    brain.save_image(os.path.join(output_dir, f"overview{suffix}.png"))

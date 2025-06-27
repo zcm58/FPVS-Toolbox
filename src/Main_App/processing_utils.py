@@ -498,11 +498,6 @@ class ProcessingMixin:
                                     stc_base = os.path.join(cond_folder, base_name)
                                     stc.save(stc_base)
 
-                                    brain = stc.plot(subject=subj, subjects_dir=subj_dir, time_viewer=False)
-                                    for view, name in [('dorsal', 'top'), ('rostral', 'frontal'), ('lat', 'side')]:
-                                        brain.show_view(view)
-                                        brain.save_image(f"{stc_base}_{name}.png")
-                                    brain.close()
 
                                     excel_name = f"{extracted_pid_for_flagging}_{cond_label.replace(' ', '_')}_Results.xlsx"
                                     excel_path = os.path.join(cond_folder, excel_name)
