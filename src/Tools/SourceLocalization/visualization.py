@@ -64,16 +64,30 @@ def view_source_estimate_pyvista(
     )
 
     # Prepare activation data per hemisphere
+    debug = SettingsManager().debug_enabled()
     data = stc.data[:, time_idx]
     n_lh = len(stc.vertices[0])
+    if debug:
+        logger.debug(
+            "Time index %s data range: min=%s max=%s", time_idx, data.min(), data.max()
+        )
     for hemi, mesh, verts in [('lh', mesh_lh, stc.vertices[0]),
                               ('rh', mesh_rh, stc.vertices[1])]:
         act = np.zeros(mesh.n_points)
         vals = data[:n_lh] if hemi == 'lh' else data[n_lh:]
+        if debug:
+            logger.debug(
+                "%s verts: %s points, mesh points=%s", hemi, len(verts), mesh.n_points
+            )
         act[verts] = vals
         # Use NaN for zero so unmapped points are fully transparent
         act_mask = act == 0
         act[act_mask] = np.nan
+        if debug:
+            logger.debug(
+                "%s activation non-zero=%s NaN=%s", hemi,
+                np.count_nonzero(~act_mask), np.count_nonzero(np.isnan(act))
+            )
         heatmap = mesh.copy()
         # Slightly offset points along normals to avoid z-fighting
         normals = heatmap.point_normals
@@ -88,6 +102,8 @@ def view_source_estimate_pyvista(
                 opacity=1.0,
                 name=f'act_{hemi}'
             )
+        elif debug:
+            logger.debug("%s hemisphere has no activation", hemi)
 
     pl.add_scalar_bar(title='Source Amplitude', n_colors=8)
 
@@ -120,6 +136,12 @@ def view_source_estimate(
     try:
         import mne
         stc = mne.read_source_estimate(stc_path)
+        debug = SettingsManager().debug_enabled()
+        if debug:
+            logger.debug(
+                "Loaded STC with %s vertices and %s time samples (tmin=%s, tstep=%s)",
+                stc.data.shape[0], stc.data.shape[1], getattr(stc, 'tmin', 'n/a'), getattr(stc, 'tstep', 'n/a')
+            )
 
         # Threshold data
         settings = SettingsManager()
@@ -128,6 +150,11 @@ def view_source_estimate(
             stc = stc.copy()
             val = thr * float(stc.data.max()) if 0 < thr < 1 else thr
             stc.data[(stc.data < val) & (stc.data > -val)] = 0
+        if debug:
+            logger.debug(
+                "Threshold=%s (val=%s) -> non-zero count=%s",
+                thr, 'n/a' if thr == 0 else val, np.count_nonzero(stc.data)
+            )
 
         # Determine alpha
         gui_alpha = settings.get('visualization', 'surface_opacity', fallback=0.5)
@@ -141,6 +168,10 @@ def view_source_estimate(
             subjects_dir = str(fetch_fsaverage(verbose=False).parent)
 
         time_idx = settings.get('visualization', 'time_index', fallback=0)
+        if debug:
+            logger.debug(
+                "Using time index %s of %s", time_idx, stc.data.shape[1]
+            )
         pl = view_source_estimate_pyvista(stc, subjects_dir, time_idx, cortex_alpha, cortex_alpha)
         pl.show(title=window_title or _derive_title(stc_path))
         return pl
