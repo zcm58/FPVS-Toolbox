@@ -129,6 +129,16 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(gen_tab, text="Debug Mode").grid(row=11, column=0, sticky="w", padx=pad, pady=(pad, 0))
         ctk.CTkCheckBox(gen_tab, text="Enable", variable=self.debug_var).grid(row=11, column=1, sticky="w", padx=pad, pady=(pad, 0))
 
+        ctk.CTkLabel(
+            gen_tab,
+            text="Number of CPU cores to use for processing",
+        ).grid(row=12, column=0, sticky="w", padx=pad, pady=(pad, 0))
+        jobs_var = tk.StringVar(value=self.manager.get("loreta", "n_jobs", "1"))
+        ctk.CTkEntry(gen_tab, textvariable=jobs_var).grid(
+            row=12, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0)
+        )
+        self.jobs_var = jobs_var
+
         # --- Stats Tab ---
         ctk.CTkLabel(stats_tab, text="FPVS Base Frequency (Hz)").grid(row=0, column=0, sticky="w", padx=pad, pady=(pad, 0))
         base_var = tk.StringVar(value=self.manager.get('analysis', 'base_freq', '6.0'))
@@ -253,6 +263,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('loreta', 'loreta_threshold', self.thr_var.get())
         self.manager.set('loreta', 'time_window_start_ms', self.t_start_var.get())
         self.manager.set('loreta', 'time_window_end_ms', self.t_end_var.get())
+        self.manager.set('loreta', 'n_jobs', self.jobs_var.get())
         self.manager.set(
             'loreta',
             'auto_oddball_localization',
