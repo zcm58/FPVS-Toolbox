@@ -53,8 +53,8 @@ DEFAULTS = {
         'auto_oddball_localization': 'False',
         'baseline_tmin': '-0.2',
         'baseline_tmax': '0.0',
-        'time_window_start_ms': '',
-        'time_window_end_ms': ''
+        'time_window_start_ms': '10',
+        'time_window_end_ms': '100'
     },
     'debug': {
         'enabled': 'False'
