@@ -83,6 +83,13 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             master=self, value=settings.get('loreta', 'time_window_end_ms', '')
         )
 
+        try:
+            ti_ms = float(settings.get('visualization', 'time_index_ms', '50'))
+        except ValueError:
+            ti_ms = 50.0
+        self.time_index_var = tk.DoubleVar(master=self, value=ti_ms)
+        self.time_index_str = tk.StringVar(master=self, value=str(ti_ms))
+
         self.avg_mode_var = tk.StringVar(master=self, value="Raw amplitudes")
 
 

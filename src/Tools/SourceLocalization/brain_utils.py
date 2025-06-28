@@ -34,13 +34,30 @@ def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
         # Fallback for older versions or different renderer states
         try:
             actors = []
-            for hemi in ['lh', 'rh']:
-                if hemi in brain._hemi_actors:
-                    actors.append(brain._hemi_actors[hemi])
 
-            if not actors:  # Try another internal attribute if the first fails
+            if hasattr(brain, "_hemi_actors"):
+                for hemi in ["lh", "rh"]:
+                    actor = brain._hemi_actors.get(hemi)
+                    if actor is not None:
+                        actors.append(actor)
+
+            if not actors and hasattr(brain, "_surfaces"):
                 for hemi_mesh in brain._surfaces.values():
-                    actors.append(hemi_mesh['actor'])
+                    if isinstance(hemi_mesh, dict):
+                        actor = hemi_mesh.get("actor")
+                    else:
+                        actor = getattr(hemi_mesh, "actor", None)
+                    if actor is not None:
+                        actors.append(actor)
+
+            if not actors and hasattr(brain, "_actors"):
+                actors.extend(brain._actors.values())
+
+            if not actors and hasattr(brain, "_layered_meshes"):
+                for mesh in brain._layered_meshes.values():
+                    actor = getattr(mesh, "actor", None)
+                    if actor is not None:
+                        actors.append(actor)
 
             if not actors:
                 logger.error("Could not find any brain surface actors to modify alpha.")
