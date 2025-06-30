@@ -79,6 +79,16 @@ displayed with a red heatmap so you can easily spot the peak response. The
 color bar at the bottom of the viewer shows the magnitude of the estimated
 current density and is labeled **Source amplitude** for clarity.
 
+Saved source estimates can also be opened directly from the command line using
+`pyqt_viewer.py`:
+
+```bash
+python src/Tools/SourceLocalization/pyqt_viewer.py --stc path/to/source
+```
+
+The viewer provides sliders for adjusting cortex opacity and selecting the time
+point displayed.
+
 The underlying module exposes an `is_pyvistaqt_backend()` helper which
 returns ``True`` when the viewer will use the interactive PyVistaQt
 backend. This can be queried before opening any 3‑D windows to ensure
