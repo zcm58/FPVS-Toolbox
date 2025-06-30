@@ -11,6 +11,7 @@ from .stc_utils import (
     morph_to_fsaverage,
 )
 from .visualization import view_source_estimate
+from .pyqt_viewer import STCViewer
 
 __all__ = [
     "SourceLocalizationWindow",
@@ -22,4 +23,5 @@ __all__ = [
     "average_conditions_to_fsaverage",
     "run_localization_worker",
     "morph_to_fsaverage",
+    "STCViewer",
 ]

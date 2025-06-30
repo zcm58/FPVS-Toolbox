@@ -9,16 +9,6 @@ import mne
 logger = logging.getLogger(__name__)
 
 
-def _set_brain_title(brain: mne.viz.Brain, title: str) -> None:
-    """Safely set the window title of a Brain viewer."""
-    try:
-        plotter = brain._renderer.plotter
-        if hasattr(plotter, "app_window"):
-            plotter.app_window.setWindowTitle(title)
-    except Exception:
-        logger.debug("Could not set brain title.", exc_info=True)
-
-
 def _set_brain_alpha(brain: mne.viz.Brain, alpha: float) -> None:
     """Set the transparency of the brain surface meshes after plotting."""
     logger.debug("Attempting to set brain surface alpha to %s post-plot.", alpha)
@@ -117,19 +107,3 @@ def _plot_with_alpha(
 
     return brain
 
-
-def _set_colorbar_label(brain: mne.viz.Brain, label: str) -> None:
-    """Set the colorbar title in a robust way."""
-    try:
-        renderer = getattr(brain, "_renderer", None)
-        cbar = None
-        if renderer is not None:
-            plotter = getattr(renderer, "plotter", None)
-            cbar = getattr(plotter, "scalar_bar", None)
-        if cbar is not None:
-            if hasattr(cbar, "SetTitle"):
-                cbar.SetTitle(label)
-            elif hasattr(cbar, "title"):
-                cbar.title = label
-    except Exception:
-        logger.debug("Failed to set colorbar label", exc_info=True)
