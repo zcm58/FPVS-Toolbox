@@ -167,6 +167,10 @@ def run_source_localization(
             threshold = float(settings.get("loreta", "loreta_threshold", "0.0"))
         except ValueError:
             threshold = None
+    if threshold is not None and threshold != 0.0:
+        log_func(f"Using threshold {threshold}")
+    else:
+        log_func("No threshold will be applied")
     if time_window is None:
         start_ms = settings.get("loreta", "time_window_start_ms", "")
         end_ms = settings.get("loreta", "time_window_end_ms", "")
@@ -366,7 +370,14 @@ def run_source_localization(
             evoked, inv, method=mne_method, n_jobs=n_jobs
         )
     if threshold:
+        if 0 < threshold < 1:
+            thr_val = threshold * np.max(np.abs(stc.data))
+        else:
+            thr_val = threshold
+        log_func(f"Applying threshold {threshold} (cutoff {thr_val:.5f})")
         stc = _threshold_stc(stc, threshold)
+    else:
+        log_func("Skipping thresholding step")
     step += 1
 
     update_progress(step, total, progress_cb)
