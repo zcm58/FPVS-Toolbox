@@ -18,7 +18,7 @@ from Main_App.settings_manager import SettingsManager
 import customtkinter as ctk
 
 from config import PAD_X, PAD_Y, CORNER_RADIUS, init_fonts, FONT_MAIN
-from . import runner, worker, visualization
+from . import runner, worker
 
 
 class SourceLocalizationWindow(ctk.CTkToplevel):
@@ -187,13 +187,6 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         view_btn.grid(row=13, column=0, columnspan=3, pady=(0, PAD_Y))
 
-        compare_btn = ctk.CTkButton(
-            frame,
-            text="Compare two STC files",
-            command=self._compare_stc,
-        )
-
-        compare_btn.grid(row=14, column=0, columnspan=3, pady=(0, PAD_Y))
 
         self.avgModeLabel = ctk.CTkLabel(frame, text="Averaging mode:")
         self.avgModeLabel.grid(row=14, column=0, sticky="e", padx=PAD_X, pady=PAD_Y)
@@ -254,44 +247,6 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         self.after(0, _open_viewer)
 
-    def _compare_stc(self):
-        path_a = filedialog.askopenfilename(
-            title="Select the first SourceEstimate file",
-            filetypes=[("SourceEstimate", "*-lh.stc"), ("All files", "*")],
-            parent=self,
-        )
-        if not path_a:
-            return
-
-        path_b = filedialog.askopenfilename(
-            title="Select the second SourceEstimate file",
-            filetypes=[("SourceEstimate", "*-lh.stc"), ("All files", "*")],
-            parent=self,
-        )
-        if not path_b:
-            return
-
-        if path_a.endswith("-lh.stc") or path_a.endswith("-rh.stc"):
-            path_a = path_a[:-7]
-        if path_b.endswith("-lh.stc") or path_b.endswith("-rh.stc"):
-            path_b = path_b[:-7]
-
-        log_func = getattr(self.master, "log", print)
-        log_func(f"Comparing STCs {path_a} and {path_b}")
-
-        def _open_viewer():
-            try:
-                visualization.compare_source_estimates(
-                    path_a,
-                    path_b,
-                    threshold=self.threshold_var.get(),
-                    alpha=self.alpha_var.get(),
-                )
-            except Exception as err:
-                log_func(f"STC compare failed: {err}")
-                messagebox.showerror("Error", str(err))
-
-        self.after(0, _open_viewer)
 
     def _average_results(self):
         folder = filedialog.askdirectory(
