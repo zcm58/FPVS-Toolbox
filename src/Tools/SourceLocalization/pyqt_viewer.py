@@ -4,6 +4,8 @@ import argparse
 from pathlib import Path
 
 
+# ruff: noqa: E402
+
 
 import numpy as np
 import pyvista as pv
@@ -74,10 +76,23 @@ class STCViewer(QtWidgets.QMainWindow):
     def _load_surfaces(self) -> None:
         subject = self.stc.subject or "fsaverage"
         surf_dir = self.subjects_dir / subject / "surf"
-        lh = pv.read(surf_dir / "lh.pial")
-        rh = pv.read(surf_dir / "rh.pial")
-        self.cortex_lh = self.plotter.add_mesh(lh, color="lightgray", opacity=0.5, name="lh")
-        self.cortex_rh = self.plotter.add_mesh(rh, color="lightgray", opacity=0.5, name="rh")
+
+        verts_lh, faces_lh = mne.read_surface(surf_dir / "lh.pial")
+        verts_rh, faces_rh = mne.read_surface(surf_dir / "rh.pial")
+
+        def _fmt(arr: np.ndarray) -> np.ndarray:
+            return np.c_[np.full(len(arr), 3), arr].astype(np.int64)
+
+        lh = pv.PolyData(verts_lh, _fmt(faces_lh))
+        rh = pv.PolyData(verts_rh, _fmt(faces_rh))
+
+        self.cortex_lh = self.plotter.add_mesh(
+            lh, color="lightgray", opacity=0.5, name="lh"
+        )
+        self.cortex_rh = self.plotter.add_mesh(
+            rh, color="lightgray", opacity=0.5, name="rh"
+        )
+
         self.heat_lh = lh.copy()
         self.heat_rh = rh.copy()
         self.heat_lh.point_data["activation"] = np.zeros(lh.n_points)
