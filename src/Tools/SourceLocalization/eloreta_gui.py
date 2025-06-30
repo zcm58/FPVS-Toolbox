@@ -1,6 +1,9 @@
 """Simple GUI for running eLORETA/sLORETA localization."""
 
 import os
+import sys
+import subprocess
+from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
@@ -235,7 +238,6 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         )
         if not path:
             return
-        title = os.path.basename(path)
         if path.endswith("-lh.stc") or path.endswith("-rh.stc"):
             path = path[:-7]
         log_func = getattr(self.master, "log", print)
@@ -243,24 +245,13 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
 
         def _open_viewer():
             try:
-                self._on_time_index_entry()
-                settings = SettingsManager()
-                settings.set('visualization', 'time_index_ms', str(self.time_index_var.get()))
-                settings.save()
-                brain = visualization.view_source_estimate(
-                    path,
-                    threshold=self.threshold_var.get(),
-                    alpha=self.alpha_var.get(),
-                    time_ms=self.time_index_var.get(),
-                    window_title=title,
-                    log_func=log_func,
-                )
-                self.brain = brain
+                script = Path(__file__).with_name("pyqt_viewer.py")
+                args = [sys.executable, str(script), "--stc", path]
+                subprocess.Popen(args)
             except Exception as err:
                 log_func(f"STC viewer failed: {err}")
                 messagebox.showerror("Error", str(err))
 
-        # Schedule opening the viewer on the main thread to avoid Qt issues
         self.after(0, _open_viewer)
 
     def _compare_stc(self):
@@ -541,11 +532,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             self.alpha_str.set(str(new_val))
         except tk.TclError:
             return
-        if self.brain is not None:
-            runner.logger.debug(
-                "_on_alpha_slider updating brain to %s", self.alpha_var.get()
-            )
-            visualization._set_brain_alpha(self.brain, self.alpha_var.get())
+
 
     def _on_alpha_entry(self, _event=None) -> None:
         """Validate entry value and update slider."""
@@ -557,11 +544,7 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
         self.alpha_var.set(value)
         self.alpha_str.set(str(value))
         self.alpha_slider.set(value)
-        if self.brain is not None:
-            runner.logger.debug(
-                "_on_alpha_entry updating brain to %s", value
-            )
-            visualization._set_brain_alpha(self.brain, value)
+
 
     def _on_time_index_entry(self, _event=None) -> None:
         """Validate time entry value."""
@@ -576,24 +559,4 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
     def _on_avg_mode_change(self, value: str) -> None:
         """Callback when the averaging mode option is changed."""
         self.avg_mode_var.set(value)
-
-    def _open_brain(self, stc_path: str, thr: float, alpha: float, title: str) -> None:
-        """Open a SourceEstimate in the interactive viewer on the main thread."""
-        log_func = getattr(self.master, "log", print)
-        try:
-            self._on_time_index_entry()
-            settings = SettingsManager()
-            settings.set('visualization', 'time_index_ms', str(self.time_index_var.get()))
-            settings.save()
-            self.brain = visualization.view_source_estimate(
-                stc_path,
-                threshold=thr,
-                alpha=alpha,
-                time_ms=self.time_index_var.get(),
-                window_title=title,
-                log_func=log_func,
-            )
-        except Exception as err:
-            log_func(f"STC viewer failed: {err}")
-            messagebox.showerror("Error", str(err))
 

@@ -17,8 +17,6 @@ from .backend_utils import _ensure_pyvista_backend, get_current_backend
 from .brain_utils import (
     _plot_with_alpha,
     _set_brain_alpha,
-    _set_brain_title,
-    _set_colorbar_label,
 )
 from .data_utils import (
     _load_data,
@@ -443,8 +441,25 @@ def run_source_localization(
             logger.debug("stc.plot succeeded on retry")
         _set_brain_alpha(brain, alpha)
         logger.debug("Brain alpha set to %s", alpha)
-        _set_brain_title(brain, stc_path.name)
-        _set_colorbar_label(brain, "Source amplitude")
+        try:
+            plotter = brain._renderer.plotter
+            if hasattr(plotter, "app_window"):
+                plotter.app_window.setWindowTitle(stc_path.name)
+        except Exception:
+            logger.debug("Could not set brain title.", exc_info=True)
+        try:
+            renderer = getattr(brain, "_renderer", None)
+            cbar = None
+            if renderer is not None:
+                plotter = getattr(renderer, "plotter", None)
+                cbar = getattr(plotter, "scalar_bar", None)
+            if cbar is not None:
+                if hasattr(cbar, "SetTitle"):
+                    cbar.SetTitle("Source amplitude")
+                elif hasattr(cbar, "title"):
+                    cbar.title = "Source amplitude"
+        except Exception:
+            logger.debug("Failed to set colorbar label", exc_info=True)
         try:
             labels = mne.read_labels_from_annot(
                 subject, parc="aparc", subjects_dir=subjects_dir
