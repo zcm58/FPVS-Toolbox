@@ -3,13 +3,20 @@ import sys
 import argparse
 from pathlib import Path
 
+
+
 import numpy as np
 import pyvista as pv
 from pyvistaqt import QtInteractor
 from PyQt5 import QtWidgets, QtCore
 import mne
 
-from .data_utils import _resolve_subjects_dir
+
+SRC_PATH = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(SRC_PATH))
+
+from Tools.SourceLocalization.data_utils import _resolve_subjects_dir
+
 from Main_App.settings_manager import SettingsManager
 
 
