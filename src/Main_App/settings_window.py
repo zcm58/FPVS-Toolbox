@@ -215,6 +215,11 @@ class SettingsWindow(ctk.CTkToplevel):
         self.t_start_var = t_start_var
         self.t_end_var = t_end_var
 
+        ctk.CTkLabel(loreta_tab, text="Display Time (ms)").grid(row=7, column=0, sticky="w", padx=pad)
+        disp_var = tk.StringVar(value=self.manager.get('visualization', 'time_index_ms', '100'))
+        ctk.CTkEntry(loreta_tab, textvariable=disp_var, width=80).grid(row=7, column=1, sticky="w", padx=pad)
+        self.disp_var = disp_var
+
         auto_loc_default = self.manager.get('loreta', 'auto_oddball_localization', 'False').lower() == 'true'
         self.auto_loc_var = tk.BooleanVar(value=auto_loc_default)
         ctk.CTkCheckBox(
@@ -264,6 +269,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('loreta', 'time_window_start_ms', self.t_start_var.get())
         self.manager.set('loreta', 'time_window_end_ms', self.t_end_var.get())
         self.manager.set('loreta', 'n_jobs', self.jobs_var.get())
+        self.manager.set('visualization', 'time_index_ms', self.disp_var.get())
         self.manager.set(
             'loreta',
             'auto_oddball_localization',
