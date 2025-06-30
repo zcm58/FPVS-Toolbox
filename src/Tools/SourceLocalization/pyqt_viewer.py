@@ -119,8 +119,10 @@ class STCViewer(QtWidgets.QMainWindow):
         arr_rh = np.full(self.heat_rh.n_points, np.nan)
         arr_lh[self.stc.vertices[0]] = data[:n_lh]
         arr_rh[self.stc.vertices[1]] = data[n_lh:]
-        self.plotter.update_scalars(arr_lh, mesh=self.heat_lh, render=False)
-        self.plotter.update_scalars(arr_rh, mesh=self.heat_rh, render=False)
+
+        # Modern PyVista approach: modify mesh scalars in-place
+        self.heat_lh.point_data["activation"] = arr_lh
+        self.heat_rh.point_data["activation"] = arr_rh
         self.plotter.render()
 
 
