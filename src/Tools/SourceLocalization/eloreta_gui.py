@@ -256,6 +256,11 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             try:
                 script = Path(__file__).with_name("pyqt_viewer.py")
                 args = [sys.executable, str(script), "--stc", path]
+                try:
+                    time_ms = float(self.time_index_var.get())
+                    args.extend(["--time-ms", str(time_ms)])
+                except Exception:
+                    pass
                 subprocess.Popen(args)
             except Exception as err:
                 log_func(f"STC viewer failed: {err}")

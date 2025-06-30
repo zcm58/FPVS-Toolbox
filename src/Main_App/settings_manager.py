@@ -53,14 +53,14 @@ DEFAULTS = {
         'auto_oddball_localization': 'False',
         'baseline_tmin': '-0.2',
         'baseline_tmax': '0.0',
-        'time_window_start_ms': '10',
-        'time_window_end_ms': '100',
+        'time_window_start_ms': '-1000',
+        'time_window_end_ms': '1000',
         'n_jobs': '2'
     },
     'visualization': {
         'threshold': '0.0',
         'surface_opacity': '0.5',
-        'time_index_ms': '50'
+        'time_index_ms': '100'
     },
     'debug': {
         'enabled': 'False'

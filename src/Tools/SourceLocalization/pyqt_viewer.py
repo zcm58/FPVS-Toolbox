@@ -25,14 +25,20 @@ from Main_App.settings_manager import SettingsManager
 class STCViewer(QtWidgets.QMainWindow):
     """Qt window for interactively viewing SourceEstimate files."""
 
-    def __init__(self, stc_path: str):
+    def __init__(self, stc_path: str, time_ms: float | None = None):
         super().__init__()
         self.setWindowTitle(os.path.basename(stc_path))
         self.stc = mne.read_source_estimate(stc_path)
         self._setup_subjects()
         self._build_ui()
         self._load_surfaces()
-        self._update_time(0)
+        if time_ms is not None:
+            idx = int(round((time_ms / 1000 - self.stc.tmin) / self.stc.tstep))
+            idx = max(0, min(idx, self.stc.data.shape[1] - 1))
+        else:
+            idx = 0
+        self.time_slider.setValue(idx)
+        self._update_time(idx)
 
     def _setup_subjects(self) -> None:
         settings = SettingsManager()
@@ -129,9 +135,10 @@ class STCViewer(QtWidgets.QMainWindow):
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="View a source estimate file")
     parser.add_argument("--stc", required=True, help="Base STC file path")
+    parser.add_argument("--time-ms", type=float, help="Initial time in ms")
     args = parser.parse_args(argv)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    viewer = STCViewer(args.stc)
+    viewer = STCViewer(args.stc, args.time_ms)
     viewer.show()
     app.exec_()
 
