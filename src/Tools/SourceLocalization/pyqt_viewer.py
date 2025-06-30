@@ -3,7 +3,9 @@ import sys
 import argparse
 from pathlib import Path
 
+
 # ruff: noqa: E402
+
 
 import numpy as np
 import pyvista as pv
@@ -11,10 +13,12 @@ from pyvistaqt import QtInteractor
 from PyQt5 import QtWidgets, QtCore
 import mne
 
+
 SRC_PATH = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SRC_PATH))
 
 from Tools.SourceLocalization.data_utils import _resolve_subjects_dir
+
 from Main_App.settings_manager import SettingsManager
 
 
@@ -72,6 +76,7 @@ class STCViewer(QtWidgets.QMainWindow):
     def _load_surfaces(self) -> None:
         subject = self.stc.subject or "fsaverage"
         surf_dir = self.subjects_dir / subject / "surf"
+
         verts_lh, faces_lh = mne.read_surface(surf_dir / "lh.pial")
         verts_rh, faces_rh = mne.read_surface(surf_dir / "rh.pial")
 
@@ -87,6 +92,7 @@ class STCViewer(QtWidgets.QMainWindow):
         self.cortex_rh = self.plotter.add_mesh(
             rh, color="lightgray", opacity=0.5, name="rh"
         )
+
         self.heat_lh = lh.copy()
         self.heat_rh = rh.copy()
         self.heat_lh.point_data["activation"] = np.zeros(lh.n_points)
