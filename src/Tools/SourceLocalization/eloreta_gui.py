@@ -235,6 +235,22 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
             path = path[:-7]
         log_func = getattr(self.master, "log", print)
         log_func(f"Opening STC viewer for {path}")
+        # log the threshold that will be used in the viewer
+        try:
+            current_thr = float(self.threshold_var.get())
+        except Exception:
+            current_thr = 0.0
+        log_func(f"LORETA threshold: {current_thr}")
+
+        # read the source estimate to report the initial time index
+        try:
+            import mne
+
+            stc = mne.read_source_estimate(path)
+            first_time_ms = stc.times[0] * 1000
+            log_func(f"Initial timestamp: {first_time_ms:.1f} ms")
+        except Exception as err:
+            log_func(f"Could not read initial timestamp: {err}")
 
         def _open_viewer():
             try:
