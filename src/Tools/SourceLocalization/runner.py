@@ -168,9 +168,11 @@ def run_source_localization(
         except ValueError:
             threshold = None
     if threshold is not None and threshold != 0.0:
-        log_func(f"Using threshold {threshold}")
+
+        logger.info("Using threshold %s", threshold)
     else:
-        log_func("No threshold will be applied")
+        logger.info("No threshold will be applied")
+
     if time_window is None:
         start_ms = settings.get("loreta", "time_window_start_ms", "")
         end_ms = settings.get("loreta", "time_window_end_ms", "")
@@ -374,10 +376,14 @@ def run_source_localization(
             thr_val = threshold * np.max(np.abs(stc.data))
         else:
             thr_val = threshold
-        log_func(f"Applying threshold {threshold} (cutoff {thr_val:.5f})")
+
+        logger.info(
+            "Applying threshold %s (cutoff %.5f)", threshold, thr_val
+        )
         stc = _threshold_stc(stc, threshold)
     else:
-        log_func("Skipping thresholding step")
+        logger.info("Skipping thresholding step")
+
     step += 1
 
     update_progress(step, total, progress_cb)
