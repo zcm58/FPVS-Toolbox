@@ -60,7 +60,8 @@ DEFAULTS = {
     'visualization': {
         'threshold': '0.0',
         'surface_opacity': '0.5',
-        'time_index_ms': '100'
+        'time_index_ms': '100',
+        'show_brain_mesh': 'True'
     },
     'debug': {
         'enabled': 'False'
