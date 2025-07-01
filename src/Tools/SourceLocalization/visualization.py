@@ -29,90 +29,109 @@ def _derive_title(path: str) -> str:
 
 
 def view_source_estimate_pyvista(
-        stc: _BaseSourceEstimate,
-        subjects_dir: str,
-        time_idx: int,
-        cortex_alpha: float,
-        atlas_alpha: float,  # This argument is not currently used but is kept for API consistency
+    stc: _BaseSourceEstimate,
+    subjects_dir: str,
+    time_idx: int,
+    cortex_alpha: float,
+    atlas_alpha: float,
+    show_cortex: bool = True,
 ) -> pv.Plotter:
-    """Plot semi-transparent cortex and opaque activation spots in separate actors."""
+    """Plot source estimate heatmap with optional semi-transparent cortex.
+
+    Parameters
+    ----------
+    show_cortex
+        If ``True`` (default), render the anatomical cortex mesh. When ``False``
+        only the activation heatmap will be displayed. Useful for debugging
+        transparency issues.
+    """
     subj = getattr(stc, 'subject', None) or 'fsaverage'
     surf_dir = Path(subjects_dir) / subj / 'surf'
 
     # Load pial surfaces
     verts_lh, faces_lh = read_surface(surf_dir / 'lh.pial')
     verts_rh, faces_rh = read_surface(surf_dir / 'rh.pial')
-
-    def _fmt(f):
-        return np.hstack([np.full((f.shape[0], 1), 3), f]).astype(np.int64)
-
+    def _fmt(f): return np.hstack([np.full((f.shape[0],1),3), f]).astype(np.int64)
     mesh_lh = pv.PolyData(verts_lh, _fmt(faces_lh))
     mesh_rh = pv.PolyData(verts_rh, _fmt(faces_rh))
 
     # Create plotter and enable depth peeling
-    pl = pv.Plotter(window_size=(800, 600), lighting='light_kit')
+    pl = pv.Plotter(window_size=(800,600))
     pl.set_background('white')
     pl.enable_depth_peeling()
+    if SettingsManager().debug_enabled():
+        logger.debug(
+            "Plotter created. time_idx=%s show_cortex=%s", time_idx, show_cortex
+        )
 
-    # Combine hemispheres into one mesh for the cortex layer
+    # Combine hemispheres into one mesh
     cortex_mesh = mesh_lh.copy().merge(mesh_rh)
-    pl.add_mesh(
-        cortex_mesh,
-        color='lightgray',
-        opacity=cortex_alpha,
-        ambient=1.0,
-        diffuse=0.0,
-        specular=0.0,
-        name='cortex'
-    )
+    if show_cortex:
+        pl.add_mesh(
+            cortex_mesh,
+            color='lightgray',
+            opacity=cortex_alpha,
+            ambient=1.0,
+            diffuse=0.0,
+            specular=0.0,
+            name='cortex'
+        )
+    elif SettingsManager().debug_enabled():
+        logger.debug('Cortex mesh rendering disabled')
 
-    # Prepare and add activation overlay
+    # Prepare activation data per hemisphere
+    debug = SettingsManager().debug_enabled()
     data = stc.data[:, time_idx]
     n_lh = len(stc.vertices[0])
-    act_lh = np.zeros(mesh_lh.n_points)
-    act_rh = np.zeros(mesh_rh.n_points)
-    act_lh[stc.vertices[0]] = data[:n_lh]
-    act_rh[stc.vertices[1]] = data[n_lh:]
-
-    mask_lh = act_lh != 0
-    mask_rh = act_rh != 0
-
-    # Create separate meshes for the heatmap using the masks
-    heatmap_lh = mesh_lh.extract_points(mask_lh)
-    heatmap_rh = mesh_rh.extract_points(mask_rh)
-
-    # Determine color limits for the heatmap
-    clim = [float(data.min()), float(data.max())] if np.any(data) else [0, 1]
-
-    if heatmap_lh.n_points > 0:
-        heatmap_lh.point_data['activation'] = act_lh[mask_lh]
-        pl.add_mesh(
-            heatmap_lh, scalars='activation', cmap='hot', clim=clim,
-            opacity=1.0, name='act_lh'
+    if debug:
+        logger.debug(
+            "Time index %s data range: min=%s max=%s", time_idx, data.min(), data.max()
         )
-    if heatmap_rh.n_points > 0:
-        heatmap_rh.point_data['activation'] = act_rh[mask_rh]
-        pl.add_mesh(
-            heatmap_rh, scalars='activation', cmap='hot', clim=clim,
-            opacity=1.0, name='act_rh'
-        )
+    for hemi, mesh, verts in [('lh', mesh_lh, stc.vertices[0]),
+                              ('rh', mesh_rh, stc.vertices[1])]:
+        act = np.zeros(mesh.n_points)
+        vals = data[:n_lh] if hemi == 'lh' else data[n_lh:]
+        if debug:
+            logger.debug(
+                "%s verts: %s points, mesh points=%s", hemi, len(verts), mesh.n_points
+            )
+        act[verts] = vals
+        # Use NaN for zero so unmapped points are fully transparent
+        act_mask = act == 0
+        act[act_mask] = np.nan
+        if debug:
+            logger.debug(
+                "%s activation non-zero=%s NaN=%s", hemi,
+                np.count_nonzero(~act_mask), np.count_nonzero(np.isnan(act))
+            )
+        heatmap = mesh.copy()
+        # Slightly offset points along normals to avoid z-fighting
+        normals = heatmap.point_normals
+        heatmap.points = heatmap.points + normals * 1e-2
+        heatmap.point_data['activation'] = act
+        if np.any(~act_mask):
+            pl.add_mesh(
+                heatmap,
+                scalars='activation',
+                cmap='hot',
+                nan_opacity=0.0,
+                opacity=1.0,
+                name=f'act_{hemi}'
+            )
+        elif debug:
+            logger.debug("%s hemisphere has no activation", hemi)
 
     pl.add_scalar_bar(title='Source Amplitude', n_colors=8)
 
-    # --- THE FIX: ADD CAMERA CONTROLS HERE ---
-    # This automatically adjusts the camera to fit all the meshes in the scene.
-    pl.reset_camera()
-    # You can then set a specific viewpoint for consistency.
-    pl.camera_position = 'yz'  # Set a side view
-    pl.camera.elevation = 15  # Tilt camera up slightly
-    pl.camera.azimuth = 60  # Rotate camera
-    pl.camera.zoom(1.4)  # Zoom in a bit
-    # --- END OF FIX ---
-
-    # Optional debug logging
+    # Debug actor properties
     try:
         actors = list(pl.renderer.actors.values())
         logger.debug(f"Total actors: {len(actors)}")
+        for idx, actor in enumerate(actors):
+            prop = actor.GetProperty()
+            mapper = actor.GetMapper()
+            vis = mapper.GetScalarVisibility() if mapper else False
+            logger.debug(f"Actor[{idx}] opacity={prop.GetOpacity()}, scalarVis={vis}")
     except Exception:
         logger.exception("Actor introspection failed")
 
@@ -126,8 +145,16 @@ def view_source_estimate(
     time_ms: Optional[float] = None,
     window_title: Optional[str] = None,
     log_func: Optional[Callable[[str], None]] = None,
+    show_cortex: Optional[bool] = None,
 ) -> pv.Plotter | None:
-    """Load STC, apply threshold & alpha settings, then render via PyVista."""
+    """Load STC, apply threshold & alpha settings, then render via PyVista.
+
+    Parameters
+    ----------
+    show_cortex
+        Override the GUI setting controlling whether the anatomical mesh is
+        displayed. ``None`` (default) uses the value from ``settings.ini``.
+    """
     if log_func is None:
         log_func = logger.info
     log_func(f"Visualizing STC: {os.path.basename(stc_path)} (α={alpha if alpha is not None else 'gui'})")
@@ -154,9 +181,14 @@ def view_source_estimate(
                 thr, 'n/a' if thr == 0 else val, np.count_nonzero(stc.data)
             )
 
-        # Determine alpha
+        # Determine alpha and cortex visibility
         gui_alpha = settings.get('visualization', 'surface_opacity', fallback=0.5)
         cortex_alpha = alpha if alpha is not None else gui_alpha
+        show_brain_mesh = settings.get('visualization', 'show_brain_mesh', 'True').lower() == 'true'
+        if show_cortex is not None:
+            show_brain_mesh = show_cortex
+        if debug:
+            logger.debug("show_brain_mesh=%s", show_brain_mesh)
 
         # Resolve subjects_dir
         mri_path = settings.get('loreta', 'mri_path', fallback='')
@@ -183,7 +215,14 @@ def view_source_estimate(
             )
 
 
-        pl = view_source_estimate_pyvista(stc, subjects_dir, time_idx, cortex_alpha, cortex_alpha)
+        pl = view_source_estimate_pyvista(
+            stc,
+            subjects_dir,
+            time_idx,
+            cortex_alpha,
+            cortex_alpha,
+            show_brain_mesh,
+        )
         pl.show(title=window_title or _derive_title(stc_path))
         return pl
     except Exception as err:
