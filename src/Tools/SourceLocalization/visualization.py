@@ -29,11 +29,11 @@ def _derive_title(path: str) -> str:
 
 
 def view_source_estimate_pyvista(
-    stc: _BaseSourceEstimate,
-    subjects_dir: str,
-    time_idx: int,
-    cortex_alpha: float,
-    atlas_alpha: float,
+        stc: _BaseSourceEstimate,
+        subjects_dir: str,
+        time_idx: int,
+        cortex_alpha: float,
+        atlas_alpha: float,  # This argument is not currently used but is kept for API consistency
 ) -> pv.Plotter:
     """Plot semi-transparent cortex and opaque activation spots in separate actors."""
     subj = getattr(stc, 'subject', None) or 'fsaverage'
@@ -42,16 +42,19 @@ def view_source_estimate_pyvista(
     # Load pial surfaces
     verts_lh, faces_lh = read_surface(surf_dir / 'lh.pial')
     verts_rh, faces_rh = read_surface(surf_dir / 'rh.pial')
-    def _fmt(f): return np.hstack([np.full((f.shape[0],1),3), f]).astype(np.int64)
+
+    def _fmt(f):
+        return np.hstack([np.full((f.shape[0], 1), 3), f]).astype(np.int64)
+
     mesh_lh = pv.PolyData(verts_lh, _fmt(faces_lh))
     mesh_rh = pv.PolyData(verts_rh, _fmt(faces_rh))
 
     # Create plotter and enable depth peeling
-    pl = pv.Plotter(window_size=(800,600))
+    pl = pv.Plotter(window_size=(800, 600), lighting='light_kit')
     pl.set_background('white')
     pl.enable_depth_peeling()
 
-    # Combine hemispheres into one mesh
+    # Combine hemispheres into one mesh for the cortex layer
     cortex_mesh = mesh_lh.copy().merge(mesh_rh)
     pl.add_mesh(
         cortex_mesh,
@@ -63,59 +66,53 @@ def view_source_estimate_pyvista(
         name='cortex'
     )
 
-    # Prepare activation data per hemisphere
-    debug = SettingsManager().debug_enabled()
+    # Prepare and add activation overlay
     data = stc.data[:, time_idx]
     n_lh = len(stc.vertices[0])
-    if debug:
-        logger.debug(
-            "Time index %s data range: min=%s max=%s", time_idx, data.min(), data.max()
+    act_lh = np.zeros(mesh_lh.n_points)
+    act_rh = np.zeros(mesh_rh.n_points)
+    act_lh[stc.vertices[0]] = data[:n_lh]
+    act_rh[stc.vertices[1]] = data[n_lh:]
+
+    mask_lh = act_lh != 0
+    mask_rh = act_rh != 0
+
+    # Create separate meshes for the heatmap using the masks
+    heatmap_lh = mesh_lh.extract_points(mask_lh)
+    heatmap_rh = mesh_rh.extract_points(mask_rh)
+
+    # Determine color limits for the heatmap
+    clim = [float(data.min()), float(data.max())] if np.any(data) else [0, 1]
+
+    if heatmap_lh.n_points > 0:
+        heatmap_lh.point_data['activation'] = act_lh[mask_lh]
+        pl.add_mesh(
+            heatmap_lh, scalars='activation', cmap='hot', clim=clim,
+            opacity=1.0, name='act_lh'
         )
-    for hemi, mesh, verts in [('lh', mesh_lh, stc.vertices[0]),
-                              ('rh', mesh_rh, stc.vertices[1])]:
-        act = np.zeros(mesh.n_points)
-        vals = data[:n_lh] if hemi == 'lh' else data[n_lh:]
-        if debug:
-            logger.debug(
-                "%s verts: %s points, mesh points=%s", hemi, len(verts), mesh.n_points
-            )
-        act[verts] = vals
-        # Use NaN for zero so unmapped points are fully transparent
-        act_mask = act == 0
-        act[act_mask] = np.nan
-        if debug:
-            logger.debug(
-                "%s activation non-zero=%s NaN=%s", hemi,
-                np.count_nonzero(~act_mask), np.count_nonzero(np.isnan(act))
-            )
-        heatmap = mesh.copy()
-        # Slightly offset points along normals to avoid z-fighting
-        normals = heatmap.point_normals
-        heatmap.points = heatmap.points + normals * 1e-2
-        heatmap.point_data['activation'] = act
-        if np.any(~act_mask):
-            pl.add_mesh(
-                heatmap,
-                scalars='activation',
-                cmap='hot',
-                nan_opacity=0.0,
-                opacity=1.0,
-                name=f'act_{hemi}'
-            )
-        elif debug:
-            logger.debug("%s hemisphere has no activation", hemi)
+    if heatmap_rh.n_points > 0:
+        heatmap_rh.point_data['activation'] = act_rh[mask_rh]
+        pl.add_mesh(
+            heatmap_rh, scalars='activation', cmap='hot', clim=clim,
+            opacity=1.0, name='act_rh'
+        )
 
     pl.add_scalar_bar(title='Source Amplitude', n_colors=8)
 
-    # Debug actor properties
+    # --- THE FIX: ADD CAMERA CONTROLS HERE ---
+    # This automatically adjusts the camera to fit all the meshes in the scene.
+    pl.reset_camera()
+    # You can then set a specific viewpoint for consistency.
+    pl.camera_position = 'yz'  # Set a side view
+    pl.camera.elevation = 15  # Tilt camera up slightly
+    pl.camera.azimuth = 60  # Rotate camera
+    pl.camera.zoom(1.4)  # Zoom in a bit
+    # --- END OF FIX ---
+
+    # Optional debug logging
     try:
         actors = list(pl.renderer.actors.values())
         logger.debug(f"Total actors: {len(actors)}")
-        for idx, actor in enumerate(actors):
-            prop = actor.GetProperty()
-            mapper = actor.GetMapper()
-            vis = mapper.GetScalarVisibility() if mapper else False
-            logger.debug(f"Actor[{idx}] opacity={prop.GetOpacity()}, scalarVis={vis}")
     except Exception:
         logger.exception("Actor introspection failed")
 
