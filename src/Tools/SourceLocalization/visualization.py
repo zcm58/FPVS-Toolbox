@@ -34,8 +34,17 @@ def view_source_estimate_pyvista(
     time_idx: int,
     cortex_alpha: float,
     atlas_alpha: float,
+    show_cortex: bool = True,
 ) -> pv.Plotter:
-    """Plot semi-transparent cortex and opaque activation spots in separate actors."""
+    """Plot source estimate heatmap with optional semi-transparent cortex.
+
+    Parameters
+    ----------
+    show_cortex
+        If ``True`` (default), render the anatomical cortex mesh. When ``False``
+        only the activation heatmap will be displayed. Useful for debugging
+        transparency issues.
+    """
     subj = getattr(stc, 'subject', None) or 'fsaverage'
     surf_dir = Path(subjects_dir) / subj / 'surf'
 
@@ -50,18 +59,25 @@ def view_source_estimate_pyvista(
     pl = pv.Plotter(window_size=(800,600))
     pl.set_background('white')
     pl.enable_depth_peeling()
+    if SettingsManager().debug_enabled():
+        logger.debug(
+            "Plotter created. time_idx=%s show_cortex=%s", time_idx, show_cortex
+        )
 
     # Combine hemispheres into one mesh
     cortex_mesh = mesh_lh.copy().merge(mesh_rh)
-    pl.add_mesh(
-        cortex_mesh,
-        color='lightgray',
-        opacity=cortex_alpha,
-        ambient=1.0,
-        diffuse=0.0,
-        specular=0.0,
-        name='cortex'
-    )
+    if show_cortex:
+        pl.add_mesh(
+            cortex_mesh,
+            color='lightgray',
+            opacity=cortex_alpha,
+            ambient=1.0,
+            diffuse=0.0,
+            specular=0.0,
+            name='cortex'
+        )
+    elif SettingsManager().debug_enabled():
+        logger.debug('Cortex mesh rendering disabled')
 
     # Prepare activation data per hemisphere
     debug = SettingsManager().debug_enabled()
@@ -129,8 +145,16 @@ def view_source_estimate(
     time_ms: Optional[float] = None,
     window_title: Optional[str] = None,
     log_func: Optional[Callable[[str], None]] = None,
+    show_cortex: Optional[bool] = None,
 ) -> pv.Plotter | None:
-    """Load STC, apply threshold & alpha settings, then render via PyVista."""
+    """Load STC, apply threshold & alpha settings, then render via PyVista.
+
+    Parameters
+    ----------
+    show_cortex
+        Override the GUI setting controlling whether the anatomical mesh is
+        displayed. ``None`` (default) uses the value from ``settings.ini``.
+    """
     if log_func is None:
         log_func = logger.info
     log_func(f"Visualizing STC: {os.path.basename(stc_path)} (α={alpha if alpha is not None else 'gui'})")
@@ -157,9 +181,14 @@ def view_source_estimate(
                 thr, 'n/a' if thr == 0 else val, np.count_nonzero(stc.data)
             )
 
-        # Determine alpha
+        # Determine alpha and cortex visibility
         gui_alpha = settings.get('visualization', 'surface_opacity', fallback=0.5)
         cortex_alpha = alpha if alpha is not None else gui_alpha
+        show_brain_mesh = settings.get('visualization', 'show_brain_mesh', 'True').lower() == 'true'
+        if show_cortex is not None:
+            show_brain_mesh = show_cortex
+        if debug:
+            logger.debug("show_brain_mesh=%s", show_brain_mesh)
 
         # Resolve subjects_dir
         mri_path = settings.get('loreta', 'mri_path', fallback='')
@@ -186,7 +215,14 @@ def view_source_estimate(
             )
 
 
-        pl = view_source_estimate_pyvista(stc, subjects_dir, time_idx, cortex_alpha, cortex_alpha)
+        pl = view_source_estimate_pyvista(
+            stc,
+            subjects_dir,
+            time_idx,
+            cortex_alpha,
+            cortex_alpha,
+            show_brain_mesh,
+        )
         pl.show(title=window_title or _derive_title(stc_path))
         return pl
     except Exception as err:

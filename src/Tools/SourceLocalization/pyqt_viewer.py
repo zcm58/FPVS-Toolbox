@@ -70,11 +70,18 @@ class STCViewer(QtWidgets.QMainWindow):
         self.time_slider.setRange(0, self.stc.data.shape[1] - 1)
         self.time_slider.valueChanged.connect(self._update_time)
 
+        self.cortex_cb = QtWidgets.QCheckBox("Show Cortex")
+        show_default = SettingsManager().get('visualization', 'show_brain_mesh', 'True').lower() == 'true'
+        self.cortex_cb.setChecked(show_default)
+        self.cortex_cb.stateChanged.connect(self._toggle_cortex)
+
         ctrl_layout.addWidget(QtWidgets.QLabel("Opacity"))
         ctrl_layout.addWidget(self.opacity_slider)
         ctrl_layout.addSpacing(20)
         ctrl_layout.addWidget(QtWidgets.QLabel("Time"))
         ctrl_layout.addWidget(self.time_slider)
+        ctrl_layout.addSpacing(20)
+        ctrl_layout.addWidget(self.cortex_cb)
 
         layout.addWidget(ctrl)
         self.setCentralWidget(central)
@@ -98,6 +105,9 @@ class STCViewer(QtWidgets.QMainWindow):
         self.cortex_rh = self.plotter.add_mesh(
             rh, color="lightgray", opacity=0.5, name="rh"
         )
+        visible = self.cortex_cb.isChecked()
+        self.cortex_lh.SetVisibility(visible)
+        self.cortex_rh.SetVisibility(visible)
 
         self.heat_lh = lh.copy()
         self.heat_rh = rh.copy()
@@ -115,6 +125,12 @@ class STCViewer(QtWidgets.QMainWindow):
         alpha = max(0, min(100, int(value))) / 100
         for actor in (self.cortex_lh, self.cortex_rh):
             actor.GetProperty().SetOpacity(alpha)
+        self.plotter.render()
+
+    def _toggle_cortex(self, state: int) -> None:
+        visible = state == QtCore.Qt.Checked
+        for actor in (self.cortex_lh, self.cortex_rh):
+            actor.SetVisibility(visible)
         self.plotter.render()
 
     def _update_time(self, value: int) -> None:
