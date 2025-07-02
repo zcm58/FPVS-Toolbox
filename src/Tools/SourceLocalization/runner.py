@@ -362,6 +362,15 @@ def run_source_localization(
         stc = mne.minimum_norm.apply_inverse(
             evoked, inv, method=mne_method, n_jobs=n_jobs
         )
+    debug = SettingsManager().debug_enabled()
+    if debug:
+        logger.debug(
+            "STC computed: shape=%s min=%.5f max=%.5f nnz=%s",
+            stc.data.shape,
+            np.min(stc.data),
+            np.max(stc.data),
+            np.count_nonzero(stc.data),
+        )
     if threshold:
         if 0 < threshold < 1:
             thr_val = threshold * np.max(np.abs(stc.data))
@@ -372,6 +381,13 @@ def run_source_localization(
             "Applying threshold %s (cutoff %.5f)", threshold, thr_val
         )
         stc = _threshold_stc(stc, threshold)
+        if debug:
+            logger.debug(
+                "Post-threshold STC: min=%.5f max=%.5f nnz=%s",
+                np.min(stc.data),
+                np.max(stc.data),
+                np.count_nonzero(stc.data),
+            )
     else:
         logger.info("Skipping thresholding step")
 

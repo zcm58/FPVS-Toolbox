@@ -213,6 +213,13 @@ def view_source_estimate(
             logger.debug(
                 "Using time index %s of %s (time_ms=%s)", time_idx, stc.data.shape[1], time_ms
             )
+            vals = stc.data[:, time_idx]
+            logger.debug(
+                "Activation range at idx %s: min=%.5f max=%.5f",
+                time_idx,
+                float(vals.min()),
+                float(vals.max()),
+            )
 
 
         pl = view_source_estimate_pyvista(

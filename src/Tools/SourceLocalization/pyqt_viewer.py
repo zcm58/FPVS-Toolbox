@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import logging
 from pathlib import Path
 
 
@@ -18,6 +19,8 @@ SRC_PATH = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SRC_PATH))
 
 from Tools.SourceLocalization.data_utils import _resolve_subjects_dir
+
+logger = logging.getLogger(__name__)
 
 from Main_App.settings_manager import SettingsManager
 
@@ -136,6 +139,13 @@ class STCViewer(QtWidgets.QMainWindow):
     def _update_time(self, value: int) -> None:
         idx = max(0, min(int(value), self.stc.data.shape[1] - 1))
         data = self.stc.data[:, idx]
+        if SettingsManager().debug_enabled():
+            logger.debug(
+                "update_time idx=%s range=(%.5f, %.5f)",
+                idx,
+                float(data.min()),
+                float(data.max()),
+            )
         n_lh = len(self.stc.vertices[0])
         arr_lh = np.full(self.heat_lh.n_points, np.nan)
         arr_rh = np.full(self.heat_rh.n_points, np.nan)
