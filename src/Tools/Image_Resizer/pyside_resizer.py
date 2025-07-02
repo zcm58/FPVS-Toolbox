@@ -2,7 +2,7 @@
 """PySide6 GUI for the FPVS image resizer.
 
 This module provides a QWidget-based interface that reuses the
-:func:`process_images_in_folder` logic from ``FPVSImageResizer.py``.
+:func:`process_images_in_folder` logic from ``image_resize_core.py``.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .FPVSImageResizer import process_images_in_folder
+from .image_resize_core import process_images_in_folder
 
 
 class _Worker(QObject):
