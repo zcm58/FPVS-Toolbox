@@ -36,11 +36,19 @@ class STCViewer(QtWidgets.QMainWindow):
         self._setup_subjects()
         self._build_ui()
         self._load_surfaces()
+
+        start_idx = max(0, self._index_for_time(0.0))
+        end_idx = min(self.stc.data.shape[1] - 1, self._index_for_time(0.5))
+        self.time_slider.setRange(start_idx, end_idx)
+        step = max(1, round(0.01 / self.stc.tstep))
+        self.time_slider.setSingleStep(step)
+        self.time_slider.setPageStep(step)
+
         if time_ms is not None:
-            idx = int(round((time_ms / 1000 - self.stc.tmin) / self.stc.tstep))
-            idx = max(0, min(idx, self.stc.data.shape[1] - 1))
+            idx = self._index_for_time(time_ms / 1000)
+            idx = max(start_idx, min(idx, end_idx))
         else:
-            idx = 0
+            idx = start_idx
         self.time_slider.setValue(idx)
         self._update_time(idx)
 
@@ -124,6 +132,9 @@ class STCViewer(QtWidgets.QMainWindow):
             self.heat_rh, scalars="activation", cmap="hot", nan_opacity=0.0, name="act_rh"
         )
         self.plotter.add_scalar_bar(title="Source Amplitude", n_colors=8)
+
+    def _index_for_time(self, sec: float) -> int:
+        return int(round((sec - self.stc.tmin) / self.stc.tstep))
 
     def _update_opacity(self, value: int) -> None:
         alpha = max(0, min(100, int(value))) / 100
