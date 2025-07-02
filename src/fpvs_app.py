@@ -261,23 +261,20 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         stats_win.geometry(self.settings.get('gui', 'stats_size', '950x950'))
 
     def open_image_resizer(self):
-        """Open the PySide6-based FPVS Image Resizer."""
+        """Open the PySide6-based FPVS Image Resizer in its own thread."""
         self.debug("Image resizer window requested")
-        from PySide6.QtWidgets import QApplication
 
-        app = QApplication.instance()
-        if app is None:
+        def run():
+            from PySide6.QtWidgets import QApplication
+
             app = QApplication([])
+            win = FPVSImageResizer()
+            win.show()
+            app.exec()
 
-            def run_app():
-                app.exec()
+        import threading
 
-            import threading
-
-            threading.Thread(target=run_app, daemon=True).start()
-
-        win = FPVSImageResizer()
-        win.show()
+        threading.Thread(target=run, daemon=True).start()
 
 
     # --- Menu Methods ---
