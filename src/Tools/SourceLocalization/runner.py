@@ -371,6 +371,13 @@ def run_source_localization(
             np.max(stc.data),
             np.count_nonzero(stc.data),
         )
+        logger.debug(
+            "STC time info: tmin=%.4f tmax=%.4f tstep=%.4f n_times=%s",
+            float(stc.tmin),
+            float(stc.times[-1]),
+            float(stc.tstep),
+            stc.data.shape[1],
+        )
     if threshold:
         if 0 < threshold < 1:
             thr_val = threshold * np.max(np.abs(stc.data))
