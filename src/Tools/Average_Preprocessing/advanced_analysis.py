@@ -76,11 +76,12 @@ def create_themed_listbox(parent: ctk.CTkBaseClass, **kwargs) -> tk.Listbox:
                 property_key,
                 appearance,
             )
-            default_bg = "white" if appearance == "Light" else "#2B2B2B"
-            default_fg = "black" if appearance == "Light" else "white"
+
+        default_bg = "white" if appearance == "Light" else "#2B2B2B"
+        default_fg = "black" if appearance == "Light" else "white"
         if "background" in property_key or "fg_color" in property_key:
             return default_bg
-            return default_fg
+        return default_fg
 
     return tk.Listbox(
         parent,
