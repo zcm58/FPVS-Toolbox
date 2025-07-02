@@ -70,15 +70,6 @@ try:  # pragma: no cover - best effort
 except Exception as err:  # pragma: no cover - optional
     logger.debug("Failed to set 3D backend: %s", err)
 
-
-def _update_progress(
-    progress_cb: Optional[Callable[[float], None]], step: int, total: int
-) -> None:
-    """Call ``progress_cb`` with the completed fraction if provided."""
-
-    if progress_cb:
-        progress_cb(step / total)
-
 def run_source_localization(
     fif_path: str | None,
     output_dir: str,
