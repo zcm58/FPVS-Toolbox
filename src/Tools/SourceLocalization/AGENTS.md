@@ -39,3 +39,8 @@ If you're asked to try to speed up processing, please keep in mind that we will 
 than once in a normal processing run. This rules out things like caching the noise covariance or the inverse operator.
 Do not ever suggest or implement these things. Parallel processing is an option. We also can never reuse filtered or
 cropped epochs. 
+
+IMPORTANT RULE: Right now, the LORETA mesh is not properly displaying in the 3-D viewer, but the brain mesh DOES 
+render appropriately, and the opacity slider works. Do not change the way the brain mesh is rendered or the opacity
+slider implementation. For now, do not edit the brain mesh layer at ALL unless you specifically think that there is 
+an issue with the brain mesh that prevents us from seeing the loreta mesh. 
