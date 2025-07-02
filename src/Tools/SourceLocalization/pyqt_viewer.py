@@ -23,6 +23,7 @@ from Tools.SourceLocalization.data_utils import _resolve_subjects_dir
 logger = logging.getLogger(__name__)
 
 from Main_App.settings_manager import SettingsManager
+from Main_App.debug_utils import configure_logging, get_settings
 
 
 class STCViewer(QtWidgets.QMainWindow):
@@ -163,6 +164,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--stc", required=True, help="Base STC file path")
     parser.add_argument("--time-ms", type=float, help="Initial time in ms")
     args = parser.parse_args(argv)
+    configure_logging(get_settings().debug_enabled())
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     viewer = STCViewer(args.stc, args.time_ms)
     viewer.show()
