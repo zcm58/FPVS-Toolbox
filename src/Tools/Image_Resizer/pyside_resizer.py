@@ -29,7 +29,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .image_resize_core import process_images_in_folder
+try:  # pragma: no cover - fallback for running as a script
+    from .image_resize_core import process_images_in_folder  # type: ignore
+except ImportError:
+    from image_resize_core import process_images_in_folder  # type: ignore
 
 
 class _Worker(QObject):
