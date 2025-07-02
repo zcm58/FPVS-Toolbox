@@ -62,9 +62,6 @@ from Main_App.post_process import post_process as _external_post_process
 # Advanced averaging UI and core function
 from Tools.Average_Preprocessing import AdvancedAnalysisWindow
 
-# Image resizer
-from Tools.Image_Resizer import FPVSImageResizer
-
 # Statistics toolbox
 import Tools.Stats as stats
 from Main_App.relevant_publications_window import RelevantPublicationsWindow
@@ -261,20 +258,23 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         stats_win.geometry(self.settings.get('gui', 'stats_size', '950x950'))
 
     def open_image_resizer(self):
-        """Open the PySide6-based FPVS Image Resizer in its own thread."""
+        """Launch the PySide6-based FPVS Image Resizer in a new process."""
         self.debug("Image resizer window requested")
 
-        def run():
-            from PySide6.QtWidgets import QApplication
+        def _open():
+            try:
+                from pathlib import Path
+                import subprocess
+                import sys
+                from Tools.Image_Resizer import pyside_resizer
 
-            app = QApplication([])
-            win = FPVSImageResizer()
-            win.show()
-            app.exec()
+                script = Path(pyside_resizer.__file__)
+                subprocess.Popen([sys.executable, str(script)], close_fds=True)
+            except Exception as err:
+                self.log(f"Image resizer failed: {err}")
+                messagebox.showerror("Error", str(err))
 
-        import threading
-
-        threading.Thread(target=run, daemon=True).start()
+        self.after(0, _open)
 
 
     # --- Menu Methods ---
