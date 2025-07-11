@@ -276,6 +276,25 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
         self.after(0, _open)
 
+    def open_plot_generator(self):
+        """Launch the PySide6-based plot generator in a new process."""
+        self.debug("Plot generator window requested")
+
+        def _open():
+            try:
+                from pathlib import Path
+                import subprocess
+                import sys
+                from Tools.Plot_Generator import plot_generator
+
+                script = Path(plot_generator.__file__)
+                subprocess.Popen([sys.executable, str(script)], close_fds=True)
+            except Exception as err:
+                self.log(f"Plot generator failed: {err}")
+                messagebox.showerror("Error", str(err))
+
+        self.after(0, _open)
+
 
     # --- Menu Methods ---
     def create_menu(self):

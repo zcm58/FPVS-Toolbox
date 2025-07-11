@@ -52,6 +52,11 @@ class AppMenuBar:
         tools_menu.add_command(label="Image_Resizer", command=self.app_ref.open_image_resizer)
         tools_menu.add_separator()
         tools_menu.add_command(
+            label="Generate Plots",
+            command=self.app_ref.open_plot_generator,
+        )
+        tools_menu.add_separator()
+        tools_menu.add_command(
             label="Average Epochs in Pre-Processing Phase",
             command=self.app_ref.open_advanced_analysis_window,
         )
