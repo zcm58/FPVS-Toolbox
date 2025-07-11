@@ -683,6 +683,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             otherwise ``None``.
         """
 
+        logger.debug("Starting _validate_processing_setup")
+
 
         # 0) If the main app hasn't yet validated its entries, do so now.
         self.log(
@@ -851,6 +853,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         """Start the background thread that performs advanced averaging."""
 
         self.log("All configurations validated. Starting processing thread...")
+        logger.debug("Launching processing thread with output dir: %s", output_directory)
+        logger.debug("Thread params: %s", main_app_params)
         self.progress_bar.grid()
         self.progress_bar.set(0)
         self.start_adv_processing_button.configure(state="disabled")
@@ -883,12 +887,15 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         """Validate configuration and spawn the processing thread."""
 
         self.log("=" * 30 + "\nAttempting to Start Advanced Processing...")
+        logger.debug("Defined groups at start: %s", self.defined_groups)
 
         validation = self._validate_processing_setup()
         if not validation:
             return
 
         main_app_params, output_directory = validation
+        logger.debug("Validated main_app_params: %s", main_app_params)
+        logger.debug("Output directory: %s", output_directory)
         self._launch_processing_thread(main_app_params, output_directory)
 
     def _check_processing_thread(self):
