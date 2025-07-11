@@ -137,6 +137,17 @@ def run_advanced_averaging_processing(
     current_operation_count = 0
     overall_success = True
 
+    # Count how many times each file will be used across all mappings
+    file_usage_counts: Dict[str, int] = {}
+    for group in defined_groups:
+        for mapping in group.get('condition_mappings', []):
+            for source_info in mapping.get('sources', []):
+                fpath = source_info['file_path']
+                file_usage_counts[fpath] = file_usage_counts.get(fpath, 0) + 1
+
+    # Cache of preprocessed Raw objects reused across event IDs
+    preprocessed_cache: Dict[str, mne.io.Raw] = {}
+
     for group_definition in defined_groups:  # A "group definition" is like a recipe, e.g., "Average A"
         if stop_event.is_set():
             log_callback("Processing cancelled by user.")
@@ -188,27 +199,24 @@ def run_advanced_averaging_processing(
                     log_callback(
                         f"      Loading & Preprocessing: {file_basename} for Event ID {original_event_id} ('{original_event_label}')")
 
-                    raw = None
-                    raw_copy_for_preproc = None
                     raw_proc = None
-                    participant_source_epochs = None  # MODIFICATION: Ensure initialization
+                    participant_source_epochs = None
                     try:
-                        raw = main_app_load_file_func(file_path_of_source)
-                        if raw is None or stop_event.is_set():
-                            log_callback(f"      Skipping {file_basename} (load failed or stop event).")
-                            overall_success = False
-                            continue
-
-                        raw_copy_for_preproc = raw.copy()
-                        # MODIFICATION: Removed 'del raw;' and 'gc.collect()' from here
-
-                        raw_proc = main_app_preprocess_raw_func(raw_copy_for_preproc, **main_app_params.copy())
-                        # MODIFICATION: Removed 'del raw_copy_for_preproc;' and 'gc.collect()' from here
-
-                        if raw_proc is None or stop_event.is_set():
-                            log_callback(f"      Skipping {file_basename} (preprocess failed or stop event).")
-                            overall_success = False
-                            continue
+                        if file_path_of_source in preprocessed_cache:
+                            raw_proc = preprocessed_cache[file_path_of_source]
+                        else:
+                            raw = main_app_load_file_func(file_path_of_source)
+                            if raw is None or stop_event.is_set():
+                                log_callback(f"      Skipping {file_basename} (load failed or stop event).")
+                                overall_success = False
+                                continue
+                            raw_proc = main_app_preprocess_raw_func(raw.copy(), **main_app_params.copy())
+                            del raw
+                            if raw_proc is None or stop_event.is_set():
+                                log_callback(f"      Skipping {file_basename} (preprocess failed or stop event).")
+                                overall_success = False
+                                continue
+                            preprocessed_cache[file_path_of_source] = raw_proc
 
                         stim_channel = main_app_params.get('stim_channel', 'Status')
                         events = mne.find_events(raw_proc, stim_channel=stim_channel, consecutive=True, verbose=False)
@@ -237,18 +245,14 @@ def run_advanced_averaging_processing(
                             f"      !!! Error during epoching for {file_basename}, ID {original_event_id} for {participant_pid}: {e}\n{traceback.format_exc()}")
                         overall_success = False
                     finally:
-                        if raw_proc is not None:
-                            del raw_proc
-                        if raw_copy_for_preproc is not None:
-                            del raw_copy_for_preproc
-                        if raw is not None:
-                            del raw
                         if participant_source_epochs is not None:
-                            del participant_source_epochs  # MODIFICATION: Cleanup added
-                        gc.collect()
-
-                    current_operation_count += 1
-                    progress_callback(current_operation_count / total_operations_estimate)
+                            del participant_source_epochs
+                        current_operation_count += 1
+                        progress_callback(current_operation_count / total_operations_estimate)
+                        file_usage_counts[file_path_of_source] -= 1
+                        if file_usage_counts[file_path_of_source] == 0 and file_path_of_source in preprocessed_cache:
+                            del preprocessed_cache[file_path_of_source]
+                            gc.collect()
 
                 if epochs_for_this_participant_this_rule:
                     averaging_method = group_definition.get('averaging_method', "Pool Trials")
