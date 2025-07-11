@@ -328,10 +328,23 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
         cf = ctk.CTkFrame(bottom, fg_color="transparent")
         cf.grid(row=2, column=0, columnspan=2, pady=PAD_Y, sticky="e")
-        self.start_adv_processing_button = ctk.CTkButton(cf, text="Start Advanced Processing",
-                                                         command=self.start_advanced_processing,
-                                                         font=ctk.CTkFont(weight="bold"))
+        self.start_adv_processing_button = ctk.CTkButton(
+            cf,
+            text="Start Advanced Processing",
+            command=self.start_advanced_processing,
+            font=ctk.CTkFont(weight="bold"),
+        )
         self.start_adv_processing_button.pack(side="left", padx=PAD_X)
+
+        self.stop_processing_button = ctk.CTkButton(
+            cf,
+            text="Stop",
+            command=self.stop_processing,
+            font=ctk.CTkFont(weight="bold"),
+        )
+        self.stop_processing_button.pack(side="left", padx=PAD_X)
+        self.stop_processing_button.configure(state="disabled")
+
         self.close_button = ctk.CTkButton(cf, text="Close", command=self._on_close)
         self.close_button.pack(side="left", padx=PAD_X)
 
@@ -931,6 +944,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self.progress_bar.grid()
         self.progress_bar.set(0)
         self.start_adv_processing_button.configure(state="disabled")
+        if hasattr(self, "stop_processing_button"):
+            self.stop_processing_button.configure(state="normal")
         self.close_button.configure(state="disabled")
         self._stop_requested.clear()
 
@@ -974,6 +989,18 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         main_app_params, output_directory = validation
         self._launch_processing_thread(main_app_params, output_directory)
 
+    def stop_processing(self) -> None:
+        """Request the running processing thread to stop."""
+
+        if not (self.processing_thread and self.processing_thread.is_alive()):
+            return
+
+        if not self._stop_requested.is_set():
+            self._stop_requested.set()
+            self.log("Stop requested. Waiting for processing to terminate...")
+            if hasattr(self, "stop_processing_button"):
+                self.stop_processing_button.configure(state="disabled")
+
     def _check_processing_thread(self):
         if self.processing_thread and self.processing_thread.is_alive():
             if self.debug_mode:
@@ -995,6 +1022,9 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
         if hasattr(self, 'close_button') and self.close_button.winfo_exists():
             self.close_button.configure(state="normal")
+
+        if hasattr(self, 'stop_processing_button') and self.stop_processing_button.winfo_exists():
+            self.stop_processing_button.configure(state="disabled")
 
         self._update_start_processing_button_state()
 
@@ -1061,8 +1091,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 master=self,
             )
             if msg_box.get() == "Yes":
-                self._stop_requested.set()
-                self.log("Stop requested. Waiting for thread to terminate gracefully...")
+                self.stop_processing()
                 self.after(1000, self._force_destroy)
             else:
                 return
