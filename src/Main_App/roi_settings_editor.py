@@ -45,3 +45,13 @@ class ROISettingsEditor:
             if name and electrodes:
                 pairs.append((name, electrodes))
         return pairs
+
+    def set_pairs(self, pairs):
+        for ent in self.entries:
+            if ent['frame'].winfo_exists():
+                ent['frame'].destroy()
+        self.entries.clear()
+        for name, electrodes in pairs:
+            self.add_entry(name, ','.join(electrodes))
+        if not pairs:
+            self.add_entry()
