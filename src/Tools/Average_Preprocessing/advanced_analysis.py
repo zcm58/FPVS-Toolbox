@@ -13,6 +13,7 @@ import customtkinter as ctk
 from customtkinter import CTkInputDialog
 import CTkMessagebox
 import os
+import json
 from pathlib import Path
 import re
 import threading
@@ -334,6 +335,10 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                                                          command=self.start_advanced_processing,
                                                          font=ctk.CTkFont(weight="bold"))
         self.start_adv_processing_button.pack(side="left", padx=PAD_X)
+        self.save_config_button = ctk.CTkButton(cf, text="Save Config…", command=self.save_groups_to_file)
+        self.save_config_button.pack(side="left", padx=PAD_X)
+        self.load_config_button = ctk.CTkButton(cf, text="Load Config…", command=self.load_groups_from_file)
+        self.load_config_button.pack(side="left", padx=PAD_X)
         self.close_button = ctk.CTkButton(cf, text="Close", command=self._on_close)
         self.close_button.pack(side="left", padx=PAD_X)
 
@@ -1119,6 +1124,76 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         if self.debug_mode:
             logger.debug("Extracted PID: %s", result_pid)
         return result_pid
+
+    def save_groups_to_file(self) -> None:
+        """Save ``self.defined_groups`` to a JSON file chosen by the user."""
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            parent=self,
+            title="Save Group Configuration",
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(self.defined_groups, f, indent=2)
+            self.log(f"Saved group configuration to {file_path}.")
+        except Exception as e:  # pragma: no cover - display error to user
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message=f"Failed to save configuration:\n{e}",
+                icon="cancel",
+                master=self,
+            )
+            if self.debug_mode:
+                logger.error("Failed to save config: %s", traceback.format_exc())
+
+    def load_groups_from_file(self) -> None:
+        """Load groups from a JSON file and refresh the UI."""
+
+        file_path = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            parent=self,
+            title="Load Group Configuration",
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if not isinstance(data, list) or not all(isinstance(g, dict) for g in data):
+                raise ValueError("Invalid configuration structure")
+
+            required = {"name", "file_paths", "condition_mappings", "averaging_method", "config_saved"}
+            for group in data:
+                if not required.issubset(group.keys()):
+                    raise ValueError("Configuration missing required keys")
+
+            self.defined_groups = data
+            # Update source files based on union of all group file paths
+            all_paths = {fp for g in self.defined_groups for fp in g.get("file_paths", [])}
+            self.source_eeg_files = sorted(all_paths)
+
+            self.selected_group_index = None
+            self._update_source_files_listbox()
+            self._update_groups_listbox()
+            self._clear_group_config_display()
+            self._update_start_processing_button_state()
+            self.log(f"Loaded {len(self.defined_groups)} group(s) from {file_path}.")
+        except Exception as e:  # pragma: no cover - display error to user
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message=f"Failed to load configuration:\n{e}",
+                icon="cancel",
+                master=self,
+            )
+            if self.debug_mode:
+                logger.error("Failed to load config: %s", traceback.format_exc())
 
     def _on_close(self):
         if self.processing_thread and self.processing_thread.is_alive():
