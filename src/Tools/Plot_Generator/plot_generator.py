@@ -159,7 +159,22 @@ class _Worker(QObject):
 
         for roi, amps in roi_data.items():
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
-            ax.plot(freqs, amps, linewidth=1.0, color="black")
+
+            freq_amp = dict(zip(freqs, amps))
+            bar_x = []
+            bar_y = []
+            for odd in self.oddballs:
+                amp = freq_amp.get(odd)
+                if amp is None:
+                    continue
+                bar_x.append(odd)
+                bar_y.append(amp)
+
+            if not bar_x:
+                self._emit(f"Oddball frequencies not found for ROI {roi}")
+                continue
+
+            ax.bar(bar_x, bar_y, width=0.05, color="black", align="center")
             ax.set_xticks(self.oddballs)
             ax.set_xticklabels([f"{odd:.1f} Hz" for odd in self.oddballs])
             ax.set_xlim(self.x_min, self.x_max)
