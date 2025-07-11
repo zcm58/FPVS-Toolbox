@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+
 from typing import Dict, List, Iterable
 
 import pandas as pd
@@ -46,7 +47,9 @@ class _Worker(QObject):
         title: str,
         xlabel: str,
         ylabel: str,
+
         out_dir: str,
+
     ) -> None:
         super().__init__()
         self.folder = folder
@@ -58,7 +61,9 @@ class _Worker(QObject):
         self.title = title
         self.xlabel = xlabel
         self.ylabel = ylabel
+
         self.out_dir = Path(out_dir)
+
 
     def run(self) -> None:
         try:
@@ -74,7 +79,9 @@ class _Worker(QObject):
         if not cond_folder.is_dir():
             self._emit(f"Condition folder not found: {cond_folder}")
             return
+
         self.out_dir.mkdir(parents=True, exist_ok=True)
+
         excel_files = [
             Path(root) / f
             for root, _, files in os.walk(cond_folder)
@@ -92,8 +99,10 @@ class _Worker(QObject):
             else [self.selected_roi]
         )
 
+
         roi_data: Dict[str, List[List[float]]] = {rn: [] for rn in roi_names}
         freqs: Iterable[float] | None = None
+
         for excel_path in excel_files:
             try:
                 df = pd.read_excel(excel_path, sheet_name=sheet)
@@ -104,14 +113,17 @@ class _Worker(QObject):
             if not freq_cols:
                 self._emit(f"No freq columns in {excel_path.name}")
                 continue
+
             if freqs is None:
                 freqs = [float(c.split("_")[0]) for c in freq_cols]
+
             for roi in roi_names:
                 chans = [c.upper() for c in self.roi_map.get(roi, [])]
                 df_roi = df[df["Electrode"].str.upper().isin(chans)]
                 if df_roi.empty:
                     self._emit(f"No electrodes for ROI {roi} in {excel_path.name}")
                     continue
+
                 means = df_roi[freq_cols].mean().tolist()
                 roi_data[roi].append(means)
 
@@ -137,6 +149,7 @@ class _Worker(QObject):
         fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
         for roi, amps in roi_data.items():
             ax.plot(freqs, amps, linewidth=1.0, label=roi)
+
         ax.set_xlim(0, max(freqs) + 0.5)
         ax.set_ylim(-0.05, 0.30)
         ax.set_xlabel(self.xlabel)
@@ -145,12 +158,14 @@ class _Worker(QObject):
         for odd in self.oddballs:
             ax.axvline(x=odd, color="black", linewidth=0.8)
             ax.text(odd, ax.get_ylim()[0], f"{odd} Hz", ha="center", va="top")
+
         if len(roi_data) > 1:
             ax.legend(loc="upper right")
         ax.grid(False)
         fig.tight_layout()
         fname = f"{self.condition}_{self.metric}.png"
         fig.savefig(self.out_dir / fname)
+
         plt.close(fig)
         self._emit(f"Saved {fname}")
 
@@ -185,6 +200,7 @@ class PlotGeneratorWindow(QWidget):
         layout.addWidget(browse, row, 2)
         row += 1
 
+
         layout.addWidget(QLabel("Save Plots To:"), row, 0)
         self.out_edit = QLineEdit()
         self.out_edit.setReadOnly(True)
@@ -193,6 +209,7 @@ class PlotGeneratorWindow(QWidget):
         browse_out.clicked.connect(self._select_output)
         layout.addWidget(browse_out, row, 2)
         row += 1
+
 
         layout.addWidget(QLabel("Condition:"), row, 0)
         self.condition_combo = QComboBox()
@@ -258,10 +275,12 @@ class PlotGeneratorWindow(QWidget):
             self.folder_edit.setText(folder)
             self._populate_conditions(folder)
 
+
     def _select_output(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if folder:
             self.out_edit.setText(folder)
+
 
     def _populate_conditions(self, folder: str) -> None:
         self.condition_combo.clear()
@@ -292,10 +311,12 @@ class PlotGeneratorWindow(QWidget):
         if not folder:
             QMessageBox.critical(self, "Error", "Select a folder first.")
             return
+
         out_dir = self.out_edit.text()
         if not out_dir:
             QMessageBox.critical(self, "Error", "Select an output folder first.")
             return
+
         if not self.condition_combo.currentText():
             QMessageBox.critical(self, "Error", "No condition selected.")
             return
@@ -318,7 +339,9 @@ class PlotGeneratorWindow(QWidget):
             self.title_edit.text(),
             self.xlabel_edit.text(),
             self.ylabel_edit.text(),
+
             out_dir,
+
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
