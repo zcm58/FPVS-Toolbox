@@ -248,6 +248,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         gb.grid(row=5, column=0, pady=PAD_Y, sticky="ew")
         ctk.CTkButton(gb, text="Create New Group", command=self.create_new_group, width=BUTTON_WIDTH) \
             .pack(side="left", padx=PAD_X, expand=True)
+        ctk.CTkButton(gb, text="Rename Group", command=self.rename_selected_group, width=BUTTON_WIDTH) \
+            .pack(side="left", padx=PAD_X, expand=True)
         ctk.CTkButton(gb, text="Delete Group", command=self.delete_selected_group, width=BUTTON_WIDTH) \
             .pack(side="left", padx=PAD_X, expand=True)
 
@@ -593,6 +595,40 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self._update_start_processing_button_state()
             if self.debug_mode:
                 logger.debug("Group '%s' deleted", group_name_to_delete)
+
+    def rename_selected_group(self) -> None:
+        """Prompt the user to rename the currently selected group."""
+
+        if self.selected_group_index is None:
+            self.log("No group selected to rename.")
+            return
+
+        current_name = self.defined_groups[self.selected_group_index]['name']
+        dlg = CTkInputDialog(
+            title="Rename Averaging Group",
+            text=f"Enter a new name for '{current_name}':",
+        )
+        new_name = dlg.get_input()
+        if not new_name or not new_name.strip():
+            return
+        new_name = new_name.strip()
+
+        # ensure name is unique
+        for i, grp in enumerate(self.defined_groups):
+            if i != self.selected_group_index and grp['name'] == new_name:
+                CTkMessagebox.CTkMessagebox(
+                    title="Error",
+                    message=f"A group named '{new_name}' already exists.",
+                    icon="cancel",
+                    master=self,
+                )
+                return
+
+        self.defined_groups[self.selected_group_index]['name'] = new_name
+        self.defined_groups[self.selected_group_index]['config_saved'] = False
+        self._update_groups_listbox()
+        self._display_group_configuration()
+        self.log(f"Renamed group to '{new_name}'.")
 
     def _update_groups_listbox(self):
         current_selection = self.groups_listbox.curselection()
