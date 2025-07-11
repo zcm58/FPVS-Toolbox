@@ -10,6 +10,8 @@ import os
 import tkinter as tk
 from tkinter import filedialog
 import customtkinter as ctk
+from customtkinter import CTkInputDialog
+import CTkMessagebox
 from Tools.SourceLocalization.data_utils import fetch_fsaverage_with_progress
 
 from config import init_fonts, FONT_MAIN
@@ -314,24 +316,70 @@ class SettingsWindow(ctk.CTkToplevel):
         self.destroy()
 
     def _export_config(self):
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".ini",
-            filetypes=[("INI files", "*.ini"), ("JSON files", "*.json")],
-            title="Save Configuration",
+
+        dlg = CTkInputDialog(
+            title="Save Configuration", text="Enter a name for this configuration:"
         )
-        if file_path:
+        name = dlg.get_input()
+        if name:
             self._apply_changes()
-            self.manager.export(file_path)
+            self.manager.export_named(name.strip())
+            CTkMessagebox.CTkMessagebox(
+                title="Saved", message=f"Configuration saved as '{name}'.", icon="check", master=self
+            )
 
     def _import_config(self):
-        file_path = filedialog.askopenfilename(
-            filetypes=[("INI or JSON", "*.ini *.json"), ("All files", "*")],
-            title="Load Configuration",
-        )
-        if file_path:
-            self.manager.load_from(file_path)
+        name = self._select_config()
+        if name:
+            try:
+                self.manager.load_named(name)
+            except FileNotFoundError:
+                CTkMessagebox.CTkMessagebox(
+                    title="Error", message=f"Configuration '{name}' not found.", icon="cancel", master=self
+                )
+                return
             self._refresh_fields()
             self._apply_changes()
+
+    def _select_config(self):
+        names = self.manager.list_configs()
+        if not names:
+            CTkMessagebox.CTkMessagebox(
+                title="No Configurations",
+                message="No saved configurations were found.",
+                icon="info",
+                master=self,
+            )
+            return None
+
+        win = ctk.CTkToplevel(self)
+        win.title("Load Configuration")
+        win.geometry("300x250")
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+
+        listbox = tk.Listbox(win, activestyle="none")
+        for n in names:
+            listbox.insert("end", n)
+        listbox.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+
+        choice = {"name": None}
+
+        def _confirm():
+            sel = listbox.curselection()
+            if sel:
+                choice["name"] = listbox.get(sel[0])
+            win.destroy()
+
+        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
+        btn_frame.pack(pady=10)
+        ctk.CTkButton(btn_frame, text="Load", command=_confirm).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(btn_frame, text="Cancel", command=win.destroy).pack(side="left")
+
+        win.wait_window()
+        return choice["name"]
+
 
     def _refresh_fields(self):
         self.mode_var.set(self.manager.get('appearance', 'mode', 'System'))
