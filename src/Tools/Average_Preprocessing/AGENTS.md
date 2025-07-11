@@ -13,3 +13,7 @@ epochs and is considered the preferred method.
 The Average of Averages method would first calculate the average of all the 
 epochs in file 1, then file 2, then average file 1 and 2 together. This gives
 equal weight to both files, but not all epochs. 
+
+If the user uses this option, the tool should respect whether the "Run LORETA during processing?" option is selected
+in the main app. If it is selected, the LORETA processing should be applied to the new averaged file AFTER the averaging
+has taken place. 

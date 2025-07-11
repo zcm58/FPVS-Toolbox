@@ -17,6 +17,7 @@ import threading
 
 # Set up module level logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class PostProcessContextForAdvanced:
@@ -107,6 +108,9 @@ def run_advanced_averaging_processing(
     """
 
     log_callback("Starting advanced averaging core processing (per-participant output)...")
+    logger.debug("run_advanced_averaging_processing called with %d groups", len(defined_groups))
+    for idx, g in enumerate(defined_groups):
+        logger.debug("Group %d definition: %s", idx, g)
 
     # Estimate total operations for progress bar
     total_source_ops = 0
@@ -124,6 +128,8 @@ def run_advanced_averaging_processing(
     total_operations_estimate = total_source_ops + total_participant_post_ops
     if total_operations_estimate == 0:
         total_operations_estimate = 1
+    logger.debug("Estimated total operations: %d (sources: %d, post_ops: %d)",
+                 total_operations_estimate, total_source_ops, total_participant_post_ops)
     current_operation_count = 0
     overall_success = True
 
@@ -134,6 +140,8 @@ def run_advanced_averaging_processing(
 
         group_recipe_name = group_definition['name']  # e.g., "Average A"
         log_callback(f"--- Applying Group Recipe: {group_recipe_name} ---")
+        logger.debug("Processing group '%s' with files: %s",
+                     group_recipe_name, group_definition.get('file_paths'))
 
         unique_participant_files = sorted(list(set(group_definition.get('file_paths', []))))
         if not unique_participant_files:
@@ -146,6 +154,7 @@ def run_advanced_averaging_processing(
                 return False
 
             participant_pid = pid_extraction_func({'file_paths': [participant_file_path]})
+            logger.debug("Participant file path: %s", participant_file_path)
             log_callback(
                 f"  -- Processing Participant: {participant_pid} (File: {Path(participant_file_path).name}) for Recipe: '{group_recipe_name}' --")
 
@@ -156,6 +165,7 @@ def run_advanced_averaging_processing(
                     return False
 
                 output_label_for_average = mapping_rule['output_label']
+                logger.debug("Mapping rule sources: %s", mapping_rule.get('sources'))
                 log_callback(f"    Applying rule for: '{output_label_for_average}' to participant {participant_pid}")
 
                 epochs_for_this_participant_this_rule: List[mne.Epochs] = []
@@ -199,6 +209,7 @@ def run_advanced_averaging_processing(
 
                         stim_channel = main_app_params.get('stim_channel', 'Status')
                         events = mne.find_events(raw_proc, stim_channel=stim_channel, consecutive=True, verbose=False)
+                        logger.debug("Found %d events in %s", len(events), file_basename)
 
                         if original_event_id not in events[:, 2]:
                             log_callback(
@@ -210,6 +221,11 @@ def run_advanced_averaging_processing(
                             raw_proc, events, event_id=event_id_dict_for_mne,
                             tmin=main_app_params['epoch_start'], tmax=main_app_params['epoch_end'],
                             preload=True, baseline=None, verbose=False, on_missing='warn'
+                        )
+                        logger.debug(
+                            "Epochs info - n_epochs: %d, n_channels: %d",
+                            len(participant_source_epochs),
+                            participant_source_epochs.info['nchan']
                         )
                         if len(participant_source_epochs) > 0:
                             log_callback(
@@ -289,7 +305,14 @@ def run_advanced_averaging_processing(
                     condition_name_for_output=group_recipe_name
                 )
                 try:
-                    external_post_process_func(post_proc_context, list(averaged_data_for_this_participant.keys()))
+                    logger.debug(
+                        "Calling external_post_process_func with labels: %s",
+                        list(averaged_data_for_this_participant.keys())
+                    )
+                    external_post_process_func(
+                        post_proc_context,
+                        list(averaged_data_for_this_participant.keys())
+                    )
                     log_callback(
                         f"  --- Post-processing for {participant_pid} (Recipe: '{group_recipe_name}') completed. ---")
                 except Exception as e:
@@ -312,4 +335,5 @@ def run_advanced_averaging_processing(
         log_callback(f"--- All participants processed for Group Recipe: {group_recipe_name} ---")
 
     log_callback("Advanced averaging core processing finished.")
+    logger.debug("Processing success status: %s", overall_success)
     return overall_success
