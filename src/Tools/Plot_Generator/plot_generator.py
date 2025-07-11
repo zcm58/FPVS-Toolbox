@@ -35,7 +35,7 @@ from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
 
 from Main_App.settings_manager import SettingsManager
-from .plot_settings import PlotSettingsManager
+from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from config import update_target_frequencies
 
 
