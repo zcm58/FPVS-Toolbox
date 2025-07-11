@@ -14,10 +14,11 @@ from typing import List, Dict, Any, Callable, Optional, Union
 
 import mne
 import threading
+from Main_App.settings_manager import SettingsManager
 
 # Set up module level logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+DEBUG_ENABLED = SettingsManager().debug_enabled()
 
 
 class PostProcessContextForAdvanced:
@@ -107,10 +108,14 @@ def run_advanced_averaging_processing(
         ``True`` if processing completed without major errors, otherwise ``False``.
     """
 
+    def _debug(msg: str) -> None:
+        if DEBUG_ENABLED:
+            log_callback(f"[DEBUG] {msg}")
+            logger.debug(msg)
+
     log_callback("Starting advanced averaging core processing (per-participant output)...")
-    logger.debug("run_advanced_averaging_processing called with %d groups", len(defined_groups))
-    for idx, g in enumerate(defined_groups):
-        logger.debug("Group %d definition: %s", idx, g)
+    if DEBUG_ENABLED:
+        logger.debug("Advanced averaging core processing started with %d group definitions", len(defined_groups))
 
     # Estimate total operations for progress bar
     total_source_ops = 0
@@ -128,10 +133,20 @@ def run_advanced_averaging_processing(
     total_operations_estimate = total_source_ops + total_participant_post_ops
     if total_operations_estimate == 0:
         total_operations_estimate = 1
-    logger.debug("Estimated total operations: %d (sources: %d, post_ops: %d)",
-                 total_operations_estimate, total_source_ops, total_participant_post_ops)
+    _debug(f"Total operation estimate: {total_operations_estimate}")
     current_operation_count = 0
     overall_success = True
+
+    # Count how many times each file will be used across all mappings
+    file_usage_counts: Dict[str, int] = {}
+    for group in defined_groups:
+        for mapping in group.get('condition_mappings', []):
+            for source_info in mapping.get('sources', []):
+                fpath = source_info['file_path']
+                file_usage_counts[fpath] = file_usage_counts.get(fpath, 0) + 1
+
+    # Cache of preprocessed Raw objects reused across event IDs
+    preprocessed_cache: Dict[str, mne.io.Raw] = {}
 
     for group_definition in defined_groups:  # A "group definition" is like a recipe, e.g., "Average A"
         if stop_event.is_set():
@@ -140,8 +155,7 @@ def run_advanced_averaging_processing(
 
         group_recipe_name = group_definition['name']  # e.g., "Average A"
         log_callback(f"--- Applying Group Recipe: {group_recipe_name} ---")
-        logger.debug("Processing group '%s' with files: %s",
-                     group_recipe_name, group_definition.get('file_paths'))
+        _debug(f"Processing group '{group_recipe_name}' with {len(group_definition.get('file_paths', []))} files")
 
         unique_participant_files = sorted(list(set(group_definition.get('file_paths', []))))
         if not unique_participant_files:
@@ -154,9 +168,9 @@ def run_advanced_averaging_processing(
                 return False
 
             participant_pid = pid_extraction_func({'file_paths': [participant_file_path]})
-            logger.debug("Participant file path: %s", participant_file_path)
             log_callback(
                 f"  -- Processing Participant: {participant_pid} (File: {Path(participant_file_path).name}) for Recipe: '{group_recipe_name}' --")
+            _debug(f"Participant {participant_pid} file {participant_file_path}")
 
             averaged_data_for_this_participant: Dict[str, List[Union[mne.Epochs, mne.Evoked]]] = {}
 
@@ -165,8 +179,8 @@ def run_advanced_averaging_processing(
                     return False
 
                 output_label_for_average = mapping_rule['output_label']
-                logger.debug("Mapping rule sources: %s", mapping_rule.get('sources'))
                 log_callback(f"    Applying rule for: '{output_label_for_average}' to participant {participant_pid}")
+                _debug(f"Rule '{output_label_for_average}' with {len(mapping_rule.get('sources', []))} sources")
 
                 epochs_for_this_participant_this_rule: List[mne.Epochs] = []
 
@@ -185,31 +199,27 @@ def run_advanced_averaging_processing(
                     log_callback(
                         f"      Loading & Preprocessing: {file_basename} for Event ID {original_event_id} ('{original_event_label}')")
 
-                    raw = None
-                    raw_copy_for_preproc = None
                     raw_proc = None
-                    participant_source_epochs = None  # MODIFICATION: Ensure initialization
+                    participant_source_epochs = None
                     try:
-                        raw = main_app_load_file_func(file_path_of_source)
-                        if raw is None or stop_event.is_set():
-                            log_callback(f"      Skipping {file_basename} (load failed or stop event).")
-                            overall_success = False
-                            continue
-
-                        raw_copy_for_preproc = raw.copy()
-                        # MODIFICATION: Removed 'del raw;' and 'gc.collect()' from here
-
-                        raw_proc = main_app_preprocess_raw_func(raw_copy_for_preproc, **main_app_params.copy())
-                        # MODIFICATION: Removed 'del raw_copy_for_preproc;' and 'gc.collect()' from here
-
-                        if raw_proc is None or stop_event.is_set():
-                            log_callback(f"      Skipping {file_basename} (preprocess failed or stop event).")
-                            overall_success = False
-                            continue
+                        if file_path_of_source in preprocessed_cache:
+                            raw_proc = preprocessed_cache[file_path_of_source]
+                        else:
+                            raw = main_app_load_file_func(file_path_of_source)
+                            if raw is None or stop_event.is_set():
+                                log_callback(f"      Skipping {file_basename} (load failed or stop event).")
+                                overall_success = False
+                                continue
+                            raw_proc = main_app_preprocess_raw_func(raw.copy(), **main_app_params.copy())
+                            del raw
+                            if raw_proc is None or stop_event.is_set():
+                                log_callback(f"      Skipping {file_basename} (preprocess failed or stop event).")
+                                overall_success = False
+                                continue
+                            preprocessed_cache[file_path_of_source] = raw_proc
 
                         stim_channel = main_app_params.get('stim_channel', 'Status')
                         events = mne.find_events(raw_proc, stim_channel=stim_channel, consecutive=True, verbose=False)
-                        logger.debug("Found %d events in %s", len(events), file_basename)
 
                         if original_event_id not in events[:, 2]:
                             log_callback(
@@ -221,11 +231,6 @@ def run_advanced_averaging_processing(
                             raw_proc, events, event_id=event_id_dict_for_mne,
                             tmin=main_app_params['epoch_start'], tmax=main_app_params['epoch_end'],
                             preload=True, baseline=None, verbose=False, on_missing='warn'
-                        )
-                        logger.debug(
-                            "Epochs info - n_epochs: %d, n_channels: %d",
-                            len(participant_source_epochs),
-                            participant_source_epochs.info['nchan']
                         )
                         if len(participant_source_epochs) > 0:
                             log_callback(
@@ -240,23 +245,20 @@ def run_advanced_averaging_processing(
                             f"      !!! Error during epoching for {file_basename}, ID {original_event_id} for {participant_pid}: {e}\n{traceback.format_exc()}")
                         overall_success = False
                     finally:
-                        if raw_proc is not None:
-                            del raw_proc
-                        if raw_copy_for_preproc is not None:
-                            del raw_copy_for_preproc
-                        if raw is not None:
-                            del raw
                         if participant_source_epochs is not None:
-                            del participant_source_epochs  # MODIFICATION: Cleanup added
-                        gc.collect()
-
-                    current_operation_count += 1
-                    progress_callback(current_operation_count / total_operations_estimate)
+                            del participant_source_epochs
+                        current_operation_count += 1
+                        progress_callback(current_operation_count / total_operations_estimate)
+                        file_usage_counts[file_path_of_source] -= 1
+                        if file_usage_counts[file_path_of_source] == 0 and file_path_of_source in preprocessed_cache:
+                            del preprocessed_cache[file_path_of_source]
+                            gc.collect()
 
                 if epochs_for_this_participant_this_rule:
                     averaging_method = group_definition.get('averaging_method', "Pool Trials")
                     log_callback(
                         f"    Averaging {len(epochs_for_this_participant_this_rule)} sets of epochs for '{output_label_for_average}' (Participant: {participant_pid}, Method: {averaging_method})")
+                    _debug(f"Averaging method '{averaging_method}' on {len(epochs_for_this_participant_this_rule)} epoch sets")
                     try:
                         if averaging_method == "Pool Trials":
                             concatenated_epochs = mne.concatenate_epochs(epochs_for_this_participant_this_rule)
@@ -273,6 +275,7 @@ def run_advanced_averaging_processing(
                                 averaged_data_for_this_participant[output_label_for_average] = [averaged_evoked]
                                 log_callback(
                                     f"      Averaged {len(evokeds_to_average)} evoked responses for '{output_label_for_average}'.")
+                                _debug("Grand averaged evoked responses")
                             else:
                                 log_callback(
                                     f"      No valid evoked responses to average for '{output_label_for_average}'.")
@@ -296,6 +299,7 @@ def run_advanced_averaging_processing(
                     return False
                 log_callback(
                     f"  --- Initiating Post-Processing for Participant {participant_pid} (Recipe: '{group_recipe_name}') ---")
+                _debug(f"Post-processing data for participant {participant_pid}")
 
                 post_proc_context = PostProcessContextForAdvanced(
                     log_callback=log_callback,
@@ -305,14 +309,7 @@ def run_advanced_averaging_processing(
                     condition_name_for_output=group_recipe_name
                 )
                 try:
-                    logger.debug(
-                        "Calling external_post_process_func with labels: %s",
-                        list(averaged_data_for_this_participant.keys())
-                    )
-                    external_post_process_func(
-                        post_proc_context,
-                        list(averaged_data_for_this_participant.keys())
-                    )
+                    external_post_process_func(post_proc_context, list(averaged_data_for_this_participant.keys()))
                     log_callback(
                         f"  --- Post-processing for {participant_pid} (Recipe: '{group_recipe_name}') completed. ---")
                 except Exception as e:
@@ -331,9 +328,10 @@ def run_advanced_averaging_processing(
             gc.collect()
             log_callback(
                 f"  -- Finished processing for Participant: {participant_pid} (Recipe: '{group_recipe_name}') --")
+            _debug(f"Completed participant {participant_pid}")
 
         log_callback(f"--- All participants processed for Group Recipe: {group_recipe_name} ---")
 
     log_callback("Advanced averaging core processing finished.")
-    logger.debug("Processing success status: %s", overall_success)
+    _debug("Core processing complete")
     return overall_success

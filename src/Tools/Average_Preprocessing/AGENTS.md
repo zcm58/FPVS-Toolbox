@@ -14,6 +14,6 @@ The Average of Averages method would first calculate the average of all the
 epochs in file 1, then file 2, then average file 1 and 2 together. This gives
 equal weight to both files, but not all epochs. 
 
-If the user uses this option, the tool should respect whether the "Run LORETA during processing?" option is selected
-in the main app. If it is selected, the LORETA processing should be applied to the new averaged file AFTER the averaging
-has taken place. 
+As with the rest of this directory, the GUI code should be kept separate from the functionality of the app. Keep 
+each .py file under 500 lines if possible, and separate functions into their own files that make sense for a human
+user. If any files are over roughly 500 lines, please suggest ways to break them up into smaller files. 

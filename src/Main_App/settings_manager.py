@@ -8,6 +8,7 @@ mode.
 
 import os
 import sys
+import json
 import configparser
 from typing import List, Tuple
 
@@ -69,6 +70,7 @@ DEFAULTS = {
 }
 
 INI_NAME = 'settings.ini'
+CONFIGS_DIR = 'configs'
 
 def _default_ini_path() -> str:
     """Return the default path for the settings file in a user-writable location."""
@@ -78,6 +80,11 @@ def _default_ini_path() -> str:
         base = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser('~'), '.config'))
     return os.path.join(base, 'FPVS_Toolbox', INI_NAME)
 
+
+def _default_configs_dir() -> str:
+    base = os.path.dirname(_default_ini_path())
+    return os.path.join(base, CONFIGS_DIR)
+
 class SettingsManager:
     """Handles loading and saving user preferences to an INI file."""
 
@@ -85,6 +92,7 @@ class SettingsManager:
         if ini_path is None:
             ini_path = _default_ini_path()
         self.ini_path = ini_path
+        self.configs_dir = _default_configs_dir()
         self.config = configparser.ConfigParser()
         self.load()
 
@@ -122,10 +130,69 @@ class SettingsManager:
         with open(self.ini_path, 'w') as f:
             self.config.write(f)
 
+    def export(self, path: str) -> None:
+        """Write the current settings to ``path`` as INI or JSON."""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        ext = os.path.splitext(path)[1].lower()
+        if ext == '.json':
+            data = {"DEFAULT": dict(self.config.defaults())}
+            for section in self.config.sections():
+                data[section] = dict(self.config.items(section))
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+        else:
+            with open(path, 'w') as f:
+                self.config.write(f)
+
+    def export_named(self, name: str, ext: str = '.ini') -> str:
+        """Export settings to the managed configs directory using ``name``."""
+        os.makedirs(self.configs_dir, exist_ok=True)
+        if not ext.startswith('.'):
+            ext = '.' + ext
+        path = os.path.join(self.configs_dir, name + ext)
+        self.export(path)
+        return path
+
+
     def reset(self) -> None:
         """Reset settings to defaults and save."""
         self.config.read_dict(DEFAULTS)
         self.save()
+
+    def load_from(self, path: str) -> None:
+        """Load settings from ``path`` then save to the default ini file."""
+        self.config.read_dict(DEFAULTS)
+        ext = os.path.splitext(path)[1].lower()
+        if ext == '.json':
+            with open(path, 'r') as f:
+                data = json.load(f)
+            self.config.read_dict(data)
+        else:
+            self.config.read(path)
+        self.save()
+
+
+    def list_configs(self) -> List[str]:
+        """Return saved configuration names in the configs directory."""
+        if not os.path.isdir(self.configs_dir):
+            return []
+        names = []
+        for fname in os.listdir(self.configs_dir):
+            if fname.endswith('.ini') or fname.endswith('.json'):
+                names.append(os.path.splitext(fname)[0])
+        return sorted(names)
+
+    def load_named(self, name: str) -> None:
+        """Load config with ``name`` from the configs directory."""
+        path_ini = os.path.join(self.configs_dir, name + '.ini')
+        path_json = os.path.join(self.configs_dir, name + '.json')
+        if os.path.exists(path_ini):
+            self.load_from(path_ini)
+        elif os.path.exists(path_json):
+            self.load_from(path_json)
+        else:
+            raise FileNotFoundError(name)
+
 
     def get(self, section: str, option: str, fallback: str = '') -> str:
         return self.config.get(section, option, fallback=fallback)
