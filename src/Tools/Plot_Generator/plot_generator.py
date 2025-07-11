@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Dict, List, Iterable
-
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")  # Ensure no GUI backend required
@@ -27,8 +26,10 @@ from PySide6.QtWidgets import (
 
 from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
+
 from Main_App.settings_manager import SettingsManager
 from config import update_target_frequencies
+
 
 
 class _Worker(QObject):
@@ -49,6 +50,7 @@ class _Worker(QObject):
         xlabel: str,
         ylabel: str,
         out_dir: str,
+
     ) -> None:
         super().__init__()
         self.folder = folder
@@ -60,7 +62,9 @@ class _Worker(QObject):
         self.title = title
         self.xlabel = xlabel
         self.ylabel = ylabel
+
         self.out_dir = Path(out_dir)
+
 
     def run(self) -> None:
         try:
@@ -76,7 +80,9 @@ class _Worker(QObject):
         if not cond_folder.is_dir():
             self._emit(f"Condition folder not found: {cond_folder}")
             return
+
         self.out_dir.mkdir(parents=True, exist_ok=True)
+
         excel_files = [
             Path(root) / f
             for root, _, files in os.walk(cond_folder)
@@ -94,8 +100,10 @@ class _Worker(QObject):
             else [self.selected_roi]
         )
 
+
         roi_data: Dict[str, List[List[float]]] = {rn: [] for rn in roi_names}
         freqs: Iterable[float] | None = None
+
         for excel_path in excel_files:
             try:
                 df = pd.read_excel(excel_path, sheet_name=sheet)
@@ -106,14 +114,17 @@ class _Worker(QObject):
             if not freq_cols:
                 self._emit(f"No freq columns in {excel_path.name}")
                 continue
+
             if freqs is None:
                 freqs = [float(c.split("_")[0]) for c in freq_cols]
+
             for roi in roi_names:
                 chans = [c.upper() for c in self.roi_map.get(roi, [])]
                 df_roi = df[df["Electrode"].str.upper().isin(chans)]
                 if df_roi.empty:
                     self._emit(f"No electrodes for ROI {roi} in {excel_path.name}")
                     continue
+
                 means = df_roi[freq_cols].mean().tolist()
                 roi_data[roi].append(means)
 
@@ -136,6 +147,7 @@ class _Worker(QObject):
 
     def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
+
         for roi, amps in roi_data.items():
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
             ax.plot(freqs, amps, linewidth=1.0, color="black")
@@ -155,6 +167,7 @@ class _Worker(QObject):
             self._emit(f"Saved {fname}")
 
 
+
 class PlotGeneratorWindow(QWidget):
     """Main window for generating plots."""
 
@@ -162,6 +175,7 @@ class PlotGeneratorWindow(QWidget):
         super().__init__(parent)
         self.setWindowTitle("Generate Plots")
         self.roi_map = load_rois_from_settings()
+
 
         mgr = SettingsManager()
         default_folder = mgr.get("paths", "output_folder", "")
@@ -175,12 +189,14 @@ class PlotGeneratorWindow(QWidget):
         except Exception:
             pass
 
+
         self._defaults = {
             "title_snr": "SNR Plot",
             "title_bca": "BCA Plot",
             "xlabel": "Frequency (Hz)",
             "ylabel_snr": "SNR",
             "ylabel_bca": "Baseline-corrected amplitude (µV)",
+
             "odd_freqs": odd_freqs_text,
             "default_folder": default_folder,
         }
@@ -189,6 +205,7 @@ class PlotGeneratorWindow(QWidget):
         if default_folder:
             self.folder_edit.setText(default_folder)
             self._populate_conditions(default_folder)
+
         self._thread: QThread | None = None
         self._worker: _Worker | None = None
 
@@ -198,22 +215,27 @@ class PlotGeneratorWindow(QWidget):
         layout.addWidget(QLabel("Excel Files Folder:"), row, 0)
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
+
         self.folder_edit.setText(self._defaults.get("default_folder", ""))
+
         layout.addWidget(self.folder_edit, row, 1)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._select_folder)
         layout.addWidget(browse, row, 2)
         row += 1
 
+
         layout.addWidget(QLabel("Save Plots To:"), row, 0)
         self.out_edit = QLineEdit()
         self.out_edit.setReadOnly(True)
         self.out_edit.setText(self._defaults.get("default_folder", ""))
+
         layout.addWidget(self.out_edit, row, 1)
         browse_out = QPushButton("Browse…")
         browse_out.clicked.connect(self._select_output)
         layout.addWidget(browse_out, row, 2)
         row += 1
+
 
         layout.addWidget(QLabel("Condition:"), row, 0)
         self.condition_combo = QComboBox()
@@ -234,7 +256,9 @@ class PlotGeneratorWindow(QWidget):
         row += 1
 
         layout.addWidget(QLabel("Oddball frequencies (Hz):"), row, 0)
+
         self.freq_edit = QLineEdit(self._defaults["odd_freqs"])
+
         layout.addWidget(self.freq_edit, row, 1, 1, 2)
         row += 1
 
@@ -279,10 +303,12 @@ class PlotGeneratorWindow(QWidget):
             self.folder_edit.setText(folder)
             self._populate_conditions(folder)
 
+
     def _select_output(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if folder:
             self.out_edit.setText(folder)
+
 
     def _populate_conditions(self, folder: str) -> None:
         self.condition_combo.clear()
@@ -302,8 +328,10 @@ class PlotGeneratorWindow(QWidget):
         self._defaults["xlabel"] = self.xlabel_edit.text()
         self._defaults["ylabel_snr"] = self.ylabel_edit.text()
         self._defaults["ylabel_bca"] = self.ylabel_edit.text()
+
         self._defaults["odd_freqs"] = self.freq_edit.text()
         self._defaults["default_folder"] = self.folder_edit.text()
+
         QMessageBox.information(self, "Settings", "New settings have been applied.")
 
     def _append_log(self, text: str) -> None:
@@ -315,10 +343,12 @@ class PlotGeneratorWindow(QWidget):
         if not folder:
             QMessageBox.critical(self, "Error", "Select a folder first.")
             return
+
         out_dir = self.out_edit.text()
         if not out_dir:
             QMessageBox.critical(self, "Error", "Select an output folder first.")
             return
+
         if not self.condition_combo.currentText():
             QMessageBox.critical(self, "Error", "No condition selected.")
             return
@@ -341,7 +371,9 @@ class PlotGeneratorWindow(QWidget):
             self.title_edit.text(),
             self.xlabel_edit.text(),
             self.ylabel_edit.text(),
+
             out_dir,
+
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
