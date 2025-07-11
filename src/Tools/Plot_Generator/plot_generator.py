@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-
 from typing import Dict, List, Iterable
-
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")  # Ensure no GUI backend required
@@ -47,7 +45,6 @@ class _Worker(QObject):
         title: str,
         xlabel: str,
         ylabel: str,
-
         out_dir: str,
 
     ) -> None:
@@ -146,28 +143,25 @@ class _Worker(QObject):
 
     def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
-        fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
+
         for roi, amps in roi_data.items():
-            ax.plot(freqs, amps, linewidth=1.0, label=roi)
+            fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
+            ax.plot(freqs, amps, linewidth=1.0, color="black")
+            ax.set_xlim(0, max(freqs) + 0.5)
+            ax.set_ylim(-0.05, 0.30)
+            ax.set_xlabel(self.xlabel)
+            ax.set_ylabel(self.ylabel)
+            ax.set_title(self.title)
+            for odd in self.oddballs:
+                ax.axvline(x=odd, color="black", linewidth=0.8)
+                ax.text(odd, ax.get_ylim()[0], f"{odd} Hz", ha="center", va="top")
+            ax.grid(False)
+            fig.tight_layout()
+            fname = f"{self.condition}_{roi}_{self.metric}.png"
+            fig.savefig(self.out_dir / fname)
+            plt.close(fig)
+            self._emit(f"Saved {fname}")
 
-        ax.set_xlim(0, max(freqs) + 0.5)
-        ax.set_ylim(-0.05, 0.30)
-        ax.set_xlabel(self.xlabel)
-        ax.set_ylabel(self.ylabel)
-        ax.set_title(self.title)
-        for odd in self.oddballs:
-            ax.axvline(x=odd, color="black", linewidth=0.8)
-            ax.text(odd, ax.get_ylim()[0], f"{odd} Hz", ha="center", va="top")
-
-        if len(roi_data) > 1:
-            ax.legend(loc="upper right")
-        ax.grid(False)
-        fig.tight_layout()
-        fname = f"{self.condition}_{self.metric}.png"
-        fig.savefig(self.out_dir / fname)
-
-        plt.close(fig)
-        self._emit(f"Saved {fname}")
 
 
 class PlotGeneratorWindow(QWidget):
@@ -183,6 +177,8 @@ class PlotGeneratorWindow(QWidget):
             "xlabel": "Frequency (Hz)",
             "ylabel_snr": "SNR",
             "ylabel_bca": "Baseline-corrected amplitude (µV)",
+            "odd_freqs": "1.2, 2.4, 3.6, 4.8, 6.0, 7.2, 8.4, 9.6",
+
         }
         self._build_ui()
         self._thread: QThread | None = None
@@ -199,6 +195,7 @@ class PlotGeneratorWindow(QWidget):
         browse.clicked.connect(self._select_folder)
         layout.addWidget(browse, row, 2)
         row += 1
+
 
 
         layout.addWidget(QLabel("Save Plots To:"), row, 0)
@@ -230,7 +227,9 @@ class PlotGeneratorWindow(QWidget):
         row += 1
 
         layout.addWidget(QLabel("Oddball frequencies (Hz):"), row, 0)
-        self.freq_edit = QLineEdit()
+
+        self.freq_edit = QLineEdit(self._defaults["odd_freqs"])
+
         layout.addWidget(self.freq_edit, row, 1, 1, 2)
         row += 1
 
@@ -300,6 +299,9 @@ class PlotGeneratorWindow(QWidget):
         self._defaults["xlabel"] = self.xlabel_edit.text()
         self._defaults["ylabel_snr"] = self.ylabel_edit.text()
         self._defaults["ylabel_bca"] = self.ylabel_edit.text()
+
+        self._defaults["odd_freqs"] = self.freq_edit.text()
+
         QMessageBox.information(self, "Settings", "New settings have been applied.")
 
     def _append_log(self, text: str) -> None:
@@ -312,10 +314,12 @@ class PlotGeneratorWindow(QWidget):
             QMessageBox.critical(self, "Error", "Select a folder first.")
             return
 
+
         out_dir = self.out_edit.text()
         if not out_dir:
             QMessageBox.critical(self, "Error", "Select an output folder first.")
             return
+
 
         if not self.condition_combo.currentText():
             QMessageBox.critical(self, "Error", "No condition selected.")

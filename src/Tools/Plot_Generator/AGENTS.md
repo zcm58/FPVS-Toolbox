@@ -1,3 +1,10 @@
+The Plot_Generator directory contains the standalone PySide6 tool that builds SNR
+or BCA line plots from Excel files created by the FPVS Toolbox. GUI adjustments
+and minor bug fixes are allowed. Keep processing code modular and under 500 lines
+per file. ROI definitions should be loaded from the existing settings using the
+utilities in `Tools.Stats`. Plots should be averaged across participants within
+each condition and saved to a user selected output folder.
+
 This tool will be use to generate publication quality figures within the FPVS Toolbox. Users should have the ability
 to edit the plot title, x and y labels, and the scale of the x and y axes.
 
@@ -13,3 +20,4 @@ The app should read all of these excel files for each condition and generate an 
 across all the participants, then plot that data. To further clarify, if you have 30 participants and 5 conditions,
 You should generate one plot per condition per ROI. If the user defines 4 ROIS like "frontal, central, parietal, 
 occipital", then you have 4 ROIs * 5 conditions = 20 plots. 
+
