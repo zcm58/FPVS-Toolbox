@@ -28,6 +28,7 @@ from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
 
 from Main_App.settings_manager import SettingsManager
+from .plot_settings import PlotSettingsManager
 from config import update_target_frequencies
 
 
@@ -186,9 +187,15 @@ class PlotGeneratorWindow(QWidget):
         self.setWindowTitle("Generate Plots")
         self.roi_map = load_rois_from_settings()
 
-
         mgr = SettingsManager()
-        default_folder = mgr.get("paths", "output_folder", "")
+        self.plot_mgr = PlotSettingsManager()
+        default_in = self.plot_mgr.get("paths", "input_folder", "")
+        default_out = self.plot_mgr.get("paths", "output_folder", "")
+        main_default = mgr.get("paths", "output_folder", "")
+        if not default_in:
+            default_in = main_default
+        if not default_out:
+            default_out = main_default
         odd_freqs_text = ""
         try:
             odd = float(mgr.get("analysis", "oddball_freq", ""))
@@ -214,13 +221,16 @@ class PlotGeneratorWindow(QWidget):
             "y_max_bca": "0.3",
 
             "odd_freqs": odd_freqs_text,
-            "default_folder": default_folder,
+            "input_folder": default_in,
+            "output_folder": default_out,
         }
 
         self._build_ui()
-        if default_folder:
-            self.folder_edit.setText(default_folder)
-            self._populate_conditions(default_folder)
+        if default_in:
+            self.folder_edit.setText(default_in)
+            self._populate_conditions(default_in)
+        if default_out:
+            self.out_edit.setText(default_out)
 
         self._thread: QThread | None = None
         self._worker: _Worker | None = None
@@ -232,7 +242,7 @@ class PlotGeneratorWindow(QWidget):
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
 
-        self.folder_edit.setText(self._defaults.get("default_folder", ""))
+        self.folder_edit.setText(self._defaults.get("input_folder", ""))
 
         layout.addWidget(self.folder_edit, row, 1)
         browse = QPushButton("Browse…")
@@ -244,7 +254,7 @@ class PlotGeneratorWindow(QWidget):
         layout.addWidget(QLabel("Save Plots To:"), row, 0)
         self.out_edit = QLineEdit()
         self.out_edit.setReadOnly(True)
-        self.out_edit.setText(self._defaults.get("default_folder", ""))
+        self.out_edit.setText(self._defaults.get("output_folder", ""))
 
         layout.addWidget(self.out_edit, row, 1)
         browse_out = QPushButton("Browse…")
@@ -312,9 +322,12 @@ class PlotGeneratorWindow(QWidget):
         self.apply_btn = QPushButton("Apply Settings")
         self.apply_btn.clicked.connect(self._apply_settings)
         layout.addWidget(self.apply_btn, row, 0)
+        self.save_defaults_btn = QPushButton("Save Defaults")
+        self.save_defaults_btn.clicked.connect(self._save_defaults)
+        layout.addWidget(self.save_defaults_btn, row, 1)
         self.gen_btn = QPushButton("Generate")
         self.gen_btn.clicked.connect(self._generate)
-        layout.addWidget(self.gen_btn, row, 1)
+        layout.addWidget(self.gen_btn, row, 2)
         row += 1
 
         self.log = QPlainTextEdit()
@@ -376,9 +389,16 @@ class PlotGeneratorWindow(QWidget):
         self._defaults["x_max"] = self.xmax_edit.text()
 
         self._defaults["odd_freqs"] = self.freq_edit.text()
-        self._defaults["default_folder"] = self.folder_edit.text()
+        self._defaults["input_folder"] = self.folder_edit.text()
+        self._defaults["output_folder"] = self.out_edit.text()
 
         QMessageBox.information(self, "Settings", "New settings have been applied.")
+
+    def _save_defaults(self) -> None:
+        self.plot_mgr.set("paths", "input_folder", self.folder_edit.text())
+        self.plot_mgr.set("paths", "output_folder", self.out_edit.text())
+        self.plot_mgr.save()
+        QMessageBox.information(self, "Defaults", "Default folders saved.")
 
     def _append_log(self, text: str) -> None:
         self.log.appendPlainText(text)
@@ -439,8 +459,13 @@ class PlotGeneratorWindow(QWidget):
         self._worker.finished.connect(self._thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.finished.connect(lambda: self.gen_btn.setEnabled(True))
+        self._thread.finished.connect(self._generation_finished)
         self._thread.start()
+
+    def _generation_finished(self) -> None:
+        self.gen_btn.setEnabled(True)
+        self._thread = None
+        self._worker = None
 
 
 def main() -> None:
