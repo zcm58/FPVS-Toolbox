@@ -13,6 +13,7 @@ import customtkinter as ctk
 from customtkinter import CTkInputDialog
 import CTkMessagebox
 import os
+import json
 from pathlib import Path
 import re
 import threading
@@ -248,6 +249,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         gb.grid(row=5, column=0, pady=PAD_Y, sticky="ew")
         ctk.CTkButton(gb, text="Create New Group", command=self.create_new_group, width=BUTTON_WIDTH) \
             .pack(side="left", padx=PAD_X, expand=True)
+        ctk.CTkButton(gb, text="Rename Group", command=self.rename_selected_group, width=BUTTON_WIDTH) \
+            .pack(side="left", padx=PAD_X, expand=True)
         ctk.CTkButton(gb, text="Delete Group", command=self.delete_selected_group, width=BUTTON_WIDTH) \
             .pack(side="left", padx=PAD_X, expand=True)
 
@@ -317,14 +320,18 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         bottom = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         bottom.grid(row=1, column=0, columnspan=2, padx=PAD_X, pady=PAD_Y, sticky="ew")
         bottom.grid_columnconfigure(0, weight=1)
+        bottom.grid_columnconfigure(1, weight=0)
 
         self.log_textbox = ctk.CTkTextbox(bottom, height=100, wrap="word", state="disabled")
         self.log_textbox.grid(row=0, column=0, columnspan=2, padx=PAD_X, pady=PAD_Y, sticky="ew")
 
         self.progress_bar = ctk.CTkProgressBar(bottom, orientation="horizontal")
-        self.progress_bar.grid(row=1, column=0, columnspan=2, padx=PAD_X, pady=(0, PAD_Y), sticky="ew")
+        self.progress_bar.grid(row=1, column=0, padx=PAD_X, pady=(0, PAD_Y), sticky="ew")
         self.progress_bar.set(0)
         self.progress_bar.grid_remove()
+
+        self.clear_log_button = ctk.CTkButton(bottom, text="Clear Log", command=self.clear_log)
+        self.clear_log_button.grid(row=1, column=1, padx=PAD_X, pady=(0, PAD_Y))
 
         cf = ctk.CTkFrame(bottom, fg_color="transparent")
         cf.grid(row=2, column=0, columnspan=2, pady=PAD_Y, sticky="e")
@@ -336,6 +343,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         )
         self.start_adv_processing_button.pack(side="left", padx=PAD_X)
 
+
         self.stop_processing_button = ctk.CTkButton(
             cf,
             text="Stop",
@@ -344,6 +352,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         )
         self.stop_processing_button.pack(side="left", padx=PAD_X)
         self.stop_processing_button.configure(state="disabled")
+
 
         self.close_button = ctk.CTkButton(cf, text="Close", command=self._on_close)
         self.close_button.pack(side="left", padx=PAD_X)
@@ -366,6 +375,13 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self.log_textbox.configure(state="disabled")
         if hasattr(self.master_app, "log"):
             self.master_app.log(f"[AdvAnalysis] {message}")
+
+    def clear_log(self) -> None:
+        """Clear all text from the log textbox."""
+        if hasattr(self, 'log_textbox') and self.log_textbox.winfo_exists():
+            self.log_textbox.configure(state="normal")
+            self.log_textbox.delete("1.0", tk.END)
+            self.log_textbox.configure(state="disabled")
 
     def debug(self, message: str) -> None:
         if self.debug_mode:
@@ -606,6 +622,40 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self._update_start_processing_button_state()
             if self.debug_mode:
                 logger.debug("Group '%s' deleted", group_name_to_delete)
+
+    def rename_selected_group(self) -> None:
+        """Prompt the user to rename the currently selected group."""
+
+        if self.selected_group_index is None:
+            self.log("No group selected to rename.")
+            return
+
+        current_name = self.defined_groups[self.selected_group_index]['name']
+        dlg = CTkInputDialog(
+            title="Rename Averaging Group",
+            text=f"Enter a new name for '{current_name}':",
+        )
+        new_name = dlg.get_input()
+        if not new_name or not new_name.strip():
+            return
+        new_name = new_name.strip()
+
+        # ensure name is unique
+        for i, grp in enumerate(self.defined_groups):
+            if i != self.selected_group_index and grp['name'] == new_name:
+                CTkMessagebox.CTkMessagebox(
+                    title="Error",
+                    message=f"A group named '{new_name}' already exists.",
+                    icon="cancel",
+                    master=self,
+                )
+                return
+
+        self.defined_groups[self.selected_group_index]['name'] = new_name
+        self.defined_groups[self.selected_group_index]['config_saved'] = False
+        self._update_groups_listbox()
+        self._display_group_configuration()
+        self.log(f"Renamed group to '{new_name}'.")
 
     def _update_groups_listbox(self):
         current_selection = self.groups_listbox.curselection()
@@ -949,8 +999,42 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self.close_button.configure(state="disabled")
         self._stop_requested.clear()
 
-        load_file_method = self.master_app.load_eeg_file
-        preprocess_raw_method = self.master_app.preprocess_raw
+        # Acquire the file loading and preprocessing callables. The main
+        # application may expose these as bound methods (legacy behaviour),
+        # but newer versions provide standalone helpers.  We handle both
+        # cases here for compatibility.
+
+        if hasattr(self.master_app, "load_eeg_file"):
+            load_file_method = self.master_app.load_eeg_file
+        else:  # Fallback to utility function
+            from Main_App.load_utils import load_eeg_file as _load
+
+            def load_file_method(fp):
+                return _load(self.master_app, fp)
+
+        if hasattr(self.master_app, "preprocess_raw"):
+            preprocess_raw_method = self.master_app.preprocess_raw
+        else:
+            from Main_App.eeg_preprocessing import perform_preprocessing as _pp
+
+            def preprocess_raw_method(raw, **params):
+                """Wrapper to match legacy ``preprocess_raw`` interface."""
+                filename = "UnknownFile"
+                if getattr(raw, "filenames", None):
+                    try:
+                        filename = os.path.basename(raw.filenames[0])
+                    except Exception:
+                        pass
+                elif getattr(raw, "filename", None):
+                    filename = os.path.basename(raw.filename)
+
+                processed, _ = _pp(
+                    raw_input=raw,
+                    params=params,
+                    log_func=self.master_app.log,
+                    filename_for_log=filename,
+                )
+                return processed
 
         self.processing_thread = threading.Thread(
             target=self._thread_target_wrapper,
@@ -1079,6 +1163,76 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         if self.debug_mode:
             logger.debug("Extracted PID: %s", result_pid)
         return result_pid
+
+    def save_groups_to_file(self) -> None:
+        """Save ``self.defined_groups`` to a JSON file chosen by the user."""
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            parent=self,
+            title="Save Group Configuration",
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(self.defined_groups, f, indent=2)
+            self.log(f"Saved group configuration to {file_path}.")
+        except Exception as e:  # pragma: no cover - display error to user
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message=f"Failed to save configuration:\n{e}",
+                icon="cancel",
+                master=self,
+            )
+            if self.debug_mode:
+                logger.error("Failed to save config: %s", traceback.format_exc())
+
+    def load_groups_from_file(self) -> None:
+        """Load groups from a JSON file and refresh the UI."""
+
+        file_path = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            parent=self,
+            title="Load Group Configuration",
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if not isinstance(data, list) or not all(isinstance(g, dict) for g in data):
+                raise ValueError("Invalid configuration structure")
+
+            required = {"name", "file_paths", "condition_mappings", "averaging_method", "config_saved"}
+            for group in data:
+                if not required.issubset(group.keys()):
+                    raise ValueError("Configuration missing required keys")
+
+            self.defined_groups = data
+            # Update source files based on union of all group file paths
+            all_paths = {fp for g in self.defined_groups for fp in g.get("file_paths", [])}
+            self.source_eeg_files = sorted(all_paths)
+
+            self.selected_group_index = None
+            self._update_source_files_listbox()
+            self._update_groups_listbox()
+            self._clear_group_config_display()
+            self._update_start_processing_button_state()
+            self.log(f"Loaded {len(self.defined_groups)} group(s) from {file_path}.")
+        except Exception as e:  # pragma: no cover - display error to user
+            CTkMessagebox.CTkMessagebox(
+                title="Error",
+                message=f"Failed to load configuration:\n{e}",
+                icon="cancel",
+                master=self,
+            )
+            if self.debug_mode:
+                logger.error("Failed to load config: %s", traceback.format_exc())
 
     def _on_close(self):
         if self.processing_thread and self.processing_thread.is_alive():
