@@ -1087,8 +1087,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
     def _check_processing_thread(self):
         if self.processing_thread and self.processing_thread.is_alive():
-            if self.debug_mode:
-                logger.debug("Processing thread still running")
+            # The processing thread can run for a long time, so avoid spamming
+            # the debug log on every check.
             self.after(100, self._check_processing_thread)
         else:
             if not self._stop_requested.is_set() and \
