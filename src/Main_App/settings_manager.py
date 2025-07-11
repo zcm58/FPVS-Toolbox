@@ -153,6 +153,7 @@ class SettingsManager:
         self.export(path)
         return path
 
+
     def reset(self) -> None:
         """Reset settings to defaults and save."""
         self.config.read_dict(DEFAULTS)
@@ -169,6 +170,7 @@ class SettingsManager:
         else:
             self.config.read(path)
         self.save()
+
 
     def list_configs(self) -> List[str]:
         """Return saved configuration names in the configs directory."""
@@ -190,6 +192,7 @@ class SettingsManager:
             self.load_from(path_json)
         else:
             raise FileNotFoundError(name)
+
 
     def get(self, section: str, option: str, fallback: str = '') -> str:
         return self.config.get(section, option, fallback=fallback)

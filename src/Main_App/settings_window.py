@@ -316,6 +316,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.destroy()
 
     def _export_config(self):
+
         dlg = CTkInputDialog(
             title="Save Configuration", text="Enter a name for this configuration:"
         )
@@ -378,6 +379,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         win.wait_window()
         return choice["name"]
+
 
     def _refresh_fields(self):
         self.mode_var.set(self.manager.get('appearance', 'mode', 'System'))
