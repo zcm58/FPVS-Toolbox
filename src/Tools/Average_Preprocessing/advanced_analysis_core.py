@@ -14,9 +14,11 @@ from typing import List, Dict, Any, Callable, Optional, Union
 
 import mne
 import threading
+from Main_App.settings_manager import SettingsManager
 
 # Set up module level logger
 logger = logging.getLogger(__name__)
+DEBUG_ENABLED = SettingsManager().debug_enabled()
 
 
 class PostProcessContextForAdvanced:
@@ -106,7 +108,14 @@ def run_advanced_averaging_processing(
         ``True`` if processing completed without major errors, otherwise ``False``.
     """
 
+    def _debug(msg: str) -> None:
+        if DEBUG_ENABLED:
+            log_callback(f"[DEBUG] {msg}")
+            logger.debug(msg)
+
     log_callback("Starting advanced averaging core processing (per-participant output)...")
+    if DEBUG_ENABLED:
+        logger.debug("Advanced averaging core processing started with %d group definitions", len(defined_groups))
 
     # Estimate total operations for progress bar
     total_source_ops = 0
@@ -124,6 +133,7 @@ def run_advanced_averaging_processing(
     total_operations_estimate = total_source_ops + total_participant_post_ops
     if total_operations_estimate == 0:
         total_operations_estimate = 1
+    _debug(f"Total operation estimate: {total_operations_estimate}")
     current_operation_count = 0
     overall_success = True
 
@@ -134,6 +144,7 @@ def run_advanced_averaging_processing(
 
         group_recipe_name = group_definition['name']  # e.g., "Average A"
         log_callback(f"--- Applying Group Recipe: {group_recipe_name} ---")
+        _debug(f"Processing group '{group_recipe_name}' with {len(group_definition.get('file_paths', []))} files")
 
         unique_participant_files = sorted(list(set(group_definition.get('file_paths', []))))
         if not unique_participant_files:
@@ -148,6 +159,7 @@ def run_advanced_averaging_processing(
             participant_pid = pid_extraction_func({'file_paths': [participant_file_path]})
             log_callback(
                 f"  -- Processing Participant: {participant_pid} (File: {Path(participant_file_path).name}) for Recipe: '{group_recipe_name}' --")
+            _debug(f"Participant {participant_pid} file {participant_file_path}")
 
             averaged_data_for_this_participant: Dict[str, List[Union[mne.Epochs, mne.Evoked]]] = {}
 
@@ -157,6 +169,7 @@ def run_advanced_averaging_processing(
 
                 output_label_for_average = mapping_rule['output_label']
                 log_callback(f"    Applying rule for: '{output_label_for_average}' to participant {participant_pid}")
+                _debug(f"Rule '{output_label_for_average}' with {len(mapping_rule.get('sources', []))} sources")
 
                 epochs_for_this_participant_this_rule: List[mne.Epochs] = []
 
@@ -241,6 +254,7 @@ def run_advanced_averaging_processing(
                     averaging_method = group_definition.get('averaging_method', "Pool Trials")
                     log_callback(
                         f"    Averaging {len(epochs_for_this_participant_this_rule)} sets of epochs for '{output_label_for_average}' (Participant: {participant_pid}, Method: {averaging_method})")
+                    _debug(f"Averaging method '{averaging_method}' on {len(epochs_for_this_participant_this_rule)} epoch sets")
                     try:
                         if averaging_method == "Pool Trials":
                             concatenated_epochs = mne.concatenate_epochs(epochs_for_this_participant_this_rule)
@@ -257,6 +271,7 @@ def run_advanced_averaging_processing(
                                 averaged_data_for_this_participant[output_label_for_average] = [averaged_evoked]
                                 log_callback(
                                     f"      Averaged {len(evokeds_to_average)} evoked responses for '{output_label_for_average}'.")
+                                _debug("Grand averaged evoked responses")
                             else:
                                 log_callback(
                                     f"      No valid evoked responses to average for '{output_label_for_average}'.")
@@ -280,6 +295,7 @@ def run_advanced_averaging_processing(
                     return False
                 log_callback(
                     f"  --- Initiating Post-Processing for Participant {participant_pid} (Recipe: '{group_recipe_name}') ---")
+                _debug(f"Post-processing data for participant {participant_pid}")
 
                 post_proc_context = PostProcessContextForAdvanced(
                     log_callback=log_callback,
@@ -308,8 +324,10 @@ def run_advanced_averaging_processing(
             gc.collect()
             log_callback(
                 f"  -- Finished processing for Participant: {participant_pid} (Recipe: '{group_recipe_name}') --")
+            _debug(f"Completed participant {participant_pid}")
 
         log_callback(f"--- All participants processed for Group Recipe: {group_recipe_name} ---")
 
     log_callback("Advanced averaging core processing finished.")
+    _debug("Core processing complete")
     return overall_success
