@@ -320,14 +320,18 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         bottom = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         bottom.grid(row=1, column=0, columnspan=2, padx=PAD_X, pady=PAD_Y, sticky="ew")
         bottom.grid_columnconfigure(0, weight=1)
+        bottom.grid_columnconfigure(1, weight=0)
 
         self.log_textbox = ctk.CTkTextbox(bottom, height=100, wrap="word", state="disabled")
         self.log_textbox.grid(row=0, column=0, columnspan=2, padx=PAD_X, pady=PAD_Y, sticky="ew")
 
         self.progress_bar = ctk.CTkProgressBar(bottom, orientation="horizontal")
-        self.progress_bar.grid(row=1, column=0, columnspan=2, padx=PAD_X, pady=(0, PAD_Y), sticky="ew")
+        self.progress_bar.grid(row=1, column=0, padx=PAD_X, pady=(0, PAD_Y), sticky="ew")
         self.progress_bar.set(0)
         self.progress_bar.grid_remove()
+
+        self.clear_log_button = ctk.CTkButton(bottom, text="Clear Log", command=self.clear_log)
+        self.clear_log_button.grid(row=1, column=1, padx=PAD_X, pady=(0, PAD_Y))
 
         cf = ctk.CTkFrame(bottom, fg_color="transparent")
         cf.grid(row=2, column=0, columnspan=2, pady=PAD_Y, sticky="e")
@@ -360,6 +364,13 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self.log_textbox.configure(state="disabled")
         if hasattr(self.master_app, "log"):
             self.master_app.log(f"[AdvAnalysis] {message}")
+
+    def clear_log(self) -> None:
+        """Clear all text from the log textbox."""
+        if hasattr(self, 'log_textbox') and self.log_textbox.winfo_exists():
+            self.log_textbox.configure(state="normal")
+            self.log_textbox.delete("1.0", tk.END)
+            self.log_textbox.configure(state="disabled")
 
     def debug(self, message: str) -> None:
         if self.debug_mode:
