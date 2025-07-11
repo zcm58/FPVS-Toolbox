@@ -147,14 +147,16 @@ class _Worker(QObject):
         for roi, amps in roi_data.items():
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
             ax.plot(freqs, amps, linewidth=1.0, color="black")
+            ax.set_xticks(self.oddballs)
+            ax.set_xticklabels([f"{odd:.1f} Hz" for odd in self.oddballs])
             ax.set_xlim(0, max(freqs) + 0.5)
             ax.set_ylim(-0.05, 0.30)
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             ax.set_title(self.title)
-            for odd in self.oddballs:
-                ax.axvline(x=odd, color="black", linewidth=0.8)
-                ax.text(odd, ax.get_ylim()[0], f"{odd} Hz", ha="center", va="top")
+            # for odd in self.oddballs:
+            #     ax.axvline(x=odd, color="black", linewidth=0.8)
+            #     ax.text(odd, ax.get_ylim()[0], f"{odd} Hz", ha="center", va="top")
             ax.grid(False)
             fig.tight_layout()
             fname = f"{self.condition}_{roi}_{self.metric}.png"
