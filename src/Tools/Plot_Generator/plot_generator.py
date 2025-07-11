@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, List
+
+from typing import Dict, List, Iterable
 
 import pandas as pd
 import matplotlib
@@ -46,6 +47,9 @@ class _Worker(QObject):
         title: str,
         xlabel: str,
         ylabel: str,
+
+        out_dir: str,
+
     ) -> None:
         super().__init__()
         self.folder = folder
@@ -57,6 +61,9 @@ class _Worker(QObject):
         self.title = title
         self.xlabel = xlabel
         self.ylabel = ylabel
+
+        self.out_dir = Path(out_dir)
+
 
     def run(self) -> None:
         try:
@@ -72,6 +79,9 @@ class _Worker(QObject):
         if not cond_folder.is_dir():
             self._emit(f"Condition folder not found: {cond_folder}")
             return
+
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+
         excel_files = [
             Path(root) / f
             for root, _, files in os.walk(cond_folder)
@@ -88,6 +98,11 @@ class _Worker(QObject):
             if self.selected_roi == ALL_ROIS_OPTION
             else [self.selected_roi]
         )
+
+
+        roi_data: Dict[str, List[List[float]]] = {rn: [] for rn in roi_names}
+        freqs: Iterable[float] | None = None
+
         for excel_path in excel_files:
             try:
                 df = pd.read_excel(excel_path, sheet_name=sheet)
@@ -98,20 +113,43 @@ class _Worker(QObject):
             if not freq_cols:
                 self._emit(f"No freq columns in {excel_path.name}")
                 continue
-            freqs = [float(c.split("_")[0]) for c in freq_cols]
+
+            if freqs is None:
+                freqs = [float(c.split("_")[0]) for c in freq_cols]
+
             for roi in roi_names:
                 chans = [c.upper() for c in self.roi_map.get(roi, [])]
                 df_roi = df[df["Electrode"].str.upper().isin(chans)]
                 if df_roi.empty:
                     self._emit(f"No electrodes for ROI {roi} in {excel_path.name}")
                     continue
-                means = df_roi[freq_cols].mean().values
-                self._plot(freqs, means, roi, excel_path.parent)
 
-    def _plot(self, freqs: List[float], amps, roi: str, out_dir: Path) -> None:
+                means = df_roi[freq_cols].mean().tolist()
+                roi_data[roi].append(means)
+
+        if not freqs:
+            self._emit("No frequency data found.")
+            return
+
+        averaged: Dict[str, List[float]] = {}
+        for roi, rows in roi_data.items():
+            if not rows:
+                self._emit(f"No data collected for ROI {roi}")
+                continue
+            averaged[roi] = list(pd.DataFrame(rows).mean(axis=0))
+
+        if not averaged:
+            self._emit("No ROI data to plot.")
+            return
+
+        self._plot(list(freqs), averaged)
+
+    def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
         fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
-        ax.plot(freqs, amps, color="black", linewidth=1.0)
+        for roi, amps in roi_data.items():
+            ax.plot(freqs, amps, linewidth=1.0, label=roi)
+
         ax.set_xlim(0, max(freqs) + 0.5)
         ax.set_ylim(-0.05, 0.30)
         ax.set_xlabel(self.xlabel)
@@ -120,10 +158,14 @@ class _Worker(QObject):
         for odd in self.oddballs:
             ax.axvline(x=odd, color="black", linewidth=0.8)
             ax.text(odd, ax.get_ylim()[0], f"{odd} Hz", ha="center", va="top")
+
+        if len(roi_data) > 1:
+            ax.legend(loc="upper right")
         ax.grid(False)
         fig.tight_layout()
-        fname = f"{self.condition}_{roi}_{self.metric}.png"
-        fig.savefig(out_dir / fname)
+        fname = f"{self.condition}_{self.metric}.png"
+        fig.savefig(self.out_dir / fname)
+
         plt.close(fig)
         self._emit(f"Saved {fname}")
 
@@ -157,6 +199,17 @@ class PlotGeneratorWindow(QWidget):
         browse.clicked.connect(self._select_folder)
         layout.addWidget(browse, row, 2)
         row += 1
+
+
+        layout.addWidget(QLabel("Save Plots To:"), row, 0)
+        self.out_edit = QLineEdit()
+        self.out_edit.setReadOnly(True)
+        layout.addWidget(self.out_edit, row, 1)
+        browse_out = QPushButton("Browse…")
+        browse_out.clicked.connect(self._select_output)
+        layout.addWidget(browse_out, row, 2)
+        row += 1
+
 
         layout.addWidget(QLabel("Condition:"), row, 0)
         self.condition_combo = QComboBox()
@@ -222,6 +275,13 @@ class PlotGeneratorWindow(QWidget):
             self.folder_edit.setText(folder)
             self._populate_conditions(folder)
 
+
+    def _select_output(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
+        if folder:
+            self.out_edit.setText(folder)
+
+
     def _populate_conditions(self, folder: str) -> None:
         self.condition_combo.clear()
         try:
@@ -251,6 +311,12 @@ class PlotGeneratorWindow(QWidget):
         if not folder:
             QMessageBox.critical(self, "Error", "Select a folder first.")
             return
+
+        out_dir = self.out_edit.text()
+        if not out_dir:
+            QMessageBox.critical(self, "Error", "Select an output folder first.")
+            return
+
         if not self.condition_combo.currentText():
             QMessageBox.critical(self, "Error", "No condition selected.")
             return
@@ -273,6 +339,9 @@ class PlotGeneratorWindow(QWidget):
             self.title_edit.text(),
             self.xlabel_edit.text(),
             self.ylabel_edit.text(),
+
+            out_dir,
+
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
