@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+# Allow running this module directly by ensuring the package root is on sys.path
+if __package__ is None:  # pragma: no cover - executed when run as script
+    import sys
+    from pathlib import Path
+
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+
 import os
 from pathlib import Path
 from typing import Dict, List, Iterable
