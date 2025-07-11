@@ -20,6 +20,8 @@ from typing import List, Dict, Any, Optional
 import traceback
 import logging
 
+from Main_App.settings_manager import SettingsManager
+
 logger = logging.getLogger(__name__)
 
 # Shared constants (with fallbacks)
@@ -127,6 +129,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         # Keep this window above its parent
         self.transient(master)
         self.master_app = master
+        self.debug_mode = SettingsManager().debug_enabled()
         self.title("Advanced Averaging Analysis")
 
         # Respect custom window dimensions from settings if available
@@ -139,6 +142,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 size_str = default_size
 
         self.geometry(size_str)
+        if self.debug_mode:
+            logger.debug("Advanced window geometry set to %s", size_str)
 
         # Try to parse width/height from the size string to set a matching
         # ``minsize``.  Fall back to previous defaults if parsing fails.
@@ -163,6 +168,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self._tooltips = []
 
         self._build_ui()
+        if self.debug_mode:
+            logger.debug("UI built; initializing main app parameter checks")
         self.log("Advanced Averaging Analysis window initialized.")
         self._check_main_app_params()
 
@@ -193,6 +200,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         group["config_saved"] = True
         self.log(
             f"Configuration (averaging method: {group['averaging_method']}) confirmed for group '{group['name']}'.")
+        if self.debug_mode:
+            logger.debug("Group '%s' configuration saved", group['name'])
         self._update_groups_listbox()
         self._update_start_processing_button_state()
         self.save_group_config_button.configure(state="disabled")
@@ -333,6 +342,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         w, h = self.winfo_width(), self.winfo_height()
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        if self.debug_mode:
+            logger.debug("Window centered at %dx%d", w, h)
 
     def log(self, message: str):
         if hasattr(self, 'log_textbox') and self.log_textbox.winfo_exists():
@@ -342,6 +353,11 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self.log_textbox.configure(state="disabled")
         if hasattr(self.master_app, "log"):
             self.master_app.log(f"[AdvAnalysis] {message}")
+
+    def debug(self, message: str) -> None:
+        if self.debug_mode:
+            self.log(f"[DEBUG] {message}")
+            logger.debug(message)
 
     def add_source_files(self):
         """Prompt the user for EEG files and add them to the source list."""
@@ -353,12 +369,17 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         )
         if not files:
             return
+        if self.debug_mode:
+            logger.debug("Selected %d file(s): %s", len(files), files)
 
         added_count = 0
         for f_path in files:
             if f_path not in self.source_eeg_files:
                 self.source_eeg_files.append(f_path)
                 added_count += 1
+
+        if self.debug_mode:
+            logger.debug("%d new files will be added", added_count)
 
         if added_count > 0:
             self.source_eeg_files.sort()
@@ -374,6 +395,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         if not selected_indices:
             self.log("No source files selected to remove.")
             return
+        if self.debug_mode:
+            logger.debug("Indices selected for removal: %s", selected_indices)
 
         removed_file_paths = [self.source_eeg_files[i] for i in selected_indices]
         self.source_eeg_files = [f for i, f in enumerate(self.source_eeg_files) if i not in selected_indices]
@@ -382,6 +405,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self._update_source_files_listbox()
             self.log(f"Removed {len(removed_file_paths)} file(s) from source list.")
             self._check_groups_for_removed_files(removed_file_paths)
+            if self.debug_mode:
+                logger.debug("Removed file paths: %s", removed_file_paths)
 
     def _update_source_files_listbox(self):
         """Refresh the source files listbox to match ``self.source_eeg_files``."""
@@ -389,12 +414,16 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self.source_files_listbox.delete(0, tk.END)
         for f_path in self.source_eeg_files:
             self.source_files_listbox.insert(tk.END, Path(f_path).name)
+        if self.debug_mode:
+            logger.debug("Source file listbox refreshed with %d entries", len(self.source_eeg_files))
 
     def _check_groups_for_removed_files(self, removed_paths: List[str]):
         """
         Updated to reflect user's snippet structure while retaining robust logic.
         Removes deleted EEG files from each group’s file_paths and their mapping sources.
         """
+        if self.debug_mode:
+            logger.debug("Checking groups for removed files: %s", removed_paths)
         updated_any = False  # Renamed from updated_any_group
         affected_indices = []  # Renamed from affected_group_indices
 
@@ -448,12 +477,17 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
     def create_new_group(self):
         """Prompt for details and create a new averaging group."""
 
+        if self.debug_mode:
+            logger.debug("Creating new averaging group")
+
         dlg_name = CTkInputDialog(title="New Averaging Group", text="Enter a name for this averaging group:")
         name = dlg_name.get_input()
         if not name or not name.strip():
             self.log("Group creation cancelled.")
             return
         name = name.strip()
+        if self.debug_mode:
+            logger.debug("Group name entered: %s", name)
         if any(g['name'] == name for g in self.defined_groups):
             CTkMessagebox.CTkMessagebox(
                 title="Error",
@@ -469,6 +503,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         if not id_str:
             self.log("Group creation cancelled (no IDs).")
             return
+        if self.debug_mode:
+            logger.debug("Event IDs input: %s", id_str)
         try:
             ids_to_average = [int(x.strip()) for x in id_str.split(",") if x.strip()]
         except ValueError:
@@ -479,6 +515,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 master=self,
             )
             return
+        if self.debug_mode:
+            logger.debug("Parsed event IDs: %s", ids_to_average)
         if not ids_to_average:
             CTkMessagebox.CTkMessagebox(
                 title="Error",
@@ -505,6 +543,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                     'original_label': str(event_id_val),
                     'original_id': event_id_val
                 })
+        if self.debug_mode:
+            logger.debug("Mapping rule for group '%s': %s", name, mapping_rule)
 
         new_grp_data = {
             'name': name,
@@ -515,8 +555,12 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             'ui_mapping_rules': []
         }
         self.defined_groups.append(new_grp_data)
+        if self.debug_mode:
+            logger.debug("New group appended: %s", new_grp_data)
         self._update_groups_listbox()
         self.log(f"Created group '{name}' averaging IDs {ids_to_average} in all {len(self.source_eeg_files)} files.")
+        if self.debug_mode:
+            logger.debug("Group '%s' created with IDs %s", name, ids_to_average)
 
         new_group_idx = len(self.defined_groups) - 1
         self.groups_listbox.selection_clear(0, tk.END)
@@ -547,6 +591,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             self.selected_group_index = None
             self._clear_group_config_display()
             self._update_start_processing_button_state()
+            if self.debug_mode:
+                logger.debug("Group '%s' deleted", group_name_to_delete)
 
     def _update_groups_listbox(self):
         current_selection = self.groups_listbox.curselection()
@@ -556,6 +602,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             status_str = "" if g_data.get('config_saved', False) else " (Unsaved)"
             display_text = f"{g_data['name']} ({len(g_data['file_paths'])} files){status_str}"
             self.groups_listbox.insert(tk.END, display_text)
+        if self.debug_mode:
+            logger.debug("Groups listbox updated with %d groups", len(self.defined_groups))
 
         if current_selection and current_selection[0] < self.groups_listbox.size():
             self.groups_listbox.selection_set(current_selection[0])
@@ -565,6 +613,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         selected_indices = self.groups_listbox.curselection()
         if not selected_indices:
             return
+        if self.debug_mode:
+            logger.debug("Group listbox selection changed: %s", selected_indices)
 
         newly_selected_idx = selected_indices[0]
         if self.selected_group_index != newly_selected_idx:
@@ -593,6 +643,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         idx = self.selected_group_index
         if idx is None or idx >= len(self.defined_groups):
             return
+        if self.debug_mode:
+            logger.debug("Displaying configuration for group index %s", idx)
 
         group_data = self.defined_groups[idx]
         ctk.CTkLabel(self.group_config_frame, text=f"Group Name: {group_data['name']}", font=ctk.CTkFont(weight="bold")) \
@@ -638,6 +690,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             group_data['averaging_method'] = new_method
             group_data['config_saved'] = False
             self.log(f"Averaging method for '{group_data['name']}' changed to '{new_method}'. Needs re-saving.")
+            if self.debug_mode:
+                logger.debug("Group '%s' averaging method set to %s", group_data['name'], new_method)
             self._update_groups_listbox()
             self._update_start_processing_button_state()
             self.save_group_config_button.configure(state="normal")
@@ -665,6 +719,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                                log_callback_arg,
                                progress_callback_arg,
                                stop_event_arg):
+        if self.debug_mode:
+            logger.debug("Processing thread wrapper started")
         try:
             run_advanced_averaging_processing(
                 defined_groups_arg,
@@ -686,6 +742,9 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                              f"Target function 'run_advanced_averaging_processing' crashed unexpectedly:\n"
                              f"{detailed_error}")
             self.after(0, self.log, error_message)
+        finally:
+            if self.debug_mode:
+                logger.debug("Processing thread wrapper exiting")
         # The _check_processing_thread method will handle UI finalization
         # when this wrapper function (and thus the thread) completes.
 
@@ -701,37 +760,37 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
 
         # 0) If the main app hasn't yet validated its entries, do so now.
-        self.log(
+        self.debug(
             f"[PARAM_CHECK] Initial check: self.master_app has 'validated_params' attribute: {hasattr(self.master_app, 'validated_params')}" )
         if hasattr(self.master_app, 'validated_params'):
             current_params = getattr(self.master_app, 'validated_params', 'Attribute exists but is None')
-            self.log(
+            self.debug(
                 f"[PARAM_CHECK] Initial self.master_app.validated_params (type: {type(current_params)}): {current_params}")
 
         main_app_params_are_set = bool(getattr(self.master_app, "validated_params", None))
 
         if not main_app_params_are_set:
-            self.log(
+            self.debug(
                 "[PARAM_CHECK] Main app's 'validated_params' not set or is None/empty. Attempting to call _validate_inputs().")
             ok = False
             if hasattr(self.master_app, "_validate_inputs"):
-                self.log("[PARAM_CHECK] Calling self.master_app._validate_inputs()...")
+                self.debug("[PARAM_CHECK] Calling self.master_app._validate_inputs()...")
                 try:
                     ok = self.master_app._validate_inputs()
-                    self.log(f"[PARAM_CHECK] self.master_app._validate_inputs() returned: {ok}")
+                    self.debug(f"[PARAM_CHECK] self.master_app._validate_inputs() returned: {ok}")
 
                     if hasattr(self.master_app, 'validated_params'):
                         current_params_after_call = getattr(self.master_app, 'validated_params', 'Attribute exists but is None')
-                        self.log(
+                        self.debug(
                             f"[PARAM_CHECK] After _validate_inputs(), self.master_app.validated_params (type: {type(current_params_after_call)}): {current_params_after_call}")
                         main_app_params_are_set = bool(current_params_after_call)
                     else:
-                        self.log(
+                        self.debug(
                             "[PARAM_CHECK] After _validate_inputs(), self.master_app still does not have 'validated_params' attribute.")
                         main_app_params_are_set = False
 
                 except Exception as e:
-                    self.log(f"[PARAM_CHECK] Error during self.master_app._validate_inputs(): {traceback.format_exc()}")
+                    self.debug(f"[PARAM_CHECK] Error during self.master_app._validate_inputs(): {traceback.format_exc()}")
                     CTkMessagebox.CTkMessagebox(
                         title="Error",
                         message=f"An error occurred while validating main application inputs: {e}",
@@ -740,11 +799,11 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                     )
                     return None
             else:
-                self.log(
+                self.debug(
                     "[PARAM_CHECK] Warning: Main app does not have a '_validate_inputs' method, and 'validated_params' was not already set.")
 
             if not ok and not main_app_params_are_set:
-                self.log(
+                self.debug(
                     "[PARAM_CHECK] Main app input validation failed or was not performed, and parameters are still not set.")
                 CTkMessagebox.CTkMessagebox(
                     title="Error",
@@ -754,7 +813,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 )
                 return None
             elif ok and not main_app_params_are_set:
-                self.log(
+                self.debug(
                     "[PARAM_CHECK] Warning: _validate_inputs returned True, but validated_params is still not set or is None/empty.")
                 CTkMessagebox.CTkMessagebox(
                     title="Error",
@@ -809,10 +868,10 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
         main_app_params = getattr(self.master_app, 'validated_params', None)
 
-        self.log(f"[PARAM_CHECK] Final fetched main_app_params to be used for processing: {main_app_params}")
+        self.debug(f"[PARAM_CHECK] Final fetched main_app_params to be used for processing: {main_app_params}")
 
         if main_app_params is None or not main_app_params:
-            self.log("[PARAM_CHECK] Critical Error: main_app_params is None or empty after validation attempts.")
+            self.debug("[PARAM_CHECK] Critical Error: main_app_params is None or empty after validation attempts.")
             CTkMessagebox.CTkMessagebox(
                 title="Critical Error",
                 message="Could not retrieve necessary parameters from the main application. Processing cannot start.",
@@ -822,7 +881,7 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             return None
 
         if not isinstance(main_app_params, dict):
-            self.log(
+            self.debug(
                 f"[PARAM_CHECK] Critical Error: main_app_params is not a dictionary (type: {type(main_app_params)}).")
             CTkMessagebox.CTkMessagebox(
                 title="Critical Error",
@@ -867,6 +926,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         """Start the background thread that performs advanced averaging."""
 
         self.log("All configurations validated. Starting processing thread...")
+        if self.debug_mode:
+            logger.debug("Launching processing thread with %d groups", len(self.defined_groups))
         self.progress_bar.grid()
         self.progress_bar.set(0)
         self.start_adv_processing_button.configure(state="disabled")
@@ -893,22 +954,30 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             daemon=True,
         )
         self.processing_thread.start()
+        if self.debug_mode:
+            logger.debug("Background processing thread started")
         self.after(100, self._check_processing_thread)
 
     def start_advanced_processing(self) -> None:
         """Validate configuration and spawn the processing thread."""
 
         self.log("=" * 30 + "\nAttempting to Start Advanced Processing...")
+        if self.debug_mode:
+            logger.debug("Starting advanced processing validation")
 
         validation = self._validate_processing_setup()
         if not validation:
             return
+        if self.debug_mode:
+            logger.debug("Validation successful")
 
         main_app_params, output_directory = validation
         self._launch_processing_thread(main_app_params, output_directory)
 
     def _check_processing_thread(self):
         if self.processing_thread and self.processing_thread.is_alive():
+            if self.debug_mode:
+                logger.debug("Processing thread still running")
             self.after(100, self._check_processing_thread)
         else:
             if not self._stop_requested.is_set() and \
@@ -918,6 +987,8 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
                 self._finalize_processing_ui_state()
 
     def _finalize_processing_ui_state(self):
+        if self.debug_mode:
+            logger.debug("Finalizing UI state after processing")
         if hasattr(self, 'progress_bar') and self.progress_bar.winfo_exists():
             self.progress_bar.set(0)
             self.progress_bar.grid_remove()
@@ -935,6 +1006,9 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
     def _extract_pid_for_group(self, group_data: Dict[str, Any]) -> str:
         """Return a participant identifier extracted from a group's first file."""
+
+        if self.debug_mode:
+            logger.debug("Extracting PID for group")
 
         file_paths = group_data.get('file_paths', [])
         if not file_paths:
@@ -971,7 +1045,10 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
 
         # Final cleanup if no P<number> pattern was extracted
         cleaned_pid_alphanum_only = re.sub(r"[^A-Za-z0-9]", "", cleaned_pid)
-        return cleaned_pid_alphanum_only if cleaned_pid_alphanum_only else base_name
+        result_pid = cleaned_pid_alphanum_only if cleaned_pid_alphanum_only else base_name
+        if self.debug_mode:
+            logger.debug("Extracted PID: %s", result_pid)
+        return result_pid
 
     def _on_close(self):
         if self.processing_thread and self.processing_thread.is_alive():
@@ -990,11 +1067,15 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
             else:
                 return
         else:
+            if self.debug_mode:
+                logger.debug("Window closed without active processing")
             self.destroy()
 
     def _force_destroy(self):
         if self.processing_thread and self.processing_thread.is_alive():
             self.log("Thread still active after timeout. Forcing close.")
+            if self.debug_mode:
+                logger.debug("Force destroying window while thread active")
         self.destroy()
 
 
