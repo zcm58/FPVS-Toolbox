@@ -38,7 +38,8 @@ def _compute_freqs(odd: float, upper: float) -> np.ndarray:
         odd = 1.2
     if upper < odd:
         upper = 16.8
-    return np.arange(odd, upper + odd, odd)
+    steps = int(round(upper / odd))
+    return np.array([odd * i for i in range(1, steps + 1)])
 
 
 def update_target_frequencies(odd: float = None, upper: float = None) -> np.ndarray:
