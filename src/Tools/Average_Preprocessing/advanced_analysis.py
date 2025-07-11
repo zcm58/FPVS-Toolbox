@@ -934,8 +934,42 @@ class AdvancedAnalysisWindow(ctk.CTkToplevel):
         self.close_button.configure(state="disabled")
         self._stop_requested.clear()
 
-        load_file_method = self.master_app.load_eeg_file
-        preprocess_raw_method = self.master_app.preprocess_raw
+        # Acquire the file loading and preprocessing callables. The main
+        # application may expose these as bound methods (legacy behaviour),
+        # but newer versions provide standalone helpers.  We handle both
+        # cases here for compatibility.
+
+        if hasattr(self.master_app, "load_eeg_file"):
+            load_file_method = self.master_app.load_eeg_file
+        else:  # Fallback to utility function
+            from Main_App.load_utils import load_eeg_file as _load
+
+            def load_file_method(fp):
+                return _load(self.master_app, fp)
+
+        if hasattr(self.master_app, "preprocess_raw"):
+            preprocess_raw_method = self.master_app.preprocess_raw
+        else:
+            from Main_App.eeg_preprocessing import perform_preprocessing as _pp
+
+            def preprocess_raw_method(raw, **params):
+                """Wrapper to match legacy ``preprocess_raw`` interface."""
+                filename = "UnknownFile"
+                if getattr(raw, "filenames", None):
+                    try:
+                        filename = os.path.basename(raw.filenames[0])
+                    except Exception:
+                        pass
+                elif getattr(raw, "filename", None):
+                    filename = os.path.basename(raw.filename)
+
+                processed, _ = _pp(
+                    raw_input=raw,
+                    params=params,
+                    log_func=self.master_app.log,
+                    filename_for_log=filename,
+                )
+                return processed
 
         self.processing_thread = threading.Thread(
             target=self._thread_target_wrapper,
