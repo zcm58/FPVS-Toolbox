@@ -8,6 +8,7 @@ mode.
 
 import os
 import sys
+import json
 import configparser
 from typing import List, Tuple
 
@@ -122,9 +123,35 @@ class SettingsManager:
         with open(self.ini_path, 'w') as f:
             self.config.write(f)
 
+    def export(self, path: str) -> None:
+        """Write the current settings to ``path`` as INI or JSON."""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        ext = os.path.splitext(path)[1].lower()
+        if ext == '.json':
+            data = {"DEFAULT": dict(self.config.defaults())}
+            for section in self.config.sections():
+                data[section] = dict(self.config.items(section))
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+        else:
+            with open(path, 'w') as f:
+                self.config.write(f)
+
     def reset(self) -> None:
         """Reset settings to defaults and save."""
         self.config.read_dict(DEFAULTS)
+        self.save()
+
+    def load_from(self, path: str) -> None:
+        """Load settings from ``path`` then save to the default ini file."""
+        self.config.read_dict(DEFAULTS)
+        ext = os.path.splitext(path)[1].lower()
+        if ext == '.json':
+            with open(path, 'r') as f:
+                data = json.load(f)
+            self.config.read_dict(data)
+        else:
+            self.config.read(path)
         self.save()
 
     def get(self, section: str, option: str, fallback: str = '') -> str:
