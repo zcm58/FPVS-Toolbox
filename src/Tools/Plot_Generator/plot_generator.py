@@ -27,6 +27,10 @@ from PySide6.QtWidgets import (
 from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
 
+from Main_App.settings_manager import SettingsManager
+from config import update_target_frequencies
+
+
 
 class _Worker(QObject):
     """Worker to process Excel files and generate plots."""
@@ -171,16 +175,37 @@ class PlotGeneratorWindow(QWidget):
         super().__init__(parent)
         self.setWindowTitle("Generate Plots")
         self.roi_map = load_rois_from_settings()
+
+
+        mgr = SettingsManager()
+        default_folder = mgr.get("paths", "output_folder", "")
+        odd_freqs_text = ""
+        try:
+            odd = float(mgr.get("analysis", "oddball_freq", ""))
+            upper = float(mgr.get("analysis", "bca_upper_limit", ""))
+            if odd and upper:
+                freqs = update_target_frequencies(odd, upper)
+                odd_freqs_text = ", ".join(f"{f:g}" for f in freqs)
+        except Exception:
+            pass
+
+
         self._defaults = {
             "title_snr": "SNR Plot",
             "title_bca": "BCA Plot",
             "xlabel": "Frequency (Hz)",
             "ylabel_snr": "SNR",
             "ylabel_bca": "Baseline-corrected amplitude (µV)",
-            "odd_freqs": "1.2, 2.4, 3.6, 4.8, 6.0, 7.2, 8.4, 9.6",
 
+            "odd_freqs": odd_freqs_text,
+            "default_folder": default_folder,
         }
+
         self._build_ui()
+        if default_folder:
+            self.folder_edit.setText(default_folder)
+            self._populate_conditions(default_folder)
+
         self._thread: QThread | None = None
         self._worker: _Worker | None = None
 
@@ -190,6 +215,9 @@ class PlotGeneratorWindow(QWidget):
         layout.addWidget(QLabel("Excel Files Folder:"), row, 0)
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
+
+        self.folder_edit.setText(self._defaults.get("default_folder", ""))
+
         layout.addWidget(self.folder_edit, row, 1)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._select_folder)
@@ -197,10 +225,11 @@ class PlotGeneratorWindow(QWidget):
         row += 1
 
 
-
         layout.addWidget(QLabel("Save Plots To:"), row, 0)
         self.out_edit = QLineEdit()
         self.out_edit.setReadOnly(True)
+        self.out_edit.setText(self._defaults.get("default_folder", ""))
+
         layout.addWidget(self.out_edit, row, 1)
         browse_out = QPushButton("Browse…")
         browse_out.clicked.connect(self._select_output)
@@ -301,6 +330,7 @@ class PlotGeneratorWindow(QWidget):
         self._defaults["ylabel_bca"] = self.ylabel_edit.text()
 
         self._defaults["odd_freqs"] = self.freq_edit.text()
+        self._defaults["default_folder"] = self.folder_edit.text()
 
         QMessageBox.information(self, "Settings", "New settings have been applied.")
 
@@ -314,12 +344,10 @@ class PlotGeneratorWindow(QWidget):
             QMessageBox.critical(self, "Error", "Select a folder first.")
             return
 
-
         out_dir = self.out_edit.text()
         if not out_dir:
             QMessageBox.critical(self, "Error", "Select an output folder first.")
             return
-
 
         if not self.condition_combo.currentText():
             QMessageBox.critical(self, "Error", "No condition selected.")

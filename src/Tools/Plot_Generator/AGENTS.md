@@ -21,3 +21,4 @@ across all the participants, then plot that data. To further clarify, if you hav
 You should generate one plot per condition per ROI. If the user defines 4 ROIS like "frontal, central, parietal, 
 occipital", then you have 4 ROIs * 5 conditions = 20 plots. 
 
+
