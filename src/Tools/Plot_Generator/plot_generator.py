@@ -49,6 +49,10 @@ class _Worker(QObject):
         title: str,
         xlabel: str,
         ylabel: str,
+        x_min: float,
+        x_max: float,
+        y_min: float,
+        y_max: float,
         out_dir: str,
 
     ) -> None:
@@ -62,6 +66,10 @@ class _Worker(QObject):
         self.title = title
         self.xlabel = xlabel
         self.ylabel = ylabel
+        self.x_min = x_min
+        self.x_max = x_max
+        self.y_min = y_min
+        self.y_max = y_max
 
         self.out_dir = Path(out_dir)
 
@@ -153,8 +161,8 @@ class _Worker(QObject):
             ax.plot(freqs, amps, linewidth=1.0, color="black")
             ax.set_xticks(self.oddballs)
             ax.set_xticklabels([f"{odd:.1f} Hz" for odd in self.oddballs])
-            ax.set_xlim(0, max(freqs) + 0.5)
-            ax.set_ylim(-0.05, 0.30)
+            ax.set_xlim(self.x_min, self.x_max)
+            ax.set_ylim(self.y_min, self.y_max)
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             ax.set_title(self.title)
@@ -198,6 +206,12 @@ class PlotGeneratorWindow(QWidget):
             "xlabel": "Frequency (Hz)",
             "ylabel_snr": "SNR",
             "ylabel_bca": "Baseline-corrected amplitude (µV)",
+            "x_min": "0.0",
+            "x_max": "10.0",
+            "y_min_snr": "0.0",
+            "y_max_snr": "3.0",
+            "y_min_bca": "0.0",
+            "y_max_bca": "0.3",
 
             "odd_freqs": odd_freqs_text,
             "default_folder": default_folder,
@@ -279,6 +293,22 @@ class PlotGeneratorWindow(QWidget):
         layout.addWidget(self.ylabel_edit, row, 1, 1, 2)
         row += 1
 
+        layout.addWidget(QLabel("X min:"), row, 0)
+        self.xmin_edit = QLineEdit(self._defaults["x_min"])
+        layout.addWidget(self.xmin_edit, row, 1)
+        layout.addWidget(QLabel("X max:"), row, 2)
+        self.xmax_edit = QLineEdit(self._defaults["x_max"])
+        layout.addWidget(self.xmax_edit, row, 3)
+        row += 1
+
+        layout.addWidget(QLabel("Y min:"), row, 0)
+        self.ymin_edit = QLineEdit(self._defaults["y_min_snr"])
+        layout.addWidget(self.ymin_edit, row, 1)
+        layout.addWidget(QLabel("Y max:"), row, 2)
+        self.ymax_edit = QLineEdit(self._defaults["y_max_snr"])
+        layout.addWidget(self.ymax_edit, row, 3)
+        row += 1
+
         self.apply_btn = QPushButton("Apply Settings")
         self.apply_btn.clicked.connect(self._apply_settings)
         layout.addWidget(self.apply_btn, row, 0)
@@ -289,15 +319,19 @@ class PlotGeneratorWindow(QWidget):
 
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
-        layout.addWidget(self.log, row, 0, 1, 3)
+        layout.addWidget(self.log, row, 0, 1, 4)
 
     def _metric_changed(self, metric: str) -> None:
         if metric == "SNR":
             self.ylabel_edit.setText(self._defaults["ylabel_snr"])
             self.title_edit.setText(self._defaults["title_snr"])
+            self.ymin_edit.setText(self._defaults["y_min_snr"])
+            self.ymax_edit.setText(self._defaults["y_max_snr"])
         else:
             self.ylabel_edit.setText(self._defaults["ylabel_bca"])
             self.title_edit.setText(self._defaults["title_bca"])
+            self.ymin_edit.setText(self._defaults["y_min_bca"])
+            self.ymax_edit.setText(self._defaults["y_max_bca"])
 
     def _select_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Excel Folder")
@@ -325,11 +359,21 @@ class PlotGeneratorWindow(QWidget):
         self.condition_combo.addItems(subfolders)
 
     def _apply_settings(self) -> None:
-        self._defaults["title_snr"] = self.title_edit.text()
-        self._defaults["title_bca"] = self.title_edit.text()
+        metric = self.metric_combo.currentText()
+        if metric == "SNR":
+            self._defaults["title_snr"] = self.title_edit.text()
+            self._defaults["ylabel_snr"] = self.ylabel_edit.text()
+            self._defaults["y_min_snr"] = self.ymin_edit.text()
+            self._defaults["y_max_snr"] = self.ymax_edit.text()
+        else:
+            self._defaults["title_bca"] = self.title_edit.text()
+            self._defaults["ylabel_bca"] = self.ylabel_edit.text()
+            self._defaults["y_min_bca"] = self.ymin_edit.text()
+            self._defaults["y_max_bca"] = self.ymax_edit.text()
+
         self._defaults["xlabel"] = self.xlabel_edit.text()
-        self._defaults["ylabel_snr"] = self.ylabel_edit.text()
-        self._defaults["ylabel_bca"] = self.ylabel_edit.text()
+        self._defaults["x_min"] = self.xmin_edit.text()
+        self._defaults["x_max"] = self.xmax_edit.text()
 
         self._defaults["odd_freqs"] = self.freq_edit.text()
         self._defaults["default_folder"] = self.folder_edit.text()
@@ -359,6 +403,14 @@ class PlotGeneratorWindow(QWidget):
         except ValueError:
             QMessageBox.critical(self, "Error", "Invalid oddball frequencies.")
             return
+        try:
+            x_min = float(self.xmin_edit.text())
+            x_max = float(self.xmax_edit.text())
+            y_min = float(self.ymin_edit.text())
+            y_max = float(self.ymax_edit.text())
+        except ValueError:
+            QMessageBox.critical(self, "Error", "Invalid axis limits.")
+            return
 
         self.gen_btn.setEnabled(False)
         self.log.clear()
@@ -373,6 +425,10 @@ class PlotGeneratorWindow(QWidget):
             self.title_edit.text(),
             self.xlabel_edit.text(),
             self.ylabel_edit.text(),
+            x_min,
+            x_max,
+            y_min,
+            y_max,
 
             out_dir,
 
