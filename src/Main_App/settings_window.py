@@ -406,10 +406,46 @@ class SettingsWindow(ctk.CTkToplevel):
             self._apply_changes()
             win.destroy()
 
+
+        def _delete_selected():
+            sel = listbox.curselection()
+            if not sel:
+                CTkMessagebox.CTkMessagebox(
+                    title="Select configuration",
+                    message="Select configuration to delete",
+                    icon="warning",
+                    master=win,
+                )
+                return
+            name = listbox.get(sel[0])
+            try:
+                self.manager.delete_named(name)
+            except FileNotFoundError:
+                CTkMessagebox.CTkMessagebox(
+                    title="Error",
+                    message=f"Configuration '{name}' not found.",
+                    icon="cancel",
+                    master=win,
+                )
+                return
+            listbox.delete(sel[0])
+            CTkMessagebox.CTkMessagebox(
+                title="Deleted",
+                message=f"Configuration '{name}' deleted.",
+                icon="check",
+                master=win,
+            )
+
+
         ctk.CTkButton(btn_frame, text="Save New Config", command=_save_new).pack(
             side="left", padx=(0, 10)
         )
         ctk.CTkButton(btn_frame, text="Load Config", command=_load_selected).pack(
+
+            side="left", padx=(0, 10)
+        )
+        ctk.CTkButton(btn_frame, text="Delete Config", command=_delete_selected).pack(
+
             side="left"
         )
 

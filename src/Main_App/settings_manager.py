@@ -182,6 +182,17 @@ class SettingsManager:
                 names.append(os.path.splitext(fname)[0])
         return sorted(names)
 
+    def delete_named(self, name: str) -> None:
+        """Delete the saved configuration ``name``."""
+        removed = False
+        for ext in ('.ini', '.json'):
+            path = os.path.join(self.configs_dir, name + ext)
+            if os.path.exists(path):
+                os.remove(path)
+                removed = True
+        if not removed:
+            raise FileNotFoundError(name)
+
     def load_named(self, name: str) -> None:
         """Load config with ``name`` from the configs directory."""
         path_ini = os.path.join(self.configs_dir, name + '.ini')
