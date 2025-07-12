@@ -406,6 +406,7 @@ class SettingsWindow(ctk.CTkToplevel):
             self._apply_changes()
             win.destroy()
 
+
         def _delete_selected():
             sel = listbox.curselection()
             if not sel:
@@ -435,13 +436,16 @@ class SettingsWindow(ctk.CTkToplevel):
                 master=win,
             )
 
+
         ctk.CTkButton(btn_frame, text="Save New Config", command=_save_new).pack(
             side="left", padx=(0, 10)
         )
         ctk.CTkButton(btn_frame, text="Load Config", command=_load_selected).pack(
+
             side="left", padx=(0, 10)
         )
         ctk.CTkButton(btn_frame, text="Delete Config", command=_delete_selected).pack(
+
             side="left"
         )
 
