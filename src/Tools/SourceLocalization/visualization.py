@@ -100,9 +100,13 @@ def view_source_estimate_pyvista(
         act_mask = act == 0
         act[act_mask] = np.nan
         if debug:
+            # Log how many points contain activation values and how many are NaN
+            # after applying the NaN mask so we can debug transparency issues.
             logger.debug(
-                "%s activation non-zero=%s NaN=%s", hemi,
-                np.count_nonzero(~act_mask), np.count_nonzero(np.isnan(act))
+                "%s activation non-zero=%s NaN=%s",
+                hemi,
+                np.count_nonzero(~act_mask),
+                np.count_nonzero(np.isnan(act)),
             )
         heatmap = mesh.copy()
         # Slightly offset points along normals to avoid z-fighting
