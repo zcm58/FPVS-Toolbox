@@ -62,9 +62,6 @@ from Main_App.post_process import post_process as _external_post_process
 # Advanced averaging UI and core function
 from Tools.Average_Preprocessing import AdvancedAnalysisWindow
 
-# Image resizer
-from Tools.Image_Resizer import FPVSImageResizer
-
 # Statistics toolbox
 import Tools.Stats as stats
 from Main_App.relevant_publications_window import RelevantPublicationsWindow
@@ -261,11 +258,42 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         stats_win.geometry(self.settings.get('gui', 'stats_size', '950x950'))
 
     def open_image_resizer(self):
-        """Open the FPVS Image_Resizer tool in a new CTkToplevel."""
+        """Launch the PySide6-based FPVS Image Resizer in a new process."""
         self.debug("Image resizer window requested")
-        # We pass `self` so the new window is a child of the main app:
-        win = FPVSImageResizer(self)
-        win.geometry(self.settings.get('gui', 'resizer_size', '800x600'))
+
+        def _open():
+            try:
+                from pathlib import Path
+                import subprocess
+                import sys
+                from Tools.Image_Resizer import pyside_resizer
+
+                script = Path(pyside_resizer.__file__)
+                subprocess.Popen([sys.executable, str(script)], close_fds=True)
+            except Exception as err:
+                self.log(f"Image resizer failed: {err}")
+                messagebox.showerror("Error", str(err))
+
+        self.after(0, _open)
+
+    def open_plot_generator(self):
+        """Launch the PySide6-based plot generator in a new process."""
+        self.debug("Plot generator window requested")
+
+        def _open():
+            try:
+                from pathlib import Path
+                import subprocess
+                import sys
+                from Tools.Plot_Generator import plot_generator
+
+                script = Path(plot_generator.__file__)
+                subprocess.Popen([sys.executable, str(script)], close_fds=True)
+            except Exception as err:
+                self.log(f"Plot generator failed: {err}")
+                messagebox.showerror("Error", str(err))
+
+        self.after(0, _open)
 
 
     # --- Menu Methods ---

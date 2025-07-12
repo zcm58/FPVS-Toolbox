@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import logging
 from pathlib import Path
 
 
@@ -19,7 +20,10 @@ sys.path.insert(0, str(SRC_PATH))
 
 from Tools.SourceLocalization.data_utils import _resolve_subjects_dir
 
+logger = logging.getLogger(__name__)
+
 from Main_App.settings_manager import SettingsManager
+from Main_App.debug_utils import configure_logging, get_settings
 
 
 class STCViewer(QtWidgets.QMainWindow):
@@ -32,11 +36,19 @@ class STCViewer(QtWidgets.QMainWindow):
         self._setup_subjects()
         self._build_ui()
         self._load_surfaces()
+
+        start_idx = max(0, self._index_for_time(0.0))
+        end_idx = min(self.stc.data.shape[1] - 1, self._index_for_time(0.5))
+        self.time_slider.setRange(start_idx, end_idx)
+        step = max(1, round(0.01 / self.stc.tstep))
+        self.time_slider.setSingleStep(step)
+        self.time_slider.setPageStep(step)
+
         if time_ms is not None:
-            idx = int(round((time_ms / 1000 - self.stc.tmin) / self.stc.tstep))
-            idx = max(0, min(idx, self.stc.data.shape[1] - 1))
+            idx = self._index_for_time(time_ms / 1000)
+            idx = max(start_idx, min(idx, end_idx))
         else:
-            idx = 0
+            idx = start_idx
         self.time_slider.setValue(idx)
         self._update_time(idx)
 
@@ -121,6 +133,9 @@ class STCViewer(QtWidgets.QMainWindow):
         )
         self.plotter.add_scalar_bar(title="Source Amplitude", n_colors=8)
 
+    def _index_for_time(self, sec: float) -> int:
+        return int(round((sec - self.stc.tmin) / self.stc.tstep))
+
     def _update_opacity(self, value: int) -> None:
         alpha = max(0, min(100, int(value))) / 100
         for actor in (self.cortex_lh, self.cortex_rh):
@@ -136,6 +151,13 @@ class STCViewer(QtWidgets.QMainWindow):
     def _update_time(self, value: int) -> None:
         idx = max(0, min(int(value), self.stc.data.shape[1] - 1))
         data = self.stc.data[:, idx]
+        if SettingsManager().debug_enabled():
+            logger.debug(
+                "update_time idx=%s range=(%.5f, %.5f)",
+                idx,
+                float(data.min()),
+                float(data.max()),
+            )
         n_lh = len(self.stc.vertices[0])
         arr_lh = np.full(self.heat_lh.n_points, np.nan)
         arr_rh = np.full(self.heat_rh.n_points, np.nan)
@@ -153,6 +175,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--stc", required=True, help="Base STC file path")
     parser.add_argument("--time-ms", type=float, help="Initial time in ms")
     args = parser.parse_args(argv)
+    configure_logging(get_settings().debug_enabled())
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     viewer = STCViewer(args.stc, args.time_ms)
     viewer.show()

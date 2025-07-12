@@ -10,6 +10,8 @@ import os
 import tkinter as tk
 from tkinter import filedialog
 import customtkinter as ctk
+from customtkinter import CTkInputDialog
+import CTkMessagebox
 from Tools.SourceLocalization.data_utils import fetch_fsaverage_with_progress
 
 from config import init_fonts, FONT_MAIN
@@ -139,6 +141,11 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         self.jobs_var = jobs_var
 
+        btn_frame = ctk.CTkFrame(gen_tab, fg_color="transparent")
+        btn_frame.grid(row=13, column=0, columnspan=3, sticky="w", padx=pad, pady=(pad, 0))
+        ctk.CTkButton(btn_frame, text="Save Configuration", command=self._export_config).pack(side="left", padx=(0, pad))
+        ctk.CTkButton(btn_frame, text="Load Configuration", command=self._import_config).pack(side="left")
+
         # --- Stats Tab ---
         ctk.CTkLabel(stats_tab, text="FPVS Base Frequency (Hz)").grid(row=0, column=0, sticky="w", padx=pad, pady=(pad, 0))
         base_var = tk.StringVar(value=self.manager.get('analysis', 'base_freq', '6.0'))
@@ -244,7 +251,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.reset()
         self.destroy()
 
-    def _save(self):
+    def _apply_changes(self):
         self.manager.set('appearance', 'mode', self.mode_var.get())
         self.manager.set('paths', 'data_folder', self.data_var.get())
         self.manager.set('paths', 'output_folder', self.out_var.get())
@@ -304,5 +311,102 @@ class SettingsWindow(ctk.CTkToplevel):
             from tkinter import messagebox
             messagebox.showinfo("Restart Required", "Please restart the app for debug mode changes to take effect.")
 
+    def _save(self):
+        self._apply_changes()
         self.destroy()
+
+    def _export_config(self):
+
+        dlg = CTkInputDialog(
+            title="Save Configuration", text="Enter a name for this configuration:"
+        )
+        name = dlg.get_input()
+        if name:
+            self._apply_changes()
+            self.manager.export_named(name.strip())
+            CTkMessagebox.CTkMessagebox(
+                title="Saved", message=f"Configuration saved as '{name}'.", icon="check", master=self
+            )
+
+    def _import_config(self):
+        name = self._select_config()
+        if name:
+            try:
+                self.manager.load_named(name)
+            except FileNotFoundError:
+                CTkMessagebox.CTkMessagebox(
+                    title="Error", message=f"Configuration '{name}' not found.", icon="cancel", master=self
+                )
+                return
+            self._refresh_fields()
+            self._apply_changes()
+
+    def _select_config(self):
+        names = self.manager.list_configs()
+        if not names:
+            CTkMessagebox.CTkMessagebox(
+                title="No Configurations",
+                message="No saved configurations were found.",
+                icon="info",
+                master=self,
+            )
+            return None
+
+        win = ctk.CTkToplevel(self)
+        win.title("Load Configuration")
+        win.geometry("300x250")
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+
+        listbox = tk.Listbox(win, activestyle="none")
+        for n in names:
+            listbox.insert("end", n)
+        listbox.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+
+        choice = {"name": None}
+
+        def _confirm():
+            sel = listbox.curselection()
+            if sel:
+                choice["name"] = listbox.get(sel[0])
+            win.destroy()
+
+        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
+        btn_frame.pack(pady=10)
+        ctk.CTkButton(btn_frame, text="Load", command=_confirm).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(btn_frame, text="Cancel", command=win.destroy).pack(side="left")
+
+        win.wait_window()
+        return choice["name"]
+
+
+    def _refresh_fields(self):
+        self.mode_var.set(self.manager.get('appearance', 'mode', 'System'))
+        self.data_var.set(self.manager.get('paths', 'data_folder', ''))
+        self.out_var.set(self.manager.get('paths', 'output_folder', ''))
+        self.main_var.set(self.manager.get('gui', 'main_size', '750x920'))
+        self.stats_var.set(self.manager.get('gui', 'stats_size', '950x950'))
+        self.resize_var.set(self.manager.get('gui', 'resizer_size', '800x600'))
+        self.adv_var.set(self.manager.get('gui', 'advanced_size', '1050x850'))
+        self.stim_var.set(self.manager.get('stim', 'channel', 'Status'))
+        self.cond_var.set(self.manager.get('events', 'labels', ''))
+        self.id_var.set(self.manager.get('events', 'ids', ''))
+        self.debug_var.set(self.manager.get('debug', 'enabled', 'False').lower() == 'true')
+        self.jobs_var.set(self.manager.get('loreta', 'n_jobs', '2'))
+        self.base_var.set(self.manager.get('analysis', 'base_freq', '6.0'))
+        self.bca_var.set(self.manager.get('analysis', 'bca_upper_limit', '16.8'))
+        self.alpha_var.set(self.manager.get('analysis', 'alpha', '0.05'))
+        self.roi_editor.set_pairs(self.manager.get_roi_pairs())
+        self.odd_var.set(self.manager.get('analysis', 'oddball_freq', '1.2'))
+        self.harm_var.set(self.manager.get('loreta', 'oddball_harmonics', '1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8'))
+        self.mri_var.set(self.manager.get('loreta', 'mri_path', ''))
+        self.low_var.set(self.manager.get('loreta', 'loreta_low_freq', '0.1'))
+        self.high_var.set(self.manager.get('loreta', 'loreta_high_freq', '40.0'))
+        self.snr_var.set(self.manager.get('loreta', 'loreta_snr', '3.0'))
+        self.thr_var.set(self.manager.get('loreta', 'loreta_threshold', '0.0'))
+        self.t_start_var.set(self.manager.get('loreta', 'time_window_start_ms', ''))
+        self.t_end_var.set(self.manager.get('loreta', 'time_window_end_ms', ''))
+        self.disp_var.set(self.manager.get('visualization', 'time_index_ms', '100'))
+        self.auto_loc_var.set(self.manager.get('loreta', 'auto_oddball_localization', 'False').lower() == 'true')
 

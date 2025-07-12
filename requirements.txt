@@ -1,0 +1,17 @@
+# Core dependencies
+mne
+numpy
+pandas
+scipy
+customtkinter
+ctkmessagebox
+statsmodels
+nibabel
+pyvista
+pyvistaqt
+pillow
+openpyxl
+XlsxWriter
+requests
+packaging
+PyQt5

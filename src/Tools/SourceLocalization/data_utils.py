@@ -85,6 +85,14 @@ def _threshold_stc(stc: mne.SourceEstimate, thr: float) -> mne.SourceEstimate:
     else:
         thr_val = thr
     stc.data[np.abs(stc.data) < thr_val] = 0
+    if SettingsManager().debug_enabled():
+        active = int(np.count_nonzero(np.any(stc.data != 0, axis=1)))
+        logger.debug(
+            "threshold_stc: thr=%s cutoff=%.5f active_vertices=%s",
+            thr,
+            thr_val,
+            active,
+        )
     return stc
 
 
@@ -211,6 +219,13 @@ def _prepare_forward(
 
     surf_dir = subjects_dir_path / subject / "surf"
     log_func(f"Expecting surface files in: {surf_dir}")
+    for fname in ["lh.pial", "rh.pial", "lh.white", "rh.white"]:
+        path = surf_dir / fname
+        log_func(f"Surface file {path} {'found' if path.exists() else 'MISSING'}")
+    bem_file = subjects_dir_path / subject / "bem" / f"{subject}-5120-bem.fif"
+    log_func(
+        f"BEM file {bem_file} {'found' if bem_file.exists() else 'MISSING'}"
+    )
 
     trans = settings.get("paths", "trans_file", "fsaverage")
     log_func(f"Using trans file: {trans}")
