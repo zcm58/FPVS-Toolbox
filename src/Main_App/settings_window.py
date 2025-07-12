@@ -143,8 +143,11 @@ class SettingsWindow(ctk.CTkToplevel):
 
         btn_frame = ctk.CTkFrame(gen_tab, fg_color="transparent")
         btn_frame.grid(row=13, column=0, columnspan=3, sticky="w", padx=pad, pady=(pad, 0))
-        ctk.CTkButton(btn_frame, text="Save Configuration", command=self._export_config).pack(side="left", padx=(0, pad))
-        ctk.CTkButton(btn_frame, text="Load Configuration", command=self._import_config).pack(side="left")
+        ctk.CTkButton(
+            btn_frame,
+            text="View Saved Configurations",
+            command=self._view_configs,
+        ).pack(side="left")
 
         # --- Stats Tab ---
         ctk.CTkLabel(stats_tab, text="FPVS Base Frequency (Hz)").grid(row=0, column=0, sticky="w", padx=pad, pady=(pad, 0))
@@ -340,6 +343,77 @@ class SettingsWindow(ctk.CTkToplevel):
                 return
             self._refresh_fields()
             self._apply_changes()
+
+    def _view_configs(self):
+        names = self.manager.list_configs()
+
+        win = ctk.CTkToplevel(self)
+        win.title("Saved Configurations")
+        win.geometry("300x300")
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+
+        listbox = tk.Listbox(win, activestyle="none")
+        for n in names:
+            listbox.insert("end", n)
+        listbox.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+
+        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
+        btn_frame.pack(pady=10)
+
+        def _save_new():
+            dlg = CTkInputDialog(
+                title="Save Configuration",
+                text="Enter a name for this configuration:",
+            )
+            name = dlg.get_input()
+            if name:
+                self._apply_changes()
+                self.manager.export_named(name.strip())
+                listbox.delete(0, "end")
+                for n in self.manager.list_configs():
+                    listbox.insert("end", n)
+                CTkMessagebox.CTkMessagebox(
+                    title="Saved",
+                    message=f"Configuration saved as '{name}'.",
+                    icon="check",
+                    master=self,
+                )
+
+        def _load_selected():
+            sel = listbox.curselection()
+            if not sel:
+                CTkMessagebox.CTkMessagebox(
+                    title="Select configuration",
+                    message="Select configuration to load",
+                    icon="warning",
+                    master=win,
+                )
+                return
+            name = listbox.get(sel[0])
+            try:
+                self.manager.load_named(name)
+            except FileNotFoundError:
+                CTkMessagebox.CTkMessagebox(
+                    title="Error",
+                    message=f"Configuration '{name}' not found.",
+                    icon="cancel",
+                    master=win,
+                )
+                return
+            self._refresh_fields()
+            self._apply_changes()
+            win.destroy()
+
+        ctk.CTkButton(btn_frame, text="Save New Config", command=_save_new).pack(
+            side="left", padx=(0, 10)
+        )
+        ctk.CTkButton(btn_frame, text="Load Config", command=_load_selected).pack(
+            side="left"
+        )
+
+        win.wait_window()
 
     def _select_config(self):
         names = self.manager.list_configs()
