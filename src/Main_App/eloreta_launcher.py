@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tkinter import messagebox
+
 
 def open_eloreta_tool(app):
     """Launch the eLORETA/sLORETA GUI.
@@ -11,6 +13,16 @@ def open_eloreta_tool(app):
     app : tkinter.Misc
         Parent window from which the tool is launched.
     """
+    if not messagebox.askyesno(
+        "LORETA Tool Warning",
+        (
+            "IMPORTANT: The LORETA Tool is currently under active development. "
+            "Certain features may not work as intended. Continue?"
+        ),
+        parent=app,
+    ):
+        return None
+
     # Import inside the function to avoid heavy dependencies at startup
     from Tools.SourceLocalization import SourceLocalizationWindow
 
