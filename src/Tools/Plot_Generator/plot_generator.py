@@ -186,6 +186,7 @@ class _Worker(QObject):
             ax.set_xticklabels([f"{odd:.1f} Hz" for odd in self.oddballs])
             ax.set_xlim(self.x_min, self.x_max)
             ax.set_ylim(self.y_min, self.y_max)
+            ax.axhline(0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             ax.set_title(self.title)
