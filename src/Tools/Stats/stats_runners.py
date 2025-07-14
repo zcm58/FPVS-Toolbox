@@ -282,10 +282,11 @@ def run_mixed_model(self):
         else:
             output_text += "Mixed effects model did not return any results or the result was empty.\n"
             self.log_to_main_app("Mixed effects model returned no results or empty table.")
-    except ImportError:
+    except ImportError as e:
         output_text += "Error: The `statsmodels` package is required for mixed effects modeling.\n"
         output_text += "Please install it via `pip install statsmodels`.\n"
-        self.log_to_main_app("ImportError during mixed model execution.")
+        output_text += f"Original error: {e}\n"
+        self.log_to_main_app(f"ImportError during mixed model execution: {e}")
     except Exception as e:
         output_text += f"Mixed effects model failed unexpectedly: {e}\n"
         self.log_to_main_app(f"!!! Mixed Model Error: {e}\n{traceback.format_exc()}")
