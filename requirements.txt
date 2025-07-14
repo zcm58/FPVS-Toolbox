@@ -9,6 +9,7 @@ statsmodels
 nibabel
 pyvista
 pyvistaqt
+matplotlib
 pillow
 openpyxl
 XlsxWriter
