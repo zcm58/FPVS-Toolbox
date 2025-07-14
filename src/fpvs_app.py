@@ -266,10 +266,13 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
                 import subprocess
                 import sys
 
-                subprocess.Popen(
-                    [sys.executable, "-m", "Tools.Image_Resizer.pyside_resizer"],
-                    close_fds=True,
-                )
+                command = [
+                    sys.argv[0]
+                    if not getattr(sys, "frozen", False)
+                    else sys.executable
+                ]
+                command.append("--run-image-resizer")
+                subprocess.Popen(command, close_fds=True)
             except Exception as err:
                 self.log(f"Image resizer failed: {err}")
                 messagebox.showerror("Error", str(err))
@@ -285,10 +288,13 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
                 import subprocess
                 import sys
 
-                subprocess.Popen(
-                    [sys.executable, "-m", "Tools.Plot_Generator.plot_generator"],
-                    close_fds=True,
-                )
+                command = [
+                    sys.argv[0]
+                    if not getattr(sys, "frozen", False)
+                    else sys.executable
+                ]
+                command.append("--run-plot-generator")
+                subprocess.Popen(command, close_fds=True)
             except Exception as err:
                 self.log(f"Plot generator failed: {err}")
                 messagebox.showerror("Error", str(err))
