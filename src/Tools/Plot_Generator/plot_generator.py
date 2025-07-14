@@ -1,14 +1,10 @@
 """PySide6 GUI for generating SNR/BCA line plots from Excel files."""
-
 from __future__ import annotations
-
 # Allow running this module directly by ensuring the package root is on sys.path
 if __package__ is None:  # pragma: no cover - executed when run as script
     import sys
     from pathlib import Path
-
     sys.path.append(str(Path(__file__).resolve().parents[2]))
-
 import os
 from pathlib import Path
 from typing import Dict, List, Iterable
@@ -16,7 +12,6 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")  # Ensure no GUI backend required
 import matplotlib.pyplot as plt
-
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import (
     QApplication,
@@ -30,15 +25,11 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QWidget,
 )
-
 from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
-
 from Main_App.settings_manager import SettingsManager
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from config import update_target_frequencies
-
-
 
 class _Worker(QObject):
     """Worker to process Excel files and generate plots."""
@@ -189,7 +180,7 @@ class _Worker(QObject):
             ax.axhline(0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
-            ax.set_title(self.title)
+            ax.set_title(f"{self.title}: {roi}")
             # for odd in self.oddballs:
             #     ax.axvline(x=odd, color="black", linewidth=0.8)
             #     ax.text(odd, ax.get_ylim()[0], f"{odd} Hz", ha="center", va="top")
@@ -288,6 +279,7 @@ class PlotGeneratorWindow(QWidget):
 
         layout.addWidget(QLabel("Condition:"), row, 0)
         self.condition_combo = QComboBox()
+        self.condition_combo.currentTextChanged.connect(self._condition_changed)
         layout.addWidget(self.condition_combo, row, 1, 1, 2)
         row += 1
 
@@ -360,12 +352,10 @@ class PlotGeneratorWindow(QWidget):
     def _metric_changed(self, metric: str) -> None:
         if metric == "SNR":
             self.ylabel_edit.setText(self._defaults["ylabel_snr"])
-            self.title_edit.setText(self._defaults["title_snr"])
             self.ymin_edit.setText(self._defaults["y_min_snr"])
             self.ymax_edit.setText(self._defaults["y_max_snr"])
         else:
             self.ylabel_edit.setText(self._defaults["ylabel_bca"])
-            self.title_edit.setText(self._defaults["title_bca"])
             self.ymin_edit.setText(self._defaults["y_min_bca"])
             self.ymax_edit.setText(self._defaults["y_max_bca"])
 
@@ -381,6 +371,9 @@ class PlotGeneratorWindow(QWidget):
         if folder:
             self.out_edit.setText(folder)
 
+    def _condition_changed(self, condition: str) -> None:
+        if condition:
+            self.title_edit.setText(condition)
 
     def _populate_conditions(self, folder: str) -> None:
         self.condition_combo.clear()
@@ -393,6 +386,8 @@ class PlotGeneratorWindow(QWidget):
         except Exception:
             subfolders = []
         self.condition_combo.addItems(subfolders)
+        if subfolders:
+            self._condition_changed(subfolders[0])
 
     def _apply_settings(self) -> None:
         metric = self.metric_combo.currentText()
@@ -490,13 +485,11 @@ class PlotGeneratorWindow(QWidget):
         self._thread = None
         self._worker = None
 
-
 def main() -> None:
     app = QApplication([])
     win = PlotGeneratorWindow()
     win.show()
     app.exec()
-
 
 if __name__ == "__main__":
     main()
