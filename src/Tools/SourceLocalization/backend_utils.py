@@ -20,7 +20,7 @@ def _log_backend_imports() -> None:
     if not SettingsManager().debug_enabled():
         return
 
-    for mod_name in ("pyvistaqt", "pyvista", "PyQt5", "PySide6"):
+    for mod_name in ("pyvistaqt", "pyvista", "PySide6"):
         try:
             module = importlib.import_module(mod_name)
             version = getattr(module, "__version__", "unknown")

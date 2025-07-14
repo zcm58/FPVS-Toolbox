@@ -9,10 +9,10 @@ statsmodels
 nibabel
 pyvista
 pyvistaqt
+matplotlib
 pillow
 openpyxl
 XlsxWriter
 requests
 packaging
-PyQt5
 PySide6
