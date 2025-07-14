@@ -128,8 +128,19 @@ class _Worker(QObject):
                 self._emit(f"No freq columns in {excel_path.name}")
                 continue
 
+            freq_pairs: List[tuple[float, str]] = []
+            for col in freq_cols:
+                try:
+                    freq = float(col.split("_")[0])
+                except ValueError:
+                    continue
+                freq_pairs.append((freq, col))
+
+            freq_pairs.sort(key=lambda x: x[0])
+            ordered_freqs = [f for f, _ in freq_pairs]
+            ordered_cols = [c for _, c in freq_pairs]
             if freqs is None:
-                freqs = [float(c.split("_")[0]) for c in freq_cols]
+                freqs = ordered_freqs
 
             for roi in roi_names:
                 chans = [c.upper() for c in self.roi_map.get(roi, [])]
@@ -138,7 +149,7 @@ class _Worker(QObject):
                     self._emit(f"No electrodes for ROI {roi} in {excel_path.name}")
                     continue
 
-                means = df_roi[freq_cols].mean().tolist()
+                means = df_roi[ordered_cols].mean().tolist()
                 roi_data[roi].append(means)
 
         if not freqs:
