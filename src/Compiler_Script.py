@@ -16,4 +16,5 @@ pyinstaller `
   --hidden-import=statsmodels `
   --hidden-import=pyvista `
   --hidden-import=statsmodels `
+  --hidden-import=patsy `
   -D src/main.py
