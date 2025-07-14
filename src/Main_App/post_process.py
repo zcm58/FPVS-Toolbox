@@ -240,7 +240,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
         if valid_data_count > 0 and final_electrode_names_ordered:
             avg_metrics = {k: v / valid_data_count for k, v in accum.items()}
-            freq_column_names = [f"{f:.1f}_Hz" for f in TARGET_FREQUENCIES]
+            freq_column_names = [f"{f:.4f}_Hz" for f in TARGET_FREQUENCIES]
             full_snr_avg = full_snr_accum / valid_data_count if full_snr_accum is not None else None
             dataframes_to_save = {
                 'FFT Amplitude (uV)': pd.DataFrame(
@@ -257,7 +257,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 ),
             }
             if full_snr_avg is not None:
-                freq_cols_full = [f"{f:.1f}_Hz" for f in fft_frequencies]
+                freq_cols_full = [f"{f:.4f}_Hz" for f in fft_frequencies]
                 dataframes_to_save['FullSNR'] = pd.DataFrame(
                     full_snr_avg, index=final_electrode_names_ordered, columns=freq_cols_full
                 )
