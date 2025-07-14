@@ -10,6 +10,8 @@ if __package__ is None:  # pragma: no cover - executed when run as script
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, List, Iterable
 import pandas as pd
@@ -485,10 +487,29 @@ class PlotGeneratorWindow(QWidget):
         self._thread.finished.connect(self._generation_finished)
         self._thread.start()
 
+    def _open_output_folder(self) -> None:
+        folder = self.out_edit.text()
+        if not folder:
+            return
+        if sys.platform.startswith("win"):
+            os.startfile(folder)
+        elif sys.platform == "darwin":
+            subprocess.call(["open", folder])
+        else:
+            subprocess.call(["xdg-open", folder])
+
     def _generation_finished(self) -> None:
         self.gen_btn.setEnabled(True)
         self._thread = None
         self._worker = None
+        resp = QMessageBox.question(
+            self,
+            "Finished",
+            "Plots have been successfully generated. View plots?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if resp == QMessageBox.Yes:
+            self._open_output_folder()
 
 
 def main() -> None:
