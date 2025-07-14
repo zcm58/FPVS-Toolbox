@@ -263,13 +263,13 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
         def _open():
             try:
-                from pathlib import Path
                 import subprocess
                 import sys
-                from Tools.Image_Resizer import pyside_resizer
 
-                script = Path(pyside_resizer.__file__)
-                subprocess.Popen([sys.executable, str(script)], close_fds=True)
+                subprocess.Popen(
+                    [sys.executable, "-m", "Tools.Image_Resizer.pyside_resizer"],
+                    close_fds=True,
+                )
             except Exception as err:
                 self.log(f"Image resizer failed: {err}")
                 messagebox.showerror("Error", str(err))
@@ -282,13 +282,13 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
         def _open():
             try:
-                from pathlib import Path
                 import subprocess
                 import sys
-                from Tools.Plot_Generator import plot_generator
 
-                script = Path(plot_generator.__file__)
-                subprocess.Popen([sys.executable, str(script)], close_fds=True)
+                subprocess.Popen(
+                    [sys.executable, "-m", "Tools.Plot_Generator.plot_generator"],
+                    close_fds=True,
+                )
             except Exception as err:
                 self.log(f"Plot generator failed: {err}")
                 messagebox.showerror("Error", str(err))
