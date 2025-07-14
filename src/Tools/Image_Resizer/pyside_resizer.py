@@ -280,8 +280,13 @@ class FPVSImageResizerQt(QWidget):
             subprocess.call(["xdg-open", self.output_folder])
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Launch the Qt-based FPVS image resizer."""
     app = QApplication(sys.argv)
     win = FPVSImageResizerQt()
     win.show()
-    sys.exit(app.exec())
+    app.exec()
+
+
+if __name__ == "__main__":
+    main()
