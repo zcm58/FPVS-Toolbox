@@ -10,8 +10,10 @@ pyinstaller `
   --hidden-import=mne.io.bdf `
   --hidden-import=mne.io.eeglab `
   --hidden-import=scipy `
+  --hidden-import=scipy._cyutility `
   --hidden-import=pandas `
   --hidden-import=numpy `
   --hidden-import=statsmodels `
   --hidden-import=pyvista `
+  --hidden-import=statsmodels `
   -D src/main.py
