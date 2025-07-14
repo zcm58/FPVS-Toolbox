@@ -48,11 +48,14 @@ def run_mixed_effects_model(data: pd.DataFrame, dv_col: str, group_col: str, fix
     )
 
     try:
+        # statsmodels provides the MixedLM function required for this analysis
         import statsmodels.formula.api as smf
-    except ImportError:
+    except ImportError as e:
+        # Log the actual exception so users can see why the import failed
+        logger.error("Failed to import statsmodels: %s", e)
         raise ImportError(
             "statsmodels is required for mixed effects modeling. Please install it via `pip install statsmodels`."
-        )
+        ) from e
 
     parsed_vars = sorted({var for term in fixed_effects for var in _extract_variables(term)})
     required_cols = [dv_col, group_col] + parsed_vars
