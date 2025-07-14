@@ -1,2 +1,2 @@
-exclude = ["src/Tools/Stats", "src/Compiler Script.py"]
+exclude = ["src/Tools/Stats", "src/Compiler_Script.py"]
 line-length = 120

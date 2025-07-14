@@ -29,6 +29,7 @@ Key functionalities:
 
 # === Dependencies ===
 import os
+from pathlib import Path
 import queue
 import tkinter as tk
 from tkinter import messagebox
@@ -266,11 +267,9 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
                 import subprocess
                 import sys
 
-                command = [
-                    sys.argv[0]
-                    if not getattr(sys, "frozen", False)
-                    else sys.executable
-                ]
+                command = [sys.executable]
+                if not getattr(sys, "frozen", False):
+                    command.append(str(Path(__file__).resolve().parent / "main.py"))
                 command.append("--run-image-resizer")
                 subprocess.Popen(command, close_fds=True)
             except Exception as err:
@@ -288,11 +287,9 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
                 import subprocess
                 import sys
 
-                command = [
-                    sys.argv[0]
-                    if not getattr(sys, "frozen", False)
-                    else sys.executable
-                ]
+                command = [sys.executable]
+                if not getattr(sys, "frozen", False):
+                    command.append(str(Path(__file__).resolve().parent / "main.py"))
                 command.append("--run-plot-generator")
                 subprocess.Popen(command, close_fds=True)
             except Exception as err:
