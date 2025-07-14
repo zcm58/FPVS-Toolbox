@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pyvista as pv
 from pyvistaqt import QtInteractor
-from PyQt5 import QtWidgets, QtCore
+from PySide6 import QtWidgets, QtCore
 import mne
 
 
@@ -31,6 +31,12 @@ class STCViewer(QtWidgets.QMainWindow):
 
     def __init__(self, stc_path: str, time_ms: float | None = None):
         super().__init__()
+        if SettingsManager().debug_enabled():
+            logger.debug(
+                "Initializing STCViewer with PySide6 %s (Qt %s)",
+                QtCore.__version__,
+                QtCore.qVersion(),
+            )
         self.setWindowTitle(os.path.basename(stc_path))
         self.stc = mne.read_source_estimate(stc_path)
         self._setup_subjects()
@@ -65,6 +71,8 @@ class STCViewer(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
+        if SettingsManager().debug_enabled():
+            logger.debug("Building UI widgets")
 
         self.plotter = QtInteractor(central)
         layout.addWidget(self.plotter)
@@ -101,6 +109,8 @@ class STCViewer(QtWidgets.QMainWindow):
     def _load_surfaces(self) -> None:
         subject = self.stc.subject or "fsaverage"
         surf_dir = self.subjects_dir / subject / "surf"
+        if SettingsManager().debug_enabled():
+            logger.debug("Loading surfaces for subject %s", subject)
 
         verts_lh, faces_lh = mne.read_surface(surf_dir / "lh.pial")
         verts_rh, faces_rh = mne.read_surface(surf_dir / "rh.pial")
@@ -141,12 +151,16 @@ class STCViewer(QtWidgets.QMainWindow):
         for actor in (self.cortex_lh, self.cortex_rh):
             actor.GetProperty().SetOpacity(alpha)
         self.plotter.render()
+        if SettingsManager().debug_enabled():
+            logger.debug("Opacity set to %.2f", alpha)
 
     def _toggle_cortex(self, state: int) -> None:
         visible = state == QtCore.Qt.Checked
         for actor in (self.cortex_lh, self.cortex_rh):
             actor.SetVisibility(visible)
         self.plotter.render()
+        if SettingsManager().debug_enabled():
+            logger.debug("Cortex visibility %s", visible)
 
     def _update_time(self, value: int) -> None:
         idx = max(0, min(int(value), self.stc.data.shape[1] - 1))
@@ -168,6 +182,8 @@ class STCViewer(QtWidgets.QMainWindow):
         self.heat_lh.point_data["activation"] = arr_lh
         self.heat_rh.point_data["activation"] = arr_rh
         self.plotter.render()
+        if SettingsManager().debug_enabled():
+            logger.debug("Updated heatmap for time index %s", idx)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -176,6 +192,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--time-ms", type=float, help="Initial time in ms")
     args = parser.parse_args(argv)
     configure_logging(get_settings().debug_enabled())
+    os.environ.setdefault("QT_API", "pyside6")
+    if SettingsManager().debug_enabled():
+        logger.debug(
+            "main() QT_API=%s QT_QPA_PLATFORM=%s",
+            os.environ.get("QT_API"),
+            os.environ.get("QT_QPA_PLATFORM"),
+        )
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     viewer = STCViewer(args.stc, args.time_ms)
     viewer.show()
