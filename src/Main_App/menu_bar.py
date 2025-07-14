@@ -49,7 +49,7 @@ class AppMenuBar:
             command=lambda: open_eloreta_tool(self.app_ref),
         )
         tools_menu.add_separator()
-        tools_menu.add_command(label="Image_Resizer", command=self.app_ref.open_image_resizer)
+        tools_menu.add_command(label="Image Resizer", command=self.app_ref.open_image_resizer)
         tools_menu.add_separator()
         tools_menu.add_command(
             label="Generate Plots",
