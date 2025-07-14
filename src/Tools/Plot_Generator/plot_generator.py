@@ -102,7 +102,6 @@ class _Worker(QObject):
             self._emit("No Excel files found for condition.")
             return
 
-        sheet = "SNR" if self.metric == "SNR" else "BCA (uV)"
         roi_names = (
             list(self.roi_map.keys())
             if self.selected_roi == ALL_ROIS_OPTION
@@ -115,7 +114,12 @@ class _Worker(QObject):
 
         for excel_path in excel_files:
             try:
-                df = pd.read_excel(excel_path, sheet_name=sheet)
+                if self.metric == "SNR":
+                    xls = pd.ExcelFile(excel_path)
+                    sheet_to_load = "FullSNR" if "FullSNR" in xls.sheet_names else "SNR"
+                    df = pd.read_excel(xls, sheet_name=sheet_to_load)
+                else:
+                    df = pd.read_excel(excel_path, sheet_name="BCA (uV)")
             except Exception as e:  # pragma: no cover - simple logging
                 self._emit(f"Failed reading {excel_path.name}: {e}")
                 continue
@@ -161,20 +165,20 @@ class _Worker(QObject):
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
 
             freq_amp = dict(zip(freqs, amps))
-            bar_x = []
-            bar_y = []
+            ax.plot(freqs, amps, color="black", linewidth=1)
+
+            mark_x = []
+            mark_y = []
             for odd in self.oddballs:
                 amp = freq_amp.get(odd)
                 if amp is None:
                     continue
-                bar_x.append(odd)
-                bar_y.append(amp)
+                mark_x.append(odd)
+                mark_y.append(amp)
 
-            if not bar_x:
-                self._emit(f"Oddball frequencies not found for ROI {roi}")
-                continue
+            if mark_x:
+                ax.scatter(mark_x, mark_y, color="red", zorder=3)
 
-            ax.bar(bar_x, bar_y, width=0.05, color="black", align="center")
             ax.set_xticks(self.oddballs)
             ax.set_xticklabels([f"{odd:.1f} Hz" for odd in self.oddballs])
             ax.set_xlim(self.x_min, self.x_max)
