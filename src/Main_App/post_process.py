@@ -257,12 +257,14 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 ),
             }
             if full_snr_avg is not None:
+
                 try:
                     upper_limit = float(app.settings.get('analysis', 'bca_upper_limit', '16.8'))
                 except Exception:
                     upper_limit = 16.8
                 mask = fft_frequencies <= upper_limit
                 freq_cols_full = [f"{f:.4f}_Hz" for f in fft_frequencies[mask]]
+
                 dataframes_to_save['FullSNR'] = pd.DataFrame(
                     full_snr_avg[:, mask],
                     index=final_electrode_names_ordered,
