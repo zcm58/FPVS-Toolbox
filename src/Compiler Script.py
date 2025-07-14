@@ -13,4 +13,5 @@ pyinstaller `
   --hidden-import=pandas `
   --hidden-import=numpy `
   --hidden-import=statsmodels `
+  --hidden-import=pyvista `
   -D src/main.py
