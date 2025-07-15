@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QComboBox,
     QPlainTextEdit,
+    QProgressBar,
     QCheckBox,
     QWidget,
 )
@@ -39,7 +40,7 @@ from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 class _Worker(QObject):
     """Worker to process Excel files and generate plots."""
 
-    progress = Signal(str)
+    progress = Signal(str, int, int)
     finished = Signal()
 
     def __init__(
@@ -86,8 +87,8 @@ class _Worker(QObject):
         finally:
             self.finished.emit()
 
-    def _emit(self, msg: str) -> None:
-        self.progress.emit(msg)
+    def _emit(self, msg: str, processed: int = 0, total: int = 0) -> None:
+        self.progress.emit(msg, processed, total)
 
     def _run(self) -> None:
         cond_folder = Path(self.folder) / self.condition
@@ -107,6 +108,12 @@ class _Worker(QObject):
             self._emit("No Excel files found for condition.")
             return
 
+        total_files = len(excel_files)
+        processed_files = 0
+        self._emit(
+            f"Found {total_files} Excel files in {cond_folder}", processed_files, total_files
+        )
+
         roi_names = (
             list(self.roi_map.keys())
             if self.selected_roi == ALL_ROIS_OPTION
@@ -118,6 +125,7 @@ class _Worker(QObject):
         freqs: Iterable[float] | None = None
 
         for excel_path in excel_files:
+            self._emit(f"Reading {excel_path.name}", processed_files, total_files)
             try:
                 if self.metric == "SNR":
                     xls = pd.ExcelFile(excel_path)
@@ -141,8 +149,15 @@ class _Worker(QObject):
                 continue
             freq_cols = [c for c in df.columns if isinstance(c, str) and c.endswith("_Hz")]
             if not freq_cols:
-                self._emit(f"No freq columns in {excel_path.name}")
+                self._emit(f"No freq columns in {excel_path.name}", processed_files, total_files)
+                processed_files += 1
                 continue
+            self._emit(
+                f"Found {len(freq_cols)} frequency columns in {excel_path.name}",
+                processed_files,
+                total_files,
+            )
+
 
             freq_pairs: List[tuple[float, str]] = []
             for col in freq_cols:
@@ -168,8 +183,11 @@ class _Worker(QObject):
                 means = df_roi[ordered_cols].mean().tolist()
                 roi_data[roi].append(means)
 
+            processed_files += 1
+            self._emit("", processed_files, total_files)
+
         if not freqs:
-            self._emit("No frequency data found.")
+            self._emit("No frequency data found.", processed_files, total_files)
             return
 
         averaged: Dict[str, List[float]] = {}
@@ -183,16 +201,7 @@ class _Worker(QObject):
             self._emit("No ROI data to plot.")
             return
 
-        if self.metric == "SNR":
-            freq_grid = np.arange(0.5, 20.01, 0.01)
-            interp_data: Dict[str, List[float]] = {}
-            freq_list = list(freqs)
-            for roi, amps in averaged.items():
-                interp_amps = np.interp(freq_grid, freq_list, amps)
-                interp_data[roi] = interp_amps.tolist()
-            self._plot(freq_grid.tolist(), interp_data)
-        else:
-            self._plot(list(freqs), averaged)
+        self._plot(list(freqs), averaged)
 
     def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
@@ -202,7 +211,25 @@ class _Worker(QObject):
 
             freq_amp = dict(zip(freqs, amps))
             line_color = "red" if self.use_matlab_style else "black"
-            ax.plot(freqs, amps, color=line_color, linewidth=1)
+
+            if self.metric == "SNR":
+                stem_vals = amps
+                ax.stem(
+                    freqs,
+                    stem_vals,
+                    linefmt=line_color,
+                    markerfmt=" ",
+                    basefmt=" ",
+                    bottom=1.0,
+                )
+                self._emit(
+                    f"Plotted {len(stem_vals)} SNR stems for ROI {roi}", 0, 0
+                )
+            else:
+                ax.plot(freqs, amps, color=line_color, linewidth=1)
+                self._emit(
+                    f"Plotted continuous line for ROI {roi}", 0, 0
+                )
 
             mark_x = []
             mark_y = []
@@ -215,13 +242,16 @@ class _Worker(QObject):
 
             if mark_x and not self.use_matlab_style:
                 ax.scatter(mark_x, mark_y, color="red", zorder=3)
+                self._emit(
+                    f"Marked {len(mark_x)} oddball points on ROI {roi}", 0, 0
+                )
 
             ax.set_xticks(self.oddballs)
             ax.set_xticklabels([f"{odd:.1f} Hz" for odd in self.oddballs])
             ax.set_xlim(self.x_min, self.x_max)
             ax.set_ylim(self.y_min, self.y_max)
             if not self.use_matlab_style:
-                ax.axhline(0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             ax.set_title(f"{self.title}: {roi}")
@@ -393,6 +423,10 @@ class PlotGeneratorWindow(QWidget):
         layout.addWidget(self.gen_btn, row, 2)
         row += 1
 
+        self.progress_bar = QProgressBar()
+        layout.addWidget(self.progress_bar, row, 0, 1, 4)
+        row += 1
+
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         layout.addWidget(self.log, row, 0, 1, 4)
@@ -470,6 +504,12 @@ class PlotGeneratorWindow(QWidget):
         self.log.appendPlainText(text)
         self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
 
+    def _on_progress(self, msg: str, processed: int, total: int) -> None:
+        if msg:
+            self._append_log(msg)
+        value = int(100 * processed / total) if total else 0
+        self.progress_bar.setValue(value)
+
     def _generate(self) -> None:
         folder = self.folder_edit.text()
         if not folder:
@@ -500,6 +540,7 @@ class PlotGeneratorWindow(QWidget):
 
         self.gen_btn.setEnabled(False)
         self.log.clear()
+        self.progress_bar.setValue(0)
         self._thread = QThread()
         self._worker = _Worker(
             folder,
@@ -522,7 +563,7 @@ class PlotGeneratorWindow(QWidget):
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._append_log)
+        self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread.deleteLater)
@@ -544,14 +585,28 @@ class PlotGeneratorWindow(QWidget):
         self.gen_btn.setEnabled(True)
         self._thread = None
         self._worker = None
-        resp = QMessageBox.question(
-            self,
-            "Finished",
-            "Plots have been successfully generated. View plots?",
-            QMessageBox.Yes | QMessageBox.No,
-        )
-        if resp == QMessageBox.Yes:
-            self._open_output_folder()
+        self.progress_bar.setValue(100)
+        out_dir = self.out_edit.text()
+        images = []
+        try:
+            images = list(Path(out_dir).glob("*.png"))
+        except Exception:
+            pass
+        if images:
+            resp = QMessageBox.question(
+                self,
+                "Finished",
+                "Plots have been successfully generated. View plots?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if resp == QMessageBox.Yes:
+                self._open_output_folder()
+        else:
+            QMessageBox.warning(
+                self,
+                "Finished",
+                "No plots were generated. Please check the log for errors.",
+            )
 
 def main() -> None:
     app = QApplication([])
