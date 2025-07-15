@@ -33,6 +33,7 @@ from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
 from Main_App.settings_manager import SettingsManager
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from config import update_target_frequencies
+from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 
 class _Worker(QObject):
     """Worker to process Excel files and generate plots."""
@@ -117,8 +118,19 @@ class _Worker(QObject):
             try:
                 if self.metric == "SNR":
                     xls = pd.ExcelFile(excel_path)
-                    sheet_to_load = "FullSNR" if "FullSNR" in xls.sheet_names else "SNR"
-                    df = pd.read_excel(xls, sheet_name=sheet_to_load)
+                    if "FullSNR" in xls.sheet_names:
+                        df = pd.read_excel(xls, sheet_name="FullSNR")
+                    else:
+                        df_amp = pd.read_excel(xls, sheet_name="FFT Amplitude (uV)")
+                        freq_cols_tmp = [
+                            c for c in df_amp.columns if isinstance(c, str) and c.endswith("_Hz")
+                        ]
+                        snr_vals = df_amp[freq_cols_tmp].apply(
+                            calc_snr_matlab, axis=1, result_type="expand"
+                        )
+                        snr_vals.columns = freq_cols_tmp
+                        snr_vals.insert(0, "Electrode", df_amp["Electrode"])
+                        df = snr_vals
                 else:
                     df = pd.read_excel(excel_path, sheet_name="BCA (uV)")
             except Exception as e:  # pragma: no cover - simple logging
