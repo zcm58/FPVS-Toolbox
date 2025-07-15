@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QComboBox,
     QPlainTextEdit,
+    QCheckBox,
     QWidget,
 )
 from Tools.Stats.stats_helpers import load_rois_from_settings
@@ -56,6 +57,7 @@ class _Worker(QObject):
         x_max: float,
         y_min: float,
         y_max: float,
+        use_matlab_style: bool,
         out_dir: str,
 
     ) -> None:
@@ -73,6 +75,7 @@ class _Worker(QObject):
         self.x_max = x_max
         self.y_min = y_min
         self.y_max = y_max
+        self.use_matlab_style = use_matlab_style
 
         self.out_dir = Path(out_dir)
 
@@ -198,7 +201,8 @@ class _Worker(QObject):
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
 
             freq_amp = dict(zip(freqs, amps))
-            ax.plot(freqs, amps, color="black", linewidth=1)
+            line_color = "red" if self.use_matlab_style else "black"
+            ax.plot(freqs, amps, color=line_color, linewidth=1)
 
             mark_x = []
             mark_y = []
@@ -209,14 +213,15 @@ class _Worker(QObject):
                 mark_x.append(odd)
                 mark_y.append(amp)
 
-            if mark_x:
+            if mark_x and not self.use_matlab_style:
                 ax.scatter(mark_x, mark_y, color="red", zorder=3)
 
             ax.set_xticks(self.oddballs)
             ax.set_xticklabels([f"{odd:.1f} Hz" for odd in self.oddballs])
             ax.set_xlim(self.x_min, self.x_max)
             ax.set_ylim(self.y_min, self.y_max)
-            ax.axhline(0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+            if not self.use_matlab_style:
+                ax.axhline(0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             ax.set_title(f"{self.title}: {roi}")
@@ -355,6 +360,10 @@ class PlotGeneratorWindow(QWidget):
         layout.addWidget(QLabel("Y-axis label:"), row, 0)
         self.ylabel_edit = QLineEdit(self._defaults["ylabel_snr"])
         layout.addWidget(self.ylabel_edit, row, 1, 1, 2)
+        row += 1
+
+        self.matlab_check = QCheckBox("Use MATLAB style")
+        layout.addWidget(self.matlab_check, row, 0, 1, 2)
         row += 1
 
         layout.addWidget(QLabel("X min:"), row, 0)
@@ -507,6 +516,7 @@ class PlotGeneratorWindow(QWidget):
             y_min,
             y_max,
 
+            self.matlab_check.isChecked(),
             out_dir,
 
         )
