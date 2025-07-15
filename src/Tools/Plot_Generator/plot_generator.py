@@ -27,6 +27,12 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QWidget,
+    QMenuBar,
+    QMenu,
+    QAction,
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
 )
 from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
@@ -55,6 +61,7 @@ class _Worker(QObject):
         y_min: float,
         y_max: float,
         out_dir: str,
+        stem_color: str = "red",
 
     ) -> None:
         super().__init__()
@@ -72,6 +79,7 @@ class _Worker(QObject):
         self.y_max = y_max
 
         self.out_dir = Path(out_dir)
+        self.stem_color = stem_color.lower()
 
 
     def run(self) -> None:
@@ -202,7 +210,7 @@ class _Worker(QObject):
         for roi, amps in roi_data.items():
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
 
-            line_color = "black"
+            line_color = self.stem_color
 
             if self.metric == "SNR":
                 stem_vals = amps
@@ -241,6 +249,31 @@ class _Worker(QObject):
             self._emit(f"Saved {fname}")
 
 
+class _SettingsDialog(QDialog):
+    """Dialog for configuring plot options."""
+
+    def __init__(self, parent: QWidget, color: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        layout = QVBoxLayout(self)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Stem Plot Line Color:"))
+        self.combo = QComboBox()
+        self.combo.addItems(["Red", "Blue", "Green", "Purple"])
+        self.combo.setCurrentText(color.capitalize())
+        row.addWidget(self.combo)
+        layout.addLayout(row)
+        btns = QHBoxLayout()
+        ok = QPushButton("OK")
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(ok)
+        btns.addWidget(cancel)
+        layout.addLayout(btns)
+
+    def selected_color(self) -> str:
+        return self.combo.currentText().lower()
 
 class PlotGeneratorWindow(QWidget):
     """Main window for generating plots."""
@@ -254,6 +287,7 @@ class PlotGeneratorWindow(QWidget):
         self.plot_mgr = PlotSettingsManager()
         default_in = self.plot_mgr.get("paths", "input_folder", "")
         default_out = self.plot_mgr.get("paths", "output_folder", "")
+        self.stem_color = self.plot_mgr.get_stem_color()
         main_default = mgr.get("paths", "output_folder", "")
         if not default_in:
             default_in = main_default
@@ -289,7 +323,17 @@ class PlotGeneratorWindow(QWidget):
         self._worker: _Worker | None = None
 
     def _build_ui(self) -> None:
-        layout = QGridLayout(self)
+        root_layout = QVBoxLayout(self)
+        menu = QMenuBar()
+        file_menu = QMenu("File", self)
+        menu.addMenu(file_menu)
+        action = QAction("Settings", self)
+        action.triggered.connect(self._open_settings)
+        file_menu.addAction(action)
+        root_layout.addWidget(menu)
+
+        layout = QGridLayout()
+        root_layout.addLayout(layout)
         row = 0
         layout.addWidget(QLabel("Excel Files Folder:"), row, 0)
         self.folder_edit = QLineEdit()
@@ -517,6 +561,7 @@ class PlotGeneratorWindow(QWidget):
             y_min,
             y_max,
             out_dir,
+            self.stem_color,
 
         )
         self._worker.moveToThread(self._thread)
@@ -527,6 +572,13 @@ class PlotGeneratorWindow(QWidget):
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(self._generation_finished)
         self._thread.start()
+
+    def _open_settings(self) -> None:
+        dlg = _SettingsDialog(self, self.stem_color)
+        if dlg.exec():
+            self.stem_color = dlg.selected_color()
+            self.plot_mgr.set_stem_color(self.stem_color)
+            self.plot_mgr.save()
 
     def _open_output_folder(self) -> None:
         folder = self.out_edit.text()
