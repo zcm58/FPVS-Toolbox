@@ -29,11 +29,13 @@ from PySide6.QtWidgets import (
     QWidget,
     QMenuBar,
     QMenu,
-    QAction,
+
+
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
 )
+from PySide6.QtGui import QAction
 from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
 from Main_App.settings_manager import SettingsManager
