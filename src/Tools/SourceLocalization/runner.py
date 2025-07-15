@@ -345,9 +345,7 @@ def run_source_localization(
 
         stc = source_localization.apply_sloreta(evoked, inv, snr)
     else:
-        inv = mne.minimum_norm.make_inverse_operator(
-            evoked.info, fwd, noise_cov, reg=0.05
-        )
+        inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, noise_cov)
         step += 1
 
         update_progress(step, total, progress_cb)
