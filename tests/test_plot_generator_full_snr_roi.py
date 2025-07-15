@@ -80,5 +80,15 @@ def test_full_snr_roi_averaging(tmp_path, monkeypatch):
 
     worker._run()
 
-    assert captured["freqs"] == [1.0, 1.0001, 2.0, 2.0001]
-    assert captured["roi_data"] == {"All": [4.0, 5.0, 6.5, 7.5]}
+    freqs = captured["freqs"]
+    data = captured["roi_data"]["All"]
+
+    assert pytest.approx(freqs[0], 0.0001) == 0.5
+    assert pytest.approx(freqs[-1], 0.0001) == 20.01
+    assert len(freqs) > 1000
+    assert len(data) == len(freqs)
+
+    idx1 = min(range(len(freqs)), key=lambda i: abs(freqs[i] - 1.0))
+    idx2 = min(range(len(freqs)), key=lambda i: abs(freqs[i] - 2.0))
+    assert pytest.approx(data[idx1], 1e-6) == 4.0
+    assert pytest.approx(data[idx2], 1e-6) == 6.5
