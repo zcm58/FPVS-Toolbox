@@ -183,16 +183,7 @@ class _Worker(QObject):
             self._emit("No ROI data to plot.")
             return
 
-        if self.metric == "SNR":
-            freq_grid = np.arange(0.5, 20.01, 0.01)
-            interp_data: Dict[str, List[float]] = {}
-            freq_list = list(freqs)
-            for roi, amps in averaged.items():
-                interp_amps = np.interp(freq_grid, freq_list, amps)
-                interp_data[roi] = interp_amps.tolist()
-            self._plot(freq_grid.tolist(), interp_data)
-        else:
-            self._plot(list(freqs), averaged)
+        self._plot(list(freqs), averaged)
 
     def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
@@ -202,7 +193,20 @@ class _Worker(QObject):
 
             freq_amp = dict(zip(freqs, amps))
             line_color = "red" if self.use_matlab_style else "black"
-            ax.plot(freqs, amps, color=line_color, linewidth=1)
+
+            if self.metric == "SNR":
+                stem_vals = amps
+                ax.stem(
+                    freqs,
+                    stem_vals,
+                    linefmt=line_color,
+                    markerfmt=" ",
+                    basefmt=" ",
+                    bottom=1.0,
+                    use_line_collection=True,
+                )
+            else:
+                ax.plot(freqs, amps, color=line_color, linewidth=1)
 
             mark_x = []
             mark_y = []
@@ -221,7 +225,7 @@ class _Worker(QObject):
             ax.set_xlim(self.x_min, self.x_max)
             ax.set_ylim(self.y_min, self.y_max)
             if not self.use_matlab_style:
-                ax.axhline(0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             ax.set_title(f"{self.title}: {roi}")

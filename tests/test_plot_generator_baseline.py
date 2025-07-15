@@ -44,8 +44,8 @@ def test_plot_contains_baseline_line(tmp_path, monkeypatch):
         ylabel="y",
         x_min=0.0,
         x_max=2.0,
-        y_min=-1.0,
-        y_max=1.0,
+        y_min=0.0,
+        y_max=2.0,
         use_matlab_style=False,
         out_dir=str(tmp_path),
     )
@@ -57,7 +57,7 @@ def test_plot_contains_baseline_line(tmp_path, monkeypatch):
     assert fig is not None
     ax = fig.axes[0]
     assert any(
-        getattr(line, "get_ydata", lambda: [])() == [0, 0] for line in ax.lines
+        getattr(line, "get_ydata", lambda: [])() == [1.0, 1.0] for line in ax.lines
     )
 
 
@@ -84,8 +84,8 @@ def test_matlab_style_skips_baseline_and_scatter(tmp_path, monkeypatch):
         ylabel="y",
         x_min=0.0,
         x_max=2.0,
-        y_min=-1.0,
-        y_max=1.0,
+        y_min=0.0,
+        y_max=2.0,
         use_matlab_style=True,
         out_dir=str(tmp_path),
     )
@@ -96,6 +96,7 @@ def test_matlab_style_skips_baseline_and_scatter(tmp_path, monkeypatch):
     fig = captured.get("fig")
     assert fig is not None
     ax = fig.axes[0]
-    assert all(getattr(line, "get_ydata", lambda: [])() != [0, 0] for line in ax.lines)
-    assert ax.lines[0].get_color() == "red"
-    assert not ax.collections
+    assert all(
+        getattr(line, "get_ydata", lambda: [])() != [1.0, 1.0] for line in ax.lines
+    )
+    assert len(ax.collections) == 1
