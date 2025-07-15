@@ -359,6 +359,32 @@ class SettingsWindow(ctk.CTkToplevel):
             listbox.insert("end", n)
         listbox.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
+        # Context menu for right click actions on the saved configurations
+        menu = tk.Menu(
+            win,
+            tearoff=0,
+            bg="#f1f1f1",
+            fg="#000000",
+            activebackground="#cce6ff",
+            activeforeground="#000000",
+        )
+        menu.add_command(
+            label="Delete Selected Configuration", command=lambda: _delete_selected()
+        )
+
+        def _show_menu(event: tk.Event) -> None:
+            # Select the item under the cursor before showing the menu
+            index = listbox.nearest(event.y)
+            if index >= 0:
+                listbox.selection_clear(0, "end")
+                listbox.selection_set(index)
+                menu.tk_popup(event.x_root, event.y_root)
+                menu.grab_release()
+
+        # Bind right click for Windows/Linux and middle click for macOS
+        listbox.bind("<Button-3>", _show_menu)
+        listbox.bind("<Button-2>", _show_menu)
+
         btn_frame = ctk.CTkFrame(win, fg_color="transparent")
         btn_frame.pack(pady=10)
 
