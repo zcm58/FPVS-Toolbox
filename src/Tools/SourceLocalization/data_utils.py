@@ -100,7 +100,6 @@ def _estimate_epochs_covariance(
     epochs: mne.Epochs,
     log_func: Callable[[str], None] = logger.info,
     baseline: Optional[Tuple[float | None, float | None]] = None,
-    n_jobs: int = 2,
 ) -> mne.Covariance:
     """Return a noise covariance estimated from ``epochs``.
 
@@ -108,17 +107,14 @@ def _estimate_epochs_covariance(
     When ``baseline`` is provided the same time window is passed to
     :func:`mne.compute_covariance` via ``tmin``/``tmax``. Otherwise ``tmax=0.0``
     is used. If only a single epoch is present an ad-hoc covariance is returned
-    and a message logged via ``log_func``. ``n_jobs`` controls how many CPU
-    cores are used during covariance estimation.
+    and a message logged via ``log_func``.
     """
 
     if len(epochs) > 1:
         if baseline is not None:
             tmin, tmax = baseline
-            return mne.compute_covariance(
-                epochs, tmin=tmin, tmax=tmax, n_jobs=n_jobs
-            )
-        return mne.compute_covariance(epochs, tmax=0.0, n_jobs=n_jobs)
+            return mne.compute_covariance(epochs, tmin=tmin, tmax=tmax)
+        return mne.compute_covariance(epochs, tmax=0.0)
 
     log_func("Only one epoch available. Using ad-hoc covariance.")
     return mne.make_ad_hoc_cov(epochs.info)
