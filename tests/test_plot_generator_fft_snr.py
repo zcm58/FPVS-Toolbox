@@ -87,7 +87,6 @@ def test_snr_calculated_from_fft(tmp_path, monkeypatch):
         metric="SNR",
         roi_map={"All": ["Cz", "Pz"]},
         selected_roi="All",
-        oddballs=[],
         title="t",
         xlabel="x",
         ylabel="y",
