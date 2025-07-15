@@ -69,10 +69,6 @@ class SetupPanelManager:
                                                     variable=self.app_ref.file_type, value=".BDF",
                                                     corner_radius=CORNER_RADIUS)
         self.app_ref.radio_bdf.grid(row=2, column=1, padx=PAD_X, pady=PAD_Y, sticky="w")
-        self.app_ref.radio_set = ctk.CTkRadioButton(self.app_ref.options_frame, text=".set",
-                                                    variable=self.app_ref.file_type, value=".set",
-                                                    corner_radius=CORNER_RADIUS)
-        self.app_ref.radio_set.grid(row=2, column=2, padx=PAD_X, pady=PAD_Y, sticky="w")
 
         # Row 3: Option to run LORETA during processing
         self.app_ref.run_loreta_var = tk.BooleanVar(value=False)

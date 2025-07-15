@@ -316,6 +316,7 @@ class ProcessingMixin:
                                        'message': f"DEBUG [{f_name}]: Channels after perform_preprocessing: {raw_proc.ch_names}"})
 
                     file_extension = os.path.splitext(f_path)[1].lower()
+
                     if file_extension == ".set":
                         if hasattr(raw_proc, 'annotations') and raw_proc.annotations and len(raw_proc.annotations) > 0:
                             if self.settings.debug_enabled():
@@ -390,27 +391,21 @@ class ProcessingMixin:
                                     'message': f"FINAL WARNING [{f_name}]: No events extracted from annotations for this file.",
                                 }
                             )
+
                     else:
-                        if self.settings.debug_enabled():
+                        try:
+                            events = mne.find_events(raw_proc, stim_channel=stim_channel_name, consecutive=True,
+                                                     verbose=False)
+                        except Exception as e_find:
                             gui_queue.put({'type': 'log',
-                                           'message': f"DEBUG [{f_name}]: File is '{file_extension}'. Using mne.find_events on stim_channel '{stim_channel_name}'."})
-                        if stim_channel_name not in raw_proc.ch_names:
-                            gui_queue.put({'type': 'log',
-                                           'message': f"ERROR [{f_name}]: Stim_channel '{stim_channel_name}' NOT in preprocessed data."})
-                        else:
-                            try:
-                                events = mne.find_events(raw_proc, stim_channel=stim_channel_name, consecutive=True,
-                                                         verbose=False)
-                            except Exception as e_find:
-                                gui_queue.put({'type': 'log',
-                                               'message': f"ERROR [{f_name}]: Exception mne.find_events: {e_find}"})
-                        if events.size == 0:
-                            gui_queue.put(
-                                {
-                                    'type': 'log',
-                                    'message': f"CRITICAL WARNING [{f_name}]: Event extraction resulted in empty events array.",
-                                }
-                            )
+                                           'message': f"ERROR [{f_name}]: Exception mne.find_events: {e_find}"})
+                    if events.size == 0:
+                        gui_queue.put(
+                            {
+                                'type': 'log',
+                                'message': f"CRITICAL WARNING [{f_name}]: Event extraction resulted in empty events array.",
+                            }
+                        )
 
                     if self.settings.debug_enabled():
                         gui_queue.put({'type': 'log',
