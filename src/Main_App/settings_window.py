@@ -131,18 +131,8 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(gen_tab, text="Debug Mode").grid(row=11, column=0, sticky="w", padx=pad, pady=(pad, 0))
         ctk.CTkCheckBox(gen_tab, text="Enable", variable=self.debug_var).grid(row=11, column=1, sticky="w", padx=pad, pady=(pad, 0))
 
-        ctk.CTkLabel(
-            gen_tab,
-            text="Number of CPU cores to use for processing",
-        ).grid(row=12, column=0, sticky="w", padx=pad, pady=(pad, 0))
-        jobs_var = tk.StringVar(value=self.manager.get("loreta", "n_jobs", "2"))
-        ctk.CTkEntry(gen_tab, textvariable=jobs_var).grid(
-            row=12, column=1, columnspan=2, sticky="ew", padx=pad, pady=(pad, 0)
-        )
-        self.jobs_var = jobs_var
-
         btn_frame = ctk.CTkFrame(gen_tab, fg_color="transparent")
-        btn_frame.grid(row=13, column=0, columnspan=3, sticky="w", padx=pad, pady=(pad, 0))
+        btn_frame.grid(row=12, column=0, columnspan=3, sticky="w", padx=pad, pady=(pad, 0))
         ctk.CTkButton(
             btn_frame,
             text="View Saved Configurations",
@@ -278,7 +268,6 @@ class SettingsWindow(ctk.CTkToplevel):
         self.manager.set('loreta', 'loreta_threshold', self.thr_var.get())
         self.manager.set('loreta', 'time_window_start_ms', self.t_start_var.get())
         self.manager.set('loreta', 'time_window_end_ms', self.t_end_var.get())
-        self.manager.set('loreta', 'n_jobs', self.jobs_var.get())
         self.manager.set('visualization', 'time_index_ms', self.disp_var.get())
         self.manager.set(
             'loreta',
@@ -529,7 +518,6 @@ class SettingsWindow(ctk.CTkToplevel):
         self.cond_var.set(self.manager.get('events', 'labels', ''))
         self.id_var.set(self.manager.get('events', 'ids', ''))
         self.debug_var.set(self.manager.get('debug', 'enabled', 'False').lower() == 'true')
-        self.jobs_var.set(self.manager.get('loreta', 'n_jobs', '2'))
         self.base_var.set(self.manager.get('analysis', 'base_freq', '6.0'))
         self.bca_var.set(self.manager.get('analysis', 'bca_upper_limit', '16.8'))
         self.alpha_var.set(self.manager.get('analysis', 'alpha', '0.05'))
