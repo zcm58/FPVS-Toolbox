@@ -221,6 +221,7 @@ class _Worker(QObject):
                     markerfmt=" ",
                     basefmt=" ",
                     bottom=1.0,
+
                 )
                 self._emit(
                     f"Plotted {len(stem_vals)} SNR stems for ROI {roi}", 0, 0
@@ -230,6 +231,7 @@ class _Worker(QObject):
                 self._emit(
                     f"Plotted continuous line for ROI {roi}", 0, 0
                 )
+
 
             mark_x = []
             mark_y = []
