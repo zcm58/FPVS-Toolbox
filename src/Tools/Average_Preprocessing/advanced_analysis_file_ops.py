@@ -6,7 +6,7 @@ class AdvancedAnalysisFileOpsMixin:
     
             files = filedialog.askopenfilenames(
                 title="Select EEG Files",
-                filetypes=[("EEG files", "*.bdf *.set"), ("All files", "*.*")],
+                filetypes=[("EEG files", "*.bdf")],
                 parent=self,
             )
             if not files:
