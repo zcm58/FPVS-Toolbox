@@ -320,7 +320,7 @@ class ProcessingMixin:
                         if hasattr(raw_proc, 'annotations') and raw_proc.annotations and len(raw_proc.annotations) > 0:
                             if self.settings.debug_enabled():
                                 gui_queue.put({'type': 'log',
-                                               'message': f"DEBUG [{f_name}]: Attempting event extraction using MNE Annotations for .set file."})
+                                               'message': f"DEBUG [{f_name}]: Attempting event extraction using MNE annotations."})
                             mne_annots_event_id_map = {}
                             user_gui_int_ids = set(event_id_map_from_gui.values())
                             unique_raw_ann_descriptions = list(np.unique(raw_proc.annotations.description))
@@ -351,7 +351,7 @@ class ProcessingMixin:
                                     )
                             if not mne_annots_event_id_map:
                                 gui_queue.put({'type': 'log',
-                                               'message': f"WARNING [{f_name}]: For .set file, could not create MNE event_id map from annotations."})
+                                               'message': f"WARNING [{f_name}]: Could not create MNE event_id map from annotations."})
                             else:
                                 if self.settings.debug_enabled():
                                     gui_queue.put({'type': 'log',
@@ -380,14 +380,14 @@ class ProcessingMixin:
                             gui_queue.put(
                                 {
                                     'type': 'log',
-                                    'message': f"WARNING [{f_name}]: .set file has no MNE annotations on raw_proc.",
+                                    'message': f"WARNING [{f_name}]: File has no MNE annotations on raw_proc.",
                                 }
                             )
                         if events.size == 0:
                             gui_queue.put(
                                 {
                                     'type': 'log',
-                                    'message': f"FINAL WARNING [{f_name}]: No events extracted for this .set file from annotations.",
+                                    'message': f"FINAL WARNING [{f_name}]: No events extracted from annotations for this file.",
                                 }
                             )
                     else:

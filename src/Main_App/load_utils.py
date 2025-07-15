@@ -1,7 +1,6 @@
 """Helper functions for reading EEG recordings into MNE.
-Supported ``.bdf`` and ``.set`` files are loaded with the
-appropriate options, and warnings are shown for unsupported
-formats."""
+Supported ``.bdf`` files are loaded with the appropriate options,
+and warnings are shown for unsupported formats."""
 
 import os
 from tkinter import messagebox
@@ -10,7 +9,7 @@ import mne
 
 
 def load_eeg_file(app, filepath):
-    """Load an EEG file (.bdf or .set) and apply the standard montage.
+    """Load an EEG file and apply the standard montage.
 
     Parameters
     ----------
@@ -36,7 +35,7 @@ def load_eeg_file(app, filepath):
         elif ext == ".set":
             with mne.utils.use_log_level('WARNING'):
                 raw = mne.io.read_raw_eeglab(filepath, **kwargs)
-            app.log("SET loaded successfully.")
+            app.log("EEGLAB file loaded successfully.")
         else:
             messagebox.showwarning("Unsupported File", f"Format '{ext}' not supported.")
             return None
