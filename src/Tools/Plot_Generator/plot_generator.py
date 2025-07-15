@@ -11,11 +11,10 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Iterable
 import pandas as pd
-import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # Ensure no GUI backend required
 import matplotlib.pyplot as plt
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal, QPropertyAnimation
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -27,14 +26,12 @@ from PySide6.QtWidgets import (
     QComboBox,
     QPlainTextEdit,
     QProgressBar,
-    QCheckBox,
     QWidget,
 )
 from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
 from Main_App.settings_manager import SettingsManager
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
-from config import update_target_frequencies
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 import math
 
@@ -51,7 +48,6 @@ class _Worker(QObject):
         metric: str,
         roi_map: Dict[str, List[str]],
         selected_roi: str,
-        oddballs: List[float],
         title: str,
         xlabel: str,
         ylabel: str,
@@ -59,7 +55,6 @@ class _Worker(QObject):
         x_max: float,
         y_min: float,
         y_max: float,
-        use_matlab_style: bool,
         out_dir: str,
 
     ) -> None:
@@ -69,7 +64,6 @@ class _Worker(QObject):
         self.metric = metric
         self.roi_map = roi_map
         self.selected_roi = selected_roi
-        self.oddballs = oddballs
         self.title = title
         self.xlabel = xlabel
         self.ylabel = ylabel
@@ -77,7 +71,6 @@ class _Worker(QObject):
         self.x_max = x_max
         self.y_min = y_min
         self.y_max = y_max
-        self.use_matlab_style = use_matlab_style
 
         self.out_dir = Path(out_dir)
 
@@ -210,7 +203,9 @@ class _Worker(QObject):
         for roi, amps in roi_data.items():
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
 
+
             freq_amp = dict(zip(freqs, amps))
+
             line_color = "black"
 
             if self.metric == "SNR":
@@ -232,6 +227,7 @@ class _Worker(QObject):
                 self._emit(
                     f"Plotted continuous line for ROI {roi}", 0, 0
                 )
+
 
 
             mark_x: list[float] = []
@@ -272,12 +268,10 @@ class _Worker(QObject):
                 )
             if not self.use_matlab_style:
                 ax.axhline(1.0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             ax.set_title(f"{self.title}: {roi}")
-            # for odd in self.oddballs:
-            #     ax.axvline(x=odd, color="black", linewidth=0.8)
-            #     ax.text(odd, ax.get_ylim()[0], f"{odd} Hz", ha="center", va="top")
             ax.grid(False)
             fig.tight_layout()
             fname = f"{self.condition}_{roi}_{self.metric}.png"
@@ -304,17 +298,6 @@ class PlotGeneratorWindow(QWidget):
             default_in = main_default
         if not default_out:
             default_out = main_default
-        odd_freqs_text = ""
-        try:
-            odd = float(mgr.get("analysis", "oddball_freq", ""))
-            upper = float(mgr.get("analysis", "bca_upper_limit", ""))
-            if odd and upper:
-                freqs = update_target_frequencies(odd, upper)
-                odd_freqs_text = ", ".join(f"{f:g}" for f in freqs)
-        except Exception:
-            pass
-
-
         self._defaults = {
             "title_snr": "SNR Plot",
             "title_bca": "BCA Plot",
@@ -327,13 +310,14 @@ class PlotGeneratorWindow(QWidget):
             "y_max_snr": "3.0",
             "y_min_bca": "0.0",
             "y_max_bca": "0.3",
-
-            "odd_freqs": odd_freqs_text,
             "input_folder": default_in,
             "output_folder": default_out,
         }
 
         self._build_ui()
+        # Prepare animation for smooth progress updates
+        self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
+        self._progress_anim.setDuration(200)
         if default_in:
             self.folder_edit.setText(default_in)
             self._populate_conditions(default_in)
@@ -390,12 +374,6 @@ class PlotGeneratorWindow(QWidget):
         layout.addWidget(self.roi_combo, row, 1, 1, 2)
         row += 1
 
-        layout.addWidget(QLabel("Oddball frequencies (Hz):"), row, 0)
-
-        self.freq_edit = QLineEdit(self._defaults["odd_freqs"])
-
-        layout.addWidget(self.freq_edit, row, 1, 1, 2)
-        row += 1
 
         layout.addWidget(QLabel("Chart title:"), row, 0)
         self.title_edit = QLineEdit(self._defaults["title_snr"])
@@ -412,9 +390,6 @@ class PlotGeneratorWindow(QWidget):
         layout.addWidget(self.ylabel_edit, row, 1, 1, 2)
         row += 1
 
-        self.matlab_check = QCheckBox("Use MATLAB style")
-        layout.addWidget(self.matlab_check, row, 0, 1, 2)
-        row += 1
 
         layout.addWidget(QLabel("X min:"), row, 0)
         self.xmin_edit = QLineEdit(self._defaults["x_min"])
@@ -444,6 +419,10 @@ class PlotGeneratorWindow(QWidget):
         row += 1
 
         self.progress_bar = QProgressBar()
+        # Windows 11 green accent color for the progress bar
+        self.progress_bar.setStyleSheet(
+            "QProgressBar::chunk {background-color: #16C60C;}"
+        )
         layout.addWidget(self.progress_bar, row, 0, 1, 4)
         row += 1
 
@@ -483,7 +462,7 @@ class PlotGeneratorWindow(QWidget):
             subfolders = [
                 f.name
                 for f in Path(folder).iterdir()
-                if f.is_dir()
+                if f.is_dir() and ".fif" not in f.name.lower()
             ]
         except Exception:
             subfolders = []
@@ -508,7 +487,6 @@ class PlotGeneratorWindow(QWidget):
         self._defaults["x_min"] = self.xmin_edit.text()
         self._defaults["x_max"] = self.xmax_edit.text()
 
-        self._defaults["odd_freqs"] = self.freq_edit.text()
         self._defaults["input_folder"] = self.folder_edit.text()
         self._defaults["output_folder"] = self.out_edit.text()
 
@@ -524,11 +502,18 @@ class PlotGeneratorWindow(QWidget):
         self.log.appendPlainText(text)
         self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
 
+    def _animate_progress_to(self, value: int) -> None:
+        """Animate the progress bar smoothly to the target value."""
+        self._progress_anim.stop()
+        self._progress_anim.setStartValue(self.progress_bar.value())
+        self._progress_anim.setEndValue(value)
+        self._progress_anim.start()
+
     def _on_progress(self, msg: str, processed: int, total: int) -> None:
         if msg:
             self._append_log(msg)
         value = int(100 * processed / total) if total else 0
-        self.progress_bar.setValue(value)
+        self._animate_progress_to(value)
 
     def _generate(self) -> None:
         folder = self.folder_edit.text()
@@ -545,11 +530,6 @@ class PlotGeneratorWindow(QWidget):
             QMessageBox.critical(self, "Error", "No condition selected.")
             return
         try:
-            oddballs = [float(v.strip()) for v in self.freq_edit.text().split(",") if v.strip()]
-        except ValueError:
-            QMessageBox.critical(self, "Error", "Invalid oddball frequencies.")
-            return
-        try:
             x_min = float(self.xmin_edit.text())
             x_max = float(self.xmax_edit.text())
             y_min = float(self.ymin_edit.text())
@@ -560,7 +540,7 @@ class PlotGeneratorWindow(QWidget):
 
         self.gen_btn.setEnabled(False)
         self.log.clear()
-        self.progress_bar.setValue(0)
+        self._animate_progress_to(0)
         self._thread = QThread()
         self._worker = _Worker(
             folder,
@@ -568,7 +548,6 @@ class PlotGeneratorWindow(QWidget):
             self.metric_combo.currentText(),
             self.roi_map,
             self.roi_combo.currentText(),
-            oddballs,
             self.title_edit.text(),
             self.xlabel_edit.text(),
             self.ylabel_edit.text(),
@@ -576,8 +555,6 @@ class PlotGeneratorWindow(QWidget):
             x_max,
             y_min,
             y_max,
-
-            self.matlab_check.isChecked(),
             out_dir,
 
         )
@@ -605,7 +582,7 @@ class PlotGeneratorWindow(QWidget):
         self.gen_btn.setEnabled(True)
         self._thread = None
         self._worker = None
-        self.progress_bar.setValue(100)
+        self._animate_progress_to(100)
         out_dir = self.out_edit.text()
         images = []
         try:
