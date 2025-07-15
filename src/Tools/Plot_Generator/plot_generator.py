@@ -39,6 +39,7 @@ from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
 from Main_App.settings_manager import SettingsManager
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
+import math
 
 class _Worker(QObject):
     """Worker to process Excel files and generate plots."""
@@ -210,14 +211,16 @@ class _Worker(QObject):
         for roi, amps in roi_data.items():
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
 
+
             line_color = self.stem_color
+
 
             if self.metric == "SNR":
                 stem_vals = amps
                 ax.stem(
                     freqs,
                     stem_vals,
-                    linefmt=line_color,
+                    linefmt="red",
                     markerfmt=" ",
                     basefmt=" ",
                     bottom=1.0,
@@ -233,11 +236,46 @@ class _Worker(QObject):
                 )
 
 
-            ax.set_xticks([])
-            ax.set_xticklabels([])
+
+            mark_x: list[float] = []
+            mark_y: list[float] = []
+            for odd in self.oddballs:
+                amp = freq_amp.get(odd)
+                if amp is None:
+                    amp = float(np.interp([odd], freqs, amps)[0])
+                mark_x.append(odd)
+                mark_y.append(amp)
+
+            if mark_x and not self.use_matlab_style:
+                ax.scatter(mark_x, mark_y, color="blue", zorder=3)
+                self._emit(
+                    f"Marked {len(mark_x)} oddball points on ROI {roi}", 0, 0
+                )
+
+            tick_start = math.ceil(self.x_min)
+            tick_end = math.floor(self.x_max) + 1
+            ax.set_xticks(range(tick_start, tick_end))
             ax.set_xlim(self.x_min, self.x_max)
             ax.set_ylim(self.y_min, self.y_max)
-            ax.axhline(1.0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+            for fx in range(max(1, tick_start), tick_end):
+                ax.axvline(
+                    fx,
+                    color="lightgray",
+                    linestyle="--",
+                    linewidth=0.5,
+                    zorder=0,
+                )
+            for y in range(math.ceil(self.y_min), math.floor(self.y_max) + 1):
+                ax.axhline(
+                    y,
+                    color="lightgray",
+                    linestyle="--",
+                    linewidth=0.5,
+                    zorder=0,
+                )
+            if not self.use_matlab_style:
+                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             ax.set_title(f"{self.title}: {roi}")
