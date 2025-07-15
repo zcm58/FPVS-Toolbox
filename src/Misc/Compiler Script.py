@@ -30,8 +30,6 @@ if __name__ == "__main__":
         "--hidden-import",
         "mne.io.bdf",
         "--hidden-import",
-        "mne.io.eeglab",
-        "--hidden-import",
         "scipy",
         "--hidden-import",
         "pandas",
