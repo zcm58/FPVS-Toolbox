@@ -15,7 +15,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # Ensure no GUI backend required
 import matplotlib.pyplot as plt
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal, QPropertyAnimation
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -316,6 +316,9 @@ class PlotGeneratorWindow(QWidget):
         }
 
         self._build_ui()
+        # Prepare animation for smooth progress updates
+        self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
+        self._progress_anim.setDuration(200)
         if default_in:
             self.folder_edit.setText(default_in)
             self._populate_conditions(default_in)
@@ -426,6 +429,10 @@ class PlotGeneratorWindow(QWidget):
         row += 1
 
         self.progress_bar = QProgressBar()
+        # Windows 11 green accent color for the progress bar
+        self.progress_bar.setStyleSheet(
+            "QProgressBar::chunk {background-color: #16C60C;}"
+        )
         layout.addWidget(self.progress_bar, row, 0, 1, 4)
         row += 1
 
@@ -506,11 +513,18 @@ class PlotGeneratorWindow(QWidget):
         self.log.appendPlainText(text)
         self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
 
+    def _animate_progress_to(self, value: int) -> None:
+        """Animate the progress bar smoothly to the target value."""
+        self._progress_anim.stop()
+        self._progress_anim.setStartValue(self.progress_bar.value())
+        self._progress_anim.setEndValue(value)
+        self._progress_anim.start()
+
     def _on_progress(self, msg: str, processed: int, total: int) -> None:
         if msg:
             self._append_log(msg)
         value = int(100 * processed / total) if total else 0
-        self.progress_bar.setValue(value)
+        self._animate_progress_to(value)
 
     def _generate(self) -> None:
         folder = self.folder_edit.text()
@@ -542,7 +556,7 @@ class PlotGeneratorWindow(QWidget):
 
         self.gen_btn.setEnabled(False)
         self.log.clear()
-        self.progress_bar.setValue(0)
+        self._animate_progress_to(0)
         self._thread = QThread()
         self._worker = _Worker(
             folder,
@@ -587,7 +601,7 @@ class PlotGeneratorWindow(QWidget):
         self.gen_btn.setEnabled(True)
         self._thread = None
         self._worker = None
-        self.progress_bar.setValue(100)
+        self._animate_progress_to(100)
         out_dir = self.out_edit.text()
         images = []
         try:
