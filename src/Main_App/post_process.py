@@ -262,11 +262,18 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     upper_limit = float(app.settings.get('analysis', 'bca_upper_limit', '16.8'))
                 except Exception:
                     upper_limit = 16.8
-                mask = fft_frequencies <= upper_limit
-                freq_cols_full = [f"{f:.4f}_Hz" for f in fft_frequencies[mask]]
+
+                max_freq = min(upper_limit, float(fft_frequencies[-1]))
+                freq_grid = np.arange(0.5, max_freq + 0.01, 0.01)
+
+                interp_snr = np.zeros((full_snr_avg.shape[0], len(freq_grid)))
+                for ch_idx in range(full_snr_avg.shape[0]):
+                    interp_snr[ch_idx] = np.interp(freq_grid, fft_frequencies, full_snr_avg[ch_idx])
+
+                freq_cols_full = [f"{f:.4f}_Hz" for f in freq_grid]
 
                 dataframes_to_save['FullSNR'] = pd.DataFrame(
-                    full_snr_avg[:, mask],
+                    interp_snr,
                     index=final_electrode_names_ordered,
                     columns=freq_cols_full,
                 )
