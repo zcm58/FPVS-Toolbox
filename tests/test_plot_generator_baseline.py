@@ -46,6 +46,7 @@ def test_plot_contains_baseline_line(tmp_path, monkeypatch):
         x_max=2.0,
         y_min=-1.0,
         y_max=1.0,
+        use_matlab_style=False,
         out_dir=str(tmp_path),
     )
 
@@ -58,3 +59,43 @@ def test_plot_contains_baseline_line(tmp_path, monkeypatch):
     assert any(
         getattr(line, "get_ydata", lambda: [])() == [0, 0] for line in ax.lines
     )
+
+
+def test_matlab_style_skips_baseline_and_scatter(tmp_path, monkeypatch):
+    module = _import_module()
+
+    captured = {}
+
+    def dummy_close(fig):
+        captured["fig"] = fig
+
+    monkeypatch.setattr(module.plt, "close", dummy_close)
+    monkeypatch.setattr(module.matplotlib.figure.Figure, "savefig", lambda self, *a, **k: None)
+
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        metric="SNR",
+        roi_map={"roi": ["Cz"]},
+        selected_roi="roi",
+        oddballs=[1.0],
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=0.0,
+        x_max=2.0,
+        y_min=-1.0,
+        y_max=1.0,
+        use_matlab_style=True,
+        out_dir=str(tmp_path),
+    )
+
+    worker._emit = lambda *a, **k: None
+    worker._plot([1.0], {"roi": [0.5]})
+
+    fig = captured.get("fig")
+    assert fig is not None
+    ax = fig.axes[0]
+    assert all(getattr(line, "get_ydata", lambda: [])() != [0, 0] for line in ax.lines)
+    assert ax.lines[0].get_color() == "red"
+    assert not ax.collections

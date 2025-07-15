@@ -46,6 +46,7 @@ def test_roi_added_to_title(tmp_path, monkeypatch):
         x_max=2.0,
         y_min=-1.0,
         y_max=1.0,
+        use_matlab_style=False,
         out_dir=str(tmp_path),
     )
 
