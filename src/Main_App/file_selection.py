@@ -24,22 +24,16 @@ class FileSelectionMixin:
 
     def select_data_source(self):
         self.data_paths = []
-        file_ext = "*" + self.file_type.get().lower()
-        file_type_desc = self.file_type.get().upper()
+        # Always operate on BDF files regardless of any UI setting
+        self.file_type.set(".BDF")
+        file_ext = "*.bdf"
+        file_type_desc = ".BDF"
         try:
             if self.file_mode.get() == "Single":
                 ftypes = [(f"{file_type_desc} files", file_ext)]
-                other_ext = "*.set" if file_type_desc == ".BDF" else "*.bdf"
-                other_desc = ".SET" if file_type_desc == ".BDF" else ".BDF"
-                ftypes.append((f"{other_desc} files", other_ext))
-                ftypes.append(("All files", "*.*"))
 
                 file_path = filedialog.askopenfilename(title="Select EEG File", filetypes=ftypes)
                 if file_path:
-                    selected_ext = os.path.splitext(file_path)[1].lower()
-                    if selected_ext in ['.bdf', '.set']:
-                        self.file_type.set(selected_ext.upper())
-                        self.log(f"File type set to {selected_ext.upper()}")
                     self.data_paths = [file_path]
                     self.log(f"Selected file: {os.path.basename(file_path)}")
                 else:
