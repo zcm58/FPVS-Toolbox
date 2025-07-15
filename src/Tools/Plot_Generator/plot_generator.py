@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Iterable
 import pandas as pd
+import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # Ensure no GUI backend required
 import matplotlib.pyplot as plt
@@ -167,7 +168,16 @@ class _Worker(QObject):
             self._emit("No ROI data to plot.")
             return
 
-        self._plot(list(freqs), averaged)
+        if self.metric == "SNR":
+            freq_grid = np.arange(0.5, 20.01, 0.01)
+            interp_data: Dict[str, List[float]] = {}
+            freq_list = list(freqs)
+            for roi, amps in averaged.items():
+                interp_amps = np.interp(freq_grid, freq_list, amps)
+                interp_data[roi] = interp_amps.tolist()
+            self._plot(freq_grid.tolist(), interp_data)
+        else:
+            self._plot(list(freqs), averaged)
 
     def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
@@ -183,7 +193,7 @@ class _Worker(QObject):
             for odd in self.oddballs:
                 amp = freq_amp.get(odd)
                 if amp is None:
-                    continue
+                    amp = float(np.interp([odd], freqs, amps)[0])
                 mark_x.append(odd)
                 mark_y.append(amp)
 
