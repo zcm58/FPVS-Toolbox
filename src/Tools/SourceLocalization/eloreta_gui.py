@@ -415,27 +415,28 @@ class SourceLocalizationWindow(ctk.CTkToplevel):
     ):
         log_func = getattr(self.master, "log", print)
         ctx = mp.get_context("spawn")
-        q = ctx.Queue()
+        with ctx.Manager() as manager:
+            q = manager.Queue()
 
-        with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as ex:
-            future = ex.submit(
-                worker.run_localization_worker,
-                fif_path,
-                out_dir,
-                method=method,
-                threshold=thr,
-                alpha=alpha,
-                hemi=hemi,
-                low_freq=low_freq,
-                high_freq=high_freq,
-                harmonics=harmonics,
-                snr=snr,
-                oddball=oddball,
-                export_rois=export_rois,
-                baseline=baseline,
-                time_window=time_window,
-                queue=q,
-            )
+            with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as ex:
+                future = ex.submit(
+                    worker.run_localization_worker,
+                    fif_path,
+                    out_dir,
+                    method=method,
+                    threshold=thr,
+                    alpha=alpha,
+                    hemi=hemi,
+                    low_freq=low_freq,
+                    high_freq=high_freq,
+                    harmonics=harmonics,
+                    snr=snr,
+                    oddball=oddball,
+                    export_rois=export_rois,
+                    baseline=baseline,
+                    time_window=time_window,
+                    queue=q,
+                )
 
             while True:
                 try:
