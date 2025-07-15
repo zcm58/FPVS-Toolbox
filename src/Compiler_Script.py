@@ -8,7 +8,6 @@ pyinstaller `
   --collect-all mne `
   --collect-data mne `
   --hidden-import=mne.io.bdf `
-  --hidden-import=mne.io.eeglab `
   --hidden-import=scipy `
   --hidden-import=scipy._cyutility `
   --hidden-import=pandas `
