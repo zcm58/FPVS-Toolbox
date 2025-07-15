@@ -316,12 +316,82 @@ class ProcessingMixin:
                                        'message': f"DEBUG [{f_name}]: Channels after perform_preprocessing: {raw_proc.ch_names}"})
 
                     file_extension = os.path.splitext(f_path)[1].lower()
-                    if self.settings.debug_enabled():
-                        gui_queue.put({'type': 'log',
-                                       'message': f"DEBUG [{f_name}]: File is '{file_extension}'. Using mne.find_events on stim_channel '{stim_channel_name}'."})
-                    if stim_channel_name not in raw_proc.ch_names:
-                        gui_queue.put({'type': 'log',
-                                       'message': f"ERROR [{f_name}]: Stim_channel '{stim_channel_name}' NOT in preprocessed data."})
+
+                    if file_extension == ".set":
+                        if hasattr(raw_proc, 'annotations') and raw_proc.annotations and len(raw_proc.annotations) > 0:
+                            if self.settings.debug_enabled():
+                                gui_queue.put({'type': 'log',
+                                               'message': f"DEBUG [{f_name}]: Attempting event extraction using MNE annotations."})
+                            mne_annots_event_id_map = {}
+                            user_gui_int_ids = set(event_id_map_from_gui.values())
+                            unique_raw_ann_descriptions = list(np.unique(raw_proc.annotations.description))
+                            if self.settings.debug_enabled():
+                                gui_queue.put({'type': 'log',
+                                               'message': f"DEBUG [{f_name}]: Unique annotation descriptions in file: {unique_raw_ann_descriptions}"})
+                            for desc_str_from_file in unique_raw_ann_descriptions:
+                                mapped_id_for_this_desc = None
+                                if desc_str_from_file in event_id_map_from_gui:
+                                    mapped_id_for_this_desc = event_id_map_from_gui[desc_str_from_file]
+                                if mapped_id_for_this_desc is None:
+                                    numeric_part_match = re.search(r'\d+', desc_str_from_file)
+                                    if numeric_part_match:
+                                        try:
+                                            extracted_num_from_desc = int(numeric_part_match.group(0))
+                                            if (
+                                                extracted_num_from_desc
+                                                in user_gui_int_ids
+                                            ):
+                                                mapped_id_for_this_desc = (
+                                                    extracted_num_from_desc
+                                                )
+                                        except ValueError:
+                                            pass
+                                if mapped_id_for_this_desc is not None:
+                                    mne_annots_event_id_map[desc_str_from_file] = (
+                                        mapped_id_for_this_desc
+                                    )
+                            if not mne_annots_event_id_map:
+                                gui_queue.put({'type': 'log',
+                                               'message': f"WARNING [{f_name}]: Could not create MNE event_id map from annotations."})
+                            else:
+                                if self.settings.debug_enabled():
+                                    gui_queue.put({'type': 'log',
+                                                   'message': f"DEBUG [{f_name}]: Using MNE event_id map for annotations: {mne_annots_event_id_map}"})
+                                try:
+                                    events, _ = mne.events_from_annotations(raw_proc, event_id=mne_annots_event_id_map,
+                                                                            verbose=False, regexp=None)
+                                    if events.size == 0:
+                                        gui_queue.put(
+                                            {
+                                                'type': 'log',
+                                                'message': (
+                                                    f"WARNING [{f_name}]: mne.events_from_annotations returned no events with map: {mne_annots_event_id_map}."
+                                                ),
+                                            }
+                                        )
+                                except Exception as e_ann:
+                                    gui_queue.put(
+                                        {
+                                            'type': 'log',
+                                            'message': f"ERROR [{f_name}]: Failed to get events from annotations: {e_ann}",
+                                        }
+                                    )
+                                    events = np.array([])
+                        else:
+                            gui_queue.put(
+                                {
+                                    'type': 'log',
+                                    'message': f"WARNING [{f_name}]: File has no MNE annotations on raw_proc.",
+                                }
+                            )
+                        if events.size == 0:
+                            gui_queue.put(
+                                {
+                                    'type': 'log',
+                                    'message': f"FINAL WARNING [{f_name}]: No events extracted from annotations for this file.",
+                                }
+                            )
+
                     else:
                         try:
                             events = mne.find_events(raw_proc, stim_channel=stim_channel_name, consecutive=True,
