@@ -390,6 +390,10 @@ class PlotGeneratorWindow(QWidget):
         cond_out = Path(out_dir)
         if self._all_conditions:
             cond_out = cond_out / f"{condition} Plots"
+            title = condition
+            self.title_edit.setText(condition)
+        else:
+            title = self.title_edit.text()
 
         self._thread = QThread()
         self._worker = _Worker(
@@ -398,7 +402,7 @@ class PlotGeneratorWindow(QWidget):
             self.metric_combo.currentText(),
             self.roi_map,
             self.roi_combo.currentText(),
-            self.title_edit.text(),
+            title,
             self.xlabel_edit.text(),
             self.ylabel_edit.text(),
             x_min,
