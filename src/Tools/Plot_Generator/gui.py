@@ -425,7 +425,8 @@ class PlotGeneratorWindow(QWidget):
         if subfolders:
             self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
             self.condition_combo.addItems(subfolders)
-            self._update_chart_title_state(subfolders[0])
+            # Default to "All Conditions" which auto-generates chart names
+            self._update_chart_title_state(ALL_CONDITIONS_OPTION)
 
     def _save_defaults(self) -> None:
         self.plot_mgr.set("paths", "input_folder", self.folder_edit.text())
@@ -443,15 +444,15 @@ class PlotGeneratorWindow(QWidget):
         self.xmin_spin.setValue(float(self._defaults["x_min"]))
         self.xmax_spin.setValue(float(self._defaults["x_max"]))
         if metric == "SNR":
-            self.title_edit.setText(self._defaults["title_snr"])
             self.ylabel_edit.setText(self._defaults["ylabel_snr"])
             self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
             self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
         else:
-            self.title_edit.setText(self._defaults["title_bca"])
             self.ylabel_edit.setText(self._defaults["ylabel_bca"])
             self.ymin_spin.setValue(float(self._defaults["y_min_bca"]))
             self.ymax_spin.setValue(float(self._defaults["y_max_bca"]))
+        # Update the chart title field based on the current condition
+        self._update_chart_title_state(self.condition_combo.currentText())
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")
 
     def _append_log(self, text: str) -> None:
