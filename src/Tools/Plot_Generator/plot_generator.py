@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMenu,
 
-
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -83,6 +82,9 @@ class _Worker(QObject):
 
         self.out_dir = Path(out_dir)
         self.stem_color = stem_color.lower()
+        # maintain oddballs attribute for compatibility with older versions
+        self.oddballs: List[float] = []
+
 
 
     def run(self) -> None:
@@ -212,7 +214,6 @@ class _Worker(QObject):
 
         for roi, amps in roi_data.items():
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
-
 
             line_color = self.stem_color
 
