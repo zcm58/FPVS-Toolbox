@@ -6,10 +6,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QThread, QPropertyAnimation
+from PySide6.QtCore import QThread, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
     QFileDialog,
-    QGridLayout,
+    QGroupBox,
+    QFormLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -17,11 +18,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QPlainTextEdit,
     QProgressBar,
+    QSplitter,
     QWidget,
     QMenuBar,
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
+    QStyle,
 )
 from PySide6.QtGui import QAction, QDoubleValidator, QColor
 from PySide6.QtWidgets import QColorDialog
@@ -133,123 +136,157 @@ class PlotGeneratorWindow(QWidget):
         menu.addAction(action)
         root_layout.addWidget(menu)
 
-        layout = QGridLayout()
-        root_layout.addLayout(layout)
-        row = 0
-        layout.addWidget(QLabel("Excel Files Folder:"), row, 0)
+        file_box = QGroupBox("File I/O")
+        file_form = QFormLayout(file_box)
+        file_form.setContentsMargins(10, 10, 10, 10)
+
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
-
         self.folder_edit.setText(self._defaults.get("input_folder", ""))
-
-        layout.addWidget(self.folder_edit, row, 1)
+        self.folder_edit.setToolTip("Folder containing Excel result files")
         browse = QPushButton("Browse…")
+        browse.setToolTip("Select input folder")
+        browse.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse.clicked.connect(self._select_folder)
-        layout.addWidget(browse, row, 2)
-        row += 1
+        in_row = QHBoxLayout()
+        in_row.addWidget(self.folder_edit)
+        in_row.addWidget(browse)
+        file_form.addRow("Excel Files Folder:", in_row)
 
-
-        layout.addWidget(QLabel("Save Plots To:"), row, 0)
         self.out_edit = QLineEdit()
         self.out_edit.setReadOnly(True)
         self.out_edit.setText(self._defaults.get("output_folder", ""))
-
-        layout.addWidget(self.out_edit, row, 1)
+        self.out_edit.setToolTip("Folder to save generated plots")
         browse_out = QPushButton("Browse…")
+        browse_out.setToolTip("Select output folder")
+        browse_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse_out.clicked.connect(self._select_output)
-        layout.addWidget(browse_out, row, 2)
         open_out = QPushButton("Open…")
+        open_out.setToolTip("Open output folder")
         open_out.clicked.connect(self._open_output_folder)
-        layout.addWidget(open_out, row, 3)
-        row += 1
+        out_row = QHBoxLayout()
+        out_row.addWidget(self.out_edit)
+        out_row.addWidget(browse_out)
+        out_row.addWidget(open_out)
+        file_form.addRow("Save Plots To:", out_row)
 
+        root_layout.addWidget(file_box)
 
-        layout.addWidget(QLabel("Condition:"), row, 0)
+        params_box = QGroupBox("Plot Parameters")
+        params_form = QFormLayout(params_box)
+        params_form.setContentsMargins(10, 10, 10, 10)
+
         self.condition_combo = QComboBox()
+        self.condition_combo.setToolTip("Select condition to plot")
         self.condition_combo.currentTextChanged.connect(self._condition_changed)
-        layout.addWidget(self.condition_combo, row, 1, 1, 2)
-        row += 1
+        params_form.addRow("Condition:", self.condition_combo)
 
-        layout.addWidget(QLabel("Metric:"), row, 0)
         self.metric_combo = QComboBox()
         self.metric_combo.addItems(["SNR", "BCA"])
+        self.metric_combo.setToolTip("Metric to plot")
         self.metric_combo.currentTextChanged.connect(self._metric_changed)
-        layout.addWidget(self.metric_combo, row, 1, 1, 2)
-        row += 1
+        params_form.addRow("Metric:", self.metric_combo)
 
-        layout.addWidget(QLabel("ROI:"), row, 0)
         self.roi_combo = QComboBox()
         self.roi_combo.addItems([ALL_ROIS_OPTION] + list(self.roi_map.keys()))
-        layout.addWidget(self.roi_combo, row, 1, 1, 2)
-        row += 1
+        self.roi_combo.setToolTip("Region of interest")
+        params_form.addRow("ROI:", self.roi_combo)
 
-
-        layout.addWidget(QLabel("Chart title:"), row, 0)
         self.title_edit = QLineEdit(self._defaults["title_snr"])
-        layout.addWidget(self.title_edit, row, 1, 1, 2)
-        row += 1
+        self.title_edit.setToolTip("Chart title")
+        params_form.addRow("Chart title:", self.title_edit)
 
-        layout.addWidget(QLabel("X-axis label:"), row, 0)
         self.xlabel_edit = QLineEdit(self._defaults["xlabel"])
-        layout.addWidget(self.xlabel_edit, row, 1, 1, 2)
-        row += 1
+        self.xlabel_edit.setToolTip("X-axis label")
+        params_form.addRow("X-axis label:", self.xlabel_edit)
 
-        layout.addWidget(QLabel("Y-axis label:"), row, 0)
         self.ylabel_edit = QLineEdit(self._defaults["ylabel_snr"])
-        layout.addWidget(self.ylabel_edit, row, 1, 1, 2)
-        row += 1
+        self.ylabel_edit.setToolTip("Y-axis label")
+        params_form.addRow("Y-axis label:", self.ylabel_edit)
 
+        root_layout.addWidget(params_box)
 
-        layout.addWidget(QLabel("X min:"), row, 0)
+        ranges_box = QGroupBox("Axis Ranges")
+        ranges_form = QFormLayout(ranges_box)
+        ranges_form.setContentsMargins(10, 10, 10, 10)
+
         self.xmin_edit = QLineEdit(self._defaults["x_min"])
         self.xmin_edit.setValidator(QDoubleValidator())
-        layout.addWidget(self.xmin_edit, row, 1)
-        layout.addWidget(QLabel("X max:"), row, 2)
+        self.xmin_edit.setToolTip("Minimum X value")
         self.xmax_edit = QLineEdit(self._defaults["x_max"])
         self.xmax_edit.setValidator(QDoubleValidator())
-        layout.addWidget(self.xmax_edit, row, 3)
-        row += 1
+        self.xmax_edit.setToolTip("Maximum X value")
+        x_row = QHBoxLayout()
+        x_row.addWidget(self.xmin_edit)
+        x_row.addWidget(QLabel("to"))
+        x_row.addWidget(self.xmax_edit)
+        ranges_form.addRow("X Range:", x_row)
 
-        layout.addWidget(QLabel("Y min:"), row, 0)
         self.ymin_edit = QLineEdit(self._defaults["y_min_snr"])
         self.ymin_edit.setValidator(QDoubleValidator())
-        layout.addWidget(self.ymin_edit, row, 1)
-        layout.addWidget(QLabel("Y max:"), row, 2)
+        self.ymin_edit.setToolTip("Minimum Y value")
         self.ymax_edit = QLineEdit(self._defaults["y_max_snr"])
         self.ymax_edit.setValidator(QDoubleValidator())
-        layout.addWidget(self.ymax_edit, row, 3)
-        row += 1
+        self.ymax_edit.setToolTip("Maximum Y value")
+        y_row = QHBoxLayout()
+        y_row.addWidget(self.ymin_edit)
+        y_row.addWidget(QLabel("to"))
+        y_row.addWidget(self.ymax_edit)
+        ranges_form.addRow("Y Range:", y_row)
 
+        root_layout.addWidget(ranges_box)
+
+        actions_box = QGroupBox("Actions")
+        actions_layout = QVBoxLayout(actions_box)
+        actions_layout.setContentsMargins(10, 10, 10, 10)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
         self.apply_btn = QPushButton("Apply Settings")
         self.apply_btn.clicked.connect(self._apply_settings)
-        layout.addWidget(self.apply_btn, row, 0)
         self.save_defaults_btn = QPushButton("Save Defaults")
         self.save_defaults_btn.clicked.connect(self._save_defaults)
-        layout.addWidget(self.save_defaults_btn, row, 1)
         self.load_defaults_btn = QPushButton("Load Defaults")
         self.load_defaults_btn.clicked.connect(self._load_defaults)
-        layout.addWidget(self.load_defaults_btn, row, 2)
         self.gen_btn = QPushButton("Generate")
         self.gen_btn.clicked.connect(self._generate)
-        layout.addWidget(self.gen_btn, row, 3)
-        row += 1
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel_generation)
-        layout.addWidget(self.cancel_btn, row, 0)
-        row += 1
+        for w in (
+            self.apply_btn,
+            self.save_defaults_btn,
+            self.load_defaults_btn,
+            self.gen_btn,
+            self.cancel_btn,
+        ):
+            btn_row.addWidget(w)
+        actions_layout.addLayout(btn_row)
 
         self.progress_bar = QProgressBar()
-        # Windows 11 green accent color for the progress bar
         self.progress_bar.setStyleSheet(
             "QProgressBar::chunk {background-color: #16C60C;}"
         )
-        layout.addWidget(self.progress_bar, row, 0, 1, 4)
-        row += 1
+        actions_layout.addWidget(self.progress_bar)
 
+        root_layout.addWidget(actions_box)
+
+        splitter = QSplitter(Qt.Vertical)
+        console_box = QGroupBox("Console")
+        console_layout = QVBoxLayout(console_box)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
-        layout.addWidget(self.log, row, 0, 1, 4)
+        console_layout.addWidget(self.log)
+        splitter.addWidget(console_box)
+        root_layout.addWidget(splitter)
+
+        root_layout.setSpacing(10)
+        root_layout.setContentsMargins(10, 10, 10, 10)
+
+        self.folder_edit.textChanged.connect(self._check_required)
+        self.out_edit.textChanged.connect(self._check_required)
+        self.condition_combo.currentTextChanged.connect(self._check_required)
+        self._check_required()
 
     def _metric_changed(self, metric: str) -> None:
         if metric == "SNR":
@@ -512,6 +549,14 @@ class PlotGeneratorWindow(QWidget):
             subprocess.call(["open", folder])
         else:
             subprocess.call(["xdg-open", folder])
+
+    def _check_required(self) -> None:
+        required = bool(
+            self.folder_edit.text()
+            and self.out_edit.text()
+            and self.condition_combo.currentText()
+        )
+        self.gen_btn.setEnabled(required)
 
     def _generation_finished(self) -> None:
         self._thread = None
