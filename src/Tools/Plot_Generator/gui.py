@@ -354,7 +354,7 @@ class PlotGeneratorWindow(QWidget):
         clear_btn = QPushButton()
         clear_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
         clear_btn.setFixedSize(22, 22)
-        clear_btn.setToolTip("Clear log")
+        clear_btn.setToolTip("Clear Log")
         clear_btn.clicked.connect(lambda: self.log.clear())
         header.addWidget(clear_btn)
         console_layout.addLayout(header)
