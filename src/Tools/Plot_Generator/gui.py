@@ -355,6 +355,10 @@ class PlotGeneratorWindow(QWidget):
     def _on_progress(self, msg: str, processed: int, total: int) -> None:
         if msg:
             self._append_log(msg)
+        # Avoid resetting the progress bar when only log messages are emitted
+        if total == 0:
+            return
+
         if self._total_conditions:
             frac = (self._current_condition - 1) / self._total_conditions
             if total:
