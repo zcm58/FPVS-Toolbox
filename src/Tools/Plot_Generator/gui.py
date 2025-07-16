@@ -44,11 +44,7 @@ class _SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         row = QHBoxLayout()
         row.addWidget(QLabel("Stem Plot Line Color:"))
-        self.combo = QComboBox()
-        self.combo.addItems(["Red", "Blue", "Green", "Purple"])
-        self.combo.setCurrentText(color.capitalize())
-        row.addWidget(self.combo)
-        self.custom_color: str | None = None
+        self.current_color = color
         pick = QPushButton("Custom…")
         pick.clicked.connect(self._choose_custom)
         row.addWidget(pick)
@@ -63,14 +59,12 @@ class _SettingsDialog(QDialog):
         layout.addLayout(btns)
 
     def _choose_custom(self) -> None:
-        color = QColorDialog.getColor(QColor(self.combo.currentText()), self)
+        color = QColorDialog.getColor(QColor(self.current_color), self)
         if color.isValid():
-            self.custom_color = color.name()
+            self.current_color = color.name()
 
     def selected_color(self) -> str:
-        if self.custom_color:
-            return self.custom_color
-        return self.combo.currentText().lower()
+        return self.current_color.lower()
 
 class PlotGeneratorWindow(QWidget):
     """Main window for generating plots."""
@@ -107,7 +101,9 @@ class PlotGeneratorWindow(QWidget):
         }
         self._orig_defaults = self._defaults.copy()
         self._conditions_queue: list[str] = []
+
         self._all_conditions = False
+
 
         self._build_ui()
         # Prepare animation for smooth progress updates
@@ -359,7 +355,13 @@ class PlotGeneratorWindow(QWidget):
     def _on_progress(self, msg: str, processed: int, total: int) -> None:
         if msg:
             self._append_log(msg)
-        value = int(100 * processed / total) if total else 0
+        if self._total_conditions:
+            frac = (self._current_condition - 1) / self._total_conditions
+            if total:
+                frac += processed / total / self._total_conditions
+            value = int(frac * 100)
+        else:
+            value = int(100 * processed / total) if total else 0
         self._animate_progress_to(value)
 
     def _cancel_generation(self) -> None:
@@ -368,6 +370,8 @@ class PlotGeneratorWindow(QWidget):
         if self._thread:
             self._thread.quit()
         self._conditions_queue.clear()
+        self._total_conditions = 0
+        self._current_condition = 0
         self.cancel_btn.setEnabled(False)
         self.gen_btn.setEnabled(True)
         self._append_log("Generation cancelled.")
@@ -378,9 +382,11 @@ class PlotGeneratorWindow(QWidget):
             return
         folder, out_dir, x_min, x_max, y_min, y_max = self._gen_params
         condition = self._conditions_queue.pop(0)
+
         cond_out = Path(out_dir)
         if self._all_conditions:
             cond_out = cond_out / f"{condition} Plots"
+
         self._thread = QThread()
         self._worker = _Worker(
             folder,
@@ -411,6 +417,8 @@ class PlotGeneratorWindow(QWidget):
         self.gen_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self._animate_progress_to(100)
+        self._total_conditions = 0
+        self._current_condition = 0
         out_dir = self.out_edit.text()
         images = []
         try:
@@ -473,6 +481,8 @@ class PlotGeneratorWindow(QWidget):
             ]
         else:
             self._conditions_queue = [self.condition_combo.currentText()]
+        self._total_conditions = len(self._conditions_queue)
+        self._current_condition = 0
         self._gen_params = (folder, out_dir, x_min, x_max, y_min, y_max)
         self._start_next_condition()
 
