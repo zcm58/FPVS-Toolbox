@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QWidget,
     QMenuBar,
-    QMenu,
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -110,17 +109,13 @@ class PlotGeneratorWindow(QWidget):
         menu = QMenuBar()
         menu.setNativeMenuBar(False)
         menu.setStyleSheet(
-            "QMenuBar {background-color: #f0f0f0;}"
+            "QMenuBar {background-color: #e0e0e0;}"
             "QMenuBar::item {padding: 2px 8px; background: transparent;}"
-            "QMenuBar::item:selected {background: #e5e5e5;}"
-            "QMenu {background-color: #f0f0f0;}"
-            "QMenu::item:selected {background-color: #0078d7; color: white;}"
+            "QMenuBar::item:selected {background: #d5d5d5;}"
         )
-        file_menu = QMenu("File", self)
-        menu.addMenu(file_menu)
         action = QAction("Settings", self)
         action.triggered.connect(self._open_settings)
-        file_menu.addAction(action)
+        menu.addAction(action)
         root_layout.addWidget(menu)
 
         layout = QGridLayout()
