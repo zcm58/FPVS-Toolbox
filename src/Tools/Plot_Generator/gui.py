@@ -108,6 +108,14 @@ class PlotGeneratorWindow(QWidget):
     def _build_ui(self) -> None:
         root_layout = QVBoxLayout(self)
         menu = QMenuBar()
+        menu.setNativeMenuBar(False)
+        menu.setStyleSheet(
+            "QMenuBar {background-color: #f0f0f0;}"
+            "QMenuBar::item {padding: 2px 8px; background: transparent;}"
+            "QMenuBar::item:selected {background: #e5e5e5;}"
+            "QMenu {background-color: #f0f0f0;}"
+            "QMenu::item:selected {background-color: #0078d7; color: white;}"
+        )
         file_menu = QMenu("File", self)
         menu.addMenu(file_menu)
         action = QAction("Settings", self)
