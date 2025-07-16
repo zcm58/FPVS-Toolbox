@@ -71,6 +71,31 @@ def get_included_freqs(base_freq, all_col_names, log_func, max_freq=None):
     return [f for f in sorted_numeric_freqs if f not in excluded]
 
 
+def _match_freq_column(columns, freq_value):
+    """Return the column name that corresponds to ``freq_value``.
+
+    This helper attempts to match common frequency formats used in the
+    Excel files (e.g. ``6.0_Hz`` or ``6.0000_Hz``).
+    """
+
+    patterns = [
+        f"{freq_value:.1f}_Hz",
+        f"{freq_value:.2f}_Hz",
+        f"{freq_value:.3f}_Hz",
+        f"{freq_value:.4f}_Hz",
+    ]
+    for pattern in patterns:
+        if pattern in columns:
+            return pattern
+    for col in columns:
+        if isinstance(col, str) and col.endswith("_Hz"):
+            try:
+                if abs(float(col[:-3]) - freq_value) < 1e-4:
+                    return col
+            except ValueError:
+                continue
+    return None
+
 def aggregate_bca_sum(file_path, roi_name, base_freq, log_func):
     try:
         df = pd.read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
@@ -87,7 +112,11 @@ def aggregate_bca_sum(file_path, roi_name, base_freq, log_func):
         if not included_freq_values:
             log_func(f"No freqs to sum for BCA in {file_path}.")
             return np.nan
-        cols_to_sum = [f"{f:.1f}_Hz" for f in included_freq_values if f"{f:.1f}_Hz" in df_roi.columns]
+        cols_to_sum = []
+        for f_val in included_freq_values:
+            col_name = _match_freq_column(df_roi.columns, f_val)
+            if col_name:
+                cols_to_sum.append(col_name)
         if not cols_to_sum:
             log_func(f"No matching BCA freq columns for ROI {roi_name} in {file_path}.")
             return np.nan
@@ -179,7 +208,7 @@ def run_harmonic_check(subject_data, subjects, conditions, selected_metric, mean
             roi_header_printed = False
             sig_count = 0
             for freq_val in included_freq_values:
-                harmonic_col = f"{freq_val:.1f}_Hz"
+                display_col = _match_freq_column(sample_df_cols, freq_val) or f"{freq_val:.1f}_Hz"
                 subj_values = []
                 for pid in subjects:
                     f_path = subject_data.get(pid, {}).get(cond_name)
@@ -194,11 +223,12 @@ def run_harmonic_check(subject_data, subjects, conditions, selected_metric, mean
                         except FileNotFoundError:
                             log_func(f"Error: File not found {f_path} for PID {pid}, Cond {cond_name}.")
                             continue
-                    if harmonic_col not in current_df.columns:
+                    col_name = _match_freq_column(current_df.columns, freq_val)
+                    if not col_name:
                         continue
                     roi_channels = ROIS.get(roi_name)
                     df_roi_metric = current_df.reindex(roi_channels)
-                    mean_val_subj_roi_harmonic = df_roi_metric[harmonic_col].dropna().mean()
+                    mean_val_subj_roi_harmonic = df_roi_metric[col_name].dropna().mean()
                     if not pd.isna(mean_val_subj_roi_harmonic):
                         subj_values.append(mean_val_subj_roi_harmonic)
                 if len(subj_values) >= 3:
@@ -217,14 +247,14 @@ def run_harmonic_check(subject_data, subjects, conditions, selected_metric, mean
                         sig_count += 1
                         p_value_str = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
                         output_lines.append("    -------------------------------------------")
-                        output_lines.append(f"    Harmonic: {harmonic_col} -> SIGNIFICANT RESPONSE")
+                        output_lines.append(f"    Harmonic: {display_col} -> SIGNIFICANT RESPONSE")
                         output_lines.append(f"        Average {selected_metric}: {mean_group:.3f} (based on N={n_subj} subjects)")
                         output_lines.append(f"        Statistical Test: t({df_val}) = {t_stat:.2f}, p-value = {p_value_str}")
                         output_lines.append("    -------------------------------------------")
                         findings.append({
                             'Condition': cond_name,
                             'ROI': roi_name,
-                            'Frequency': harmonic_col,
+                            'Frequency': display_col,
                             'N_Subjects': n_subj,
                             f'Mean_{selected_metric.replace(" ", "_")}' : mean_group,
                             'T_Statistic': t_stat,
