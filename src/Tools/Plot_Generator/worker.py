@@ -351,10 +351,11 @@ class _Worker(QObject):
 
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
-            ax.set_title(roi, fontsize=14)
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
-            fig.suptitle(self.title, fontsize=16, y=0.98)
-            fig.subplots_adjust(left=0.05, right=0.75, top=0.85, bottom=0.10)
+
+            combined_title = f"{self.title}: {roi}"
+            fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
+            fig.tight_layout(rect=[0, 0, 1, 0.95])
             fname = f"{self.condition}_{roi}_{self.metric}.png"
             fig.savefig(self.out_dir / fname, dpi=300, bbox_inches="tight", pad_inches=0.05)
             plt.close(fig)
@@ -440,11 +441,12 @@ class _Worker(QObject):
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             base = self.title or f"{self.condition} vs {self.condition_b}"
-            ax.set_title(roi, fontsize=14)
             ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
-            fig.suptitle(base, fontsize=16, y=0.98)
-            fig.subplots_adjust(left=0.05, right=0.75, top=0.85, bottom=0.10)
+
+            combined_title = f"{base}: {roi}"
+            fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
+            fig.tight_layout(rect=[0, 0, 1, 0.95])
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
             fig.savefig(self.out_dir / fname, dpi=300, bbox_inches="tight", pad_inches=0.05)
             plt.close(fig)

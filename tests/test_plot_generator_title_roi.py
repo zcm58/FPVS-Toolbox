@@ -54,5 +54,5 @@ def test_roi_added_to_title(tmp_path, monkeypatch):
     fig = captured.get("fig")
     assert fig is not None
     ax = fig.axes[0]
-    assert getattr(fig, "_suptitle").get_text() == "Cond"
-    assert ax.get_title() == "Occipital"
+    assert getattr(fig, "_suptitle").get_text() == "Cond: Occipital"
+    assert ax.get_title() == ""
