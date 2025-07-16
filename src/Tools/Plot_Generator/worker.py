@@ -4,10 +4,11 @@ from __future__ import annotations
 import os
 import math
 from pathlib import Path
-from typing import Dict, List, Iterable
+from typing import Dict, List, Iterable, Sequence
 
 import pandas as pd
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -39,6 +40,9 @@ class _Worker(QObject):
         y_max: float,
         out_dir: str,
         stem_color: str = "red",
+        *,
+        oddballs: Sequence[float] | None = None,
+        use_matlab_style: bool = False,
     ) -> None:
         super().__init__()
         self.folder = folder
@@ -57,7 +61,8 @@ class _Worker(QObject):
         self.out_dir = Path(out_dir)
         self.stem_color = stem_color.lower()
         # maintain oddballs attribute for compatibility with older versions
-        self.oddballs: List[float] = []
+        self.oddballs: List[float] = list(oddballs or [])
+        self.use_matlab_style = use_matlab_style
 
     def run(self) -> None:
         try:
@@ -186,6 +191,8 @@ class _Worker(QObject):
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
 
             line_color = self.stem_color
+
+            freq_amp = dict(zip(freqs, amps))
 
             if self.metric == "SNR":
                 stem_vals = amps
