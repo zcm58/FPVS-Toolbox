@@ -40,7 +40,6 @@ class _Worker(QObject):
         self,
         folder: str,
         condition: str,
-        metric: str,
         roi_map: Dict[str, List[str]],
         selected_roi: str,
         title: str,
@@ -62,9 +61,9 @@ class _Worker(QObject):
         super().__init__()
         self.folder = folder
         self.condition = condition
-        self.metric = metric
         self.roi_map = roi_map
         self.selected_roi = selected_roi
+        self.metric = "SNR"
         self.title = title
         self.xlabel = xlabel
         self.ylabel = ylabel
@@ -159,23 +158,20 @@ class _Worker(QObject):
                 overall_total,
             )
             try:
-                if self.metric == "SNR":
-                    xls = pd.ExcelFile(excel_path)
-                    if "FullSNR" in xls.sheet_names:
-                        df = pd.read_excel(xls, sheet_name="FullSNR")
-                    else:
-                        df_amp = pd.read_excel(xls, sheet_name="FFT Amplitude (uV)")
-                        freq_cols_tmp = [
-                            c for c in df_amp.columns if isinstance(c, str) and c.endswith("_Hz")
-                        ]
-                        snr_vals = df_amp[freq_cols_tmp].apply(
-                            calc_snr_matlab, axis=1, result_type="expand"
-                        )
-                        snr_vals.columns = freq_cols_tmp
-                        snr_vals.insert(0, "Electrode", df_amp["Electrode"])
-                        df = snr_vals
+                xls = pd.ExcelFile(excel_path)
+                if "FullSNR" in xls.sheet_names:
+                    df = pd.read_excel(xls, sheet_name="FullSNR")
                 else:
-                    df = pd.read_excel(excel_path, sheet_name="BCA (uV)")
+                    df_amp = pd.read_excel(xls, sheet_name="FFT Amplitude (uV)")
+                    freq_cols_tmp = [
+                        c for c in df_amp.columns if isinstance(c, str) and c.endswith("_Hz")
+                    ]
+                    snr_vals = df_amp[freq_cols_tmp].apply(
+                        calc_snr_matlab, axis=1, result_type="expand"
+                    )
+                    snr_vals.columns = freq_cols_tmp
+                    snr_vals.insert(0, "Electrode", df_amp["Electrode"])
+                    df = snr_vals
             except Exception as e:  # pragma: no cover - simple logging
                 self._emit(f"Failed reading {excel_path.name}: {e}")
                 continue
@@ -287,25 +283,19 @@ class _Worker(QObject):
 
             line_color = self.stem_color
 
-            if self.metric == "SNR":
-                stem_vals = amps
-                cont = ax.stem(
-                    freqs,
-                    stem_vals,
-                    linefmt=line_color,
-                    markerfmt=" ",
-                    basefmt=" ",
-                    bottom=1.0,
-                )
-                cont.markerline.set_label(self.metric)
-                self._emit(
-                    f"Plotted {len(stem_vals)} SNR stems for ROI {roi}", 0, 0
-                )
-            else:
-                ax.plot(freqs, amps, color=line_color, linewidth=1, label=self.metric)
-                self._emit(
-                    f"Plotted continuous line for ROI {roi}", 0, 0
-                )
+            stem_vals = amps
+            cont = ax.stem(
+                freqs,
+                stem_vals,
+                linefmt=line_color,
+                markerfmt=" ",
+                basefmt=" ",
+                bottom=1.0,
+            )
+            cont.markerline.set_label(self.metric)
+            self._emit(
+                f"Plotted {len(stem_vals)} SNR stems for ROI {roi}", 0, 0
+            )
 
             if odd_freqs and not self.use_matlab_style:
                 freq_array = np.array(freqs)

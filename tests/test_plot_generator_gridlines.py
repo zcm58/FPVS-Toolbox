@@ -35,7 +35,6 @@ def test_gridlines_added(tmp_path, monkeypatch):
     worker = module._Worker(
         folder=str(tmp_path),
         condition="Cond",
-        metric="SNR",
         roi_map={"roi": ["Cz"]},
         selected_roi="roi",
         oddballs=[1.0, 2.0],

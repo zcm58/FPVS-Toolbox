@@ -84,7 +84,6 @@ def test_snr_calculated_from_fft(tmp_path, monkeypatch):
     worker = module._Worker(
         folder=str(tmp_path),
         condition="Cond",
-        metric="SNR",
         roi_map={"All": ["Cz", "Pz"]},
         selected_roi="All",
         title="t",

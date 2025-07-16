@@ -92,7 +92,7 @@ class PlotGeneratorWindow(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Generate Plots")
+        self.setWindowTitle("Generate SNR Plots")
         self.roi_map = load_rois_from_settings()
 
         mgr = SettingsManager()
@@ -108,16 +108,12 @@ class PlotGeneratorWindow(QWidget):
             default_out = main_default
         self._defaults = {
             "title_snr": "SNR Plot",
-            "title_bca": "BCA Plot",
             "xlabel": "Frequency (Hz)",
             "ylabel_snr": "SNR",
-            "ylabel_bca": "Baseline-corrected amplitude (µV)",
             "x_min": "0.0",
             "x_max": "10.0",
             "y_min_snr": "0.0",
             "y_max_snr": "3.0",
-            "y_min_bca": "0.0",
-            "y_max_bca": "0.3",
             "input_folder": default_in,
             "output_folder": default_out,
         }
@@ -247,11 +243,6 @@ class PlotGeneratorWindow(QWidget):
         self.condition_b_combo.hide()
 
 
-        self.metric_combo = QComboBox()
-        self.metric_combo.addItems(["SNR", "BCA"])
-        self.metric_combo.setToolTip("Choose which metric to display")
-        self.metric_combo.currentTextChanged.connect(self._metric_changed)
-        params_form.addRow(QLabel("Metric:"), self.metric_combo)
 
         self.roi_combo = QComboBox()
         self.roi_combo.addItems([ALL_ROIS_OPTION] + list(self.roi_map.keys()))
@@ -408,16 +399,6 @@ class PlotGeneratorWindow(QWidget):
         self.overlay_check.toggled.connect(self._check_required)
         self._check_required()
 
-    def _metric_changed(self, metric: str) -> None:
-        if metric == "SNR":
-            self.ylabel_edit.setText(self._defaults["ylabel_snr"])
-            self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
-            self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
-        else:
-            self.ylabel_edit.setText(self._defaults["ylabel_bca"])
-            self.ymin_spin.setValue(float(self._defaults["y_min_bca"]))
-            self.ymax_spin.setValue(float(self._defaults["y_max_bca"]))
-
     def _overlay_toggled(self, checked: bool) -> None:
         self.condition_b_combo.setVisible(checked)
         if checked:
@@ -488,21 +469,15 @@ class PlotGeneratorWindow(QWidget):
 
     def _load_defaults(self) -> None:
         self._defaults = self._orig_defaults.copy()
-        metric = self.metric_combo.currentText()
         self.folder_edit.setText(self._defaults["input_folder"])
         self.out_edit.setText(self._defaults["output_folder"])
         self._populate_conditions(self._defaults["input_folder"])
         self.xlabel_edit.setText(self._defaults["xlabel"])
         self.xmin_spin.setValue(float(self._defaults["x_min"]))
         self.xmax_spin.setValue(float(self._defaults["x_max"]))
-        if metric == "SNR":
-            self.ylabel_edit.setText(self._defaults["ylabel_snr"])
-            self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
-            self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
-        else:
-            self.ylabel_edit.setText(self._defaults["ylabel_bca"])
-            self.ymin_spin.setValue(float(self._defaults["y_min_bca"]))
-            self.ymax_spin.setValue(float(self._defaults["y_max_bca"]))
+        self.ylabel_edit.setText(self._defaults["ylabel_snr"])
+        self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
+        self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
         # Update the chart title field based on the current condition
         self._update_chart_title_state(self.condition_combo.currentText())
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")
@@ -565,7 +540,6 @@ class PlotGeneratorWindow(QWidget):
         self._worker = _Worker(
             folder,
             condition,
-            self.metric_combo.currentText(),
             self.roi_map,
             self.roi_combo.currentText(),
             title,
@@ -657,7 +631,6 @@ class PlotGeneratorWindow(QWidget):
             self._worker = _Worker(
                 folder,
                 cond_a,
-                self.metric_combo.currentText(),
                 self.roi_map,
                 self.roi_combo.currentText(),
                 self.title_edit.text(),
