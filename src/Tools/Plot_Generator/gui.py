@@ -174,7 +174,9 @@ class PlotGeneratorWindow(QWidget):
         self.folder_edit.setText(self._defaults.get("input_folder", ""))
         self.folder_edit.setToolTip("Select the folder containing your Excel sheets.")
         browse = QPushButton("Browse…")
-        browse.setToolTip("Browse for Excel folder")
+        browse.setToolTip(
+            "Select the FOLDER that contains your results excel files"
+        )
         browse.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse.clicked.connect(self._select_folder)
         in_row = QHBoxLayout()
