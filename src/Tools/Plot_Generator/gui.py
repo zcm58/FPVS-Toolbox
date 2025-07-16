@@ -418,6 +418,15 @@ class PlotGeneratorWindow(QWidget):
 
     def _overlay_toggled(self, checked: bool) -> None:
         self.condition_b_combo.setVisible(checked)
+        if checked:
+            self.title_edit.setEnabled(True)
+            self.title_edit.clear()
+            self.title_edit.setPlaceholderText(
+                "Enter base chart name (e.g. Color Response vs Category Response)"
+            )
+        else:
+            # Revert to auto-generation behavior when comparison mode is off
+            self._update_chart_title_state(self.condition_combo.currentText())
 
     def _select_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Excel Folder")
@@ -433,6 +442,12 @@ class PlotGeneratorWindow(QWidget):
 
     def _update_chart_title_state(self, condition: str) -> None:
         """Enable/disable the title field based on the selected condition."""
+        if self.overlay_check.isChecked():
+            self.title_edit.setEnabled(True)
+            self.title_edit.setPlaceholderText(
+                "Enter base chart name (e.g. Color Response vs Category Response)"
+            )
+            return
         if condition == ALL_CONDITIONS_OPTION:
             self.title_edit.setEnabled(False)
             self.title_edit.setPlaceholderText("")

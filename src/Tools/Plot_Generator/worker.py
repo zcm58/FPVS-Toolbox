@@ -384,10 +384,15 @@ class _Worker(QObject):
 
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
-            ax.set_title(f"{self.condition} vs {self.condition_b} — {roi}")
-            ax.legend(loc="upper right", frameon=True)
+            base = self.title or f"{self.condition} vs {self.condition_b}"
+            ax.set_title(f"{base} — {roi}")
+            ax.legend(
+                loc="center left",
+                bbox_to_anchor=(1.02, 0.5),
+                borderaxespad=0,
+            )
             ax.grid(False)
-            fig.tight_layout()
+            fig.tight_layout(rect=[0, 0, 0.85, 1])
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
             fig.savefig(self.out_dir / fname)
             plt.close(fig)
