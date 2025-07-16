@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QMenuBar,
     QDialog,
+    QGridLayout,
     QVBoxLayout,
     QHBoxLayout,
     QStyle,
@@ -136,9 +137,15 @@ class PlotGeneratorWindow(QWidget):
         menu.addAction(action)
         root_layout.addWidget(menu)
 
+        top_widget = QWidget()
+        grid = QGridLayout(top_widget)
+        grid.setSpacing(10)
+        grid.setContentsMargins(10, 10, 10, 10)
+
         file_box = QGroupBox("File I/O")
         file_form = QFormLayout(file_box)
         file_form.setContentsMargins(10, 10, 10, 10)
+        file_form.setSpacing(10)
 
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
@@ -170,11 +177,10 @@ class PlotGeneratorWindow(QWidget):
         out_row.addWidget(open_out)
         file_form.addRow("Save Plots To:", out_row)
 
-        root_layout.addWidget(file_box)
-
         params_box = QGroupBox("Plot Parameters")
         params_form = QFormLayout(params_box)
         params_form.setContentsMargins(10, 10, 10, 10)
+        params_form.setSpacing(10)
 
         self.condition_combo = QComboBox()
         self.condition_combo.setToolTip("Select condition to plot")
@@ -204,17 +210,18 @@ class PlotGeneratorWindow(QWidget):
         self.ylabel_edit.setToolTip("Y-axis label")
         params_form.addRow("Y-axis label:", self.ylabel_edit)
 
-        root_layout.addWidget(params_box)
-
         ranges_box = QGroupBox("Axis Ranges")
         ranges_form = QFormLayout(ranges_box)
         ranges_form.setContentsMargins(10, 10, 10, 10)
+        ranges_form.setSpacing(10)
 
         self.xmin_edit = QLineEdit(self._defaults["x_min"])
         self.xmin_edit.setValidator(QDoubleValidator())
+        self.xmin_edit.setPlaceholderText("Min X")
         self.xmin_edit.setToolTip("Minimum X value")
         self.xmax_edit = QLineEdit(self._defaults["x_max"])
         self.xmax_edit.setValidator(QDoubleValidator())
+        self.xmax_edit.setPlaceholderText("Max X")
         self.xmax_edit.setToolTip("Maximum X value")
         x_row = QHBoxLayout()
         x_row.addWidget(self.xmin_edit)
@@ -224,9 +231,11 @@ class PlotGeneratorWindow(QWidget):
 
         self.ymin_edit = QLineEdit(self._defaults["y_min_snr"])
         self.ymin_edit.setValidator(QDoubleValidator())
+        self.ymin_edit.setPlaceholderText("Min Y")
         self.ymin_edit.setToolTip("Minimum Y value")
         self.ymax_edit = QLineEdit(self._defaults["y_max_snr"])
         self.ymax_edit.setValidator(QDoubleValidator())
+        self.ymax_edit.setPlaceholderText("Max Y")
         self.ymax_edit.setToolTip("Maximum Y value")
         y_row = QHBoxLayout()
         y_row.addWidget(self.ymin_edit)
@@ -234,11 +243,10 @@ class PlotGeneratorWindow(QWidget):
         y_row.addWidget(self.ymax_edit)
         ranges_form.addRow("Y Range:", y_row)
 
-        root_layout.addWidget(ranges_box)
-
         actions_box = QGroupBox("Actions")
         actions_layout = QVBoxLayout(actions_box)
         actions_layout.setContentsMargins(10, 10, 10, 10)
+        actions_layout.setSpacing(10)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -269,9 +277,15 @@ class PlotGeneratorWindow(QWidget):
         )
         actions_layout.addWidget(self.progress_bar)
 
-        root_layout.addWidget(actions_box)
+        grid.addWidget(file_box, 0, 0)
+        grid.addWidget(params_box, 0, 1)
+        grid.addWidget(ranges_box, 1, 0)
+        grid.addWidget(actions_box, 1, 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
 
         splitter = QSplitter(Qt.Vertical)
+        splitter.addWidget(top_widget)
         console_box = QGroupBox("Console")
         console_layout = QVBoxLayout(console_box)
         self.log = QPlainTextEdit()
