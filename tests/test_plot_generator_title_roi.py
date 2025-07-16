@@ -35,7 +35,6 @@ def test_roi_added_to_title(tmp_path, monkeypatch):
     worker = module._Worker(
         folder=str(tmp_path),
         condition="Cond",
-        metric="SNR",
         roi_map={"Occipital": ["Cz"]},
         selected_roi="Occipital",
         title="Cond",

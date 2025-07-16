@@ -1,4 +1,4 @@
-"""PySide6 GUI for generating SNR/BCA line plots from Excel files."""
+"""PySide6 GUI for generating SNR line plots from Excel files."""
 from __future__ import annotations
 
 # Allow running this module directly by ensuring the package root is on sys.path

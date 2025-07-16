@@ -1,4 +1,4 @@
-"""Plot generator tool for creating SNR/BCA line plots."""
+"""Tool for generating SNR line plots."""
 
 from .gui import PlotGeneratorWindow
 from .worker import _Worker

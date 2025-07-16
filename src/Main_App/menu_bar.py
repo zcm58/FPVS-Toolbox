@@ -52,7 +52,7 @@ class AppMenuBar:
         tools_menu.add_command(label="Image Resizer", command=self.app_ref.open_image_resizer)
         tools_menu.add_separator()
         tools_menu.add_command(
-            label="Generate Plots",
+            label="Generate SNR Plots",
             command=self.app_ref.open_plot_generator,
         )
         tools_menu.add_separator()

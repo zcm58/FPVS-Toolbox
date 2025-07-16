@@ -35,7 +35,6 @@ def test_plot_contains_baseline_line(tmp_path, monkeypatch):
     worker = module._Worker(
         folder=str(tmp_path),
         condition="Cond",
-        metric="SNR",
         roi_map={"roi": ["Cz"]},
         selected_roi="roi",
         title="t",
