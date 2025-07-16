@@ -84,7 +84,25 @@ class _Worker(QObject):
     def _emit(self, msg: str, processed: int = 0, total: int = 0) -> None:
         self.progress.emit(msg, processed, total)
 
-    def _collect_data(self, condition: str) -> tuple[List[float], Dict[str, List[float]]]:
+    def _count_excel_files(self, condition: str) -> int:
+        """Return the number of Excel files for a condition."""
+        cond_folder = Path(self.folder) / condition
+        if not cond_folder.is_dir():
+            return 0
+        return sum(
+            1
+            for root, _, files in os.walk(cond_folder)
+            for f in files
+            if f.lower().endswith(".xlsx")
+        )
+
+    def _collect_data(
+        self,
+        condition: str,
+        *,
+        offset: int = 0,
+        total_override: int | None = None,
+    ) -> tuple[List[float], Dict[str, List[float]]]:
         cond_folder = Path(self.folder) / condition
         if not cond_folder.is_dir():
             self._emit(f"Condition folder not found: {cond_folder}")
@@ -103,9 +121,12 @@ class _Worker(QObject):
             return [], {}
 
         total_files = len(excel_files)
+        overall_total = total_override if total_override is not None else total_files
         processed_files = 0
         self._emit(
-            f"Found {total_files} Excel files in {cond_folder}", processed_files, total_files
+            f"Found {total_files} Excel files in {cond_folder}",
+            offset + processed_files,
+            overall_total,
         )
 
         roi_names = (
@@ -121,7 +142,11 @@ class _Worker(QObject):
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return
-            self._emit(f"Reading {excel_path.name}", processed_files, total_files)
+            self._emit(
+                f"Reading {excel_path.name}",
+                offset + processed_files,
+                overall_total,
+            )
             try:
                 if self.metric == "SNR":
                     xls = pd.ExcelFile(excel_path)
@@ -145,13 +170,17 @@ class _Worker(QObject):
                 continue
             freq_cols = [c for c in df.columns if isinstance(c, str) and c.endswith("_Hz")]
             if not freq_cols:
-                self._emit(f"No freq columns in {excel_path.name}", processed_files, total_files)
+                self._emit(
+                    f"No freq columns in {excel_path.name}",
+                    offset + processed_files,
+                    overall_total,
+                )
                 processed_files += 1
                 continue
             self._emit(
                 f"Found {len(freq_cols)} frequency columns in {excel_path.name}",
-                processed_files,
-                total_files,
+                offset + processed_files,
+                overall_total,
             )
 
             freq_pairs: List[tuple[float, str]] = []
@@ -179,10 +208,14 @@ class _Worker(QObject):
                 roi_data[roi].append(means)
 
             processed_files += 1
-            self._emit("", processed_files, total_files)
+            self._emit("", offset + processed_files, overall_total)
 
         if not freqs:
-            self._emit("No frequency data found.", processed_files, total_files)
+            self._emit(
+                "No frequency data found.",
+                offset + processed_files,
+                overall_total,
+            )
             return [], {}
 
         averaged: Dict[str, List[float]] = {}
@@ -200,8 +233,19 @@ class _Worker(QObject):
 
     def _run(self) -> None:
         if self.overlay and self.condition_b:
-            freqs_a, data_a = self._collect_data(self.condition)
-            freqs_b, data_b = self._collect_data(self.condition_b)
+            total_a = self._count_excel_files(self.condition)
+            total_b = self._count_excel_files(self.condition_b)
+            total = total_a + total_b
+            freqs_a, data_a = self._collect_data(
+                self.condition,
+                offset=0,
+                total_override=total,
+            )
+            freqs_b, data_b = self._collect_data(
+                self.condition_b,
+                offset=total_a,
+                total_override=total,
+            )
             if freqs_a and data_a and freqs_b and data_b:
                 self._plot_overlay(freqs_a, data_a, data_b)
             return
