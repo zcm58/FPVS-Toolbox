@@ -203,7 +203,7 @@ class PlotGeneratorWindow(QWidget):
 
         self.condition_combo = QComboBox()
         self.condition_combo.setToolTip("Select the condition to plot")
-        self.condition_combo.currentTextChanged.connect(self._condition_changed)
+        self.condition_combo.currentTextChanged.connect(self._update_chart_title_state)
         params_form.addRow("Condition:", self.condition_combo)
 
         self.metric_combo = QComboBox()
@@ -396,9 +396,19 @@ class PlotGeneratorWindow(QWidget):
         if folder:
             self.out_edit.setText(folder)
 
-    def _condition_changed(self, condition: str) -> None:
-        if condition:
-            self.title_edit.setText(condition)
+    def _update_chart_title_state(self, condition: str) -> None:
+        """Enable/disable the title field based on the selected condition."""
+        if condition == ALL_CONDITIONS_OPTION:
+            self.title_edit.setEnabled(False)
+            self.title_edit.setPlaceholderText("")
+            self.title_edit.setText(
+                "Chart Names Automatically Generated Based on Condition"
+            )
+        else:
+            self.title_edit.setEnabled(True)
+            self.title_edit.setPlaceholderText("e.g. Fruit vs Veg")
+            if condition:
+                self.title_edit.setText(condition)
 
     def _populate_conditions(self, folder: str) -> None:
         self.condition_combo.clear()
@@ -413,7 +423,7 @@ class PlotGeneratorWindow(QWidget):
         if subfolders:
             self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
             self.condition_combo.addItems(subfolders)
-            self._condition_changed(subfolders[0])
+            self._update_chart_title_state(subfolders[0])
 
     def _apply_settings(self) -> None:
         metric = self.metric_combo.currentText()
@@ -515,7 +525,6 @@ class PlotGeneratorWindow(QWidget):
         if self._all_conditions:
             cond_out = cond_out / f"{condition} Plots"
             title = condition
-            self.title_edit.setText(condition)
         else:
             title = self.title_edit.text()
 
