@@ -23,13 +23,16 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
 )
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QDoubleValidator, QColor
+from PySide6.QtWidgets import QColorDialog
 
 from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
 from Main_App.settings_manager import SettingsManager
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from .worker import _Worker
+
+ALL_CONDITIONS_OPTION = "All Conditions"
 
 class _SettingsDialog(QDialog):
     """Dialog for configuring plot options."""
@@ -44,6 +47,10 @@ class _SettingsDialog(QDialog):
         self.combo.addItems(["Red", "Blue", "Green", "Purple"])
         self.combo.setCurrentText(color.capitalize())
         row.addWidget(self.combo)
+        self.custom_color: str | None = None
+        pick = QPushButton("Custom…")
+        pick.clicked.connect(self._choose_custom)
+        row.addWidget(pick)
         layout.addLayout(row)
         btns = QHBoxLayout()
         ok = QPushButton("OK")
@@ -54,7 +61,14 @@ class _SettingsDialog(QDialog):
         btns.addWidget(cancel)
         layout.addLayout(btns)
 
+    def _choose_custom(self) -> None:
+        color = QColorDialog.getColor(QColor(self.combo.currentText()), self)
+        if color.isValid():
+            self.custom_color = color.name()
+
     def selected_color(self) -> str:
+        if self.custom_color:
+            return self.custom_color
         return self.combo.currentText().lower()
 
 class PlotGeneratorWindow(QWidget):
@@ -90,6 +104,8 @@ class PlotGeneratorWindow(QWidget):
             "input_folder": default_in,
             "output_folder": default_out,
         }
+        self._orig_defaults = self._defaults.copy()
+        self._conditions_queue: list[str] = []
 
         self._build_ui()
         # Prepare animation for smooth progress updates
@@ -103,6 +119,7 @@ class PlotGeneratorWindow(QWidget):
 
         self._thread: QThread | None = None
         self._worker: _Worker | None = None
+        self._gen_params: tuple[str, str, float, float, float, float] | None = None
 
     def _build_ui(self) -> None:
         root_layout = QVBoxLayout(self)
@@ -143,6 +160,9 @@ class PlotGeneratorWindow(QWidget):
         browse_out = QPushButton("Browse…")
         browse_out.clicked.connect(self._select_output)
         layout.addWidget(browse_out, row, 2)
+        open_out = QPushButton("Open…")
+        open_out.clicked.connect(self._open_output_folder)
+        layout.addWidget(open_out, row, 3)
         row += 1
 
 
@@ -184,17 +204,21 @@ class PlotGeneratorWindow(QWidget):
 
         layout.addWidget(QLabel("X min:"), row, 0)
         self.xmin_edit = QLineEdit(self._defaults["x_min"])
+        self.xmin_edit.setValidator(QDoubleValidator())
         layout.addWidget(self.xmin_edit, row, 1)
         layout.addWidget(QLabel("X max:"), row, 2)
         self.xmax_edit = QLineEdit(self._defaults["x_max"])
+        self.xmax_edit.setValidator(QDoubleValidator())
         layout.addWidget(self.xmax_edit, row, 3)
         row += 1
 
         layout.addWidget(QLabel("Y min:"), row, 0)
         self.ymin_edit = QLineEdit(self._defaults["y_min_snr"])
+        self.ymin_edit.setValidator(QDoubleValidator())
         layout.addWidget(self.ymin_edit, row, 1)
         layout.addWidget(QLabel("Y max:"), row, 2)
         self.ymax_edit = QLineEdit(self._defaults["y_max_snr"])
+        self.ymax_edit.setValidator(QDoubleValidator())
         layout.addWidget(self.ymax_edit, row, 3)
         row += 1
 
@@ -204,9 +228,17 @@ class PlotGeneratorWindow(QWidget):
         self.save_defaults_btn = QPushButton("Save Defaults")
         self.save_defaults_btn.clicked.connect(self._save_defaults)
         layout.addWidget(self.save_defaults_btn, row, 1)
+        self.load_defaults_btn = QPushButton("Load Defaults")
+        self.load_defaults_btn.clicked.connect(self._load_defaults)
+        layout.addWidget(self.load_defaults_btn, row, 2)
         self.gen_btn = QPushButton("Generate")
         self.gen_btn.clicked.connect(self._generate)
-        layout.addWidget(self.gen_btn, row, 2)
+        layout.addWidget(self.gen_btn, row, 3)
+        row += 1
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._cancel_generation)
+        layout.addWidget(self.cancel_btn, row, 0)
         row += 1
 
         self.progress_bar = QProgressBar()
@@ -257,8 +289,9 @@ class PlotGeneratorWindow(QWidget):
             ]
         except Exception:
             subfolders = []
-        self.condition_combo.addItems(subfolders)
         if subfolders:
+            self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
+            self.condition_combo.addItems(subfolders)
             self._condition_changed(subfolders[0])
 
     def _apply_settings(self) -> None:
@@ -289,6 +322,27 @@ class PlotGeneratorWindow(QWidget):
         self.plot_mgr.save()
         QMessageBox.information(self, "Defaults", "Default folders saved.")
 
+    def _load_defaults(self) -> None:
+        self._defaults = self._orig_defaults.copy()
+        metric = self.metric_combo.currentText()
+        self.folder_edit.setText(self._defaults["input_folder"])
+        self.out_edit.setText(self._defaults["output_folder"])
+        self._populate_conditions(self._defaults["input_folder"])
+        self.xlabel_edit.setText(self._defaults["xlabel"])
+        self.xmin_edit.setText(self._defaults["x_min"])
+        self.xmax_edit.setText(self._defaults["x_max"])
+        if metric == "SNR":
+            self.title_edit.setText(self._defaults["title_snr"])
+            self.ylabel_edit.setText(self._defaults["ylabel_snr"])
+            self.ymin_edit.setText(self._defaults["y_min_snr"])
+            self.ymax_edit.setText(self._defaults["y_max_snr"])
+        else:
+            self.title_edit.setText(self._defaults["title_bca"])
+            self.ylabel_edit.setText(self._defaults["ylabel_bca"])
+            self.ymin_edit.setText(self._defaults["y_min_bca"])
+            self.ymax_edit.setText(self._defaults["y_max_bca"])
+        QMessageBox.information(self, "Defaults", "Settings reset to defaults.")
+
     def _append_log(self, text: str) -> None:
         self.log.appendPlainText(text)
         self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
@@ -305,6 +359,74 @@ class PlotGeneratorWindow(QWidget):
             self._append_log(msg)
         value = int(100 * processed / total) if total else 0
         self._animate_progress_to(value)
+
+    def _cancel_generation(self) -> None:
+        if self._worker:
+            self._worker.stop()
+        if self._thread:
+            self._thread.quit()
+        self._conditions_queue.clear()
+        self.cancel_btn.setEnabled(False)
+        self.gen_btn.setEnabled(True)
+        self._append_log("Generation cancelled.")
+
+    def _start_next_condition(self) -> None:
+        if not self._conditions_queue:
+            self._finish_all()
+            return
+        folder, out_dir, x_min, x_max, y_min, y_max = self._gen_params
+        condition = self._conditions_queue.pop(0)
+        self._thread = QThread()
+        self._worker = _Worker(
+            folder,
+            condition,
+            self.metric_combo.currentText(),
+            self.roi_map,
+            self.roi_combo.currentText(),
+            self.title_edit.text(),
+            self.xlabel_edit.text(),
+            self.ylabel_edit.text(),
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            out_dir,
+            self.stem_color,
+        )
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+        self._thread.finished.connect(self._generation_finished)
+        self._thread.start()
+
+    def _finish_all(self) -> None:
+        self.gen_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self._animate_progress_to(100)
+        out_dir = self.out_edit.text()
+        images = []
+        try:
+            images = list(Path(out_dir).glob("*.png"))
+        except Exception:
+            pass
+        if images:
+            resp = QMessageBox.question(
+                self,
+                "Finished",
+                "Plots have been successfully generated. View plots?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if resp == QMessageBox.Yes:
+                self._open_output_folder()
+        else:
+            QMessageBox.warning(
+                self,
+                "Finished",
+                "No plots were generated. Please check the log for errors.",
+            )
 
     def _generate(self) -> None:
         folder = self.folder_edit.text()
@@ -330,34 +452,18 @@ class PlotGeneratorWindow(QWidget):
             return
 
         self.gen_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
         self.log.clear()
         self._animate_progress_to(0)
-        self._thread = QThread()
-        self._worker = _Worker(
-            folder,
-            self.condition_combo.currentText(),
-            self.metric_combo.currentText(),
-            self.roi_map,
-            self.roi_combo.currentText(),
-            self.title_edit.text(),
-            self.xlabel_edit.text(),
-            self.ylabel_edit.text(),
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            out_dir,
-            self.stem_color,
-
-        )
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.finished.connect(self._generation_finished)
-        self._thread.start()
+        if self.condition_combo.currentText() == ALL_CONDITIONS_OPTION:
+            self._conditions_queue = [
+                self.condition_combo.itemText(i)
+                for i in range(1, self.condition_combo.count())
+            ]
+        else:
+            self._conditions_queue = [self.condition_combo.currentText()]
+        self._gen_params = (folder, out_dir, x_min, x_max, y_min, y_max)
+        self._start_next_condition()
 
     def _open_settings(self) -> None:
         dlg = _SettingsDialog(self, self.stem_color)
@@ -378,28 +484,9 @@ class PlotGeneratorWindow(QWidget):
             subprocess.call(["xdg-open", folder])
 
     def _generation_finished(self) -> None:
-        self.gen_btn.setEnabled(True)
         self._thread = None
         self._worker = None
-        self._animate_progress_to(100)
-        out_dir = self.out_edit.text()
-        images = []
-        try:
-            images = list(Path(out_dir).glob("*.png"))
-        except Exception:
-            pass
-        if images:
-            resp = QMessageBox.question(
-                self,
-                "Finished",
-                "Plots have been successfully generated. View plots?",
-                QMessageBox.Yes | QMessageBox.No,
-            )
-            if resp == QMessageBox.Yes:
-                self._open_output_folder()
-        else:
-            QMessageBox.warning(
-                self,
-                "Finished",
-                "No plots were generated. Please check the log for errors.",
-            )
+        if self._conditions_queue:
+            self._start_next_condition()
+            return
+        self._finish_all()
