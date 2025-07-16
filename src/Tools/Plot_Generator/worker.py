@@ -9,6 +9,7 @@ from typing import Dict, List, Iterable, Sequence
 import pandas as pd
 import matplotlib
 import numpy as np
+from Main_App.settings_manager import SettingsManager
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -193,6 +194,18 @@ class _Worker(QObject):
 
     def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
+        mgr = SettingsManager()
+        harm_str = mgr.get(
+            "loreta",
+            "oddball_harmonics",
+            "1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8",
+        )
+        try:
+            cfg_odds = [float(h) for h in harm_str.replace(";", ",").split(",") if h.strip()]
+        except Exception:
+            cfg_odds = []
+        odd_freqs = self.oddballs if self.oddballs else cfg_odds
+
 
         for roi, amps in roi_data.items():
             if self._stop_requested:
@@ -202,11 +215,9 @@ class _Worker(QObject):
 
             line_color = self.stem_color
 
-            freq_amp = dict(zip(freqs, amps))
-
             if self.metric == "SNR":
                 stem_vals = amps
-                ax.stem(
+                cont = ax.stem(
                     freqs,
                     stem_vals,
                     linefmt=line_color,
@@ -214,28 +225,32 @@ class _Worker(QObject):
                     basefmt=" ",
                     bottom=1.0,
                 )
+                cont.markerline.set_label(self.metric)
                 self._emit(
                     f"Plotted {len(stem_vals)} SNR stems for ROI {roi}", 0, 0
                 )
             else:
-                ax.plot(freqs, amps, color=line_color, linewidth=1)
+                ax.plot(freqs, amps, color=line_color, linewidth=1, label=self.metric)
                 self._emit(
                     f"Plotted continuous line for ROI {roi}", 0, 0
                 )
 
-            mark_x: list[float] = []
-            mark_y: list[float] = []
-            for odd in self.oddballs:
-                amp = freq_amp.get(odd)
-                if amp is None:
-                    amp = float(np.interp([odd], freqs, amps)[0])
-                mark_x.append(odd)
-                mark_y.append(amp)
-
-            if mark_x and not self.use_matlab_style:
-                ax.scatter(mark_x, mark_y, color="blue", zorder=3)
+            if odd_freqs and not self.use_matlab_style:
+                freq_array = np.array(freqs)
+                for idx, odd in enumerate(odd_freqs):
+                    closest = int(np.abs(freq_array - odd).argmin())
+                    label = "Oddball Peaks" if idx == 0 else "_nolegend_"
+                    ax.scatter(
+                        freq_array[closest],
+                        amps[closest],
+                        facecolor="red",
+                        edgecolor="black",
+                        zorder=4,
+                        label=label,
+                    )
+                ax.legend()
                 self._emit(
-                    f"Marked {len(mark_x)} oddball points on ROI {roi}", 0, 0
+                    f"Marked {len(odd_freqs)} oddball points on ROI {roi}", 0, 0
                 )
 
             tick_start = math.ceil(self.x_min)
