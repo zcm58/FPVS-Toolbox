@@ -386,6 +386,7 @@ class PlotGeneratorWindow(QWidget):
             return
         folder, out_dir, x_min, x_max, y_min, y_max = self._gen_params
         condition = self._conditions_queue.pop(0)
+        self._current_condition += 1
 
         cond_out = Path(out_dir)
         if self._all_conditions:
