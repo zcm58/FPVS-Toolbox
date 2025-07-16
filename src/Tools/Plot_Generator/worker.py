@@ -42,8 +42,11 @@ class _Worker(QObject):
         out_dir: str,
         stem_color: str = "red",
         *,
+        condition_b: str | None = None,
+        stem_color_b: str = "blue",
         oddballs: Sequence[float] | None = None,
         use_matlab_style: bool = False,
+        overlay: bool = False,
     ) -> None:
         super().__init__()
         self.folder = folder
@@ -61,6 +64,9 @@ class _Worker(QObject):
 
         self.out_dir = Path(out_dir)
         self.stem_color = stem_color.lower()
+        self.stem_color_b = stem_color_b.lower()
+        self.condition_b = condition_b
+        self.overlay = overlay
         # maintain oddballs attribute for compatibility with older versions
         self.oddballs: List[float] = list(oddballs or [])
         self.use_matlab_style = use_matlab_style
@@ -78,11 +84,11 @@ class _Worker(QObject):
     def _emit(self, msg: str, processed: int = 0, total: int = 0) -> None:
         self.progress.emit(msg, processed, total)
 
-    def _run(self) -> None:
-        cond_folder = Path(self.folder) / self.condition
+    def _collect_data(self, condition: str) -> tuple[List[float], Dict[str, List[float]]]:
+        cond_folder = Path(self.folder) / condition
         if not cond_folder.is_dir():
             self._emit(f"Condition folder not found: {cond_folder}")
-            return
+            return [], {}
 
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -94,7 +100,7 @@ class _Worker(QObject):
         ]
         if not excel_files:
             self._emit("No Excel files found for condition.")
-            return
+            return [], {}
 
         total_files = len(excel_files)
         processed_files = 0
@@ -177,7 +183,7 @@ class _Worker(QObject):
 
         if not freqs:
             self._emit("No frequency data found.", processed_files, total_files)
-            return
+            return [], {}
 
         averaged: Dict[str, List[float]] = {}
         for roi, rows in roi_data.items():
@@ -188,9 +194,21 @@ class _Worker(QObject):
 
         if not averaged:
             self._emit("No ROI data to plot.")
+            return [], {}
+
+        return list(freqs), averaged
+
+    def _run(self) -> None:
+        if self.overlay and self.condition_b:
+            freqs_a, data_a = self._collect_data(self.condition)
+            freqs_b, data_b = self._collect_data(self.condition_b)
+            if freqs_a and data_a and freqs_b and data_b:
+                self._plot_overlay(freqs_a, data_a, data_b)
             return
 
-        self._plot(list(freqs), averaged)
+        freqs, averaged = self._collect_data(self.condition)
+        if freqs and averaged:
+            self._plot(freqs, averaged)
 
     def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
@@ -283,6 +301,94 @@ class _Worker(QObject):
             ax.grid(False)
             fig.tight_layout()
             fname = f"{self.condition}_{roi}_{self.metric}.png"
+            fig.savefig(self.out_dir / fname)
+            plt.close(fig)
+            self._emit(f"Saved {fname}")
+
+    def _plot_overlay(
+        self,
+        freqs: List[float],
+        data_a: Dict[str, List[float]],
+        data_b: Dict[str, List[float]],
+    ) -> None:
+        plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
+        mgr = SettingsManager()
+        harm_str = mgr.get(
+            "loreta",
+            "oddball_harmonics",
+            "1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8",
+        )
+        try:
+            cfg_odds = [float(h) for h in harm_str.replace(";", ",").split(",") if h.strip()]
+        except Exception:
+            cfg_odds = []
+        odd_freqs = self.oddballs if self.oddballs else cfg_odds
+
+        for roi in data_a:
+            if self._stop_requested:
+                self._emit("Generation cancelled by user.")
+                return
+            fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
+            ax.plot(freqs, data_a[roi], color=self.stem_color, label=self.condition)
+            ax.plot(freqs, data_b.get(roi, []), color=self.stem_color_b, label=self.condition_b)
+
+            if odd_freqs:
+                freq_array = np.array(freqs)
+                for idx, odd in enumerate(odd_freqs):
+                    closest = int(np.abs(freq_array - odd).argmin())
+                    val_a = data_a[roi][closest]
+                    val_b = data_b[roi][closest]
+                    label_a = "A-Peaks" if idx == 0 else "_nolegend_"
+                    label_b = "B-Peaks" if idx == 0 else "_nolegend_"
+                    ax.scatter(
+                        freq_array[closest],
+                        val_a,
+                        marker="o",
+                        facecolor=self.stem_color,
+                        edgecolor="black",
+                        zorder=4,
+                        label=label_a,
+                    )
+                    ax.scatter(
+                        freq_array[closest],
+                        val_b,
+                        marker="^",
+                        facecolor=self.stem_color_b,
+                        edgecolor="black",
+                        zorder=4,
+                        label=label_b,
+                    )
+            tick_start = math.ceil(self.x_min)
+            tick_end = math.floor(self.x_max) + 1
+            ax.set_xticks(range(tick_start, tick_end))
+            ax.set_xlim(self.x_min, self.x_max)
+            ax.set_ylim(self.y_min, self.y_max)
+            for fx in range(max(1, tick_start), tick_end):
+                ax.axvline(
+                    fx,
+                    color="lightgray",
+                    linestyle="--",
+                    linewidth=0.5,
+                    zorder=0,
+                )
+            for y in range(math.ceil(self.y_min), math.floor(self.y_max) + 1):
+                ax.axhline(
+                    y,
+                    color="lightgray",
+                    linestyle="--",
+                    linewidth=0.5,
+                    zorder=0,
+                )
+            if not self.use_matlab_style:
+                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+
+            ax.set_xlabel(self.xlabel)
+            ax.set_ylabel(self.ylabel)
+            ax.set_title(f"{self.condition} vs {self.condition_b} — {roi}")
+            ax.legend(loc="upper right", frameon=True)
+            ax.grid(False)
+            fig.tight_layout()
+            fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
             fig.savefig(self.out_dir / fname)
             plt.close(fig)
             self._emit(f"Saved {fname}")

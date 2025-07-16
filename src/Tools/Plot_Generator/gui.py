@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QDoubleSpinBox,
+    QCheckBox,
     QStyle,
     QSizePolicy,
 )
@@ -44,17 +45,27 @@ ALL_CONDITIONS_OPTION = "All Conditions"
 class _SettingsDialog(QDialog):
     """Dialog for configuring plot options."""
 
-    def __init__(self, parent: QWidget, color: str) -> None:
+    def __init__(self, parent: QWidget, color_a: str, color_b: str) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
         layout = QVBoxLayout(self)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Stem Plot Line Color:"))
-        self.current_color = color
-        pick = QPushButton("Custom…")
-        pick.clicked.connect(self._choose_custom)
-        row.addWidget(pick)
-        layout.addLayout(row)
+
+        row_a = QHBoxLayout()
+        row_a.addWidget(QLabel("Condition A Color:"))
+        self.color_a = color_a
+        pick_a = QPushButton("Custom…")
+        pick_a.clicked.connect(lambda: self._choose_custom("a"))
+        row_a.addWidget(pick_a)
+        layout.addLayout(row_a)
+
+        row_b = QHBoxLayout()
+        row_b.addWidget(QLabel("Condition B Color:"))
+        self.color_b = color_b
+        pick_b = QPushButton("Custom…")
+        pick_b.clicked.connect(lambda: self._choose_custom("b"))
+        row_b.addWidget(pick_b)
+        layout.addLayout(row_b)
+
         btns = QHBoxLayout()
         ok = QPushButton("OK")
         ok.clicked.connect(self.accept)
@@ -64,13 +75,17 @@ class _SettingsDialog(QDialog):
         btns.addWidget(cancel)
         layout.addLayout(btns)
 
-    def _choose_custom(self) -> None:
-        color = QColorDialog.getColor(QColor(self.current_color), self)
+    def _choose_custom(self, which: str) -> None:
+        init = self.color_a if which == "a" else self.color_b
+        color = QColorDialog.getColor(QColor(init), self)
         if color.isValid():
-            self.current_color = color.name()
+            if which == "a":
+                self.color_a = color.name()
+            else:
+                self.color_b = color.name()
 
-    def selected_color(self) -> str:
-        return self.current_color.lower()
+    def selected_colors(self) -> tuple[str, str]:
+        return self.color_a.lower(), self.color_b.lower()
 
 class PlotGeneratorWindow(QWidget):
     """Main window for generating plots."""
@@ -85,6 +100,7 @@ class PlotGeneratorWindow(QWidget):
         default_in = self.plot_mgr.get("paths", "input_folder", "")
         default_out = self.plot_mgr.get("paths", "output_folder", "")
         self.stem_color = self.plot_mgr.get_stem_color()
+        self.stem_color_b = self.plot_mgr.get_second_color()
         main_default = mgr.get("paths", "output_folder", "")
         if not default_in:
             default_in = main_default
@@ -218,6 +234,15 @@ class PlotGeneratorWindow(QWidget):
 
         self.condition_combo.currentTextChanged.connect(self._update_chart_title_state)
         params_form.addRow("Condition:", self.condition_combo)
+
+        self.overlay_check = QCheckBox("Overlay Comparison")
+        self.overlay_check.toggled.connect(self._overlay_toggled)
+        params_form.addRow("", self.overlay_check)
+
+        self.condition_b_combo = QComboBox()
+        self.condition_b_combo.setToolTip("Select second condition")
+        params_form.addRow("Condition B:", self.condition_b_combo)
+        self.condition_b_combo.hide()
 
 
         self.metric_combo = QComboBox()
@@ -377,6 +402,8 @@ class PlotGeneratorWindow(QWidget):
         self.folder_edit.textChanged.connect(self._check_required)
         self.out_edit.textChanged.connect(self._check_required)
         self.condition_combo.currentTextChanged.connect(self._check_required)
+        self.condition_b_combo.currentTextChanged.connect(self._check_required)
+        self.overlay_check.toggled.connect(self._check_required)
         self._check_required()
 
     def _metric_changed(self, metric: str) -> None:
@@ -388,6 +415,9 @@ class PlotGeneratorWindow(QWidget):
             self.ylabel_edit.setText(self._defaults["ylabel_bca"])
             self.ymin_spin.setValue(float(self._defaults["y_min_bca"]))
             self.ymax_spin.setValue(float(self._defaults["y_max_bca"]))
+
+    def _overlay_toggled(self, checked: bool) -> None:
+        self.condition_b_combo.setVisible(checked)
 
     def _select_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Excel Folder")
@@ -417,6 +447,7 @@ class PlotGeneratorWindow(QWidget):
 
     def _populate_conditions(self, folder: str) -> None:
         self.condition_combo.clear()
+        self.condition_b_combo.clear()
         try:
             subfolders = [
                 f.name
@@ -428,6 +459,7 @@ class PlotGeneratorWindow(QWidget):
         if subfolders:
             self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
             self.condition_combo.addItems(subfolders)
+            self.condition_b_combo.addItems(subfolders)
             # Default to "All Conditions" which auto-generates chart names
             self._update_chart_title_state(ALL_CONDITIONS_OPTION)
 
@@ -596,26 +628,64 @@ class PlotGeneratorWindow(QWidget):
         self.cancel_btn.setEnabled(True)
         self.log.clear()
         self._animate_progress_to(0)
-        self._all_conditions = (
-            self.condition_combo.currentText() == ALL_CONDITIONS_OPTION
-        )
-        if self._all_conditions:
-            self._conditions_queue = [
-                self.condition_combo.itemText(i)
-                for i in range(1, self.condition_combo.count())
-            ]
+        if self.overlay_check.isChecked():
+            cond_a = self.condition_combo.currentText()
+            cond_b = self.condition_b_combo.currentText()
+            if cond_a == cond_b:
+                QMessageBox.critical(self, "Error", "Select two different conditions.")
+                self.gen_btn.setEnabled(True)
+                self.cancel_btn.setEnabled(False)
+                return
+            self._thread = QThread()
+            self._worker = _Worker(
+                folder,
+                cond_a,
+                self.metric_combo.currentText(),
+                self.roi_map,
+                self.roi_combo.currentText(),
+                self.title_edit.text(),
+                self.xlabel_edit.text(),
+                self.ylabel_edit.text(),
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                out_dir,
+                self.stem_color,
+                condition_b=cond_b,
+                stem_color_b=self.stem_color_b,
+                overlay=True,
+            )
+            self._worker.moveToThread(self._thread)
+            self._thread.started.connect(self._worker.run)
+            self._worker.progress.connect(self._on_progress)
+            self._worker.finished.connect(self._thread.quit)
+            self._worker.finished.connect(self._worker.deleteLater)
+            self._thread.finished.connect(self._thread.deleteLater)
+            self._thread.finished.connect(self._finish_all)
+            self._thread.start()
         else:
-            self._conditions_queue = [self.condition_combo.currentText()]
-        self._total_conditions = len(self._conditions_queue)
-        self._current_condition = 0
-        self._gen_params = (folder, out_dir, x_min, x_max, y_min, y_max)
-        self._start_next_condition()
+            self._all_conditions = (
+                self.condition_combo.currentText() == ALL_CONDITIONS_OPTION
+            )
+            if self._all_conditions:
+                self._conditions_queue = [
+                    self.condition_combo.itemText(i)
+                    for i in range(1, self.condition_combo.count())
+                ]
+            else:
+                self._conditions_queue = [self.condition_combo.currentText()]
+            self._total_conditions = len(self._conditions_queue)
+            self._current_condition = 0
+            self._gen_params = (folder, out_dir, x_min, x_max, y_min, y_max)
+            self._start_next_condition()
 
     def _open_settings(self) -> None:
-        dlg = _SettingsDialog(self, self.stem_color)
+        dlg = _SettingsDialog(self, self.stem_color, self.stem_color_b)
         if dlg.exec():
-            self.stem_color = dlg.selected_color()
+            self.stem_color, self.stem_color_b = dlg.selected_colors()
             self.plot_mgr.set_stem_color(self.stem_color)
+            self.plot_mgr.set_second_color(self.stem_color_b)
             self.plot_mgr.save()
 
     def _open_output_folder(self) -> None:
@@ -635,6 +705,8 @@ class PlotGeneratorWindow(QWidget):
             and self.out_edit.text()
             and self.condition_combo.currentText()
         )
+        if self.overlay_check.isChecked():
+            required = required and bool(self.condition_b_combo.currentText())
         self.gen_btn.setEnabled(required)
 
     def _generation_finished(self) -> None:
