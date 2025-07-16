@@ -123,6 +123,8 @@ class PlotGeneratorWindow(QWidget):
         }
         self._orig_defaults = self._defaults.copy()
         self._conditions_queue: list[str] = []
+        self._total_conditions = 0
+        self._current_condition = 0
 
         self._all_conditions = False
 
