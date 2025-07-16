@@ -44,11 +44,7 @@ class _SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         row = QHBoxLayout()
         row.addWidget(QLabel("Stem Plot Line Color:"))
-        self.combo = QComboBox()
-        self.combo.addItems(["Red", "Blue", "Green", "Purple"])
-        self.combo.setCurrentText(color.capitalize())
-        row.addWidget(self.combo)
-        self.custom_color: str | None = None
+        self.current_color = color
         pick = QPushButton("Custom…")
         pick.clicked.connect(self._choose_custom)
         row.addWidget(pick)
@@ -63,14 +59,12 @@ class _SettingsDialog(QDialog):
         layout.addLayout(btns)
 
     def _choose_custom(self) -> None:
-        color = QColorDialog.getColor(QColor(self.combo.currentText()), self)
+        color = QColorDialog.getColor(QColor(self.current_color), self)
         if color.isValid():
-            self.custom_color = color.name()
+            self.current_color = color.name()
 
     def selected_color(self) -> str:
-        if self.custom_color:
-            return self.custom_color
-        return self.combo.currentText().lower()
+        return self.current_color.lower()
 
 class PlotGeneratorWindow(QWidget):
     """Main window for generating plots."""
