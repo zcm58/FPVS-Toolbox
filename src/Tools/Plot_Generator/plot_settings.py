@@ -20,6 +20,8 @@ class PlotSettingsManager:
         self.ini_path = ini_path or _default_ini_path()
         self.config = configparser.ConfigParser()
         self.load()
+        if not self.config.has_option("plot", "stem_color"):
+            self.set("plot", "stem_color", "red")
 
     def load(self) -> None:
         self.config.read(self.ini_path)
@@ -32,7 +34,15 @@ class PlotSettingsManager:
     def get(self, section: str, option: str, fallback: str = '') -> str:
         return self.config.get(section, option, fallback=fallback)
 
+    def get_stem_color(self) -> str:
+        """Return the stored stem plot line color."""
+        return self.get("plot", "stem_color", "red")
+
     def set(self, section: str, option: str, value: str) -> None:
         if not self.config.has_section(section):
             self.config.add_section(section)
         self.config.set(section, option, value)
+
+    def set_stem_color(self, color: str) -> None:
+        """Persist the stem plot line color."""
+        self.set("plot", "stem_color", color)
