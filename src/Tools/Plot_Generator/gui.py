@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QDoubleSpinBox,
     QStyle,
+    QSizePolicy,
 )
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import QColorDialog
@@ -163,9 +164,9 @@ class PlotGeneratorWindow(QWidget):
 
         file_box = QGroupBox("File I/O")
         self._style_box(file_box)
-        file_form = QFormLayout(file_box)
-        file_form.setContentsMargins(10, 10, 10, 10)
-        file_form.setSpacing(8)
+        file_layout = QVBoxLayout(file_box)
+        file_layout.setContentsMargins(8, 8, 8, 8)
+        file_layout.setSpacing(6)
 
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
@@ -177,11 +178,11 @@ class PlotGeneratorWindow(QWidget):
         browse.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse.clicked.connect(self._select_folder)
         in_row = QHBoxLayout()
-        in_row.setContentsMargins(10, 10, 10, 10)
-        in_row.setSpacing(8)
-        in_row.addWidget(self.folder_edit)
+        in_row.addWidget(QLabel("Excel Files Folder:"))
         in_row.addWidget(browse)
-        file_form.addRow(QLabel("Excel Files Folder"), in_row)
+        file_layout.addLayout(in_row)
+        self.folder_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        file_layout.addWidget(self.folder_edit)
 
         self.out_edit = QLineEdit()
         self.out_edit.setReadOnly(True)
@@ -193,16 +194,16 @@ class PlotGeneratorWindow(QWidget):
         browse_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse_out.clicked.connect(self._select_output)
         open_out = QPushButton("Open…")
-        open_out.setToolTip("Open output folder")
+        open_out.setToolTip("Open save directory")
         open_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         open_out.clicked.connect(self._open_output_folder)
         out_row = QHBoxLayout()
-        out_row.setContentsMargins(10, 10, 10, 10)
-        out_row.setSpacing(8)
-        out_row.addWidget(self.out_edit)
+        out_row.addWidget(QLabel("Save Plots To:"))
         out_row.addWidget(browse_out)
         out_row.addWidget(open_out)
-        file_form.addRow(QLabel("Save Plots To"), out_row)
+        file_layout.addLayout(out_row)
+        self.out_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        file_layout.addWidget(self.out_edit)
 
         params_box = QGroupBox("Plot Parameters")
         self._style_box(params_box)
