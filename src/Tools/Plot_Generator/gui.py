@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QComboBox,
-    QPlainTextEdit,
+    QTextEdit,
     QProgressBar,
     QSplitter,
     QWidget,
@@ -25,9 +25,10 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QVBoxLayout,
     QHBoxLayout,
+    QDoubleSpinBox,
     QStyle,
 )
-from PySide6.QtGui import QAction, QDoubleValidator, QColor
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import QColorDialog
 
 
@@ -125,6 +126,9 @@ class PlotGeneratorWindow(QWidget):
 
     def _build_ui(self) -> None:
         root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(10, 10, 10, 10)
+        root_layout.setSpacing(8)
+
         menu = QMenuBar()
         menu.setNativeMenuBar(False)
         menu.setStyleSheet(
@@ -139,135 +143,179 @@ class PlotGeneratorWindow(QWidget):
 
         top_widget = QWidget()
         grid = QGridLayout(top_widget)
-        grid.setSpacing(10)
+        grid.setSpacing(8)
         grid.setContentsMargins(10, 10, 10, 10)
 
         file_box = QGroupBox("File I/O")
+        file_font = file_box.font()
+        file_font.setPointSize(10)
+        file_font.setBold(True)
+        file_box.setFont(file_font)
         file_form = QFormLayout(file_box)
         file_form.setContentsMargins(10, 10, 10, 10)
-        file_form.setSpacing(10)
+        file_form.setSpacing(8)
 
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
+        self.folder_edit.setPlaceholderText("Select the folder containing your Excel sheets")
         self.folder_edit.setText(self._defaults.get("input_folder", ""))
-        self.folder_edit.setToolTip("Folder containing Excel result files")
+        self.folder_edit.setToolTip("Select the folder containing your Excel sheets.")
         browse = QPushButton("Browse…")
-        browse.setToolTip("Select input folder")
+        browse.setToolTip("Browse for Excel folder")
         browse.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse.clicked.connect(self._select_folder)
         in_row = QHBoxLayout()
+        in_row.setContentsMargins(10, 10, 10, 10)
+        in_row.setSpacing(8)
         in_row.addWidget(self.folder_edit)
         in_row.addWidget(browse)
-        file_form.addRow("Excel Files Folder:", in_row)
+        file_form.addRow("Excel Files Folder", in_row)
 
         self.out_edit = QLineEdit()
         self.out_edit.setReadOnly(True)
+        self.out_edit.setPlaceholderText("Folder where plots will be saved")
         self.out_edit.setText(self._defaults.get("output_folder", ""))
-        self.out_edit.setToolTip("Folder to save generated plots")
+        self.out_edit.setToolTip("Folder where plots will be saved")
         browse_out = QPushButton("Browse…")
-        browse_out.setToolTip("Select output folder")
+        browse_out.setToolTip("Browse for output folder")
         browse_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse_out.clicked.connect(self._select_output)
         open_out = QPushButton("Open…")
         open_out.setToolTip("Open output folder")
+        open_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         open_out.clicked.connect(self._open_output_folder)
         out_row = QHBoxLayout()
+        out_row.setContentsMargins(10, 10, 10, 10)
+        out_row.setSpacing(8)
         out_row.addWidget(self.out_edit)
         out_row.addWidget(browse_out)
         out_row.addWidget(open_out)
-        file_form.addRow("Save Plots To:", out_row)
+        file_form.addRow("Save Plots To", out_row)
 
         params_box = QGroupBox("Plot Parameters")
+        params_font = params_box.font()
+        params_font.setPointSize(10)
+        params_font.setBold(True)
+        params_box.setFont(params_font)
         params_form = QFormLayout(params_box)
         params_form.setContentsMargins(10, 10, 10, 10)
-        params_form.setSpacing(10)
+        params_form.setSpacing(8)
 
         self.condition_combo = QComboBox()
-        self.condition_combo.setToolTip("Select condition to plot")
+        self.condition_combo.setToolTip("Select the condition to plot")
         self.condition_combo.currentTextChanged.connect(self._condition_changed)
         params_form.addRow("Condition:", self.condition_combo)
 
         self.metric_combo = QComboBox()
         self.metric_combo.addItems(["SNR", "BCA"])
-        self.metric_combo.setToolTip("Metric to plot")
+        self.metric_combo.setToolTip("Choose which metric to display")
         self.metric_combo.currentTextChanged.connect(self._metric_changed)
         params_form.addRow("Metric:", self.metric_combo)
 
         self.roi_combo = QComboBox()
         self.roi_combo.addItems([ALL_ROIS_OPTION] + list(self.roi_map.keys()))
-        self.roi_combo.setToolTip("Region of interest")
+        self.roi_combo.setToolTip("Select the region of interest")
         params_form.addRow("ROI:", self.roi_combo)
 
         self.title_edit = QLineEdit(self._defaults["title_snr"])
-        self.title_edit.setToolTip("Chart title")
+        self.title_edit.setPlaceholderText("e.g. Fruit vs Veg")
+        self.title_edit.setToolTip("Title shown on the plot")
         params_form.addRow("Chart title:", self.title_edit)
 
         self.xlabel_edit = QLineEdit(self._defaults["xlabel"])
-        self.xlabel_edit.setToolTip("X-axis label")
+        self.xlabel_edit.setPlaceholderText("e.g. Frequency (Hz)")
+        self.xlabel_edit.setToolTip("Label for the X axis")
         params_form.addRow("X-axis label:", self.xlabel_edit)
 
         self.ylabel_edit = QLineEdit(self._defaults["ylabel_snr"])
-        self.ylabel_edit.setToolTip("Y-axis label")
+        self.ylabel_edit.setPlaceholderText("Metric units")
+        self.ylabel_edit.setToolTip("Label for the Y axis")
         params_form.addRow("Y-axis label:", self.ylabel_edit)
 
         ranges_box = QGroupBox("Axis Ranges")
+        ranges_font = ranges_box.font()
+        ranges_font.setPointSize(10)
+        ranges_font.setBold(True)
+        ranges_box.setFont(ranges_font)
         ranges_form = QFormLayout(ranges_box)
         ranges_form.setContentsMargins(10, 10, 10, 10)
-        ranges_form.setSpacing(10)
+        ranges_form.setSpacing(8)
 
-        self.xmin_edit = QLineEdit(self._defaults["x_min"])
-        self.xmin_edit.setValidator(QDoubleValidator())
-        self.xmin_edit.setPlaceholderText("Min X")
-        self.xmin_edit.setToolTip("Minimum X value")
-        self.xmax_edit = QLineEdit(self._defaults["x_max"])
-        self.xmax_edit.setValidator(QDoubleValidator())
-        self.xmax_edit.setPlaceholderText("Max X")
-        self.xmax_edit.setToolTip("Maximum X value")
+        self.xmin_spin = QDoubleSpinBox()
+        self.xmin_spin.setRange(-9999.0, 9999.0)
+        self.xmin_spin.setDecimals(2)
+        self.xmin_spin.setSingleStep(0.1)
+        self.xmin_spin.setSuffix(" Hz")
+        self.xmin_spin.setValue(float(self._defaults["x_min"]))
+        self.xmin_spin.setToolTip("Minimum X frequency")
+        self.xmax_spin = QDoubleSpinBox()
+        self.xmax_spin.setRange(-9999.0, 9999.0)
+        self.xmax_spin.setDecimals(2)
+        self.xmax_spin.setSingleStep(0.1)
+        self.xmax_spin.setSuffix(" Hz")
+        self.xmax_spin.setValue(float(self._defaults["x_max"]))
+        self.xmax_spin.setToolTip("Maximum X frequency")
         x_row = QHBoxLayout()
-        x_row.addWidget(self.xmin_edit)
+        x_row.setContentsMargins(10, 10, 10, 10)
+        x_row.setSpacing(8)
+        x_row.addWidget(self.xmin_spin)
         x_row.addWidget(QLabel("to"))
-        x_row.addWidget(self.xmax_edit)
+        x_row.addWidget(self.xmax_spin)
         ranges_form.addRow("X Range:", x_row)
 
-        self.ymin_edit = QLineEdit(self._defaults["y_min_snr"])
-        self.ymin_edit.setValidator(QDoubleValidator())
-        self.ymin_edit.setPlaceholderText("Min Y")
-        self.ymin_edit.setToolTip("Minimum Y value")
-        self.ymax_edit = QLineEdit(self._defaults["y_max_snr"])
-        self.ymax_edit.setValidator(QDoubleValidator())
-        self.ymax_edit.setPlaceholderText("Max Y")
-        self.ymax_edit.setToolTip("Maximum Y value")
+        self.ymin_spin = QDoubleSpinBox()
+        self.ymin_spin.setRange(-9999.0, 9999.0)
+        self.ymin_spin.setDecimals(2)
+        self.ymin_spin.setSingleStep(0.1)
+        self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
+        self.ymin_spin.setToolTip("Minimum Y value")
+        self.ymax_spin = QDoubleSpinBox()
+        self.ymax_spin.setRange(-9999.0, 9999.0)
+        self.ymax_spin.setDecimals(2)
+        self.ymax_spin.setSingleStep(0.1)
+        self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
+        self.ymax_spin.setToolTip("Maximum Y value")
         y_row = QHBoxLayout()
-        y_row.addWidget(self.ymin_edit)
+        y_row.setContentsMargins(10, 10, 10, 10)
+        y_row.setSpacing(8)
+        y_row.addWidget(self.ymin_spin)
         y_row.addWidget(QLabel("to"))
-        y_row.addWidget(self.ymax_edit)
+        y_row.addWidget(self.ymax_spin)
         ranges_form.addRow("Y Range:", y_row)
 
         actions_box = QGroupBox("Actions")
+        actions_font = actions_box.font()
+        actions_font.setPointSize(10)
+        actions_font.setBold(True)
+        actions_box.setFont(actions_font)
         actions_layout = QVBoxLayout(actions_box)
         actions_layout.setContentsMargins(10, 10, 10, 10)
-        actions_layout.setSpacing(10)
+        actions_layout.setSpacing(8)
 
         btn_row = QHBoxLayout()
-        btn_row.addStretch()
+        btn_row.setContentsMargins(10, 10, 10, 10)
+        btn_row.setSpacing(8)
         self.apply_btn = QPushButton("Apply Settings")
+        self.apply_btn.setToolTip("Apply current settings")
         self.apply_btn.clicked.connect(self._apply_settings)
         self.save_defaults_btn = QPushButton("Save Defaults")
+        self.save_defaults_btn.setToolTip("Save current folders as defaults")
         self.save_defaults_btn.clicked.connect(self._save_defaults)
         self.load_defaults_btn = QPushButton("Load Defaults")
+        self.load_defaults_btn.setToolTip("Restore original defaults")
         self.load_defaults_btn.clicked.connect(self._load_defaults)
         self.gen_btn = QPushButton("Generate")
+        self.gen_btn.setToolTip("Start plot generation")
         self.gen_btn.clicked.connect(self._generate)
+        self.gen_btn.setEnabled(False)
         self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setToolTip("Cancel generation")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel_generation)
-        for w in (
-            self.apply_btn,
-            self.save_defaults_btn,
-            self.load_defaults_btn,
-            self.gen_btn,
-            self.cancel_btn,
-        ):
+        for w in (self.apply_btn, self.save_defaults_btn, self.load_defaults_btn):
+            btn_row.addWidget(w)
+        btn_row.addStretch()
+        for w in (self.gen_btn, self.cancel_btn):
             btn_row.addWidget(w)
         actions_layout.addLayout(btn_row)
 
@@ -282,15 +330,39 @@ class PlotGeneratorWindow(QWidget):
         grid.addWidget(ranges_box, 1, 0)
         grid.addWidget(actions_box, 1, 1)
         grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(1, 2)
 
         splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(top_widget)
-        console_box = QGroupBox("Console")
+
+        console_box = QGroupBox()
+        console_font = console_box.font()
+        console_font.setPointSize(10)
+        console_font.setBold(True)
+        console_box.setFont(console_font)
         console_layout = QVBoxLayout(console_box)
-        self.log = QPlainTextEdit()
+        console_layout.setContentsMargins(10, 10, 10, 10)
+        console_layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(10, 10, 10, 10)
+        header.setSpacing(8)
+        label = QLabel("Log Output")
+        label.setStyleSheet("color: gray;")
+        header.addWidget(label)
+        header.addStretch()
+        clear_btn = QPushButton()
+        clear_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogResetButton))
+        clear_btn.setFixedSize(18, 18)
+        clear_btn.setToolTip("Clear log")
+        clear_btn.clicked.connect(lambda: self.log.clear())
+        header.addWidget(clear_btn)
+        console_layout.addLayout(header)
+
+        self.log = QTextEdit()
         self.log.setReadOnly(True)
         console_layout.addWidget(self.log)
+
         splitter.addWidget(console_box)
         root_layout.addWidget(splitter)
 
@@ -305,12 +377,12 @@ class PlotGeneratorWindow(QWidget):
     def _metric_changed(self, metric: str) -> None:
         if metric == "SNR":
             self.ylabel_edit.setText(self._defaults["ylabel_snr"])
-            self.ymin_edit.setText(self._defaults["y_min_snr"])
-            self.ymax_edit.setText(self._defaults["y_max_snr"])
+            self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
+            self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
         else:
             self.ylabel_edit.setText(self._defaults["ylabel_bca"])
-            self.ymin_edit.setText(self._defaults["y_min_bca"])
-            self.ymax_edit.setText(self._defaults["y_max_bca"])
+            self.ymin_spin.setValue(float(self._defaults["y_min_bca"]))
+            self.ymax_spin.setValue(float(self._defaults["y_max_bca"]))
 
     def _select_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Excel Folder")
@@ -348,17 +420,17 @@ class PlotGeneratorWindow(QWidget):
         if metric == "SNR":
             self._defaults["title_snr"] = self.title_edit.text()
             self._defaults["ylabel_snr"] = self.ylabel_edit.text()
-            self._defaults["y_min_snr"] = self.ymin_edit.text()
-            self._defaults["y_max_snr"] = self.ymax_edit.text()
+            self._defaults["y_min_snr"] = str(self.ymin_spin.value())
+            self._defaults["y_max_snr"] = str(self.ymax_spin.value())
         else:
             self._defaults["title_bca"] = self.title_edit.text()
             self._defaults["ylabel_bca"] = self.ylabel_edit.text()
-            self._defaults["y_min_bca"] = self.ymin_edit.text()
-            self._defaults["y_max_bca"] = self.ymax_edit.text()
+            self._defaults["y_min_bca"] = str(self.ymin_spin.value())
+            self._defaults["y_max_bca"] = str(self.ymax_spin.value())
 
         self._defaults["xlabel"] = self.xlabel_edit.text()
-        self._defaults["x_min"] = self.xmin_edit.text()
-        self._defaults["x_max"] = self.xmax_edit.text()
+        self._defaults["x_min"] = str(self.xmin_spin.value())
+        self._defaults["x_max"] = str(self.xmax_spin.value())
 
         self._defaults["input_folder"] = self.folder_edit.text()
         self._defaults["output_folder"] = self.out_edit.text()
@@ -378,22 +450,22 @@ class PlotGeneratorWindow(QWidget):
         self.out_edit.setText(self._defaults["output_folder"])
         self._populate_conditions(self._defaults["input_folder"])
         self.xlabel_edit.setText(self._defaults["xlabel"])
-        self.xmin_edit.setText(self._defaults["x_min"])
-        self.xmax_edit.setText(self._defaults["x_max"])
+        self.xmin_spin.setValue(float(self._defaults["x_min"]))
+        self.xmax_spin.setValue(float(self._defaults["x_max"]))
         if metric == "SNR":
             self.title_edit.setText(self._defaults["title_snr"])
             self.ylabel_edit.setText(self._defaults["ylabel_snr"])
-            self.ymin_edit.setText(self._defaults["y_min_snr"])
-            self.ymax_edit.setText(self._defaults["y_max_snr"])
+            self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
+            self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
         else:
             self.title_edit.setText(self._defaults["title_bca"])
             self.ylabel_edit.setText(self._defaults["ylabel_bca"])
-            self.ymin_edit.setText(self._defaults["y_min_bca"])
-            self.ymax_edit.setText(self._defaults["y_max_bca"])
+            self.ymin_spin.setValue(float(self._defaults["y_min_bca"]))
+            self.ymax_spin.setValue(float(self._defaults["y_max_bca"]))
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")
 
     def _append_log(self, text: str) -> None:
-        self.log.appendPlainText(text)
+        self.log.append(text)
         self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
 
     def _animate_progress_to(self, value: int) -> None:
@@ -519,10 +591,10 @@ class PlotGeneratorWindow(QWidget):
             QMessageBox.critical(self, "Error", "No condition selected.")
             return
         try:
-            x_min = float(self.xmin_edit.text())
-            x_max = float(self.xmax_edit.text())
-            y_min = float(self.ymin_edit.text())
-            y_max = float(self.ymax_edit.text())
+            x_min = self.xmin_spin.value()
+            x_max = self.xmax_spin.value()
+            y_min = self.ymin_spin.value()
+            y_max = self.ymax_spin.value()
         except ValueError:
             QMessageBox.critical(self, "Error", "Invalid axis limits.")
             return
