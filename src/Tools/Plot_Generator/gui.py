@@ -107,6 +107,8 @@ class PlotGeneratorWindow(QWidget):
         }
         self._orig_defaults = self._defaults.copy()
         self._conditions_queue: list[str] = []
+        self._total_conditions = 0
+        self._current_condition = 0
 
         self._build_ui()
         # Prepare animation for smooth progress updates
@@ -358,7 +360,13 @@ class PlotGeneratorWindow(QWidget):
     def _on_progress(self, msg: str, processed: int, total: int) -> None:
         if msg:
             self._append_log(msg)
-        value = int(100 * processed / total) if total else 0
+        if self._total_conditions:
+            frac = (self._current_condition - 1) / self._total_conditions
+            if total:
+                frac += processed / total / self._total_conditions
+            value = int(frac * 100)
+        else:
+            value = int(100 * processed / total) if total else 0
         self._animate_progress_to(value)
 
     def _cancel_generation(self) -> None:
@@ -367,6 +375,8 @@ class PlotGeneratorWindow(QWidget):
         if self._thread:
             self._thread.quit()
         self._conditions_queue.clear()
+        self._total_conditions = 0
+        self._current_condition = 0
         self.cancel_btn.setEnabled(False)
         self.gen_btn.setEnabled(True)
         self._append_log("Generation cancelled.")
@@ -377,6 +387,7 @@ class PlotGeneratorWindow(QWidget):
             return
         folder, out_dir, x_min, x_max, y_min, y_max = self._gen_params
         condition = self._conditions_queue.pop(0)
+        self._current_condition = self._total_conditions - len(self._conditions_queue)
         self._thread = QThread()
         self._worker = _Worker(
             folder,
@@ -407,6 +418,8 @@ class PlotGeneratorWindow(QWidget):
         self.gen_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self._animate_progress_to(100)
+        self._total_conditions = 0
+        self._current_condition = 0
         out_dir = self.out_edit.text()
         images = []
         try:
@@ -463,6 +476,8 @@ class PlotGeneratorWindow(QWidget):
             ]
         else:
             self._conditions_queue = [self.condition_combo.currentText()]
+        self._total_conditions = len(self._conditions_queue)
+        self._current_condition = 0
         self._gen_params = (folder, out_dir, x_min, x_max, y_min, y_max)
         self._start_next_condition()
 
