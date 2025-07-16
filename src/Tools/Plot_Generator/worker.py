@@ -18,6 +18,17 @@ from PySide6.QtCore import QObject, Signal
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 
+# Global plotting style applied after imports
+plt.rcParams.update(
+    {
+        "font.family": "serif",
+        "font.size": 12,
+        "lines.linewidth": 1.5,
+        "xtick.major.size": 6,
+        "ytick.major.size": 6,
+    }
+)
+
 
 class _Worker(QObject):
     """Worker to process Excel files and generate plots."""
@@ -255,7 +266,6 @@ class _Worker(QObject):
             self._plot(freqs, averaged)
 
     def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
-        plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
         mgr = SettingsManager()
         harm_str = mgr.get(
             "loreta",
@@ -273,7 +283,7 @@ class _Worker(QObject):
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return
-            fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
+            fig, ax = plt.subplots(figsize=(12, 4))
 
             line_color = self.stem_color
 
@@ -310,7 +320,7 @@ class _Worker(QObject):
                         zorder=4,
                         label=label,
                     )
-                ax.legend()
+                ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
                 self._emit(
                     f"Marked {len(odd_freqs)} oddball points on ROI {roi}", 0, 0
                 )
@@ -337,15 +347,16 @@ class _Worker(QObject):
                     zorder=0,
                 )
             if not self.use_matlab_style:
-                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
 
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
-            ax.set_title(f"{self.title}: {roi}")
-            ax.grid(False)
-            fig.tight_layout()
+            ax.set_title(roi, fontsize=14)
+            ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
+            fig.suptitle(self.title, fontsize=16, y=0.98)
+            fig.subplots_adjust(left=0.05, right=0.75, top=0.85, bottom=0.10)
             fname = f"{self.condition}_{roi}_{self.metric}.png"
-            fig.savefig(self.out_dir / fname)
+            fig.savefig(self.out_dir / fname, dpi=300, bbox_inches="tight", pad_inches=0.05)
             plt.close(fig)
             self._emit(f"Saved {fname}")
 
@@ -372,7 +383,7 @@ class _Worker(QObject):
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return
-            fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
+            fig, ax = plt.subplots(figsize=(12, 4))
             ax.plot(freqs, data_a[roi], color=self.stem_color, label=self.condition)
             ax.plot(freqs, data_b.get(roi, []), color=self.stem_color_b, label=self.condition_b)
 
@@ -424,20 +435,17 @@ class _Worker(QObject):
                     zorder=0,
                 )
             if not self.use_matlab_style:
-                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+                ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
 
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             base = self.title or f"{self.condition} vs {self.condition_b}"
-            ax.set_title(f"{base} — {roi}")
-            ax.legend(
-                loc="center left",
-                bbox_to_anchor=(1.02, 0.5),
-                borderaxespad=0,
-            )
-            ax.grid(False)
-            fig.tight_layout(rect=[0, 0, 0.85, 1])
+            ax.set_title(roi, fontsize=14)
+            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
+            ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
+            fig.suptitle(base, fontsize=16, y=0.98)
+            fig.subplots_adjust(left=0.05, right=0.75, top=0.85, bottom=0.10)
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
-            fig.savefig(self.out_dir / fname)
+            fig.savefig(self.out_dir / fname, dpi=300, bbox_inches="tight", pad_inches=0.05)
             plt.close(fig)
             self._emit(f"Saved {fname}")
