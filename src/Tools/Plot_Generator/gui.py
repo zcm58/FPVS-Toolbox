@@ -107,6 +107,7 @@ class PlotGeneratorWindow(QWidget):
         }
         self._orig_defaults = self._defaults.copy()
         self._conditions_queue: list[str] = []
+        self._all_conditions = False
 
         self._build_ui()
         # Prepare animation for smooth progress updates
@@ -377,6 +378,9 @@ class PlotGeneratorWindow(QWidget):
             return
         folder, out_dir, x_min, x_max, y_min, y_max = self._gen_params
         condition = self._conditions_queue.pop(0)
+        cond_out = Path(out_dir)
+        if self._all_conditions:
+            cond_out = cond_out / f"{condition} Plots"
         self._thread = QThread()
         self._worker = _Worker(
             folder,
@@ -391,7 +395,7 @@ class PlotGeneratorWindow(QWidget):
             x_max,
             y_min,
             y_max,
-            out_dir,
+            str(cond_out),
             self.stem_color,
         )
         self._worker.moveToThread(self._thread)
@@ -410,7 +414,10 @@ class PlotGeneratorWindow(QWidget):
         out_dir = self.out_edit.text()
         images = []
         try:
-            images = list(Path(out_dir).glob("*.png"))
+            if self._all_conditions:
+                images = list(Path(out_dir).rglob("*.png"))
+            else:
+                images = list(Path(out_dir).glob("*.png"))
         except Exception:
             pass
         if images:
@@ -456,7 +463,10 @@ class PlotGeneratorWindow(QWidget):
         self.cancel_btn.setEnabled(True)
         self.log.clear()
         self._animate_progress_to(0)
-        if self.condition_combo.currentText() == ALL_CONDITIONS_OPTION:
+        self._all_conditions = (
+            self.condition_combo.currentText() == ALL_CONDITIONS_OPTION
+        )
+        if self._all_conditions:
             self._conditions_queue = [
                 self.condition_combo.itemText(i)
                 for i in range(1, self.condition_combo.count())
