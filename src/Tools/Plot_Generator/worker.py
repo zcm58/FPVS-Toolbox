@@ -63,12 +63,16 @@ class _Worker(QObject):
         # maintain oddballs attribute for compatibility with older versions
         self.oddballs: List[float] = list(oddballs or [])
         self.use_matlab_style = use_matlab_style
+        self._stop_requested = False
 
     def run(self) -> None:
         try:
             self._run()
         finally:
             self.finished.emit()
+
+    def stop(self) -> None:
+        self._stop_requested = True
 
     def _emit(self, msg: str, processed: int = 0, total: int = 0) -> None:
         self.progress.emit(msg, processed, total)
@@ -107,6 +111,9 @@ class _Worker(QObject):
         freqs: Iterable[float] | None = None
 
         for excel_path in excel_files:
+            if self._stop_requested:
+                self._emit("Generation cancelled by user.")
+                return
             self._emit(f"Reading {excel_path.name}", processed_files, total_files)
             try:
                 if self.metric == "SNR":
@@ -188,6 +195,9 @@ class _Worker(QObject):
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
 
         for roi, amps in roi_data.items():
+            if self._stop_requested:
+                self._emit("Generation cancelled by user.")
+                return
             fig, ax = plt.subplots(figsize=(8, 3), dpi=300)
 
             line_color = self.stem_color
