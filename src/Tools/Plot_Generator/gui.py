@@ -126,6 +126,12 @@ class PlotGeneratorWindow(QWidget):
 
 
         self._build_ui()
+        self._overlay_width_anim = QPropertyAnimation(self.overlay_container, b"maximumWidth")
+        self._overlay_width_anim.setDuration(200)
+        self._overlay_opacity_anim = QPropertyAnimation(self.overlay_container, b"windowOpacity")
+        self._overlay_opacity_anim.setDuration(200)
+        self.overlay_container.setMaximumWidth(0)
+        self.overlay_container.setWindowOpacity(0.0)
         # Prepare animation for smooth progress updates
         self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
         self._progress_anim.setDuration(200)
@@ -229,18 +235,43 @@ class PlotGeneratorWindow(QWidget):
 
         self.condition_combo = QComboBox()
         self.condition_combo.setToolTip("Select the condition to plot")
-
         self.condition_combo.currentTextChanged.connect(self._update_chart_title_state)
-        params_form.addRow("Condition:", self.condition_combo)
+
+        self.color_a_btn = QPushButton()
+        self.color_a_btn.setFixedSize(20, 20)
+        self.color_a_btn.setStyleSheet(f"background-color: {self.stem_color};")
+        self.color_a_btn.setToolTip("Color for Condition A")
+        self.color_a_btn.clicked.connect(lambda: self._choose_color("a"))
+
+        self.condition_b_combo = QComboBox()
+        self.condition_b_combo.setToolTip("Select second condition")
+
+        self.color_b_btn = QPushButton()
+        self.color_b_btn.setFixedSize(20, 20)
+        self.color_b_btn.setStyleSheet(f"background-color: {self.stem_color_b};")
+        self.color_b_btn.setToolTip("Color for Condition B")
+        self.color_b_btn.clicked.connect(lambda: self._choose_color("b"))
+
+        cond_row = QHBoxLayout()
+        cond_row.setSpacing(6)
+        cond_row.addWidget(QLabel("Condition A"))
+        cond_row.addWidget(self.condition_combo)
+        cond_row.addWidget(self.color_a_btn)
+        self.overlay_container = QWidget()
+        oc_layout = QHBoxLayout(self.overlay_container)
+        oc_layout.setContentsMargins(0, 0, 0, 0)
+        oc_layout.setSpacing(6)
+        self.vs_label = QLabel("vs")
+        oc_layout.addWidget(self.vs_label)
+        oc_layout.addWidget(QLabel("Condition B"))
+        oc_layout.addWidget(self.condition_b_combo)
+        oc_layout.addWidget(self.color_b_btn)
+        cond_row.addWidget(self.overlay_container)
+        params_form.addRow(cond_row)
 
         self.overlay_check = QCheckBox("Overlay Comparison")
         self.overlay_check.toggled.connect(self._overlay_toggled)
         params_form.addRow("", self.overlay_check)
-
-        self.condition_b_combo = QComboBox()
-        self.condition_b_combo.setToolTip("Select second condition")
-        params_form.addRow("Condition B:", self.condition_b_combo)
-        self.condition_b_combo.hide()
 
 
 
@@ -400,7 +431,22 @@ class PlotGeneratorWindow(QWidget):
         self._check_required()
 
     def _overlay_toggled(self, checked: bool) -> None:
-        self.condition_b_combo.setVisible(checked)
+        for anim in (self._overlay_width_anim, self._overlay_opacity_anim):
+            anim.stop()
+        if checked:
+            end_width = self.overlay_container.sizeHint().width()
+            self.overlay_container.setVisible(True)
+            self._overlay_width_anim.setStartValue(self.overlay_container.maximumWidth())
+            self._overlay_width_anim.setEndValue(end_width)
+            self._overlay_opacity_anim.setStartValue(self.overlay_container.windowOpacity())
+            self._overlay_opacity_anim.setEndValue(1.0)
+        else:
+            self._overlay_width_anim.setStartValue(self.overlay_container.maximumWidth())
+            self._overlay_width_anim.setEndValue(0)
+            self._overlay_opacity_anim.setStartValue(self.overlay_container.windowOpacity())
+            self._overlay_opacity_anim.setEndValue(0.0)
+        self._overlay_width_anim.start()
+        self._overlay_opacity_anim.start()
         if checked:
             self.title_edit.setEnabled(True)
             self.title_edit.clear()
@@ -422,6 +468,20 @@ class PlotGeneratorWindow(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if folder:
             self.out_edit.setText(folder)
+
+    def _choose_color(self, which: str) -> None:
+        init = self.stem_color if which == "a" else self.stem_color_b
+        color = QColorDialog.getColor(QColor(init), self)
+        if color.isValid():
+            if which == "a":
+                self.stem_color = color.name()
+                self.color_a_btn.setStyleSheet(f"background-color: {self.stem_color};")
+                self.plot_mgr.set_stem_color(self.stem_color)
+            else:
+                self.stem_color_b = color.name()
+                self.color_b_btn.setStyleSheet(f"background-color: {self.stem_color_b};")
+                self.plot_mgr.set_second_color(self.stem_color_b)
+            self.plot_mgr.save()
 
     def _update_chart_title_state(self, condition: str) -> None:
         """Enable/disable the title field based on the selected condition."""
