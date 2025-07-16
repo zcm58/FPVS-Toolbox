@@ -199,7 +199,7 @@ class _Worker(QObject):
                 ax.stem(
                     freqs,
                     stem_vals,
-                    linefmt="red",
+                    linefmt=line_color,
                     markerfmt=" ",
                     basefmt=" ",
                     bottom=1.0,
