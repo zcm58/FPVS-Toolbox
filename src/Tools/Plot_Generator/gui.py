@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QWidget,
     QMenuBar,
     QDialog,
-    QGridLayout,
     QVBoxLayout,
     QHBoxLayout,
     QDoubleSpinBox,
@@ -177,10 +176,8 @@ class PlotGeneratorWindow(QWidget):
         menu.addAction(action)
         root_layout.addWidget(menu)
 
-        top_widget = QWidget()
-        grid = QGridLayout(top_widget)
-        grid.setSpacing(8)
-        grid.setContentsMargins(10, 10, 10, 10)
+        controls_splitter = QSplitter(Qt.Horizontal)
+        controls_splitter.setContentsMargins(0, 0, 0, 0)
 
         file_box = QGroupBox("File I/O")
         self._style_box(file_box)
@@ -379,15 +376,26 @@ class PlotGeneratorWindow(QWidget):
         )
         actions_layout.addWidget(self.progress_bar)
 
-        grid.addWidget(file_box, 0, 0)
-        grid.addWidget(params_box, 0, 1)
-        grid.addWidget(ranges_box, 1, 0)
-        grid.addWidget(actions_box, 1, 1)
-        grid.setColumnStretch(0, 2)
-        grid.setColumnStretch(1, 1)
+        left_container = QWidget()
+        left_layout = QVBoxLayout(left_container)
+        left_layout.setContentsMargins(10, 10, 10, 10)
+        left_layout.setSpacing(8)
+        left_layout.addWidget(file_box)
+        left_layout.addWidget(ranges_box)
+
+        right_container = QWidget()
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(10, 10, 10, 10)
+        right_layout.setSpacing(8)
+        right_layout.addWidget(params_box)
+        right_layout.addWidget(actions_box)
+
+        controls_splitter.addWidget(left_container)
+        controls_splitter.addWidget(right_container)
+        controls_splitter.setSizes([600, 300])
 
         splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(top_widget)
+        splitter.addWidget(controls_splitter)
 
         console_box = QGroupBox()
         self._style_box(console_box)
@@ -418,6 +426,7 @@ class PlotGeneratorWindow(QWidget):
         console_layout.addWidget(self.log)
 
         splitter.addWidget(console_box)
+        splitter.setSizes([500, 200])
         root_layout.addWidget(splitter)
 
         root_layout.setSpacing(10)
