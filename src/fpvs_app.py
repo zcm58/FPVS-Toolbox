@@ -415,7 +415,8 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
     # --- Validation Methods ---
     def _validate_numeric_input(self, P):
-        if P == "" or P == "-":
+        if P in ("", "-", "ID", "Numerical ID"):
+            # Ignore placeholder text to prevent spurious error chimes
             return True
         try:
             float(P)
@@ -426,7 +427,8 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             return False
 
     def _validate_integer_input(self, P):
-        if P == "":
+        if P in ("", "-", "ID", "Numerical ID"):
+            # Ignore placeholder text to prevent spurious error chimes
             return True
         try:
             int(P)
