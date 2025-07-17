@@ -216,8 +216,12 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
         # Automatically check for updates without blocking the UI
         try:
+            # Run the automatic update check silently to avoid any system
+            # notification sounds during startup. Results are still logged
+            # and the user can manually trigger a visible check from the
+            # "File" menu if desired.
             update_manager.check_for_updates_async(
-                self, silent=False, notify_if_no_update=False
+                self, silent=True, notify_if_no_update=False
             )
         except Exception as e:
             self.log(f"Auto update check failed: {e}")
@@ -417,6 +421,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             float(P)
             return True
         except ValueError:
+            self.debug(f"Validation failed for numeric input: '{P}'")
             self.bell()
             return False
 
@@ -427,6 +432,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             int(P)
             return True
         except ValueError:
+            self.debug(f"Validation failed for integer input: '{P}'")
             self.bell()
             return False
 

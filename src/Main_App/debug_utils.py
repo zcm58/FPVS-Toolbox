@@ -1,6 +1,7 @@
 import logging
 
 from .settings_manager import SettingsManager
+from tkinter import messagebox
 
 import mne
 
@@ -47,3 +48,21 @@ def configure_logging(debug_enabled: bool, log_file: str | None = None) -> None:
 def get_settings() -> SettingsManager:
     """Return a :class:`SettingsManager` instance."""
     return SettingsManager()
+
+
+def install_messagebox_logger(debug_enabled: bool) -> None:
+    """Wrap tkinter messagebox functions to emit debug logs when called."""
+    if not debug_enabled:
+        return
+
+    logger = logging.getLogger(__name__)
+
+    def _wrap(func):
+        def inner(*args, **kwargs):
+            logger.debug("messagebox.%s called args=%s kwargs=%s", func.__name__, args, kwargs)
+            return func(*args, **kwargs)
+        return inner
+
+    for name in ("showerror", "showinfo", "showwarning", "askyesno"):
+        if hasattr(messagebox, name):
+            setattr(messagebox, name, _wrap(getattr(messagebox, name)))
