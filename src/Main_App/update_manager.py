@@ -49,6 +49,7 @@ def check_for_updates_async(app, silent=True, notify_if_no_update=True):
 def _check_for_updates(app, silent=True, notify_if_no_update=True):
     """Fetch release info and schedule any UI dialogs on the main thread."""
     app.log("Checking for updates...")
+    app.debug(f"Update check started (silent={silent}, notify_if_no_update={notify_if_no_update})")
     try:
         resp = requests.get(FPVS_TOOLBOX_UPDATE_API, timeout=5)
         resp.raise_for_status()
@@ -67,6 +68,7 @@ def _check_for_updates(app, silent=True, notify_if_no_update=True):
                     f"Update {latest} available. Use 'Check for Updates' in the File menu to update."
                 )
             else:
+                app.debug("Displaying update available prompt")
                 def prompt():
                     if messagebox.askyesno(
                         "Update Available",
@@ -81,6 +83,7 @@ def _check_for_updates(app, silent=True, notify_if_no_update=True):
                 app.log("No update available.")
             else:
                 if notify_if_no_update:
+                    app.debug("Displaying 'Up to Date' info dialog")
                     app.after(0, lambda: messagebox.showinfo(
                         "Up to Date",
                         f"You are running the latest version ({FPVS_TOOLBOX_VERSION}).",
@@ -88,6 +91,7 @@ def _check_for_updates(app, silent=True, notify_if_no_update=True):
     except Exception as e:
         app.log(f"Update check failed: {e}")
         if not silent:
+            app.debug("Displaying update failure error dialog")
             app.after(0, lambda err=e: messagebox.showerror("Update Check Failed", str(err)))
 
 

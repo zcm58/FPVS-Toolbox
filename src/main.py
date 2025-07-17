@@ -12,7 +12,7 @@ except Exception:
     pass
 
 from fpvs_app import FPVSApp
-from Main_App.debug_utils import configure_logging, get_settings
+from Main_App.debug_utils import configure_logging, get_settings, install_messagebox_logger
 import multiprocessing
 import sys
 
@@ -33,7 +33,9 @@ def main() -> None:
         return
 
     settings = get_settings()
-    configure_logging(settings.debug_enabled())
+    debug = settings.debug_enabled()
+    configure_logging(debug)
+    install_messagebox_logger(debug)
     app = FPVSApp()
     app.mainloop()
 
