@@ -421,6 +421,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             float(P)
             return True
         except ValueError:
+            self.debug(f"Validation failed for numeric input: '{P}'")
             self.bell()
             return False
 
@@ -431,6 +432,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
             int(P)
             return True
         except ValueError:
+            self.debug(f"Validation failed for integer input: '{P}'")
             self.bell()
             return False
 
