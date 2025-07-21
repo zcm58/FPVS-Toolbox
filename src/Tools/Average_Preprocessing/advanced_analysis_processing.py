@@ -1,5 +1,6 @@
 # ruff: noqa: F401,F403,F405
 from .advanced_analysis_base import *  # noqa: F401,F403,F405
+from .advanced_analysis_base import _external_post_process_actual
 class AdvancedAnalysisProcessingMixin:
         def _update_start_processing_button_state(self):
             all_groups_valid_and_saved = False
