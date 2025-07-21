@@ -2,7 +2,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6 import QtWidgets
 
-
 class MainWindow(QtWidgets.QMainWindow):
     """Minimal window displaying a blank label."""
 
@@ -11,7 +10,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("FPVS Toolbox")
 
         label = QtWidgets.QLabel("")
-        label.setAlignment(Qt.AlignCenter)
+
+        label.setAlignment(QtWidgets.Qt.AlignmentFlag.AlignCenter)
 
 
         central = QtWidgets.QWidget()
