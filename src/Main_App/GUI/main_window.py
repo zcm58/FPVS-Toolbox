@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(grp_proc)
 
         # Load saved processing options
-        mode = self.settings.get("processing", "mode", "single").lower()
+        mode = self.settings.get("processing", "mode", "batch").lower()
         if mode == "batch":
             self.rb_batch.setChecked(True)
         else:
