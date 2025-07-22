@@ -209,6 +209,9 @@ class MainWindow(QMainWindow):
         self.btn_add_row.clicked.connect(lambda: self.add_event_row())
         self.btn_detect.clicked.connect(self.detect_trigger_ids)
 
+        # Sync the select button label with the current mode
+        self._update_select_button_text()
+
     # ------------------------------------------------------------------
     def log(self, message: str, level: int = logging.INFO) -> None:
         ts = pd.Timestamp.now().strftime("%H:%M:%S.%f")[:-3]
@@ -225,6 +228,14 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, mode: str) -> None:
         self.settings.set("processing", "mode", mode)
         self.settings.save()
+        self._update_select_button_text()
+
+    def _update_select_button_text(self) -> None:
+        """Update the label of the EEG selection button based on the mode."""
+        if self.rb_batch.isChecked():
+            self.btn_open_eeg.setText("Select Input Folder…")
+        else:
+            self.btn_open_eeg.setText("Select .BDF File…")
 
     # ------------------------------------------------------------------
     def open_settings_window(self) -> None:
@@ -293,15 +304,39 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def select_eeg_file(self) -> None:  # pragma: no cover - GUI stub
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select EEG File",
-            self.settings.get("paths", "data_folder", ""),
-            "EEG Files (*.bdf *.set);;All Files (*)",
-        )
-        if paths:
-            self.data_paths = paths
-            self.log(f"Selected {len(paths)} file(s)")
+        """Prompt the user to select a single .BDF file or an input folder."""
+        if self.rb_batch.isChecked():
+            folder = QFileDialog.getExistingDirectory(
+                self,
+                "Select Input Folder",
+                self.settings.get("paths", "data_folder", ""),
+            )
+            if folder:
+                bdf_files = sorted(Path(folder).glob("*.bdf"))
+                if bdf_files:
+                    self.data_paths = [str(p) for p in bdf_files]
+                    self.log(
+                        f"Selected folder: {folder}, Found {len(bdf_files)} '.bdf' file(s)."
+                    )
+                else:
+                    self.log(f"No '.bdf' files found in {folder}.")
+                    QMessageBox.warning(
+                        self, "No Files Found", f"No '.bdf' files found in:\n{folder}"
+                    )
+            else:
+                self.log("No folder selected.")
+        else:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select EEG File",
+                self.settings.get("paths", "data_folder", ""),
+                "BDF Files (*.bdf);;All Files (*)",
+            )
+            if file_path:
+                self.data_paths = [file_path]
+                self.log(f"Selected file: {Path(file_path).name}")
+            else:
+                self.log("No file selected.")
 
     def select_output_folder(self) -> None:  # pragma: no cover - GUI stub
         folder = QFileDialog.getExistingDirectory(
