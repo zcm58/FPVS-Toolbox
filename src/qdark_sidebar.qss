@@ -2,15 +2,15 @@ QWidget#sidebar {
   background-color: #212121;
 }
 QWidget#sidebar QToolButton {
-  color: #EEEEEE;
+  color: #FFFFFF;
   background: transparent;
   border: none;
   padding: 12px 16px;
+  qproperty-iconSize: 24px 24px;
   text-align: left;
-  font: 11pt "Segoe UI";
 }
 QWidget#sidebar QToolButton:hover {
-  background-color: #333333;
+  background-color: rgba(255,255,255,0.1);
 }
 QWidget#sidebar QToolButton:checked {
   background-color: #FF9800;

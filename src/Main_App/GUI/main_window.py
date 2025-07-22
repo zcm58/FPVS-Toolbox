@@ -24,8 +24,8 @@ from PySide6.QtWidgets import (
     QToolButton,
     QSizePolicy,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 import logging
 import pandas as pd
 from pathlib import Path
@@ -228,6 +228,20 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
+        def white_icon(name: str) -> QIcon:
+            icon = QIcon.fromTheme(name)
+            if icon.isNull():
+                return icon
+            pm = icon.pixmap(24, 24)
+            tinted = QPixmap(pm.size())
+            tinted.fill(Qt.transparent)
+            painter = QPainter(tinted)
+            painter.drawPixmap(0, 0, pm)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.fillRect(tinted.rect(), QColor("white"))
+            painter.end()
+            return QIcon(tinted)
+
         def make_button(name: str, text: str, icon: str | None, slot) -> QToolButton:
             btn = QToolButton()
             btn.setObjectName(name)
@@ -235,8 +249,10 @@ class MainWindow(QMainWindow):
             btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             btn.setCursor(Qt.PointingHandCursor)
+            btn.setIconSize(QSize(24, 24))
+            btn.setStyleSheet("padding: 12px 16px; text-align: left;")
             if icon:
-                btn.setIcon(QIcon.fromTheme(icon))
+                btn.setIcon(white_icon(icon))
             if slot:
                 btn.clicked.connect(slot)
             lay.addWidget(btn)
