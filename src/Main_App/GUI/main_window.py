@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QStatusBar,
     QFileDialog,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt
 import logging
@@ -41,6 +42,7 @@ class MainWindow(QMainWindow):
         self.settings = SettingsManager()
         self.output_folder: str = ""
         self.data_paths: list[str] = []
+        self.event_rows: list[QWidget] = []
         self._settings_dialog = None
         self.setWindowTitle("FPVS Toolbox")
         self.setMinimumSize(1024, 768)
@@ -93,6 +95,24 @@ class MainWindow(QMainWindow):
         gl.addWidget(self.cb_loreta, 2, 0, 1, 3)
         main_layout.addWidget(grp_proc)
 
+        # Load saved processing options
+        mode = self.settings.get("processing", "mode", "single").lower()
+        if mode == "batch":
+            self.rb_batch.setChecked(True)
+        else:
+            self.rb_single.setChecked(True)
+
+        ftype = self.settings.get("processing", "file_type", ".bdf").lower()
+        if ".set" in ftype or ftype == "set":
+            self.rb_set.setChecked(True)
+        else:
+            self.rb_bdf.setChecked(True)
+
+        loreta_enabled = (
+            self.settings.get("processing", "run_loreta", "False").lower() == "true"
+        )
+        self.cb_loreta.setChecked(loreta_enabled)
+
         # Preprocessing Parameters group
         grp_pre = QGroupBox("Preprocessing Parameters", container)
         grid = QGridLayout(grp_pre)
@@ -120,6 +140,25 @@ class MainWindow(QMainWindow):
         grid.addWidget(self.cb_save_fif, 5, 0, 1, 4)
         main_layout.addWidget(grp_pre)
 
+        # Load saved preprocessing parameters
+        pre_keys = [
+            ("preprocessing", "low_pass"),
+            ("preprocessing", "high_pass"),
+            ("preprocessing", "downsample"),
+            ("preprocessing", "epoch_start"),
+            ("preprocessing", "reject_thresh"),
+            ("preprocessing", "epoch_end"),
+            ("preprocessing", "ref_chan1"),
+            ("preprocessing", "ref_chan2"),
+            ("preprocessing", "max_idx_keep"),
+            ("preprocessing", "max_bad_chans"),
+        ]
+        for edit, (sec, opt) in zip(self.pre_edits, pre_keys):
+            edit.setText(self.settings.get(sec, opt, ""))
+        self.cb_save_fif.setChecked(
+            self.settings.get("preprocessing", "save_fif", "True").lower() == "true"
+        )
+
         # Event Map group
         grp_event = QGroupBox(
             "Event Map (Condition Label → Numerical ID)", container
@@ -139,6 +178,14 @@ class MainWindow(QMainWindow):
         vlay.addLayout(btns)
         main_layout.addWidget(grp_event)
 
+        # Populate saved event map rows
+        saved_pairs = self.settings.get_event_pairs()
+        if saved_pairs:
+            for label, ident in saved_pairs:
+                self.add_event_row(label, ident)
+        else:
+            self.add_event_row()
+
         # Log group
         grp_log = QGroupBox("Log", container)
         lay_log = QVBoxLayout(grp_log)
@@ -156,6 +203,7 @@ class MainWindow(QMainWindow):
         self.btn_open_output.clicked.connect(self.select_output_folder)
         self.btn_start.clicked.connect(self.start_processing)
         self.btn_add_row.clicked.connect(lambda: self.add_event_row())
+        self.btn_detect.clicked.connect(self.detect_trigger_ids)
 
     # ------------------------------------------------------------------
     def log(self, message: str, level: int = logging.INFO) -> None:
@@ -189,12 +237,11 @@ class MainWindow(QMainWindow):
         self.close()
 
     def open_stats_analyzer(self) -> None:
-        from Tools import Stats as stats
-
-        stats_win = stats.StatsAnalysisWindow(
-            master=self, default_folder=self.output_folder
+        QMessageBox.information(
+            self,
+            "Stats Toolbox",
+            "The statistics tool is not yet available in the Qt interface.",
         )
-        stats_win.geometry(self.settings.get("gui", "stats_size", "700x650"))
 
     def open_image_resizer(self) -> None:
         cmd = [sys.executable]
@@ -211,16 +258,18 @@ class MainWindow(QMainWindow):
         subprocess.Popen(cmd, close_fds=True)
 
     def open_advanced_analysis_window(self) -> None:
-        from Tools.Average_Preprocessing import AdvancedAnalysisWindow
-
-        adv = AdvancedAnalysisWindow(master=self)
-        adv.geometry(self.settings.get("gui", "advanced_size", "500x500"))
+        QMessageBox.information(
+            self,
+            "Advanced Analysis",
+            "The advanced preprocessing tool is not yet available in the Qt interface.",
+        )
 
     def show_relevant_publications(self) -> None:
-        from Main_App.relevant_publications_window import RelevantPublicationsWindow
-
-        win = RelevantPublicationsWindow(self)
-        win.geometry("600x600")
+        QMessageBox.information(
+            self,
+            "Relevant Publications",
+            "This dialog is not yet implemented in the Qt interface.",
+        )
 
     def show_about_dialog(self) -> None:
         from PySide6.QtWidgets import QMessageBox
@@ -255,6 +304,21 @@ class MainWindow(QMainWindow):
     def start_processing(self) -> None:  # pragma: no cover - GUI stub
         self.log("start_processing() stub")
 
+    def detect_trigger_ids(self) -> None:  # pragma: no cover - GUI stub
+        try:
+            from Tools.Event_Map import event_map_utils
+
+            pairs = event_map_utils.detect_trigger_ids(self.data_paths)
+        except Exception as err:
+            QMessageBox.warning(self, "Detection Failed", str(err))
+            return
+
+        added = 0
+        for lbl, ident in pairs:
+            self.add_event_row(str(lbl), str(ident))
+            added += 1
+        self.log(f"Detected and added {added} trigger ID(s)")
+
     def add_event_row(self, label: str = "", id: str = "") -> None:
         row = QWidget(self.event_container)
         hl = QHBoxLayout(row)
@@ -269,6 +333,7 @@ class MainWindow(QMainWindow):
         hl.addWidget(le_id)
         hl.addWidget(btn_rm)
         self.event_layout.addWidget(row)
+        self.event_rows.append(row)
         self.log("Added event map row")
 
 
