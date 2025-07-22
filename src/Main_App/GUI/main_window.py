@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QToolButton,
     QSizePolicy,
+    QStyle,
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
@@ -203,7 +204,7 @@ class MainWindow(QMainWindow):
             painter.end()
             return QIcon(tinted)
 
-        def make_button(name: str, text: str, icon: str | None, slot) -> QToolButton:
+        def make_button(name: str, text: str, icon: QIcon | str | None, slot) -> QToolButton:
             btn = QToolButton()
             btn.setObjectName(name)
             btn.setText(text)
@@ -213,15 +214,28 @@ class MainWindow(QMainWindow):
             btn.setIconSize(QSize(24, 24))
             btn.setStyleSheet("padding: 12px 16px; text-align: left;")
             if icon:
-                btn.setIcon(white_icon(icon))
+                if isinstance(icon, QIcon):
+                    btn.setIcon(icon)
+                else:
+                    btn.setIcon(white_icon(icon))
             if slot:
                 btn.clicked.connect(slot)
             lay.addWidget(btn)
             return btn
 
         self.btn_home = make_button("btn_home", "Home", "go-home", lambda: None)
-        self.btn_data = make_button("btn_data", "Data Analysis", "view-statistics", self.open_stats_analyzer)
-        self.btn_graphs = make_button("btn_graphs", "Graphs", "view-media-visualization", self.open_plot_generator)
+        self.btn_data = make_button(
+            "btn_data",
+            "Statistical Analysis",
+            QApplication.instance().style().standardIcon(QStyle.SP_ComputerIcon),
+            self.open_stats_analyzer,
+        )
+        self.btn_graphs = make_button(
+            "btn_graphs",
+            "SNR Plots",
+            QIcon.fromTheme("view-bar-chart"),  # TODO: supply bar-chart icon if missing
+            self.open_plot_generator,
+        )
         self.btn_image = make_button("btn_image", "Image Resizer", "camera-photo", self.open_image_resizer)
         self.btn_epoch = make_button("btn_epoch", "Epoch Averaging", "view-refresh", self.open_advanced_analysis_window)
 
