@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QDialog,
     QTabWidget,
+    QGroupBox,
+    QGridLayout,
     QComboBox,
     QCheckBox,
     QDialogButtonBox,
@@ -85,6 +87,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(tabs)
 
         self._init_general_tab(tabs)
+        self._init_preproc_tab(tabs)
         self._init_stats_tab(tabs)
         self._init_oddball_tab(tabs)
         self._init_loreta_tab(tabs)
@@ -139,6 +142,59 @@ class SettingsDialog(QDialog):
         form.addRow(QLabel("Debug Mode"), self.debug_check)
 
         tabs.addTab(tab, "General")
+
+    # ------------------------------------------------------------------
+    def _init_preproc_tab(self, tabs: QTabWidget) -> None:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        self.group_preproc = QGroupBox("Preprocessing Parameters", tab)
+        grid = QGridLayout(self.group_preproc)
+        params = [
+            "Low Pass (Hz):",
+            "High Pass (Hz):",
+            "Downsample (Hz):",
+            "Epoch Start (s):",
+            "Rejection Z-Thresh:",
+            "Epoch End (s):",
+            "Ref Chan 1:",
+            "Ref Chan 2:",
+            "Max Chan Idx Keep:",
+            "Max Bad Chans (Flag):",
+        ]
+        self.preproc_edits: list[QLineEdit] = []
+        for i, label_text in enumerate(params):
+            row, col = divmod(i, 2)
+            lbl = QLabel(label_text, self.group_preproc)
+            edit = QLineEdit(self.group_preproc)
+            self.preproc_edits.append(edit)
+            grid.addWidget(lbl, row, col * 2)
+            grid.addWidget(edit, row, col * 2 + 1)
+
+        pre_keys = [
+            ("preprocessing", "low_pass", "0.1"),
+            ("preprocessing", "high_pass", "50"),
+            ("preprocessing", "downsample", "256"),
+            ("preprocessing", "epoch_start", "-1"),
+            ("preprocessing", "reject_thresh", "5"),
+            ("preprocessing", "epoch_end", "125"),
+            ("preprocessing", "ref_chan1", "EXG1"),
+            ("preprocessing", "ref_chan2", "EXG2"),
+            ("preprocessing", "max_idx_keep", "64"),
+            ("preprocessing", "max_bad_chans", "10"),
+        ]
+        for edit, (sec, opt, fallback) in zip(self.preproc_edits, pre_keys):
+            edit.setText(self.manager.get(sec, opt, fallback))
+
+        self.save_fif_check = QCheckBox("Save Preprocessed .fif", self.group_preproc)
+        self.save_fif_check.setChecked(
+            self.manager.get("paths", "save_fif", "False").lower() == "true"
+        )
+        grid.addWidget(self.save_fif_check, 5, 0, 1, 4)
+
+        layout.addWidget(self.group_preproc)
+        layout.addStretch(1)
+        tabs.addTab(tab, "Preprocessing")
 
     # ------------------------------------------------------------------
     def _init_stats_tab(self, tabs: QTabWidget) -> None:
@@ -251,6 +307,21 @@ class SettingsDialog(QDialog):
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
+        pre_keys = [
+            ("preprocessing", "low_pass"),
+            ("preprocessing", "high_pass"),
+            ("preprocessing", "downsample"),
+            ("preprocessing", "epoch_start"),
+            ("preprocessing", "reject_thresh"),
+            ("preprocessing", "epoch_end"),
+            ("preprocessing", "ref_chan1"),
+            ("preprocessing", "ref_chan2"),
+            ("preprocessing", "max_idx_keep"),
+            ("preprocessing", "max_bad_chans"),
+        ]
+        for edit, (sec, opt) in zip(self.preproc_edits, pre_keys):
+            self.manager.set(sec, opt, edit.text())
+        self.manager.set("paths", "save_fif", str(self.save_fif_check.isChecked()))
         self.manager.set("loreta", "mri_path", self.mri_edit.text())
         self.manager.set("loreta", "loreta_low_freq", self.low_freq_edit.text())
         self.manager.set("loreta", "loreta_high_freq", self.high_freq_edit.text())

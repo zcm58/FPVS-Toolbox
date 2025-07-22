@@ -123,50 +123,11 @@ class MainWindow(QMainWindow):
         )
         self.cb_loreta.setChecked(loreta_enabled)
 
-        # Preprocessing Parameters group
-        grp_pre = QGroupBox("Preprocessing Parameters", container)
-        grid = QGridLayout(grp_pre)
-        params = [
-            "Low Pass (Hz):",
-            "High Pass (Hz):",
-            "Downsample (Hz):",
-            "Epoch Start (s):",
-            "Rejection Z-Thresh:",
-            "Epoch End (s):",
-            "Ref Chan 1:",
-            "Ref Chan 2:",
-            "Max Chan Idx Keep:",
-            "Max Bad Chans (Flag):",
-        ]
-        self.pre_edits: list[QLineEdit] = []
-        for i, label_text in enumerate(params):
-            row, col = divmod(i, 2)
-            lbl = QLabel(label_text, grp_pre)
-            edit = QLineEdit(grp_pre)
-            self.pre_edits.append(edit)
-            grid.addWidget(lbl, row, col * 2)
-            grid.addWidget(edit, row, col * 2 + 1)
-        # Populate defaults using stored settings with fallbacks from the legacy app
-        pre_keys = [
-            ("preprocessing", "low_pass", "0.1"),
-            ("preprocessing", "high_pass", "50"),
-            ("preprocessing", "downsample", "256"),
-            ("preprocessing", "epoch_start", "-1"),
-            ("preprocessing", "reject_thresh", "5"),
-            ("preprocessing", "epoch_end", "125"),
-            ("preprocessing", "ref_chan1", "EXG1"),
-            ("preprocessing", "ref_chan2", "EXG2"),
-            ("preprocessing", "max_idx_keep", "64"),
-            ("preprocessing", "max_bad_chans", "10"),
-        ]
-        for edit, (sec, opt, fallback) in zip(self.pre_edits, pre_keys):
-            edit.setText(self.settings.get(sec, opt, fallback))
-        self.cb_save_fif = QCheckBox("Save Preprocessed .fif", grp_pre)
-        self.cb_save_fif.setChecked(
-            self.settings.get("paths", "save_fif", "False").lower() == "true"
-        )
-        grid.addWidget(self.cb_save_fif, 5, 0, 1, 4)
-        main_layout.addWidget(grp_pre)
+        # Preprocessing parameters have moved to Settings. Show placeholder
+        placeholder = QLabel("⚙️ Configure preprocessing in Settings", container)
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setStyleSheet("color: #CCCCCC; font-style: italic;")
+        main_layout.addWidget(placeholder)
 
         # Event Map group
         grp_event = QGroupBox(
