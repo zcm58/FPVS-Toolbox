@@ -117,7 +117,7 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
 
 
         # --- Tkinter Variables for UI State ---
-        self.file_mode = tk.StringVar(master=self, value="Single")
+        self.file_mode = tk.StringVar(master=self, value="Batch")
         self.file_type = tk.StringVar(master=self, value=".BDF")
         self.save_folder_path = tk.StringVar(master=self)
         # Save preprocessed FIF files by default
