@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QStyle,
     QFrame,
+    QAction,
+    QMenu,
 )
 from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
@@ -34,12 +36,10 @@ import pandas as pd
 from pathlib import Path
 import subprocess
 import sys
-
 from Main_App.GUI.menu_bar import build_menu_bar
 from Main_App.GUI.settings_panel import SettingsDialog
 from Main_App.settings_manager import SettingsManager
-
-
+from Main_App.Backend.project import Project
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
@@ -64,8 +64,10 @@ class MainWindow(QMainWindow):
         self.processor = Processor()
         self.setWindowTitle("FPVS Toolbox")
         self.setMinimumSize(1024, 768)
+        self.currentProject: Project | None = None
         self._init_ui()
         self._init_sidebar()
+        self._init_file_menu()
         self.log("Welcome to the FPVS Toolbox!")
         self.log(
             f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}"
@@ -300,6 +302,35 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, dock)
 
     # ------------------------------------------------------------------
+    def _init_file_menu(self) -> None:
+        """Configure the File menu with project actions."""
+        menu_bar = self.menuBar()
+        if not menu_bar:
+            return
+        file_menu = menu_bar.actions()[0].menu()
+        file_menu.clear()
+
+        action_new = QAction("New Project…", self)
+        action_new.triggered.connect(self.new_project)
+        file_menu.addAction(action_new)
+
+        open_menu = QMenu("Open Existing Project", self)
+        browse_action = QAction("Browse…", self)
+        browse_action.triggered.connect(self.open_existing_project)
+        open_menu.addAction(browse_action)
+        file_menu.addMenu(open_menu)
+        file_menu.addSeparator()
+
+        for text, slot in [
+            ("Settings", self.open_settings_window),
+            ("Check for Updates", self.check_for_updates),
+            ("Exit", self.quit),
+        ]:
+            act = QAction(text, self)
+            act.triggered.connect(slot)
+            file_menu.addAction(act)
+
+    # ------------------------------------------------------------------
     def log(self, message: str, level: int = logging.INFO) -> None:
         ts = pd.Timestamp.now().strftime("%H:%M:%S.%f")[:-3]
         formatted = f"{ts} [GUI]: {message}"
@@ -343,6 +374,24 @@ class MainWindow(QMainWindow):
 
     def quit(self) -> None:
         self.close()
+
+    # ------------------------------------------------------------------
+    def new_project(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Select Project Directory")
+        if not folder:
+            return
+        project = Project.load(folder)
+        project.save()
+        self.currentProject = project
+        self.loadProject(project)
+
+    def open_existing_project(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Select Project Directory")
+        if not folder:
+            return
+        project = Project.load(folder)
+        self.currentProject = project
+        self.loadProject(project)
 
     def open_stats_analyzer(self) -> None:
         QMessageBox.information(
@@ -476,13 +525,15 @@ class MainWindow(QMainWindow):
         self.event_rows.append(row)
         self.log("Added event map row")
 
+    # ------------------------------------------------------------------
+    def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
+        """Apply project settings to the UI."""
+        self.log(f"Loaded project: {project.name}")
 
 def main() -> None:
     app = QApplication([])
     win = MainWindow()
     win.show()
     app.exec()
-
-
 if __name__ == "__main__":
     main()
