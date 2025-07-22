@@ -262,4 +262,27 @@ class SettingsDialog(QDialog):
         self.manager.set("loreta", "auto_oddball_localization", str(self.auto_loc_check.isChecked()))
         self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
         self.manager.save()
+
+        try:
+            from Tools.Stats.stats_helpers import load_rois_from_settings, apply_rois_to_modules
+            from Tools.Stats.stats import StatsAnalysisWindow
+
+            rois = load_rois_from_settings(self.manager)
+            apply_rois_to_modules(rois)
+
+            for window in StatsAnalysisWindow.get_instances():
+                window.reload_rois(rois)
+        except Exception:
+            pass
+
+        try:
+            from config import update_target_frequencies
+
+            update_target_frequencies(
+                float(self.oddball_freq_edit.text()),
+                float(self.bca_limit_edit.text()),
+            )
+        except Exception:
+            pass
+
         self.accept()
