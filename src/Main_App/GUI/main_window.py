@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QStatusBar,
     QFileDialog,
     QMessageBox,
+    QButtonGroup,
 )
 from PySide6.QtCore import Qt
 import logging
@@ -47,6 +48,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("FPVS Toolbox")
         self.setMinimumSize(1024, 768)
         self._init_ui()
+        self.log("Welcome to the FPVS Toolbox!")
+        self.log(
+            f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}"
+        )
 
     # ------------------------------------------------------------------
     def _init_ui(self) -> None:
@@ -87,13 +92,18 @@ class MainWindow(QMainWindow):
         self.rb_batch = QRadioButton("Batch Folder", grp_proc)
         gl.addWidget(self.rb_single, 0, 1)
         gl.addWidget(self.rb_batch, 0, 2)
-        gl.addWidget(QLabel("File Type:"), 1, 0)
-        self.rb_bdf = QRadioButton(".BDF", grp_proc)
-        self.rb_set = QRadioButton(".set", grp_proc)
-        gl.addWidget(self.rb_bdf, 1, 1)
-        gl.addWidget(self.rb_set, 1, 2)
         self.cb_loreta = QCheckBox("Run LORETA during processing?", grp_proc)
-        gl.addWidget(self.cb_loreta, 2, 0, 1, 3)
+        gl.addWidget(self.cb_loreta, 1, 0, 1, 3)
+        self.mode_group = QButtonGroup(self)
+        self.mode_group.setExclusive(True)
+        self.mode_group.addButton(self.rb_single)
+        self.mode_group.addButton(self.rb_batch)
+        self.rb_single.toggled.connect(
+            lambda checked: checked and self._on_mode_changed("single")
+        )
+        self.rb_batch.toggled.connect(
+            lambda checked: checked and self._on_mode_changed("batch")
+        )
         main_layout.addWidget(grp_proc)
 
         # Load saved processing options
@@ -102,12 +112,6 @@ class MainWindow(QMainWindow):
             self.rb_batch.setChecked(True)
         else:
             self.rb_single.setChecked(True)
-
-        ftype = self.settings.get("processing", "file_type", ".bdf").lower()
-        if ".set" in ftype or ftype == "set":
-            self.rb_set.setChecked(True)
-        else:
-            self.rb_bdf.setChecked(True)
 
         loreta_enabled = (
             self.settings.get("processing", "run_loreta", "False").lower() == "true"
@@ -137,44 +141,27 @@ class MainWindow(QMainWindow):
             self.pre_edits.append(edit)
             grid.addWidget(lbl, row, col * 2)
             grid.addWidget(edit, row, col * 2 + 1)
-        # Populate defaults from the legacy customtkinter UI
-        defaults = [
-            "0.1",
-            "50",
-            "256",
-            "-1",
-            "5",
-            "125",
-            "EXG1",
-            "EXG2",
-            "64",
-            "10",
+        # Populate defaults using stored settings with fallbacks from the legacy app
+        pre_keys = [
+            ("preprocessing", "low_pass", "0.1"),
+            ("preprocessing", "high_pass", "50"),
+            ("preprocessing", "downsample", "256"),
+            ("preprocessing", "epoch_start", "-1"),
+            ("preprocessing", "reject_thresh", "5"),
+            ("preprocessing", "epoch_end", "125"),
+            ("preprocessing", "ref_chan1", "EXG1"),
+            ("preprocessing", "ref_chan2", "EXG2"),
+            ("preprocessing", "max_idx_keep", "64"),
+            ("preprocessing", "max_bad_chans", "10"),
         ]
-        for edit, text in zip(self.pre_edits, defaults):
-            edit.setText(text)
+        for edit, (sec, opt, fallback) in zip(self.pre_edits, pre_keys):
+            edit.setText(self.settings.get(sec, opt, fallback))
         self.cb_save_fif = QCheckBox("Save Preprocessed .fif", grp_pre)
-        self.cb_save_fif.setChecked(True)
+        self.cb_save_fif.setChecked(
+            self.settings.get("paths", "save_fif", "False").lower() == "true"
+        )
         grid.addWidget(self.cb_save_fif, 5, 0, 1, 4)
         main_layout.addWidget(grp_pre)
-
-        # Load saved preprocessing parameters
-        pre_keys = [
-            ("preprocessing", "low_pass"),
-            ("preprocessing", "high_pass"),
-            ("preprocessing", "downsample"),
-            ("preprocessing", "epoch_start"),
-            ("preprocessing", "reject_thresh"),
-            ("preprocessing", "epoch_end"),
-            ("preprocessing", "ref_chan1"),
-            ("preprocessing", "ref_chan2"),
-            ("preprocessing", "max_idx_keep"),
-            ("preprocessing", "max_bad_chans"),
-        ]
-        for edit, (sec, opt) in zip(self.pre_edits, pre_keys):
-            edit.setText(self.settings.get(sec, opt, ""))
-        self.cb_save_fif.setChecked(
-            self.settings.get("preprocessing", "save_fif", "True").lower() == "true"
-        )
 
         # Event Map group
         grp_event = QGroupBox(
@@ -233,6 +220,11 @@ class MainWindow(QMainWindow):
     def debug(self, message: str) -> None:
         if logger.isEnabledFor(logging.DEBUG):
             self.log(f"[DEBUG] {message}", level=logging.DEBUG)
+
+    # ------------------------------------------------------------------
+    def _on_mode_changed(self, mode: str) -> None:
+        self.settings.set("processing", "mode", mode)
+        self.settings.save()
 
     # ------------------------------------------------------------------
     def open_settings_window(self) -> None:
