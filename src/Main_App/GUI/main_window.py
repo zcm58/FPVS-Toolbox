@@ -3,7 +3,9 @@
 from __future__ import annotations
 from PySide6 import QtWidgets
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog, QVBoxLayout
 from Main_App.GUI.menu_bar import build_menu_bar
+from Main_App.GUI.settings_panel import SettingsPanel
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
@@ -24,8 +26,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(central)
 
     # ─────── placeholder stubs ─────────────────────────────
-    def open_settings_window(self):
-        print("OPEN SETTINGS (stub)")
+    def open_settings_window(self) -> None:
+        # 1) create modal dialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Settings")
+        dlg.setModal(True)
+
+        # 2) layout for the panel
+        dlg_layout = QVBoxLayout(dlg)
+
+        # 3) instantiate your SettingsPanel, passing self or your controller
+        panel = SettingsPanel(self)
+        dlg_layout.addWidget(panel)
+
+        # 4) wire the panel signals to close (and optionally save)
+        panel.settings_saved.connect(dlg.accept)
+        panel.settings_canceled.connect(dlg.reject)
+
+        # 5) run the dialog
+        dlg.exec()
 
     def check_for_updates(self):
         print("CHECK UPDATES (stub)")
