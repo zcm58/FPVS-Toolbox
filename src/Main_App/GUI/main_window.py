@@ -209,6 +209,9 @@ class MainWindow(QMainWindow):
         self.btn_add_row.clicked.connect(lambda: self.add_event_row())
         self.btn_detect.clicked.connect(self.detect_trigger_ids)
 
+        # Sync the select button label with the current mode
+        self._update_select_button_text()
+
     # ------------------------------------------------------------------
     def log(self, message: str, level: int = logging.INFO) -> None:
         ts = pd.Timestamp.now().strftime("%H:%M:%S.%f")[:-3]
@@ -225,6 +228,14 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, mode: str) -> None:
         self.settings.set("processing", "mode", mode)
         self.settings.save()
+        self._update_select_button_text()
+
+    def _update_select_button_text(self) -> None:
+        """Update the label of the EEG selection button based on the mode."""
+        if self.rb_batch.isChecked():
+            self.btn_open_eeg.setText("Select Input Folder…")
+        else:
+            self.btn_open_eeg.setText("Select .BDF File…")
 
     # ------------------------------------------------------------------
     def open_settings_window(self) -> None:
