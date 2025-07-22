@@ -23,9 +23,11 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QToolButton,
     QSizePolicy,
+    QProgressBar,
     QStyle,
+
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QPropertyAnimation
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 import logging
 import pandas as pd
@@ -70,19 +72,10 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.addToolBar(Qt.TopToolBarArea, toolbar)
-        self.btn_open_eeg = QPushButton("Select EEG File…", self)
-        self.btn_open_output = QPushButton("Select Output Folder…", self)
-        self.btn_start = QPushButton("Start Processing", self)
         self.lbl_debug = QLabel("DEBUG MODE ENABLED", self)
         self.lbl_debug.setStyleSheet("color: red;")
         self.lbl_debug.setVisible(self.settings.debug_enabled())
-        for w in (
-            self.btn_open_eeg,
-            self.btn_open_output,
-            self.btn_start,
-            self.lbl_debug,
-        ):
-            toolbar.addWidget(w)
+        toolbar.addWidget(self.lbl_debug)
 
         # Central container
         container = QWidget(self)
@@ -100,6 +93,12 @@ class MainWindow(QMainWindow):
         gl.addWidget(self.rb_batch, 0, 2)
         self.cb_loreta = QCheckBox("Run LORETA during processing?", grp_proc)
         gl.addWidget(self.cb_loreta, 1, 0, 1, 3)
+        self.btn_open_eeg = QPushButton("Select EEG File…", grp_proc)
+        self.btn_open_output = QPushButton("Select Output Folder…", grp_proc)
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self.btn_open_eeg)
+        btn_row.addWidget(self.btn_open_output)
+        gl.addLayout(btn_row, 2, 0, 1, 3)
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
         self.mode_group.addButton(self.rb_single)
@@ -148,6 +147,22 @@ class MainWindow(QMainWindow):
         btns.addWidget(self.btn_add_row)
         vlay.addLayout(btns)
         main_layout.addWidget(grp_event)
+
+        action_row = QHBoxLayout()
+        self.btn_start = QPushButton("Start Processing", container)
+        self.progress_bar = QProgressBar(container)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.progress_bar.setStyleSheet(
+            "QProgressBar::chunk {background-color: #0BBF00;}"
+        )
+        action_row.addWidget(self.btn_start)
+        action_row.addWidget(self.progress_bar)
+        main_layout.addLayout(action_row)
+        self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
+        self._progress_anim.setDuration(200)
 
         # Populate saved event map rows
         saved_pairs = self.settings.get_event_pairs()
@@ -386,6 +401,14 @@ class MainWindow(QMainWindow):
 
     def start_processing(self) -> None:  # pragma: no cover - GUI stub
         self.log("start_processing() stub")
+        self._animate_progress_to(100)
+
+    def _animate_progress_to(self, value: int) -> None:
+        """Animate the progress bar smoothly to the target value."""
+        self._progress_anim.stop()
+        self._progress_anim.setStartValue(self.progress_bar.value())
+        self._progress_anim.setEndValue(value)
+        self._progress_anim.start()
 
     def detect_trigger_ids(self) -> None:  # pragma: no cover - GUI stub
         try:
