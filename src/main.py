@@ -8,6 +8,7 @@
 USE_PYSIDE6 = True
 
 from ctypes import windll
+import sys
 
 try:
     windll.shcore.SetProcessDpiAwareness(1)
@@ -26,10 +27,21 @@ else:
     from fpvs_app import FPVSApp
     from Main_App.debug_utils import configure_logging, get_settings, install_messagebox_logger
     import multiprocessing
-    import sys
 
 def main() -> None:
     """Entry point for running the FPVS Toolbox or its sub-tools."""
+    if "--run-image-resizer" in sys.argv:
+        from Tools.Image_Resizer import pyside_resizer
+
+        pyside_resizer.main()
+        return
+
+    if "--run-plot-generator" in sys.argv:
+        from Tools.Plot_Generator import plot_generator
+
+        plot_generator.main()
+        return
+
     if USE_PYSIDE6:
         app = QApplication([])
         window = MainWindow()
@@ -37,18 +49,6 @@ def main() -> None:
         app.exec()
     else:
         multiprocessing.freeze_support()
-
-        if "--run-image-resizer" in sys.argv:
-            from Tools.Image_Resizer import pyside_resizer
-
-            pyside_resizer.main()
-            return
-
-        if "--run-plot-generator" in sys.argv:
-            from Tools.Plot_Generator import plot_generator
-
-            plot_generator.main()
-            return
 
         settings = get_settings()
         debug = settings.debug_enabled()
