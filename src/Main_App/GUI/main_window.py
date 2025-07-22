@@ -25,9 +25,9 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QProgressBar,
     QStyle,
-
+    QFrame,
 )
-from PySide6.QtCore import Qt, QSize, QPropertyAnimation
+from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 import logging
 import pandas as pd
@@ -38,6 +38,15 @@ import sys
 from Main_App.GUI.menu_bar import build_menu_bar
 from Main_App.GUI.settings_panel import SettingsDialog
 from Main_App.settings_manager import SettingsManager
+
+
+class Processor(QObject):
+    """Minimal processing stub emitting progress updates."""
+
+    progressChanged = Signal(int)
+
+    def emit_progress(self, value: int) -> None:
+        self.progressChanged.emit(value)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +61,7 @@ class MainWindow(QMainWindow):
         self.data_paths: list[str] = []
         self.event_rows: list[QWidget] = []
         self._settings_dialog = None
+        self.processor = Processor()
         self.setWindowTitle("FPVS Toolbox")
         self.setMinimumSize(1024, 768)
         self._init_ui()
@@ -83,6 +93,20 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(12)
 
+        header = QWidget(container)
+        header.setStyleSheet("background-color: #2A2A2A; padding: 8px;")
+        h_lay = QHBoxLayout(header)
+        h_lay.setContentsMargins(0, 0, 0, 0)
+        lbl_proj = QLabel("Current Project: Semantic Categories", header)
+        lbl_proj.setStyleSheet("color: white; font-weight: bold;")
+        self.btn_view_project = QPushButton("View/Edit Project", header)
+        self.btn_view_project.setFlat(True)
+        self.btn_view_project.setIcon(QIcon.fromTheme("document-edit"))
+        h_lay.addWidget(lbl_proj)
+        h_lay.addStretch(1)
+        h_lay.addWidget(self.btn_view_project)
+        main_layout.addWidget(header)
+
         # Processing Options group
         grp_proc = QGroupBox("Processing Options", container)
         gl = QGridLayout(grp_proc)
@@ -96,8 +120,8 @@ class MainWindow(QMainWindow):
         self.btn_open_eeg = QPushButton("Select EEG File…", grp_proc)
         self.btn_open_output = QPushButton("Select Output Folder…", grp_proc)
         btn_row = QHBoxLayout()
-        btn_row.addWidget(self.btn_open_eeg)
         btn_row.addWidget(self.btn_open_output)
+        btn_row.addWidget(self.btn_open_eeg)
         gl.addLayout(btn_row, 2, 0, 1, 3)
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
@@ -149,20 +173,25 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(grp_event)
 
         action_row = QHBoxLayout()
+        action_row.setSpacing(0)
         self.btn_start = QPushButton("Start Processing", container)
         self.progress_bar = QProgressBar(container)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
         self.progress_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.progress_bar.setStyleSheet(
             "QProgressBar::chunk {background-color: #0BBF00;}"
         )
         action_row.addWidget(self.btn_start)
+        action_row.addSpacing(16)
         action_row.addWidget(self.progress_bar)
         main_layout.addLayout(action_row)
         self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
         self._progress_anim.setDuration(200)
+        self._progress_anim.valueChanged.connect(self.progress_bar.setValue)
+        self.processor.progressChanged.connect(self._animate_progress_to)
 
         # Populate saved event map rows
         saved_pairs = self.settings.get_event_pairs()
@@ -253,6 +282,11 @@ class MainWindow(QMainWindow):
         )
         self.btn_image = make_button("btn_image", "Image Resizer", "camera-photo", self.open_image_resizer)
         self.btn_epoch = make_button("btn_epoch", "Epoch Averaging", "view-refresh", self.open_advanced_analysis_window)
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background:#444;")
+        lay.addWidget(divider)
 
         lay.addStretch(1)
 
