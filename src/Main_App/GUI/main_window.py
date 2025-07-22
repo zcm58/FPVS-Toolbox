@@ -17,10 +17,20 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QTextEdit,
     QStatusBar,
+    QFileDialog,
 )
 from PySide6.QtCore import Qt
+import logging
+import pandas as pd
+from pathlib import Path
+import subprocess
+import sys
 
 from Main_App.GUI.menu_bar import build_menu_bar
+from Main_App.GUI.settings_panel import SettingsDialog
+from Main_App.settings_manager import SettingsManager
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -28,6 +38,10 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self.settings = SettingsManager()
+        self.output_folder: str = ""
+        self.data_paths: list[str] = []
+        self._settings_dialog = None
         self.setWindowTitle("FPVS Toolbox")
         self.setMinimumSize(1024, 768)
         self._init_ui()
@@ -144,14 +158,102 @@ class MainWindow(QMainWindow):
         self.btn_add_row.clicked.connect(lambda: self.add_event_row())
 
     # ------------------------------------------------------------------
+    def log(self, message: str, level: int = logging.INFO) -> None:
+        ts = pd.Timestamp.now().strftime("%H:%M:%S.%f")[:-3]
+        formatted = f"{ts} [GUI]: {message}"
+        if hasattr(self, "text_log") and self.text_log:
+            self.text_log.append(formatted)
+        logger.log(level, message)
+
+    def debug(self, message: str) -> None:
+        if logger.isEnabledFor(logging.DEBUG):
+            self.log(f"[DEBUG] {message}", level=logging.DEBUG)
+
+    # ------------------------------------------------------------------
+    def open_settings_window(self) -> None:
+        if self._settings_dialog and self._settings_dialog.isVisible():
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+            return
+        dlg = SettingsDialog(self.settings, self)
+        self._settings_dialog = dlg
+        dlg.exec()
+        self._settings_dialog = None
+
+    def check_for_updates(self) -> None:
+        from Main_App import update_manager
+
+        update_manager.check_for_updates_async(self, silent=False)
+
+    def quit(self) -> None:
+        self.close()
+
+    def open_stats_analyzer(self) -> None:
+        from Tools import Stats as stats
+
+        stats_win = stats.StatsAnalysisWindow(
+            master=self, default_folder=self.output_folder
+        )
+        stats_win.geometry(self.settings.get("gui", "stats_size", "700x650"))
+
+    def open_image_resizer(self) -> None:
+        cmd = [sys.executable]
+        if not getattr(sys, "frozen", False):
+            cmd.append(str(Path(__file__).resolve().parent.parent / "main.py"))
+        cmd.append("--run-image-resizer")
+        subprocess.Popen(cmd, close_fds=True)
+
+    def open_plot_generator(self) -> None:
+        cmd = [sys.executable]
+        if not getattr(sys, "frozen", False):
+            cmd.append(str(Path(__file__).resolve().parent.parent / "main.py"))
+        cmd.append("--run-plot-generator")
+        subprocess.Popen(cmd, close_fds=True)
+
+    def open_advanced_analysis_window(self) -> None:
+        from Tools.Average_Preprocessing import AdvancedAnalysisWindow
+
+        adv = AdvancedAnalysisWindow(master=self)
+        adv.geometry(self.settings.get("gui", "advanced_size", "500x500"))
+
+    def show_relevant_publications(self) -> None:
+        from Main_App.relevant_publications_window import RelevantPublicationsWindow
+
+        win = RelevantPublicationsWindow(self)
+        win.geometry("600x600")
+
+    def show_about_dialog(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from config import FPVS_TOOLBOX_VERSION
+
+        QMessageBox.information(
+            self,
+            "About FPVS ToolBox",
+            f"Version: {FPVS_TOOLBOX_VERSION} was developed by Zack Murphy at Mississippi State University.",
+        )
+
+    # ------------------------------------------------------------------
     def select_eeg_file(self) -> None:  # pragma: no cover - GUI stub
-        print("select_eeg_file() stub")
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select EEG File",
+            self.settings.get("paths", "data_folder", ""),
+            "EEG Files (*.bdf *.set);;All Files (*)",
+        )
+        if paths:
+            self.data_paths = paths
+            self.log(f"Selected {len(paths)} file(s)")
 
     def select_output_folder(self) -> None:  # pragma: no cover - GUI stub
-        print("select_output_folder() stub")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Output Folder", self.output_folder or ""
+        )
+        if folder:
+            self.output_folder = folder
+            self.log(f"Output folder set: {folder}")
 
     def start_processing(self) -> None:  # pragma: no cover - GUI stub
-        print("start_processing() stub")
+        self.log("start_processing() stub")
 
     def add_event_row(self, label: str = "", id: str = "") -> None:
         row = QWidget(self.event_container)
@@ -159,11 +261,15 @@ class MainWindow(QMainWindow):
         le_label = QLineEdit(label, row)
         le_id = QLineEdit(id, row)
         btn_rm = QPushButton("✕", row)
-        btn_rm.clicked.connect(lambda _, r=row: r.setParent(None))
+        def _remove() -> None:
+            row.setParent(None)
+            self.log("Event map row removed.")
+        btn_rm.clicked.connect(_remove)
         hl.addWidget(le_label)
         hl.addWidget(le_id)
         hl.addWidget(btn_rm)
         self.event_layout.addWidget(row)
+        self.log("Added event map row")
 
 
 def main() -> None:
