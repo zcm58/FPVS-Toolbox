@@ -1,0 +1,19 @@
+QWidget#sidebar {
+  background-color: #212121;
+}
+QWidget#sidebar QToolButton {
+  color: #EEEEEE;
+  background: transparent;
+  border: none;
+  padding: 12px 16px;
+  text-align: left;
+  font: 11pt "Segoe UI";
+}
+QWidget#sidebar QToolButton:hover {
+  background-color: #333333;
+}
+QWidget#sidebar QToolButton:checked {
+  background-color: #FF9800;
+  color: #212121;
+  font-weight: bold;
+}

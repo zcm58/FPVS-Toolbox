@@ -20,8 +20,12 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QMessageBox,
     QButtonGroup,
+    QDockWidget,
+    QToolButton,
+    QSizePolicy,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 import logging
 import pandas as pd
 from pathlib import Path
@@ -48,6 +52,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("FPVS Toolbox")
         self.setMinimumSize(1024, 768)
         self._init_ui()
+        self._init_sidebar()
         self.log("Welcome to the FPVS Toolbox!")
         self.log(
             f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}"
@@ -199,6 +204,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(grp_log)
 
         # Finalize
+        self.homeWidget = container
         self.setCentralWidget(container)
         self.setStatusBar(QStatusBar(self))
 
@@ -211,6 +217,47 @@ class MainWindow(QMainWindow):
 
         # Sync the select button label with the current mode
         self._update_select_button_text()
+
+    # ------------------------------------------------------------------
+    def _init_sidebar(self) -> None:
+        """Create the dark sidebar with tool buttons."""
+        sidebar = QWidget(self)
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(200)
+        lay = QVBoxLayout(sidebar)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        def make_button(name: str, text: str, icon: str | None, slot) -> QToolButton:
+            btn = QToolButton()
+            btn.setObjectName(name)
+            btn.setText(text)
+            btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            btn.setCursor(Qt.PointingHandCursor)
+            if icon:
+                btn.setIcon(QIcon.fromTheme(icon))
+            if slot:
+                btn.clicked.connect(slot)
+            lay.addWidget(btn)
+            return btn
+
+        self.btn_home = make_button("btn_home", "Home", "go-home", lambda: None)
+        self.btn_data = make_button("btn_data", "Data Analysis", "view-statistics", self.open_stats_analyzer)
+        self.btn_graphs = make_button("btn_graphs", "Graphs", "view-media-visualization", self.open_plot_generator)
+        self.btn_image = make_button("btn_image", "Image Resizer", "camera-photo", self.open_image_resizer)
+        self.btn_epoch = make_button("btn_epoch", "Epoch Averaging", "view-refresh", self.open_advanced_analysis_window)
+
+        lay.addStretch(1)
+
+        self.btn_settings = make_button("btn_settings", "Settings", "settings", self.open_settings_window)
+        self.btn_info = make_button("btn_info", "Information", None, self.show_relevant_publications)
+        self.btn_help = make_button("btn_help", "Help", None, self.show_about_dialog)
+
+        dock = QDockWidget("", self)
+        dock.setWidget(sidebar)
+        dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.addDockWidget(Qt.LeftDockWidgetArea, dock)
 
     # ------------------------------------------------------------------
     def log(self, message: str, level: int = logging.INFO) -> None:
