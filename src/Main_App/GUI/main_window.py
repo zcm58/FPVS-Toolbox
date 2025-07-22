@@ -137,7 +137,23 @@ class MainWindow(QMainWindow):
             self.pre_edits.append(edit)
             grid.addWidget(lbl, row, col * 2)
             grid.addWidget(edit, row, col * 2 + 1)
+        # Populate defaults from the legacy customtkinter UI
+        defaults = [
+            "0.1",
+            "50",
+            "256",
+            "-1",
+            "5",
+            "125",
+            "EXG1",
+            "EXG2",
+            "64",
+            "10",
+        ]
+        for edit, text in zip(self.pre_edits, defaults):
+            edit.setText(text)
         self.cb_save_fif = QCheckBox("Save Preprocessed .fif", grp_pre)
+        self.cb_save_fif.setChecked(True)
         grid.addWidget(self.cb_save_fif, 5, 0, 1, 4)
         main_layout.addWidget(grp_pre)
 
