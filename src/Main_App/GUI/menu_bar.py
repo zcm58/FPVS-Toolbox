@@ -1,6 +1,5 @@
 from __future__ import annotations
-from PySide6.QtWidgets import QMenuBar, QMenu, QMainWindow
-from PySide6.QtCore   import Qt
+from PySide6.QtWidgets import QMenuBar, QMainWindow
 from PySide6.QtGui    import QAction
 from Main_App.eloreta_launcher import open_eloreta_tool
 
