@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
         self.btn_start = QPushButton("Start Processing", self)
         self.lbl_debug = QLabel("DEBUG MODE ENABLED", self)
         self.lbl_debug.setStyleSheet("color: red;")
+        self.lbl_debug.setVisible(self.settings.debug_enabled())
         for w in (
             self.btn_open_eeg,
             self.btn_open_output,
@@ -226,6 +227,7 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self.settings, self)
         self._settings_dialog = dlg
         dlg.exec()
+        self.lbl_debug.setVisible(self.settings.debug_enabled())
         self._settings_dialog = None
 
     def check_for_updates(self) -> None:
