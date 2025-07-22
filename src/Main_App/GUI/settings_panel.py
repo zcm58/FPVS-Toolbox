@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialogButtonBox,
     QFileDialog,
+    QMessageBox,
 )
 
 from Main_App.settings_manager import SettingsManager
@@ -260,8 +261,17 @@ class SettingsDialog(QDialog):
         self.manager.set("loreta", "time_window_end_ms", self.t_end_edit.text())
         self.manager.set("visualization", "time_index_ms", self.display_time_edit.text())
         self.manager.set("loreta", "auto_oddball_localization", str(self.auto_loc_check.isChecked()))
+
+        prev_debug = self.manager.debug_enabled()
         self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
         self.manager.save()
+
+        if not prev_debug and self.manager.debug_enabled():
+            QMessageBox.information(
+                self,
+                "Debug Mode Enabled",
+                "Debug mode enabled. Please close and reopen FPVS Toolbox for changes to take effect.",
+            )
 
         try:
             from Tools.Stats.stats_helpers import load_rois_from_settings, apply_rois_to_modules
