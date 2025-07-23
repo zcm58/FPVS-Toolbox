@@ -73,7 +73,7 @@ def start_processing(self) -> None:
 
             self.log("Post-processing results")
             condition_labels = list(self.currentProject.event_map.keys())
-            post_process(self, result, condition_labels)
+            post_process(self, condition_labels)
 
         _animate_progress_to(self, 100)
         self.log("Processing complete")
