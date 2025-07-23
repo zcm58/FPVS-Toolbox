@@ -69,7 +69,10 @@ class MainWindow(QMainWindow):
         self._init_sidebar()
 
         settings = QSettings()
-        saved_root = settings.value("paths/projectsRoot", "", type=str)
+        settings.beginGroup("paths")
+        saved_root = settings.value("projectsRoot", "", type=str)
+        settings.endGroup()
+
         if saved_root and Path(saved_root).is_dir():
             self.projectsRoot = Path(saved_root)
         else:
@@ -83,9 +86,11 @@ class MainWindow(QMainWindow):
                     "You must select a Projects Root folder to continue.",
                 )
                 sys.exit(1)
-            settings.setValue("paths/projectsRoot", root)
-            settings.sync()
             self.projectsRoot = Path(root)
+            settings.beginGroup("paths")
+            settings.setValue("projectsRoot", str(self.projectsRoot))
+            settings.endGroup()
+            settings.sync()
 
         self._init_file_menu()
         self.log("Welcome to the FPVS Toolbox!")
