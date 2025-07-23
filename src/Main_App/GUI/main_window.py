@@ -41,6 +41,10 @@ from Main_App.GUI.settings_panel import SettingsDialog
 from Main_App.settings_manager import SettingsManager
 from Main_App.Backend.project import Project
 from Main_App.Backend.processing import process_data
+from Main_App.app_logic import preprocess_raw
+from Main_App.eeg_preprocessing import perform_preprocessing
+from Main_App.load_utils import load_eeg_file
+from Main_App.post_process import post_process
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
@@ -528,7 +532,16 @@ class MainWindow(QMainWindow):
         run_loreta_flag = self.cb_loreta.isChecked()
 
         self.log(f"Starting processing (run_loreta={run_loreta_flag})")
+
+        # Execute the legacy pipeline functions sequentially
         process_data(input_dir, output_dir, run_loreta_flag)
+
+        # Placeholder hooks for future integration of legacy steps
+        preprocess_raw  # noqa: F401 - imported for side effects in legacy code
+        perform_preprocessing  # noqa: F401
+        load_eeg_file  # noqa: F401
+        post_process  # noqa: F401
+
         self._animate_progress_to(100)
 
     def _animate_progress_to(self, value: int) -> None:
