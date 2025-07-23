@@ -19,9 +19,9 @@ import tkinter as tk
 import config
 from Tools.SourceLocalization import runner as eloreta_runner, source_model
 from Tools.SourceLocalization.logging_utils import QueueLogHandler
-from Main_App.post_process import post_process as _external_post_process
-from Main_App.eeg_preprocessing import perform_preprocessing
-from Main_App.load_utils import load_eeg_file
+from Main_App.Legacy_App.post_process import post_process as _external_post_process
+from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
+from Main_App.Legacy_App.load_utils import load_eeg_file
 
 
 def _sanitize_folder_name(label: str) -> str:

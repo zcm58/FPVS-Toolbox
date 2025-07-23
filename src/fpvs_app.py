@@ -38,26 +38,25 @@ import customtkinter as ctk
 import requests
 import logging
 from packaging.version import parse as version_parse
-from Main_App.menu_bar import AppMenuBar
-from Main_App.ui_setup_panels import SetupPanelManager
-from Main_App.ui_event_map_manager import EventMapManager
-from Main_App.event_map_utils import EventMapMixin
-from Main_App.file_selection import FileSelectionMixin
-from Main_App.event_detection import EventDetectionMixin
-from Main_App.validation_mixins import ValidationMixin
-from Main_App.processing_utils import ProcessingMixin
-from Main_App.logging_mixin import LoggingMixin
-from Main_App import update_manager
+from Main_App import AppMenuBar
+from Main_App import SetupPanelManager
+from Main_App import EventMapManager
+from Main_App import EventMapMixin
+from Main_App import FileSelectionMixin
+from Main_App import EventDetectionMixin
+from Main_App import ValidationMixin
+from Main_App import ProcessingMixin
+from Main_App import LoggingMixin
+from Main_App.Legacy_App import update_manager
 
 from config import (
     FPVS_TOOLBOX_VERSION,
     FPVS_TOOLBOX_UPDATE_API,
-    FPVS_TOOLBOX_REPO_PAGE,
-    DEFAULT_STIM_CHANNEL
+    FPVS_TOOLBOX_REPO_PAGE
 )
 import config
 
-from Main_App.post_process import post_process as _external_post_process
+from Main_App import post_process as _external_post_process
 
 
 # Advanced averaging UI and core function
@@ -65,9 +64,9 @@ from Tools.Average_Preprocessing import AdvancedAnalysisWindow
 
 # Statistics toolbox
 import Tools.Stats as stats
-from Main_App.relevant_publications_window import RelevantPublicationsWindow
-from Main_App.settings_manager import SettingsManager
-from Main_App.settings_window import SettingsWindow
+from Main_App import RelevantPublicationsWindow
+from Main_App import SettingsManager
+from Main_App import SettingsWindow
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ of the FPVS Toolbox.
 import tkinter as tk
 # Note: Other imports like webbrowser, messagebox, etc., are not needed here
 # if the command methods themselves remain in the main FPVSApp class.
-from Main_App.eloreta_launcher import open_eloreta_tool
+from Main_App.Legacy_App.eloreta_launcher import open_eloreta_tool
 
 class AppMenuBar:
     def __init__(self, app_reference):

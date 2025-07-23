@@ -13,7 +13,7 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 from typing import Optional
 
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 
 import customtkinter as ctk
 

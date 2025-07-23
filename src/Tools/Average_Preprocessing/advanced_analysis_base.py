@@ -9,20 +9,14 @@ initiate processing via :mod:`advanced_analysis_core`.
 """
 
 import tkinter as tk
-from tkinter import filedialog
 import customtkinter as ctk
-from customtkinter import CTkInputDialog
 import CTkMessagebox
-import os
-import json
-from pathlib import Path
 import re
 import threading
 from typing import List, Dict, Any, Optional
-import traceback
 import logging
 
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +45,7 @@ try:
     from .advanced_analysis_core import run_advanced_averaging_processing
 
     # CORRECTED: Use ABSOLUTE import from src root for post_process
-    from Main_App.post_process import post_process as _external_post_process_actual
+    from Main_App import post_process as _external_post_process_actual
 
 except ImportError as e:
     # Keep the error handling for robustness

@@ -35,7 +35,7 @@ from PySide6.QtWidgets import QColorDialog
 
 from Tools.Stats.stats_helpers import load_rois_from_settings
 from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from .worker import _Worker
 

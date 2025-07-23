@@ -1,7 +1,7 @@
 # Helper methods extracted from stats.py
 
 import logging
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 from . import stats_analysis
 
 logger = logging.getLogger(__name__)

@@ -9,7 +9,7 @@ exists.
 
 import numpy as np
 import customtkinter as ctk
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 
 # — FPVS Toolbox version & update API —
 

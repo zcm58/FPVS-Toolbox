@@ -11,7 +11,7 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 import mne
 from mne import combine_evoked
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 from . import source_localization
 from .backend_utils import _ensure_pyvista_backend, get_current_backend
 from .brain_utils import (

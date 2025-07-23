@@ -24,14 +24,14 @@ if USE_PYSIDE6:
     try:
         from PySide6.QtWidgets import QApplication
         from pathlib import Path
-        from Main_App.GUI.main_window import MainWindow
+        from Main_App import MainWindow
     except ImportError as exc:  # pragma: no cover - import guard
         raise ImportError(
             "PySide6 not installed; install with 'pip install PySide6'"
         ) from exc
 else:
     from fpvs_app import FPVSApp
-    from Main_App.debug_utils import configure_logging, get_settings, install_messagebox_logger
+    from Main_App import configure_logging, get_settings, install_messagebox_logger
     import multiprocessing
 
 def main() -> None:

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def _log_backend_imports() -> None:
     """Log backend import information when debug mode is enabled."""
     try:
-        from Main_App.settings_manager import SettingsManager
+        from Main_App import SettingsManager
     except Exception:
         return
 

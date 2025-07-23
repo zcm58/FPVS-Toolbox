@@ -11,7 +11,7 @@ from typing import Callable, Optional, Tuple
 
 import numpy as np
 import mne
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 
 logger = logging.getLogger(__name__)
 

@@ -15,7 +15,7 @@ from mne.source_estimate import _BaseSourceEstimate
 from tkinter import messagebox
 
 from .data_utils import _resolve_subjects_dir
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 
 logger = logging.getLogger(__name__)
 

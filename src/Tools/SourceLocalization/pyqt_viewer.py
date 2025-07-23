@@ -22,8 +22,8 @@ from Tools.SourceLocalization.data_utils import _resolve_subjects_dir
 
 logger = logging.getLogger(__name__)
 
-from Main_App.settings_manager import SettingsManager
-from Main_App.debug_utils import configure_logging, get_settings
+from Main_App import SettingsManager
+from Main_App import configure_logging, get_settings
 
 
 class STCViewer(QtWidgets.QMainWindow):

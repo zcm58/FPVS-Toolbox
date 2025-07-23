@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Callable, Optional, Union
 
 import mne
 import threading
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 
 # Set up module level logger
 logger = logging.getLogger(__name__)

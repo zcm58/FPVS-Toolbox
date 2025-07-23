@@ -9,7 +9,7 @@ from typing import Dict, List, Iterable, Sequence
 import pandas as pd
 import matplotlib
 import numpy as np
-from Main_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt

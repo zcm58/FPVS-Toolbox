@@ -36,15 +36,15 @@ import pandas as pd
 from pathlib import Path
 import subprocess
 import sys
-from Main_App.GUI.menu_bar import build_menu_bar
-from Main_App.GUI.settings_panel import SettingsDialog
-from Main_App.settings_manager import SettingsManager
-from Main_App.Backend.project import Project
-from Main_App.load_utils import load_eeg_file
-from Main_App.app_logic import preprocess_raw
-from Main_App.eeg_preprocessing import perform_preprocessing
-from Main_App.Backend.processing import process_data
-from Main_App.post_process import post_process
+from Main_App import build_menu_bar
+from Main_App import SettingsDialog
+from Main_App import SettingsManager
+from Main_App import Project
+from Main_App import load_eeg_file
+from Main_App import preprocess_raw
+from Main_App import perform_preprocessing
+from Main_App import process_data
+from Main_App import post_process
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
@@ -397,7 +397,7 @@ class MainWindow(QMainWindow):
         self._settings_dialog = None
 
     def check_for_updates(self) -> None:
-        from Main_App import update_manager
+        from Main_App.Legacy_App import update_manager
 
         update_manager.check_for_updates_async(self, silent=False)
 

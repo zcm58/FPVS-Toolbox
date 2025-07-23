@@ -250,7 +250,7 @@ class AdvancedAnalysisProcessingMixin:
             if hasattr(self.master_app, "load_eeg_file"):
                 load_file_method = self.master_app.load_eeg_file
             else:  # Fallback to utility function
-                from Main_App.load_utils import load_eeg_file as _load
+                from Main_App import load_eeg_file as _load
     
                 def load_file_method(fp):
                     return _load(self.master_app, fp)
@@ -258,7 +258,7 @@ class AdvancedAnalysisProcessingMixin:
             if hasattr(self.master_app, "preprocess_raw"):
                 preprocess_raw_method = self.master_app.preprocess_raw
             else:
-                from Main_App.eeg_preprocessing import perform_preprocessing as _pp
+                from Main_App import perform_preprocessing as _pp
     
                 def preprocess_raw_method(raw, **params):
                     """Wrapper to match legacy ``preprocess_raw`` interface."""
