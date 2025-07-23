@@ -194,21 +194,42 @@ class MainWindow(QMainWindow):
         vlay.addLayout(btns)
         main_layout.addWidget(grp_event)
 
+        # --- Start + Progress Row ---
         action_row = QHBoxLayout()
-        action_row.setSpacing(0)
-        self.btn_start = QPushButton("Start Processing", container)
+        action_row.setSpacing(16)
+
+        # Create widgets
+        self.btn_start = QPushButton(container)
         self.progress_bar = QProgressBar(container)
+
+        # 1) Enlarge and fix the button size
+        self.btn_start.setText("Start Processing")
+        self.btn_start.setMinimumSize(150, 36)
+        self.btn_start.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        # 2) Center text in the progress bar and allow it to expand
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFormat("%p%")
-        self.progress_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.progress_bar.setAlignment(Qt.AlignCenter)
+        self.progress_bar.setFixedHeight(self.btn_start.sizeHint().height())
         self.progress_bar.setStyleSheet(
-            "QProgressBar::chunk {background-color: #0BBF00;}"
+            """
+            QProgressBar {
+              min-height: 36px;
+              text-align: center;
+            }
+            QProgressBar::chunk {
+              background-color: #0BBF00;
+            }
+            """
         )
+
+        # 3) Add with stretch so the bar fills leftover space
         action_row.addWidget(self.btn_start)
-        action_row.addSpacing(16)
-        action_row.addWidget(self.progress_bar)
+        action_row.addWidget(self.progress_bar, 1)
+
         main_layout.addLayout(action_row)
         self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
         self._progress_anim.setDuration(200)
