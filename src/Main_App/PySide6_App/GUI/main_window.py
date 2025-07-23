@@ -8,15 +8,14 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QMessageBox,
-    QFileDialog,
 )
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QTimer
 import logging
 import pandas as pd
 from pathlib import Path
 import subprocess
 import sys
-import traceback
+import queue
 from .settings_panel import SettingsDialog
 from .sidebar import init_sidebar
 from .file_menu import init_file_menu
@@ -26,11 +25,10 @@ from Main_App.PySide6_App.Backend import Project
 from Main_App.PySide6_App.Backend.processing_controller import (
     _animate_progress_to,
 )
-from Main_App.Legacy_App.load_utils import load_eeg_file
-from Main_App.Legacy_App.app_logic import preprocess_raw
-from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
-from Main_App.PySide6_App.Backend.processing import process_data
-from Main_App.Legacy_App.post_process import post_process
+
+from Main_App.Legacy_App.file_selection import FileSelectionMixin
+from Main_App.Legacy_App.validation_mixins import ValidationMixin
+from Main_App.Legacy_App.processing_utils import ProcessingMixin
 from Main_App.PySide6_App.Backend.project_manager import (
     select_projects_root,
     new_project,
@@ -50,7 +48,20 @@ class Processor(QObject):
 logger = logging.getLogger(__name__)
 
 
-class MainWindow(QMainWindow):
+class _QtEntryAdapter:
+    """Provide Tk-like ``get`` and ``focus_set`` for :class:`QLineEdit`."""
+
+    def __init__(self, line_edit: QLineEdit) -> None:
+        self._edit = line_edit
+
+    def get(self) -> str:  # type: ignore[override]
+        return self._edit.text()
+
+    def focus_set(self) -> None:  # type: ignore[override]
+        self._edit.setFocus()
+
+
+class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMixin):
     """Main application window implemented with PySide6."""
 
     def __init__(self) -> None:
@@ -74,6 +85,23 @@ class MainWindow(QMainWindow):
         self.log(
             f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}"
         )
+
+        # Legacy mixin compatibility ----------------------------
+        self.gui_queue = queue.Queue()
+        self.processing_thread = None
+        self.detection_thread = None
+        self.preprocessed_data = {}
+        self.validated_params = {}
+        self._max_progress = 1
+        self.busy = False
+        self.run_loreta_var = SimpleNamespace(get=lambda: self.cb_loreta.isChecked())
+        self.save_fif_var = SimpleNamespace(get=lambda: True)
+        self.save_folder_path = SimpleNamespace(get=lambda: "", set=lambda v: None)
+        self.file_mode = SimpleNamespace(get=lambda: "Batch")
+        self.file_type = SimpleNamespace(set=lambda v: None)
+        self._processing_timer = QTimer(self)
+        self._processing_timer.timeout.connect(self._periodic_queue_check)
+        self._processing_timer.start(50)
 
     # ------------------------------------------------------------------
 
@@ -107,6 +135,14 @@ class MainWindow(QMainWindow):
             self.btn_open_eeg.setText("Select Input Folder…")
         else:
             self.btn_open_eeg.setText("Select .BDF File…")
+
+    def after(self, ms: int, callback) -> int:
+        QTimer.singleShot(ms, callback)
+        return 0
+
+    def _set_controls_enabled(self, enabled: bool) -> None:
+        if hasattr(self, "btn_start"):
+            self.btn_start.setEnabled(enabled)
 
     # ------------------------------------------------------------------
     def open_settings_window(self) -> None:
@@ -199,95 +235,9 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
 
-    def start_processing(self) -> None:
-        try:
-            input_dir = Path(self.currentProject.input_folder)
-            run_loreta = self.cb_loreta.isChecked()
 
-            if self.rb_batch.isChecked():
-                bdf_files = list(input_dir.glob("*.bdf"))
-                if not bdf_files:
-                    raise FileNotFoundError(f"No .bdf files in {input_dir}")
-            else:
-                file_path, _ = QFileDialog.getOpenFileName(
-                    self,
-                    "Select .BDF File",
-                    str(input_dir),
-                    "BDF Files (*.bdf)",
-                )
-                if not file_path:
-                    self.log("No file selected, aborting.")
-                    return
-                bdf_files = [Path(file_path)]
-
-            for fp in bdf_files:
-                self.log(f"Loading EEG file: {fp.name}")
-                if self.settings.debug_enabled():
-                    self.log(f"[DEBUG] Calling load_eeg_file(self, '{fp}')")
-                raw = load_eeg_file(self, str(fp))
-                if self.settings.debug_enabled():
-                    self.log(f"[DEBUG] load_eeg_file returned: {raw!r}")
-
-                self.log("Preprocessing raw data")
-                if self.settings.debug_enabled():
-                    self.log("[DEBUG] Calling preprocess_raw(self, raw)")
-                proc1 = preprocess_raw(self, raw)
-                if self.settings.debug_enabled():
-                    self.log(f"[DEBUG] preprocess_raw returned: {proc1!r}")
-
-                if self.settings.debug_enabled():
-                    self.log("[DEBUG] Collecting preprocessing parameters")
-                params = {
-                    "downsample_rate": self.currentProject.preprocessing.get("downsample"),
-                    "low_pass": self.currentProject.preprocessing.get("low_pass"),
-                    "high_pass": self.currentProject.preprocessing.get("high_pass"),
-                    "reject_thresh": self.currentProject.preprocessing.get("rejection_z"),
-                    "ref_channel1": self.currentProject.preprocessing.get("ref_chan1"),
-                    "ref_channel2": self.currentProject.preprocessing.get("ref_chan2"),
-                    "max_idx_keep": self.currentProject.preprocessing.get("max_chan_idx"),
-                    "stim_channel": self.settings.get("stim", "channel", "Status"),
-                }
-                if self.settings.debug_enabled():
-                    self.log(f"[DEBUG] Calling perform_preprocessing(proc1, {params})")
-                proc2, _ = perform_preprocessing(proc1, params, self.log, fp.name)
-                if self.settings.debug_enabled():
-                    self.log(f"[DEBUG] perform_preprocessing returned: {proc2!r}")
-
-                out_dir = str(
-                    self.currentProject.project_root
-                    / self.currentProject.subfolders["excel"]
-                )
-                self.log(f"Running main processing (run_loreta={run_loreta})")
-                if self.settings.debug_enabled():
-                    self.log(
-                        f"[DEBUG] Calling process_data(proc2, '{out_dir}', {run_loreta})"
-                    )
-                result = process_data(proc2, out_dir, run_loreta)
-                if self.settings.debug_enabled():
-                    self.log(f"[DEBUG] process_data returned: {result!r}")
-
-                self.log("Post-processing results")
-                condition_labels = list(self.currentProject.event_map.keys())
-                if self.settings.debug_enabled():
-                    self.log(
-                        f"[DEBUG] Calling post_process(self, {condition_labels})"
-                    )
-                post_process(self, condition_labels)
-                if self.settings.debug_enabled():
-                    self.log("[DEBUG] post_process completed")
-
-            self._animate_progress_to(100)
-            self.log("Processing complete")
-
-        except Exception as e:
-            if self.settings.debug_enabled():
-                tb = traceback.format_exc()
-                self.log(f"[DEBUG] Full traceback:\n{tb}")
-            self.log(f"Processing failed: {e}", level=logging.ERROR)
-            QMessageBox.critical(self, "Processing Error", str(e))
-
-    def _animate_progress_to(self, value: int) -> None:
-        _animate_progress_to(self, value)
+    def _animate_progress_to(self, value: float) -> None:
+        _animate_progress_to(self, int(value * 100))
 
     def detect_trigger_ids(self) -> None:  # pragma: no cover - GUI stub
         try:
@@ -321,12 +271,46 @@ class MainWindow(QMainWindow):
         self.event_rows.append(row)
         self.log("Added event map row")
 
+    @property
+    def event_map_entries(self):
+        entries = []
+        for row in self.event_rows:
+            edits = row.findChildren(QLineEdit)
+            if len(edits) >= 2:
+                entries.append(
+                    {
+                        "label": _QtEntryAdapter(edits[0]),
+                        "id": _QtEntryAdapter(edits[1]),
+                    }
+                )
+        return entries
+
     # ------------------------------------------------------------------
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
         loadProject(self, project)
         # Provide legacy post_process with a .get() API to retrieve the Excel output folder
         excel_folder = self.currentProject.project_root / self.currentProject.subfolders["excel"]
-        self.save_folder_path = SimpleNamespace(get=lambda: str(excel_folder))
+        self.save_folder_path = SimpleNamespace(get=lambda: str(excel_folder), set=lambda v: None)
+
+        def make_entry(value: str):
+            edit = QLineEdit(str(value))
+            return _QtEntryAdapter(edit)
+
+        p = self.currentProject.preprocessing
+        self.low_pass_entry = make_entry(p.get("low_pass"))
+        self.high_pass_entry = make_entry(p.get("high_pass"))
+        self.downsample_entry = make_entry(p.get("downsample"))
+        self.epoch_start_entry = make_entry(
+            self.settings.get("preprocessing", "epoch_start", "-1")
+        )
+        self.epoch_end_entry = make_entry(
+            self.settings.get("preprocessing", "epoch_end", "125")
+        )
+        self.reject_thresh_entry = make_entry(p.get("rejection_z"))
+        self.ref_channel1_entry = make_entry(p.get("ref_chan1"))
+        self.ref_channel2_entry = make_entry(p.get("ref_chan2"))
+        self.max_idx_keep_entry = make_entry(p.get("max_chan_idx"))
+        self.max_bad_channels_alert_entry = make_entry(p.get("max_bad_chans"))
 
     def saveProjectSettings(self) -> None:
         """Collect current UI settings and save them to ``project.json``."""
