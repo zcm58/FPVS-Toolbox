@@ -546,7 +546,7 @@ class MainWindow(QMainWindow):
 
             for fp in bdf_files:
                 self.log(f"Loading EEG file: {fp.name}")
-                raw = load_eeg_file(str(fp))
+                raw = load_eeg_file(self, str(fp))
 
                 self.log("Preprocessing raw data")
                 processed = preprocess_raw(raw)
