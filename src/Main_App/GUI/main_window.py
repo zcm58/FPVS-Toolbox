@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QStyle,
     QFrame,
     QMenu,
+    QInputDialog,
 )
 from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal
 from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor
@@ -98,12 +99,12 @@ class MainWindow(QMainWindow):
         header.setStyleSheet("background-color: #2A2A2A; padding: 8px;")
         h_lay = QHBoxLayout(header)
         h_lay.setContentsMargins(0, 0, 0, 0)
-        lbl_proj = QLabel("Current Project: Semantic Categories", header)
-        lbl_proj.setStyleSheet("color: white; font-weight: bold;")
+        self.lbl_currentProject = QLabel("Current Project: None", header)
+        self.lbl_currentProject.setStyleSheet("color: white; font-weight: bold;")
         self.btn_view_project = QPushButton("View/Edit Project", header)
         self.btn_view_project.setFlat(True)
         self.btn_view_project.setIcon(QIcon.fromTheme("document-edit"))
-        h_lay.addWidget(lbl_proj)
+        h_lay.addWidget(self.lbl_currentProject)
         h_lay.addStretch(1)
         h_lay.addWidget(self.btn_view_project)
         main_layout.addWidget(header)
@@ -384,6 +385,14 @@ class MainWindow(QMainWindow):
         if not folder:
             return
         project = Project.load(folder)
+        default_name = Path(folder).name
+        name, ok = QInputDialog.getText(
+            self, "Project Name", "Enter a name for this project:", text=default_name
+        )
+        if ok and name.strip():
+            project.name = name.strip()
+        else:
+            project.name = default_name
         project.save()
         self.currentProject = project
         self.loadProject(project)
@@ -531,6 +540,27 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
         """Apply project settings to the UI."""
+        self.currentProject = project
+        # Update header
+        self.lbl_currentProject.setText(f"Current Project: {project.name}")
+
+        # Processing Options
+        mode = project.options.get("mode", "batch").lower()
+        self.rb_single.setChecked(mode == "single")
+        self.rb_batch.setChecked(mode == "batch")
+        self.cb_loreta.setChecked(bool(project.options.get("run_loreta", False)))
+
+        # Event Map
+        for row in list(self.event_rows):
+            row.setParent(None)
+        self.event_rows.clear()
+
+        if project.event_map:
+            for label, ident in project.event_map.items():
+                self.add_event_row(str(label), str(ident))
+        else:
+            self.add_event_row()
+
         self.log(f"Loaded project: {project.name}")
 
 def main() -> None:
