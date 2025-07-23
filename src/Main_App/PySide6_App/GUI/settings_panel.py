@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal, QSettings
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -219,7 +219,7 @@ class SettingsDialog(QDialog):
         form.addRow(QLabel("Regions of Interest"), self.roi_editor)
 
         add_btn = QPushButton("+ Add ROI")
-        add_btn.clicked.connect(self.roi_editor.add_entry)
+        add_btn.clicked.connect(lambda: self.roi_editor.add_entry())
         form.addRow(add_btn)
 
         tabs.addTab(tab, "Stats")
