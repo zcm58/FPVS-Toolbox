@@ -311,6 +311,7 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
         if not menu_bar:
             return
+
         file_menu = getattr(self, "file_menu", None)
         if file_menu is None:
             actions = menu_bar.actions()
@@ -318,6 +319,7 @@ class MainWindow(QMainWindow):
                 return
             file_menu = actions[0].menu()
             self.file_menu = file_menu
+
         file_menu.clear()
 
         action_new = QAction("New Project…", self)
