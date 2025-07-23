@@ -215,8 +215,8 @@ class MainWindow(QMainWindow):
 
                 self.log("Preprocessing raw data")
                 if self.settings.debug_enabled():
-                    self.log("[DEBUG] Calling preprocess_raw(raw)")
-                proc1 = preprocess_raw(raw)
+                    self.log("[DEBUG] Calling preprocess_raw(self, raw)")
+                proc1 = preprocess_raw(self, raw)
                 if self.settings.debug_enabled():
                     self.log(f"[DEBUG] preprocess_raw returned: {proc1!r}")
 
