@@ -586,7 +586,9 @@ class MainWindow(QMainWindow):
                 result = process_data(processed, out_dir, run_loreta)
 
                 self.log("Post-processing results")
-                post_process(result)
+                # Supply the list of condition labels from the current project
+                condition_labels = list(self.currentProject.event_map.keys())
+                post_process(result, condition_labels)
 
             self._animate_progress_to(100)
             self.log("Processing complete")
