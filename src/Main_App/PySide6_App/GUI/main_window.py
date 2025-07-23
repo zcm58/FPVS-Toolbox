@@ -570,8 +570,13 @@ class MainWindow(QMainWindow):
                 raw = load_eeg_file(self, str(fp))
 
                 self.log("Preprocessing raw data")
-                processed = preprocess_raw(raw)
-                processed = perform_preprocessing(processed)
+                processed = preprocess_raw(self, raw)
+                processed, _ = perform_preprocessing(
+                    raw_input=processed,
+                    params={},
+                    log_func=self.log,
+                    filename_for_log=fp.name,
+                )
 
                 out_dir = str(
                     self.currentProject.project_root
