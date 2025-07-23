@@ -69,7 +69,7 @@ def start_processing(self) -> None:
                 self.currentProject.project_root / self.currentProject.subfolders["excel"]
             )
             self.log(f"Running main processing (run_loreta={run_loreta})")
-            result = process_data(preprocessed, out_dir, run_loreta)
+            process_data(preprocessed, out_dir, run_loreta)
 
             self.log("Post-processing results")
             condition_labels = list(self.currentProject.event_map.keys())
