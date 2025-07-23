@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QSettings
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -91,6 +91,10 @@ class SettingsDialog(QDialog):
         self._init_stats_tab(tabs)
         self._init_oddball_tab(tabs)
         self._init_loreta_tab(tabs)
+
+        self.btn_changeRoot = QPushButton("Change Projects Root…", self)
+        self.btn_changeRoot.clicked.connect(self.changeProjectsRoot)
+        layout.addWidget(self.btn_changeRoot)
 
         btn_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         layout.addWidget(btn_box)
@@ -289,6 +293,24 @@ class SettingsDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, "Select Folder", edit.text() or "")
         if folder:
             edit.setText(folder)
+
+    # ------------------------------------------------------------------
+    def changeProjectsRoot(self) -> None:
+        settings = QSettings()
+        root = QFileDialog.getExistingDirectory(
+            self,
+            "Select Projects Root Folder",
+            settings.value("paths/projectsRoot", ""),
+        )
+        if not root:
+            return
+        settings.setValue("paths/projectsRoot", root)
+        settings.sync()
+        QMessageBox.information(
+            self,
+            "Projects Root Updated",
+            f"New Projects Root: {root}",
+        )
 
     # ------------------------------------------------------------------
     def _save(self) -> None:
