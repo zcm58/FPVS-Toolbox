@@ -73,14 +73,41 @@ class Project:
 
     @classmethod
     def load(cls, path: Path | str) -> "Project":
-        """Load a project from ``project.json`` located at ``path``."""
+        """Load an existing project or scaffold a new one.
 
-        root = Path(path)
-        manifest_path = root / cls.MANIFEST_NAME
-        data: Dict[str, Any] | None = None
+        Numbered subfolders are ensured to exist and the manifest is saved
+        back to disk after loading or creating a project.
+        """
+
+        project_root = Path(path)
+        manifest_path = project_root / cls.MANIFEST_NAME
+
+        # Load existing manifest if present
         if manifest_path.exists():
             data = json.loads(manifest_path.read_text())
-        return cls(project_root=root, data=data)
+        else:
+            data = {}
+
+        # Default subfolders with required numbering
+        default_subfolders = {
+            "excel": "1 - Excel Data Files",
+            "snr": "2 - SNR Plots",
+            "stats": "3 - Statistical Analysis Results",
+        }
+
+        # Merge saved subfolders with defaults
+        subfolders = {**default_subfolders, **data.get("subfolders", {})}
+
+        # Ensure directories exist on disk
+        for folder_name in subfolders.values():
+            (project_root / folder_name).mkdir(parents=True, exist_ok=True)
+
+        # Instantiate project with merged manifest data
+        project = cls(project_root=project_root, data={**data, "subfolders": subfolders})
+
+        # Persist updated manifest
+        project.save()
+        return project
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a serializable dictionary representation."""
