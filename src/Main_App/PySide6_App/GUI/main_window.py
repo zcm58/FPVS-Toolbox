@@ -570,20 +570,15 @@ class MainWindow(QMainWindow):
                 raw = load_eeg_file(self, str(fp))
 
                 self.log("Preprocessing raw data")
-                processed = preprocess_raw(self, raw)
-                processed, _ = perform_preprocessing(
-                    raw_input=processed,
-                    params={},
-                    log_func=self.log,
-                    filename_for_log=fp.name,
-                )
+                preprocessed = preprocess_raw(raw)
+                preprocessed = perform_preprocessing(preprocessed)
 
                 out_dir = str(
                     self.currentProject.project_root
                     / self.currentProject.subfolders["excel"]
                 )
                 self.log(f"Running main processing (run_loreta={run_loreta})")
-                result = process_data(processed, out_dir, run_loreta)
+                result = process_data(preprocessed, out_dir, run_loreta)
 
                 self.log("Post-processing results")
                 # Supply the list of condition labels from the current project
