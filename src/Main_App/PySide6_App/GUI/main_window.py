@@ -140,16 +140,30 @@ class MainWindow(QMainWindow):
 
     def open_image_resizer(self) -> None:
         cmd = [sys.executable]
-        if not getattr(sys, "frozen", False):
-            cmd.append(str(Path(__file__).resolve().parents[2] / "main.py"))
-        cmd.append("--run-image-resizer")
+        if getattr(sys, "frozen", False):
+            cmd.append("--run-image-resizer")
+        else:
+            script = (
+                Path(__file__).resolve().parents[3]
+                / "Tools"
+                / "Image_Resizer"
+                / "pyside_resizer.py"
+            )
+            cmd.append(str(script))
         subprocess.Popen(cmd, close_fds=True)
 
     def open_plot_generator(self) -> None:
         cmd = [sys.executable]
-        if not getattr(sys, "frozen", False):
-            cmd.append(str(Path(__file__).resolve().parents[2] / "main.py"))
-        cmd.append("--run-plot-generator")
+        if getattr(sys, "frozen", False):
+            cmd.append("--run-plot-generator")
+        else:
+            script = (
+                Path(__file__).resolve().parents[3]
+                / "Tools"
+                / "Plot_Generator"
+                / "plot_generator.py"
+            )
+            cmd.append(str(script))
         subprocess.Popen(cmd, close_fds=True)
 
     def open_advanced_analysis_window(self) -> None:
