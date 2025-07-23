@@ -77,11 +77,6 @@ class MainWindow(QMainWindow):
         # Menu bar
         menu = build_menu_bar(self)
         self.setMenuBar(menu)
-        # Keep a reference to the File menu so it isn't destroyed
-        if menu.actions():
-            self.file_menu = menu.actions()[0].menu()
-        else:
-            self.file_menu = None
 
         # Top toolbar
         toolbar = QToolBar(self)
@@ -312,13 +307,9 @@ class MainWindow(QMainWindow):
         if not menu_bar:
             return
 
-        file_menu = getattr(self, "file_menu", None)
+        file_menu = menu_bar.findChild(QMenu, "fileMenu")
         if file_menu is None:
-            actions = menu_bar.actions()
-            if not actions:
-                return
-            file_menu = actions[0].menu()
-            self.file_menu = file_menu
+            return
 
         file_menu.clear()
 

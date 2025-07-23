@@ -11,6 +11,7 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
 
     # File
     file_menu = menu_bar.addMenu("File")
+    file_menu.setObjectName("fileMenu")
     for text, slot in [
         ("Settings",         parent.open_settings_window),
         ("Check for Updates", parent.check_for_updates),
