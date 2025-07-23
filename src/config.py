@@ -9,7 +9,7 @@ exists.
 
 import numpy as np
 import customtkinter as ctk
-from Main_App import SettingsManager
+
 
 # — FPVS Toolbox version & update API —
 
@@ -18,26 +18,34 @@ FPVS_TOOLBOX_VERSION       = "1.1.1"
 FPVS_TOOLBOX_UPDATE_API    = "https://api.github.com/repos/zcm58/FPVS-Toolbox-Repo/releases/latest"
 FPVS_TOOLBOX_REPO_PAGE     = "https://github.com/zcm58/FPVS-Toolbox-Repo/releases"
 
+# Default frequency values used when settings are unavailable. These match the
+# values provided in :mod:`Main_App.Legacy_App.settings_manager`.
+DEFAULT_ODDBALL_FREQ = 1.2
+DEFAULT_BCA_UPPER_LIMIT = 16.8
+
 # — metrics —
 
 def _load_frequency_settings():
+    """Return oddball frequency and upper limit from saved settings."""
+    from Main_App import SettingsManager  # Imported lazily to avoid circular deps
+
     mgr = SettingsManager()
     try:
-        odd = float(mgr.get('analysis', 'oddball_freq', '1.2'))
+        odd = float(mgr.get('analysis', 'oddball_freq', str(DEFAULT_ODDBALL_FREQ)))
     except ValueError:
-        odd = 1.2
+        odd = DEFAULT_ODDBALL_FREQ
     try:
-        upper = float(mgr.get('analysis', 'bca_upper_limit', '16.8'))
+        upper = float(mgr.get('analysis', 'bca_upper_limit', str(DEFAULT_BCA_UPPER_LIMIT)))
     except ValueError:
-        upper = 16.8
+        upper = DEFAULT_BCA_UPPER_LIMIT
     return odd, upper
 
 
 def _compute_freqs(odd: float, upper: float) -> np.ndarray:
     if odd <= 0:
-        odd = 1.2
+        odd = DEFAULT_ODDBALL_FREQ
     if upper < odd:
-        upper = 16.8
+        upper = DEFAULT_BCA_UPPER_LIMIT
     steps = int(round(upper / odd))
     return np.array([odd * i for i in range(1, steps + 1)])
 
@@ -51,7 +59,9 @@ def update_target_frequencies(odd: float = None, upper: float = None) -> np.ndar
     return TARGET_FREQUENCIES
 
 
-TARGET_FREQUENCIES = update_target_frequencies()
+# Pre-compute default frequencies without accessing SettingsManager to avoid
+# circular imports during initialisation.
+TARGET_FREQUENCIES = _compute_freqs(DEFAULT_ODDBALL_FREQ, DEFAULT_BCA_UPPER_LIMIT)
 DEFAULT_ELECTRODE_NAMES_64 = [
     'Fp1','AF7','AF3','F1','F3','F5','F7','FT7','FC5','FC3','FC1','C1','C3','C5','T7','TP7',
     'CP5','CP3','CP1','P1','P3','P5','P7','P9','PO7','PO3','O1','Iz','Oz','POz','Pz','CPz',
