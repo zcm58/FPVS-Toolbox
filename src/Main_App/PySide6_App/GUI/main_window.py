@@ -99,6 +99,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self.save_folder_path = SimpleNamespace(get=lambda: "", set=lambda v: None)
         self.file_mode = SimpleNamespace(get=lambda: "Batch")
         self.file_type = SimpleNamespace(set=lambda v: None)
+        # Connect temporary data selection button to legacy mixin
+        if hasattr(self, "btn_select_data"):
+            self.btn_select_data.clicked.connect(self.select_data_source)
         self._processing_timer = QTimer(self)
         self._processing_timer.timeout.connect(self._periodic_queue_check)
         self._processing_timer.start(50)

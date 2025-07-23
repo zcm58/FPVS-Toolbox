@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QDockWidget,
     QApplication,
+    QPushButton,
 )
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PySide6.QtCore import Qt, QSize
@@ -87,6 +88,11 @@ def init_sidebar(self) -> None:
     divider.setFixedHeight(1)
     divider.setStyleSheet("background:#444;")
     lay.addWidget(divider)
+
+    # Temporary button to trigger legacy data selection
+    self.btn_select_data = QPushButton("Select Data Folder...")
+    self.btn_select_data.setObjectName("btn_select_data")
+    lay.addWidget(self.btn_select_data)
 
     lay.addStretch(1)
 
