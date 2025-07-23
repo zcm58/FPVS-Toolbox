@@ -9,11 +9,16 @@ USE_PYSIDE6 = True
 
 from ctypes import windll
 import sys
+from PySide6.QtCore import QCoreApplication
 
 try:
     windll.shcore.SetProcessDpiAwareness(1)
 except Exception:
     pass
+
+QCoreApplication.setOrganizationName("MississippiStateUniversity")
+QCoreApplication.setOrganizationDomain("msstate.edu")
+QCoreApplication.setApplicationName("FPVS Toolbox")
 
 if USE_PYSIDE6:
     try:
