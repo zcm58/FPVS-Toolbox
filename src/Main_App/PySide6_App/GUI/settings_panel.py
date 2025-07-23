@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from Main_App import SettingsManager
-from Main_App import ROISettingsEditor
+from Main_App.Legacy_App.settings_manager import SettingsManager
+from .roi_settings_editor import ROISettingsEditor
 
 
 class SettingsPanel(QWidget):

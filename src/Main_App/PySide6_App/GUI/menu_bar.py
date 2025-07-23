@@ -1,7 +1,7 @@
 from __future__ import annotations
 from PySide6.QtWidgets import QMenuBar, QMainWindow
 from PySide6.QtGui    import QAction
-from Main_App import open_eloreta_tool
+from Main_App.Legacy_App.eloreta_launcher import open_eloreta_tool
 
 def build_menu_bar(parent: QMainWindow) -> QMenuBar:
     """
