@@ -38,6 +38,7 @@ from Main_App.PySide6_App.Backend.project_manager import (
     openProjectPath,
     loadProject,
 )
+from types import SimpleNamespace
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
@@ -323,6 +324,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
         loadProject(self, project)
+        # Provide legacy post_process with a .get() API to retrieve the Excel output folder
+        excel_folder = self.currentProject.project_root / self.currentProject.subfolders["excel"]
+        self.save_folder_path = SimpleNamespace(get=lambda: str(excel_folder))
 
     def saveProjectSettings(self) -> None:
         """Collect current UI settings and save them to ``project.json``."""
