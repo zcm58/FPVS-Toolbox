@@ -38,6 +38,7 @@ class Project:
 
     project_root: Path
     name: str
+    input_folder: Path = Path("")
     subfolders: Dict[str, str] = field(default_factory=lambda: _DEFAULTS["subfolders"].copy())
     preprocessing: Dict[str, Any] = field(
         default_factory=lambda: _DEFAULTS["preprocessing"].copy()
@@ -52,6 +53,7 @@ class Project:
 
         object.__setattr__(self, "project_root", Path(project_root))
         object.__setattr__(self, "name", Path(project_root).name)
+        object.__setattr__(self, "input_folder", Path(""))
         manifest = data or {}
 
         sub = _DEFAULTS["subfolders"].copy()
@@ -104,6 +106,8 @@ class Project:
 
         # Instantiate project with merged manifest data
         project = cls(project_root=project_root, data={**data, "subfolders": subfolders})
+        project.name = data.get("name", project_root.name)
+        project.input_folder = Path(data.get("input_folder", ""))
 
         # Persist updated manifest
         project.save()
@@ -113,6 +117,8 @@ class Project:
         """Return a serializable dictionary representation."""
 
         return {
+            "name": self.name,
+            "input_folder": str(self.input_folder),
             "subfolders": self.subfolders,
             "preprocessing": self.preprocessing,
             "event_map": self.event_map,

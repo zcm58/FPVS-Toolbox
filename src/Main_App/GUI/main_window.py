@@ -395,39 +395,70 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def new_project(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select Project Directory")
-        if not folder:
-            return
-        project = Project.load(folder)
-        default_name = Path(folder).name
         name, ok = QInputDialog.getText(
-            self, "Project Name", "Enter a name for this project:", text=default_name
+            self, "Project Name", "Enter a name for this project:"
         )
-        if ok and name.strip():
-            project.name = name.strip()
-        else:
-            project.name = default_name
+        if not ok or not name.strip():
+            return
+
+        input_folder = QFileDialog.getExistingDirectory(
+            self, "Select Input Folder", ""
+        )
+        if not input_folder:
+            return
+
+        project_root = QFileDialog.getExistingDirectory(
+            self, "Select Project Directory", ""
+        )
+        if not project_root:
+            return
+
+        project = Project.load(project_root)
+        project.name = name.strip()
+        project.input_folder = input_folder
         project.save()
+
+        settings = QSettings()
+        recent = settings.value("recentProjects", [])
+        if project_root not in recent:
+            recent.insert(0, project_root)
+            settings.setValue("recentProjects", recent)
+
         self.currentProject = project
         self.loadProject(project)
 
-        settings = QSettings()
-        recent = settings.value("recentProjects", [])  # type: list[str]
-        if folder not in recent:
-            recent.insert(0, folder)
-            settings.setValue("recentProjects", recent)
-
     def open_existing_project(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select Project Directory")
-        if not folder:
-            return
-        self.openProjectPath(folder)
-
         settings = QSettings()
-        recent = settings.value("recentProjects", [])  # type: list[str]
-        if folder not in recent:
-            recent.insert(0, folder)
-            settings.setValue("recentProjects", recent)
+        recent = settings.value("recentProjects", [])
+        if not recent:
+            QMessageBox.information(
+                self, "No Projects", "No projects found. Create one first."
+            )
+            return
+
+        display_map: dict[str, str] = {}
+        for i, folder in enumerate(recent, start=1):
+            try:
+                proj = Project.load(folder)
+                label = f"Project {i}: {proj.name}"
+                display_map[label] = folder
+            except Exception:
+                continue
+
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Open Project",
+            "Select a project:",
+            list(display_map.keys()),
+            editable=False,
+        )
+        if not ok:
+            return
+
+        folder = display_map[choice]
+        project = Project.load(folder)
+        self.currentProject = project
+        self.loadProject(project)
 
     def openProjectPath(self, folder: str) -> None:
         project = Project.load(folder)
@@ -572,6 +603,9 @@ class MainWindow(QMainWindow):
         self.currentProject = project
         # Update header
         self.lbl_currentProject.setText(f"Current Project: {project.name}")
+
+        self.settings.set("paths", "data_folder", project.input_folder)
+        self.settings.save()
 
         # Processing Options
         mode = project.options.get("mode", "batch").lower()
