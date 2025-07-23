@@ -24,7 +24,7 @@ if USE_PYSIDE6:
     try:
         from PySide6.QtWidgets import QApplication
         from pathlib import Path
-        from Main_App import MainWindow
+        from Main_App.PySide6_App.GUI.main_window import MainWindow
     except ImportError as exc:  # pragma: no cover - import guard
         raise ImportError(
             "PySide6 not installed; install with 'pip install PySide6'"
