@@ -28,10 +28,9 @@ from PySide6.QtWidgets import (
     QFrame,
     QMenu,
     QInputDialog,
-    QAction,
 )
 from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal, QSettings
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
 import logging
 import pandas as pd
 from pathlib import Path
