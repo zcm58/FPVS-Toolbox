@@ -40,7 +40,7 @@ from Main_App.GUI.menu_bar import build_menu_bar
 from Main_App.GUI.settings_panel import SettingsDialog
 from Main_App.settings_manager import SettingsManager
 from Main_App.Backend.project import Project
-from Main_App.Processing.processing import process_data
+from Main_App.Backend.processing import process_data
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
