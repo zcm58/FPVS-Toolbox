@@ -40,10 +40,10 @@ from Main_App.GUI.menu_bar import build_menu_bar
 from Main_App.GUI.settings_panel import SettingsDialog
 from Main_App.settings_manager import SettingsManager
 from Main_App.Backend.project import Project
-from Main_App.Backend.processing import process_data
+from Main_App.load_utils import load_eeg_file
 from Main_App.app_logic import preprocess_raw
 from Main_App.eeg_preprocessing import perform_preprocessing
-from Main_App.load_utils import load_eeg_file
+from Main_App.Backend.processing import process_data
 from Main_App.post_process import post_process
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
@@ -522,27 +522,44 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
 
-    def start_processing(self) -> None:  # pragma: no cover - GUI stub
-        """Trigger legacy processing and animate the progress bar."""
-        input_dir = str(self.currentProject.input_folder)
-        output_dir = str(
-            self.currentProject.project_root
-            / self.currentProject.subfolders["excel"]
-        )
-        run_loreta_flag = self.cb_loreta.isChecked()
+    def start_processing(self) -> None:
+        """Run the full legacy EEG processing pipeline."""
+        try:
+            # Build paths
+            input_dir = str(self.currentProject.input_folder)
+            output_dir = str(
+                self.currentProject.project_root
+                / self.currentProject.subfolders["excel"]
+            )
+            run_loreta = self.cb_loreta.isChecked()
 
-        self.log(f"Starting processing (run_loreta={run_loreta_flag})")
+            # 1. Load EEG files
+            self.log(f"Loading EEG files from {input_dir}")
+            raw_files = load_eeg_file(input_dir)
 
-        # Execute the legacy pipeline functions sequentially
-        process_data(input_dir, output_dir, run_loreta_flag)
+            # 2. Raw preprocessing
+            self.log("Preprocessing raw data")
+            raw_data = preprocess_raw(raw_files)
 
-        # Placeholder hooks for future integration of legacy steps
-        preprocess_raw  # noqa: F401 - imported for side effects in legacy code
-        perform_preprocessing  # noqa: F401
-        load_eeg_file  # noqa: F401
-        post_process  # noqa: F401
+            # 3. Additional preprocessing
+            self.log("Performing preprocessing steps")
+            preprocessed = perform_preprocessing(raw_data)
 
-        self._animate_progress_to(100)
+            # 4. Main processing
+            self.log(f"Running main processing (run_loreta={run_loreta})")
+            processed = process_data(preprocessed, output_dir, run_loreta)
+
+            # 5. Post-processing
+            self.log("Post-processing results")
+            post_process(processed)
+
+            # Animate progress bar to 100%
+            self._animate_progress_to(100)
+            self.log("Processing complete")
+
+        except Exception as e:
+            self.log(f"Processing failed: {e}", level=logging.ERROR)
+            QMessageBox.critical(self, "Processing Error", str(e))
 
     def _animate_progress_to(self, value: int) -> None:
         """Animate the progress bar smoothly to the target value."""
