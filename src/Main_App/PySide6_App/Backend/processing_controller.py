@@ -50,7 +50,7 @@ def start_processing(self) -> None:
             raw = load_eeg_file(self, str(fp))
 
             self.log("Preprocessing raw data")
-            preprocessed = preprocess_raw(raw)
+            preprocessed = preprocess_raw(self, raw)
             preprocessed = perform_preprocessing(preprocessed)
 
             out_dir = str(
