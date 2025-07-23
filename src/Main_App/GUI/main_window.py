@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QStatusBar,
     QFileDialog,
-    QMessageBox,
     QButtonGroup,
     QDockWidget,
     QToolButton,
@@ -27,9 +26,10 @@ from PySide6.QtWidgets import (
     QStyle,
     QFrame,
     QMenu,
-    QInputDialog,
 )
-from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal, QSettings
+from PySide6.QtWidgets import QInputDialog, QMessageBox
+from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
 import logging
 import pandas as pd
@@ -318,18 +318,9 @@ class MainWindow(QMainWindow):
         action_new.triggered.connect(self.new_project)
         file_menu.addAction(action_new)
 
-        open_menu = QMenu("Open Existing Project ▶", self)
-        settings_obj = QSettings()
-        for folder in settings_obj.value("recentProjects", []):
-            name = Path(folder).name
-            act = QAction(name, self)
-            act.triggered.connect(lambda _, f=folder: self.openProjectPath(f))
-            open_menu.addAction(act)
-        open_menu.addSeparator()
-        browse_action = QAction("Browse…", self)
-        browse_action.triggered.connect(self.open_existing_project)
-        open_menu.addAction(browse_action)
-        file_menu.addMenu(open_menu)
+        action_open = QAction("Open Existing Project…", self)
+        action_open.triggered.connect(self.open_existing_project)
+        file_menu.addAction(action_open)
         file_menu.addSeparator()
 
         action_settings = QAction("Settings", self)
@@ -419,51 +410,72 @@ class MainWindow(QMainWindow):
         project.save()
 
         settings = QSettings()
-        recent = settings.value("recentProjects", [])
-        if project_root not in recent:
-            recent.insert(0, project_root)
-            settings.setValue("recentProjects", recent)
+        recent = settings.value("recentProjects", [], type=list)
+        folder = str(project.project_root)
+        if folder in recent:
+            recent.remove(folder)
+        recent.insert(0, folder)
+        settings.setValue("recentProjects", recent)
+        settings.sync()
 
         self.currentProject = project
         self.loadProject(project)
 
     def open_existing_project(self) -> None:
         settings = QSettings()
-        recent = settings.value("recentProjects", [])
+        recent = settings.value("recentProjects", [], type=list)
         if not recent:
             QMessageBox.information(
                 self, "No Projects", "No projects found. Create one first."
             )
             return
 
-        display_map: dict[str, str] = {}
-        for i, folder in enumerate(recent, start=1):
+        # Build display→path map
+        choices: dict[str, str] = {}
+        for i, path in enumerate(recent, start=1):
             try:
-                proj = Project.load(folder)
-                label = f"Project {i}: {proj.name}"
-                display_map[label] = folder
+                proj = Project.load(path)
             except Exception:
                 continue
+            label = f"Project {i}: {proj.name}"
+            choices[label] = path
 
+        display_list = list(choices.keys())
         choice, ok = QInputDialog.getItem(
             self,
             "Open Project",
             "Select a project:",
-            list(display_map.keys()),
+            display_list,
             editable=False,
         )
-        if not ok:
+        if not ok or choice not in choices:
             return
 
-        folder = display_map[choice]
+        folder = choices[choice]
         project = Project.load(folder)
         self.currentProject = project
         self.loadProject(project)
+
+        # Update recent projects registry
+        if folder:
+            if folder in recent:
+                recent.remove(folder)
+            recent.insert(0, folder)
+            settings.setValue("recentProjects", recent)
+            settings.sync()
 
     def openProjectPath(self, folder: str) -> None:
         project = Project.load(folder)
         self.currentProject = project
         self.loadProject(project)
+
+        settings = QSettings()
+        recent = settings.value("recentProjects", [], type=list)
+        if folder in recent:
+            recent.remove(folder)
+        recent.insert(0, folder)
+        settings.setValue("recentProjects", recent)
+        settings.sync()
 
     def open_stats_analyzer(self) -> None:
         QMessageBox.information(
