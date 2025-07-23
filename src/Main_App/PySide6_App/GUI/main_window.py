@@ -588,7 +588,8 @@ class MainWindow(QMainWindow):
                 self.log("Post-processing results")
                 # Supply the list of condition labels from the current project
                 condition_labels = list(self.currentProject.event_map.keys())
-                post_process(result, condition_labels)
+                # Supply self as the application context for logging
+                post_process(self, result, condition_labels)
 
             self._animate_progress_to(100)
             self.log("Processing complete")
