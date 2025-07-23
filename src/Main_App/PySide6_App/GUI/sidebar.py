@@ -73,7 +73,7 @@ def init_sidebar(self) -> None:
         lay,
         "btn_graphs",
         "SNR Plots",
-        QIcon.fromTheme("view-bar-chart"),
+        "view-bar-chart",
         self.open_plot_generator,
     )
     self.btn_image = make_button(
