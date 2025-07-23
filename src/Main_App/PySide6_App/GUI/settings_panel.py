@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.Legacy_App.settings_manager import SettingsManager
 from .roi_settings_editor import ROISettingsEditor
+from ..config.projects_root import changeProjectsRoot
 
 
 class SettingsPanel(QWidget):
@@ -93,7 +94,7 @@ class SettingsDialog(QDialog):
         self._init_loreta_tab(tabs)
 
         self.btn_changeRoot = QPushButton("Change Projects Root…", self)
-        self.btn_changeRoot.clicked.connect(self.changeProjectsRoot)
+        self.btn_changeRoot.clicked.connect(lambda: changeProjectsRoot(self))
         layout.addWidget(self.btn_changeRoot)
 
         btn_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -295,22 +296,6 @@ class SettingsDialog(QDialog):
             edit.setText(folder)
 
     # ------------------------------------------------------------------
-    def changeProjectsRoot(self) -> None:
-        settings = QSettings()
-        root = QFileDialog.getExistingDirectory(
-            self,
-            "Select Projects Root Folder",
-            settings.value("paths/projectsRoot", ""),
-        )
-        if not root:
-            return
-        settings.setValue("paths/projectsRoot", root)
-        settings.sync()
-        QMessageBox.information(
-            self,
-            "Projects Root Updated",
-            f"New Projects Root: {root}",
-        )
 
     # ------------------------------------------------------------------
     def _save(self) -> None:
