@@ -28,9 +28,10 @@ from PySide6.QtWidgets import (
     QFrame,
     QMenu,
     QInputDialog,
+    QAction,
 )
-from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal
-from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor
+from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal, QSettings
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 import logging
 import pandas as pd
 from pathlib import Path
@@ -318,21 +319,35 @@ class MainWindow(QMainWindow):
         action_new.triggered.connect(self.new_project)
         file_menu.addAction(action_new)
 
-        open_menu = QMenu("Open Existing Project", self)
+        open_menu = QMenu("Open Existing Project ▶", self)
+        settings_obj = QSettings()
+        for folder in settings_obj.value("recentProjects", []):
+            name = Path(folder).name
+            act = QAction(name, self)
+            act.triggered.connect(lambda _, f=folder: self.openProjectPath(f))
+            open_menu.addAction(act)
+        open_menu.addSeparator()
         browse_action = QAction("Browse…", self)
         browse_action.triggered.connect(self.open_existing_project)
         open_menu.addAction(browse_action)
         file_menu.addMenu(open_menu)
         file_menu.addSeparator()
 
-        for text, slot in [
-            ("Settings", self.open_settings_window),
-            ("Check for Updates", self.check_for_updates),
-            ("Exit", self.quit),
-        ]:
-            act = QAction(text, self)
-            act.triggered.connect(slot)
-            file_menu.addAction(act)
+        action_settings = QAction("Settings", self)
+        action_settings.triggered.connect(self.open_settings_window)
+        file_menu.addAction(action_settings)
+
+        action_check = QAction("Check for Updates", self)
+        action_check.triggered.connect(self.check_for_updates)
+        file_menu.addAction(action_check)
+
+        action_save = QAction("Save Project Settings", self)
+        action_save.triggered.connect(self.saveProjectSettings)
+        self.exit_action = QAction("Exit", self)
+        self.exit_action.triggered.connect(self.quit)
+
+        file_menu.addAction(action_save)
+        file_menu.addAction(self.exit_action)
 
     # ------------------------------------------------------------------
     def log(self, message: str, level: int = logging.INFO) -> None:
@@ -397,10 +412,25 @@ class MainWindow(QMainWindow):
         self.currentProject = project
         self.loadProject(project)
 
+        settings = QSettings()
+        recent = settings.value("recentProjects", [])  # type: list[str]
+        if folder not in recent:
+            recent.insert(0, folder)
+            settings.setValue("recentProjects", recent)
+
     def open_existing_project(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Project Directory")
         if not folder:
             return
+        self.openProjectPath(folder)
+
+        settings = QSettings()
+        recent = settings.value("recentProjects", [])  # type: list[str]
+        if folder not in recent:
+            recent.insert(0, folder)
+            settings.setValue("recentProjects", recent)
+
+    def openProjectPath(self, folder: str) -> None:
         project = Project.load(folder)
         self.currentProject = project
         self.loadProject(project)
@@ -562,6 +592,28 @@ class MainWindow(QMainWindow):
             self.add_event_row()
 
         self.log(f"Loaded project: {project.name}")
+
+    def saveProjectSettings(self) -> None:
+        """Collect current UI settings and save them to ``project.json``."""
+        if not self.currentProject:
+            QMessageBox.warning(self, "No Project", "Please open or create a project first.")
+            return
+
+        self.currentProject.options["mode"] = "single" if self.rb_single.isChecked() else "batch"
+        self.currentProject.options["run_loreta"] = self.cb_loreta.isChecked()
+
+        mapping: dict[str, int] = {}
+        for row in self.event_rows:
+            edits = row.findChildren(QLineEdit)
+            if len(edits) >= 2:
+                label = edits[0].text()
+                ident = edits[1].text()
+                if label and ident.isdigit():
+                    mapping[label] = int(ident)
+        self.currentProject.event_map = mapping
+
+        self.currentProject.save()
+        QMessageBox.information(self, "Project Saved", "All settings written to project.json.")
 
 def main() -> None:
     app = QApplication([])
