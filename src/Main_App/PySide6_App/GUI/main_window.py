@@ -3,48 +3,35 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
-    QToolBar,
-    QPushButton,
-    QLabel,
-    QGroupBox,
-    QGridLayout,
-    QVBoxLayout,
-    QHBoxLayout,
     QWidget,
-    QRadioButton,
-    QCheckBox,
+    QHBoxLayout,
     QLineEdit,
-    QScrollArea,
-    QTextEdit,
-    QStatusBar,
-    QFileDialog,
-    QButtonGroup,
-    QDockWidget,
-    QToolButton,
-    QSizePolicy,
-    QProgressBar,
-    QStyle,
-    QFrame,
-    QMenu,
+    QPushButton,
+    QMessageBox,
 )
-from PySide6.QtWidgets import QInputDialog, QMessageBox
-from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal
-from PySide6.QtCore import QSettings
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
+from PySide6.QtCore import QObject, Signal
 import logging
 import pandas as pd
 from pathlib import Path
 import subprocess
 import sys
-from .menu_bar import build_menu_bar
 from .settings_panel import SettingsDialog
+from .sidebar import init_sidebar
+from .file_menu import init_file_menu
+from .ui_main import init_ui
 from Main_App.Legacy_App.settings_manager import SettingsManager
 from Main_App.PySide6_App.Backend import Project
-from Main_App.Legacy_App.load_utils import load_eeg_file
-from Main_App.Legacy_App.app_logic import preprocess_raw
-from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
-from Main_App.PySide6_App.Backend.processing import process_data
-from Main_App.Legacy_App.post_process import post_process
+from Main_App.PySide6_App.Backend.processing_controller import (
+    start_processing,
+    _animate_progress_to,
+)
+from Main_App.PySide6_App.Backend.project_manager import (
+    select_projects_root,
+    new_project,
+    open_existing_project,
+    openProjectPath,
+    loadProject,
+)
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
@@ -70,313 +57,22 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("FPVS Toolbox")
         self.setMinimumSize(1024, 768)
         self.currentProject: Project | None = None
-        self._init_ui()
-        self._init_sidebar()
+        init_ui(self)
+        init_sidebar(self)
 
-        settings = QSettings()
-        settings.beginGroup("paths")
-        saved_root = settings.value("projectsRoot", "", type=str)
-        settings.endGroup()
+        select_projects_root(self)
 
-        if saved_root and Path(saved_root).is_dir():
-            self.projectsRoot = Path(saved_root)
-        else:
-            root = QFileDialog.getExistingDirectory(
-                self, "Select Projects Root Folder", ""
-            )
-            if not root:
-                QMessageBox.critical(
-                    self,
-                    "Projects Root Required",
-                    "You must select a Projects Root folder to continue.",
-                )
-                sys.exit(1)
-            self.projectsRoot = Path(root)
-            settings.beginGroup("paths")
-            settings.setValue("projectsRoot", str(self.projectsRoot))
-            settings.endGroup()
-            settings.sync()
-
-        self._init_file_menu()
+        init_file_menu(self)
         self.log("Welcome to the FPVS Toolbox!")
         self.log(
             f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}"
         )
 
     # ------------------------------------------------------------------
-    def _init_ui(self) -> None:
-        # Menu bar
-        menu = build_menu_bar(self)
-        self.setMenuBar(menu)
-
-        # Top toolbar
-        toolbar = QToolBar(self)
-        toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        self.addToolBar(Qt.TopToolBarArea, toolbar)
-        self.lbl_debug = QLabel("DEBUG MODE ENABLED", self)
-        self.lbl_debug.setStyleSheet("color: red;")
-        self.lbl_debug.setVisible(self.settings.debug_enabled())
-        toolbar.addWidget(self.lbl_debug)
-
-        # Central container
-        container = QWidget(self)
-        main_layout = QVBoxLayout(container)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(12)
-
-        header = QWidget(container)
-        header.setStyleSheet("background-color: #2A2A2A; padding: 8px;")
-        h_lay = QHBoxLayout(header)
-        h_lay.setContentsMargins(0, 0, 0, 0)
-        self.lbl_currentProject = QLabel("Current Project: None", header)
-        self.lbl_currentProject.setStyleSheet("color: white; font-weight: bold;")
-        h_lay.addWidget(self.lbl_currentProject)
-        h_lay.addStretch(1)
-        main_layout.addWidget(header)
-
-        # Processing Options group
-        grp_proc = QGroupBox("Processing Options", container)
-        gl = QGridLayout(grp_proc)
-        gl.addWidget(QLabel("Mode:"), 0, 0)
-        self.rb_single = QRadioButton("Single File", grp_proc)
-        self.rb_batch = QRadioButton("Batch Folder", grp_proc)
-        gl.addWidget(self.rb_single, 0, 1)
-        gl.addWidget(self.rb_batch, 0, 2)
-        self.cb_loreta = QCheckBox("Run LORETA during processing?", grp_proc)
-        gl.addWidget(self.cb_loreta, 1, 0, 1, 3)
-        self.mode_group = QButtonGroup(self)
-        self.mode_group.setExclusive(True)
-        self.mode_group.addButton(self.rb_single)
-        self.mode_group.addButton(self.rb_batch)
-        self.rb_single.toggled.connect(
-            lambda checked: checked and self._on_mode_changed("single")
-        )
-        self.rb_batch.toggled.connect(
-            lambda checked: checked and self._on_mode_changed("batch")
-        )
-        main_layout.addWidget(grp_proc)
-
-        # Load saved processing options
-        mode = self.settings.get("processing", "mode", "batch").lower()
-        if mode == "batch":
-            self.rb_batch.setChecked(True)
-        else:
-            self.rb_single.setChecked(True)
-
-        loreta_enabled = (
-            self.settings.get("processing", "run_loreta", "False").lower() == "true"
-        )
-        self.cb_loreta.setChecked(loreta_enabled)
-
-        # Preprocessing parameters have moved to Settings. Show placeholder
-        placeholder = QLabel("⚙️ Configure preprocessing in Settings", container)
-        placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setStyleSheet("color: #CCCCCC; font-style: italic;")
-        main_layout.addWidget(placeholder)
-
-        # Event Map group
-        grp_event = QGroupBox(
-            "Event Map (Condition Label → Numerical ID)", container
-        )
-        vlay = QVBoxLayout(grp_event)
-        scroll = QScrollArea(grp_event)
-        scroll.setWidgetResizable(True)
-        self.event_container = QWidget()
-        self.event_layout = QVBoxLayout(self.event_container)
-        scroll.setWidget(self.event_container)
-        vlay.addWidget(scroll)
-        btns = QHBoxLayout()
-        self.btn_detect = QPushButton("Detect Trigger IDs", grp_event)
-        self.btn_add_row = QPushButton("+ Add Condition", grp_event)
-        btns.addWidget(self.btn_detect)
-        btns.addWidget(self.btn_add_row)
-        vlay.addLayout(btns)
-        main_layout.addWidget(grp_event)
-
-        # --- Start + Progress Row ---
-        action_row = QHBoxLayout()
-        action_row.setSpacing(16)
-
-        # Create widgets
-        self.btn_start = QPushButton(container)
-        self.progress_bar = QProgressBar(container)
-
-        # 1) Enlarge and fix the button size
-        self.btn_start.setText("Start Processing")
-        self.btn_start.setMinimumSize(150, 36)
-        self.btn_start.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-
-        # 2) Center text in the progress bar and allow it to expand
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("%p%")
-        self.progress_bar.setAlignment(Qt.AlignCenter)
-        self.progress_bar.setFixedHeight(self.btn_start.sizeHint().height())
-        self.progress_bar.setStyleSheet(
-            """
-            QProgressBar {
-              min-height: 36px;
-              text-align: center;
-            }
-            QProgressBar::chunk {
-              background-color: #0BBF00;
-            }
-            """
-        )
-
-        # 3) Add with stretch so the bar fills leftover space
-        action_row.addWidget(self.btn_start)
-        action_row.addWidget(self.progress_bar, 1)
-
-        main_layout.addLayout(action_row)
-        self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
-        self._progress_anim.setDuration(200)
-        self._progress_anim.valueChanged.connect(self.progress_bar.setValue)
-        self.processor.progressChanged.connect(self._animate_progress_to)
-
-        # Populate saved event map rows
-        saved_pairs = self.settings.get_event_pairs()
-        if saved_pairs:
-            for label, ident in saved_pairs:
-                self.add_event_row(label, ident)
-        else:
-            self.add_event_row()
-
-        # Log group
-        grp_log = QGroupBox("Log", container)
-        lay_log = QVBoxLayout(grp_log)
-        self.text_log = QTextEdit(grp_log)
-        self.text_log.setReadOnly(True)
-        lay_log.addWidget(self.text_log)
-        main_layout.addWidget(grp_log)
-
-        # Finalize
-        self.homeWidget = container
-        self.setCentralWidget(container)
-        self.setStatusBar(QStatusBar(self))
-
-        # Connect toolbar buttons to methods
-        self.btn_start.clicked.connect(self.start_processing)
-        self.btn_add_row.clicked.connect(lambda: self.add_event_row())
-        self.btn_detect.clicked.connect(self.detect_trigger_ids)
-
-        # Sync the select button label with the current mode
-        self._update_select_button_text()
 
     # ------------------------------------------------------------------
-    def _init_sidebar(self) -> None:
-        """Create the dark sidebar with tool buttons."""
-        sidebar = QWidget(self)
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(200)
-        lay = QVBoxLayout(sidebar)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-
-        def white_icon(name: str) -> QIcon:
-            icon = QIcon.fromTheme(name)
-            if icon.isNull():
-                return icon
-            pm = icon.pixmap(24, 24)
-            tinted = QPixmap(pm.size())
-            tinted.fill(Qt.transparent)
-            painter = QPainter(tinted)
-            painter.drawPixmap(0, 0, pm)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-            painter.fillRect(tinted.rect(), QColor("white"))
-            painter.end()
-            return QIcon(tinted)
-
-        def make_button(name: str, text: str, icon: QIcon | str | None, slot) -> QToolButton:
-            btn = QToolButton()
-            btn.setObjectName(name)
-            btn.setText(text)
-            btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setIconSize(QSize(24, 24))
-            btn.setStyleSheet("padding: 12px 16px; text-align: left;")
-            if icon:
-                if isinstance(icon, QIcon):
-                    btn.setIcon(icon)
-                else:
-                    btn.setIcon(white_icon(icon))
-            if slot:
-                btn.clicked.connect(slot)
-            lay.addWidget(btn)
-            return btn
-
-        self.btn_home = make_button("btn_home", "Home", "go-home", lambda: None)
-        self.btn_data = make_button(
-            "btn_data",
-            "Statistical Analysis",
-            QApplication.instance().style().standardIcon(QStyle.SP_ComputerIcon),
-            self.open_stats_analyzer,
-        )
-        self.btn_graphs = make_button(
-            "btn_graphs",
-            "SNR Plots",
-            QIcon.fromTheme("view-bar-chart"),  # TODO: supply bar-chart icon if missing
-            self.open_plot_generator,
-        )
-        self.btn_image = make_button("btn_image", "Image Resizer", "camera-photo", self.open_image_resizer)
-        self.btn_epoch = make_button("btn_epoch", "Epoch Averaging", "view-refresh", self.open_advanced_analysis_window)
-        divider = QFrame()
-        divider.setFrameShape(QFrame.HLine)
-        divider.setFixedHeight(1)
-        divider.setStyleSheet("background:#444;")
-        lay.addWidget(divider)
-
-        lay.addStretch(1)
-
-        self.btn_settings = make_button("btn_settings", "Settings", "settings", self.open_settings_window)
-        self.btn_info = make_button("btn_info", "Information", None, self.show_relevant_publications)
-        self.btn_help = make_button("btn_help", "Help", None, self.show_about_dialog)
-
-        dock = QDockWidget("", self)
-        dock.setWidget(sidebar)
-        dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        self.addDockWidget(Qt.LeftDockWidgetArea, dock)
 
     # ------------------------------------------------------------------
-    def _init_file_menu(self) -> None:
-        """Configure the File menu with project actions."""
-        menu_bar = self.menuBar()
-        if not menu_bar:
-            return
-
-        file_menu = menu_bar.findChild(QMenu, "fileMenu")
-        if file_menu is None:
-            return
-
-        file_menu.clear()
-
-        action_new = QAction("New Project…", self)
-        action_new.triggered.connect(self.new_project)
-        file_menu.addAction(action_new)
-
-        action_open = QAction("Open Existing Project…", self)
-        action_open.triggered.connect(self.open_existing_project)
-        file_menu.addAction(action_open)
-        file_menu.addSeparator()
-
-        action_settings = QAction("Settings", self)
-        action_settings.triggered.connect(self.open_settings_window)
-        file_menu.addAction(action_settings)
-
-        action_check = QAction("Check for Updates", self)
-        action_check.triggered.connect(self.check_for_updates)
-        file_menu.addAction(action_check)
-
-        action_save = QAction("Save Project Settings", self)
-        action_save.triggered.connect(self.saveProjectSettings)
-        self.exit_action = QAction("Exit", self)
-        self.exit_action.triggered.connect(self.quit)
-
-        file_menu.addAction(action_save)
-        file_menu.addAction(self.exit_action)
 
     # ------------------------------------------------------------------
     def log(self, message: str, level: int = logging.INFO) -> None:
@@ -427,74 +123,13 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def new_project(self) -> None:
-        # 1) Ask for project name
-        name, ok = QInputDialog.getText(
-            self, "Project Name", "Enter a name for this new project:"
-        )
-        if not ok or not name.strip():
-            return
-
-        # 2) Ask for input folder of .BDF files
-        input_folder = QFileDialog.getExistingDirectory(
-            self, "Select Input Folder (BDF files)", ""
-        )
-        if not input_folder:
-            return
-
-        # 3) Create project directory under Projects Root
-        project_dir = self.projectsRoot / name.strip()
-        project_dir.mkdir(parents=True, exist_ok=True)
-
-        # 4) Load (and scaffold) manifest via Project.load()
-        project = Project.load(project_dir)
-        project.name = name.strip()
-        project.input_folder = input_folder
-        project.save()
-
-        # 5) Store and apply
-        self.currentProject = project
-        self.loadProject(project)
+        new_project(self)
 
     def open_existing_project(self) -> None:
-        candidates = [
-            d for d in self.projectsRoot.iterdir() if (d / "project.json").exists()
-        ]
-        if not candidates:
-            QMessageBox.information(
-                self, "No Projects", "No projects found under your Projects Root."
-            )
-            return
-
-        labels = []
-        label_to_path = {}
-        for d in candidates:
-            proj = Project.load(d)
-            label = proj.name
-            labels.append(label)
-            label_to_path[label] = d
-
-        choice, ok = QInputDialog.getItem(
-            self, "Open Project", "Select a project:", labels, editable=False
-        )
-        if not ok or choice not in label_to_path:
-            return
-
-        project = Project.load(label_to_path[choice])
-        self.currentProject = project
-        self.loadProject(project)
+        open_existing_project(self)
 
     def openProjectPath(self, folder: str) -> None:
-        project = Project.load(folder)
-        self.currentProject = project
-        self.loadProject(project)
-
-        settings = QSettings()
-        recent = settings.value("recentProjects", [], type=list)
-        if folder in recent:
-            recent.remove(folder)
-        recent.insert(0, folder)
-        settings.setValue("recentProjects", recent)
-        settings.sync()
+        openProjectPath(self, folder)
 
     def open_stats_analyzer(self) -> None:
         QMessageBox.information(
@@ -544,61 +179,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def start_processing(self) -> None:
-        """Run the full legacy pipeline, ensuring load_eeg_file() is called with individual .bdf file paths."""
-        try:
-            input_dir = Path(self.currentProject.input_folder)
-            run_loreta = self.cb_loreta.isChecked()
-
-            if self.rb_batch.isChecked():
-                bdf_files = list(input_dir.glob("*.bdf"))
-                if not bdf_files:
-                    raise FileNotFoundError(f"No .bdf files in {input_dir}")
-            else:
-                file_path, _ = QFileDialog.getOpenFileName(
-                    self,
-                    "Select .BDF File",
-                    str(input_dir),
-                    "BDF Files (*.bdf)",
-                )
-                if not file_path:
-                    self.log("No file selected, aborting.")
-                    return
-                bdf_files = [Path(file_path)]
-
-            for fp in bdf_files:
-                self.log(f"Loading EEG file: {fp.name}")
-                raw = load_eeg_file(self, str(fp))
-
-                self.log("Preprocessing raw data")
-                preprocessed = preprocess_raw(raw)
-                preprocessed = perform_preprocessing(preprocessed)
-
-                out_dir = str(
-                    self.currentProject.project_root
-                    / self.currentProject.subfolders["excel"]
-                )
-                self.log(f"Running main processing (run_loreta={run_loreta})")
-                result = process_data(preprocessed, out_dir, run_loreta)
-
-                self.log("Post-processing results")
-                # Supply the list of condition labels from the current project
-                condition_labels = list(self.currentProject.event_map.keys())
-                # Supply self as the application context for logging
-                post_process(self, result, condition_labels)
-
-            self._animate_progress_to(100)
-            self.log("Processing complete")
-
-        except Exception as e:
-            self.log(f"Processing failed: {e}", level=logging.ERROR)
-            QMessageBox.critical(self, "Processing Error", str(e))
+        start_processing(self)
 
     def _animate_progress_to(self, value: int) -> None:
-        """Animate the progress bar smoothly to the target value."""
-        self._progress_anim.stop()
-        self._progress_anim.setStartValue(self.progress_bar.value())
-        self._progress_anim.setEndValue(value)
-        self._progress_anim.start()
+        _animate_progress_to(self, value)
 
     def detect_trigger_ids(self) -> None:  # pragma: no cover - GUI stub
         try:
@@ -634,32 +218,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
-        """Apply project settings to the UI."""
-        self.currentProject = project
-        # Update header
-        self.lbl_currentProject.setText(f"Current Project: {project.name}")
-
-        self.settings.set("paths", "data_folder", str(project.input_folder))
-        self.settings.save()
-
-        # Processing Options
-        mode = project.options.get("mode", "batch").lower()
-        self.rb_single.setChecked(mode == "single")
-        self.rb_batch.setChecked(mode == "batch")
-        self.cb_loreta.setChecked(bool(project.options.get("run_loreta", False)))
-
-        # Event Map
-        for row in list(self.event_rows):
-            row.setParent(None)
-        self.event_rows.clear()
-
-        if project.event_map:
-            for label, ident in project.event_map.items():
-                self.add_event_row(str(label), str(ident))
-        else:
-            self.add_event_row()
-
-        self.log(f"Loaded project: {project.name}")
+        loadProject(self, project)
 
     def saveProjectSettings(self) -> None:
         """Collect current UI settings and save them to ``project.json``."""
