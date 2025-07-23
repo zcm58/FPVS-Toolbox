@@ -26,11 +26,10 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QStyle,
     QFrame,
-    QAction,
     QMenu,
 )
 from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QObject, Signal
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
+from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor
 import logging
 import pandas as pd
 from pathlib import Path
