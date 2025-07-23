@@ -523,37 +523,45 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def start_processing(self) -> None:
-        """Run the full legacy EEG processing pipeline."""
+        """Run the full legacy pipeline, ensuring load_eeg_file() is called with individual .bdf file paths."""
         try:
-            # Build paths
-            input_dir = str(self.currentProject.input_folder)
-            output_dir = str(
-                self.currentProject.project_root
-                / self.currentProject.subfolders["excel"]
-            )
+            input_dir = Path(self.currentProject.input_folder)
             run_loreta = self.cb_loreta.isChecked()
 
-            # 1. Load EEG files
-            self.log(f"Loading EEG files from {input_dir}")
-            raw_files = load_eeg_file(input_dir)
+            if self.rb_batch.isChecked():
+                bdf_files = list(input_dir.glob("*.bdf"))
+                if not bdf_files:
+                    raise FileNotFoundError(f"No .bdf files in {input_dir}")
+            else:
+                file_path, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "Select .BDF File",
+                    str(input_dir),
+                    "BDF Files (*.bdf)",
+                )
+                if not file_path:
+                    self.log("No file selected, aborting.")
+                    return
+                bdf_files = [Path(file_path)]
 
-            # 2. Raw preprocessing
-            self.log("Preprocessing raw data")
-            raw_data = preprocess_raw(raw_files)
+            for fp in bdf_files:
+                self.log(f"Loading EEG file: {fp.name}")
+                raw = load_eeg_file(str(fp))
 
-            # 3. Additional preprocessing
-            self.log("Performing preprocessing steps")
-            preprocessed = perform_preprocessing(raw_data)
+                self.log("Preprocessing raw data")
+                processed = preprocess_raw(raw)
+                processed = perform_preprocessing(processed)
 
-            # 4. Main processing
-            self.log(f"Running main processing (run_loreta={run_loreta})")
-            processed = process_data(preprocessed, output_dir, run_loreta)
+                out_dir = str(
+                    self.currentProject.project_root
+                    / self.currentProject.subfolders["excel"]
+                )
+                self.log(f"Running main processing (run_loreta={run_loreta})")
+                result = process_data(processed, out_dir, run_loreta)
 
-            # 5. Post-processing
-            self.log("Post-processing results")
-            post_process(processed)
+                self.log("Post-processing results")
+                post_process(result)
 
-            # Animate progress bar to 100%
             self._animate_progress_to(100)
             self.log("Processing complete")
 
