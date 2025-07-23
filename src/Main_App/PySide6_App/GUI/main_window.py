@@ -269,9 +269,9 @@ class MainWindow(QMainWindow):
                 condition_labels = list(self.currentProject.event_map.keys())
                 if self.settings.debug_enabled():
                     self.log(
-                        f"[DEBUG] Calling post_process(self, result, {condition_labels})"
+                        f"[DEBUG] Calling post_process(self, {condition_labels})"
                     )
-                post_process(self, result, condition_labels)
+                post_process(self, condition_labels)
                 if self.settings.debug_enabled():
                     self.log("[DEBUG] post_process completed")
 
