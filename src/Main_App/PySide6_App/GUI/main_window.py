@@ -221,8 +221,20 @@ class MainWindow(QMainWindow):
                     self.log(f"[DEBUG] preprocess_raw returned: {proc1!r}")
 
                 if self.settings.debug_enabled():
-                    self.log("[DEBUG] Calling perform_preprocessing(proc1)")
-                proc2 = perform_preprocessing(proc1)
+                    self.log("[DEBUG] Collecting preprocessing parameters")
+                params = {
+                    "downsample_rate": self.currentProject.preprocessing.get("downsample"),
+                    "low_pass": self.currentProject.preprocessing.get("low_pass"),
+                    "high_pass": self.currentProject.preprocessing.get("high_pass"),
+                    "reject_thresh": self.currentProject.preprocessing.get("rejection_z"),
+                    "ref_channel1": self.currentProject.preprocessing.get("ref_chan1"),
+                    "ref_channel2": self.currentProject.preprocessing.get("ref_chan2"),
+                    "max_idx_keep": self.currentProject.preprocessing.get("max_chan_idx"),
+                    "stim_channel": self.settings.get("stim", "channel", "Status"),
+                }
+                if self.settings.debug_enabled():
+                    self.log(f"[DEBUG] Calling perform_preprocessing(proc1, {params})")
+                proc2, _ = perform_preprocessing(proc1, params, self.log, fp.name)
                 if self.settings.debug_enabled():
                     self.log(f"[DEBUG] perform_preprocessing returned: {proc2!r}")
 
