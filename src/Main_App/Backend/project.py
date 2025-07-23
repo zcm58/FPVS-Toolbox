@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 _DEFAULTS = {
@@ -38,38 +38,31 @@ class Project:
 
     project_root: Path
     name: str
-    input_folder: Path = Path("")
-    subfolders: Dict[str, str] = field(default_factory=lambda: _DEFAULTS["subfolders"].copy())
-    preprocessing: Dict[str, Any] = field(
-        default_factory=lambda: _DEFAULTS["preprocessing"].copy()
-    )
-    event_map: Dict[str, int] = field(default_factory=dict)
-    options: Dict[str, Any] = field(default_factory=lambda: _DEFAULTS["options"].copy())
+    input_folder: Path
+    subfolders: Dict[str, str]
+    preprocessing: Dict[str, Any]
+    event_map: Dict[str, int]
+    options: Dict[str, Any]
 
     MANIFEST_NAME = "project.json"
 
-    def __init__(self, project_root: Path, data: Optional[Dict[str, Any]] | None = None) -> None:
-        """Initialize the project from ``data`` or defaults."""
-
-        object.__setattr__(self, "project_root", Path(project_root))
-        object.__setattr__(self, "name", Path(project_root).name)
-        object.__setattr__(self, "input_folder", Path(""))
-        manifest = data or {}
-
-        sub = _DEFAULTS["subfolders"].copy()
-        sub.update(manifest.get("subfolders", {}))
-        object.__setattr__(self, "subfolders", sub)
-
-        prep = _DEFAULTS["preprocessing"].copy()
-        prep.update(manifest.get("preprocessing", {}))
-        object.__setattr__(self, "preprocessing", prep)
-
-        event_map = manifest.get("event_map", {}) or {}
-        object.__setattr__(self, "event_map", event_map)
-
-        opts = _DEFAULTS["options"].copy()
-        opts.update(manifest.get("options", {}))
-        object.__setattr__(self, "options", opts)
+    def __init__(
+        self,
+        project_root: Path,
+        name: str,
+        input_folder: Path,
+        subfolders: dict[str, str],
+        preprocessing: dict[str, Any],
+        event_map: dict[str, int],
+        options: dict[str, Any],
+    ) -> None:
+        self.project_root = Path(project_root)
+        self.name = name
+        self.input_folder = Path(input_folder)
+        self.subfolders = subfolders
+        self.preprocessing = preprocessing
+        self.event_map = event_map
+        self.options = options
 
     # dataclass will not auto-generate __repr__ due to custom __init__
 
@@ -84,32 +77,38 @@ class Project:
         project_root = Path(path)
         manifest_path = project_root / cls.MANIFEST_NAME
 
-        # Load existing manifest if present
-        if manifest_path.exists():
-            data = json.loads(manifest_path.read_text())
-        else:
-            data = {}
+        data = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
 
-        # Default subfolders with required numbering
         default_subfolders = {
             "excel": "1 - Excel Data Files",
             "snr": "2 - SNR Plots",
             "stats": "3 - Statistical Analysis Results",
         }
-
-        # Merge saved subfolders with defaults
         subfolders = {**default_subfolders, **data.get("subfolders", {})}
 
-        # Ensure directories exist on disk
         for folder_name in subfolders.values():
             (project_root / folder_name).mkdir(parents=True, exist_ok=True)
 
-        # Instantiate project with merged manifest data
-        project = cls(project_root=project_root, data={**data, "subfolders": subfolders})
-        project.name = data.get("name", project_root.name)
-        project.input_folder = Path(data.get("input_folder", ""))
+        preprocessing = _DEFAULTS["preprocessing"].copy()
+        preprocessing.update(data.get("preprocessing", {}))
 
-        # Persist updated manifest
+        event_map = data.get("event_map", {}) or {}
+
+        options = _DEFAULTS["options"].copy()
+        options.update(data.get("options", {}))
+
+        name = data.get("name", project_root.name)
+        input_folder = Path(data.get("input_folder", ""))
+
+        project = cls(
+            project_root=project_root,
+            name=name,
+            input_folder=input_folder,
+            subfolders=subfolders,
+            preprocessing=preprocessing,
+            event_map=event_map,
+            options=options,
+        )
         project.save()
         return project
 
@@ -117,7 +116,7 @@ class Project:
         """Return a serializable dictionary representation."""
 
         return {
-            "name": self.name,
+            "name": str(self.name),
             "input_folder": str(self.input_folder),
             "subfolders": self.subfolders,
             "preprocessing": self.preprocessing,

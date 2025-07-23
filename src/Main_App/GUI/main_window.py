@@ -67,6 +67,24 @@ class MainWindow(QMainWindow):
         self.currentProject: Project | None = None
         self._init_ui()
         self._init_sidebar()
+
+        settings = QSettings()
+        projects_root = settings.value("paths/projectsRoot", "", type=str)
+        if not projects_root:
+            projects_root = QFileDialog.getExistingDirectory(
+                self, "Select Projects Root Folder", ""
+            )
+            if not projects_root:
+                QMessageBox.critical(
+                    self,
+                    "Projects Root Required",
+                    "You must select a Projects Root folder to continue.",
+                )
+                sys.exit(1)
+            settings.setValue("paths/projectsRoot", projects_root)
+            settings.sync()
+        self.projectsRoot = Path(projects_root)
+
         self._init_file_menu()
         self.log("Welcome to the FPVS Toolbox!")
         self.log(
@@ -386,83 +404,61 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def new_project(self) -> None:
+        # 1) Ask for project name
         name, ok = QInputDialog.getText(
-            self, "Project Name", "Enter a name for this project:"
+            self, "Project Name", "Enter a name for this new project:"
         )
         if not ok or not name.strip():
             return
 
+        # 2) Ask for input folder of .BDF files
         input_folder = QFileDialog.getExistingDirectory(
-            self, "Select Input Folder", ""
+            self, "Select Input Folder (BDF files)", ""
         )
         if not input_folder:
             return
 
-        project_root = QFileDialog.getExistingDirectory(
-            self, "Select Project Directory", ""
-        )
-        if not project_root:
-            return
+        # 3) Create project directory under Projects Root
+        project_dir = self.projectsRoot / name.strip()
+        project_dir.mkdir(parents=True, exist_ok=True)
 
-        project = Project.load(project_root)
+        # 4) Load (and scaffold) manifest via Project.load()
+        project = Project.load(project_dir)
         project.name = name.strip()
         project.input_folder = input_folder
         project.save()
 
-        settings = QSettings()
-        recent = settings.value("recentProjects", [], type=list)
-        folder = str(project.project_root)
-        if folder in recent:
-            recent.remove(folder)
-        recent.insert(0, folder)
-        settings.setValue("recentProjects", recent)
-        settings.sync()
-
+        # 5) Store and apply
         self.currentProject = project
         self.loadProject(project)
 
     def open_existing_project(self) -> None:
-        settings = QSettings()
-        recent = settings.value("recentProjects", [], type=list)
-        if not recent:
+        candidates = [
+            d for d in self.projectsRoot.iterdir() if (d / "project.json").exists()
+        ]
+        if not candidates:
             QMessageBox.information(
-                self, "No Projects", "No projects found. Create one first."
+                self, "No Projects", "No projects found under your Projects Root."
             )
             return
 
-        # Build display→path map
-        choices: dict[str, str] = {}
-        for i, path in enumerate(recent, start=1):
-            try:
-                proj = Project.load(path)
-            except Exception:
-                continue
-            label = f"Project {i}: {proj.name}"
-            choices[label] = path
+        labels = []
+        label_to_path = {}
+        for d in candidates:
+            proj = Project.load(d)
+            label = proj.name
+            labels.append(label)
+            label_to_path[label] = d
 
-        display_list = list(choices.keys())
         choice, ok = QInputDialog.getItem(
-            self,
-            "Open Project",
-            "Select a project:",
-            display_list,
-            editable=False,
+            self, "Open Project", "Select a project:", labels, editable=False
         )
-        if not ok or choice not in choices:
+        if not ok or choice not in label_to_path:
             return
 
-        folder = choices[choice]
-        project = Project.load(folder)
+        project = Project.load(label_to_path[choice])
         self.currentProject = project
         self.loadProject(project)
-
-        # Update recent projects registry
-        if folder:
-            if folder in recent:
-                recent.remove(folder)
-            recent.insert(0, folder)
-            settings.setValue("recentProjects", recent)
-            settings.sync()
 
     def openProjectPath(self, folder: str) -> None:
         project = Project.load(folder)
