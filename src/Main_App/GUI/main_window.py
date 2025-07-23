@@ -69,21 +69,23 @@ class MainWindow(QMainWindow):
         self._init_sidebar()
 
         settings = QSettings()
-        projects_root = settings.value("paths/projectsRoot", "", type=str)
-        if not projects_root:
-            projects_root = QFileDialog.getExistingDirectory(
+        saved_root = settings.value("paths/projectsRoot", "", type=str)
+        if saved_root and Path(saved_root).is_dir():
+            self.projectsRoot = Path(saved_root)
+        else:
+            root = QFileDialog.getExistingDirectory(
                 self, "Select Projects Root Folder", ""
             )
-            if not projects_root:
+            if not root:
                 QMessageBox.critical(
                     self,
                     "Projects Root Required",
                     "You must select a Projects Root folder to continue.",
                 )
                 sys.exit(1)
-            settings.setValue("paths/projectsRoot", projects_root)
+            settings.setValue("paths/projectsRoot", root)
             settings.sync()
-        self.projectsRoot = Path(projects_root)
+            self.projectsRoot = Path(root)
 
         self._init_file_menu()
         self.log("Welcome to the FPVS Toolbox!")
@@ -612,7 +614,7 @@ class MainWindow(QMainWindow):
         # Update header
         self.lbl_currentProject.setText(f"Current Project: {project.name}")
 
-        self.settings.set("paths", "data_folder", project.input_folder)
+        self.settings.set("paths", "data_folder", str(project.input_folder))
         self.settings.save()
 
         # Processing Options
