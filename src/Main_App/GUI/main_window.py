@@ -40,6 +40,7 @@ from Main_App.GUI.menu_bar import build_menu_bar
 from Main_App.GUI.settings_panel import SettingsDialog
 from Main_App.settings_manager import SettingsManager
 from Main_App.Backend.project import Project
+from Main_App.Processing.processing import process_data
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
@@ -518,7 +519,16 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def start_processing(self) -> None:  # pragma: no cover - GUI stub
-        self.log("start_processing() stub")
+        """Trigger legacy processing and animate the progress bar."""
+        input_dir = str(self.currentProject.input_folder)
+        output_dir = str(
+            self.currentProject.project_root
+            / self.currentProject.subfolders["excel"]
+        )
+        run_loreta_flag = self.cb_loreta.isChecked()
+
+        self.log(f"Starting processing (run_loreta={run_loreta_flag})")
+        process_data(input_dir, output_dir, run_loreta_flag)
         self._animate_progress_to(100)
 
     def _animate_progress_to(self, value: int) -> None:
