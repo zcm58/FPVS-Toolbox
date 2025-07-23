@@ -10,6 +10,11 @@ application updates.
 from . import Legacy_App
 
 from .Legacy_App.settings_manager import SettingsManager
+from .Legacy_App.debug_utils import (
+    configure_logging,
+    get_settings,
+    install_messagebox_logger,
+)
 from .Legacy_App.settings_window import SettingsWindow
 from .Legacy_App.relevant_publications_window import (
     RelevantPublicationsWindow,
@@ -26,10 +31,7 @@ from .Legacy_App.load_utils import load_eeg_file
 from .Legacy_App.eeg_preprocessing import perform_preprocessing
 from .Legacy_App.app_logic import preprocess_raw
 from .Legacy_App.post_process import post_process
-from .Legacy_App.debug_utils import install_messagebox_logger
 from .PySide6_App.Backend import Project
-from .Legacy_App.debug_utils      import configure_logging
-from .Legacy_App.settings_manager import get_settings
 
 __all__ = [
     "SettingsManager",
