@@ -51,7 +51,19 @@ def start_processing(self) -> None:
 
             self.log("Preprocessing raw data")
             preprocessed = preprocess_raw(self, raw)
-            preprocessed = perform_preprocessing(preprocessed)
+
+            params = {
+                "downsample_rate": self.currentProject.preprocessing.get("downsample"),
+                "low_pass": self.currentProject.preprocessing.get("low_pass"),
+                "high_pass": self.currentProject.preprocessing.get("high_pass"),
+                "reject_thresh": self.currentProject.preprocessing.get("rejection_z"),
+                "ref_channel1": self.currentProject.preprocessing.get("ref_chan1"),
+                "ref_channel2": self.currentProject.preprocessing.get("ref_chan2"),
+                "max_idx_keep": self.currentProject.preprocessing.get("max_chan_idx"),
+                "stim_channel": self.settings.get("stim", "channel", "Status"),
+            }
+
+            preprocessed, _ = perform_preprocessing(preprocessed, params, self.log, fp.name)
 
             out_dir = str(
                 self.currentProject.project_root / self.currentProject.subfolders["excel"]
