@@ -126,12 +126,8 @@ class MainWindow(QMainWindow):
         h_lay.setContentsMargins(0, 0, 0, 0)
         self.lbl_currentProject = QLabel("Current Project: None", header)
         self.lbl_currentProject.setStyleSheet("color: white; font-weight: bold;")
-        self.btn_view_project = QPushButton("View/Edit Project", header)
-        self.btn_view_project.setFlat(True)
-        self.btn_view_project.setIcon(QIcon.fromTheme("document-edit"))
         h_lay.addWidget(self.lbl_currentProject)
         h_lay.addStretch(1)
-        h_lay.addWidget(self.btn_view_project)
         main_layout.addWidget(header)
 
         # Processing Options group
@@ -144,12 +140,6 @@ class MainWindow(QMainWindow):
         gl.addWidget(self.rb_batch, 0, 2)
         self.cb_loreta = QCheckBox("Run LORETA during processing?", grp_proc)
         gl.addWidget(self.cb_loreta, 1, 0, 1, 3)
-        self.btn_open_eeg = QPushButton("Select EEG File…", grp_proc)
-        self.btn_open_output = QPushButton("Select Output Folder…", grp_proc)
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self.btn_open_output)
-        btn_row.addWidget(self.btn_open_eeg)
-        gl.addLayout(btn_row, 2, 0, 1, 3)
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
         self.mode_group.addButton(self.rb_single)
@@ -242,8 +232,6 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar(self))
 
         # Connect toolbar buttons to methods
-        self.btn_open_eeg.clicked.connect(self.select_eeg_file)
-        self.btn_open_output.clicked.connect(self.select_output_folder)
         self.btn_start.clicked.connect(self.start_processing)
         self.btn_add_row.clicked.connect(lambda: self.add_event_row())
         self.btn_detect.clicked.connect(self.detect_trigger_ids)
@@ -384,6 +372,8 @@ class MainWindow(QMainWindow):
 
     def _update_select_button_text(self) -> None:
         """Update the label of the EEG selection button based on the mode."""
+        if not hasattr(self, "btn_open_eeg"):
+            return
         if self.rb_batch.isChecked():
             self.btn_open_eeg.setText("Select Input Folder…")
         else:
@@ -526,48 +516,6 @@ class MainWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
-    def select_eeg_file(self) -> None:  # pragma: no cover - GUI stub
-        """Prompt the user to select a single .BDF file or an input folder."""
-        if self.rb_batch.isChecked():
-            folder = QFileDialog.getExistingDirectory(
-                self,
-                "Select Input Folder",
-                self.settings.get("paths", "data_folder", ""),
-            )
-            if folder:
-                bdf_files = sorted(Path(folder).glob("*.bdf"))
-                if bdf_files:
-                    self.data_paths = [str(p) for p in bdf_files]
-                    self.log(
-                        f"Selected folder: {folder}, Found {len(bdf_files)} '.bdf' file(s)."
-                    )
-                else:
-                    self.log(f"No '.bdf' files found in {folder}.")
-                    QMessageBox.warning(
-                        self, "No Files Found", f"No '.bdf' files found in:\n{folder}"
-                    )
-            else:
-                self.log("No folder selected.")
-        else:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self,
-                "Select EEG File",
-                self.settings.get("paths", "data_folder", ""),
-                "BDF Files (*.bdf);;All Files (*)",
-            )
-            if file_path:
-                self.data_paths = [file_path]
-                self.log(f"Selected file: {Path(file_path).name}")
-            else:
-                self.log("No file selected.")
-
-    def select_output_folder(self) -> None:  # pragma: no cover - GUI stub
-        folder = QFileDialog.getExistingDirectory(
-            self, "Select Output Folder", self.output_folder or ""
-        )
-        if folder:
-            self.output_folder = folder
-            self.log(f"Output folder set: {folder}")
 
     def start_processing(self) -> None:  # pragma: no cover - GUI stub
         self.log("start_processing() stub")
