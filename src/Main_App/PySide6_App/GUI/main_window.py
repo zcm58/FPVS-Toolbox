@@ -76,6 +76,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self.setMinimumSize(1024, 768)
         self.currentProject: Project | None = None
         init_ui(self)
+        # Support legacy .set() calls from processing_utils
+        self.progress_bar.set = self.progress_bar.setValue
         init_sidebar(self)
 
         select_projects_root(self)
