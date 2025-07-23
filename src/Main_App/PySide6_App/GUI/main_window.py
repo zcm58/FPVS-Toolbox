@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QMessageBox,
+    QFileDialog,
 )
 from PySide6.QtCore import QObject, Signal
 import logging
@@ -15,6 +16,7 @@ import pandas as pd
 from pathlib import Path
 import subprocess
 import sys
+import traceback
 from .settings_panel import SettingsDialog
 from .sidebar import init_sidebar
 from .file_menu import init_file_menu
@@ -22,9 +24,13 @@ from .ui_main import init_ui
 from Main_App.Legacy_App.settings_manager import SettingsManager
 from Main_App.PySide6_App.Backend import Project
 from Main_App.PySide6_App.Backend.processing_controller import (
-    start_processing,
     _animate_progress_to,
 )
+from Main_App.Legacy_App.load_utils import load_eeg_file
+from Main_App.Legacy_App.app_logic import preprocess_raw
+from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
+from Main_App.PySide6_App.Backend.processing import process_data
+from Main_App.Legacy_App.post_process import post_process
 from Main_App.PySide6_App.Backend.project_manager import (
     select_projects_root,
     new_project,
@@ -179,7 +185,79 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def start_processing(self) -> None:
-        start_processing(self)
+        try:
+            input_dir = Path(self.currentProject.input_folder)
+            run_loreta = self.cb_loreta.isChecked()
+
+            if self.rb_batch.isChecked():
+                bdf_files = list(input_dir.glob("*.bdf"))
+                if not bdf_files:
+                    raise FileNotFoundError(f"No .bdf files in {input_dir}")
+            else:
+                file_path, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "Select .BDF File",
+                    str(input_dir),
+                    "BDF Files (*.bdf)",
+                )
+                if not file_path:
+                    self.log("No file selected, aborting.")
+                    return
+                bdf_files = [Path(file_path)]
+
+            for fp in bdf_files:
+                self.log(f"Loading EEG file: {fp.name}")
+                if self.settings.debug_enabled():
+                    self.log(f"[DEBUG] Calling load_eeg_file(self, '{fp}')")
+                raw = load_eeg_file(self, str(fp))
+                if self.settings.debug_enabled():
+                    self.log(f"[DEBUG] load_eeg_file returned: {raw!r}")
+
+                self.log("Preprocessing raw data")
+                if self.settings.debug_enabled():
+                    self.log("[DEBUG] Calling preprocess_raw(raw)")
+                proc1 = preprocess_raw(raw)
+                if self.settings.debug_enabled():
+                    self.log(f"[DEBUG] preprocess_raw returned: {proc1!r}")
+
+                if self.settings.debug_enabled():
+                    self.log("[DEBUG] Calling perform_preprocessing(proc1)")
+                proc2 = perform_preprocessing(proc1)
+                if self.settings.debug_enabled():
+                    self.log(f"[DEBUG] perform_preprocessing returned: {proc2!r}")
+
+                out_dir = str(
+                    self.currentProject.project_root
+                    / self.currentProject.subfolders["excel"]
+                )
+                self.log(f"Running main processing (run_loreta={run_loreta})")
+                if self.settings.debug_enabled():
+                    self.log(
+                        f"[DEBUG] Calling process_data(proc2, '{out_dir}', {run_loreta})"
+                    )
+                result = process_data(proc2, out_dir, run_loreta)
+                if self.settings.debug_enabled():
+                    self.log(f"[DEBUG] process_data returned: {result!r}")
+
+                self.log("Post-processing results")
+                condition_labels = list(self.currentProject.event_map.keys())
+                if self.settings.debug_enabled():
+                    self.log(
+                        f"[DEBUG] Calling post_process(self, result, {condition_labels})"
+                    )
+                post_process(self, result, condition_labels)
+                if self.settings.debug_enabled():
+                    self.log("[DEBUG] post_process completed")
+
+            self._animate_progress_to(100)
+            self.log("Processing complete")
+
+        except Exception as e:
+            if self.settings.debug_enabled():
+                tb = traceback.format_exc()
+                self.log(f"[DEBUG] Full traceback:\n{tb}")
+            self.log(f"Processing failed: {e}", level=logging.ERROR)
+            QMessageBox.critical(self, "Processing Error", str(e))
 
     def _animate_progress_to(self, value: int) -> None:
         _animate_progress_to(self, value)
