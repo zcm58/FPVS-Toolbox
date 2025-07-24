@@ -49,8 +49,21 @@ def _qt_showwarning(title, message, **options):
     QMessageBox.warning(None, title, message)
 
 
+def _qt_showinfo(title, message, **options):
+    QMessageBox.information(None, title, message)
+
+
+def _qt_askyesno(title, message, **options):
+    result = QMessageBox.question(
+        None, title, message, QMessageBox.Yes | QMessageBox.No
+    )
+    return result == QMessageBox.Yes
+
+
 tk_messagebox.showerror = _qt_showerror
 tk_messagebox.showwarning = _qt_showwarning
+tk_messagebox.showinfo = _qt_showinfo
+tk_messagebox.askyesno = _qt_askyesno
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
@@ -80,6 +93,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
     def __init__(self) -> None:
         super().__init__()
+        from Main_App.Legacy_App import update_manager
+        update_manager.cleanup_old_executable()
         self.settings = SettingsManager()
         self.output_folder: str = ""
         self.data_paths: list[str] = []
@@ -126,6 +141,13 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
         # Allow legacy processing_utils to call self.post_process(...)
         self.post_process = _legacy_post_process
+
+        try:
+            update_manager.check_for_updates_async(
+                self, silent=True, notify_if_no_update=False
+            )
+        except Exception as e:
+            self.log(f"Auto update check failed: {e}")
 
     # ------------------------------------------------------------------
 
