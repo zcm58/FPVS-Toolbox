@@ -42,11 +42,26 @@ from types import SimpleNamespace
 
 # Redirect legacy tkinter dialogs to Qt
 def _qt_showerror(title, message, **options):
-    QMessageBox.critical(None, title, message)
+    parent = QApplication.activeWindow()
+    QMessageBox.critical(parent, title, message)
 
 
 def _qt_showwarning(title, message, **options):
-    QMessageBox.warning(None, title, message)
+    parent = QApplication.activeWindow()
+    QMessageBox.warning(parent, title, message)
+
+
+def _qt_showinfo(title, message, **options):
+    parent = QApplication.activeWindow()
+    QMessageBox.information(parent, title, message)
+
+
+def _qt_askyesno(title, message, **options):
+    parent = QApplication.activeWindow()
+    result = QMessageBox.question(
+        parent, title, message, QMessageBox.Yes | QMessageBox.No
+    )
+    return result == QMessageBox.Yes
 
 
 def _qt_showinfo(title, message, **options):
@@ -226,7 +241,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     def check_for_updates(self) -> None:
         from Main_App.Legacy_App import update_manager
 
-        update_manager.check_for_updates_async(self, silent=False)
+        update_manager.check_for_updates_async(
+            self, silent=False, notify_if_no_update=True
+        )
 
     def quit(self) -> None:
         self.close()
