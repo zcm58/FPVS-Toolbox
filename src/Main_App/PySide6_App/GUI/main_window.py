@@ -343,6 +343,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         hl = QHBoxLayout(row)
         le_label = QLineEdit(label, row)
         le_id = QLineEdit(id, row)
+        le_label.returnPressed.connect(self.btn_add_row.click)
+        le_id.returnPressed.connect(self.btn_add_row.click)
         btn_rm = QPushButton("✕", row)
         def _remove() -> None:
             row.setParent(None)
