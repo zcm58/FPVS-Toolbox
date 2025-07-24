@@ -76,6 +76,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self.setMinimumSize(1024, 768)
         self.currentProject: Project | None = None
         init_ui(self)
+        # Prevent spurious finalize/error dialogs until a run starts
+        self._run_active = False
         # Support legacy .set() calls from processing_utils
         self.progress_bar.set = self.progress_bar.setValue
         init_sidebar(self)
@@ -148,6 +150,27 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     def _set_controls_enabled(self, enabled: bool) -> None:
         if hasattr(self, "btn_start"):
             self.btn_start.setEnabled(enabled)
+
+    def start_processing(self) -> None:
+        """Begin a processing run and activate queue checks."""
+        # Mark that a real run is active
+        self._run_active = True
+        # Delegate to the legacy mixin’s processing entry point
+        super().start_processing()
+
+    def _periodic_queue_check(self) -> None:
+        """Process queue messages only when a run is active."""
+        # Only process queue messages while a run is active
+        if not self._run_active:
+            return
+        super()._periodic_queue_check()
+
+    def _finalize_processing(self, *args, **kwargs) -> None:
+        """Reset run state after mixin finalization."""
+        # Call the mixin’s finalization (dialogs, control resets)
+        super()._finalize_processing(*args, **kwargs)
+        # Now that the run is fully done, disable run_active
+        self._run_active = False
 
     # ------------------------------------------------------------------
     def open_settings_window(self) -> None:
