@@ -7,9 +7,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QPushButton,
-    QMessageBox,
 )
 from PySide6.QtCore import QObject, Signal, QTimer
+import tkinter.messagebox as tk_messagebox
+from PySide6.QtWidgets import QMessageBox
+from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
 import logging
 import pandas as pd
 from pathlib import Path
@@ -37,6 +39,18 @@ from Main_App.PySide6_App.Backend.project_manager import (
     loadProject,
 )
 from types import SimpleNamespace
+
+# Redirect legacy tkinter dialogs to Qt
+def _qt_showerror(title, message, **options):
+    QMessageBox.critical(None, title, message)
+
+
+def _qt_showwarning(title, message, **options):
+    QMessageBox.warning(None, title, message)
+
+
+tk_messagebox.showerror = _qt_showerror
+tk_messagebox.showwarning = _qt_showwarning
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
@@ -109,6 +123,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self._processing_timer = QTimer(self)
         self._processing_timer.timeout.connect(self._periodic_queue_check)
         self._processing_timer.start(50)
+
+        # Allow legacy processing_utils to call self.post_process(...)
+        self.post_process = _legacy_post_process
 
     # ------------------------------------------------------------------
 
