@@ -107,6 +107,7 @@ def init_ui(self) -> None:
     scroll.setWidgetResizable(True)
     self.event_container = QWidget()
     self.event_layout = QVBoxLayout(self.event_container)
+    self.event_layout.setSpacing(2)
     scroll.setWidget(self.event_container)
     vlay.addWidget(scroll)
     btns = QHBoxLayout()
