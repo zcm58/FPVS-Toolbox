@@ -316,9 +316,24 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     # ------------------------------------------------------------------
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
         loadProject(self, project)
-        # Provide legacy post_process with a .get() API to retrieve the Excel output folder
-        excel_folder = self.currentProject.project_root / self.currentProject.subfolders["excel"]
-        self.save_folder_path = SimpleNamespace(get=lambda: str(excel_folder), set=lambda v: None)
+
+        # Auto-populate data_paths from the project's input folder
+        input_dir = Path(project.input_folder)
+        bdf_files = sorted(input_dir.glob("*.bdf"))
+        self.data_paths = [str(p) for p in bdf_files]
+        if self.data_paths:
+            self.log(
+                f"Project data folder set: {input_dir} ({len(self.data_paths)} .bdf files)"
+            )
+        else:
+            self.log(
+                f"Warning: no .bdf files found in project input folder: {input_dir}",
+                level=logging.WARNING,
+            )
+
+        # Provide legacy post_process with a .get() for the Excel output folder
+        excel_dir = project.project_root / project.subfolders["excel"]
+        self.save_folder_path = SimpleNamespace(get=lambda: str(excel_dir))
 
         def make_entry(value: str):
             edit = QLineEdit(str(value))
