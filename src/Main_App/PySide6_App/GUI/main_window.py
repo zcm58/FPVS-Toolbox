@@ -136,6 +136,12 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         )
 
         # Legacy mixin compatibility ----------------------------
+
+        # 👉 ADD THESE THREE LINES:
+        self.progress_bar.set = self.progress_bar.setValue
+        self.btn_start.clicked.connect(self.start_processing)
+        self.btn_select_data.clicked.connect(self.select_data_source)
+
         self.gui_queue = queue.Queue()
         self.processing_thread = None
         self.detection_thread = None
@@ -172,6 +178,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+
+
+
     def log(self, message: str, level: int = logging.INFO) -> None:
         ts = pd.Timestamp.now().strftime("%H:%M:%S.%f")[:-3]
         formatted = f"{ts} [GUI]: {message}"
@@ -191,12 +202,12 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
     def _update_select_button_text(self) -> None:
         """Update the label of the EEG selection button based on the mode."""
-        if not hasattr(self, "btn_open_eeg"):
+        if not hasattr(self, "btn_select_data"):
             return
         if self.rb_batch.isChecked():
-            self.btn_open_eeg.setText("Select Input Folder…")
+            self.btn_select_data.setText("Select Input Folder…")
         else:
-            self.btn_open_eeg.setText("Select .BDF File…")
+            self.btn_select_data.setText("Select .BDF File…")
 
     def after(self, ms: int, callback) -> int:
         QTimer.singleShot(ms, callback)

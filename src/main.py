@@ -5,7 +5,7 @@
 
 """Entry point for launching the FPVS Toolbox GUI application."""
 
-USE_PYSIDE6 = True
+USE_PYSIDE6 = True #"currently in dual GUI mode - set to False to use the legacy Tkinter GUI"
 
 from ctypes import windll
 import sys

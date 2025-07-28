@@ -452,14 +452,14 @@ class SettingsWindow(ctk.CTkToplevel):
             )
 
 
-        ctk.CTkButton(btn_frame, text="Save New Config", command=_save_new).pack(
+        ctk.CTkButton(btn_frame, text="Save New config", command=_save_new).pack(
             side="left", padx=(0, 10)
         )
-        ctk.CTkButton(btn_frame, text="Load Config", command=_load_selected).pack(
+        ctk.CTkButton(btn_frame, text="Load config", command=_load_selected).pack(
 
             side="left", padx=(0, 10)
         )
-        ctk.CTkButton(btn_frame, text="Delete Config", command=_delete_selected).pack(
+        ctk.CTkButton(btn_frame, text="Delete config", command=_delete_selected).pack(
 
             side="left"
         )

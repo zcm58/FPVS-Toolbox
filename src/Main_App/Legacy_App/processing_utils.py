@@ -42,24 +42,38 @@ def _stc_basename_from_fif(path: str) -> str:
 
 class ProcessingMixin:
     _queue_job_id = None
+
     def start_processing(self):
+        print("\n--- 'start_processing' has been called ---")
+        thread_obj = getattr(self, "_processing_thread", None)
+        print(f"--> Current thread object is: {thread_obj}")
+        if thread_obj:
+            print(f"--> Is thread alive? {thread_obj.is_alive()}")
+
         # Guard against re-entrant calls only when a real thread is active
         if getattr(self, "_processing_thread", None) and self._processing_thread.is_alive():
+            print("!!! GUARD IS TRUE: Blocking start.")
             messagebox.showerror("Error", "Processing already started")
             return
+
+        print("--> GUARD IS FALSE: Proceeding to start a new run.")
+
+        # Immediately disable the Start Processing button to prevent a duplicate call and error
+        self._set_controls_enabled(False)
+
         if self.detection_thread and self.detection_thread.is_alive():
             messagebox.showwarning("Busy", "Event detection is running. Please wait.")
             return
 
-        self.log("="*50)
+        self.log("=" * 50)
         self.log("START PROCESSING Initiated...")
         if getattr(self, 'run_loreta_var', None) and getattr(self.run_loreta_var, 'get', lambda: False)():
             if not messagebox.askyesno(
-                "Run LORETA",
-                (
-                    "WARNING: Enabling LORETA will significantly increase the "
-                    "processing time of your dataset. Do you wish to continue?"
-                ),
+                    "Run LORETA",
+                    (
+                            "WARNING: Enabling LORETA will significantly increase the "
+                            "processing time of your dataset. Do you wish to continue?"
+                    ),
             ):
                 self.log("User canceled processing after LORETA warning.")
                 return
@@ -78,7 +92,7 @@ class ProcessingMixin:
             self.remaining_time_var.set("")
             self.after(0, self._update_time_remaining)
         self.busy = True
-        self._set_controls_enabled(False)
+
 
         self.log("Starting background processing thread...")
         args = (list(self.data_paths), self.validated_params.copy(), self.gui_queue)
