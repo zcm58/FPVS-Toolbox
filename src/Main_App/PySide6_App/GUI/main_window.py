@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, Signal, QTimer
 import tkinter.messagebox as tk_messagebox
 from PySide6.QtWidgets import QMessageBox
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
+from types import MethodType
 import logging
 import pandas as pd
 from pathlib import Path
@@ -155,7 +156,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self._processing_timer.start(50)
 
         # Allow legacy processing_utils to call self.post_process(...)
-        self.post_process = _legacy_post_process
+        self.post_process = MethodType(_legacy_post_process, self)
 
         try:
             update_manager.check_for_updates_async(
