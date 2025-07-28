@@ -43,8 +43,9 @@ def _stc_basename_from_fif(path: str) -> str:
 class ProcessingMixin:
     _queue_job_id = None
     def start_processing(self):
-        if self.processing_thread and self.processing_thread.is_alive():
-            messagebox.showwarning("Busy", "Processing is already running.")
+        # Guard against re-entrant calls only when a real thread is active
+        if getattr(self, "_processing_thread", None) and self._processing_thread.is_alive():
+            messagebox.showerror("Error", "Processing already started")
             return
         if self.detection_thread and self.detection_thread.is_alive():
             messagebox.showwarning("Busy", "Event detection is running. Please wait.")
@@ -83,6 +84,8 @@ class ProcessingMixin:
         args = (list(self.data_paths), self.validated_params.copy(), self.gui_queue)
         self.processing_thread = threading.Thread(target=self._processing_thread_func, args=args, daemon=True)
         self.processing_thread.start()
+        # Mirror reference used by the run guard
+        self._processing_thread = self.processing_thread
         self._queue_job_id = self.after(100, self._periodic_queue_check)
 
     def _periodic_queue_check(self):
