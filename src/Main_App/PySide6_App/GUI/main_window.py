@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QObject, Signal, QTimer
 import tkinter.messagebox as tk_messagebox
 from PySide6.QtWidgets import QMessageBox
+from Tools.Stats.stats_ui_pyside6 import StatsWindow as PysideStatsWindow
+from Tools.Stats.stats import StatsAnalysisWindow as launch_ctk_stats
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
 from types import MethodType
 import logging
@@ -40,6 +42,9 @@ from Main_App.PySide6_App.Backend.project_manager import (
     loadProject,
 )
 from types import SimpleNamespace
+
+# Toggle which Stats GUI to launch:
+USE_PYSIDE6_STATS = True  # set to False to use the legacy CustomTkinter GUI
 
 # Redirect legacy tkinter dialogs to Qt
 def _qt_showerror(title, message, **options):
@@ -271,11 +276,15 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         openProjectPath(self, folder)
 
     def open_stats_analyzer(self) -> None:
-        QMessageBox.information(
-            self,
-            "Stats Toolbox",
-            "The statistics tool is not yet available in the Qt interface.",
-        )
+        """Launch the statistical analysis tool based on ``USE_PYSIDE6_STATS``."""
+        if USE_PYSIDE6_STATS:
+            window = PysideStatsWindow(self)
+            window.show()
+            if not hasattr(self, "_child_windows"):
+                self._child_windows = []
+            self._child_windows.append(window)
+        else:
+            launch_ctk_stats(master=self)
 
     def open_image_resizer(self) -> None:
         cmd = [sys.executable]
