@@ -110,6 +110,7 @@ class ProcessingMixin:
                     original_data = self.preprocessed_data
                     self.preprocessed_data = epochs_dict
                     try:
+                        self.log(f"Post-process condition labels: {labels}")
                         _external_post_process(self, labels)
                     except Exception as e:
                         self.log(f"!!! post_process error for {fname}: {e}")
@@ -471,7 +472,9 @@ class ProcessingMixin:
                                 }
                             )
                         try:
+
                             self.post_process(labels_list)
+
                         except Exception as e_post:
                             gui_queue.put({
                                 'type': 'log',
