@@ -463,17 +463,23 @@ class ProcessingMixin:
                         temp_original_preprocessed_data = self.preprocessed_data
                         self.data_paths = [f_path]
                         self.preprocessed_data = file_epochs
-                        try:
+                        labels_list = list(file_epochs.keys())
+                        if self.settings.debug_enabled():
                             gui_queue.put(
                                 {
                                     'type': 'log',
-                                    'message': f"Post-process condition labels: {list(file_epochs.keys())}",
+                                    'message': f"DEBUG [{f_name}]: post_process function {self.post_process} with labels {labels_list}",
                                 }
                             )
-                            self.post_process(list(file_epochs.keys()))
+                        try:
+
+                            self.post_process(labels_list)
+
                         except Exception as e_post:
-                            gui_queue.put({'type': 'log',
-                                           'message': f"!!! Post-processing/Excel error for {f_name}: {e_post}\n{traceback.format_exc()}"})
+                            gui_queue.put({
+                                'type': 'log',
+                                'message': f"!!! Post-processing/Excel error for {f_name}: {e_post}\n{traceback.format_exc()}",
+                            })
                         finally:
                             self.data_paths = temp_original_data_paths
                             self.preprocessed_data = temp_original_preprocessed_data
