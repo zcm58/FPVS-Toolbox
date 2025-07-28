@@ -6,18 +6,121 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt
 import os
+import json
+import tkinter.messagebox as messagebox
+from types import SimpleNamespace
+
+# Legacy imports for scanning and analysis
+from Tools.Stats.stats_file_scanner import (
+    browse_folder, scan_folder,
+    update_condition_menus, update_condition_B_options
+)
+from Tools.Stats.stats_runners import (
+    run_rm_anova, run_mixed_model,
+    run_posthoc_tests, run_interaction_posthocs,
+    run_harmonic_check, _structure_harmonic_results
+)
+from Tools.Stats.stats_helpers import (
+    load_rois_from_settings, apply_rois_to_modules, log_to_main_app
+)
+from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
+
+
+def _auto_detect_project_dir() -> str:
+    """
+    Walk up directories to find project.json and return its folder,
+    or cwd if none found.
+    """
+    path = os.getcwd()
+    while True:
+        if os.path.isfile(os.path.join(path, 'project.json')):
+            return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+    return os.getcwd()
 
 
 class StatsWindow(QMainWindow):
-    """Skeleton PySide6 window for the FPVS Statistical Analysis Tool."""
+    """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
 
-    def __init__(self, parent=None):
+    # Alias legacy methods directly
+    browse_folder = browse_folder
+    scan_folder = scan_folder
+    update_condition_menus = update_condition_menus
+    update_condition_B_options = update_condition_B_options
+    run_rm_anova = run_rm_anova
+    run_mixed_model = run_mixed_model
+    run_posthoc_tests = run_posthoc_tests
+    run_interaction_posthocs = run_interaction_posthocs
+    run_harmonic_check = run_harmonic_check
+    _structure_harmonic_results = _structure_harmonic_results
+    log_to_main_app = log_to_main_app
+
+    def __init__(self, parent=None, project_dir: str = None):
+        # Determine project_dir
+        if project_dir and os.path.isdir(project_dir):
+            self.project_dir = project_dir
+        else:
+            proj = getattr(parent, 'currentProject', None)
+            if proj and hasattr(proj, 'project_root'):
+                self.project_dir = str(proj.project_root)
+            else:
+                self.project_dir = _auto_detect_project_dir()
+        if not os.path.isdir(self.project_dir):
+            self.project_dir = _auto_detect_project_dir()
+
         super().__init__(parent)
+        # Independent top-level window
+        self.setWindowFlags(self.windowFlags() | Qt.Window)
         self.setWindowTitle("FPVS Statistical Analysis Tool")
-        self._init_ui()
 
-    # ------------------------------------------------------------------
-    # UI construction
+        # --- Legacy state variables ---
+        self.subject_data = {}
+        self.all_subject_data = {}
+        self.subjects = []
+        self.conditions = []
+        self.rm_anova_results_data = None
+        self.mixed_model_results_data = None
+        self.posthoc_results_data = None
+        self.harmonic_check_results_data = []
+
+        # --- UI variable proxies for legacy code expecting tk.StringVar-like API ---
+        self.stats_data_folder_var = SimpleNamespace(
+            get=lambda: self.le_folder.text(),
+            set=lambda v: self.le_folder.setText(v)
+        )
+        self.detected_info_var = SimpleNamespace(
+            set=lambda txt: self.lbl_status.setText(txt)
+        )
+        self.roi_var = SimpleNamespace(
+            get=lambda: ALL_ROIS_OPTION,
+            set=lambda v: None
+        )
+        self.alpha_var = SimpleNamespace(
+            get=lambda: "0.05",
+            set=lambda v: None
+        )
+        self.harmonic_metric_var = SimpleNamespace(
+            get=lambda: self.cb_metric.currentText(),
+            set=lambda v: None
+        )
+        self.harmonic_threshold_var = SimpleNamespace(
+            get=lambda: self.le_threshold.text(),
+            set=lambda v: None
+        )
+        self.posthoc_factor_var = SimpleNamespace(
+            get=lambda: "condition by roi",
+            set=lambda v: None
+        )
+
+        self._init_ui()
+        # Bind the QTextEdit to legacy name
+        self.results_textbox = self.results_text
+        # Auto-load default data folder
+        self._load_default_data_folder()
+
     def _init_ui(self):
         central = QWidget(self)
         self.setCentralWidget(central)
@@ -25,158 +128,89 @@ class StatsWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
 
-        # --- Data Folder Selection Row ---
-        folder_row = QHBoxLayout()
-        folder_row.setSpacing(5)
-        folder_row.setContentsMargins(0, 0, 0, 5)
-
-        lbl_folder = QLabel("Data Folder:")
-        self.le_folder = QLineEdit()
-        self.le_folder.setReadOnly(True)
-        self.le_folder.setFixedHeight(28)
-
-        btn_browse = QPushButton("Browse…")  # Unicode ellipsis
-        btn_browse.setFixedHeight(28)
-        btn_browse.clicked.connect(self.on_browse_folder)
-
-        folder_row.addWidget(lbl_folder)
+        # --- Data Folder Selection ---
+        folder_row = QHBoxLayout(); folder_row.setSpacing(5)
+        lbl = QLabel("Data Folder:")
+        self.le_folder = QLineEdit(); self.le_folder.setReadOnly(True); self.le_folder.setFixedHeight(28)
+        btn = QPushButton("Browse…"); btn.setFixedHeight(28)
+        btn.clicked.connect(lambda: self.browse_folder())
+        folder_row.addWidget(lbl)
         folder_row.addWidget(self.le_folder, 1)
-        folder_row.addWidget(btn_browse)
+        folder_row.addWidget(btn)
         main_layout.addLayout(folder_row)
 
-        # Status label (default background)
-        self.lbl_status = QLabel(
-            "Scan complete: Found 7 subjects and 4 conditions.", self
-        )
+        # --- Status ---
+        self.lbl_status = QLabel("Select folder containing FPVS results.", self)
         main_layout.addWidget(self.lbl_status)
 
-        # --- Summed BCA Analysis Section ---
-        summed_group = QFrame()
-        summed_group.setFrameShape(QFrame.StyledPanel)
-        summed_group.setLineWidth(1)
-        summed_layout = QVBoxLayout(summed_group)
-
-        title_summed = QLabel("Summed BCA Analysis:")
-        f = title_summed.font()
-        f.setBold(True)
-        title_summed.setFont(f)
-        summed_layout.addWidget(title_summed, alignment=Qt.AlignLeft)
-
-        buttons_row = QHBoxLayout()
-        col1 = QVBoxLayout()
-        col2 = QVBoxLayout()
-
-        # Left column buttons
+        # --- Summed BCA Section ---
+        summed = QFrame(); summed.setFrameShape(QFrame.StyledPanel); summed.setLineWidth(1)
+        vs = QVBoxLayout(summed)
+        title = QLabel("Summed BCA Analysis:"); f = title.font(); f.setBold(True); title.setFont(f)
+        vs.addWidget(title, alignment=Qt.AlignLeft)
+        hr = QHBoxLayout(); vc1, vc2 = QVBoxLayout(), QVBoxLayout()
         self.run_rm_anova_btn = QPushButton("Run RM-ANOVA (Summed BCA)")
         self.run_rm_anova_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.run_rm_anova_btn.clicked.connect(self.on_run_rm_anova)
-
+        self.run_rm_anova_btn.clicked.connect(lambda: self.run_rm_anova())
+        vc1.addWidget(self.run_rm_anova_btn)
         self.run_mixed_model_btn = QPushButton("Run Mixed Model")
         self.run_mixed_model_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.run_mixed_model_btn.clicked.connect(self.on_run_mixed_model)
-
+        self.run_mixed_model_btn.clicked.connect(lambda: self.run_mixed_model())
+        vc1.addWidget(self.run_mixed_model_btn)
         self.run_posthoc_btn = QPushButton("Run Interaction Post-hocs")
         self.run_posthoc_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.run_posthoc_btn.clicked.connect(self.on_run_interaction_posthocs)
-
-        # Right column buttons
+        self.run_posthoc_btn.clicked.connect(lambda: self.run_interaction_posthocs())
+        vc1.addWidget(self.run_posthoc_btn)
         self.export_rm_anova_btn = QPushButton("Export RM-ANOVA")
         self.export_rm_anova_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.export_rm_anova_btn.clicked.connect(self.on_export_rm_anova)
-
+        vc2.addWidget(self.export_rm_anova_btn)
         self.export_mixed_model_btn = QPushButton("Export Mixed Model")
         self.export_mixed_model_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.export_mixed_model_btn.clicked.connect(self.on_export_mixed_model)
-
+        vc2.addWidget(self.export_mixed_model_btn)
         self.export_posthoc_btn = QPushButton("Export Post-hoc Results")
         self.export_posthoc_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.export_posthoc_btn.clicked.connect(self.on_export_posthoc_results)
+        vc2.addWidget(self.export_posthoc_btn)
+        hr.addLayout(vc1); hr.addLayout(vc2); vs.addLayout(hr)
+        main_layout.addWidget(summed)
 
-        col1.addWidget(self.run_rm_anova_btn)
-        col1.addWidget(self.run_mixed_model_btn)
-        col1.addWidget(self.run_posthoc_btn)
-        col2.addWidget(self.export_rm_anova_btn)
-        col2.addWidget(self.export_mixed_model_btn)
-        col2.addWidget(self.export_posthoc_btn)
-        buttons_row.addLayout(col1)
-        buttons_row.addLayout(col2)
-        summed_layout.addLayout(buttons_row)
-
-        main_layout.addWidget(summed_group)
-
-        # --- Harmonic Significance Section ---
-        harmonic_group = QFrame()
-        harmonic_group.setFrameShape(QFrame.StyledPanel)
-        harmonic_group.setLineWidth(1)
-        harmonic_layout = QVBoxLayout(harmonic_group)
-
-        title_harmonic = QLabel("Per-Harmonic Significance Check:")
-        f2 = title_harmonic.font()
-        f2.setBold(True)
-        title_harmonic.setFont(f2)
-        harmonic_layout.addWidget(title_harmonic, alignment=Qt.AlignLeft)
-
-        controls_row = QHBoxLayout()
-        controls_row.setSpacing(5)
-
-        lbl_metric = QLabel("Metric:")
-        self.cb_metric = QComboBox()
-        self.cb_metric.addItems(["SNR"])
-
-        lbl_thresh = QLabel("Mean Threshold:")
-        self.le_threshold = QLineEdit("1.96")
-
-        self.run_harmonic_btn = QPushButton("Run Harmonic Check")
-        self.run_harmonic_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.run_harmonic_btn.clicked.connect(self.on_run_harmonic_check)
-
-        self.export_harmonic_btn = QPushButton("Export Harmonic Results")
-        self.export_harmonic_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.export_harmonic_btn.clicked.connect(self.on_export_harmonic_results)
-
-        controls_row.addWidget(lbl_metric)
-        controls_row.addWidget(self.cb_metric)
-        controls_row.addWidget(lbl_thresh)
-        controls_row.addWidget(self.le_threshold)
-        controls_row.addWidget(self.run_harmonic_btn)
-        controls_row.addWidget(self.export_harmonic_btn)
-        harmonic_layout.addLayout(controls_row)
-
-        main_layout.addWidget(harmonic_group)
+        # --- Harmonic Check Section ---
+        harm = QFrame(); harm.setFrameShape(QFrame.StyledPanel); harm.setLineWidth(1)
+        vh = QVBoxLayout(harm)
+        t2 = QLabel("Per-Harmonic Significance Check:"); hf = t2.font(); hf.setBold(True); t2.setFont(hf)
+        vh.addWidget(t2, alignment=Qt.AlignLeft)
+        rc = QHBoxLayout(); rc.setSpacing(5)
+        rc.addWidget(QLabel("Metric:"))
+        self.cb_metric = QComboBox(); self.cb_metric.addItems(["SNR", "Z-Score"]); rc.addWidget(self.cb_metric)
+        rc.addWidget(QLabel("Mean Threshold:")); self.le_threshold = QLineEdit("1.96"); rc.addWidget(self.le_threshold)
+        runh = QPushButton("Run Harmonic Check"); runh.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        runh.clicked.connect(lambda: self.run_harmonic_check()); rc.addWidget(runh)
+        exph = QPushButton("Export Harmonic Results"); exph.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        rc.addWidget(exph)
+        vh.addLayout(rc); main_layout.addWidget(harm)
 
         # --- Results Display ---
-        self.results_text = QTextEdit()
-        self.results_text.setReadOnly(True)
-        main_layout.addWidget(self.results_text, 1)  # stretch=1
+        self.results_text = QTextEdit(); self.results_text.setReadOnly(True)
+        main_layout.addWidget(self.results_text, 1)
 
-    # ------------------------------------------------------------------
-    # Slots / Actions
-    def on_browse_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Data Folder", os.getcwd())
-        if folder:
-            self.le_folder.setText(folder)
-            print(f"Selected folder: {folder}")
+    def _load_default_data_folder(self):
+        # Populate using legacy scan_folder or auto-detect
+        default = None
+        parent = self.parent()
+        if parent and hasattr(parent, 'currentProject') and parent.currentProject:
+            proj = parent.currentProject
+            root = str(getattr(proj, 'project_root', ''))
+            sub = proj.subfolders.get('excel', '')
+            cand = os.path.join(root, sub)
+            if os.path.isdir(cand): default = cand
+        if not default or not os.path.isdir(default):
+            pd_dir = _auto_detect_project_dir(); cand = os.path.join(pd_dir, '1 - Excel Data Files')
+            if os.path.isdir(cand): default = cand
+        if default and os.path.isdir(default):
+            self.le_folder.setText(default)
+            self.stats_data_folder_var.set(default)
+            try:
+                self.scan_folder()
+            except Exception as e:
+                self.lbl_status.setText(f"Initial scan failed: {e}")
 
-    def on_run_rm_anova(self):
-        print("Run RM-ANOVA clicked")
-
-    def on_export_rm_anova(self):
-        print("Export RM-ANOVA clicked")
-
-    def on_run_mixed_model(self):
-        print("Run Mixed Model clicked")
-
-    def on_export_mixed_model(self):
-        print("Export Mixed Model clicked")
-
-    def on_run_interaction_posthocs(self):
-        print("Run Interaction Post-hocs clicked")
-
-    def on_export_posthoc_results(self):
-        print("Export Post-hoc Results clicked")
-
-    def on_run_harmonic_check(self):
-        print("Run Harmonic Check clicked")
-
-    def on_export_harmonic_results(self):
-        print("Export Harmonic Results clicked")
+    # No custom slots needed; using aliased legacy methods
