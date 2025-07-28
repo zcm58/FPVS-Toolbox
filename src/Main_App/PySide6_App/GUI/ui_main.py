@@ -182,7 +182,7 @@ def init_ui(self) -> None:
     self.setStatusBar(QStatusBar(self))
 
     # Connect toolbar buttons to methods
-    self.btn_start.clicked.connect(self.start_processing)
+
     self.btn_add_row.clicked.connect(lambda: self.add_event_row())
     self.btn_detect.clicked.connect(self.detect_trigger_ids)
 
