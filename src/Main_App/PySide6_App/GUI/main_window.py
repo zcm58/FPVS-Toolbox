@@ -392,6 +392,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         # Provide legacy post_process with a .get() for the Excel output folder
         excel_dir = project.project_root / project.subfolders["excel"]
         self.save_folder_path = SimpleNamespace(get=lambda: str(excel_dir))
+        self.log(f"Save folder path set: {self.save_folder_path.get()}")
 
         def make_entry(value: str):
             edit = QLineEdit(str(value))
