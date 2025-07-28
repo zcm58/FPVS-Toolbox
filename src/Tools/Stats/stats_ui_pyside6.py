@@ -12,9 +12,9 @@ from types import SimpleNamespace
 
 # Legacy imports for scanning and analysis
 from Tools.Stats.stats_file_scanner import (
-    browse_folder, scan_folder,
     update_condition_menus, update_condition_B_options
 )
+from Tools.Stats.stats_file_scanner_pyside6 import scan_folder_simple, ScanError
 from Tools.Stats.stats_runners import (
     run_rm_anova, run_mixed_model,
     run_posthoc_tests, run_interaction_posthocs,
@@ -46,8 +46,6 @@ class StatsWindow(QMainWindow):
     """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
 
     # Alias legacy methods directly
-    browse_folder = browse_folder
-    scan_folder = scan_folder
     update_condition_menus = update_condition_menus
     update_condition_B_options = update_condition_B_options
     run_rm_anova = run_rm_anova
@@ -133,11 +131,15 @@ class StatsWindow(QMainWindow):
         lbl = QLabel("Data Folder:")
         self.le_folder = QLineEdit(); self.le_folder.setReadOnly(True); self.le_folder.setFixedHeight(28)
         btn = QPushButton("Browse…"); btn.setFixedHeight(28)
-        btn.clicked.connect(lambda: self.browse_folder())
+        btn.clicked.connect(self.on_browse_folder)
         folder_row.addWidget(lbl)
         folder_row.addWidget(self.le_folder, 1)
         folder_row.addWidget(btn)
         main_layout.addLayout(folder_row)
+
+        self.btn_scan = QPushButton("Scan Folder Contents")
+        self.btn_scan.clicked.connect(self.on_scan_folder)
+        main_layout.addWidget(self.btn_scan)
 
         # --- Status ---
         self.lbl_status = QLabel("Select folder containing FPVS results.", self)
@@ -192,6 +194,26 @@ class StatsWindow(QMainWindow):
         self.results_text = QTextEdit(); self.results_text.setReadOnly(True)
         main_layout.addWidget(self.results_text, 1)
 
+    def on_browse_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Data Folder", os.getcwd())
+        if folder:
+            self.le_folder.setText(folder)
+            self.on_scan_folder()
+
+    def on_scan_folder(self):
+        folder = self.le_folder.text()
+        try:
+            subjects, conditions, data = scan_folder_simple(folder)
+            self.subjects = subjects
+            self.conditions = conditions
+            self.subject_data = data
+            self.lbl_status.setText(
+                f"Scan complete: Found {len(subjects)} subjects and {len(conditions)} conditions."
+            )
+            # e.g. update_condition_menus(self.conditions)
+        except ScanError as e:
+            self.lbl_status.setText(f"Scan failed: {e}")
+
     def _load_default_data_folder(self):
         # Populate using legacy scan_folder or auto-detect
         default = None
@@ -209,7 +231,7 @@ class StatsWindow(QMainWindow):
             self.le_folder.setText(default)
             self.stats_data_folder_var.set(default)
             try:
-                self.scan_folder()
+                self.on_scan_folder()
             except Exception as e:
                 self.lbl_status.setText(f"Initial scan failed: {e}")
 
