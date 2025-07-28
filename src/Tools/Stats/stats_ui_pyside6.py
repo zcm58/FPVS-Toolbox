@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QLineEdit, QPushButton,
     QComboBox, QTextEdit, QHBoxLayout, QVBoxLayout,
-    QGroupBox, QFileDialog
+    QFrame, QFileDialog, QSizePolicy
 )
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt
@@ -28,26 +28,34 @@ class StatsWindow(QMainWindow):
         # --- Data Folder Selection Row ---
         folder_row = QHBoxLayout()
         folder_row.setSpacing(5)
+        folder_row.setContentsMargins(0, 0, 0, 5)
+
         lbl_folder = QLabel("Data Folder:")
         self.le_folder = QLineEdit()
         self.le_folder.setReadOnly(True)
-        btn_browse = QPushButton("Browse…")
+        self.le_folder.setFixedHeight(28)
+
+        btn_browse = QPushButton("Browse…")  # Unicode ellipsis
+        btn_browse.setFixedHeight(28)
         btn_browse.clicked.connect(self.on_browse_folder)
+
         folder_row.addWidget(lbl_folder)
         folder_row.addWidget(self.le_folder, 1)
         folder_row.addWidget(btn_browse)
         main_layout.addLayout(folder_row)
 
-        # Status label
+        # Status label (default background)
         self.lbl_status = QLabel(
             "Scan complete: Found 7 subjects and 4 conditions.", self
         )
-        self.lbl_status.setStyleSheet("background-color: lightgray;")
         main_layout.addWidget(self.lbl_status)
 
         # --- Summed BCA Analysis Section ---
-        summed_group = QGroupBox()
+        summed_group = QFrame()
+        summed_group.setFrameShape(QFrame.StyledPanel)
+        summed_group.setLineWidth(1)
         summed_layout = QVBoxLayout(summed_group)
+
         title_summed = QLabel("Summed BCA Analysis:")
         f = title_summed.font()
         f.setBold(True)
@@ -57,18 +65,31 @@ class StatsWindow(QMainWindow):
         buttons_row = QHBoxLayout()
         col1 = QVBoxLayout()
         col2 = QVBoxLayout()
+
+        # Left column buttons
         self.run_rm_anova_btn = QPushButton("Run RM-ANOVA (Summed BCA)")
+        self.run_rm_anova_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.run_rm_anova_btn.clicked.connect(self.on_run_rm_anova)
+
         self.run_mixed_model_btn = QPushButton("Run Mixed Model")
+        self.run_mixed_model_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.run_mixed_model_btn.clicked.connect(self.on_run_mixed_model)
+
         self.run_posthoc_btn = QPushButton("Run Interaction Post-hocs")
+        self.run_posthoc_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.run_posthoc_btn.clicked.connect(self.on_run_interaction_posthocs)
 
+        # Right column buttons
         self.export_rm_anova_btn = QPushButton("Export RM-ANOVA")
+        self.export_rm_anova_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.export_rm_anova_btn.clicked.connect(self.on_export_rm_anova)
+
         self.export_mixed_model_btn = QPushButton("Export Mixed Model")
+        self.export_mixed_model_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.export_mixed_model_btn.clicked.connect(self.on_export_mixed_model)
+
         self.export_posthoc_btn = QPushButton("Export Post-hoc Results")
+        self.export_posthoc_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.export_posthoc_btn.clicked.connect(self.on_export_posthoc_results)
 
         col1.addWidget(self.run_rm_anova_btn)
@@ -84,8 +105,11 @@ class StatsWindow(QMainWindow):
         main_layout.addWidget(summed_group)
 
         # --- Harmonic Significance Section ---
-        harmonic_group = QGroupBox()
+        harmonic_group = QFrame()
+        harmonic_group.setFrameShape(QFrame.StyledPanel)
+        harmonic_group.setLineWidth(1)
         harmonic_layout = QVBoxLayout(harmonic_group)
+
         title_harmonic = QLabel("Per-Harmonic Significance Check:")
         f2 = title_harmonic.font()
         f2.setBold(True)
@@ -94,14 +118,20 @@ class StatsWindow(QMainWindow):
 
         controls_row = QHBoxLayout()
         controls_row.setSpacing(5)
+
         lbl_metric = QLabel("Metric:")
         self.cb_metric = QComboBox()
         self.cb_metric.addItems(["SNR"])
+
         lbl_thresh = QLabel("Mean Threshold:")
         self.le_threshold = QLineEdit("1.96")
+
         self.run_harmonic_btn = QPushButton("Run Harmonic Check")
+        self.run_harmonic_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.run_harmonic_btn.clicked.connect(self.on_run_harmonic_check)
+
         self.export_harmonic_btn = QPushButton("Export Harmonic Results")
+        self.export_harmonic_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.export_harmonic_btn.clicked.connect(self.on_export_harmonic_results)
 
         controls_row.addWidget(lbl_metric)
@@ -117,7 +147,7 @@ class StatsWindow(QMainWindow):
         # --- Results Display ---
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
-        main_layout.addWidget(self.results_text, 1)
+        main_layout.addWidget(self.results_text, 1)  # stretch=1
 
     # ------------------------------------------------------------------
     # Slots / Actions
@@ -150,4 +180,3 @@ class StatsWindow(QMainWindow):
 
     def on_export_harmonic_results(self):
         print("Export Harmonic Results clicked")
-
