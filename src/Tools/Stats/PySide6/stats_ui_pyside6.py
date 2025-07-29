@@ -14,7 +14,6 @@ from pathlib import Path
 # Corrected imports for the new file structure
 from Tools.Stats.PySide6.stats_file_scanner_pyside6 import scan_folder_simple, ScanError
 from Tools.Stats.Legacy.stats_runners import (
-    run_mixed_model,
     run_posthoc_tests, run_interaction_posthocs,
     run_harmonic_check, _structure_harmonic_results
 )
@@ -23,6 +22,10 @@ from Tools.Stats.Legacy.stats_analysis import (
     run_rm_anova as analysis_run_rm_anova,  # Alias to avoid name clash
     ALL_ROIS_OPTION
 )
+# Import the specific model and interpretation helpers
+from Tools.Stats.Legacy.mixed_effects_model import run_mixed_effects_model
+from Tools.Stats.Legacy.interpretation_helpers import generate_lme_summary
+
 from Tools.Stats.Legacy.stats_helpers import (
     load_rois_from_settings, apply_rois_to_modules, log_to_main_app
 )
@@ -48,7 +51,6 @@ class StatsWindow(QMainWindow):
     """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
 
     # Alias other legacy methods directly
-    run_mixed_model = run_mixed_model
     run_posthoc_tests = run_posthoc_tests
     run_interaction_posthocs = run_interaction_posthocs
     run_harmonic_check = run_harmonic_check
@@ -171,7 +173,7 @@ class StatsWindow(QMainWindow):
         main_layout.addWidget(self.results_text, 1)
 
         self.run_rm_anova_btn.clicked.connect(self.on_run_rm_anova)
-        self.run_mixed_model_btn.clicked.connect(self.run_mixed_model)
+        self.run_mixed_model_btn.clicked.connect(self.on_run_mixed_model)  # Connect to the new handler
         self.run_posthoc_btn.clicked.connect(self.run_interaction_posthocs)
         self.run_harm_btn.clicked.connect(self.run_harmonic_check)
         self.export_rm_anova_btn.clicked.connect(lambda: self.on_export("rm_anova"))
@@ -180,9 +182,6 @@ class StatsWindow(QMainWindow):
         self.export_harm_btn.clicked.connect(lambda: self.on_export("harmonic"))
 
     def on_run_rm_anova(self):
-        """
-        Handles the 'Run RM-ANOVA' button click, including full interpretation.
-        """
         if not self.subject_data:
             QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
             return
@@ -295,6 +294,92 @@ class StatsWindow(QMainWindow):
             output_text += "--------------------------------------------\n"
         else:
             output_text += "RM-ANOVA did not return any results or the result was empty.\n"
+
+        self.results_text.setText(output_text)
+        log_to_gui("\nAnalysis complete.")
+
+    def on_run_mixed_model(self):
+        """
+        Handles the 'Run Mixed Model' button click, including interpretation.
+        """
+        if not self.subject_data:
+            QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
+            return
+
+        try:
+            settings = SettingsManager()
+            base_freq = float(settings.get("analysis", "base_freq", 6.0))
+            alpha = float(settings.get("analysis", "alpha", 0.05))
+        except Exception as e:
+            QMessageBox.critical(self, "Settings Error", f"Could not load analysis settings: {e}")
+            return
+
+        self.results_text.clear()
+        self.mixed_model_results_data = None
+        self.export_mixed_model_btn.setEnabled(False)
+
+        def log_to_gui(message):
+            self.results_text.append(message)
+            QApplication.processEvents()
+
+        log_to_gui("Preparing data for Mixed Effects Model...")
+
+        all_subject_bca_data = prepare_all_subject_summed_bca_data(
+            subjects=self.subjects, conditions=self.conditions,
+            subject_data=self.subject_data, base_freq=base_freq, log_func=log_to_gui
+        )
+
+        if not all_subject_bca_data:
+            log_to_gui("\nData preparation failed. Check logs for details.")
+            return
+
+        long_format_data = []
+        for pid, cond_data in all_subject_bca_data.items():
+            for cond_name, roi_data in cond_data.items():
+                for roi_name, value in roi_data.items():
+                    if not pd.isna(value):
+                        long_format_data.append(
+                            {'subject': pid, 'condition': cond_name, 'roi': roi_name, 'value': value})
+
+        if not long_format_data:
+            QMessageBox.critical(self, "Data Error", "No valid data available for Mixed Model after filtering NaNs.")
+            return
+
+        df_long = pd.DataFrame(long_format_data)
+        log_to_gui("Data preparation complete. Running Mixed Effects Model...")
+
+        output_text = "============================================================\n"
+        output_text += "       Linear Mixed-Effects Model Results\n"
+        output_text += "       Analysis conducted on: Summed BCA Data\n"
+        output_text += "============================================================\n\n"
+        output_text += (
+            "This model accounts for repeated observations from each subject by including\n"
+            "a random intercept. Fixed effects assess how conditions and ROIs influence\n"
+            "Summed BCA values, including their interaction.\n\n"
+        )
+
+        try:
+            mixed_results_df = run_mixed_effects_model(
+                data=df_long,
+                dv_col='value',
+                group_col='subject',
+                fixed_effects=['condition * roi']
+            )
+
+            if mixed_results_df is not None and not mixed_results_df.empty:
+                output_text += "--------------------------------------------\n"
+                output_text += "                 FIXED EFFECTS TABLE\n"
+                output_text += "--------------------------------------------\n"
+                output_text += mixed_results_df.to_string(index=False) + "\n"
+                output_text += generate_lme_summary(mixed_results_df, alpha=alpha)
+                self.mixed_model_results_data = mixed_results_df
+                self.export_mixed_model_btn.setEnabled(True)
+            else:
+                output_text += "Mixed effects model did not return any results or the result was empty.\n"
+
+        except Exception as e:
+            output_text += f"Mixed effects model failed unexpectedly: {e}\n"
+            QMessageBox.critical(self, "Analysis Failed", f"An error occurred during the mixed model analysis:\n{e}")
 
         self.results_text.setText(output_text)
         log_to_gui("\nAnalysis complete.")
