@@ -3,7 +3,15 @@ import os
 
 
 def _import_scanner_module():
-    path = os.path.join(os.path.dirname(__file__), '..', 'src', 'Tools', 'Stats', 'stats_file_scanner.py')
+    path = os.path.join(
+        os.path.dirname(__file__),
+        '..',
+        'src',
+        'Tools',
+        'Stats',
+        'Legacy',
+        'stats_file_scanner.py',
+    )
     spec = importlib.util.spec_from_file_location('stats_file_scanner', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

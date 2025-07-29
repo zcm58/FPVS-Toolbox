@@ -15,7 +15,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from PySide6.QtCore import QObject, Signal
 
-from Tools.Stats.stats_analysis import ALL_ROIS_OPTION
+from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 
 # Global plotting style applied after imports

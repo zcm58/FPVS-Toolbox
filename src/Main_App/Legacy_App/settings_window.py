@@ -280,7 +280,10 @@ class SettingsWindow(ctk.CTkToplevel):
 
         # Update ROI definitions in any open Stats windows
         try:
-            from Tools.Stats.stats_helpers import load_rois_from_settings, apply_rois_to_modules
+            from Tools.Stats.Legacy.stats_helpers import (
+                load_rois_from_settings,
+                apply_rois_to_modules,
+            )
             from Tools.Stats.stats import StatsAnalysisWindow
             rois = load_rois_from_settings(self.manager)
             apply_rois_to_modules(rois)
