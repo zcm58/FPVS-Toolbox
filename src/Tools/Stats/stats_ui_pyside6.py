@@ -1,19 +1,15 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QLineEdit, QPushButton,
     QComboBox, QTextEdit, QHBoxLayout, QVBoxLayout,
-    QFrame, QFileDialog, QSizePolicy
+    QFrame, QFileDialog, QSizePolicy, QMessageBox
 )
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt
 import os
 import json
-import tkinter.messagebox as messagebox
 from types import SimpleNamespace
 
 # Legacy imports for scanning and analysis
-from Tools.Stats.stats_file_scanner import (
-    update_condition_menus, update_condition_B_options
-)
 from Tools.Stats.stats_file_scanner_pyside6 import scan_folder_simple, ScanError
 from Tools.Stats.stats_runners import (
     run_rm_anova, run_mixed_model,
@@ -46,8 +42,6 @@ class StatsWindow(QMainWindow):
     """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
 
     # Alias legacy methods directly
-    update_condition_menus = update_condition_menus
-    update_condition_B_options = update_condition_B_options
     run_rm_anova = run_rm_anova
     run_mixed_model = run_mixed_model
     run_posthoc_tests = run_posthoc_tests
@@ -138,7 +132,7 @@ class StatsWindow(QMainWindow):
         main_layout.addLayout(folder_row)
 
         self.btn_scan = QPushButton("Scan Folder Contents")
-        self.btn_scan.clicked.connect(self.on_scan_folder)
+        self.btn_scan.clicked.connect(self._scan_button_clicked)
         main_layout.addWidget(self.btn_scan)
 
         # --- Status ---
@@ -198,21 +192,30 @@ class StatsWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Select Data Folder", os.getcwd())
         if folder:
             self.le_folder.setText(folder)
-            self.on_scan_folder()
+            try:
+                self.on_scan_folder()
+            except ScanError as e:
+                self.lbl_status.setText(f"Scan failed: {e}")
+                QMessageBox.critical(self, "Scan Error", str(e))
 
     def on_scan_folder(self):
         folder = self.le_folder.text()
+        subjects, conditions, data = scan_folder_simple(folder)
+        self.subjects = subjects
+        self.conditions = conditions
+        self.subject_data = data
+        self.lbl_status.setText(
+            f"Scan complete: Found {len(subjects)} subjects and {len(conditions)} conditions."
+        )
+        # e.g. update_condition_menus(self.conditions)
+
+    def _scan_button_clicked(self):
+        """Handle Scan Folder button clicks with error reporting."""
         try:
-            subjects, conditions, data = scan_folder_simple(folder)
-            self.subjects = subjects
-            self.conditions = conditions
-            self.subject_data = data
-            self.lbl_status.setText(
-                f"Scan complete: Found {len(subjects)} subjects and {len(conditions)} conditions."
-            )
-            # e.g. update_condition_menus(self.conditions)
+            self.on_scan_folder()
         except ScanError as e:
             self.lbl_status.setText(f"Scan failed: {e}")
+            QMessageBox.critical(self, "Scan Error", str(e))
 
     def _load_default_data_folder(self):
         # Populate using legacy scan_folder or auto-detect
@@ -232,7 +235,8 @@ class StatsWindow(QMainWindow):
             self.stats_data_folder_var.set(default)
             try:
                 self.on_scan_folder()
-            except Exception as e:
+            except ScanError as e:
                 self.lbl_status.setText(f"Initial scan failed: {e}")
+                QMessageBox.critical(self, "Scan Error", str(e))
 
     # No custom slots needed; using aliased legacy methods
