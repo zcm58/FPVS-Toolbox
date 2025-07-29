@@ -2,7 +2,7 @@
 
 import logging
 from Main_App import SettingsManager
-from src.Tools.Stats import stats_analysis
+from . import stats_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +100,9 @@ def load_rois_from_settings(manager=None):
 
 def apply_rois_to_modules(rois_dict):
     """Update ROI dictionaries in related stats modules."""
-    import Tools.Stats.stats as stats_mod
-    import Tools.Stats.stats_analysis as analysis_mod
-    import Tools.Stats.stats_runners as runners_mod
+    import Tools.Stats.Legacy.stats as stats_mod
+    import Tools.Stats.Legacy.stats_analysis as analysis_mod
+    import Tools.Stats.Legacy.stats_runners as runners_mod
 
     stats_mod.ROIS = rois_dict
     analysis_mod.set_rois(rois_dict)

@@ -2,7 +2,7 @@
 
 import customtkinter as ctk
 from config import FONT_BOLD
-from src.Tools.Stats import stats_export
+from . import stats_export
 
 
 def create_widgets(self):

@@ -8,7 +8,7 @@ import mne
 import re
 from config import TARGET_FREQUENCIES, DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
 from typing import List, Any
-from Tools.Stats.full_snr import compute_full_snr
+from Tools.Stats.Legacy.full_snr import compute_full_snr
 
 
 def post_process(app: Any, condition_labels_present: List[str]) -> None:

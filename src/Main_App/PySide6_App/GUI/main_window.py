@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QObject, Signal, QTimer
 import tkinter.messagebox as tk_messagebox
 from PySide6.QtWidgets import QMessageBox
-from Tools.Stats.stats_ui_pyside6 import StatsWindow as PysideStatsWindow
-from Tools.Stats.stats import StatsAnalysisWindow as launch_ctk_stats
+from Tools.Stats import StatsWindow as PysideStatsWindow
+from Tools.Stats.Legacy.stats import StatsAnalysisWindow as launch_ctk_stats
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
 from types import MethodType
 import logging
