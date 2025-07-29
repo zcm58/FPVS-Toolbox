@@ -736,20 +736,28 @@ class StatsWindow(QMainWindow):
         )
         if reply == QMessageBox.Yes:
             QDesktopServices.openUrl(QUrl.fromLocalFile(results_dir))
+        if reply == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(results_dir))
 
     def on_export_harmonic(self):
         results_dir = self._ensure_results_dir()
-        path = os.path.join(results_dir, f"{self.project_title} Harmonic Results.xlsx")
+        # Include selected metric (SNR or Z Score) in the filename
+        metric = self.harmonic_metric_var.get()
+        # Sanitize spaces/dashes if you prefer filename safety
+        metric_safe = metric.replace(" ", "_").replace("-", "_")
+        filename = f"{self.project_title} Harmonic Check {metric_safe} Results.xlsx"
+        path = os.path.join(results_dir, filename)
         export_harmonic_results_to_excel(
             self._structure_harmonic_results(),
             path,
             self.log_to_main_app,
             metric=self.harmonic_metric_var.get(),
         )
+        # Prompt the user to open the results folder, showing the exact filename
         reply = QMessageBox.question(
             self,
             "Export Complete",
-            "Data successfully exported. Open folder?",
+            f"Data successfully exported as:\n{filename}\n\nOpen folder?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
