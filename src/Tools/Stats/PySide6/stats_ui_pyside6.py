@@ -10,6 +10,10 @@ import pandas as pd
 import numpy as np
 from types import SimpleNamespace
 from pathlib import Path
+import logging
+
+# Set up a logger for this module
+logger = logging.getLogger(__name__)
 
 # Corrected imports for the new file structure
 from Tools.Stats.PySide6.stats_file_scanner_pyside6 import scan_folder_simple, ScanError
@@ -26,7 +30,7 @@ from Tools.Stats.Legacy.interpretation_helpers import generate_lme_summary
 from Tools.Stats.Legacy.posthoc_tests import run_interaction_posthocs
 
 from Tools.Stats.Legacy.stats_helpers import (
-    load_rois_from_settings, apply_rois_to_modules, log_to_main_app
+    load_rois_from_settings, apply_rois_to_modules
 )
 # Import all the new, UI-agnostic export functions
 from Tools.Stats.Legacy.stats_export import (
@@ -57,7 +61,6 @@ class StatsWindow(QMainWindow):
     # Alias other legacy methods directly
     run_harmonic_check = run_harmonic_check
     _structure_harmonic_results = _structure_harmonic_results
-    log_to_main_app = log_to_main_app
 
     def __init__(self, parent=None, project_dir: str = None):
         if project_dir and os.path.isdir(project_dir):
@@ -93,6 +96,11 @@ class StatsWindow(QMainWindow):
         self._init_ui()
         self.results_textbox = self.results_text
         QTimer.singleShot(100, self._load_default_data_folder)
+
+    def log_to_main_app(self, message):
+        """A simple logger for the standalone stats window."""
+        logger.info(f"[StatsWindow] {message}")
+        print(f"[StatsWindow] {message}")  # Also print to console for visibility
 
     def _init_ui(self):
         central = QWidget(self)
