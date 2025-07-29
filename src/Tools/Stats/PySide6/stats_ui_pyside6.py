@@ -660,6 +660,12 @@ class StatsWindow(QMainWindow):
             self.le_folder.setText(default)
             self._scan_button_clicked()
 
+    def _structure_harmonic_results(self):
+        """Converts the list of harmonic result dicts into a DataFrame."""
+        if not self.harmonic_check_results_data:
+            return pd.DataFrame()
+        return pd.DataFrame(self.harmonic_check_results_data)
+
     def on_export(self, export_type: str):
         """Handles exporting different result types to Excel."""
 
