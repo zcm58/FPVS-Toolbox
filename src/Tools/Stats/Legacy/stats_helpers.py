@@ -2,7 +2,7 @@
 
 import logging
 from Main_App import SettingsManager
-from . import stats_analysis
+from src.Tools.Stats import stats_analysis
 
 logger = logging.getLogger(__name__)
 
