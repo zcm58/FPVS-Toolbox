@@ -11,18 +11,18 @@ import numpy as np
 from types import SimpleNamespace
 from pathlib import Path
 import logging
+from scipy import stats
 
 # Set up a logger for this module
 logger = logging.getLogger(__name__)
 
 # Corrected imports for the new file structure
 from Tools.Stats.PySide6.stats_file_scanner_pyside6 import scan_folder_simple, ScanError
-from Tools.Stats.Legacy.stats_runners import (
-    run_harmonic_check, _structure_harmonic_results
-)
 from Tools.Stats.Legacy.stats_analysis import (
     prepare_all_subject_summed_bca_data,
     run_rm_anova as analysis_run_rm_anova,
+    get_included_freqs,
+    _match_freq_column,
     ALL_ROIS_OPTION
 )
 from Tools.Stats.Legacy.mixed_effects_model import run_mixed_effects_model
@@ -58,10 +58,6 @@ def _auto_detect_project_dir() -> str:
 class StatsWindow(QMainWindow):
     """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
 
-    # Alias other legacy methods directly
-    run_harmonic_check = run_harmonic_check
-    _structure_harmonic_results = _structure_harmonic_results
-
     def __init__(self, parent=None, project_dir: str = None):
         if project_dir and os.path.isdir(project_dir):
             self.project_dir = project_dir
@@ -82,6 +78,7 @@ class StatsWindow(QMainWindow):
         self.mixed_model_results_data = None
         self.posthoc_results_data = None
         self.harmonic_check_results_data = []
+        self.rois = {}
 
         # --- UI variable proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text(),
@@ -101,6 +98,12 @@ class StatsWindow(QMainWindow):
         """A simple logger for the standalone stats window."""
         logger.info(f"[StatsWindow] {message}")
         print(f"[StatsWindow] {message}")  # Also print to console for visibility
+
+    def refresh_rois(self):
+        """Reload ROI definitions from settings."""
+        self.rois = load_rois_from_settings()
+        apply_rois_to_modules(self.rois)
+        self.log_to_main_app("Refreshed ROI definitions from settings.")
 
     def _init_ui(self):
         central = QWidget(self)
@@ -166,7 +169,7 @@ class StatsWindow(QMainWindow):
         harm_layout = QHBoxLayout()
         harm_layout.addWidget(QLabel("Metric:"));
         self.cb_metric = QComboBox();
-        self.cb_metric.addItems(["SNR", "Z-Score"]);
+        self.cb_metric.addItems(["SNR", "Z Score"]);
         harm_layout.addWidget(self.cb_metric)
         harm_layout.addWidget(QLabel("Mean Threshold:"));
         self.le_threshold = QLineEdit("1.96");
@@ -466,48 +469,119 @@ class StatsWindow(QMainWindow):
 
     def on_run_harmonic_check(self):
         """
-        Handles the 'Run Harmonic Check' button click.
+        Handles the 'Run Harmonic Check' button click, adapted for PySide6.
         """
-        if not self.subject_data:
-            QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
-            return
+        self.refresh_rois()
+        self.log_to_main_app("Running Per-Harmonic Significance Check...")
+        self.results_text.clear()
+        self.export_harm_btn.setEnabled(False)
+        self.harmonic_check_results_data.clear()
 
         try:
             settings = SettingsManager()
             base_freq = float(settings.get("analysis", "base_freq", 6.0))
             alpha = float(settings.get("analysis", "alpha", 0.05))
-            metric = self.harmonic_metric_var.get()
-            threshold = float(self.harmonic_threshold_var.get())
+            selected_metric = self.harmonic_metric_var.get()
+            mean_value_threshold = float(self.harmonic_threshold_var.get())
         except ValueError:
-            QMessageBox.warning(self, "Invalid Input", "Please ensure Mean Threshold is a valid number.")
+            QMessageBox.warning(self, "Input Error", "Invalid Mean Threshold. Please enter a numeric value.")
             return
         except Exception as e:
             QMessageBox.critical(self, "Settings Error", f"Could not load analysis settings: {e}")
             return
 
-        self.results_text.clear()
-        self.harmonic_check_results_data = []
-        self.export_harm_btn.setEnabled(False)
+        if not (self.subject_data and self.subjects and self.conditions):
+            QMessageBox.warning(self, "Data Error", "No subject data found. Please scan a folder first.")
+            return
 
-        def log_to_gui(message):
-            self.results_text.append(message)
-            QApplication.processEvents()
+        output_text = f"===== Per-Harmonic Significance Check ({selected_metric}) =====\n"
+        output_text += f"A harmonic is flagged as 'Significant' if:\n"
+        output_text += f"1. Its average {selected_metric} is reliably different from zero across subjects (p < {alpha}).\n"
+        output_text += f"2. AND this average {selected_metric} is also greater than your threshold of {mean_value_threshold}.\n\n"
 
-        log_to_gui("Running Per-Harmonic Significance Check...")
+        any_significant_found_overall = False
+        loaded_dataframes = {}
+        roi_list = list(self.rois.keys())
 
-        try:
-            output_text, findings_list = run_harmonic_check(
-                self,  # Pass self to give access to legacy helper methods
-            )
-            self.results_text.setText(output_text)
-            if findings_list:
-                self.harmonic_check_results_data = findings_list
-                self.export_harm_btn.setEnabled(True)
-        except Exception as e:
-            QMessageBox.critical(self, "Analysis Failed", f"An error occurred during the harmonic check:\n{e}")
-            self.results_text.setText(f"Harmonic check failed unexpectedly: {e}")
+        for cond_name in self.conditions:
+            output_text += f"\n=== Condition: {cond_name} ===\n"
+            for roi_name in roi_list:
+                sample_file_path = next((self.subject_data[pid][cond_name] for pid in self.subjects if
+                                         self.subject_data.get(pid, {}).get(cond_name)), None)
 
-        log_to_gui("\nAnalysis complete.")
+                if not sample_file_path:
+                    continue
+
+                try:
+                    if sample_file_path not in loaded_dataframes:
+                        loaded_dataframes[sample_file_path] = pd.read_excel(sample_file_path,
+                                                                            sheet_name=selected_metric,
+                                                                            index_col="Electrode")
+                        loaded_dataframes[sample_file_path].index = loaded_dataframes[
+                            sample_file_path].index.str.upper()
+
+                    sample_df_cols = loaded_dataframes[sample_file_path].columns
+                    included_freq_values = get_included_freqs(base_freq, sample_df_cols, self.log_to_main_app)
+                except Exception as e:
+                    self.log_to_main_app(f"Error reading columns for ROI '{roi_name}', Cond '{cond_name}': {e}")
+                    continue
+
+                if not included_freq_values:
+                    continue
+
+                roi_header_printed = False
+                for freq_val in included_freq_values:
+                    display_col = _match_freq_column(sample_df_cols, freq_val) or f"{freq_val:.1f}_Hz"
+                    subj_values = []
+                    for pid in self.subjects:
+                        f_path = self.subject_data.get(pid, {}).get(cond_name)
+                        if not (f_path and os.path.exists(f_path)): continue
+
+                        current_df = loaded_dataframes.get(f_path)
+                        if current_df is None:
+                            try:
+                                current_df = pd.read_excel(f_path, sheet_name=selected_metric, index_col="Electrode")
+                                current_df.index = current_df.index.str.upper()
+                                loaded_dataframes[f_path] = current_df
+                            except Exception:
+                                continue
+
+                        col_name = _match_freq_column(current_df.columns, freq_val)
+                        if not col_name: continue
+
+                        roi_channels = self.rois.get(roi_name)
+                        mean_val = current_df.reindex(roi_channels)[col_name].dropna().mean()
+                        if not pd.isna(mean_val):
+                            subj_values.append(mean_val)
+
+                    if len(subj_values) >= 3:
+                        t_stat, p_val = stats.ttest_1samp(subj_values, 0, nan_policy='omit')
+                        mean_group = np.mean(subj_values)
+                        if p_val < alpha and mean_group > mean_value_threshold:
+                            if not roi_header_printed:
+                                output_text += f"\n  --- ROI: {roi_name} ---\n"
+                                roi_header_printed = True
+                            any_significant_found_overall = True
+                            p_val_str = "< .0001" if p_val < 0.0001 else f"{p_val:.4f}"
+                            output_text += f"    ---------------------------------------------\n"
+                            output_text += f"    Harmonic: {display_col} -> SIGNIFICANT RESPONSE\n"
+                            output_text += f"        Average {selected_metric}: {mean_group:.3f} (N={len(subj_values)})\n"
+                            output_text += f"        t({len(subj_values) - 1}) = {t_stat:.2f}, p = {p_val_str}\n"
+                            output_text += f"    ---------------------------------------------\n"
+                            self.harmonic_check_results_data.append({
+                                'Condition': cond_name, 'ROI': roi_name, 'Frequency': display_col,
+                                'N_Subjects': len(subj_values), f'Mean_{selected_metric}': mean_group,
+                                'T_Statistic': t_stat, 'P_Value': p_val, 'df': len(subj_values) - 1,
+                                'Threshold_Criteria_Mean_Value': mean_value_threshold
+                            })
+
+        if not any_significant_found_overall:
+            output_text += "\nOverall: No harmonics met the significance criteria."
+
+        self.results_text.setText(output_text)
+        if self.harmonic_check_results_data:
+            self.export_harm_btn.setEnabled(True)
+        self.log_to_main_app("Harmonic check complete.")
 
     def on_browse_folder(self):
         start_dir = self.le_folder.text() or self.project_dir
