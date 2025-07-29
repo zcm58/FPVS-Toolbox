@@ -21,14 +21,18 @@ QCoreApplication.setOrganizationDomain("msstate.edu")
 QCoreApplication.setApplicationName("FPVS Toolbox")
 
 if USE_PYSIDE6:
+    # First, specifically check if PySide6 is installed.
     try:
         from PySide6.QtWidgets import QApplication
-        from pathlib import Path
-        from Main_App.PySide6_App.GUI.main_window import MainWindow
     except ImportError as exc:  # pragma: no cover - import guard
         raise ImportError(
             "PySide6 not installed; install with 'pip install PySide6'"
         ) from exc
+
+    # If the check above passes, then import the rest of your application modules.
+    # An error here will now raise the correct, unmasked traceback.
+    from pathlib import Path
+    from Main_App.PySide6_App.GUI.main_window import MainWindow
 else:
     from fpvs_app import FPVSApp
     from Main_App import configure_logging, get_settings, install_messagebox_logger
@@ -38,13 +42,11 @@ def main() -> None:
     """Entry point for running the FPVS Toolbox or its sub-tools."""
     if "--run-image-resizer" in sys.argv:
         from Tools.Image_Resizer import pyside_resizer
-
         pyside_resizer.main()
         return
 
     if "--run-plot-generator" in sys.argv:
         from Tools.Plot_Generator import plot_generator
-
         plot_generator.main()
         return
 
