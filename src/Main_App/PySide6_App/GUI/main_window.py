@@ -166,8 +166,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self._processing_timer.timeout.connect(self._periodic_queue_check)
         self._processing_timer.start(50)
 
-        # Allow legacy processing_utils to call self.post_process(...)
-        self.post_process = MethodType(_legacy_post_process, self)
+        # Allow legacy processing_utils to call post_process via a safe wrapper
+        self.post_process = MethodType(MainWindow._export_with_post_process, self)
 
         try:
             update_manager.check_for_updates_async(
@@ -175,6 +175,28 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             )
         except Exception as e:
             self.log(f"Auto update check failed: {e}")
+
+    # ------------------------------------------------------------------
+
+    def _export_with_post_process(self, labels: list[str]) -> None:
+        """Safely run the legacy ``post_process`` for Excel export."""
+        excel_dir = self.save_folder_path.get()
+        if not excel_dir or not Path(excel_dir).is_dir():
+            QMessageBox.warning(
+                self,
+                "Invalid Output Folder",
+                f"Excel output folder not found:\n{excel_dir}",
+            )
+            return
+
+        try:
+            _legacy_post_process(self, labels)
+            self.log("Excel export completed")
+        except Exception as err:
+            logger.exception("Excel export failed")
+            QMessageBox.critical(self, "Post-processing Error", str(err))
+            if hasattr(self, "btn_start"):
+                self.btn_start.setEnabled(False)
 
     # ------------------------------------------------------------------
 
