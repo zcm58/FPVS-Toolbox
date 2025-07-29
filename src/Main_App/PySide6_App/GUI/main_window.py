@@ -176,7 +176,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         except Exception as e:
             self.log(f"Auto update check failed: {e}")
 
-    # ------------------------------------------------------------------
+
 
     def _export_with_post_process(self, labels: list[str]) -> None:
         """Safely run the legacy ``post_process`` for Excel export."""
@@ -197,17 +197,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             QMessageBox.critical(self, "Post-processing Error", str(err))
             if hasattr(self, "btn_start"):
                 self.btn_start.setEnabled(False)
-
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-
 
 
     def log(self, message: str, level: int = logging.INFO) -> None:
