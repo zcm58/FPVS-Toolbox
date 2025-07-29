@@ -1,11 +1,12 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QLineEdit, QPushButton,
     QComboBox, QTextEdit, QHBoxLayout, QVBoxLayout,
-    QFrame, QFileDialog, QSizePolicy, QMessageBox, QApplication
+    QFrame, QFileDialog, QMessageBox, QApplication
 )
-from PySide6.QtGui import QAction
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt, QTimer, QUrl
 import os
+import json
 import pandas as pd
 import numpy as np
 from types import SimpleNamespace
@@ -37,7 +38,7 @@ from Tools.Stats.Legacy.stats_export import (
     export_rm_anova_results_to_excel,
     export_mixed_model_results_to_excel,
     export_posthoc_results_to_excel,
-    export_significance_results_to_excel
+    export_significance_results_to_excel as export_harmonic_results_to_excel,
 )
 from Main_App import SettingsManager
 
@@ -62,9 +63,19 @@ class StatsWindow(QMainWindow):
         if project_dir and os.path.isdir(project_dir):
             self.project_dir = project_dir
         else:
-            proj = getattr(parent, 'currentProject', None)
-            self.project_dir = str(proj.project_root) if proj and hasattr(proj,
-                                                                          'project_root') else _auto_detect_project_dir()
+            proj = getattr(parent, "currentProject", None)
+            self.project_dir = (
+                str(proj.project_root) if proj and hasattr(proj, "project_root") else _auto_detect_project_dir()
+            )
+
+        config_path = os.path.join(self.project_dir, "project.json")
+        try:
+            with open(config_path, "r") as f:
+                cfg = json.load(f)
+            self.project_title = cfg.get("name", cfg.get("title", os.path.basename(self.project_dir)))
+        except Exception:
+            self.project_title = os.path.basename(self.project_dir)
+
 
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.Window)
@@ -112,11 +123,11 @@ class StatsWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
 
-        folder_row = QHBoxLayout();
+        folder_row = QHBoxLayout()
         folder_row.setSpacing(5)
-        self.le_folder = QLineEdit();
+        self.le_folder = QLineEdit()
         self.le_folder.setReadOnly(True)
-        btn_browse = QPushButton("Browse…");
+        btn_browse = QPushButton("Browse…")
         btn_browse.clicked.connect(self.on_browse_folder)
         folder_row.addWidget(QLabel("Data Folder:"))
         folder_row.addWidget(self.le_folder, 1)
@@ -130,58 +141,58 @@ class StatsWindow(QMainWindow):
         self.lbl_status = QLabel("Select a folder containing FPVS results.")
         main_layout.addWidget(self.lbl_status)
 
-        summed_frame = QFrame();
+        summed_frame = QFrame()
         summed_frame.setFrameShape(QFrame.StyledPanel)
         vs = QVBoxLayout(summed_frame)
-        title = QLabel("Summed BCA Analysis:");
-        font = title.font();
-        font.setBold(True);
+        title = QLabel("Summed BCA Analysis:")
+        font = title.font()
+        font.setBold(True)
         title.setFont(font)
         vs.addWidget(title, alignment=Qt.AlignLeft)
 
         btn_layout = QHBoxLayout()
         run_col, export_col = QVBoxLayout(), QVBoxLayout()
-        self.run_rm_anova_btn = QPushButton("Run RM-ANOVA");
+        self.run_rm_anova_btn = QPushButton("Run RM-ANOVA")
         run_col.addWidget(self.run_rm_anova_btn)
-        self.run_mixed_model_btn = QPushButton("Run Mixed Model");
+        self.run_mixed_model_btn = QPushButton("Run Mixed Model")
         run_col.addWidget(self.run_mixed_model_btn)
-        self.run_posthoc_btn = QPushButton("Run Interaction Post-hocs");
+        self.run_posthoc_btn = QPushButton("Run Interaction Post-hocs")
         run_col.addWidget(self.run_posthoc_btn)
-        self.export_rm_anova_btn = QPushButton("Export RM-ANOVA");
+        self.export_rm_anova_btn = QPushButton("Export RM-ANOVA")
         export_col.addWidget(self.export_rm_anova_btn)
-        self.export_mixed_model_btn = QPushButton("Export Mixed Model");
+        self.export_mixed_model_btn = QPushButton("Export Mixed Model")
         export_col.addWidget(self.export_mixed_model_btn)
-        self.export_posthoc_btn = QPushButton("Export Post-hoc Results");
+        self.export_posthoc_btn = QPushButton("Export Post-hoc Results")
         export_col.addWidget(self.export_posthoc_btn)
-        btn_layout.addLayout(run_col);
+        btn_layout.addLayout(run_col)
         btn_layout.addLayout(export_col)
-        vs.addLayout(btn_layout);
+        vs.addLayout(btn_layout)
         main_layout.addWidget(summed_frame)
 
-        harm_frame = QFrame();
+        harm_frame = QFrame()
         harm_frame.setFrameShape(QFrame.StyledPanel)
         vh = QVBoxLayout(harm_frame)
-        t2 = QLabel("Per-Harmonic Significance Check:");
-        hf = t2.font();
-        hf.setBold(True);
+        t2 = QLabel("Per-Harmonic Significance Check:")
+        hf = t2.font()
+        hf.setBold(True)
         t2.setFont(hf)
         vh.addWidget(t2, alignment=Qt.AlignLeft)
         harm_layout = QHBoxLayout()
-        harm_layout.addWidget(QLabel("Metric:"));
-        self.cb_metric = QComboBox();
-        self.cb_metric.addItems(["SNR", "Z Score"]);
+        harm_layout.addWidget(QLabel("Metric:"))
+        self.cb_metric = QComboBox()
+        self.cb_metric.addItems(["SNR", "Z Score"])
         harm_layout.addWidget(self.cb_metric)
-        harm_layout.addWidget(QLabel("Mean Threshold:"));
-        self.le_threshold = QLineEdit("1.96");
+        harm_layout.addWidget(QLabel("Mean Threshold:"))
+        self.le_threshold = QLineEdit("1.96")
         harm_layout.addWidget(self.le_threshold)
-        self.run_harm_btn = QPushButton("Run Harmonic Check");
+        self.run_harm_btn = QPushButton("Run Harmonic Check")
         harm_layout.addWidget(self.run_harm_btn)
-        self.export_harm_btn = QPushButton("Export Harmonic Results");
+        self.export_harm_btn = QPushButton("Export Harmonic Results")
         harm_layout.addWidget(self.export_harm_btn)
-        vh.addLayout(harm_layout);
+        vh.addLayout(harm_layout)
         main_layout.addWidget(harm_frame)
 
-        self.results_text = QTextEdit();
+        self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
         main_layout.addWidget(self.results_text, 1)
 
@@ -189,10 +200,10 @@ class StatsWindow(QMainWindow):
         self.run_mixed_model_btn.clicked.connect(self.on_run_mixed_model)
         self.run_posthoc_btn.clicked.connect(self.on_run_interaction_posthocs)
         self.run_harm_btn.clicked.connect(self.on_run_harmonic_check)
-        self.export_rm_anova_btn.clicked.connect(lambda: self.on_export("rm_anova"))
-        self.export_mixed_model_btn.clicked.connect(lambda: self.on_export("mixed_model"))
-        self.export_posthoc_btn.clicked.connect(lambda: self.on_export("posthoc"))
-        self.export_harm_btn.clicked.connect(lambda: self.on_export("harmonic"))
+        self.export_rm_anova_btn.clicked.connect(self.on_export_rm_anova)
+        self.export_mixed_model_btn.clicked.connect(self.on_export_mixed_model)
+        self.export_posthoc_btn.clicked.connect(self.on_export_posthoc)
+        self.export_harm_btn.clicked.connect(self.on_export_harmonic)
 
     def _check_for_open_excel_files(self, directory: str) -> bool:
         """
@@ -534,7 +545,7 @@ class StatsWindow(QMainWindow):
             return
 
         output_text = f"===== Per-Harmonic Significance Check ({selected_metric}) =====\n"
-        output_text += f"A harmonic is flagged as 'Significant' if:\n"
+        output_text += "A harmonic is flagged as 'Significant' if:\n"
         output_text += f"1. Its average {selected_metric} is reliably different from zero across subjects (p < {alpha}).\n"
         output_text += f"2. AND this average {selected_metric} is also greater than your threshold of {mean_value_threshold}.\n\n"
 
@@ -602,11 +613,11 @@ class StatsWindow(QMainWindow):
                                 roi_header_printed = True
                             any_significant_found_overall = True
                             p_val_str = "< .0001" if p_val < 0.0001 else f"{p_val:.4f}"
-                            output_text += f"    ---------------------------------------------\n"
+                            output_text += "    ---------------------------------------------\n"
                             output_text += f"    Harmonic: {display_col} -> SIGNIFICANT RESPONSE\n"
                             output_text += f"        Average {selected_metric}: {mean_group:.3f} (N={len(subj_values)})\n"
                             output_text += f"        t({len(subj_values) - 1}) = {t_stat:.2f}, p = {p_val_str}\n"
-                            output_text += f"    ---------------------------------------------\n"
+                            output_text += "    ---------------------------------------------\n"
                             self.harmonic_check_results_data.append({
                                 'Condition': cond_name, 'ROI': roi_name, 'Frequency': display_col,
                                 'N_Subjects': len(subj_values), f'Mean_{selected_metric}': mean_group,
@@ -666,72 +677,81 @@ class StatsWindow(QMainWindow):
             return pd.DataFrame()
         return pd.DataFrame(self.harmonic_check_results_data)
 
-    def on_export(self, export_type: str):
-        """Handles exporting different result types to Excel."""
+    def _ensure_results_dir(self):
+        results_dir = os.path.join(self.project_dir, "3 - Statistical Analysis Results")
+        os.makedirs(results_dir, exist_ok=True)
+        return results_dir
 
-        export_map = {
-            "rm_anova": {
-                "data": self.rm_anova_results_data,
-                "func": export_rm_anova_results_to_excel,
-                "name": "RM-ANOVA",
-                "file": "Stats_RM_ANOVA_SummedBCA.xlsx",
-                "kwargs": {}
-            },
-            "mixed_model": {
-                "data": self.mixed_model_results_data,
-                "func": export_mixed_model_results_to_excel,
-                "name": "Mixed Model",
-                "file": "Stats_MixedModel.xlsx",
-                "kwargs": {}
-            },
-            "posthoc": {
-                "data": self.posthoc_results_data,
-                "func": export_posthoc_results_to_excel,
-                "name": "Post-hoc",
-                "file": "Stats_Posthoc_Interaction.xlsx",
-                "kwargs": {'factor': 'condition by roi'}
-            },
-            "harmonic": {
-                "data": self._structure_harmonic_results(),  # Call the structuring function
-                "func": export_significance_results_to_excel,
-                "name": "Harmonic Check",
-                "file": f"Stats_HarmonicCheck_{self.harmonic_metric_var.get()}.xlsx",
-                "kwargs": {'metric': self.harmonic_metric_var.get()}
-            }
-        }
+    def _structure_harmonic_results(self):
+        metric_key_name = f"Mean_{self.harmonic_metric_var.get().replace(' ', '_')}"
+        findings = {}
+        for item in self.harmonic_check_results_data:
+            cond, roi = item['Condition'], item['ROI']
+            findings.setdefault(cond, {}).setdefault(roi, []).append({
+                'Frequency': item['Frequency'],
+                metric_key_name: item[metric_key_name],
+                'N_Subjects': item['N_Subjects'],
+                'T_Statistic': item['T_Statistic'],
+                'P_Value': item['P_Value'],
+                'df': item['df'],
+                'Threshold_Criteria_Mean_Value': item['Threshold_Criteria_Mean_Value'],
+            })
+        return findings
 
-        config = export_map.get(export_type)
-        if not config:
-            QMessageBox.critical(self, "Export Error", f"Unknown export type: {export_type}")
-            return
-
-        data_to_export = config["data"]
-
-        # Correctly check if the data is empty (works for DataFrames and other types)
-        is_empty = False
-        if data_to_export is None:
-            is_empty = True
-        elif isinstance(data_to_export, pd.DataFrame):
-            is_empty = data_to_export.empty
-        elif isinstance(data_to_export, (list, dict)):
-            is_empty = not data_to_export
-
-        if is_empty:
-            QMessageBox.warning(self, "No Data",
-                                f"No {config['name']} results to export. Please run the analysis first.")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, f"Save {config['name']} Results", self.project_dir, "Excel Files (*.xlsx)"
+    def on_export_rm_anova(self):
+        results_dir = self._ensure_results_dir()
+        path = os.path.join(results_dir, f"{self.project_title} RM-ANOVA Results.xlsx")
+        export_rm_anova_results_to_excel(self.rm_anova_results_data, path, self.log_to_main_app)
+        reply = QMessageBox.question(
+            self,
+            "Export Complete",
+            "Data successfully exported. Open folder?",
+            QMessageBox.Yes | QMessageBox.No,
         )
-        if not file_path:
-            return
+        if reply == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(results_dir))
 
-        try:
-            # Pass the data and path to the UI-agnostic export function
-            config["func"](data_to_export, file_path, self.log_to_main_app, **config["kwargs"])
-            QMessageBox.information(self, "Export Successful",
-                                    f"{config['name']} results have been saved to:\n{file_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Export Failed",
-                                 f"An error occurred while exporting {config['name']} results:\n{e}")
+    def on_export_mixed_model(self):
+        results_dir = self._ensure_results_dir()
+        path = os.path.join(results_dir, f"{self.project_title} Mixed Model Results.xlsx")
+        export_mixed_model_results_to_excel(self.mixed_model_results_data, path, self.log_to_main_app)
+        reply = QMessageBox.question(
+            self,
+            "Export Complete",
+            "Data successfully exported. Open folder?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(results_dir))
+
+    def on_export_posthoc(self):
+        results_dir = self._ensure_results_dir()
+        path = os.path.join(results_dir, f"{self.project_title} Post-hoc Results.xlsx")
+        export_posthoc_results_to_excel(self.posthoc_results_data, path, self.log_to_main_app)
+        reply = QMessageBox.question(
+            self,
+            "Export Complete",
+            "Data successfully exported. Open folder?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(results_dir))
+
+    def on_export_harmonic(self):
+        results_dir = self._ensure_results_dir()
+        path = os.path.join(results_dir, f"{self.project_title} Harmonic Results.xlsx")
+        export_harmonic_results_to_excel(
+            self._structure_harmonic_results(),
+            path,
+            self.log_to_main_app,
+            metric=self.harmonic_metric_var.get(),
+        )
+        reply = QMessageBox.question(
+            self,
+            "Export Complete",
+            "Data successfully exported. Open folder?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(results_dir))
+
