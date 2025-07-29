@@ -194,7 +194,37 @@ class StatsWindow(QMainWindow):
         self.export_posthoc_btn.clicked.connect(lambda: self.on_export("posthoc"))
         self.export_harm_btn.clicked.connect(lambda: self.on_export("harmonic"))
 
+    def _check_for_open_excel_files(self, directory: str) -> bool:
+        """
+        Checks for temporary Excel files ('~$*') and shows a warning if any are found.
+        Returns True if an open file is detected, False otherwise.
+        """
+        if not os.path.isdir(directory):
+            return False # Path doesn't exist, let other parts of the code handle it.
+
+        open_files = []
+        for filename in os.listdir(directory):
+            if filename.startswith('~$'):
+                # Get the original filename for a more helpful message
+                original_filename = filename.replace('~$', '')
+                open_files.append(original_filename)
+
+        if open_files:
+            file_list_str = "\n - ".join(open_files)
+            error_message = (
+                "The following Excel file(s) appear to be open:\n\n"
+                f"<b> - {file_list_str}</b>\n\n"
+                "Please close all Excel files in the data directory and try again."
+            )
+            QMessageBox.critical(self, "Open Excel File Detected", error_message)
+            return True  # Indicates an error was found
+
+        return False  # No open files detected
+
     def on_run_rm_anova(self):
+        if self._check_for_open_excel_files(self.le_folder.text()):
+            return # Stop if an open Excel file was found
+
         if not self.subject_data:
             QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
             return
@@ -308,10 +338,13 @@ class StatsWindow(QMainWindow):
         else:
             output_text += "RM-ANOVA did not return any results or the result was empty.\n"
 
-        self.results_text.setText(output_text)
+        self.results_text.append(output_text)
         log_to_gui("\nAnalysis complete.")
 
     def on_run_mixed_model(self):
+        if self._check_for_open_excel_files(self.le_folder.text()):
+            return # Stop if an open Excel file was found
+
         if not self.subject_data:
             QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
             return
@@ -395,6 +428,9 @@ class StatsWindow(QMainWindow):
         log_to_gui("\nAnalysis complete.")
 
     def on_run_interaction_posthocs(self):
+        if self._check_for_open_excel_files(self.le_folder.text()):
+            return # Stop if an open Excel file was found
+
         if not self.subject_data:
             QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
             return
@@ -471,6 +507,9 @@ class StatsWindow(QMainWindow):
         """
         Handles the 'Run Harmonic Check' button click, adapted for PySide6.
         """
+        if self._check_for_open_excel_files(self.le_folder.text()):
+            return # Stop if an open Excel file was found
+
         self.refresh_rois()
         self.log_to_main_app("Running Per-Harmonic Significance Check...")
         self.results_text.clear()
