@@ -14,23 +14,27 @@ from pathlib import Path
 # Corrected imports for the new file structure
 from Tools.Stats.PySide6.stats_file_scanner_pyside6 import scan_folder_simple, ScanError
 from Tools.Stats.Legacy.stats_runners import (
-    run_posthoc_tests, run_interaction_posthocs,
     run_harmonic_check, _structure_harmonic_results
 )
 from Tools.Stats.Legacy.stats_analysis import (
     prepare_all_subject_summed_bca_data,
-    run_rm_anova as analysis_run_rm_anova,  # Alias to avoid name clash
+    run_rm_anova as analysis_run_rm_anova,
     ALL_ROIS_OPTION
 )
-# Import the specific model and interpretation helpers
 from Tools.Stats.Legacy.mixed_effects_model import run_mixed_effects_model
 from Tools.Stats.Legacy.interpretation_helpers import generate_lme_summary
+from Tools.Stats.Legacy.posthoc_tests import run_interaction_posthocs
 
 from Tools.Stats.Legacy.stats_helpers import (
     load_rois_from_settings, apply_rois_to_modules, log_to_main_app
 )
-from Tools.Stats.Legacy.stats_export import export_significance_results_to_excel
-# Import the central settings manager to fetch settings
+# Import all the new, UI-agnostic export functions
+from Tools.Stats.Legacy.stats_export import (
+    export_rm_anova_results_to_excel,
+    export_mixed_model_results_to_excel,
+    export_posthoc_results_to_excel,
+    export_significance_results_to_excel
+)
 from Main_App import SettingsManager
 
 
@@ -51,8 +55,6 @@ class StatsWindow(QMainWindow):
     """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
 
     # Alias other legacy methods directly
-    run_posthoc_tests = run_posthoc_tests
-    run_interaction_posthocs = run_interaction_posthocs
     run_harmonic_check = run_harmonic_check
     _structure_harmonic_results = _structure_harmonic_results
     log_to_main_app = log_to_main_app
@@ -173,9 +175,9 @@ class StatsWindow(QMainWindow):
         main_layout.addWidget(self.results_text, 1)
 
         self.run_rm_anova_btn.clicked.connect(self.on_run_rm_anova)
-        self.run_mixed_model_btn.clicked.connect(self.on_run_mixed_model)  # Connect to the new handler
-        self.run_posthoc_btn.clicked.connect(self.run_interaction_posthocs)
-        self.run_harm_btn.clicked.connect(self.run_harmonic_check)
+        self.run_mixed_model_btn.clicked.connect(self.on_run_mixed_model)
+        self.run_posthoc_btn.clicked.connect(self.on_run_interaction_posthocs)
+        self.run_harm_btn.clicked.connect(self.on_run_harmonic_check)
         self.export_rm_anova_btn.clicked.connect(lambda: self.on_export("rm_anova"))
         self.export_mixed_model_btn.clicked.connect(lambda: self.on_export("mixed_model"))
         self.export_posthoc_btn.clicked.connect(lambda: self.on_export("posthoc"))
@@ -299,9 +301,6 @@ class StatsWindow(QMainWindow):
         log_to_gui("\nAnalysis complete.")
 
     def on_run_mixed_model(self):
-        """
-        Handles the 'Run Mixed Model' button click, including interpretation.
-        """
         if not self.subject_data:
             QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
             return
@@ -384,6 +383,124 @@ class StatsWindow(QMainWindow):
         self.results_text.setText(output_text)
         log_to_gui("\nAnalysis complete.")
 
+    def on_run_interaction_posthocs(self):
+        if not self.subject_data:
+            QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
+            return
+
+        if self.rm_anova_results_data is None:
+            QMessageBox.warning(self, "Run ANOVA First",
+                                "Please run a successful RM-ANOVA before running post-hoc tests for the interaction.")
+            return
+
+        try:
+            settings = SettingsManager()
+            base_freq = float(settings.get("analysis", "base_freq", 6.0))
+            alpha = float(settings.get("analysis", "alpha", 0.05))
+        except Exception as e:
+            QMessageBox.critical(self, "Settings Error", f"Could not load analysis settings: {e}")
+            return
+
+        self.results_text.clear()
+        self.posthoc_results_data = None
+        self.export_posthoc_btn.setEnabled(False)
+
+        def log_to_gui(message):
+            self.results_text.append(message)
+            QApplication.processEvents()
+
+        log_to_gui("Preparing data for Interaction Post-hoc tests...")
+
+        all_subject_bca_data = prepare_all_subject_summed_bca_data(
+            subjects=self.subjects, conditions=self.conditions,
+            subject_data=self.subject_data, base_freq=base_freq, log_func=log_to_gui
+        )
+
+        if not all_subject_bca_data:
+            log_to_gui("\nData preparation failed. Check logs for details.")
+            return
+
+        long_format_data = []
+        for pid, cond_data in all_subject_bca_data.items():
+            for cond_name, roi_data in cond_data.items():
+                for roi_name, value in roi_data.items():
+                    if not pd.isna(value):
+                        long_format_data.append(
+                            {'subject': pid, 'condition': cond_name, 'roi': roi_name, 'value': value})
+
+        if not long_format_data:
+            QMessageBox.critical(self, "Data Error", "No valid data available for post-hoc tests after filtering NaNs.")
+            return
+
+        df_long = pd.DataFrame(long_format_data)
+        log_to_gui("Data preparation complete. Running post-hoc tests...")
+
+        try:
+            output_text, results_df = run_interaction_posthocs(
+                data=df_long,
+                dv_col='value',
+                roi_col='roi',
+                condition_col='condition',
+                subject_col='subject',
+                alpha=alpha
+            )
+
+            self.results_text.setText(output_text)
+            if results_df is not None and not results_df.empty:
+                self.posthoc_results_data = results_df
+                self.export_posthoc_btn.setEnabled(True)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Failed", f"An error occurred during the post-hoc analysis:\n{e}")
+            self.results_text.setText(f"Post-hoc analysis failed unexpectedly: {e}")
+
+        log_to_gui("\nAnalysis complete.")
+
+    def on_run_harmonic_check(self):
+        """
+        Handles the 'Run Harmonic Check' button click.
+        """
+        if not self.subject_data:
+            QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
+            return
+
+        try:
+            settings = SettingsManager()
+            base_freq = float(settings.get("analysis", "base_freq", 6.0))
+            alpha = float(settings.get("analysis", "alpha", 0.05))
+            metric = self.harmonic_metric_var.get()
+            threshold = float(self.harmonic_threshold_var.get())
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please ensure Mean Threshold is a valid number.")
+            return
+        except Exception as e:
+            QMessageBox.critical(self, "Settings Error", f"Could not load analysis settings: {e}")
+            return
+
+        self.results_text.clear()
+        self.harmonic_check_results_data = []
+        self.export_harm_btn.setEnabled(False)
+
+        def log_to_gui(message):
+            self.results_text.append(message)
+            QApplication.processEvents()
+
+        log_to_gui("Running Per-Harmonic Significance Check...")
+
+        try:
+            output_text, findings_list = run_harmonic_check(
+                self,  # Pass self to give access to legacy helper methods
+            )
+            self.results_text.setText(output_text)
+            if findings_list:
+                self.harmonic_check_results_data = findings_list
+                self.export_harm_btn.setEnabled(True)
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Failed", f"An error occurred during the harmonic check:\n{e}")
+            self.results_text.setText(f"Harmonic check failed unexpectedly: {e}")
+
+        log_to_gui("\nAnalysis complete.")
+
     def on_browse_folder(self):
         start_dir = self.le_folder.text() or self.project_dir
         folder = QFileDialog.getExistingDirectory(self, "Select Data Folder", start_dir)
@@ -423,22 +540,71 @@ class StatsWindow(QMainWindow):
             self._scan_button_clicked()
 
     def on_export(self, export_type: str):
-        data_map = {
-            "rm_anova": (self.rm_anova_results_data, "RM-ANOVA"),
-            "mixed_model": (self.mixed_model_results_data, "Mixed Model"),
-            "posthoc": (self.posthoc_results_data, "Post-hoc"),
-            "harmonic": (self.harmonic_check_results_data, "Harmonic Check")
+        """Handles exporting different result types to Excel."""
+
+        export_map = {
+            "rm_anova": {
+                "data": self.rm_anova_results_data,
+                "func": export_rm_anova_results_to_excel,
+                "name": "RM-ANOVA",
+                "file": "Stats_RM_ANOVA_SummedBCA.xlsx",
+                "kwargs": {}
+            },
+            "mixed_model": {
+                "data": self.mixed_model_results_data,
+                "func": export_mixed_model_results_to_excel,
+                "name": "Mixed Model",
+                "file": "Stats_MixedModel.xlsx",
+                "kwargs": {}
+            },
+            "posthoc": {
+                "data": self.posthoc_results_data,
+                "func": export_posthoc_results_to_excel,
+                "name": "Post-hoc",
+                "file": "Stats_Posthoc_Interaction.xlsx",
+                "kwargs": {'factor': 'condition by roi'}
+            },
+            "harmonic": {
+                "data": self._structure_harmonic_results(),  # Call the structuring function
+                "func": export_significance_results_to_excel,
+                "name": "Harmonic Check",
+                "file": f"Stats_HarmonicCheck_{self.harmonic_metric_var.get()}.xlsx",
+                "kwargs": {'metric': self.harmonic_metric_var.get()}
+            }
         }
-        data_to_export, name = data_map.get(export_type)
-        if data_to_export is None or (hasattr(data_to_export, 'empty') and data_to_export.empty) or not data_to_export:
-            QMessageBox.warning(self, "No Data", f"No {name} results to export. Please run the analysis first.")
+
+        config = export_map.get(export_type)
+        if not config:
+            QMessageBox.critical(self, "Export Error", f"Unknown export type: {export_type}")
             return
-        file_path, _ = QFileDialog.getSaveFileName(self, f"Save {name} Results", self.project_dir,
-                                                   "Excel Files (*.xlsx);;All Files (*)")
-        if not file_path: return
+
+        data_to_export = config["data"]
+
+        # Correctly check if the data is empty (works for DataFrames and other types)
+        is_empty = False
+        if data_to_export is None:
+            is_empty = True
+        elif isinstance(data_to_export, pd.DataFrame):
+            is_empty = data_to_export.empty
+        elif isinstance(data_to_export, (list, dict)):
+            is_empty = not data_to_export
+
+        if is_empty:
+            QMessageBox.warning(self, "No Data",
+                                f"No {config['name']} results to export. Please run the analysis first.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, f"Save {config['name']} Results", self.project_dir, "Excel Files (*.xlsx)"
+        )
+        if not file_path:
+            return
+
         try:
-            export_significance_results_to_excel(file_path, data_to_export, export_type)
-            QMessageBox.information(self, "Export Successful", f"{name} results have been saved to:\n{file_path}")
+            # Pass the data and path to the UI-agnostic export function
+            config["func"](data_to_export, file_path, self.log_to_main_app, **config["kwargs"])
+            QMessageBox.information(self, "Export Successful",
+                                    f"{config['name']} results have been saved to:\n{file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", f"An error occurred while exporting:\n{e}")
-            self.log_to_main_app(f"Failed to export {name} results: {e}")
+            QMessageBox.critical(self, "Export Failed",
+                                 f"An error occurred while exporting {config['name']} results:\n{e}")
