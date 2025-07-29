@@ -683,19 +683,29 @@ class StatsWindow(QMainWindow):
         return results_dir
 
     def _structure_harmonic_results(self):
-        metric_key_name = f"Mean_{self.harmonic_metric_var.get().replace(' ', '_')}"
-        findings = {}
+        """
+        Build nested dict for export. Automatically detect the 'Mean_*' key
+        (e.g. 'Mean_SNR' or 'Mean_Z Score') so we never KeyError.
+        """
+        findings: dict[str, dict[str, list]] = {}
         for item in self.harmonic_check_results_data:
-            cond, roi = item['Condition'], item['ROI']
-            findings.setdefault(cond, {}).setdefault(roi, []).append({
-                'Frequency': item['Frequency'],
-                metric_key_name: item[metric_key_name],
-                'N_Subjects': item['N_Subjects'],
-                'T_Statistic': item['T_Statistic'],
-                'P_Value': item['P_Value'],
-                'df': item['df'],
-                'Threshold_Criteria_Mean_Value': item['Threshold_Criteria_Mean_Value'],
-            })
+            cond = item.get('Condition')
+            roi = item.get('ROI')
+            # Find the first key that starts with 'Mean_'
+            mean_key = next((k for k in item.keys() if k.startswith("Mean_")), None)
+            if not mean_key:
+                continue
+
+            entry = {
+                'Frequency': item.get('Frequency'),
+                'MeanValue': item.get(mean_key),
+                'N_Subjects': item.get('N_Subjects'),
+                'T_Statistic': item.get('T_Statistic'),
+                'P_Value': item.get('P_Value'),
+                'df': item.get('df'),
+                'Threshold_Criteria_Mean_Value': item.get('Threshold_Criteria_Mean_Value'),
+            }
+            findings.setdefault(cond, {}).setdefault(roi, []).append(entry)
         return findings
 
     def on_export_rm_anova(self):
