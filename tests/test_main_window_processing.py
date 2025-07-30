@@ -19,6 +19,7 @@ import Main_App.Legacy_App.eeg_preprocessing as eeg_preprocessing
 import Main_App.PySide6_App.Backend.processing as processing
 import Main_App.Legacy_App.post_process as post_process
 import Main_App.Legacy_App.processing_utils as processing_utils
+import threading
 import tkinter.messagebox as tk_messagebox
 
 
@@ -121,4 +122,34 @@ def test_periodic_queue_check_does_not_finalize_twice(tmp_path, qtbot, monkeypat
     win._periodic_queue_check()
 
     assert call_count == 1
+
+
+
+def test_export_post_process_threadsafe(tmp_path, qtbot, monkeypatch):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+
+    project = _create_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+
+    from Main_App.PySide6_App.GUI.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    def threaded_export(self, labels):
+        def worker():
+            self.gui_queue.put({"type": "log", "message": f"exported {labels}"})
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+
+    monkeypatch.setattr(MainWindow, "_export_with_post_process", threaded_export)
+    win.post_process = threaded_export.__get__(win, MainWindow)
+
+    win.post_process(["CondA"])
+    msg = win.gui_queue.get_nowait()
+    assert msg["message"] == "exported ['CondA']"
 
