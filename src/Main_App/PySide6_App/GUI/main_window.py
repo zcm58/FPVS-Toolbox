@@ -70,17 +70,6 @@ def _qt_askyesno(title, message, **options):
     return result == QMessageBox.Yes
 
 
-def _qt_showinfo(title, message, **options):
-    QMessageBox.information(None, title, message)
-
-
-def _qt_askyesno(title, message, **options):
-    result = QMessageBox.question(
-        None, title, message, QMessageBox.Yes | QMessageBox.No
-    )
-    return result == QMessageBox.Yes
-
-
 tk_messagebox.showerror = _qt_showerror
 tk_messagebox.showwarning = _qt_showwarning
 tk_messagebox.showinfo = _qt_showinfo
