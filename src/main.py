@@ -33,6 +33,11 @@ if USE_PYSIDE6:
     # An error here will now raise the correct, unmasked traceback.
     from pathlib import Path
     from Main_App.PySide6_App.GUI.main_window import MainWindow
+    from Main_App import (
+        configure_logging,
+        get_settings,
+        install_messagebox_logger,
+    )
 else:
     from fpvs_app import FPVSApp
     from Main_App import configure_logging, get_settings, install_messagebox_logger
@@ -51,6 +56,11 @@ def main() -> None:
         return
 
     if USE_PYSIDE6:
+        settings = get_settings()
+        debug = settings.debug_enabled()
+        configure_logging(debug)
+        install_messagebox_logger(debug)
+
         app = QApplication([])
         qss = Path(__file__).resolve().parent / "qdark_sidebar.qss"
         if qss.exists():
