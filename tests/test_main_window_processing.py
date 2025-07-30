@@ -81,3 +81,44 @@ def test_main_window_processing_runs(tmp_path, qtbot, monkeypatch, debug):
     win.start_processing()
     qtbot.waitUntil(lambda: not win._run_active, timeout=1000)
 
+
+@pytest.mark.parametrize("debug", [False, True])
+def test_periodic_queue_check_does_not_finalize_twice(tmp_path, qtbot, monkeypatch, debug):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+
+    _stub_processing(monkeypatch, tmp_path)
+    call_count = 0
+
+    orig_finalize = processing_utils.ProcessingMixin._finalize_processing
+
+    def counting_finalize(self, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return orig_finalize(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        processing_utils.ProcessingMixin,
+        "_finalize_processing",
+        counting_finalize,
+    )
+
+    project = _create_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+
+    from Main_App.PySide6_App.GUI.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    win.settings.set("debug", "enabled", str(debug))
+    win.settings.save()
+
+    win.start_processing()
+    qtbot.waitUntil(lambda: not win._run_active, timeout=1000)
+
+    win._periodic_queue_check()
+
+    assert call_count == 1
+
