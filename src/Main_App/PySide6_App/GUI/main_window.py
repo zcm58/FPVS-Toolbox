@@ -42,6 +42,19 @@ from Main_App.PySide6_App.Backend.project_manager import (
     loadProject,
 )
 from types import SimpleNamespace
+import Main_App.Legacy_App.debug_utils as debug_utils
+
+# Route legacy ._qt_showinfo to a single Qt dialog (or no-op if desired)
+def _qt_showinfo(title: str, msg: str, **kwargs) -> None:
+    QMessageBox.information(None, title, msg)
+
+debug_utils.messagebox._qt_showinfo = _qt_showinfo
+
+# Route legacy ._qt_showerror to a single Qt dialog (or no-op)
+def _qt_showerror(title: str, msg: str, **kwargs) -> None:
+    QMessageBox.critical(None, title, msg)
+
+debug_utils.messagebox._qt_showerror = _qt_showerror
 
 # Toggle which Stats GUI to launch:
 USE_PYSIDE6_STATS = True  # set to False to use the legacy CustomTkinter GUI
