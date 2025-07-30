@@ -227,7 +227,12 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         # Mark that a real run is active
         self._run_active = True
         # Delegate to the legacy mixin’s processing entry point
-        super().start_processing()
+        try:
+            super().start_processing()
+        except Exception as e:  # pragma: no cover - GUI error path
+            logger.exception(e)
+            QMessageBox.critical(self, "Processing Error", str(e))
+            self._run_active = False
 
     def _periodic_queue_check(self) -> None:
         """Process queue messages only when a run is active."""
