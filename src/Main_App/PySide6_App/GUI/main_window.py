@@ -255,11 +255,13 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         super()._periodic_queue_check()
 
     def _finalize_processing(self, *args, **kwargs) -> None:
-        """Reset run state after mixin finalization."""
+        """Reset run state before delegating to the mixin finalization."""
+        # Stop queue processing and mark the run as complete
+        self._run_active = False
+        if self._processing_timer.isActive():
+            self._processing_timer.stop()
         # Call the mixin’s finalization (dialogs, control resets)
         super()._finalize_processing(*args, **kwargs)
-        # Now that the run is fully done, disable run_active
-        self._run_active = False
 
     # ------------------------------------------------------------------
     def open_settings_window(self) -> None:
