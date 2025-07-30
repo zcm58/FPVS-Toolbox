@@ -184,21 +184,30 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         """Safely run the legacy ``post_process`` for Excel export."""
         excel_dir = self.save_folder_path.get()
         if not excel_dir or not Path(excel_dir).is_dir():
-            QMessageBox.warning(
-                self,
-                "Invalid Output Folder",
-                f"Excel output folder not found:\n{excel_dir}",
+            self.gui_queue.put(
+                {
+                    "type": "error",
+                    "message": f"Excel output folder not found:\n{excel_dir}",
+                }
             )
             return
 
+        original_log = self.log
+
+        def queue_log(message: str, level: int = logging.INFO) -> None:
+            self.gui_queue.put({"type": "log", "message": message})
+            logger.log(level, message)
+
+        self.log = queue_log
+
         try:
             _legacy_post_process(self, labels)
-            self.log("Excel export completed")
+            self.gui_queue.put({"type": "log", "message": "Excel export completed"})
         except Exception as err:
             logger.exception("Excel export failed")
-            QMessageBox.critical(self, "Post-processing Error", str(err))
-            if hasattr(self, "btn_start"):
-                self.btn_start.setEnabled(False)
+            self.gui_queue.put({"type": "error", "message": str(err)})
+        finally:
+            self.log = original_log
 
 
     def log(self, message: str, level: int = logging.INFO) -> None:
