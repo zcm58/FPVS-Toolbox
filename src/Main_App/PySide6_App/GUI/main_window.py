@@ -431,7 +431,16 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         hl = QHBoxLayout(row)
         le_label = QLineEdit(label, row)
         le_id = QLineEdit(id, row)
-        le_label.returnPressed.connect(self.btn_add_row.click)
+
+        def _on_enter_in_label() -> None:
+            self.btn_add_row.click()
+            if self.event_rows:
+                new_row = self.event_rows[-1]
+                edits = new_row.findChildren(QLineEdit)
+                if edits:
+                    edits[0].setFocus()
+
+        le_label.returnPressed.connect(_on_enter_in_label)
         le_id.returnPressed.connect(self.btn_add_row.click)
         btn_rm = QPushButton("✕", row)
         def _remove() -> None:
