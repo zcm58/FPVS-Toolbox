@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import json
 from pathlib import Path
 
 from PySide6.QtCore import QThread, QPropertyAnimation, Qt
@@ -38,6 +39,15 @@ from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION
 from Main_App import SettingsManager
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from .worker import _Worker
+
+def _auto_detect_project_dir() -> str:
+    """Return folder containing ``project.json`` or CWD if not found."""
+    path = Path.cwd()
+    while not (path / "project.json").is_file():
+        if path.parent == path:
+            return str(Path.cwd())
+        path = path.parent
+    return str(path)
 
 ALL_CONDITIONS_OPTION = "All Conditions"
 
@@ -100,11 +110,37 @@ class PlotGeneratorWindow(QWidget):
         default_out = self.plot_mgr.get("paths", "output_folder", "")
         self.stem_color = self.plot_mgr.get_stem_color()
         self.stem_color_b = self.plot_mgr.get_second_color()
-        main_default = mgr.get("paths", "output_folder", "")
-        if not default_in:
-            default_in = main_default
-        if not default_out:
-            default_out = main_default
+
+        project_dir: Path | None = None
+        proj = getattr(parent, "currentProject", None)
+        if proj and hasattr(proj, "project_root"):
+            project_dir = Path(proj.project_root)
+        else:
+            env_dir = os.environ.get("FPVS_PROJECT_ROOT")
+            if env_dir and Path(env_dir).is_dir():
+                project_dir = Path(env_dir)
+            else:
+                cand = Path(_auto_detect_project_dir())
+                if (cand / "project.json").is_file():
+                    project_dir = cand
+
+        if project_dir is not None:
+            try:
+                with open(project_dir / "project.json", "r") as f:
+                    cfg = json.load(f)
+                subfolders = cfg.get("subfolders", {})
+                excel_sub = subfolders.get("excel", "1 - Excel Data Files")
+                snr_sub = subfolders.get("snr", "2 - SNR Plots")
+                default_in = str(project_dir / excel_sub)
+                default_out = str(project_dir / snr_sub)
+            except Exception:
+                pass
+        else:
+            main_default = mgr.get("paths", "output_folder", "")
+            if not default_in:
+                default_in = main_default
+            if not default_out:
+                default_out = main_default
         self._defaults = {
             "title_snr": "SNR Plot",
             "xlabel": "Frequency (Hz)",

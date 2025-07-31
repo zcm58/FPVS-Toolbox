@@ -20,6 +20,7 @@ import pandas as pd
 from pathlib import Path
 import subprocess
 import sys
+import os
 import queue
 from .settings_panel import SettingsDialog
 from .sidebar import init_sidebar
@@ -341,7 +342,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
                 / "plot_generator.py"
             )
             cmd.append(str(script))
-        subprocess.Popen(cmd, close_fds=True)
+        env = os.environ.copy()
+        proj = getattr(self, "currentProject", None)
+        if proj and hasattr(proj, "project_root"):
+            env["FPVS_PROJECT_ROOT"] = str(proj.project_root)
+        subprocess.Popen(cmd, close_fds=True, env=env)
 
     def open_advanced_analysis_window(self) -> None:
         QMessageBox.information(
