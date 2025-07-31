@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QHBoxLayout,
-    QFont,
     QGroupBox,
     QGridLayout,
     QRadioButton,
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 from PySide6.QtCore import Qt, QPropertyAnimation
+from PySide6.QtGui import QFont
 
 
 
@@ -67,7 +67,13 @@ def init_ui(self) -> None:
     for btn in (self.btn_create_project, self.btn_open_project):
         btn.setFont(button_font)
         btn.setFixedHeight(60)
-        btn.setMaximumWidth(200)
+        btn.setMinimumWidth(200)  # at least 200 px, but can grow
+        btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        btn.setStyleSheet("""
+            QPushButton {
+                padding: 12px 24px;
+            }
+        """)
 
     btn_row = QHBoxLayout()
     btn_row.setSpacing(20)
