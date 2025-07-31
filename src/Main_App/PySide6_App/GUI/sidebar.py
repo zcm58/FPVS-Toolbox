@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PySide6.QtCore import Qt, QSize
+from pathlib import Path
 from PySide6.QtWidgets import QStyle
 
 
@@ -69,12 +70,10 @@ def init_sidebar(self) -> None:
         QApplication.instance().style().standardIcon(QStyle.SP_ComputerIcon),
         self.open_stats_analyzer,
     )
+    icon_dir = Path(__file__).resolve().parent / "icons"
+    snr_icon = QIcon(str(icon_dir / "snr_plots.svg"))
     self.btn_graphs = make_button(
-        lay,
-        "btn_graphs",
-        "SNR Plots",
-        "view-bar-chart",
-        self.open_plot_generator,
+        lay, "btn_graphs", "SNR Plots", snr_icon, self.open_plot_generator
     )
     self.btn_image = make_button(
         lay, "btn_image", "Image Resizer", "camera-photo", self.open_image_resizer
