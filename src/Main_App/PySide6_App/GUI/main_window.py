@@ -40,6 +40,7 @@ from Main_App.PySide6_App.Backend.project_manager import (
     open_existing_project,
     openProjectPath,
     loadProject,
+    edit_project_settings,
 )
 from types import SimpleNamespace
 import Main_App.Legacy_App.debug_utils as debug_utils
@@ -298,6 +299,10 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
     def openProjectPath(self, folder: str) -> None:
         openProjectPath(self, folder)
+
+    def edit_project_settings(self) -> None:
+        """Delegate project editing to :mod:`project_manager`."""
+        edit_project_settings(self)
 
     def open_stats_analyzer(self) -> None:
         """Launch the statistical analysis tool based on ``USE_PYSIDE6_STATS``."""
