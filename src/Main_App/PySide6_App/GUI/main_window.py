@@ -303,6 +303,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     # ------------------------------------------------------------------
     def new_project(self) -> None:
         new_project(self)
+
         self._on_project_ready()
 
     def open_existing_project(self) -> None:
@@ -312,6 +313,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     def openProjectPath(self, folder: str) -> None:
         openProjectPath(self, folder)
         self._on_project_ready()
+
 
     def edit_project_settings(self) -> None:
         """Delegate project editing to :mod:`project_manager`."""
