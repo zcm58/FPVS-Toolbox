@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QFont,
     QGroupBox,
     QGridLayout,
     QRadioButton,
@@ -50,12 +51,35 @@ def init_ui(self) -> None:
     # ----- Page 0: Landing -----
     landing = QWidget(self.stacked)
     lay0 = QVBoxLayout(landing)
-    lay0.addStretch(1)
+    lay0.setContentsMargins(40, 40, 40, 40)
+
+    title = QLabel("Welcome to the FPVS Toolbox!", landing)
+    title_font = QFont()
+    title_font.setPointSize(24)
+    title_font.setBold(True)
+    title.setFont(title_font)
+    title.setAlignment(Qt.AlignCenter)
+
     self.btn_create_project = QPushButton("Create New Project", landing)
     self.btn_open_project = QPushButton("Open Existing Project", landing)
-    lay0.addWidget(self.btn_create_project)
-    lay0.addWidget(self.btn_open_project)
+    button_font = QFont()
+    button_font.setPointSize(14)
+    for btn in (self.btn_create_project, self.btn_open_project):
+        btn.setFont(button_font)
+        btn.setFixedHeight(60)
+        btn.setMaximumWidth(200)
+
+    btn_row = QHBoxLayout()
+    btn_row.setSpacing(20)
+    btn_row.setAlignment(Qt.AlignCenter)
+    btn_row.addWidget(self.btn_create_project)
+    btn_row.addWidget(self.btn_open_project)
+
+    lay0.addWidget(title)
     lay0.addStretch(1)
+    lay0.addLayout(btn_row)
+    lay0.addStretch(1)
+
     self.stacked.addWidget(landing)
 
     # ----- Page 1: Main UI -----
