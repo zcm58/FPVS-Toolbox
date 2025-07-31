@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QToolBar,
     QLabel,
     QWidget,
+    QStackedWidget,
     QVBoxLayout,
     QHBoxLayout,
     QGroupBox,
@@ -42,8 +43,23 @@ def init_ui(self) -> None:
     self.lbl_debug.setVisible(self.settings.debug_enabled())
     toolbar.addWidget(self.lbl_debug)
 
-    # Central container
-    container = QWidget(self)
+    # Stacked central widget
+    self.stacked = QStackedWidget(self)
+    self.setCentralWidget(self.stacked)
+
+    # ----- Page 0: Landing -----
+    landing = QWidget(self.stacked)
+    lay0 = QVBoxLayout(landing)
+    lay0.addStretch(1)
+    self.btn_create_project = QPushButton("Create New Project", landing)
+    self.btn_open_project = QPushButton("Open Existing Project", landing)
+    lay0.addWidget(self.btn_create_project)
+    lay0.addWidget(self.btn_open_project)
+    lay0.addStretch(1)
+    self.stacked.addWidget(landing)
+
+    # ----- Page 1: Main UI -----
+    container = QWidget(self.stacked)
     main_layout = QVBoxLayout(container)
     main_layout.setContentsMargins(10, 10, 10, 10)
     main_layout.setSpacing(12)
@@ -178,7 +194,7 @@ def init_ui(self) -> None:
 
     # Finalize
     self.homeWidget = container
-    self.setCentralWidget(container)
+    self.stacked.addWidget(container)
     self.setStatusBar(QStatusBar(self))
 
     # Connect toolbar buttons to methods
