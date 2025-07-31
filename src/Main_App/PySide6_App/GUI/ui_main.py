@@ -193,6 +193,8 @@ def init_ui(self) -> None:
     main_layout.addWidget(grp_log)
 
     # Finalize
+    # Provide a reference for animations
+    self.page1_container = container
     self.homeWidget = container
     self.stacked.addWidget(container)
     self.setStatusBar(QStatusBar(self))
