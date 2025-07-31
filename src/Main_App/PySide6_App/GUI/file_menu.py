@@ -24,6 +24,11 @@ def init_file_menu(self) -> None:
     action_open = QAction("Open Existing Project…", self)
     action_open.triggered.connect(self.open_existing_project)
     file_menu.addAction(action_open)
+
+    action_edit = QAction("Edit Project Settings…", self)
+    action_edit.triggered.connect(self.edit_project_settings)
+    file_menu.addAction(action_edit)
+
     file_menu.addSeparator()
 
     action_settings = QAction("Settings", self)
