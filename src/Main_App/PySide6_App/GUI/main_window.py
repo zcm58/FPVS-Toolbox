@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
 )
-from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtCore import QObject, Signal, QTimer, QPropertyAnimation, QRect
 import tkinter.messagebox as tk_messagebox
 from PySide6.QtWidgets import QMessageBox
 from Tools.Stats import StatsWindow as PysideStatsWindow
@@ -139,6 +139,15 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         select_projects_root(self)
 
         init_file_menu(self)
+        if hasattr(self, "btn_create_project"):
+            self.btn_create_project.clicked.connect(
+                self.actionCreateNewProject.trigger
+            )
+        if hasattr(self, "btn_open_project"):
+            self.btn_open_project.clicked.connect(
+                self.actionOpenExistingProject.trigger
+            )
+        self.stacked.setCurrentIndex(0)
         self.log("Welcome to the FPVS Toolbox!")
         self.log(
             f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}"
@@ -294,12 +303,15 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     # ------------------------------------------------------------------
     def new_project(self) -> None:
         new_project(self)
+        self._on_project_ready()
 
     def open_existing_project(self) -> None:
         open_existing_project(self)
+        self._on_project_ready()
 
     def openProjectPath(self, folder: str) -> None:
         openProjectPath(self, folder)
+        self._on_project_ready()
 
     def edit_project_settings(self) -> None:
         """Delegate project editing to :mod:`project_manager`."""
@@ -374,6 +386,25 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
     # ------------------------------------------------------------------
 
+    def _on_project_ready(self) -> None:
+        """Switch to the main page with a slide-in animation."""
+        if not getattr(self, "currentProject", None):
+            return
+        self.stacked.setCurrentIndex(1)
+        container = getattr(self, "page1_container", getattr(self, "homeWidget", None))
+        if not container:
+            return
+        start = QRect(self.width(), 0, self.stacked.width(), self.stacked.height())
+        end = QRect(0, 0, self.stacked.width(), self.stacked.height())
+        container.setGeometry(start)
+        anim = QPropertyAnimation(container, b"geometry")
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setDuration(400)
+        anim.start()
+        self._page1_anim = anim
+
+    # ------------------------------------------------------------------
 
     def _animate_progress_to(self, value: float) -> None:
         _animate_progress_to(self, int(value * 100))
