@@ -144,7 +144,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
         # Legacy mixin compatibility ----------------------------
 
-        # 👉 ADD THESE THREE LINES:
         self.progress_bar.set = self.progress_bar.setValue
         self.btn_start.clicked.connect(self.start_processing)
 
