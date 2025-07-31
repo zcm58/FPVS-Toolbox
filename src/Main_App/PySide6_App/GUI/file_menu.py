@@ -19,10 +19,12 @@ def init_file_menu(self) -> None:
 
     action_new = QAction("New Project…", self)
     action_new.triggered.connect(self.new_project)
+    self.actionCreateNewProject = action_new
     file_menu.addAction(action_new)
 
     action_open = QAction("Open Existing Project…", self)
     action_open.triggered.connect(self.open_existing_project)
+    self.actionOpenExistingProject = action_open
     file_menu.addAction(action_open)
 
     action_edit = QAction("Edit Project Settings…", self)

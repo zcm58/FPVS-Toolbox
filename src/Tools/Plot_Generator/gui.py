@@ -5,7 +5,6 @@ import os
 import json
 import subprocess
 import sys
-import json
 from pathlib import Path
 
 from PySide6.QtCore import QThread, QPropertyAnimation, Qt

@@ -139,6 +139,15 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         select_projects_root(self)
 
         init_file_menu(self)
+        if hasattr(self, "btn_create_project"):
+            self.btn_create_project.clicked.connect(
+                self.actionCreateNewProject.trigger
+            )
+        if hasattr(self, "btn_open_project"):
+            self.btn_open_project.clicked.connect(
+                self.actionOpenExistingProject.trigger
+            )
+        self.stacked.setCurrentIndex(0)
         self.log("Welcome to the FPVS Toolbox!")
         self.log(
             f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}"
@@ -294,12 +303,18 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     # ------------------------------------------------------------------
     def new_project(self) -> None:
         new_project(self)
+        if getattr(self, "currentProject", None):
+            self.stacked.setCurrentIndex(1)
 
     def open_existing_project(self) -> None:
         open_existing_project(self)
+        if getattr(self, "currentProject", None):
+            self.stacked.setCurrentIndex(1)
 
     def openProjectPath(self, folder: str) -> None:
         openProjectPath(self, folder)
+        if getattr(self, "currentProject", None):
+            self.stacked.setCurrentIndex(1)
 
     def edit_project_settings(self) -> None:
         """Delegate project editing to :mod:`project_manager`."""
