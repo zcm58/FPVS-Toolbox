@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import json
@@ -51,6 +52,40 @@ def _auto_detect_project_dir() -> str:
 
 ALL_CONDITIONS_OPTION = "All Conditions"
 
+
+def _auto_detect_project_dir() -> Path:
+    """Return the nearest ancestor folder containing ``project.json``."""
+    path = Path.cwd()
+    while not (path / "project.json").is_file():
+        if path.parent == path:
+            return Path.cwd()
+        path = path.parent
+    return path
+
+
+def _project_paths(parent: QWidget | None, project_dir: str | None) -> tuple[str | None, str | None]:
+    """Return Excel and SNR plot folders for the given or detected project."""
+    if project_dir and os.path.isdir(project_dir):
+        root = Path(project_dir)
+    else:
+        proj = getattr(parent, "currentProject", None)
+        if proj and hasattr(proj, "project_root"):
+            root = Path(proj.project_root)
+        else:
+            root = _auto_detect_project_dir()
+
+    manifest = root / "project.json"
+    if manifest.is_file():
+        try:
+            with open(manifest, "r") as f:
+                cfg = json.load(f)
+            excel_sub = cfg.get("subfolders", {}).get("excel", "1 - Excel Data Files")
+            snr_sub = cfg.get("subfolders", {}).get("snr", "2 - SNR Plots")
+            return str(root / excel_sub), str(root / snr_sub)
+        except Exception:
+            pass
+    return None, None
+
 class _SettingsDialog(QDialog):
     """Dialog for configuring plot options."""
 
@@ -99,7 +134,7 @@ class _SettingsDialog(QDialog):
 class PlotGeneratorWindow(QWidget):
     """Main window for generating plots."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, project_dir: str | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Generate SNR Plots")
         self.roi_map = load_rois_from_settings()
@@ -110,6 +145,7 @@ class PlotGeneratorWindow(QWidget):
         default_out = self.plot_mgr.get("paths", "output_folder", "")
         self.stem_color = self.plot_mgr.get_stem_color()
         self.stem_color_b = self.plot_mgr.get_second_color()
+
 
         project_dir: Path | None = None
         proj = getattr(parent, "currentProject", None)
@@ -141,6 +177,7 @@ class PlotGeneratorWindow(QWidget):
                 default_in = main_default
             if not default_out:
                 default_out = main_default
+
         self._defaults = {
             "title_snr": "SNR Plot",
             "xlabel": "Frequency (Hz)",
