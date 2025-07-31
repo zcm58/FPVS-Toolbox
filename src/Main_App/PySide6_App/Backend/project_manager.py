@@ -125,3 +125,17 @@ def loadProject(self, project: Project) -> None:
         self.add_event_row()
 
     self.log(f"Loaded project: {project.name}")
+
+
+def edit_project_settings(self) -> None:
+    if not getattr(self, "currentProject", None):
+        QMessageBox.warning(self, "No Project", "Please open or create a project first.")
+        return
+    folder = QFileDialog.getExistingDirectory(
+        self, "Select Input Folder", str(self.currentProject.input_folder)
+    )
+    if not folder:
+        return
+    self.currentProject.input_folder = folder
+    self.currentProject.save()
+    self.loadProject(self.currentProject)
