@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QStatusBar,
     QProgressBar,
     QSizePolicy,
+    QDockWidget,
 )
 from PySide6.QtCore import Qt, QPropertyAnimation
 from PySide6.QtGui import QFont
@@ -44,9 +45,20 @@ def init_ui(self) -> None:
     self.lbl_debug.setVisible(self.settings.debug_enabled())
     toolbar.addWidget(self.lbl_debug)
 
+    # Build sidebar placeholder
+    self.sidebar = QWidget(self)
+
     # Stacked central widget
     self.stacked = QStackedWidget(self)
     self.setCentralWidget(self.stacked)
+
+    # Sidebar dock (collapsed by default)
+    self.sidebarDock = QDockWidget("Navigation", self)
+    self.sidebarDock.setAllowedAreas(Qt.LeftDockWidgetArea)
+    self.sidebarDock.setWidget(self.sidebar)
+    self.addDockWidget(Qt.LeftDockWidgetArea, self.sidebarDock)
+    self.sidebarDock.setMaximumWidth(0)
+    self.sidebarDock.hide()
 
     # ----- Page 0: Landing -----
     landing = QWidget(self.stacked)
