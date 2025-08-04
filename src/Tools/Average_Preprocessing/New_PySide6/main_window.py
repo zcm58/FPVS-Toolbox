@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
 )
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtGui import QCloseEvent
 import os
 
 # --- Ported Mixin Imports ---
@@ -32,10 +32,20 @@ class AdvancedAveragingWindow(
     AdvancedAnalysisProcessingMixin,
     AdvancedAnalysisPostMixin,
 ):
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        input_dir: str | None = None,
+        output_dir: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Advanced Averaging Analysis")
-        # Attributes expected by legacy routines
+
+        # Store project paths
+        self.project_input_folder = input_dir
+        self.project_output_folder = output_dir
+
+        # State
         self.source_eeg_files: list[str] = []
         self.defined_groups: list[dict] = []
         self.selected_group_index: int | None = None
@@ -43,6 +53,7 @@ class AdvancedAveragingWindow(
         self.worker = None
 
         self._build_ui()
+        self._auto_load_source_files()
 
     def _build_ui(self):
         central = QWidget()
@@ -64,6 +75,7 @@ class AdvancedAveragingWindow(
         grp_gb = QGroupBox("Defined Averaging Groups")
         grp_l = QVBoxLayout(grp_gb)
         self.groups_listbox = QListWidget()
+        self.grp_list = self.groups_listbox
         btn_h2 = QHBoxLayout()
         self.btn_new = QPushButton("Create New Group")
         self.btn_rename = QPushButton("Rename Group")
@@ -179,3 +191,19 @@ class AdvancedAveragingWindow(
     def clear_log(self) -> None:
         """Clear all text from the log widget."""
         self.log_edit.clear()
+
+    def _auto_load_source_files(self) -> None:
+        """Scan project_input_folder for .bdf files and populate the list."""
+        folder = self.project_input_folder
+        if not folder or not os.path.isdir(folder):
+            self.log("Project data folder not found.")
+            return
+
+        bdfs = sorted(
+            f for f in os.listdir(folder)
+            if f.lower().endswith(".bdf")
+        )
+        full_paths = [os.path.join(folder, f) for f in bdfs]
+        self.source_eeg_files = full_paths
+        self._update_source_files_listbox()
+        self.log(f"Loaded {len(full_paths)} .bdf files from project.")

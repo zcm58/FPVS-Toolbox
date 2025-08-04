@@ -365,9 +365,18 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
     def open_epoch_averaging(self) -> None:
         """Instantiate and show the Advanced Averaging Analysis window."""
-        if not hasattr(self, "_epoch_win") or self._epoch_win is None:
-            # Pass the main window instance as the parent
-            self._epoch_win = AdvancedAveragingWindow(parent=self)
+        if not self.currentProject:
+            QMessageBox.warning(self, "No Project", "Please load a project first.")
+            return
+
+        data_dir = self.currentProject.subfolders["data"]
+        excel_dir = self.currentProject.subfolders["excel"]
+
+        # create or reuse the window
+        if not getattr(self, "_epoch_win", None):
+            self._epoch_win = AdvancedAveragingWindow(
+                parent=self, input_dir=data_dir, output_dir=excel_dir
+            )
         self._epoch_win.show()
         self._epoch_win.raise_()
         self._epoch_win.activateWindow()

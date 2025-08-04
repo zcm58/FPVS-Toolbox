@@ -102,18 +102,8 @@ class AdvancedAnalysisProcessingMixin:
         Validate all group configurations before starting the processing.
         Replicates the legacy validation logic with PySide6 dialogs.
         """
-        main_app = self.parent()  # Assume main window is the parent
-
-        # A simplified check for main app parameters
-        main_app_params = getattr(main_app, "validated_params", None)
-        output_directory = getattr(main_app, "save_folder_path", None)
-
-        if not all([main_app_params, output_directory]):
-            QMessageBox.critical(
-                self,
-                "Error",
-                "Main application parameters or output folder are not configured.",
-            )
+        if not getattr(self, "project_output_folder", None):
+            QMessageBox.critical(self, "Error", "Output folder is not configured.")
             return None
 
         if not self.defined_groups:
@@ -144,7 +134,7 @@ class AdvancedAnalysisProcessingMixin:
                 self.grp_list.setCurrentRow(i)
                 return None
 
-        return main_app_params, output_directory.get()
+        return {}, self.project_output_folder
 
     def start_advanced_processing(self) -> None:
         """Validate configuration and spawn the processing thread."""
