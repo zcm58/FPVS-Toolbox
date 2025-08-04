@@ -16,16 +16,16 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction  # noqa: F401
 import os  # noqa: F401
 
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_file_ops import (
+from Tools.Average_Preprocessing.New_PySide6.advanced_analysis_file_ops import (
     AdvancedAnalysisFileOpsMixin,
 )
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_group_ops import (
+from Tools.Average_Preprocessing.New_PySide6.advanced_analysis_group_ops import (
     AdvancedAnalysisGroupOpsMixin,
 )
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_processing import (
+from Tools.Average_Preprocessing.New_PySide6.advanced_analysis_processing import (
     AdvancedAnalysisProcessingMixin,
 )
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_post import (
+from Tools.Average_Preprocessing.New_PySide6.advanced_analysis_post import (
     AdvancedAnalysisPostMixin,
 )
 
@@ -44,6 +44,8 @@ class AdvancedAveragingWindow(
         self.source_eeg_files: list[str] = []
         self.defined_groups: list[dict] = []
         self._build_ui()
+        self.selected_group_index: int | None = None
+        self._update_start_processing_button_state()
 
     def _build_ui(self):
         central = QWidget()
@@ -55,6 +57,7 @@ class AdvancedAveragingWindow(
         src_gb = QGroupBox("Source EEG Files")
         src_l = QVBoxLayout(src_gb)
         self.src_list = QListWidget()
+        self.source_files_listbox = self.src_list
         btn_h1 = QHBoxLayout()
         self.btn_add = QPushButton("Add Files…")
         self.btn_remove = QPushButton("Remove Selected")
@@ -66,6 +69,7 @@ class AdvancedAveragingWindow(
         grp_gb = QGroupBox("Defined Averaging Groups")
         grp_l = QVBoxLayout(grp_gb)
         self.grp_list = QListWidget()
+        self.groups_listbox = self.grp_list
         btn_h2 = QHBoxLayout()
         self.btn_new = QPushButton("Create New Group")
         self.btn_rename = QPushButton("Rename Group")
@@ -153,9 +157,11 @@ class AdvancedAveragingWindow(
         self.btn_new.clicked.connect(self.create_new_group)
         self.btn_rename.clicked.connect(self.rename_selected_group)
         self.btn_del.clicked.connect(self.delete_selected_group)
+        self.grp_list.currentRowChanged.connect(self.on_group_select)
         self.btn_start.clicked.connect(self.start_advanced_processing)
         self.btn_stop.clicked.connect(self.stop_processing)
         self.btn_clear.clicked.connect(self.clear_log)
+        self.btn_close.clicked.connect(self.close)
 
     # ---- Button handlers -------------------------------------------------
     def log(self, message: str) -> None:
@@ -165,27 +171,6 @@ class AdvancedAveragingWindow(
             self.log_edit.verticalScrollBar().maximum()
         )
 
-    def add_source_files(self) -> None:  # pragma: no cover - placeholder
-        self.log("add_source_files not yet implemented.")
-
-    def remove_source_files(self) -> None:  # pragma: no cover - placeholder
-        self.log("remove_source_files not yet implemented.")
-
-    def create_new_group(self) -> None:  # pragma: no cover - placeholder
-        self.log("create_new_group not yet implemented.")
-
-    def rename_selected_group(self) -> None:  # pragma: no cover - placeholder
-        self.log("rename_selected_group not yet implemented.")
-
-    def delete_selected_group(self) -> None:  # pragma: no cover - placeholder
-        self.log("delete_selected_group not yet implemented.")
-
-    def start_advanced_processing(self) -> None:  # pragma: no cover - placeholder
-        self.log("start_advanced_processing not yet implemented.")
-
-    def stop_processing(self) -> None:  # pragma: no cover - placeholder
-        self.log("stop_processing not yet implemented.")
-
-    def clear_log(self) -> None:  # pragma: no cover - placeholder
+    def clear_log(self) -> None:
         """Clear all text from the log widget."""
         self.log_edit.clear()
