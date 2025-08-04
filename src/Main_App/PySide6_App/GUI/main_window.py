@@ -366,7 +366,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     def open_epoch_averaging(self) -> None:
         """Instantiate and show the Advanced Averaging Analysis window."""
         if not hasattr(self, "_epoch_win") or self._epoch_win is None:
-            self._epoch_win = AdvancedAveragingWindow()
+            # Pass the main window instance as the parent
+            self._epoch_win = AdvancedAveragingWindow(parent=self)
         self._epoch_win.show()
         self._epoch_win.raise_()
         self._epoch_win.activateWindow()
