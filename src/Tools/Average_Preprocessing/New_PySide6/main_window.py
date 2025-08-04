@@ -13,7 +13,13 @@ from PySide6.QtGui import QAction  # noqa: F401
 import os  # noqa: F401
 
 
-class AdvancedAveragingWindow(QMainWindow):
+class AdvancedAveragingWindow(
+    QMainWindow,
+    AdvancedAnalysisFileOpsMixin,
+    AdvancedAnalysisGroupOpsMixin,
+    AdvancedAnalysisProcessingMixin,
+    AdvancedAnalysisPostMixin,
+):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Advanced Averaging Analysis")
