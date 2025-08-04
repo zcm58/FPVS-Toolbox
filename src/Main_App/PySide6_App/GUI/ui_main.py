@@ -55,6 +55,9 @@ def init_ui(self) -> None:
     # Sidebar dock (collapsed by default)
     self.sidebarDock = QDockWidget("Navigation", self)
     self.sidebarDock.setAllowedAreas(Qt.LeftDockWidgetArea)
+    self.sidebarDock.setFeatures(
+        QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable
+    )
     self.sidebarDock.setWidget(self.sidebar)
     self.addDockWidget(Qt.LeftDockWidgetArea, self.sidebarDock)
     self.sidebarDock.setMaximumWidth(0)
