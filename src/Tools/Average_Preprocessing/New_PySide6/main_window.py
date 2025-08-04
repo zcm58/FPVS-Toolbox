@@ -107,6 +107,24 @@ class AdvancedAveragingWindow(
         master_v.addWidget(self.log_edit)
         master_v.addLayout(btn_h3)
 
+        # — Log pane —
+        self.log_edit = QPlainTextEdit()
+        self.log_edit.setReadOnly(True)
+        master_v.addWidget(self.log_edit)
+
+        # — Bottom button bar —
+        btn_h4 = QHBoxLayout()
+        self.btn_start = QPushButton("Start Advanced Processing")
+        self.btn_stop  = QPushButton("Stop")
+        self.btn_clear = QPushButton("Clear Log")
+        self.btn_close = QPushButton("Close")
+        btn_h4.addWidget(self.btn_start)
+        btn_h4.addWidget(self.btn_stop)
+        btn_h4.addStretch(1)
+        btn_h4.addWidget(self.btn_clear)
+        btn_h4.addWidget(self.btn_close)
+        master_v.addLayout(btn_h4)
+
         central.setLayout(master_v)
         self.setCentralWidget(central)
 
