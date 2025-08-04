@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QMessageBox
 from Tools.Stats import StatsWindow as PysideStatsWindow
 from Tools.Stats.Legacy.stats import StatsAnalysisWindow as launch_ctk_stats
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
+from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
 from types import MethodType
 import logging
 import pandas as pd
@@ -362,12 +363,16 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             env["FPVS_PROJECT_ROOT"] = str(proj.project_root)
         subprocess.Popen(cmd, close_fds=True, env=env)
 
+    def open_epoch_averaging(self) -> None:
+        """Instantiate and show the Advanced Averaging Analysis window."""
+        if not hasattr(self, "_epoch_win") or self._epoch_win is None:
+            self._epoch_win = AdvancedAveragingWindow()
+        self._epoch_win.show()
+        self._epoch_win.raise_()
+        self._epoch_win.activateWindow()
+
     def open_advanced_analysis_window(self) -> None:
-        QMessageBox.information(
-            self,
-            "Advanced Analysis",
-            "The advanced preprocessing tool is not yet available in the Qt interface.",
-        )
+        self.open_epoch_averaging()
 
     def show_relevant_publications(self) -> None:
         QMessageBox.information(
