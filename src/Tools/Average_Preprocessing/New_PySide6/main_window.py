@@ -1,21 +1,25 @@
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QGroupBox, QListWidget, QPushButton,
-    QHBoxLayout, QVBoxLayout, QPlainTextEdit, QSizePolicy,
+    QMainWindow,
+    QWidget,
+    QGroupBox,
+    QListWidget,
+    QPushButton,
+    QHBoxLayout,
+    QVBoxLayout,
+    QPlainTextEdit,
+    QSizePolicy,
 )
 from PySide6.QtGui import QAction  # noqa: F401
 import os  # noqa: F401
-
-# Import legacy functions but do NOT alter those files:
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_file_ops import add_files, remove_selected  # noqa: F401
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_group_ops import create_group, rename_group, delete_group  # noqa: F401, E501
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_processing import start_processing, stop_processing  # noqa: F401, E501
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_post import clear_log  # noqa: F401
 
 
 class AdvancedAveragingWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Advanced Averaging Analysis")
+        # Attributes expected by legacy routines
+        self.source_eeg_files: list[str] = []
+        self.defined_groups: list[dict] = []
         self._build_ui()
 
     def _build_ui(self):
@@ -65,8 +69,8 @@ class AdvancedAveragingWindow(QMainWindow):
         main_h.addLayout(right_v)
 
         # — Bottom Log & Buttons —
-        log_edit = QPlainTextEdit()
-        log_edit.setReadOnly(True)
+        self.log_edit = QPlainTextEdit()
+        self.log_edit.setReadOnly(True)
         btn_h3 = QHBoxLayout()
         self.btn_start = QPushButton("Start Advanced Processing")
         self.btn_stop = QPushButton("Stop")
@@ -81,18 +85,51 @@ class AdvancedAveragingWindow(QMainWindow):
         # assemble everything
         master_v = QVBoxLayout()
         master_v.addLayout(main_h)
-        master_v.addWidget(log_edit)
+        master_v.addWidget(self.log_edit)
         master_v.addLayout(btn_h3)
 
         central.setLayout(master_v)
         self.setCentralWidget(central)
 
-        # — Hook up signals to imported legacy functions (slots left for you) —
-        # self.btn_add.clicked.connect(add_files)
-        # self.btn_remove.clicked.connect(remove_selected)
-        # self.btn_new.clicked.connect(create_group)
-        # self.btn_rename.clicked.connect(rename_group)
-        # self.btn_del.clicked.connect(delete_group)
-        # self.btn_start.clicked.connect(start_processing)
-        # self.btn_stop.clicked.connect(stop_processing)
-        # self.btn_clear.clicked.connect(clear_log)
+        # Connect button signals to handlers
+        self.btn_add.clicked.connect(self.add_source_files)
+        self.btn_remove.clicked.connect(self.remove_source_files)
+        self.btn_new.clicked.connect(self.create_new_group)
+        self.btn_rename.clicked.connect(self.rename_selected_group)
+        self.btn_del.clicked.connect(self.delete_selected_group)
+        self.btn_start.clicked.connect(self.start_advanced_processing)
+        self.btn_stop.clicked.connect(self.stop_processing)
+        self.btn_clear.clicked.connect(self.clear_log)
+
+    # ---- Button handlers -------------------------------------------------
+    def log(self, message: str) -> None:
+        """Append a message to the log widget."""
+        self.log_edit.appendPlainText(message)
+        self.log_edit.verticalScrollBar().setValue(
+            self.log_edit.verticalScrollBar().maximum()
+        )
+
+    def add_source_files(self) -> None:  # pragma: no cover - placeholder
+        self.log("add_source_files not yet implemented.")
+
+    def remove_source_files(self) -> None:  # pragma: no cover - placeholder
+        self.log("remove_source_files not yet implemented.")
+
+    def create_new_group(self) -> None:  # pragma: no cover - placeholder
+        self.log("create_new_group not yet implemented.")
+
+    def rename_selected_group(self) -> None:  # pragma: no cover - placeholder
+        self.log("rename_selected_group not yet implemented.")
+
+    def delete_selected_group(self) -> None:  # pragma: no cover - placeholder
+        self.log("delete_selected_group not yet implemented.")
+
+    def start_advanced_processing(self) -> None:  # pragma: no cover - placeholder
+        self.log("start_advanced_processing not yet implemented.")
+
+    def stop_processing(self) -> None:  # pragma: no cover - placeholder
+        self.log("stop_processing not yet implemented.")
+
+    def clear_log(self) -> None:  # pragma: no cover - placeholder
+        """Clear all text from the log widget."""
+        self.log_edit.clear()
