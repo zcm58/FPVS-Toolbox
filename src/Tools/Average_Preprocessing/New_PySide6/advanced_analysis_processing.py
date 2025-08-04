@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import traceback
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import QMessageBox, QPushButton, QListWidget
@@ -18,29 +19,36 @@ logger = logging.getLogger(__name__)
 
 
 class ProcessingWorker(QObject):
-    """
-    Worker object that runs the long processing task in a separate thread.
-    Communicates with the main GUI thread via signals.
-    """
+    """Worker running the long processing task in a background thread."""
 
     finished = Signal()
     progress = Signal(float)
     log_message = Signal(str)
 
     def __init__(
-        self, defined_groups, main_app_params, output_dir, pid_extractor
+        self,
+        defined_groups,
+        main_app_params,
+        output_dir,
+        pid_extractor,
+        load_file_method: Callable[[str], Any],
+        preprocess_raw_method: Callable[..., Any],
+        post_process_func: Callable[[Any, list[str]], None],
     ):
         super().__init__()
         self.defined_groups = defined_groups
         self.main_app_params = main_app_params
         self.output_directory = output_dir
         self.pid_extraction_func = pid_extractor
+        self.load_file_method = load_file_method
+        self.preprocess_raw_method = preprocess_raw_method
+        self.post_process_func = post_process_func
         self._is_stopped = False
 
     def run(self):
-        """The main work method that is executed in the new thread."""
+        """Execute the core averaging logic in the worker thread."""
 
-        # Simple object to mimic threading.Event for the legacy function
+        # Simple object to mimic ``threading.Event`` for the legacy function
         class StopEvent:
             def __init__(self, worker_instance):
                 self.worker = worker_instance
@@ -49,13 +57,12 @@ class ProcessingWorker(QObject):
                 return self.worker._is_stopped
 
         try:
-            # This is the call to the long-running legacy function
             run_advanced_averaging_processing(
                 self.defined_groups,
                 self.main_app_params,
-                None,  # load_file_method - assuming it's handled elsewhere or not needed
-                None,  # preprocess_raw_method - same assumption
-                None,  # external_post_process_func - same assumption
+                self.load_file_method,
+                self.preprocess_raw_method,
+                self.post_process_func,
                 self.output_directory,
                 self.pid_extraction_func,
                 log_callback=self.log_message.emit,
@@ -68,8 +75,8 @@ class ProcessingWorker(QObject):
         finally:
             self.finished.emit()
 
-    def stop(self):
-        """Signals the worker to stop."""
+    def stop(self) -> None:
+        """Signal the worker to stop."""
         self._is_stopped = True
 
 
@@ -150,6 +157,47 @@ class AdvancedAnalysisProcessingMixin:
         main_app_params, output_directory = validation
         self.log("Validation successful. Starting processing thread...")
 
+        # Gather necessary callbacks from the parent application
+        parent_app = self.parent()
+
+        if hasattr(parent_app, "load_eeg_file") and callable(parent_app.load_eeg_file):
+            load_file_method = parent_app.load_eeg_file
+        else:
+            from Main_App import load_eeg_file as _load
+
+            def load_file_method(fp: str):
+                return _load(parent_app, fp)
+
+        if hasattr(parent_app, "preprocess_raw") and callable(parent_app.preprocess_raw):
+            preprocess_raw_method = parent_app.preprocess_raw
+        else:
+            from Main_App import perform_preprocessing as _pp
+
+            def preprocess_raw_method(raw, **params):
+                filename = "UnknownFile"
+                if getattr(raw, "filenames", None):
+                    try:
+                        filename = Path(raw.filenames[0]).name
+                    except Exception:
+                        pass
+                elif getattr(raw, "filename", None):
+                    filename = Path(raw.filename).name
+                processed, _ = _pp(
+                    raw_input=raw,
+                    params=params,
+                    log_func=parent_app.log,
+                    filename_for_log=filename,
+                )
+                return processed
+
+        if hasattr(parent_app, "post_process") and callable(parent_app.post_process):
+            post_process_func = parent_app.post_process
+        else:
+            from Main_App import post_process as _post
+
+            def post_process_func(ctx, labels):
+                return _post(parent_app, labels)
+
         # 1. Create a thread and a worker
         self.processing_thread = QThread()
         self.worker = ProcessingWorker(
@@ -157,6 +205,9 @@ class AdvancedAnalysisProcessingMixin:
             main_app_params=main_app_params,
             output_dir=output_directory,
             pid_extractor=self._extract_pid_for_group,
+            load_file_method=load_file_method,
+            preprocess_raw_method=preprocess_raw_method,
+            post_process_func=post_process_func,
         )
 
         # 2. Move worker to the thread
