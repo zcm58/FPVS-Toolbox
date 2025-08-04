@@ -12,6 +12,19 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction  # noqa: F401
 import os  # noqa: F401
 
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_file_ops import (
+    AdvancedAnalysisFileOpsMixin,
+)
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_group_ops import (
+    AdvancedAnalysisGroupOpsMixin,
+)
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_processing import (
+    AdvancedAnalysisProcessingMixin,
+)
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_post import (
+    AdvancedAnalysisPostMixin,
+)
+
 
 class AdvancedAveragingWindow(
     QMainWindow,
