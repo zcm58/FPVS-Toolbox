@@ -6,16 +6,10 @@ from PySide6.QtGui import QAction  # noqa: F401
 import os  # noqa: F401
 
 # Import legacy functions but do NOT alter those files:
-from Tools.Average_Preprocessing.Legacy.advanced_analysis import (
-    add_files,  # noqa: F401
-    remove_selected,  # noqa: F401
-    create_group,  # noqa: F401
-    rename_group,  # noqa: F401
-    delete_group,  # noqa: F401
-    start_processing,  # noqa: F401
-    stop_processing,  # noqa: F401
-    clear_log,  # noqa: F401
-)
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_file_ops import add_files, remove_selected  # noqa: F401
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_group_ops import create_group, rename_group, delete_group  # noqa: F401, E501
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_processing import start_processing, stop_processing  # noqa: F401, E501
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_post import clear_log  # noqa: F401
 
 
 class AdvancedAveragingWindow(QMainWindow):
