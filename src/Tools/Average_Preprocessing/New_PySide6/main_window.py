@@ -47,7 +47,7 @@ class AdvancedAveragingWindow(
 
     def _build_ui(self):
         central = QWidget()
-        main_h = QHBoxLayout(central)
+        main_h = QHBoxLayout()
 
         # — Left Panel —
         left_v = QVBoxLayout()
@@ -123,43 +123,26 @@ class AdvancedAveragingWindow(
         main_h.addLayout(left_v)
         main_h.addLayout(right_v)
 
-        # — Bottom Log & Buttons —
-        self.log_edit = QPlainTextEdit()
-        self.log_edit.setReadOnly(True)
-        btn_h3 = QHBoxLayout()
-        self.btn_start = QPushButton("Start Advanced Processing")
-        self.btn_stop = QPushButton("Stop")
-        self.btn_clear = QPushButton("Clear Log")
-        self.btn_close = QPushButton("Close")
-        btn_h3.addWidget(self.btn_start)
-        btn_h3.addWidget(self.btn_stop)
-        btn_h3.addStretch(1)
-        btn_h3.addWidget(self.btn_clear)
-        btn_h3.addWidget(self.btn_close)
-
-        # assemble everything
         master_v = QVBoxLayout()
         master_v.addLayout(main_h)
-        master_v.addWidget(self.log_edit)
-        master_v.addLayout(btn_h3)
 
         # — Log pane —
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
         master_v.addWidget(self.log_edit)
 
-        # — Bottom button bar —
-        btn_h4 = QHBoxLayout()
+        # — Bottom control buttons —
+        btn_controls = QHBoxLayout()
         self.btn_start = QPushButton("Start Advanced Processing")
         self.btn_stop  = QPushButton("Stop")
+        btn_controls.addWidget(self.btn_start)
+        btn_controls.addWidget(self.btn_stop)
+        btn_controls.addStretch(1)
         self.btn_clear = QPushButton("Clear Log")
         self.btn_close = QPushButton("Close")
-        btn_h4.addWidget(self.btn_start)
-        btn_h4.addWidget(self.btn_stop)
-        btn_h4.addStretch(1)
-        btn_h4.addWidget(self.btn_clear)
-        btn_h4.addWidget(self.btn_close)
-        master_v.addLayout(btn_h4)
+        btn_controls.addWidget(self.btn_clear)
+        btn_controls.addWidget(self.btn_close)
+        master_v.addLayout(btn_controls)
 
         central.setLayout(master_v)
         self.setCentralWidget(central)
