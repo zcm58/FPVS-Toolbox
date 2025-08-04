@@ -79,7 +79,7 @@ def init_sidebar(self) -> None:
         lay, "btn_image", "Image Resizer", "camera-photo", self.open_image_resizer
     )
     self.btn_epoch = make_button(
-        lay, "btn_epoch", "Epoch Averaging", "view-refresh", self.open_advanced_analysis_window
+        lay, "btn_epoch", "Epoch Averaging", "view-refresh", self.open_epoch_averaging
     )
     divider = QFrame()
     divider.setFrameShape(QFrame.HLine)
