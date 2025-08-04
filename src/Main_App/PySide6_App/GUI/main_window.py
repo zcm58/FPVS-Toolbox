@@ -369,8 +369,15 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             QMessageBox.warning(self, "No Project", "Please load a project first.")
             return
 
-        data_dir = self.currentProject.subfolders["data"]
-        excel_dir = self.currentProject.subfolders["excel"]
+        data_dir = self.currentProject.subfolders.get("data")
+        if data_dir is None:
+            data_dir = str(self.currentProject.input_folder)
+        else:
+            data_dir = str(self.currentProject.project_root / data_dir)
+        excel_dir = str(
+            self.currentProject.project_root
+            / self.currentProject.subfolders.get("excel", "")
+        )
 
         # create or reuse the window
         if not getattr(self, "_epoch_win", None):
