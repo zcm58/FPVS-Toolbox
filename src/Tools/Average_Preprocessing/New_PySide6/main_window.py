@@ -5,14 +5,28 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction  # noqa: F401
 import os  # noqa: F401
 
-# Import legacy functions but do NOT alter those files:
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_file_ops import add_files, remove_selected  # noqa: F401
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_group_ops import create_group, rename_group, delete_group  # noqa: F401, E501
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_processing import start_processing, stop_processing  # noqa: F401, E501
-from Tools.Average_Preprocessing.Legacy.advanced_analysis_post import clear_log  # noqa: F401
+# Import legacy mixins but do NOT alter those files:
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_file_ops import (
+    AdvancedAnalysisFileOpsMixin,
+)
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_group_ops import (
+    AdvancedAnalysisGroupOpsMixin,
+)
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_processing import (
+    AdvancedAnalysisProcessingMixin,
+)
+from Tools.Average_Preprocessing.Legacy.advanced_analysis_post import (
+    AdvancedAnalysisPostMixin,
+)
 
 
-class AdvancedAveragingWindow(QMainWindow):
+class AdvancedAveragingWindow(
+    QMainWindow,
+    AdvancedAnalysisFileOpsMixin,
+    AdvancedAnalysisGroupOpsMixin,
+    AdvancedAnalysisProcessingMixin,
+    AdvancedAnalysisPostMixin,
+):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Advanced Averaging Analysis")
