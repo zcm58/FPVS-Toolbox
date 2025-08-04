@@ -22,27 +22,40 @@ class AdvancedAnalysisPostMixin:
 
     def _extract_pid_for_group(self, group_data: Dict[str, Any]) -> str:
         """Return a participant identifier extracted from a group's first file."""
-
         file_paths = group_data.get("file_paths", [])
         if not file_paths:
             return "UnknownPID"
+
         base_name = Path(file_paths[0]).stem
+
+        # Primary Regex
         pid_regex_primary = r"\b(P\d+|S\d+|Sub\d+)\b"
         match = re.search(pid_regex_primary, base_name, re.IGNORECASE)
         if match:
             return match.group(1).upper()
+
+        # Fallback 1: Check underscore parts
         if "_" in base_name:
             for part in base_name.split("_"):
                 if re.fullmatch(r"(P\d+|S\d+|Sub\d+)", part, re.IGNORECASE):
                     return part.upper()
-        cleaned = re.sub(
+
+        # Fallback 2: More aggressive cleanup (this logic was missing)
+        cleaned_pid = re.sub(
             r"(_unamb|_ambig|_mid|_run\d*|_sess\d*|_task\w*|_eeg|_raw|_preproc|_ica).*",
             "",
             base_name,
             flags=re.IGNORECASE,
         )
-        cleaned = re.sub(r"[^A-Za-z0-9]", "", cleaned)
-        return cleaned or base_name
+        cleaned_pid = re.sub(r"[^A-Za-z0-9_]", "", cleaned_pid)
+
+        if '_' in cleaned_pid:
+            for part in cleaned_pid.split('_'):
+                if re.fullmatch(r"(P\d+|S\d+|Sub\d+)", part, re.IGNORECASE):
+                    return part.upper()
+
+        cleaned_pid_alphanum_only = re.sub(r"[^A-Za-z0-9]", "", cleaned_pid)
+        return cleaned_pid_alphanum_only or base_name
 
     def save_groups_to_file(self) -> None:
         """Save ``self.defined_groups`` to a JSON file chosen by the user."""
