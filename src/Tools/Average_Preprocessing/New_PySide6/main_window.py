@@ -8,6 +8,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QPlainTextEdit,
     QSizePolicy,
+    QRadioButton,
+    QButtonGroup,
+    QScrollArea,
+    QLabel,
 )
 from PySide6.QtGui import QAction  # noqa: F401
 import os  # noqa: F401
@@ -82,6 +86,38 @@ class AdvancedAveragingWindow(
         cfg_gb.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         map_gb.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         right_v.addWidget(cfg_gb)
+
+        # — Condition Mapping Panel —
+        mapping_layout = QVBoxLayout(map_gb)
+
+        # 1) Scrollable mapping area
+        self.mapping_area = QScrollArea()
+        self.mapping_area.setWidgetResizable(True)
+        empty_container = QWidget()
+        empty_container.setLayout(QVBoxLayout())
+        self.mapping_area.setWidget(empty_container)
+        mapping_layout.addWidget(self.mapping_area)
+
+        # 2) Averaging Method radio buttons
+        avg_label = QLabel("Averaging Method:")
+        mapping_layout.addWidget(avg_label)
+        radio_h = QHBoxLayout()
+        self.radio_pool = QRadioButton("Pool Trials")
+        self.radio_avgofavg = QRadioButton("Average of Averages")
+        self.radio_pool.setChecked(True)
+        radio_h.addWidget(self.radio_pool)
+        radio_h.addWidget(self.radio_avgofavg)
+        mapping_layout.addLayout(radio_h)
+
+        # Make the two radios exclusive (optional)
+        method_group = QButtonGroup(self)
+        method_group.addButton(self.radio_pool)
+        method_group.addButton(self.radio_avgofavg)
+
+        # 3) Save Group Configuration button
+        self.btn_save_cfg = QPushButton("Save Group Configuration")
+        mapping_layout.addWidget(self.btn_save_cfg)
+
         right_v.addWidget(map_gb)
 
         main_h.addLayout(left_v)
