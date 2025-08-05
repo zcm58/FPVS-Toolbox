@@ -23,7 +23,16 @@ from . import runner, worker
 
 class SourceLocalizationWindow(ctk.CTkToplevel):
     def __init__(self, master=None):
+        self._owns_root = False
+        if master is None or not hasattr(master, "tk"):
+            master = ctk.CTk()
+            master.withdraw()
+            self._owns_root = True
+        self._root = master
         super().__init__(master)
+        if self._owns_root:
+            self.protocol("WM_DELETE_WINDOW", self._root.destroy)
+            threading.Thread(target=self._root.mainloop, daemon=True).start()
         self.transient(master)
         init_fonts()
         self.option_add("*Font", str(FONT_MAIN), 80)
