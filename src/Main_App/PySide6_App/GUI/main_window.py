@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QObject, Signal, QTimer, QPropertyAnimation, QRect
 from PySide6.QtGui import QFont
 import tkinter.messagebox as tk_messagebox
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QStatusBar
 from Tools.Stats import StatsWindow as PysideStatsWindow
 from Tools.Stats.Legacy.stats import StatsAnalysisWindow as launch_ctk_stats
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
@@ -48,6 +48,7 @@ from Main_App.PySide6_App.Backend.project_manager import (
 from types import SimpleNamespace
 import Main_App.Legacy_App.debug_utils as debug_utils
 from . import update_manager
+from config import FPVS_TOOLBOX_VERSION
 
 # Route legacy ._qt_showinfo to a single Qt dialog (or no-op if desired)
 def _qt_showinfo(title: str, msg: str, **kwargs) -> None:
@@ -169,6 +170,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         select_projects_root(self)
 
         init_file_menu(self)
+        status = QStatusBar(self)
+        self.setStatusBar(status)
+        status.showMessage(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
         if hasattr(self, "btn_create_project"):
             self.btn_create_project.clicked.connect(
                 self.actionCreateNewProject.trigger
