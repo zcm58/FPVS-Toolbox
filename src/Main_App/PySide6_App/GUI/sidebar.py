@@ -71,7 +71,7 @@ def init_sidebar(self) -> None:
         self.open_stats_analyzer,
     )
     icon_dir = Path(__file__).resolve().parent / "icons"
-    snr_icon = QIcon(str(icon_dir / "snr_plots.svg"))
+    snr_icon = white_icon(str(icon_dir / "snr_plots.svg"))
     self.btn_graphs = make_button(
         lay, "btn_graphs", "SNR Plots", snr_icon, self.open_plot_generator
     )
@@ -101,3 +101,5 @@ def init_sidebar(self) -> None:
     dock.setWidget(sidebar)
     dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
     self.addDockWidget(Qt.LeftDockWidgetArea, dock)
+    # Remove the empty gray title bar above the sidebar
+    dock.setTitleBarWidget(QWidget())
