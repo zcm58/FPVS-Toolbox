@@ -58,7 +58,7 @@ class AdvancedAveragingWindow(
         # Increase window height for extra spacing
         w = self.size().width()
         h = self.size().height()
-        self.resize(w + 50, h + 100)
+        self.resize(w + 100, h + 500)
 
 
         # Button object names and shared style tweaks
