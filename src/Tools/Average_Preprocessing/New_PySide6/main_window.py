@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
 )
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QCloseEvent
 import os
 
@@ -30,6 +31,7 @@ class AdvancedAveragingWindow(
     AdvancedAnalysisProcessingMixin,
     AdvancedAnalysisPostMixin,
 ):
+    processing_finished = Signal()
     def __init__(
         self,
         parent=None,
@@ -51,7 +53,24 @@ class AdvancedAveragingWindow(
         self.worker = None
 
         self._build_ui()
+
+        # Increase window height for extra spacing
+        w = self.size().width()
+        h = self.size().height()
+        self.resize(w, h + 100)
+
+        # Button object names and shared style tweaks
         self.btn_start.setObjectName("btnStart")
+        self.btn_stop.setObjectName("btnStop")
+
+        for btn in (self.btn_start, self.btn_stop, self.btn_clear, self.btn_close):
+            btn.setMinimumHeight(32)
+            f = btn.font()
+            f.setBold(True)
+            btn.setFont(f)
+
+        self.btn_stop.setEnabled(False)
+
         self.setStyleSheet(
             """
   /* 1) Window & GroupBoxes */
@@ -64,9 +83,8 @@ class AdvancedAveragingWindow(
     border-radius: 4px;
   }
 
-  /* 2) All bottom-row buttons slightly taller */
+  /* 2) Generic QPushButton styling */
   QPushButton {
-    min-height: 28px;
     font-size: 9pt;
   }
 
@@ -81,8 +99,25 @@ class AdvancedAveragingWindow(
   QPushButton#btnStart:hover {
     background-color: #92C9A3;      /* slightly darker on hover */
   }
+
+  /* 4) Neutral gray Stop button */
+  QPushButton#btnStop {
+    background-color: #E0E0E0;
+    color: #333333;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+  }
+  QPushButton#btnStop:hover {
+    background-color: #D5D5D5;
+  }
   """
         )
+
+        # New signal hookups for Start/Stop behavior
+        self.btn_start.clicked.connect(lambda: self.btn_stop.setEnabled(True))
+        self.processing_finished.connect(self._on_processing_complete)
+
         self._auto_load_source_files()
 
     def _build_ui(self):
@@ -203,6 +238,17 @@ class AdvancedAveragingWindow(
                 event.ignore()
         else:
             event.accept()
+
+    # ---- Processing callbacks -----------------------------------------
+    def _on_processing_finished(self):
+        """Forward processing-finished signal and reset UI state."""
+        super()._on_processing_finished()
+        self.processing_finished.emit()
+
+    def _on_processing_complete(self):
+        """Slot triggered when processing is fully complete."""
+        self.btn_stop.setEnabled(False)
+        self.log("Processing complete; UI reset.")
 
     # ---- UI-Specific Helper Methods -------------------------------------
     def log(self, message: str) -> None:
