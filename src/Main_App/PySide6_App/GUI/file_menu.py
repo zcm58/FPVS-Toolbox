@@ -27,11 +27,9 @@ def init_file_menu(self) -> None:
     self.actionOpenExistingProject = action_open
     file_menu.addAction(action_open)
 
-    action_edit = QAction("Edit Project Settings…", self)
-    action_edit.triggered.connect(self.edit_project_settings)
-    file_menu.addAction(action_edit)
-
-    file_menu.addSeparator()
+    action_save = QAction("Save Project Settings", self)
+    action_save.triggered.connect(self.saveProjectSettings)
+    file_menu.addAction(action_save)
 
     action_settings = QAction("Settings", self)
     action_settings.triggered.connect(self.open_settings_window)
@@ -41,10 +39,6 @@ def init_file_menu(self) -> None:
     action_check.triggered.connect(self.check_for_updates)
     file_menu.addAction(action_check)
 
-    action_save = QAction("Save Project Settings", self)
-    action_save.triggered.connect(self.saveProjectSettings)
     self.exit_action = QAction("Exit", self)
     self.exit_action.triggered.connect(self.quit)
-
-    file_menu.addAction(action_save)
     file_menu.addAction(self.exit_action)
