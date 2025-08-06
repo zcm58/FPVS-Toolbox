@@ -46,6 +46,7 @@ from Main_App.PySide6_App.Backend.project_manager import (
 )
 from types import SimpleNamespace
 import Main_App.Legacy_App.debug_utils as debug_utils
+from . import update_manager
 
 # Route legacy ._qt_showinfo to a single Qt dialog (or no-op if desired)
 def _qt_showinfo(title: str, msg: str, **kwargs) -> None:
@@ -119,7 +120,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
     def __init__(self) -> None:
         super().__init__()
-        from Main_App.Legacy_App import update_manager
         update_manager.cleanup_old_executable()
         self.settings = SettingsManager()
         self.output_folder: str = ""
@@ -292,8 +292,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self._settings_dialog = None
 
     def check_for_updates(self) -> None:
-        from Main_App.Legacy_App import update_manager
-
         update_manager.check_for_updates_async(
             self, silent=False, notify_if_no_update=True
         )
