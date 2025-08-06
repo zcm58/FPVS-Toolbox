@@ -75,6 +75,15 @@ class SettingsDialog(QDialog):
     def __init__(self, manager: SettingsManager, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.manager = manager
+        # Stub attributes for pruned settings to avoid AttributeError if referenced
+        self.data_edit = None
+        self.out_edit = None
+        self.main_size_edit = None
+        self.stats_size_edit = None
+        self.resize_size_edit = None
+        self.adv_size_edit = None
+        self.cond_edit = None
+        self.id_edit = None
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -112,34 +121,8 @@ class SettingsDialog(QDialog):
         self.mode_combo.setCurrentText(self.manager.get("appearance", "mode", "System"))
         form.addRow(QLabel("Appearance Mode"), self.mode_combo)
 
-        self.data_edit = QLineEdit(self.manager.get("paths", "data_folder", ""))
-        data_row = self._with_browse(self.data_edit)
-        form.addRow(QLabel("Default Data Folder"), data_row)
-
-        self.out_edit = QLineEdit(self.manager.get("paths", "output_folder", ""))
-        out_row = self._with_browse(self.out_edit)
-        form.addRow(QLabel("Default Output Folder"), out_row)
-
-        self.main_size_edit = QLineEdit(self.manager.get("gui", "main_size", "750x920"))
-        form.addRow(QLabel("Main Window Size (WxH)"), self.main_size_edit)
-
-        self.stats_size_edit = QLineEdit(self.manager.get("gui", "stats_size", "700x650"))
-        form.addRow(QLabel("Stats Window Size (WxH)"), self.stats_size_edit)
-
-        self.resize_size_edit = QLineEdit(self.manager.get("gui", "resizer_size", "600x600"))
-        form.addRow(QLabel("Image Resizer Size (WxH)"), self.resize_size_edit)
-
-        self.adv_size_edit = QLineEdit(self.manager.get("gui", "advanced_size", "500x500"))
-        form.addRow(QLabel("Advanced Analysis Size (WxH)"), self.adv_size_edit)
-
         self.stim_edit = QLineEdit(self.manager.get("stim", "channel", "Status"))
         form.addRow(QLabel("Stim Channel"), self.stim_edit)
-
-        self.cond_edit = QLineEdit(self.manager.get("events", "labels", ""))
-        form.addRow(QLabel("Default Conditions"), self.cond_edit)
-
-        self.id_edit = QLineEdit(self.manager.get("events", "ids", ""))
-        form.addRow(QLabel("Default IDs"), self.id_edit)
 
         debug_default = self.manager.get("debug", "enabled", "False").lower() == "true"
         self.debug_check = QCheckBox("Enable Debug")
@@ -300,15 +283,7 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------
     def _save(self) -> None:
         self.manager.set("appearance", "mode", self.mode_combo.currentText())
-        self.manager.set("paths", "data_folder", self.data_edit.text())
-        self.manager.set("paths", "output_folder", self.out_edit.text())
-        self.manager.set("gui", "main_size", self.main_size_edit.text())
-        self.manager.set("gui", "stats_size", self.stats_size_edit.text())
-        self.manager.set("gui", "resizer_size", self.resize_size_edit.text())
-        self.manager.set("gui", "advanced_size", self.adv_size_edit.text())
         self.manager.set("stim", "channel", self.stim_edit.text())
-        self.manager.set("events", "labels", self.cond_edit.text())
-        self.manager.set("events", "ids", self.id_edit.text())
         self.manager.set("analysis", "base_freq", self.base_freq_edit.text())
         self.manager.set("analysis", "oddball_freq", self.oddball_freq_edit.text())
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
