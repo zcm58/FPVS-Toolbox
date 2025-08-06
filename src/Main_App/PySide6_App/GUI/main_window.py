@@ -142,16 +142,16 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         font.setWeight(QFont.DemiBold)
         self.lbl_currentProject.setFont(font)
 
-        # Style the container so the full bar shares the same gray background
+        # Style the container so the full bar shares a charcoal background
         container = self.lbl_currentProject.parentWidget()
         if container is not None:
             container.setStyleSheet(
-                "background-color: #E8E8E8; border-bottom: 1px solid #CCCCCC;"
+                "background-color: #2E2E2E; border-bottom: 1px solid #CCCCCC;"
             )
 
-        # Make label background transparent to inherit container color
+        # Make label text visible over the dark background
         self.lbl_currentProject.setStyleSheet(
-            "background: transparent; padding: 6px 12px;"
+            "background: transparent;" "color: white;" "padding: 6px 12px;"
         )
 
         # Force progress bar to render empty at full height
