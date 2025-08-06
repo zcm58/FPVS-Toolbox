@@ -54,10 +54,12 @@ class AdvancedAveragingWindow(
 
         self._build_ui()
 
+
         # Increase window height for extra spacing
         w = self.size().width()
         h = self.size().height()
-        self.resize(w, h + 100)
+        self.resize(w + 50, h + 100)
+
 
         # Button object names and shared style tweaks
         self.btn_start.setObjectName("btnStart")
