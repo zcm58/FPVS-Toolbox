@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QRadioButton,
     QButtonGroup,
-    QScrollArea,
     QLabel,
     QMessageBox,
 )
@@ -91,37 +90,38 @@ class AdvancedAveragingWindow(
 
         # — Right Panel —
         right_v = QVBoxLayout()
-        cfg_gb = QGroupBox("Group Configuration")
-        map_gb = QGroupBox("Condition Mapping for Selected Group")
-        cfg_gb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        map_gb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        right_v.addWidget(cfg_gb)
-
-        mapping_layout = QVBoxLayout(map_gb)
-        self.mapping_area = QScrollArea()
-        self.mapping_area.setWidgetResizable(True)
-        empty_container = QWidget()
-        empty_container.setLayout(QVBoxLayout())
-        self.mapping_area.setWidget(empty_container)
-        mapping_layout.addWidget(self.mapping_area)
+        info_label = QLabel(
+            "This tool should be used if you have multiple FPVS Conditions "
+            "that are expected to elicit a similar neural response in the participant. "
+            "This tool will generate a pooled average of each oddball epoch from all "
+            "of the conditions that you choose to average together BEFORE calculating "
+            "FFT, SNR, BCA, or Z-scores."
+        )
+        info_label.setWordWrap(True)
+        info_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        right_v.addWidget(info_label)
 
         avg_label = QLabel("Averaging Method:")
-        mapping_layout.addWidget(avg_label)
+        right_v.addWidget(avg_label)
         radio_h = QHBoxLayout()
         self.radio_pool = QRadioButton("Pool Trials")
         self.radio_avgofavg = QRadioButton("Average of Averages")
         self.radio_pool.setChecked(True)
+        self.radio_pool.setToolTip(
+            "Combine all epochs from selected files and average them together."
+        )
+        self.radio_avgofavg.setToolTip(
+            "Average each file separately, then average the results together."
+        )
         radio_h.addWidget(self.radio_pool)
         radio_h.addWidget(self.radio_avgofavg)
-        mapping_layout.addLayout(radio_h)
+        right_v.addLayout(radio_h)
 
         method_group = QButtonGroup(self)
         method_group.addButton(self.radio_pool)
         method_group.addButton(self.radio_avgofavg)
-
-        self.btn_save_cfg = QPushButton("Save Group Configuration")
-        mapping_layout.addWidget(self.btn_save_cfg)
-        right_v.addWidget(map_gb)
 
         main_h.addLayout(left_v)
         main_h.addLayout(right_v)
@@ -156,7 +156,6 @@ class AdvancedAveragingWindow(
         self.btn_new.clicked.connect(self.create_new_group)
         self.btn_rename.clicked.connect(self.rename_selected_group)
         self.btn_del.clicked.connect(self.delete_selected_group)
-        self.btn_save_cfg.clicked.connect(self.save_groups_to_file)
         self.btn_start.clicked.connect(self.start_advanced_processing)
         self.btn_stop.clicked.connect(self.stop_processing)
         self.btn_clear.clicked.connect(self.clear_log)
@@ -191,6 +190,10 @@ class AdvancedAveragingWindow(
     def clear_log(self) -> None:
         """Clear all text from the log widget."""
         self.log_edit.clear()
+
+    def save_groups_to_file(self) -> None:
+        """Stubbed out: configuration saving is disabled in this UI."""
+        return
 
     def _auto_load_source_files(self) -> None:
         """Scan project_input_folder for .bdf files and populate the list."""
