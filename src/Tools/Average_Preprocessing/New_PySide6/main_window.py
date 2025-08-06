@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QVBoxLayout,
     QPlainTextEdit,
-    QSizePolicy,
     QRadioButton,
     QButtonGroup,
     QLabel,
@@ -56,10 +55,23 @@ class AdvancedAveragingWindow(
 
     def _build_ui(self):
         central = QWidget()
-        main_h = QHBoxLayout()
+        main_v = QVBoxLayout(central)
 
-        # — Left Panel —
-        left_v = QVBoxLayout()
+        # Row 1: Explanatory Box
+        info_box = QGroupBox()
+        info_layout = QVBoxLayout(info_box)
+        info_label = QLabel(
+            "This tool should be used if you have multiple FPVS Conditions "
+            "that are expected to elicit a similar neural response in the participant. "
+            "This tool will generate a pooled average of each oddball epoch from all "
+            "of the conditions that you choose to average together BEFORE calculating "
+            "FFT, SNR, BCA, or Z-scores."
+        )
+        info_label.setWordWrap(True)
+        info_layout.addWidget(info_label)
+        main_v.addWidget(info_box)
+
+        # Row 2: Side-by-Side Panels
         src_gb = QGroupBox("Source EEG Files")
         src_l = QVBoxLayout(src_gb)
         self.source_files_listbox = QListWidget()
@@ -85,27 +97,12 @@ class AdvancedAveragingWindow(
         grp_l.addWidget(self.groups_listbox)
         grp_l.addLayout(btn_h2)
 
-        left_v.addWidget(src_gb)
-        left_v.addWidget(grp_gb)
+        row2 = QHBoxLayout()
+        row2.addWidget(src_gb)
+        row2.addWidget(grp_gb)
+        main_v.addLayout(row2)
 
-        # — Right Panel —
-        right_v = QVBoxLayout()
-        info_label = QLabel(
-            "This tool should be used if you have multiple FPVS Conditions "
-            "that are expected to elicit a similar neural response in the participant. "
-            "This tool will generate a pooled average of each oddball epoch from all "
-            "of the conditions that you choose to average together BEFORE calculating "
-            "FFT, SNR, BCA, or Z-scores."
-        )
-        info_label.setWordWrap(True)
-        info_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        right_v.addWidget(info_label)
-
-        avg_label = QLabel("Averaging Method:")
-        right_v.addWidget(avg_label)
-        radio_h = QHBoxLayout()
+        # Row 3: Averaging Method Radios
         self.radio_pool = QRadioButton("Pool Trials")
         self.radio_avgofavg = QRadioButton("Average of Averages")
         self.radio_pool.setChecked(True)
@@ -115,26 +112,22 @@ class AdvancedAveragingWindow(
         self.radio_avgofavg.setToolTip(
             "Average each file separately, then average the results together."
         )
+        radio_h = QHBoxLayout()
+        radio_h.addStretch(1)
         radio_h.addWidget(self.radio_pool)
         radio_h.addWidget(self.radio_avgofavg)
-        right_v.addLayout(radio_h)
+        radio_h.addStretch(1)
+        main_v.addLayout(radio_h)
 
         method_group = QButtonGroup(self)
         method_group.addButton(self.radio_pool)
         method_group.addButton(self.radio_avgofavg)
 
-        main_h.addLayout(left_v)
-        main_h.addLayout(right_v)
-
-        master_v = QVBoxLayout()
-        master_v.addLayout(main_h)
-
-        # — Log pane —
+        # Row 4: Log + Buttons
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
-        master_v.addWidget(self.log_edit)
+        main_v.addWidget(self.log_edit)
 
-        # — Bottom control buttons —
         btn_controls = QHBoxLayout()
         self.btn_start = QPushButton("Start Advanced Processing")
         self.btn_stop = QPushButton("Stop")
@@ -145,9 +138,9 @@ class AdvancedAveragingWindow(
         self.btn_close = QPushButton("Close")
         btn_controls.addWidget(self.btn_clear)
         btn_controls.addWidget(self.btn_close)
-        master_v.addLayout(btn_controls)
+        main_v.addLayout(btn_controls)
 
-        central.setLayout(master_v)
+        central.setLayout(main_v)
         self.setCentralWidget(central)
 
         # Connect button signals to the inherited legacy mixin methods
