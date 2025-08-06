@@ -51,6 +51,38 @@ class AdvancedAveragingWindow(
         self.worker = None
 
         self._build_ui()
+        self.btn_start.setObjectName("btnStart")
+        self.setStyleSheet(
+            """
+  /* 1) Window & GroupBoxes */
+  QMainWindow {
+    background-color: #F2F2F2;      /* light gray canvas */
+  }
+  QGroupBox {
+    background-color: #F7F7F7;      /* slightly lighter panels */
+    border: 1px solid #CCCCCC;
+    border-radius: 4px;
+  }
+
+  /* 2) All bottom-row buttons slightly taller */
+  QPushButton {
+    min-height: 28px;
+    font-size: 9pt;
+  }
+
+  /* 3) Soft-green accent for the Start button */
+  QPushButton#btnStart {
+    background-color: #A8D5BA;      /* soft mint green */
+    color: #1F3D2E;                 /* dark contrast text */
+    border: none;
+    border-radius: 6px;
+    padding: 10px 24px;             /* vertical 10px, horizontal 24px */
+  }
+  QPushButton#btnStart:hover {
+    background-color: #92C9A3;      /* slightly darker on hover */
+  }
+  """
+        )
         self._auto_load_source_files()
 
     def _build_ui(self):
