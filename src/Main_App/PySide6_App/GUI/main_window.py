@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 from PySide6.QtCore import QObject, Signal, QTimer, QPropertyAnimation, QRect
+from PySide6.QtGui import QFont
 import tkinter.messagebox as tk_messagebox
 from PySide6.QtWidgets import QMessageBox
 from Tools.Stats import StatsWindow as PysideStatsWindow
@@ -131,6 +132,25 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self.setMinimumSize(1024, 768)
         self.currentProject: Project | None = None
         init_ui(self)
+
+        # Make sidebar charcoal without editing sidebar.py
+        self.sidebar.setStyleSheet("background-color: #2E2E2E;")
+
+        # Restyle "Current Project" label
+        font = self.lbl_currentProject.font()
+        font.setPointSize(font.pointSize() + 2)
+        font.setWeight(QFont.DemiBold)
+        self.lbl_currentProject.setFont(font)
+        self.lbl_currentProject.setStyleSheet(
+            "background-color: #E8E8E8; border-bottom: 1px solid #CCCCCC; padding: 6px 12px;"
+        )
+
+        # Force progress bar to render empty at full height
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setMinimumHeight(self.btn_start.minimumHeight())
+
         # Prevent spurious finalize/error dialogs until a run starts
         self._run_active = False
         # Support legacy .set() calls from processing_utils
