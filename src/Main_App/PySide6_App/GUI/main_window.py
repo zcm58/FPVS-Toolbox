@@ -9,6 +9,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from types import MethodType, SimpleNamespace
+from PySide6.QtCore import QEasingCurve
 
 import tkinter.messagebox as tk_messagebox
 from PySide6.QtCore import QObject, QRect, QPropertyAnimation, QTimer, Signal
@@ -427,23 +428,26 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     # ------------------------------------------------------------------
     # Project ready -> slide in main page
     def _on_project_ready(self) -> None:
-        """Switch to the main page with a slide-in animation."""
+        """Go to page 1 and slide the content in from the right without covering the sidebar."""
         if not getattr(self, "currentProject", None):
             return
+
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
-        container = getattr(self, "page1_container", getattr(self, "homeWidget", None))
-        if not container:
+
+        wrapper = getattr(self, "page1_wrapper", None)
+        spacer = getattr(self, "slideSpacer", None)
+        if not wrapper or not spacer:
             return
-        start = QRect(self.width(), 0, self.stacked.width(), self.stacked.height())
-        end = QRect(0, 0, self.stacked.width(), self.stacked.height())
-        container.setGeometry(start)
-        anim = QPropertyAnimation(container, b"geometry")
-        anim.setStartValue(start)
-        anim.setEndValue(end)
-        anim.setDuration(400)
-        anim.start()
-        self._page1_anim = anim
+
+        if hasattr(self, "_page1_anim") and self._page1_anim is not None:
+            try:
+                self._page1_anim.stop()
+            except Exception:
+                pass
+            self._page1_anim = None
+
+
 
     # ------------------------------------------------------------------
     # Progress animation adapter

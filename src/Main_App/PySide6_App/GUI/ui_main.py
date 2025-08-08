@@ -1,6 +1,6 @@
-"""UI initialization extracted from main_window.py."""
+# ui_main.py
+""""UI initialization extracted from main_window.py."""
 from __future__ import annotations
-
 
 from PySide6.QtWidgets import (
     QToolBar,
@@ -17,15 +17,11 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QPushButton,
     QTextEdit,
-    QStatusBar,
     QProgressBar,
     QSizePolicy,
-    QDockWidget,
 )
 from PySide6.QtCore import Qt, QPropertyAnimation
 from PySide6.QtGui import QFont
-
-
 
 from .menu_bar import build_menu_bar
 
@@ -45,25 +41,11 @@ def init_ui(self) -> None:
     self.lbl_debug.setVisible(self.settings.debug_enabled())
     toolbar.addWidget(self.lbl_debug)
 
-    # Build sidebar placeholder
-    self.sidebar = QWidget(self)
-
-    # Stacked central widget
+    # Central stack
     self.stacked = QStackedWidget(self)
     self.setCentralWidget(self.stacked)
 
-    # Sidebar dock (collapsed by default)
-    self.sidebarDock = QDockWidget("Navigation", self)
-    self.sidebarDock.setAllowedAreas(Qt.LeftDockWidgetArea)
-    self.sidebarDock.setFeatures(
-        QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable
-    )
-    self.sidebarDock.setWidget(self.sidebar)
-    self.addDockWidget(Qt.LeftDockWidgetArea, self.sidebarDock)
-    self.sidebarDock.setMaximumWidth(0)
-    self.sidebarDock.hide()
-
-    # ----- Page 0: Landing -----
+    # ===== Page 0: Landing =====
     landing = QWidget(self.stacked)
     lay0 = QVBoxLayout(landing)
     lay0.setContentsMargins(40, 40, 40, 40)
@@ -82,13 +64,9 @@ def init_ui(self) -> None:
     for btn in (self.btn_create_project, self.btn_open_project):
         btn.setFont(button_font)
         btn.setFixedHeight(60)
-        btn.setMinimumWidth(200)  # at least 200 px, but can grow
+        btn.setMinimumWidth(200)
         btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        btn.setStyleSheet("""
-            QPushButton {
-                padding: 12px 24px;
-            }
-        """)
+        btn.setStyleSheet("QPushButton { padding: 12px 24px; }")
 
     btn_row = QHBoxLayout()
     btn_row.setSpacing(20)
@@ -103,23 +81,51 @@ def init_ui(self) -> None:
 
     self.stacked.addWidget(landing)
 
-    # ----- Page 1: Main UI -----
-    container = QWidget(self.stacked)
+    # ===== Page 1: Main UI =====
+    # Layout: [ sidebar | (slideSpacer | content) ]
+    page1 = QWidget(self.stacked)
+    page1_h = QHBoxLayout(page1)
+    page1_h.setContentsMargins(0, 0, 0, 0)
+    page1_h.setSpacing(0)
+
+    # Left: permanent sidebar placeholder (populated by sidebar.init_sidebar)
+    self.sidebar = QWidget(page1)
+    self.sidebar.setObjectName("sidebar")
+    self.sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+    self.sidebar.setMinimumWidth(200)
+    self.sidebar.setContentsMargins(0, 0, 0, 0)
+    page1_h.addWidget(self.sidebar)
+
+    # Right: wrapper for slide-in animation
+    self.content_wrapper = QWidget(page1)
+    wrapper_h = QHBoxLayout(self.content_wrapper)
+    wrapper_h.setContentsMargins(0, 0, 0, 0)
+    wrapper_h.setSpacing(0)
+
+    # Spacer we animate (shrinks from full width -> 0)
+    self.slideSpacer = QWidget(self.content_wrapper)
+    self.slideSpacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    self.slideSpacer.setMaximumWidth(0)  # will be set at runtime before anim
+    wrapper_h.addWidget(self.slideSpacer)
+
+    # Actual content panel
+    container = QWidget(self.content_wrapper)
+    container.setObjectName("MainContent")
     main_layout = QVBoxLayout(container)
     main_layout.setContentsMargins(10, 10, 10, 10)
     main_layout.setSpacing(12)
 
+    # Header bar (styled in main_window via #HeaderBar)
     header = QWidget(container)
-    header.setStyleSheet("background-color: #2A2A2A; padding: 8px;")
+    header.setObjectName("HeaderBar")
     h_lay = QHBoxLayout(header)
     h_lay.setContentsMargins(0, 0, 0, 0)
     self.lbl_currentProject = QLabel("Current Project: None", header)
-    self.lbl_currentProject.setStyleSheet("color: white; font-weight: bold;")
     h_lay.addWidget(self.lbl_currentProject)
     h_lay.addStretch(1)
     main_layout.addWidget(header)
 
-    # Processing Options group
+    # Processing Options
     grp_proc = QGroupBox("Processing Options", container)
     gl = QGridLayout(grp_proc)
     gl.addWidget(QLabel("Mode:"), 0, 0)
@@ -143,26 +149,19 @@ def init_ui(self) -> None:
 
     # Load saved processing options
     mode = self.settings.get("processing", "mode", "batch").lower()
-    if mode == "batch":
-        self.rb_batch.setChecked(True)
-    else:
-        self.rb_single.setChecked(True)
-
-    loreta_enabled = (
+    (self.rb_batch if mode == "batch" else self.rb_single).setChecked(True)
+    self.cb_loreta.setChecked(
         self.settings.get("processing", "run_loreta", "False").lower() == "true"
     )
-    self.cb_loreta.setChecked(loreta_enabled)
 
-    # Preprocessing parameters have moved to Settings. Show placeholder
+    # Preprocessing placeholder
     placeholder = QLabel("⚙️ Configure preprocessing in Settings", container)
     placeholder.setAlignment(Qt.AlignCenter)
     placeholder.setStyleSheet("color: #CCCCCC; font-style: italic;")
     main_layout.addWidget(placeholder)
 
     # Event Map group
-    grp_event = QGroupBox(
-        "Event Map (Condition Label → Numerical ID)", container
-    )
+    grp_event = QGroupBox("Event Map (Condition Label → Numerical ID)", container)
     vlay = QVBoxLayout(grp_event)
     scroll = QScrollArea(grp_event)
     scroll.setWidgetResizable(True)
@@ -179,20 +178,17 @@ def init_ui(self) -> None:
     vlay.addLayout(btns)
     main_layout.addWidget(grp_event)
 
-    # --- Start + Progress Row ---
+    # Start + Progress Row
     action_row = QHBoxLayout()
     action_row.setSpacing(16)
 
-    # Create widgets
     self.btn_start = QPushButton(container)
     self.progress_bar = QProgressBar(container)
 
-    # 1) Enlarge and fix the button size
     self.btn_start.setText("Start Processing")
     self.btn_start.setMinimumSize(150, 36)
     self.btn_start.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-    # 2) Center text in the progress bar and allow it to expand
     self.progress_bar.setRange(0, 100)
     self.progress_bar.setValue(0)
     self.progress_bar.setTextVisible(True)
@@ -201,21 +197,16 @@ def init_ui(self) -> None:
     self.progress_bar.setFixedHeight(self.btn_start.sizeHint().height())
     self.progress_bar.setStyleSheet(
         """
-        QProgressBar {
-          min-height: 36px;
-          text-align: center;
-        }
-        QProgressBar::chunk {
-          background-color: #0BBF00;
-        }
+        QProgressBar { min-height: 36px; text-align: center; }
+        QProgressBar::chunk { background-color: #0BBF00; }
         """
     )
 
-    # 3) Add with stretch so the bar fills leftover space
     action_row.addWidget(self.btn_start)
     action_row.addWidget(self.progress_bar, 1)
-
     main_layout.addLayout(action_row)
+
+    # Progress animation hook (unchanged)
     self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
     self._progress_anim.setDuration(200)
     self._progress_anim.valueChanged.connect(self.progress_bar.setValue)
@@ -237,17 +228,21 @@ def init_ui(self) -> None:
     lay_log.addWidget(self.text_log)
     main_layout.addWidget(grp_log)
 
-    # Finalize
-    # Provide a reference for animations
+    # Finish RIGHT side
+    wrapper_h.addWidget(container, 1)
+    page1_h.addWidget(self.content_wrapper, 1)
+
+    # Expose references used elsewhere
     self.page1_container = container
+    self.page1_right = container          # for older code paths
+    self.page1_wrapper = self.content_wrapper  # used by the new slide-in
     self.homeWidget = container
-    self.stacked.addWidget(container)
-    self.setStatusBar(QStatusBar(self))
 
-    # Connect toolbar buttons to methods
+    self.stacked.addWidget(page1)
 
+    # Wire buttons
     self.btn_add_row.clicked.connect(lambda: self.add_event_row())
     self.btn_detect.clicked.connect(self.detect_trigger_ids)
 
-    # Sync the select button label with the current mode
+    # Sync select button label
     self._update_select_button_text()
