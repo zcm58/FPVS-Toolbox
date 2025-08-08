@@ -85,11 +85,13 @@ def init_ui(self) -> None:
     # ===== Page 1: Main UI =====
     # Row layout: [sidebar] | [header + content]  --> header aligns with sidebar top
     page1 = QWidget(self.stacked)
+    page1.setObjectName("Page1")
+    page1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     row = QHBoxLayout(page1)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(0)
 
-    # Left: sidebar placeholder (populated by sidebar.init_sidebar)
+    # Sidebar placeholder (populated by sidebar.init_sidebar)
     self.sidebar = QWidget(page1)
     self.sidebar.setObjectName("sidebar")
     self.sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
@@ -99,11 +101,12 @@ def init_ui(self) -> None:
 
     # Right: vertical stack -> header on top, content below
     right = QWidget(page1)
+    right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     right_v = QVBoxLayout(right)
     right_v.setContentsMargins(0, 0, 0, 0)
     right_v.setSpacing(0)
 
-    # Header bar component at the very top (aligns with sidebar)
+    # Header bar at the very top (centered text)
     header = HeaderBar("Current Project: None", right)
     # Keep reference for external updates
     self.lbl_currentProject = header.titleLabel
@@ -112,13 +115,69 @@ def init_ui(self) -> None:
     # Content container under the header
     container = QWidget(right)
     container.setObjectName("MainContent")
+    container.setAttribute(Qt.WA_StyledBackground, True)  # ensure background paints
+    container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     main_layout = QVBoxLayout(container)
-    main_layout.setContentsMargins(10, 10, 10, 10)
+    # Consistent gutters and cushion under the header underline
+    main_layout.setContentsMargins(16, 16, 16, 16)
     main_layout.setSpacing(12)
     right_v.addWidget(container, 1)
 
     # Add the right stack to the row
     row.addWidget(right, 1)
+
+    # Gentle styling for the page (safe and minimal)
+    page1.setStyleSheet("""
+        /* Content background + cushion under header underline */
+        #MainContent {
+            background: #F8F8F8;
+            padding-top: 8px;
+        }
+
+        /* Group boxes: NO negative top offset (prevents clipping) */
+        QGroupBox {
+            border: 1px solid #CFCFCF;
+            border-radius: 8px;
+            margin-top: 18px;              /* enough room for the title chip on all DPIs */
+            background: #FFFFFF;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            left: 12px;
+            padding: 0 6px;
+            color: #333333;
+            background: #F8F8F8;           /* mask the border behind the text */
+            /* no 'top: -Npx' — avoids title being clipped */
+        }
+
+        /* Scroll area: remove gray seams around rounded inner panel */
+        QScrollArea {
+            background: transparent;
+            border: none;
+        }
+        QScrollArea > QWidget > QWidget {
+            background: transparent;
+        }
+
+        /* Inputs */
+        QLineEdit, QComboBox, QProgressBar {
+            border: 1px solid #C9C9C9;
+            border-radius: 6px;
+            padding: 6px;
+            background: #FFFFFF;
+        }
+
+        /* Buttons: Windows-blue hover/press accents */
+        QPushButton {
+            border: 1px solid #C9C9C9;
+            border-radius: 8px;
+            padding: 8px 14px;
+            background: #FFFFFF;
+        }
+        QPushButton:enabled:hover  { background: rgba(0,120,212,0.08); }  /* #0078D4 */
+        QPushButton:enabled:pressed{ background: rgba(0,120,212,0.16); }
+    """)
 
     # --- Content inside `container` ---
     # Processing Options
@@ -153,7 +212,7 @@ def init_ui(self) -> None:
     # Preprocessing placeholder
     placeholder = QLabel("⚙️ Configure preprocessing in Settings", container)
     placeholder.setAlignment(Qt.AlignCenter)
-    placeholder.setStyleSheet("color: #CCCCCC; font-style: italic;")
+    placeholder.setStyleSheet("color: #888888; font-style: italic;")
     main_layout.addWidget(placeholder)
 
     # Event Map group
@@ -174,6 +233,9 @@ def init_ui(self) -> None:
     vlay.addLayout(btns)
     main_layout.addWidget(grp_event)
 
+    # Optional: a tiny breather before the action row
+    main_layout.addSpacing(4)
+
     # Start + Progress Row
     action_row = QHBoxLayout()
     action_row.setSpacing(16)
@@ -185,16 +247,21 @@ def init_ui(self) -> None:
     self.btn_start.setMinimumSize(150, 36)
     self.btn_start.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
+    # Progress bar setup (keep green chunk)
     self.progress_bar.setRange(0, 100)
     self.progress_bar.setValue(0)
     self.progress_bar.setTextVisible(True)
     self.progress_bar.setFormat("%p%")
     self.progress_bar.setAlignment(Qt.AlignCenter)
-    self.progress_bar.setFixedHeight(self.btn_start.sizeHint().height())
-    # Keep progress green
+
+    # Lock both to the same height (matches across font DPI changes)
+    btn_h = max(36, self.btn_start.sizeHint().height())
+    self.btn_start.setFixedHeight(btn_h)
+    self.progress_bar.setFixedHeight(btn_h)
+
     self.progress_bar.setStyleSheet(
         """
-        QProgressBar { min-height: 36px; text-align: center; }
+        QProgressBar { text-align: center; }
         QProgressBar::chunk { background-color: #0BBF00; }
         """
     )
