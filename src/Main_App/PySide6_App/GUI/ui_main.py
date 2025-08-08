@@ -24,6 +24,7 @@ from PySide6.QtCore import Qt, QPropertyAnimation
 from PySide6.QtGui import QFont
 
 from .menu_bar import build_menu_bar
+from .header_bar import HeaderBar  # reusable header component
 
 
 def init_ui(self) -> None:
@@ -82,49 +83,44 @@ def init_ui(self) -> None:
     self.stacked.addWidget(landing)
 
     # ===== Page 1: Main UI =====
-    # Layout: [ sidebar | (slideSpacer | content) ]
+    # Row layout: [sidebar] | [header + content]  --> header aligns with sidebar top
     page1 = QWidget(self.stacked)
-    page1_h = QHBoxLayout(page1)
-    page1_h.setContentsMargins(0, 0, 0, 0)
-    page1_h.setSpacing(0)
+    row = QHBoxLayout(page1)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(0)
 
-    # Left: permanent sidebar placeholder (populated by sidebar.init_sidebar)
+    # Left: sidebar placeholder (populated by sidebar.init_sidebar)
     self.sidebar = QWidget(page1)
     self.sidebar.setObjectName("sidebar")
     self.sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
     self.sidebar.setMinimumWidth(200)
     self.sidebar.setContentsMargins(0, 0, 0, 0)
-    page1_h.addWidget(self.sidebar)
+    row.addWidget(self.sidebar)
 
-    # Right: wrapper for slide-in animation
-    self.content_wrapper = QWidget(page1)
-    wrapper_h = QHBoxLayout(self.content_wrapper)
-    wrapper_h.setContentsMargins(0, 0, 0, 0)
-    wrapper_h.setSpacing(0)
+    # Right: vertical stack -> header on top, content below
+    right = QWidget(page1)
+    right_v = QVBoxLayout(right)
+    right_v.setContentsMargins(0, 0, 0, 0)
+    right_v.setSpacing(0)
 
-    # Spacer we animate (shrinks from full width -> 0)
-    self.slideSpacer = QWidget(self.content_wrapper)
-    self.slideSpacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    self.slideSpacer.setMaximumWidth(0)  # will be set at runtime before anim
-    wrapper_h.addWidget(self.slideSpacer)
+    # Header bar component at the very top (aligns with sidebar)
+    header = HeaderBar("Current Project: None", right)
+    # Keep reference for external updates
+    self.lbl_currentProject = header.titleLabel
+    right_v.addWidget(header)
 
-    # Actual content panel
-    container = QWidget(self.content_wrapper)
+    # Content container under the header
+    container = QWidget(right)
     container.setObjectName("MainContent")
     main_layout = QVBoxLayout(container)
     main_layout.setContentsMargins(10, 10, 10, 10)
     main_layout.setSpacing(12)
+    right_v.addWidget(container, 1)
 
-    # Header bar (styled in main_window via #HeaderBar)
-    header = QWidget(container)
-    header.setObjectName("HeaderBar")
-    h_lay = QHBoxLayout(header)
-    h_lay.setContentsMargins(0, 0, 0, 0)
-    self.lbl_currentProject = QLabel("Current Project: None", header)
-    h_lay.addWidget(self.lbl_currentProject)
-    h_lay.addStretch(1)
-    main_layout.addWidget(header)
+    # Add the right stack to the row
+    row.addWidget(right, 1)
 
+    # --- Content inside `container` ---
     # Processing Options
     grp_proc = QGroupBox("Processing Options", container)
     gl = QGridLayout(grp_proc)
@@ -195,6 +191,7 @@ def init_ui(self) -> None:
     self.progress_bar.setFormat("%p%")
     self.progress_bar.setAlignment(Qt.AlignCenter)
     self.progress_bar.setFixedHeight(self.btn_start.sizeHint().height())
+    # Keep progress green
     self.progress_bar.setStyleSheet(
         """
         QProgressBar { min-height: 36px; text-align: center; }
@@ -228,14 +225,9 @@ def init_ui(self) -> None:
     lay_log.addWidget(self.text_log)
     main_layout.addWidget(grp_log)
 
-    # Finish RIGHT side
-    wrapper_h.addWidget(container, 1)
-    page1_h.addWidget(self.content_wrapper, 1)
-
-    # Expose references used elsewhere
+    # Finalize
     self.page1_container = container
-    self.page1_right = container          # for older code paths
-    self.page1_wrapper = self.content_wrapper  # used by the new slide-in
+    self.page1_right = container
     self.homeWidget = container
 
     self.stacked.addWidget(page1)
