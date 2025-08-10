@@ -567,9 +567,22 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             )
 
         # Provide legacy post_process with a .get() for the Excel output folder
-        excel_dir = project.project_root / project.subfolders["excel"]
-        self.save_folder_path = SimpleNamespace(get=lambda: str(excel_dir))
-        self.log(f"Save folder path set: {self.save_folder_path.get()}")
+        excel_subfolder = project.subfolders.get("excel")
+        if excel_subfolder:
+            excel_dir = project.project_root / excel_subfolder
+            self.save_folder_path = SimpleNamespace(get=lambda: str(excel_dir))
+            self.log(f"Save folder path set: {self.save_folder_path.get()}")
+        else:
+            QMessageBox.warning(
+                self,
+                "Missing Excel Folder",
+                "No 'excel' subfolder configured. Please update the project settings.",
+            )
+            self.log(
+                "Project missing 'excel' subfolder; save folder path not set.",
+                level=logging.WARNING,
+            )
+            self.save_folder_path = None
 
         def make_entry(value: str):
             edit = QLineEdit(str(value))
