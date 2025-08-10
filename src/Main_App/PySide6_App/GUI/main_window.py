@@ -222,7 +222,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
         self._processing_timer = QTimer(self)
         self._processing_timer.timeout.connect(self._periodic_queue_check)
-        self._processing_timer.start(50)  # will be gated by _run_active
+        # The timer starts when a processing run begins and stops in _finalize_processing
 
         # Allow legacy processing_utils to call post_process via a safe wrapper
         self.post_process = MethodType(MainWindow._export_with_post_process, self)
@@ -295,8 +295,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     def _finalize_processing(self, *args, **kwargs) -> None:
         """Reset run state before delegating to the mixin finalization."""
         self._run_active = False
-        if self._processing_timer.isActive():
-            self._processing_timer.stop()
+        self._processing_timer.stop()
         super()._finalize_processing(*args, **kwargs)
 
     # ------------------------------------------------------------------
