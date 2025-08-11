@@ -1,4 +1,4 @@
-# main_window.py
+# main_window.py (rewritten)
 from __future__ import annotations
 
 import logging
@@ -6,13 +6,14 @@ import os
 import queue
 import subprocess
 import sys
+import re
 from datetime import datetime
 from pathlib import Path
 from types import MethodType, SimpleNamespace
-from PySide6.QtCore import QEasingCurve
 
+# Qt / PySide6
 import tkinter.messagebox as tk_messagebox
-from PySide6.QtCore import QObject, QRect, QPropertyAnimation, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QFont, QIntValidator
 from PySide6.QtWidgets import (
     QApplication,
@@ -26,10 +27,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+# App imports
+import config
 from Main_App.Legacy_App.file_selection import FileSelectionMixin
 from Main_App.Legacy_App.processing_utils import ProcessingMixin
 from Main_App.Legacy_App.settings_manager import SettingsManager
-from Main_App.Legacy_App.validation_mixins import ValidationMixin
 from Main_App.PySide6_App.Backend import Project
 from Main_App.PySide6_App.Backend.processing_controller import _animate_progress_to
 from Main_App.PySide6_App.Backend.project_manager import (
@@ -59,6 +61,7 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------------
 # Canonical Qt messagebox adapters (used for both tk and legacy debug utils)
 # ----------------------------------------------------------------------
+
 def _qt_showerror(title: str, message: str, **options) -> None:
     parent = QApplication.activeWindow()
     QMessageBox.critical(parent, title, message)
@@ -116,9 +119,22 @@ class _QtEntryAdapter:
         self._edit.setFocus()
 
 
-class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMixin):
-    """Main application window implemented with PySide6."""
+class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
+    """Main application window implemented with PySide6.
 
+    Notes
+    -----
+    * We **do not** inherit the legacy ValidationMixin anymore.
+      ProcessingMixin expects ``_validate_inputs()``; we provide a
+      modern implementation that collects inputs from the current
+      Project + GUI and sets ``self.validated_params``.
+    * We also wrap legacy post_process with a log silencer to suppress
+      extremely verbose SNR-per-bin messages unless Debug mode is on.
+    * Queue polling uses a QTimer to keep the GUI responsive while the
+      worker thread runs.
+    """
+
+    # -------------------------- lifecycle --------------------------- #
     def __init__(self) -> None:
         super().__init__()
         update_manager.cleanup_old_executable()
@@ -136,34 +152,12 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         # Build UI
         init_ui(self)
 
-        # Sidebar appearance
-        if hasattr(self, "sidebar"):
-            self.sidebar.setStyleSheet("background-color: #2E2E2E;")
-
         # Style header bar via objectName (preferred)
-        # Requires: the header container in ui_main sets setObjectName("HeaderBar")
-        self.setStyleSheet(
-            """
-#HeaderBar { background-color: #2E2E2E; border-bottom: 1px solid #CCCCCC; }
-#HeaderBar QLabel { color: white; padding: 6px 12px; background: transparent; }
-"""
-        )
-        # Fallback for older UI trees where the objectName isn't set yet
         if hasattr(self, "lbl_currentProject"):
             font = self.lbl_currentProject.font()
             font.setPointSize(font.pointSize() + 2)
             font.setWeight(QFont.DemiBold)
             self.lbl_currentProject.setFont(font)
-            fallback_parent = self.lbl_currentProject.parentWidget()
-            if fallback_parent is not None and not getattr(
-                fallback_parent, "objectName", lambda: ""
-            )() == "HeaderBar":
-                fallback_parent.setStyleSheet(
-                    "background-color: #2E2E2E; border-bottom: 1px solid #CCCCCC;"
-                )
-                self.lbl_currentProject.setStyleSheet(
-                    "background: transparent; color: white; padding: 6px 12px;"
-                )
 
         # Progress bar baseline config
         if hasattr(self, "progress_bar"):
@@ -202,10 +196,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}"
         )
 
-        # Legacy mixin compatibility ----------------------------
+        # Wire Start button
         if hasattr(self, "btn_start"):
             self.btn_start.clicked.connect(self.start_processing)
 
+        # Legacy compat fields used by ProcessingMixin
         self.gui_queue: queue.Queue = queue.Queue()
         self.processing_thread = None
         self.detection_thread = None
@@ -214,15 +209,17 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self._max_progress = 1
         self.busy = False
 
+        # Flags/vars the mixin expects
         self.run_loreta_var = SimpleNamespace(get=lambda: self.cb_loreta.isChecked())
         self.save_fif_var = SimpleNamespace(get=lambda: True)
         self.save_folder_path = SimpleNamespace(get=lambda: "", set=lambda v: None)
         self.file_mode = SimpleNamespace(get=lambda: "Batch")
         self.file_type = SimpleNamespace(set=lambda v: None)
 
+        # Timer to poll the worker queue → keeps GUI responsive
         self._processing_timer = QTimer(self)
         self._processing_timer.timeout.connect(self._periodic_queue_check)
-        # The timer starts when a processing run begins and stops in _finalize_processing
+        # Starts when a run begins; stops in _finalize_processing
 
         # Allow legacy processing_utils to call post_process via a safe wrapper
         self.post_process = MethodType(MainWindow._export_with_post_process, self)
@@ -234,8 +231,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         except Exception as e:
             self.log(f"Auto update check failed: {e}")
 
-    # ------------------------------------------------------------------
-    # Logging helpers
+    # ---------------------------- logging --------------------------- #
     def log(self, message: str, level: int = logging.INFO) -> None:
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         formatted = f"{ts} [GUI]: {message}"
@@ -243,43 +239,25 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             self.text_log.append(formatted)
         logger.log(level, message)
 
-    def debug(self, message: str) -> None:
-        if logger.isEnabledFor(logging.DEBUG):
-            self.log(f"[DEBUG] {message}", level=logging.DEBUG)
-
-    # ------------------------------------------------------------------
-    # Mode switching
-    def _on_mode_changed(self, mode: str) -> None:
-        self.settings.set("processing", "mode", mode)
-        self.settings.save()
-        self._update_select_button_text()
-
-    def _update_select_button_text(self) -> None:
-        if not hasattr(self, "btn_select_data"):
-            return
-        if getattr(self, "rb_batch", None) and self.rb_batch.isChecked():
-            self.btn_select_data.setText("Select Input Folder…")
-        else:
-            self.btn_select_data.setText("Select .BDF File…")
-
-    # Tkinter after shim
-    def after(self, ms: int, callback) -> int:
-        QTimer.singleShot(ms, callback)
-        return 0
-
-    def _set_controls_enabled(self, enabled: bool) -> None:
-        if hasattr(self, "btn_start"):
-            self.btn_start.setEnabled(enabled)
-
-    # ------------------------------------------------------------------
-    # Processing lifecycle
+    # -------------------------- processing -------------------------- #
     def start_processing(self) -> None:
-        """Begin a processing run and (re)activate queue checks."""
+        """Begin a processing run and (re)activate queue checks.
+
+        We keep the GUI responsive by polling the queue via QTimer while
+        the worker thread (in ProcessingMixin) does the heavy lifting.
+        """
+        # Make the run active & start the queue polling timer
         self._run_active = True
-        # Ensure the timer is ticking for this run (we stop it in finalize)
         if not self._processing_timer.isActive():
-            self._processing_timer.start(50)
+            self._processing_timer.start(50)  # ~20fps UI updates
+
+        # Reset SNR tick (used by throttled post-process logging)
+        self._snr_tick = 0
+
         try:
+            # The legacy mixin calls ``_validate_inputs()``. Provide our own
+            # modern validation implementation (below) that builds the params
+            # and ensures files/paths exist.
             super().start_processing()
         except Exception as e:  # pragma: no cover - GUI error path
             logger.exception(e)
@@ -287,19 +265,121 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             self._run_active = False
 
     def _periodic_queue_check(self) -> None:
-        """Process queue messages only when a run is active."""
         if not self._run_active:
             return
         super()._periodic_queue_check()
 
     def _finalize_processing(self, *args, **kwargs) -> None:
-        """Reset run state before delegating to the mixin finalization."""
         self._run_active = False
         self._processing_timer.stop()
         super()._finalize_processing(*args, **kwargs)
 
-    # ------------------------------------------------------------------
-    # Settings / updates
+    # The ProcessingMixin looks for this. We replace legacy ValidationMixin.
+    def _validate_inputs(self) -> bool:  # called inside ProcessingMixin.start_processing
+        """Modern input validation + parameter collection.
+
+        Returns
+        -------
+        bool
+            True if everything looks good and ``self.validated_params`` is set.
+        """
+        if not getattr(self, "currentProject", None):
+            QMessageBox.warning(self, "No Project", "Please open or create a project first.")
+            return False
+
+        # Build file list from project folder if needed
+        if not self.data_paths:
+            input_dir = Path(self.currentProject.input_folder)
+            if not input_dir.is_dir():
+                QMessageBox.critical(self, "Input Folder Missing", str(input_dir))
+                return False
+            bdf_files = sorted([str(p) for p in input_dir.glob("*.bdf")])
+            if not bdf_files:
+                QMessageBox.warning(self, "No Data", "No .bdf files found in the input folder.")
+                return False
+            self.data_paths = bdf_files
+            self.log(f"Processing: {len(self.data_paths)} file(s) selected.")
+
+        # Save/output folder from project
+        excel_sub = self.currentProject.subfolders.get("excel")
+        if not excel_sub:
+            QMessageBox.critical(self, "Project Error", "Excel subfolder not configured in project.json.")
+            return False
+        excel_dir = Path(self.currentProject.project_root) / excel_sub
+        excel_dir.mkdir(parents=True, exist_ok=True)
+        self.save_folder_path = SimpleNamespace(get=lambda: str(excel_dir))
+
+        # Build params from project + settings + event-map UI
+        params = self._build_validated_params()
+        if params is None:
+            return False
+        self.validated_params = params
+
+        # We show a concise summary (not noisy) so users see what's about to run
+        lp = params.get("low_pass")
+        hp = params.get("high_pass")
+        ds = params.get("downsample")
+        rz = params.get("reject_thresh")
+        r1, r2 = params.get("ref_channel1"), params.get("ref_channel2")
+        ep = (params.get("epoch_start"), params.get("epoch_end"))
+        stim = params.get("stim_channel")
+        self.log(
+            f"Preproc params → HPF={hp if hp is not None else 'DC'}Hz, "
+            f"LPF={lp if lp is not None else 'Nyq'}Hz, DS={ds}Hz, "
+            f"Zreject={rz}, ref=({r1},{r2}), epoch=[{ep[0]}, {ep[1]}], stim='{stim}', "
+            f"events={len(params.get('event_id_map', {}))}"
+        )
+        return True
+
+    def _build_validated_params(self) -> dict | None:
+        s = self.settings
+        p = self.currentProject.preprocessing
+
+        def _to_float(val, default=None):
+            try:
+                return float(val) if val is not None and str(val) != "" else default
+            except Exception:
+                return default
+
+        def _to_int(val, default=None):
+            try:
+                return int(val) if val is not None and str(val) != "" else default
+            except Exception:
+                return default
+
+        # Event map from UI rows → {label: int_id}
+        event_map: dict[str, int] = {}
+        for row in self.event_rows:
+            edits = row.findChildren(QLineEdit)
+            if len(edits) >= 2:
+                label = edits[0].text().strip()
+                ident = edits[1].text().strip()
+                if label and ident.isdigit():
+                    event_map[label] = int(ident)
+        if not event_map:
+            QMessageBox.warning(self, "No Events", "Please add at least one event map entry.")
+            return None
+
+        params = {
+            # filter / resample / reject
+            "low_pass": _to_float(p.get("low_pass")),
+            "high_pass": _to_float(p.get("high_pass")),
+            "downsample": _to_int(p.get("downsample")),
+            "downsample_rate": _to_int(p.get("downsample")),  # some helpers expect this key
+            "reject_thresh": _to_float(p.get("rejection_z")),
+            "ref_channel1": p.get("ref_chan1") or None,
+            "ref_channel2": p.get("ref_chan2") or None,
+            "max_idx_keep": _to_int(p.get("max_chan_idx")),
+            "max_bad_channels_alert_thresh": _to_int(p.get("max_bad_chans"), 9999),
+            # epoching / events
+            "epoch_start": _to_float(s.get("preprocessing", "epoch_start", "-1"), -1.0),
+            "epoch_end": _to_float(s.get("preprocessing", "epoch_end", "125"), 125.0),
+            "stim_channel": s.get("preprocessing", "stim_channel", config.DEFAULT_STIM_CHANNEL),
+            "event_id_map": event_map,
+        }
+        return params
+
+    # ------------------------- settings UI -------------------------- #
     def open_settings_window(self) -> None:
         if self._settings_dialog and self._settings_dialog.isVisible():
             self._settings_dialog.raise_()
@@ -320,8 +400,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
     def quit(self) -> None:
         self.close()
 
-    # ------------------------------------------------------------------
-    # Project actions
+    # --------------------------- projects --------------------------- #
     def new_project(self) -> None:
         new_project(self)
         self._on_project_ready()
@@ -330,18 +409,21 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         open_existing_project(self)
         self._on_project_ready()
 
-    def openProjectPath(self, folder: str) -> None:
+    def openProjectPath(self, folder: str) -> None:  # noqa: N802 (compat)
         openProjectPath(self, folder)
         self._on_project_ready()
 
     def edit_project_settings(self) -> None:
-        """Delegate project editing to project_manager."""
         edit_project_settings(self)
 
-    # ------------------------------------------------------------------
-    # Tools launchers
+    def _on_project_ready(self) -> None:
+        if not getattr(self, "currentProject", None):
+            return
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+
+    # --------------------------- tools UI --------------------------- #
     def open_stats_analyzer(self) -> None:
-        """Launch the statistical analysis tool based on USE_PYSIDE6_STATS."""
         if USE_PYSIDE6_STATS:
             window = PysideStatsWindow(self)
             window.show()
@@ -384,7 +466,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         subprocess.Popen(cmd, close_fds=True, env=env)
 
     def open_epoch_averaging(self) -> None:
-        """Instantiate and show the Advanced Averaging Analysis window."""
         if not self.currentProject:
             QMessageBox.warning(self, "No Project", "Please load a project first.")
             return
@@ -424,81 +505,25 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             f"Version: {FPVS_TOOLBOX_VERSION} was developed by Zack Murphy at Mississippi State University.",
         )
 
-    # ------------------------------------------------------------------
-    # Project ready -> slide in main page
-    def _on_project_ready(self) -> None:
-        """Go to page 1 and slide the content in from the right without covering the sidebar."""
-        if not getattr(self, "currentProject", None):
-            return
-
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
-
-        wrapper = getattr(self, "page1_wrapper", None)
-        spacer = getattr(self, "slideSpacer", None)
-        if not wrapper or not spacer:
-            return
-
-        if hasattr(self, "_page1_anim") and self._page1_anim is not None:
-            try:
-                self._page1_anim.stop()
-            except Exception:
-                pass
-            self._page1_anim = None
-
-
-
-    # ------------------------------------------------------------------
-    # Progress animation adapter
+    # ------------------------- progress/rows ------------------------- #
     def _animate_progress_to(self, value: float) -> None:
         _animate_progress_to(self, int(value * 100))
-
-    # ------------------------------------------------------------------
-    # Event Map helpers
-    def detect_trigger_ids(self) -> None:  # pragma: no cover - GUI stub
-        try:
-            from Tools.Event_Map import event_map_utils
-
-            pairs = event_map_utils.detect_trigger_ids(self.data_paths)
-        except Exception as err:
-            QMessageBox.warning(self, "Detection Failed", str(err))
-            return
-
-        added = 0
-        for lbl, ident in pairs:
-            self.add_event_row(str(lbl), str(ident))
-            added += 1
-        self.log(f"Detected and added {added} trigger ID(s)")
 
     def add_event_row(self, label: str = "", id: str = "") -> None:
         row = QWidget(self.event_container)
         hl = QHBoxLayout(row)
 
         le_label = QLineEdit(label, row)
-
         le_id = QLineEdit(id, row)
         le_id.setValidator(QIntValidator(1, 999999, le_id))
 
-        def _on_enter_in_label() -> None:
-            self.btn_add_row.click()
-            if self.event_rows:
-                new_row = self.event_rows[-1]
-                edits = new_row.findChildren(QLineEdit)
-                if edits:
-                    edits[0].setFocus()
-
-        le_label.returnPressed.connect(_on_enter_in_label)
-        le_id.returnPressed.connect(self.btn_add_row.click)
-
         btn_rm = QPushButton("✕", row)
-
         def _remove() -> None:
             self.event_layout.removeWidget(row)
             if row in self.event_rows:
                 self.event_rows.remove(row)
             row.deleteLater()
             self.log("Event map row removed.")
-
         btn_rm.clicked.connect(_remove)
 
         hl.addWidget(le_label)
@@ -519,11 +544,19 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
                 )
         return entries
 
-    # ------------------------------------------------------------------
-    # Legacy post-process wrapper
+    # ------------------- legacy post-process wrapper ---------------- #
+    # Silence SNR-per-bin spam unless Debug is enabled. Keep the GUI
+    # responsive by pushing messages to the queue just like the worker.
+    _SNR_RE = re.compile(r"\bSNR\b", re.IGNORECASE)
+
     def _export_with_post_process(self, labels: list[str]) -> None:
-        """Safely run the legacy post_process for Excel export."""
-        excel_dir = self.save_folder_path.get()
+        """Safely run legacy post_process for Excel export.
+
+        This wraps ``self.log`` so that ultra-verbose SNR progress lines
+        are **completely suppressed** unless the user has Debug enabled
+        in Settings. Summary lines (saves / errors) still appear.
+        """
+        excel_dir = self.save_folder_path.get() if self.save_folder_path else ""
         if not excel_dir or not Path(excel_dir).is_dir():
             self.gui_queue.put(
                 {"type": "error", "message": f"Excel output folder not found:\n{excel_dir}"}
@@ -532,12 +565,18 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
 
         original_log = self.log
 
-        def queue_log(message: str, level: int = logging.INFO) -> None:
+        def throttled_gui_log(message: str, level: int = logging.INFO) -> None:
+            # Suppress SNR chatter unless Debug mode is on
+            if not self.settings.debug_enabled():
+                text = str(message)
+                if MainWindow._SNR_RE.search(text):
+                    return  # drop
+            # Route through the queue so the GUI stays responsive
             self.gui_queue.put({"type": "log", "message": message})
             logger.log(level, message)
 
-        self.log = queue_log
-
+        # Temporarily replace self.log used by legacy post_process
+        self.log = throttled_gui_log
         try:
             _legacy_post_process(self, labels)
             self.gui_queue.put({"type": "log", "message": "Excel export completed"})
@@ -547,8 +586,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         finally:
             self.log = original_log
 
-    # ------------------------------------------------------------------
-    # Project (de)serialization
+    # ------------------------ project load hook --------------------- #
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
         loadProject(self, project)
 
@@ -570,6 +608,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         excel_subfolder = project.subfolders.get("excel")
         if excel_subfolder:
             excel_dir = project.project_root / excel_subfolder
+            excel_dir.mkdir(parents=True, exist_ok=True)
             self.save_folder_path = SimpleNamespace(get=lambda: str(excel_dir))
             self.log(f"Save folder path set: {self.save_folder_path.get()}")
         else:
@@ -584,8 +623,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             )
             self.save_folder_path = None
 
-        def make_entry(value: str):
-            edit = QLineEdit(str(value))
+        # Build ephemeral entry adapters for legacy helpers that expect .get()
+        def make_entry(value: str | float | int | None):
+            edit = QLineEdit(str(value) if value is not None else "")
             return _QtEntryAdapter(edit)
 
         p = self.currentProject.preprocessing
@@ -605,7 +645,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
         self.max_bad_channels_alert_entry = make_entry(p.get("max_bad_chans"))
 
     def saveProjectSettings(self) -> None:
-        """Collect current UI settings and save them to project.json."""
         if not self.currentProject:
             QMessageBox.warning(
                 self, "No Project", "Please open or create a project first."
@@ -613,7 +652,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ValidationMixin, ProcessingMix
             return
 
         self.currentProject.options["mode"] = (
-            "single" if getattr(self, "rb_single", None) and self.rb_single.isChecked() else "batch"
+            "single"
+            if getattr(self, "rb_single", None) and self.rb_single.isChecked()
+            else "batch"
         )
         self.currentProject.options["run_loreta"] = (
             self.cb_loreta.isChecked() if hasattr(self, "cb_loreta") else False

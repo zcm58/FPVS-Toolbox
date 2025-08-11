@@ -1,4 +1,4 @@
-"""Utilities for managing the MNE 3D backend."""
+""""Utilities for managing the MNE 3D backend."""
 
 from __future__ import annotations
 
@@ -31,40 +31,39 @@ def _log_backend_imports() -> None:
 
 
 def _ensure_pyvista_backend() -> None:
-    """Force the MNE 3D backend to PyVista."""
+    """Force the MNE 3D backend to PyVista/PyVistaQt if possible."""
     if not hasattr(mne.viz, "set_3d_backend"):
         return
 
     _log_backend_imports()
 
-    logger.debug("MNE_3D_BACKEND: %s", os.environ.get("MNE_3D_BACKEND"))
-    logger.debug("QT_API: %s", os.environ.get("QT_API"))
-    logger.debug("QT_QPA_PLATFORM: %s", os.environ.get("QT_QPA_PLATFORM"))
     current = None
     if hasattr(mne.viz, "get_3d_backend"):
-        current = mne.viz.get_3d_backend()
-        logger.debug("Existing MNE 3D backend: %s", current)
+        try:
+            current = mne.viz.get_3d_backend()
+            logger.debug("Existing MNE 3D backend: %s", current)
+        except Exception:
+            current = None
     if current in {"pyvistaqt", "pyvista"}:
         return
 
+    # Prefer Qt interactor when GUI is present
     for backend in ("pyvistaqt", "pyvista"):
         logger.debug("Attempting backend %s", backend)
         try:
+            os.environ.setdefault("MNE_3D_BACKEND", backend)
             mne.viz.set_3d_backend(backend)
-            os.environ["MNE_3D_BACKEND"] = backend
             if hasattr(mne.viz, "get_3d_backend"):
                 logger.debug("Backend after set: %s", mne.viz.get_3d_backend())
         except Exception as err:  # pragma: no cover - optional
             logger.debug("Failed to set backend %s: %s", backend, err)
             continue
-        if not hasattr(mne.viz, "get_3d_backend"):
-            return
-        if mne.viz.get_3d_backend() == backend:
+        if hasattr(mne.viz, "get_3d_backend") and mne.viz.get_3d_backend() == backend:
             logger.debug("Using 3D backend %s", backend)
             return
 
     msg = "PyVista backend ('pyvistaqt' or 'pyvista') is required"
-    logger.error(msg, exc_info=True)
+    logger.error(msg)
     raise RuntimeError(msg)
 
 
@@ -87,5 +86,5 @@ def is_pyvistaqt_backend() -> bool:
 
 
 def is_pyvista_backend() -> bool:
-    """Alias for :func:`is_pyvistaqt_backend`."""
-    return is_pyvistaqt_backend()
+    """Check if the non-Qt PyVista backend is active."""
+    return get_current_backend() == "pyvista"

@@ -1,26 +1,28 @@
-"""Legacy data processing entry point.
+# -*- coding: utf-8 -*-
+"""
+Processing entry point used by the PySide6 GUI.
 
-This module exposes the ``process_data`` function used by the
-PySide6 GUI. The original implementation resided under a
-``Main_App.Processing`` package which no longer exists. The
-function here provides a stub interface so that the GUI can import
-it without raising ``ImportError``.
+For now, this is a *thin orchestrator* (no-op) that exists so the GUI
+can call a stable function. It accepts a preprocessed Raw and an output
+directory, and can later be expanded to run epoching/LORETA, etc.
 """
 
 from __future__ import annotations
+from typing import Optional
 
-def process_data(input_dir: str, output_dir: str, run_loreta: bool) -> None:
-    """Process EEG data using the legacy pipeline.
+import mne
 
+
+def process_data(raw: Optional[mne.io.BaseRaw], output_dir: str, run_loreta: bool) -> None:
+    """
     Parameters
     ----------
-    input_dir : str
-        Path to the directory containing raw data files.
+    raw : mne.io.BaseRaw | None
+        Already preprocessed Raw. (Currently unused.)
     output_dir : str
         Destination directory for processed results.
     run_loreta : bool
-        Whether to run LORETA source localization.
+        Whether to run LORETA source localization (reserved for future hook).
     """
-
-    # Placeholder for the removed legacy implementation
-    pass
+    # Placeholder: keep for compatibility; real work is handled elsewhere.
+    return
