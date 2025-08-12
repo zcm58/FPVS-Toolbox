@@ -1,22 +1,33 @@
-# src/Main_App/Legacy_App/eloreta_launcher.py
-"""Compatibility launcher for Source Localization from the Tools menu.
-
-This now opens the PySide6 dialog (no Tk/CTk), keeping the legacy import path
-that your menu already uses.
-"""
-
+# Main_App/Legacy_App/eloreta_launcher.py
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QMessageBox
 
-# Import the new PySide6 dialog from the tool
-from Tools.SourceLocalization.qt_dialog import SourceLocalizationDialog
+try:
+    # Optional GUI; may not exist in your slimmed repo
+    from Tools.SourceLocalization.qt_dialog import SourceLocalizationDialog
+except Exception:
+    SourceLocalizationDialog = None
 
 
-def open_eloreta_tool(parent: QWidget | None = None) -> None:
-    """Open the Source Localization (oddball eLORETA) dialog."""
-    dlg = SourceLocalizationDialog(parent)
-    # Let Qt delete the dialog when closed (avoids leaks when reopening)
-    dlg.setAttribute(Qt.WA_DeleteOnClose, True)
-    dlg.show()
+def open_eloreta_tool(parent=None) -> None:
+    """Open the (optional) source localization GUI, if available.
+
+    If not available, inform the user and suggest running LORETA via the
+    main processing pipeline (the 'Run LORETA during processing' checkbox).
+    """
+    if SourceLocalizationDialog is None:
+        QMessageBox.information(
+            parent,
+            "LORETA GUI not available",
+            (
+                "The optional Source Localization GUI module "
+                "(Tools.SourceLocalization.qt_dialog) is not installed.\n\n"
+                "You can still run LORETA by checking "
+                "‘Run LORETA during processing’ in the main app."
+            ),
+        )
+        return
+
+    dlg = SourceLocalizationDialog(parent=parent)
+    dlg.exec()
