@@ -10,12 +10,11 @@ import re
 from typing import Callable
 from datetime import datetime
 from pathlib import Path
-from types import MethodType, SimpleNamespace
+from types import MethodType, SimpleNamespace, ModuleType
 
 # Qt / PySide6
-import tkinter.messagebox as tk_messagebox
-from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QFont, QIntValidator
+from PySide6.QtCore import QObject, QTimer, Signal, QThread
+from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QAction  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -29,34 +28,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# App imports
-import config
-from Main_App.Legacy_App.file_selection import FileSelectionMixin
-from Main_App.Legacy_App.processing_utils import ProcessingMixin
-from Main_App.Legacy_App.settings_manager import SettingsManager
-from Main_App.PySide6_App.Backend import Project
-from Main_App.PySide6_App.Backend.processing_controller import _animate_progress_to
-from Main_App.PySide6_App.Backend.project_manager import (
-    edit_project_settings,
-    loadProject,
-    new_project,
-    open_existing_project,
-    openProjectPath,
-    select_projects_root,
-)
-from Tools.Average_Preprocessing.New_PySide6.main_window import (
-    AdvancedAveragingWindow,
-)
-from Tools.Stats import StatsWindow as PysideStatsWindow
-from Tools.Stats.Legacy.stats import StatsAnalysisWindow as launch_ctk_stats
-from config import FPVS_TOOLBOX_VERSION
-from . import update_manager
-from .file_menu import init_file_menu
-from .settings_panel import SettingsDialog
-from .sidebar import init_sidebar
-from .ui_main import init_ui
-import Main_App.Legacy_App.debug_utils as debug_utils
-from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
+# ----------------------------------------------------------------------
+# Canonical Qt messagebox adapters
+# ----------------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
 # Keep this module quiet unless the app configures handlers; avoids accidental console output.
@@ -89,11 +63,51 @@ def _qt_askyesno(title: str, message: str, **options) -> bool:
     return result == QMessageBox.Yes
 
 
-# Route legacy surfaces through the same functions
-tk_messagebox.showerror = _qt_showerror
-tk_messagebox.showwarning = _qt_showwarning
-tk_messagebox.showinfo = _qt_showinfo
-tk_messagebox.askyesno = _qt_askyesno
+# Provide a tkinter.messagebox shim without importing Tk
+_tk_module = ModuleType("tkinter")
+_tk_msg_module = ModuleType("tkinter.messagebox")
+_tk_msg_module.showerror = _qt_showerror
+_tk_msg_module.showwarning = _qt_showwarning
+_tk_msg_module.showinfo = _qt_showinfo
+_tk_msg_module.askyesno = _qt_askyesno
+_tk_module.messagebox = _tk_msg_module
+_tk_module.END = "end"
+sys.modules.setdefault("tkinter", _tk_module)
+sys.modules["tkinter.messagebox"] = _tk_msg_module
+
+
+# Import after stubbing tkinter to avoid loading the real toolkit
+import config
+from Main_App.Legacy_App.file_selection import FileSelectionMixin
+from Main_App.Legacy_App.processing_utils import ProcessingMixin
+from Main_App.Legacy_App.settings_manager import SettingsManager
+from Main_App.PySide6_App.Backend import Project
+from Main_App.PySide6_App.Backend.processing_controller import _animate_progress_to
+from Main_App.PySide6_App.Backend.project_manager import (
+    edit_project_settings,
+    loadProject,
+    new_project,
+    open_existing_project,
+    openProjectPath,
+    select_projects_root,
+)
+from Tools.Average_Preprocessing.New_PySide6.main_window import (
+    AdvancedAveragingWindow,
+)
+from Tools.Stats import StatsWindow as PysideStatsWindow
+from Tools.Stats.Legacy.stats import StatsAnalysisWindow as launch_ctk_stats
+from config import FPVS_TOOLBOX_VERSION
+from . import update_manager
+from .file_menu import init_file_menu
+from .settings_panel import SettingsDialog
+from .sidebar import init_sidebar
+from .ui_main import init_ui
+import Main_App.Legacy_App.debug_utils as debug_utils
+
+from Main_App.PySide6_App.utils.op_guard import OpGuard
+from Main_App.PySide6_App.workers.processing_worker import PostProcessWorker
+
+# Route legacy debug utils through Qt adapters
 debug_utils.messagebox._qt_showinfo = _qt_showinfo
 debug_utils.messagebox._qt_showerror = _qt_showerror
 
@@ -164,8 +178,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
       ProcessingMixin expects ``_validate_inputs()``; we provide a
       modern implementation that collects inputs from the current
       Project + GUI and sets ``self.validated_params``.
-    * We also wrap legacy post_process with a log silencer to suppress
-      extremely verbose SNR-per-bin messages unless Debug mode is on.
     * Queue polling uses a QTimer to keep the GUI responsive while the
       worker thread runs.
     """
@@ -245,6 +257,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._max_progress = 1
         self.busy = False
 
+        # Worker management
+        self._post_worker = None
+        self._post_thread = None
+        self._start_guard = OpGuard()
+
         # Flags/vars the mixin expects
         self.run_loreta_var = SimpleNamespace(get=lambda: self.cb_loreta.isChecked())
         self.save_fif_var = SimpleNamespace(get=lambda: True)
@@ -252,18 +269,10 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self.file_mode = SimpleNamespace(get=lambda: "Batch")
         self.file_type = SimpleNamespace(set=lambda v: None)
 
-        # Timer to poll the worker queue → keeps GUI responsive
-        self._processing_timer = QTimer(self)
-        self._processing_timer.timeout.connect(self._periodic_queue_check)
         # Legacy mixin uses Tk's .after(); we emulate it with QTimer
-        self._use_legacy_after = True
         self._after_timers: dict[int, QTimer] = {}
         self._queue_job_id: int | None = None
-        # Starts when a run begins; stops in _finalize_processing
-
-        # Allow legacy processing_utils to call post_process via a safe wrapper
         self.post_process = MethodType(MainWindow._export_with_post_process, self)
-
         try:
             update_manager.check_for_updates_async(
                 self, silent=True, notify_if_no_update=False
@@ -301,14 +310,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         We keep the GUI responsive by polling the queue via QTimer while
         the worker thread (in ProcessingMixin) does the heavy lifting.
         """
-        # Make the run active & start the queue polling timer
-        self._run_active = True
-        # Avoid double scheduling: if legacy uses .after(), don't run our own timer
-        if (not self._use_legacy_after) and (not self._processing_timer.isActive()):
-            # Fallback path (not used when legacy .after is active)
-            self._processing_timer.start(50)  # ~20fps UI updates
+        if not self._start_guard.start():
+            QMessageBox.warning(self, "Busy", "Processing already started")
+            return
 
-        # Reset SNR tick (used by throttled post-process logging)
+        self._run_active = True
         self._snr_tick = 0
 
         try:
@@ -320,15 +326,83 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             logger.exception(e)
             QMessageBox.critical(self, "Processing Error", str(e))
             self._run_active = False
-
+            self._start_guard.end()
     def _periodic_queue_check(self) -> None:
         if not self._run_active:
             return
-        super()._periodic_queue_check()
+
+        processed = 0
+        while processed < 50:
+            try:
+                msg = self.gui_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            processed += 1
+            t = msg.get("type")
+            if t == "log":
+                self.log(msg.get("message", ""))
+            elif t == "progress":
+                self._processed_count = msg["value"]
+                frac = msg["value"] / self._max_progress if self._max_progress else 0
+                self._animate_progress_to(frac)
+            elif t == "post":
+                fname = msg["file"]
+                epochs_dict = msg["epochs_dict"]
+                labels = msg["labels"]
+                self._start_post_worker(fname, epochs_dict, labels)
+            elif t == "error":
+                self.log("!!! THREAD ERROR: " + msg["message"])
+                if tb := msg.get("traceback"):
+                    self.log(tb)
+                self._finalize_processing(False)
+                return
+            elif t == "done":
+                self._finalize_processing(True)
+                return
+
+        delay = 16 if processed else 50
+        QTimer.singleShot(delay, self._periodic_queue_check)
+
+    def _start_post_worker(
+        self, file_name: str, epochs_dict: dict, labels: list[str]
+    ) -> None:
+        if self._post_thread and self._post_thread.isRunning():
+            # If a worker is already running, requeue and wait
+            self.gui_queue.put(
+                {"type": "post", "file": file_name, "epochs_dict": epochs_dict, "labels": labels}
+            )
+            return
+
+        worker = PostProcessWorker(file_name, epochs_dict, labels)
+        if self.save_folder_path:
+            worker.output_folder = self.save_folder_path.get()
+        worker.data_paths = [file_name]
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        worker.error.connect(self._on_worker_error)
+        worker.finished.connect(self._on_post_finished)
+        thread.started.connect(worker.run)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        self._post_worker = worker
+        self._post_thread = thread
+        thread.start()
+
+    def _on_worker_error(self, message: str) -> None:
+        self.log(message, level=logging.ERROR)
+
+    def _on_post_finished(self, payload: dict | None = None) -> None:
+        if payload:
+            for msg in payload.get("logs", []):
+                self.log(msg)
+        self._post_worker = None
+        self._post_thread = None
 
     def _finalize_processing(self, *args, **kwargs) -> None:
         self._run_active = False
-        self._processing_timer.stop()
+        self._start_guard.end()
         super()._finalize_processing(*args, **kwargs)
 
     # ------------------------ Tk-style scheduling ------------------------ #
@@ -631,112 +705,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 )
         return entries
 
-    # ------------------- legacy post-process wrapper ---------------- #
-    # Silence SNR-per-bin spam unless Debug is enabled. Keep the GUI
-    # responsive by pushing messages to the queue just like the worker.
-    _SNR_RE = re.compile(r"\bSNR\b", re.IGNORECASE)
-
     def _export_with_post_process(self, labels: list[str]) -> None:
-        """Safely run legacy post_process for Excel export.
-
-        Suppresses ultra-verbose SNR lines when Debug is off and then
-        verifies whether any .xlsx files changed under the Excel folder
-        during this export. Results are sent via the GUI queue.
-        """
-        excel_dir = self.save_folder_path.get() if getattr(self, "save_folder_path", None) else ""
-        export_started_ts = datetime.now().timestamp()
-        if not excel_dir or not Path(excel_dir).is_dir():
-            self.gui_queue.put(
-                {"type": "error", "message": f"Excel output folder not found:\n{excel_dir}"}
-            )
-            return
-
-        original_log = self.log
-
-        def throttled_gui_log(message: str, level: int = logging.INFO) -> None:
-            # Suppress SNR chatter unless Debug mode is on
-            if not self.settings.debug_enabled():
-                if MainWindow._SNR_RE.search(str(message)):
-                    return  # drop
-            # Route through the queue so the GUI stays responsive
-            self.gui_queue.put({"type": "log", "message": str(message)})
-            # Respect the same "no INFO unless debug" rule for backend
-            self._emit_backend_log(level, str(message))
-
-        # Temporarily replace self.log used by legacy post_process
-        self.log = throttled_gui_log
-
-        # Also filter any direct logger.info(...) from legacy code
-        snr_filter = None
-        filter_targets: list[logging.Logger] = []
-        if not self.settings.debug_enabled():
-            class _DropSNRFilter(logging.Filter):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.count = 0
-                def filter(self, record: logging.LogRecord) -> bool:
-                    msg = record.getMessage() if hasattr(record, "getMessage") else str(record.msg)
-                    if MainWindow._SNR_RE.search(str(msg)):
-                        self.count += 1
-                        return False
-                    return True
-            snr_filter = _DropSNRFilter()
-            for name in ("", "Main_App", "Main_App.Legacy_App"):
-                lg = logging.getLogger(name)
-                lg.addFilter(snr_filter)
-                filter_targets.append(lg)
-
-        try:
-            # Run legacy exporter (may call self.log many times)
-            _legacy_post_process(self, labels)
-
-            # ----- Post-export verification (non-blocking) -----
-            try:
-                root = Path(excel_dir)
-                cutoff = export_started_ts - 1.0
-                recent: list[Path] = []
-                for p in root.rglob("*.xlsx"):
-                    try:
-                        if p.stat().st_mtime >= cutoff:
-                            recent.append(p)
-                    except OSError:
-                        pass
-                if recent:
-                    recent.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-                    sample = "; ".join(str(p.relative_to(root)) for p in recent[:5])
-                    msg = (
-                        f"Excel export completed • {len(recent)} file(s) updated under:\n"
-                        f"{excel_dir}\nExamples: {sample}"
-                    )
-                    self.gui_queue.put({"type": "log", "message": msg})
-                else:
-                    msg = (
-                        f"No new .xlsx files detected in:\n{excel_dir}\n"
-                        f"(Verify write permissions and that condition folders exist.)"
-                    )
-                    self.gui_queue.put({"type": "error", "message": msg})
-            except Exception as _verify_err:
-                # Keep IDE quiet unless debug + avoid breaking UX
-                self._emit_backend_log(logging.DEBUG, f"export verification skipped: {_verify_err}")
-
-            self.gui_queue.put({"type": "log", "message": "Excel export completed"})
-        except Exception as err:
-            # Backend should see errors regardless of debug
-            self._emit_backend_log(logging.ERROR, f"Excel export failed: {err}")
-            self.gui_queue.put({"type": "error", "message": str(err)})
-        finally:
-            # Remove temporary filter(s) and restore logger
-            if snr_filter:
-                for lg in filter_targets:
-                    try:
-                        lg.removeFilter(snr_filter)
-                    except Exception:
-                        pass
-                if snr_filter.count:
-                    self.gui_queue.put(
-                        {"type": "log", "message": f"Suppressed {snr_filter.count} SNR progress lines (Debug off)."}
-                    )
-            self.log = original_log
+        self._start_post_worker("manual", self.preprocessed_data.copy(), labels)
 
     # ------------------------ project load hook --------------------- #
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
@@ -941,6 +911,13 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             except Exception:
                 # Be quiet but safe
                 self.log("_set_controls_enabled: child toggle failed", level=logging.DEBUG)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._post_worker and self._post_thread:
+            self._post_worker.stop()
+            self._post_thread.quit()
+            self._post_thread.wait(2000)
+        super().closeEvent(event)
 
     def detect_trigger_ids(self) -> None:
         """
