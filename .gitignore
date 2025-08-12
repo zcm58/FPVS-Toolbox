@@ -59,4 +59,9 @@ venv/
 *.log
 *.spec
 *.iss
-
+*.fif
+*.mgz
+*.txt
+*.label
+*.H
+*.K
