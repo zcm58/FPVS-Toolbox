@@ -1,16 +1,19 @@
 # main_window.py
 from __future__ import annotations
-
+from Main_App.PySide6_App.workers.processing_worker import PostProcessWorker
+from Main_App.PySide6_App.utils.op_guard import OpGuard
 import logging
 import os
 import queue
 import subprocess
 import sys
 import re
+from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
 from typing import Callable
 from datetime import datetime
 from pathlib import Path
 from types import MethodType, SimpleNamespace, ModuleType
+from collections import deque
 
 # Qt / PySide6
 from PySide6.QtCore import QObject, QTimer, Signal, QThread
@@ -40,25 +43,38 @@ logger.addHandler(logging.NullHandler())
 # Canonical Qt messagebox adapters (used for both tk and legacy debug utils)
 # ----------------------------------------------------------------------
 
-def _qt_showerror(title: str, message: str, **options) -> None:
+def _qt_showerror(title, message, **options):
     parent = QApplication.activeWindow()
     QMessageBox.critical(parent, title, message)
 
 
-def _qt_showwarning(title: str, message: str, **options) -> None:
+def _qt_showwarning(title, message, **options):
     parent = QApplication.activeWindow()
     QMessageBox.warning(parent, title, message)
 
 
-def _qt_showinfo(title: str, message: str, **options) -> None:
+def _qt_showinfo(title, message, **options):
     parent = QApplication.activeWindow()
+    # If a run just finished, only show the "Processing Complete" info dialog
+    # when the window reports a successful export (set by our post-process wrapper).
+    if str(title).lower().startswith("processing complete"):
+        ok = getattr(parent, "_last_job_success", True)
+        if not ok:
+            # Downgrade to a warning with a clearer message and skip the legacy text.
+            QMessageBox.warning(
+                parent,
+                "Processing Finished",
+                "No Excel files were generated. Check the log for details.",
+            )
+            return
     QMessageBox.information(parent, title, message)
 
-
-def _qt_askyesno(title: str, message: str, **options) -> bool:
+def _qt_askyesno(title, message, **options):
     parent = QApplication.activeWindow()
     result = QMessageBox.question(
-        parent, title, message, QMessageBox.Yes | QMessageBox.No
+        parent, title, message,
+        QMessageBox.Yes | QMessageBox.No,
+        QMessageBox.No
     )
     return result == QMessageBox.Yes
 
@@ -129,6 +145,7 @@ class _QtEntryAdapter:
 
     def __init__(self, line_edit: QLineEdit) -> None:
         self._edit = line_edit
+        self._last_job_success: bool = False
 
     def get(self) -> str:  # type: ignore[override]
         return self._edit.text()
@@ -199,6 +216,10 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Build UI
         init_ui(self)
+        # Poll the worker queue so the GUI stays responsive
+        self._processing_timer = QTimer(self)
+        self._processing_timer.setSingleShot(False)
+        self._processing_timer.timeout.connect(self._periodic_queue_check)
 
         # Style header bar via objectName (preferred)
         if hasattr(self, "lbl_currentProject"):
@@ -273,6 +294,10 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._after_timers: dict[int, QTimer] = {}
         self._queue_job_id: int | None = None
         self.post_process = MethodType(MainWindow._export_with_post_process, self)
+        self._post_thread = None
+        self._post_worker: PostProcessWorker | None = None
+        self._post_backlog: deque[tuple[str, dict, list[str]]] = deque()
+        self._op_guard = OpGuard()
         try:
             update_manager.check_for_updates_async(
                 self, silent=True, notify_if_no_update=False
@@ -305,7 +330,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     # -------------------------- processing -------------------------- #
     def start_processing(self) -> None:
-        """Begin a processing run and (re)activate queue checks.
+        """
+        Begin a processing run and (re)activate queue checks.
 
         We keep the GUI responsive by polling the queue via QTimer while
         the worker thread (in ProcessingMixin) does the heavy lifting.
@@ -314,8 +340,14 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             QMessageBox.warning(self, "Busy", "Processing already started")
             return
 
+        # Reset run state for this processing job
+        self._last_job_success = False  # Gate for “Processing Complete” popup
         self._run_active = True
         self._snr_tick = 0
+
+        # Ensure the queue polling timer is active
+        if not self._processing_timer.isActive():
+            self._processing_timer.start(50)
 
         try:
             # The legacy mixin calls ``_validate_inputs()``. Provide our own
@@ -327,6 +359,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             QMessageBox.critical(self, "Processing Error", str(e))
             self._run_active = False
             self._start_guard.end()
+
     def _periodic_queue_check(self) -> None:
         if not self._run_active:
             return
@@ -364,20 +397,29 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         delay = 16 if processed else 50
         QTimer.singleShot(delay, self._periodic_queue_check)
 
-    def _start_post_worker(
-        self, file_name: str, epochs_dict: dict, labels: list[str]
-    ) -> None:
+    def _start_post_worker(self, file_name: str, epochs_dict: dict, labels: list[str]) -> None:
+        """Launch post-processing in a QThread with the correct ctor args."""
         if self._post_thread and self._post_thread.isRunning():
-            # If a worker is already running, requeue and wait
-            self.gui_queue.put(
-                {"type": "post", "file": file_name, "epochs_dict": epochs_dict, "labels": labels}
-            )
+            logger.warning("Post-process worker already running")
             return
 
-        worker = PostProcessWorker(file_name, epochs_dict, labels)
-        if self.save_folder_path:
-            worker.output_folder = self.save_folder_path.get()
-        worker.data_paths = [file_name]
+        # Supports objects that expose .get() (Tk-style) or plain strings/Paths
+        save_folder = (
+            self.save_folder_path.get()
+            if hasattr(self.save_folder_path, "get")
+            else self.save_folder_path
+        )
+
+        worker = PostProcessWorker(
+            file_name,
+            epochs_dict,
+            labels,
+            save_folder=save_folder,
+            data_paths=[file_name],
+            settings=getattr(self, "settings", None),
+            logger=lambda m: self.gui_queue.put({"type": "log", "message": m}),
+        )
+
         thread = QThread(self)
         worker.moveToThread(thread)
         worker.error.connect(self._on_worker_error)
@@ -706,7 +748,57 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         return entries
 
     def _export_with_post_process(self, labels: list[str]) -> None:
-        self._start_post_worker("manual", self.preprocessed_data.copy(), labels)
+        """
+        Safely run the legacy ``post_process`` for Excel export.
+
+        We verify the Excel directory and count files before/after to decide
+        whether the run really produced output, then set ``_last_job_success``.
+        """
+        excel_dir = self.save_folder_path.get() if hasattr(self.save_folder_path, "get") else ""
+        if not excel_dir or not Path(excel_dir).is_dir():
+            self.gui_queue.put(
+                {"type": "error", "message": f"Excel output folder not found:\n{excel_dir}"}
+            )
+            self._last_job_success = False
+            return
+
+        original_log = self.log
+
+        def queue_log(message: str, level: int = logging.INFO) -> None:
+            self.gui_queue.put({"type": "log", "message": message})
+            logger.log(level, message)
+
+        self.log = queue_log
+        out_path = Path(excel_dir)
+
+        def _count_excels() -> int:
+            # count defensively: .xlsx/.xls/.xlsm etc.
+            return sum(1 for _ in out_path.glob("*.xls*"))
+
+        pre_count = _count_excels()
+
+        try:
+            # Call the legacy post-process function
+            _legacy_post_process(self, labels)
+
+            post_count = _count_excels()
+            if post_count > pre_count:
+                self._last_job_success = True
+                created = post_count - pre_count
+                self.gui_queue.put(
+                    {"type": "log", "message": f"Excel export completed ({created} new file(s))."}
+                )
+            else:
+                self._last_job_success = False
+                self.gui_queue.put(
+                    {"type": "error", "message": "Processing finished but no Excel files were generated."}
+                )
+        except Exception as err:
+            logger.exception("Excel export failed")
+            self._last_job_success = False
+            self.gui_queue.put({"type": "error", "message": str(err)})
+        finally:
+            self.log = original_log
 
     # ------------------------ project load hook --------------------- #
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
