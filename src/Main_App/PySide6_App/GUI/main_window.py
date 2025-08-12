@@ -1,4 +1,4 @@
-# main_window.py (rewritten)
+# main_window.py
 from __future__ import annotations
 
 import logging
@@ -7,6 +7,7 @@ import queue
 import subprocess
 import sys
 import re
+from typing import Callable
 from datetime import datetime
 from pathlib import Path
 from types import MethodType, SimpleNamespace
@@ -18,6 +19,7 @@ from PySide6.QtGui import QFont, QIntValidator
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QAbstractButton,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -57,6 +59,8 @@ import Main_App.Legacy_App.debug_utils as debug_utils
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
 
 logger = logging.getLogger(__name__)
+# Keep this module quiet unless the app configures handlers; avoids accidental console output.
+logger.addHandler(logging.NullHandler())
 
 # ----------------------------------------------------------------------
 # Canonical Qt messagebox adapters (used for both tk and legacy debug utils)
@@ -117,6 +121,38 @@ class _QtEntryAdapter:
 
     def focus_set(self) -> None:  # type: ignore[override]
         self._edit.setFocus()
+
+    # Legacy mixin hook: enable/disable controls during run
+    def _set_controls_enabled(self, enabled: bool) -> None:
+        """
+        Adapter required by Legacy_App.processing_utils.
+        Disables common inputs while a run is active; safe if widgets are missing.
+        """
+        self.busy = not enabled
+
+        def _safe(name: str) -> None:
+            w = getattr(self, name, None)
+            if w and hasattr(w, "setEnabled"):
+                try:
+                    w.setEnabled(enabled)
+                except Exception:
+                    pass
+
+        # Common selectors / actions (exists-if-present)
+        for n in (
+            "btn_start",
+            "btn_select_input_file", "le_input_file",
+            "btn_select_input_folder", "le_input_folder",
+            "btn_add_event", "btn_detect",
+            "cb_loreta",
+            "btn_create_project", "btn_open_project",
+        ):
+            _safe(n)
+
+        # Event-map row edits/buttons
+        for row in getattr(self, "event_rows", []):
+            for w in row.findChildren((QLineEdit, QAbstractButton)):
+                w.setEnabled(enabled)
 
 
 class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
@@ -219,6 +255,10 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         # Timer to poll the worker queue → keeps GUI responsive
         self._processing_timer = QTimer(self)
         self._processing_timer.timeout.connect(self._periodic_queue_check)
+        # Legacy mixin uses Tk's .after(); we emulate it with QTimer
+        self._use_legacy_after = True
+        self._after_timers: dict[int, QTimer] = {}
+        self._queue_job_id: int | None = None
         # Starts when a run begins; stops in _finalize_processing
 
         # Allow legacy processing_utils to call post_process via a safe wrapper
@@ -232,12 +272,27 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self.log(f"Auto update check failed: {e}")
 
     # ---------------------------- logging --------------------------- #
+    def _emit_backend_log(self, level: int, message: str) -> None:
+        """
+        Emit to the Python logging backend only when:
+          * Debug mode is enabled, or
+          * Level is WARNING or higher.
+        Prevents noisy INFO logs in the IDE/console during normal runs.
+        """
+        try:
+            debug_on = self.settings.debug_enabled()
+        except Exception:
+            debug_on = False
+        if debug_on or level >= logging.WARNING:
+            logger.log(level, message)
+
     def log(self, message: str, level: int = logging.INFO) -> None:
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         formatted = f"{ts} [GUI]: {message}"
         if hasattr(self, "text_log") and self.text_log:
             self.text_log.append(formatted)
-        logger.log(level, message)
+        # Do not emit INFO-level messages to backend unless Debug is on.
+        self._emit_backend_log(level, message)
 
     # -------------------------- processing -------------------------- #
     def start_processing(self) -> None:
@@ -248,7 +303,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         """
         # Make the run active & start the queue polling timer
         self._run_active = True
-        if not self._processing_timer.isActive():
+        # Avoid double scheduling: if legacy uses .after(), don't run our own timer
+        if (not self._use_legacy_after) and (not self._processing_timer.isActive()):
+            # Fallback path (not used when legacy .after is active)
             self._processing_timer.start(50)  # ~20fps UI updates
 
         # Reset SNR tick (used by throttled post-process logging)
@@ -273,6 +330,35 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._run_active = False
         self._processing_timer.stop()
         super()._finalize_processing(*args, **kwargs)
+
+    # ------------------------ Tk-style scheduling ------------------------ #
+    def after(self, delay_ms: int, callback: Callable[[], None]) -> int:
+        """Tkinter-compatible .after() backed by QTimer.singleShot.
+        Returns a job id usable with after_cancel.
+        """
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        job_id = id(timer)
+
+        def _run_and_cleanup() -> None:
+            try:
+                callback()
+            finally:
+                # remove and delete timer
+                self._after_timers.pop(job_id, None)
+                timer.deleteLater()
+
+        timer.timeout.connect(_run_and_cleanup)
+        self._after_timers[job_id] = timer
+        timer.start(int(delay_ms))
+        return job_id
+
+    def after_cancel(self, job_id: int) -> None:
+        """Cancel a scheduled callback created by .after()."""
+        t = self._after_timers.pop(job_id, None)
+        if t:
+            t.stop()
+            t.deleteLater()
 
     # The ProcessingMixin looks for this. We replace legacy ValidationMixin.
     def _validate_inputs(self) -> bool:  # called inside ProcessingMixin.start_processing
@@ -518,6 +604,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         le_id.setValidator(QIntValidator(1, 999999, le_id))
 
         btn_rm = QPushButton("✕", row)
+
         def _remove() -> None:
             self.event_layout.removeWidget(row)
             if row in self.event_rows:
@@ -552,11 +639,12 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     def _export_with_post_process(self, labels: list[str]) -> None:
         """Safely run legacy post_process for Excel export.
 
-        This wraps ``self.log`` so that ultra-verbose SNR progress lines
-        are **completely suppressed** unless the user has Debug enabled
-        in Settings. Summary lines (saves / errors) still appear.
+        Suppresses ultra-verbose SNR lines when Debug is off and then
+        verifies whether any .xlsx files changed under the Excel folder
+        during this export. Results are sent via the GUI queue.
         """
-        excel_dir = self.save_folder_path.get() if self.save_folder_path else ""
+        excel_dir = self.save_folder_path.get() if getattr(self, "save_folder_path", None) else ""
+        export_started_ts = datetime.now().timestamp()
         if not excel_dir or not Path(excel_dir).is_dir():
             self.gui_queue.put(
                 {"type": "error", "message": f"Excel output folder not found:\n{excel_dir}"}
@@ -568,22 +656,86 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         def throttled_gui_log(message: str, level: int = logging.INFO) -> None:
             # Suppress SNR chatter unless Debug mode is on
             if not self.settings.debug_enabled():
-                text = str(message)
-                if MainWindow._SNR_RE.search(text):
+                if MainWindow._SNR_RE.search(str(message)):
                     return  # drop
             # Route through the queue so the GUI stays responsive
-            self.gui_queue.put({"type": "log", "message": message})
-            logger.log(level, message)
+            self.gui_queue.put({"type": "log", "message": str(message)})
+            # Respect the same "no INFO unless debug" rule for backend
+            self._emit_backend_log(level, str(message))
 
         # Temporarily replace self.log used by legacy post_process
         self.log = throttled_gui_log
+
+        # Also filter any direct logger.info(...) from legacy code
+        snr_filter = None
+        filter_targets: list[logging.Logger] = []
+        if not self.settings.debug_enabled():
+            class _DropSNRFilter(logging.Filter):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.count = 0
+                def filter(self, record: logging.LogRecord) -> bool:
+                    msg = record.getMessage() if hasattr(record, "getMessage") else str(record.msg)
+                    if MainWindow._SNR_RE.search(str(msg)):
+                        self.count += 1
+                        return False
+                    return True
+            snr_filter = _DropSNRFilter()
+            for name in ("", "Main_App", "Main_App.Legacy_App"):
+                lg = logging.getLogger(name)
+                lg.addFilter(snr_filter)
+                filter_targets.append(lg)
+
         try:
+            # Run legacy exporter (may call self.log many times)
             _legacy_post_process(self, labels)
+
+            # ----- Post-export verification (non-blocking) -----
+            try:
+                root = Path(excel_dir)
+                cutoff = export_started_ts - 1.0
+                recent: list[Path] = []
+                for p in root.rglob("*.xlsx"):
+                    try:
+                        if p.stat().st_mtime >= cutoff:
+                            recent.append(p)
+                    except OSError:
+                        pass
+                if recent:
+                    recent.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                    sample = "; ".join(str(p.relative_to(root)) for p in recent[:5])
+                    msg = (
+                        f"Excel export completed • {len(recent)} file(s) updated under:\n"
+                        f"{excel_dir}\nExamples: {sample}"
+                    )
+                    self.gui_queue.put({"type": "log", "message": msg})
+                else:
+                    msg = (
+                        f"No new .xlsx files detected in:\n{excel_dir}\n"
+                        f"(Verify write permissions and that condition folders exist.)"
+                    )
+                    self.gui_queue.put({"type": "error", "message": msg})
+            except Exception as _verify_err:
+                # Keep IDE quiet unless debug + avoid breaking UX
+                self._emit_backend_log(logging.DEBUG, f"export verification skipped: {_verify_err}")
+
             self.gui_queue.put({"type": "log", "message": "Excel export completed"})
         except Exception as err:
-            logger.exception("Excel export failed")
+            # Backend should see errors regardless of debug
+            self._emit_backend_log(logging.ERROR, f"Excel export failed: {err}")
             self.gui_queue.put({"type": "error", "message": str(err)})
         finally:
+            # Remove temporary filter(s) and restore logger
+            if snr_filter:
+                for lg in filter_targets:
+                    try:
+                        lg.removeFilter(snr_filter)
+                    except Exception:
+                        pass
+                if snr_filter.count:
+                    self.gui_queue.put(
+                        {"type": "log", "message": f"Suppressed {snr_filter.count} SNR progress lines (Debug off)."}
+                    )
             self.log = original_log
 
     # ------------------------ project load hook --------------------- #
@@ -675,6 +827,145 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self, "Project Saved", "All settings written to project.json."
         )
 
+    # --------------------------- UI helpers --------------------------- #
+    def update_select_button_text(self) -> None:
+        """
+        Ensure the file/folder select button(s) reflect the active mode.
+        Safe if widgets are missing; no behavior changes.
+        """
+        try:
+            mode = "Batch"
+            if hasattr(self, "file_mode") and callable(getattr(self.file_mode, "get", None)):
+                mode = self.file_mode.get()
+
+            if mode == "Single":
+                # Prefer file button text when present
+                btn_file = getattr(self, "btn_select_input_file", None)
+                if btn_file and hasattr(btn_file, "setText"):
+                    btn_file.setText("Select EEG File…")
+                # If only a generic button exists, set that
+                btn_generic = getattr(self, "btn_select_input", None)
+                if btn_generic and hasattr(btn_generic, "setText"):
+                    btn_generic.setText("Select EEG File…")
+            else:
+                # Batch
+                btn_folder = getattr(self, "btn_select_input_folder", None)
+                if btn_folder and hasattr(btn_folder, "setText"):
+                    btn_folder.setText("Select Data Folder…")
+                btn_generic = getattr(self, "btn_select_input", None)
+                if btn_generic and hasattr(btn_generic, "setText"):
+                    btn_generic.setText("Select Data Folder…")
+        except Exception as e:
+            self.log(f"update_select_button_text failed: {e}", level=logging.WARNING)
+
+    # Alias for ui_main.py which calls the underscored name
+    def _update_select_button_text(self) -> None:
+        self.update_select_button_text()
+
+    # --------------------------- mode + detect --------------------------- #
+    def _on_mode_changed(self, mode: str) -> None:
+        """
+        Adapter for UI radio buttons (wired in ui_main.py).
+        Keeps legacy-compatible mode string and toggles any present selectors.
+        """
+        mode_norm = (mode or "").strip().lower()
+        if mode_norm not in ("single", "batch"):
+            self.log(f"Unknown mode '{mode}'; ignoring.", level=logging.WARNING)
+            return
+
+        # Maintain legacy-readable getter that some helpers expect
+        pretty = "Single" if mode_norm == "single" else "Batch"
+        self.file_mode = SimpleNamespace(get=lambda p=pretty: p)
+        self.log(f"File mode changed to {pretty}")
+
+        # Opportunistically toggle common widgets if they exist; no-ops otherwise
+        def _safe_set_enabled(obj_name: str, enabled: bool) -> None:
+            w = getattr(self, obj_name, None)
+            if w and hasattr(w, "setEnabled"):
+                try:
+                    w.setEnabled(enabled)
+                except Exception:
+                    pass
+
+        # Typical names used in our UI builder; harmless if missing
+        is_single = (mode_norm == "single")
+        _safe_set_enabled("btn_select_input_file", is_single)
+        _safe_set_enabled("le_input_file", is_single)
+        _safe_set_enabled("btn_select_input_folder", not is_single)
+        _safe_set_enabled("le_input_folder", not is_single)
+
+        self.update_select_button_text()
+
+        # Optional label feedback
+        lbl = getattr(self, "lbl_mode", None)
+        if isinstance(lbl, QLabel):
+            try:
+                lbl.setText(f"Mode: {pretty}")
+            except Exception:
+                pass
+
+    # ---------- legacy mixin hook: enable/disable controls during run ---------- #
+    def _set_controls_enabled(self, enabled: bool) -> None:
+        """
+        Required by Main_App.Legacy_App.processing_utils.
+        Disables common inputs while a run is active. No-ops if widgets missing.
+        """
+        self.busy = not enabled
+
+        def _safe_enable(name: str) -> None:
+            w = getattr(self, name, None)
+            if w and hasattr(w, "setEnabled"):
+                try:
+                    w.setEnabled(enabled)
+                except Exception:
+                    self.log(f"_set_controls_enabled: could not toggle {name}", level=logging.DEBUG)
+
+        # Common controls (exists-if-present)
+        for n in (
+            "btn_start",
+            "btn_select_input_file", "le_input_file",
+            "btn_select_input_folder", "le_input_folder",
+            "btn_add_event", "btn_detect",
+            "cb_loreta",
+            "btn_create_project", "btn_open_project",
+        ):
+            _safe_enable(n)
+
+        # Event-map row edits/buttons (query per-type; Qt doesn't accept tuple here)
+        for row in getattr(self, "event_rows", []):
+            try:
+                for child in row.findChildren(QLineEdit):
+                    child.setEnabled(enabled)
+                for child in row.findChildren(QAbstractButton):
+                    child.setEnabled(enabled)
+            except Exception:
+                # Be quiet but safe
+                self.log("_set_controls_enabled: child toggle failed", level=logging.DEBUG)
+
+    def detect_trigger_ids(self) -> None:
+        """
+        Non-blocking placeholder so the Detect button works without crashing.
+        If/when a public legacy API is exposed for trigger detection, call it here.
+        """
+        try:
+            # If we already have any event-map entries, just inform the user.
+            has_entries = any(
+                bool(edits.get("label").get() and edits.get("id").get())
+                for edits in self.event_map_entries
+            )
+            if has_entries:
+                self.log("Detect: event map already has entries; no changes made.")
+                QMessageBox.information(self, "Detect Triggers",
+                                        "Event map already contains entries.\nEdit as needed and Save Project.")
+                return
+            # Graceful notice; real detection can be wired to a worker later.
+            self.log("Detect: auto trigger detection not available in Qt UI yet.")
+            QMessageBox.information(self, "Detect Triggers",
+                                    "Automatic trigger detection is not available yet in the Qt interface.\n"
+                                    "Please enter event labels/IDs manually for now.")
+        except Exception as e:
+            self.log(f"Detect triggers failed: {e}", level=logging.ERROR)
+            QMessageBox.warning(self, "Detect Triggers", f"Could not run detection: {e}")
 
 # ----------------------------------------------------------------------
 def main() -> None:
