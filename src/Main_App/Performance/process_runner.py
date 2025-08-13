@@ -12,6 +12,9 @@ Process-based per-file runner.
 """
 
 import logging
+import atexit
+import shutil
+import tempfile
 import os
 import time
 import traceback
@@ -66,6 +69,20 @@ def _worker_init() -> None:
     # Register stubs
     sys.modules.setdefault("tkinter", tk)
     sys.modules["tkinter.messagebox"] = msg
+
+    # --- Memmap cleanup on worker exit ---
+    from pathlib import Path
+    base = Path(tempfile.gettempdir()) / "fpvs_memmap"
+    pid_dir = base / f"pid_{os.getpid()}"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+
+    def _cleanup_pid_dir() -> None:
+        try:
+            shutil.rmtree(pid_dir, ignore_errors=True)  # remove memmaps for this worker
+        except Exception:
+            pass
+
+    atexit.register(_cleanup_pid_dir)
 
 
 def _memmap_path_for_file(file_path: Path) -> Path:
@@ -207,6 +224,28 @@ def _memory_ok(limit_ratio: Optional[float]) -> bool:
     vm = psutil.virtual_memory()
     return (vm.percent / 100.0) < float(limit_ratio)
 
+def _scavenge_stale_memmaps() -> None:
+    """Remove memmap PID folders for processes that are no longer alive."""
+    try:
+        from pathlib import Path
+        import psutil
+        base = Path(tempfile.gettempdir()) / "fpvs_memmap"
+        if not base.exists():
+            return
+        for d in base.glob("pid_*"):
+            try:
+                pid = int(d.name.split("_", 1)[1])
+            except Exception:
+                continue
+            if not psutil.pid_exists(pid):
+                shutil.rmtree(d, ignore_errors=True)
+        try:
+            base.rmdir()  # remove root if empty
+        except OSError:
+            pass
+    except Exception:
+        pass
+
 
 def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = None) -> None:
     """
@@ -235,6 +274,55 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
         mp_context=ctx,
         initializer=_worker_init,
     ) as pool:
+
+        def _submit_next_available() -> bool:
+            """Submit one file if capacity and (if enabled) memory is OK."""
+            nonlocal remaining
+            if not remaining or len(in_flight) >= maxw:
+                return False
+            # Optional soft-cap on system RAM
+            while not _memory_ok(getattr(params, "memory_soft_limit_ratio", None)):
+                time.sleep(getattr(params, "memory_check_interval_s", 0.25))
+            f = remaining.pop(0)
+            fut = pool.submit(_process_one_file, f, params.settings, params.event_map, params.save_folder)
+            in_flight[fut] = f
+            return True
+
+        # Prime pool
+        while len(in_flight) < maxw and remaining:
+            if not _submit_next_available():
+                break
+
+        # Drain
+        while in_flight or remaining:
+            if not in_flight and remaining:
+                _submit_next_available()
+                continue
+
+            done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED, timeout=0.5)
+            if not done:
+                _submit_next_available()
+                continue
+
+            for fut in done:
+                f = in_flight.pop(fut, None)
+                try:
+                    res = fut.result()
+                except Exception as exc:
+                    res = {"status": "error", "file": str(f) if f else "unknown", "error": str(exc)}
+                completed += 1
+                if progress_queue:
+                    progress_queue.put(
+                        {"type": "progress", "completed": completed, "total": total, "result": res}
+                    )
+
+                _submit_next_available()
+
+    # Final cleanup: remove any stale memmaps in the %TEMP% folder from previous runs
+    _scavenge_stale_memmaps()
+
+    if progress_queue:
+        progress_queue.put({"type": "done", "count": completed})
 
         def _submit_next_available() -> bool:
             """Submit one file if below memory cap and capacity; return True if submitted."""
