@@ -257,6 +257,30 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self.setStatusBar(status)
         status.showMessage(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
 
+        # --- Busy spinner (ENLARGED) ---
+        # Make the status bar taller & add padding
+        self.statusBar().setSizeGripEnabled(False)
+        self.statusBar().setMinimumHeight(36)  # ~36 px tall
+        self.statusBar().setContentsMargins(8, 0, 8, 0)
+
+        # Larger animated text spinner
+        self._busyFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._busyIdx = 0
+        self._busyTimer = QTimer(self)
+        self._busyTimer.setInterval(120)  # ~8 FPS
+        self._busyTimer.timeout.connect(self._tick_busy)
+
+        self._busyLabel = QLabel("")  # lives in the status bar
+        # bump font size (keeps current family/theme)
+        _big = self._busyLabel.font()
+        _big.setPointSize(max(_big.pointSize() + 4, 14))  # +4pt or at least 14pt
+        self._busyLabel.setFont(_big)
+        # add padding so it doesn't feel cramped
+        self._busyLabel.setStyleSheet("padding: 0 10px;")
+        self._busyLabel.setVisible(False)
+        self.statusBar().addPermanentWidget(self._busyLabel)
+        # --------------------------------
+
         # Wire landing page buttons if present
         if hasattr(self, "btn_create_project"):
             self.btn_create_project.clicked.connect(self.actionCreateNewProject.trigger)
@@ -337,39 +361,51 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     # -------------------------- processing -------------------------- #
     def start_processing(self) -> None:
         """
-        Begin a processing run and (re)activate queue checks.
-
-        Keeps the GUI responsive; in 'process' mode we use a process pool,
-        in 'single' mode we run the original legacy path.
+        Begin a processing run. In 'process' mode we use a per-file process pool;
+        in 'single' mode we defer to the legacy path. Spinner hooks included.
         """
         if not self._start_guard.start():
             QMessageBox.warning(self, "Busy", "Processing already started")
             return
 
-        # Reset run state for this processing job
-        self._last_job_success = False  # Gate for “Processing Complete” popup
+        # Reset run state
+        self._last_job_success = False
         self._run_active = True
         self._snr_tick = 0
 
-        # Ensure the queue polling timer is active for the legacy path
+        # Start spinner immediately (if present)
+        try:
+            if hasattr(self, "_busy_start"):
+                self._busy_start()
+        except Exception:
+            pass
+
+        # Default: timer on; we'll stop it in process mode
         if not self._processing_timer.isActive():
             self._processing_timer.start(50)
 
         try:
-            if not self._n_jobs_ignored_logged:
-                logger.info(
-                    "n_jobs is ignored in this version; using parallel_mode=%s",
-                    self.parallel_mode,
-                )
+            if not getattr(self, "_n_jobs_ignored_logged", False):
+                logger.info("n_jobs is ignored in this version; using parallel_mode=%s", self.parallel_mode)
                 self._n_jobs_ignored_logged = True
 
-            # Process-pool path (per-file, multiprocessing)
+            # Pull project overrides if present
+            if getattr(self, "currentProject", None):
+                opts = getattr(self.currentProject, "options", {})
+                self.parallel_mode = opts.get("parallel_mode", getattr(self, "parallel_mode", "process"))
+                self.max_workers = opts.get("max_workers", getattr(self, "max_workers", None))
+
+            # ---------- Process mode (multiprocessing) ----------
             if self.parallel_mode == "process":
-                # The legacy GUI-queue poller isn't used in process mode; stop it.
+                # Do NOT kick legacy path. We stop the legacy poll timer here.
                 if self._processing_timer.isActive():
                     self._processing_timer.stop()
 
                 if not self._validate_inputs():
+                    try:
+                        if hasattr(self, "_busy_stop"): self._busy_stop()
+                    except Exception:
+                        pass
                     self._run_active = False
                     self._start_guard.end()
                     return
@@ -377,7 +413,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 self._set_controls_enabled(False)
                 self._max_progress = len(self.data_paths)
                 if hasattr(self, "progress_bar"):
+                    self.progress_bar.setRange(0, 100)
                     self.progress_bar.setValue(0)
+                self._processed_count = 0
                 self.busy = True
 
                 from pathlib import Path
@@ -387,20 +425,33 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 save_folder = Path(self.save_folder_path.get())
                 files = [Path(p) for p in self.data_paths]
                 settings = self.validated_params.copy()
-                # pull out event map if present; leave the rest intact
                 event_map = settings.pop("event_id_map", {})
 
                 self._mp = MpRunnerBridge(self)
-                # Drive the existing progress bar (0..100)
-                self._mp.progress.connect(lambda pct: self.progress_bar.setValue(pct))
-                self._mp.error.connect(lambda m: QMessageBox.critical(self, "Processing Error", m))
+
+                # Smooth progress if available
+                self._mp.progress.connect(
+                    lambda pct: (self._animate_progress_to(pct / 100.0)
+                                 if hasattr(self, "_animate_progress_to")
+                                 else self.progress_bar.setValue(int(pct)))
+                )
+                self._mp.error.connect(
+                    lambda m: (
+                        (self._busy_stop() if hasattr(self, "_busy_stop") else None),
+                        QMessageBox.critical(self, "Processing Error", m),
+                        setattr(self, "_run_active", False),
+                        self._start_guard.end(),
+                    )
+                )
                 self._mp.finished.connect(
                     lambda _p: (
+                        (self._busy_stop() if hasattr(self, "_busy_stop") else None),
                         self._finalize_processing(True),
                         setattr(self, "_run_active", False),
                         self._start_guard.end(),
                     )
                 )
+
                 self._mp.start(
                     project_root=project_root,
                     data_files=files,
@@ -411,18 +462,61 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 )
                 return  # IMPORTANT: do not fall through to legacy
 
-            # Single-process legacy path (original behavior)
+            # ---------- Single mode (legacy path) ----------
             from Main_App.Performance.mp_env import set_blas_threads_single_process
             set_blas_threads_single_process()
             if not self._processing_timer.isActive():
                 self._processing_timer.start(50)
             super().start_processing()
 
-        except Exception as e:  # pragma: no cover - GUI error path
+        except Exception as e:
             logger.exception(e)
             QMessageBox.critical(self, "Processing Error", str(e))
+            try:
+                if hasattr(self, "_busy_stop"): self._busy_stop()
+            except Exception:
+                pass
             self._run_active = False
             self._start_guard.end()
+
+    # --- Busy spinner helpers ---
+    def _busy_start(self) -> None:
+        if not self._busyTimer.isActive():
+            self._busyIdx = 0
+            self._busyLabel.setText(f"{self._busyFrames[0]} Processing…")
+            self._busyLabel.setVisible(True)
+            self._busyTimer.start()
+
+    def _busy_stop(self) -> None:
+        if self._busyTimer.isActive():
+            self._busyTimer.stop()
+        self._busyLabel.setVisible(False)
+
+    def _tick_busy(self) -> None:
+        self._busyIdx = (self._busyIdx + 1) % len(self._busyFrames)
+        self._busyLabel.setText(f"{self._busyFrames[self._busyIdx]} Processing…")
+
+    # --------------------------------
+
+    def _on_processing_finished(self, _payload: dict | None = None) -> None:
+        # Process-mode completion
+        self._busy_stop()
+        self._finalize_processing(True)
+        self._run_active = False
+        self._start_guard.end()
+
+    def _on_processing_error(self, message: str) -> None:
+        # Process-mode error
+        self._busy_stop()
+        QMessageBox.critical(self, "Processing Error", message)
+
+    def _finalize_processing(self, success: bool) -> None:  # type: ignore[override]
+        """Ensure spinner stops for the legacy (single) path, then defer."""
+        try:
+            self._busy_stop()
+        except Exception:
+            pass
+        super()._finalize_processing(success)
 
     def _periodic_queue_check(self) -> None:
         if not self._run_active:
