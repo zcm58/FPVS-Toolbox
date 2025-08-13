@@ -339,8 +339,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         """
         Begin a processing run and (re)activate queue checks.
 
-        We keep the GUI responsive by polling the queue via QTimer while
-        the worker thread (in ProcessingMixin) does the heavy lifting.
+        Keeps the GUI responsive; in 'process' mode we use a process pool,
+        in 'single' mode we run the original legacy path.
         """
         if not self._start_guard.start():
             QMessageBox.warning(self, "Busy", "Processing already started")
@@ -351,7 +351,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._run_active = True
         self._snr_tick = 0
 
-        # Ensure the queue polling timer is active
+        # Ensure the queue polling timer is active for the legacy path
         if not self._processing_timer.isActive():
             self._processing_timer.start(50)
 
@@ -362,44 +362,62 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     self.parallel_mode,
                 )
                 self._n_jobs_ignored_logged = True
+
+            # Process-pool path (per-file, multiprocessing)
             if self.parallel_mode == "process":
+                # The legacy GUI-queue poller isn't used in process mode; stop it.
+                if self._processing_timer.isActive():
+                    self._processing_timer.stop()
+
                 if not self._validate_inputs():
                     self._run_active = False
                     self._start_guard.end()
                     return
+
                 self._set_controls_enabled(False)
                 self._max_progress = len(self.data_paths)
-                self.progress_bar.setValue(0)
+                if hasattr(self, "progress_bar"):
+                    self.progress_bar.setValue(0)
                 self.busy = True
+
+                from pathlib import Path
                 from Main_App.PySide6_App.workers.mp_runner_bridge import MpRunnerBridge
+
+                project_root = Path(self.currentProject.project_root)
+                save_folder = Path(self.save_folder_path.get())
+                files = [Path(p) for p in self.data_paths]
+                settings = self.validated_params.copy()
+                # pull out event map if present; leave the rest intact
+                event_map = settings.pop("event_id_map", {})
+
                 self._mp = MpRunnerBridge(self)
+                # Drive the existing progress bar (0..100)
                 self._mp.progress.connect(lambda pct: self.progress_bar.setValue(pct))
-                self._mp.error.connect(
-                    lambda m: QMessageBox.critical(self, "Processing Error", m)
-                )
+                self._mp.error.connect(lambda m: QMessageBox.critical(self, "Processing Error", m))
                 self._mp.finished.connect(
-                    lambda payload: (
+                    lambda _p: (
                         self._finalize_processing(True),
                         setattr(self, "_run_active", False),
                         self._start_guard.end(),
                     )
                 )
-                project_root = Path(self.currentProject.project_root)
-                save_folder = Path(self.save_folder_path.get())
-                files = [Path(p) for p in self.data_paths]
-                settings = self.validated_params.copy()
-                event_map = settings.pop("event_id_map", {})
                 self._mp.start(
-                    project_root,
-                    files,
-                    settings,
-                    event_map,
-                    save_folder,
-                    self.max_workers,
+                    project_root=project_root,
+                    data_files=files,
+                    settings=settings,
+                    event_map=event_map,
+                    save_folder=save_folder,
+                    max_workers=self.max_workers,
                 )
-            else:
-                set_blas_threads_single_process()
-                super().start_processing()
+                return  # IMPORTANT: do not fall through to legacy
+
+            # Single-process legacy path (original behavior)
+            from Main_App.Performance.mp_env import set_blas_threads_single_process
+            set_blas_threads_single_process()
+            if not self._processing_timer.isActive():
+                self._processing_timer.start(50)
+            super().start_processing()
+
         except Exception as e:  # pragma: no cover - GUI error path
             logger.exception(e)
             QMessageBox.critical(self, "Processing Error", str(e))
