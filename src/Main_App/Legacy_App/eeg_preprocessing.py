@@ -2,14 +2,27 @@
 # -*- coding: utf-8 -*-
 """
 Handles the EEG preprocessing pipeline for the FPVS Toolbox.
+Adds a cached standard 10–20 montage factory to reduce RAM/CPU overhead
+without changing the preprocessing order or behavior.
 """
+from __future__ import annotations
+
 import logging
+import traceback
+from functools import lru_cache
+from typing import Any, Callable, Optional, Tuple
+
 import mne
 import numpy as np
 from scipy.stats import kurtosis
-import traceback
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "perform_preprocessing",
+    "get_cached_standard_montage",
+    "attach_cached_montage_if_missing",
+]
 
 # Import configuration with a graceful fallback when run standalone
 try:
@@ -25,10 +38,46 @@ except ImportError:  # pragma: no cover - fallback for isolated execution
     )
 
 
-def perform_preprocessing(raw_input: mne.io.BaseRaw,
-                          params: dict,
-                          log_func: callable,
-                          filename_for_log: str = "UnknownFile"):
+# -----------------------------------------------------------------------------
+# Montage caching (no behavioral change to preprocessing; callers may use this)
+# -----------------------------------------------------------------------------
+@lru_cache(maxsize=8)
+def get_cached_standard_montage(name: str = "standard_1020") -> Any:
+    """
+    Return a cached standard montage object (e.g., 'standard_1020').
+
+    This avoids rebuilding/loading the montage repeatedly across workers/files.
+    """
+    mont = mne.channels.make_standard_montage(name)
+    logger.debug("Montage cache: returning '%s' (cache size up to 8).", name)
+    return mont
+
+
+def attach_cached_montage_if_missing(
+    raw: mne.io.BaseRaw,
+    name: str = "standard_1020",
+    on_missing: str = "warn",
+) -> None:
+    """
+    Attach a cached montage to 'raw' only if none is present.
+    DOES NOT change the existing preprocessing order; helper for callers.
+
+    Note: Not invoked internally by 'perform_preprocessing' to preserve behavior.
+    """
+    try:
+        if raw.get_montage() is None:
+            raw.set_montage(get_cached_standard_montage(name), on_missing=on_missing, verbose=False)
+            logger.debug("Cached montage '%s' attached to Raw (on_missing=%s).", name, on_missing)
+    except Exception as e:
+        logger.warning("Failed to attach cached montage '%s': %s", name, e)
+
+
+def perform_preprocessing(
+    raw_input: mne.io.BaseRaw,
+    params: dict,
+    log_func: Callable[[str], None],
+    filename_for_log: str = "UnknownFile",
+) -> Tuple[Optional[mne.io.BaseRaw], int]:
     """
     Applies preprocessing steps to the raw MNE object.
 

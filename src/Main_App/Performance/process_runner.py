@@ -8,19 +8,22 @@ Process-based per-file runner.
 - Extracts events using the project's stim channel (e.g., "Status").
 - Suppresses any legacy tkinter.messagebox calls inside workers.
 - Calls the existing post-export adapter (no Legacy edits).
+- Adds RAM-aware backpressure: staged submissions + system memory soft-cap.
 """
 
 import logging
 import os
 import time
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import tempfile
+from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 from dataclasses import dataclass
 from multiprocessing import Queue, get_context
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Dict, List, Optional
 
+import psutil  # soft memory cap
 from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,10 @@ class RunParams:
     event_map: Dict[str, int]  # {label: code}
     save_folder: Path
     max_workers: Optional[int] = None
+    # RAM backpressure (ratio of total system memory). None disables throttling.
+    memory_soft_limit_ratio: Optional[float] = 0.85
+    # How often to re-check memory when throttled
+    memory_check_interval_s: float = 0.25
 
 
 def _worker_init() -> None:
@@ -61,6 +68,13 @@ def _worker_init() -> None:
     sys.modules["tkinter.messagebox"] = msg
 
 
+def _memmap_path_for_file(file_path: Path) -> Path:
+    """Mirror the loader's deterministic per-PID memmap path for cleanup."""
+    pid_dir = Path(tempfile.gettempdir()) / "fpvs_memmap" / f"pid_{os.getpid()}"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    return pid_dir / (file_path.stem + "_raw.dat")
+
+
 def _process_one_file(
     file_path: Path,
     settings: Dict[str, object],
@@ -83,6 +97,7 @@ def _process_one_file(
             run_post_export,
         )
         import mne  # type: ignore
+        import gc
 
         # Minimal logger-compatible stub for legacy functions
         class _App:
@@ -103,8 +118,8 @@ def _process_one_file(
         if raw_proc is None:
             raise RuntimeError("perform_preprocessing returned None")
 
+        # Free loader Raw ASAP
         del raw
-        import gc
         gc.collect()
 
         # 2) Events — prefer explicit stim channel (BioSemi 'Status')
@@ -156,8 +171,22 @@ def _process_one_file(
         )
         run_post_export(ctx, list(event_map.keys()))
 
-        del raw_proc
+        # Done with Raw/Epochs
+        del raw_proc, epochs_dict
         gc.collect()
+
+        # Attempt memmap cleanup for this file (safe if still open -> ignore)
+        try:
+            p = _memmap_path_for_file(file_path)
+            if p.exists():
+                p.unlink(missing_ok=True)  # type: ignore[arg-type]
+            pid_dir = p.parent
+            try:
+                pid_dir.rmdir()  # remove if empty
+            except OSError:
+                pass
+        except Exception:
+            pass
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         return {"status": "ok", "file": str(file_path), "elapsed_ms": elapsed_ms}
@@ -169,6 +198,14 @@ def _process_one_file(
             "error": f"{e}",
             "trace": traceback.format_exc(),
         }
+
+
+def _memory_ok(limit_ratio: Optional[float]) -> bool:
+    """Return True if system memory usage is below the soft cap."""
+    if limit_ratio is None:
+        return True
+    vm = psutil.virtual_memory()
+    return (vm.percent / 100.0) < float(limit_ratio)
 
 
 def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = None) -> None:
@@ -188,36 +225,62 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
     maxw = params.max_workers or max(1, (os.cpu_count() or 2) - 1)
     ctx = get_context("spawn")
 
+    completed = 0
+    total = len(files)
+    remaining = list(files)
+    in_flight: dict = {}
+
     with ProcessPoolExecutor(
         max_workers=maxw,
         mp_context=ctx,
         initializer=_worker_init,
     ) as pool:
-        futures = {
-            pool.submit(
-                _process_one_file,
-                f,
-                params.settings,
-                params.event_map,
-                params.save_folder,
-            ): f
-            for f in files
-        }
 
-        completed = 0
-        total = len(futures)
-        for fut in as_completed(futures):
-            res = fut.result()
-            completed += 1
-            if progress_queue:
-                progress_queue.put(
-                    {
-                        "type": "progress",
-                        "completed": completed,
-                        "total": total,
-                        "result": res,
-                    }
-                )
+        def _submit_next_available() -> bool:
+            """Submit one file if below memory cap and capacity; return True if submitted."""
+            nonlocal remaining
+            if not remaining:
+                return False
+            if len(in_flight) >= maxw:
+                return False
+            # Soft-cap throttle: wait until memory OK
+            while not _memory_ok(params.memory_soft_limit_ratio):
+                time.sleep(params.memory_check_interval_s)
+            f = remaining.pop(0)
+            fut = pool.submit(_process_one_file, f, params.settings, params.event_map, params.save_folder)
+            in_flight[fut] = f
+            return True
+
+        # Prime the pool
+        while len(in_flight) < maxw and remaining:
+            if not _submit_next_available():
+                break
+
+        while in_flight or remaining:
+            if not in_flight and remaining:
+                # No tasks running but some remaining: try to submit again (memory might have freed)
+                _submit_next_available()
+                continue
+
+            done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED, timeout=0.5)
+            if not done:
+                # Periodically try to top up submissions if memory allows
+                _submit_next_available()
+                continue
+
+            for fut in done:
+                f = in_flight.pop(fut, None)
+                try:
+                    res = fut.result()
+                except Exception as exc:
+                    res = {"status": "error", "file": str(f) if f else "unknown", "error": str(exc)}
+                completed += 1
+                if progress_queue:
+                    progress_queue.put(
+                        {"type": "progress", "completed": completed, "total": total, "result": res}
+                    )
+                # Try to submit another task after each completion
+                _submit_next_available()
 
         if progress_queue:
             progress_queue.put({"type": "done", "count": completed})
