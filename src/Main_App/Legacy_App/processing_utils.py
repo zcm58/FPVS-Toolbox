@@ -434,9 +434,18 @@ class ProcessingMixin:
                                            'message': f"DEBUG [{f_name}]: Attempting to epoch for GUI label '{lbl}' (using Int ID: {num_id_val_gui}). Events array shape: {events.shape}"})
                         if events.size > 0 and num_id_val_gui in events[:, 2]:
                             try:
-                                epochs = mne.Epochs(raw_proc, events, event_id={lbl: num_id_val_gui},
-                                                    tmin=params['epoch_start'], tmax=params['epoch_end'],
-                                                    preload=True, verbose=False, baseline=None, on_missing='warn')
+                                epochs = mne.Epochs(
+                                    raw_proc,
+                                    events,
+                                    event_id={lbl: num_id_val_gui},
+                                    tmin=params['epoch_start'],
+                                    tmax=params['epoch_end'],
+                                    preload=False,
+                                    verbose=False,
+                                    baseline=None,
+                                    on_missing='warn',
+                                    decim=1,
+                                )
                                 if len(epochs.events) > 0:
                                     gui_queue.put({'type': 'log',
                                                    'message': f"  -> Successfully created {len(epochs.events)} epochs for GUI label '{lbl}' in {f_name}."})

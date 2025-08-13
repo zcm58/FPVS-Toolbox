@@ -82,7 +82,28 @@ def perform_preprocessing(raw_input: mne.io.BaseRaw,
             log_func(
                 f"Skip initial referencing for {filename_for_log} (Ref channels '{ref1}', '{ref2}' not found or not specified).")
 
-        # 2. Drop Channels
+        # 2. Downsample early
+        if downsample_rate:
+            sf = raw.info['sfreq']
+            log_func(f"Downsample check for {filename_for_log}: Curr {sf:.1f}Hz, Tgt {downsample_rate}Hz.")
+            if sf > downsample_rate:
+                try:
+                    raw.resample(downsample_rate, n_jobs=1, npad="auto", window='hann', verbose=False)
+                    log_func(f"Resampled {filename_for_log} to {raw.info['sfreq']:.1f}Hz.")
+                except Exception as resample_err:
+                    log_func(f"Warn: Resampling failed for {filename_for_log}: {resample_err}")
+            else:
+                log_func(f"No downsampling needed for {filename_for_log}.")
+        else:
+            log_func(f"Skip downsample for {filename_for_log}.")
+
+        # 3. Drop EXG reference channels
+        for ch in ("EXG1", "EXG2"):
+            if ch in raw.ch_names:
+                raw.drop_channels([ch])
+                log_func(f"Dropped {ch} after referencing.")
+
+        # 4. Drop Channels
         current_names_before_drop = list(raw.info['ch_names'])
         log_func(
             f"DEBUG [preprocess for {filename_for_log}]: Channel names BEFORE drop logic ({len(current_names_before_drop)}): {current_names_before_drop}")
@@ -123,22 +144,7 @@ def perform_preprocessing(raw_input: mne.io.BaseRaw,
             log_func(
                 f"Skip channel drop for {filename_for_log} (max_keep: {max_keep}). Current channels: {len(current_names_before_drop)}")
 
-        # 3. Downsample
-        if downsample_rate:
-            sf = raw.info['sfreq']
-            log_func(f"Downsample check for {filename_for_log}: Curr {sf:.1f}Hz, Tgt {downsample_rate}Hz.")
-            if sf > downsample_rate:
-                try:
-                    raw.resample(downsample_rate, npad="auto", window='hann', verbose=False)
-                    log_func(f"Resampled {filename_for_log} to {raw.info['sfreq']:.1f}Hz.")
-                except Exception as resample_err:
-                    log_func(f"Warn: Resampling failed for {filename_for_log}: {resample_err}")
-            else:
-                log_func(f"No downsampling needed for {filename_for_log}.")
-        else:
-            log_func(f"Skip downsample for {filename_for_log}.")
-
-        # 4. Filter
+        # 5. Filter
         l_freq = low_pass if low_pass and low_pass > 0 else None
         h_freq = high_pass
         if l_freq or h_freq:
@@ -155,7 +161,7 @@ def perform_preprocessing(raw_input: mne.io.BaseRaw,
         else:
             log_func(f"Skip filter for {filename_for_log}.")
 
-        # 5. Kurtosis rejection & interp
+        # 6. Kurtosis rejection & interp
         if reject_thresh:
             log_func(f"Kurtosis rejection for {filename_for_log} (Z > {reject_thresh})...")
             bad_k_auto = []
@@ -212,7 +218,7 @@ def perform_preprocessing(raw_input: mne.io.BaseRaw,
         else:
             log_func(f"Skip Kurtosis for {filename_for_log} (no threshold).")
 
-        # 6. Average Reference
+        # 7. Average Reference
         try:
             log_func(f"Applying average reference to {filename_for_log}...")
             eeg_picks_for_ref = mne.pick_types(raw.info, eeg=True, exclude=raw.info['bads'])
