@@ -2,6 +2,7 @@
 from __future__ import annotations
 from Main_App.PySide6_App.workers.processing_worker import PostProcessWorker
 from Main_App.PySide6_App.utils.op_guard import OpGuard
+from Main_App.Performance.mp_env import set_blas_threads_single_process
 import logging
 import os
 import queue
@@ -240,6 +241,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Prevent spurious finalize/error dialogs until a run starts
         self._run_active = False
+        # Parallel processing configuration
+        self.parallel_mode = "process"
+        self.max_workers = max(1, (os.cpu_count() or 2) - 1)
+        self._n_jobs_ignored_logged = False
+        self._mp = None
 
         # Build nav + menus
         init_sidebar(self)
@@ -250,6 +256,30 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         status = QStatusBar(self)
         self.setStatusBar(status)
         status.showMessage(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
+
+        # --- Busy spinner (ENLARGED) ---
+        # Make the status bar taller & add padding
+        self.statusBar().setSizeGripEnabled(False)
+        self.statusBar().setMinimumHeight(36)  # ~36 px tall
+        self.statusBar().setContentsMargins(8, 0, 8, 0)
+
+        # Larger animated text spinner
+        self._busyFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._busyIdx = 0
+        self._busyTimer = QTimer(self)
+        self._busyTimer.setInterval(120)  # ~8 FPS
+        self._busyTimer.timeout.connect(self._tick_busy)
+
+        self._busyLabel = QLabel("")  # lives in the status bar
+        # bump font size (keeps current family/theme)
+        _big = self._busyLabel.font()
+        _big.setPointSize(max(_big.pointSize() + 4, 14))  # +4pt or at least 14pt
+        self._busyLabel.setFont(_big)
+        # add padding so it doesn't feel cramped
+        self._busyLabel.setStyleSheet("padding: 0 10px;")
+        self._busyLabel.setVisible(False)
+        self.statusBar().addPermanentWidget(self._busyLabel)
+        # --------------------------------
 
         # Wire landing page buttons if present
         if hasattr(self, "btn_create_project"):
@@ -297,6 +327,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._post_thread = None
         self._post_worker: PostProcessWorker | None = None
         self._post_backlog: deque[tuple[str, dict, list[str]]] = deque()
+        self._pending_finalize = False
         self._op_guard = OpGuard()
         try:
             update_manager.check_for_updates_async(
@@ -331,34 +362,162 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     # -------------------------- processing -------------------------- #
     def start_processing(self) -> None:
         """
-        Begin a processing run and (re)activate queue checks.
-
-        We keep the GUI responsive by polling the queue via QTimer while
-        the worker thread (in ProcessingMixin) does the heavy lifting.
+        Begin a processing run. In 'process' mode we use a per-file process pool;
+        in 'single' mode we defer to the legacy path. Spinner hooks included.
         """
         if not self._start_guard.start():
             QMessageBox.warning(self, "Busy", "Processing already started")
             return
 
-        # Reset run state for this processing job
-        self._last_job_success = False  # Gate for “Processing Complete” popup
+        # Reset run state
+        self._last_job_success = False
         self._run_active = True
         self._snr_tick = 0
 
-        # Ensure the queue polling timer is active
+        # Start spinner immediately (if present)
+        try:
+            if hasattr(self, "_busy_start"):
+                self._busy_start()
+        except Exception:
+            pass
+
+        # Default: timer on; we'll stop it in process mode
         if not self._processing_timer.isActive():
             self._processing_timer.start(50)
 
         try:
-            # The legacy mixin calls ``_validate_inputs()``. Provide our own
-            # modern validation implementation (below) that builds the params
-            # and ensures files/paths exist.
+            if not getattr(self, "_n_jobs_ignored_logged", False):
+                logger.info("n_jobs is ignored in this version; using parallel_mode=%s", self.parallel_mode)
+                self._n_jobs_ignored_logged = True
+
+            # Pull project overrides if present
+            if getattr(self, "currentProject", None):
+                opts = getattr(self.currentProject, "options", {})
+                self.parallel_mode = opts.get("parallel_mode", getattr(self, "parallel_mode", "process"))
+                self.max_workers = opts.get("max_workers", getattr(self, "max_workers", None))
+
+            # ---------- Process mode (multiprocessing) ----------
+            if self.parallel_mode == "process":
+                # Do NOT kick legacy path. We stop the legacy poll timer here.
+                if self._processing_timer.isActive():
+                    self._processing_timer.stop()
+
+                if not self._validate_inputs():
+                    try:
+                        if hasattr(self, "_busy_stop"): self._busy_stop()
+                    except Exception:
+                        pass
+                    self._run_active = False
+                    self._start_guard.end()
+                    return
+
+                self._set_controls_enabled(False)
+                self._max_progress = len(self.data_paths)
+                if hasattr(self, "progress_bar"):
+                    self.progress_bar.setRange(0, 100)
+                    self.progress_bar.setValue(0)
+                self._processed_count = 0
+                self.busy = True
+
+                from pathlib import Path
+                from Main_App.PySide6_App.workers.mp_runner_bridge import MpRunnerBridge
+
+                project_root = Path(self.currentProject.project_root)
+                save_folder = Path(self.save_folder_path.get())
+                files = [Path(p) for p in self.data_paths]
+                settings = self.validated_params.copy()
+                event_map = settings.pop("event_id_map", {})
+
+                self._mp = MpRunnerBridge(self)
+
+                # Smooth progress if available
+                self._mp.progress.connect(
+                    lambda pct: (self._animate_progress_to(pct / 100.0)
+                                 if hasattr(self, "_animate_progress_to")
+                                 else self.progress_bar.setValue(int(pct)))
+                )
+                self._mp.error.connect(
+                    lambda m: (
+                        (self._busy_stop() if hasattr(self, "_busy_stop") else None),
+                        QMessageBox.critical(self, "Processing Error", m),
+                        setattr(self, "_run_active", False),
+                        self._start_guard.end(),
+                    )
+                )
+                self._mp.finished.connect(
+                    lambda _p: (
+                        (self._busy_stop() if hasattr(self, "_busy_stop") else None),
+                        self._finalize_processing(True),
+                        setattr(self, "_run_active", False),
+                        self._start_guard.end(),
+                    )
+                )
+
+                self._mp.start(
+                    project_root=project_root,
+                    data_files=files,
+                    settings=settings,
+                    event_map=event_map,
+                    save_folder=save_folder,
+                    max_workers=self.max_workers,
+                )
+                return  # IMPORTANT: do not fall through to legacy
+
+            # ---------- Single mode (legacy path) ----------
+            from Main_App.Performance.mp_env import set_blas_threads_single_process
+            set_blas_threads_single_process()
+            if not self._processing_timer.isActive():
+                self._processing_timer.start(50)
             super().start_processing()
-        except Exception as e:  # pragma: no cover - GUI error path
+
+        except Exception as e:
             logger.exception(e)
             QMessageBox.critical(self, "Processing Error", str(e))
+            try:
+                if hasattr(self, "_busy_stop"): self._busy_stop()
+            except Exception:
+                pass
             self._run_active = False
             self._start_guard.end()
+
+    # --- Busy spinner helpers ---
+    def _busy_start(self) -> None:
+        if not self._busyTimer.isActive():
+            self._busyIdx = 0
+            self._busyLabel.setText(f"{self._busyFrames[0]} Processing…")
+            self._busyLabel.setVisible(True)
+            self._busyTimer.start()
+
+    def _busy_stop(self) -> None:
+        if self._busyTimer.isActive():
+            self._busyTimer.stop()
+        self._busyLabel.setVisible(False)
+
+    def _tick_busy(self) -> None:
+        self._busyIdx = (self._busyIdx + 1) % len(self._busyFrames)
+        self._busyLabel.setText(f"{self._busyFrames[self._busyIdx]} Processing…")
+
+    # --------------------------------
+
+    def _on_processing_finished(self, _payload: dict | None = None) -> None:
+        # Process-mode completion
+        self._busy_stop()
+        self._finalize_processing(True)
+        self._run_active = False
+        self._start_guard.end()
+
+    def _on_processing_error(self, message: str) -> None:
+        # Process-mode error
+        self._busy_stop()
+        QMessageBox.critical(self, "Processing Error", message)
+
+    def _finalize_processing(self, success: bool) -> None:  # type: ignore[override]
+        """Ensure spinner stops for the legacy (single) path, then defer."""
+        try:
+            self._busy_stop()
+        except Exception:
+            pass
+        super()._finalize_processing(success)
 
     def _periodic_queue_check(self) -> None:
         if not self._run_active:
@@ -391,19 +550,26 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 self._finalize_processing(False)
                 return
             elif t == "done":
-                self._finalize_processing(True)
+                if self._post_worker or self._post_backlog:
+                    self._pending_finalize = True
+                else:
+                    self._finalize_processing(True)
                 return
 
         delay = 16 if processed else 50
         QTimer.singleShot(delay, self._periodic_queue_check)
 
     def _start_post_worker(self, file_name: str, epochs_dict: dict, labels: list[str]) -> None:
-        """Launch post-processing in a QThread with the correct ctor args."""
+        """Queue-aware launcher for post-processing jobs."""
+        payload = (file_name, epochs_dict, labels)
+
+        # If a worker is active, enqueue and return
         if self._post_thread and self._post_thread.isRunning():
-            logger.warning("Post-process worker already running")
+            self._post_backlog.append(payload)
+            base = os.path.basename(str(file_name))
+            self.log(f"Queued post-processing for {base}")
             return
 
-        # Supports objects that expose .get() (Tk-style) or plain strings/Paths
         save_folder = (
             self.save_folder_path.get()
             if hasattr(self.save_folder_path, "get")
@@ -423,7 +589,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         thread = QThread(self)
         worker.moveToThread(thread)
         worker.error.connect(self._on_worker_error)
-        worker.finished.connect(self._on_post_finished)
+        worker.finished.connect(self._on_post_finished)   # will drain backlog
         thread.started.connect(worker.run)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
@@ -439,8 +605,21 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         if payload:
             for msg in payload.get("logs", []):
                 self.log(msg)
+
+        # Clear current worker
         self._post_worker = None
         self._post_thread = None
+
+        # Start next queued job, if any
+        if self._post_backlog:
+            next_file, next_epochs, next_labels = self._post_backlog.popleft()
+            self._start_post_worker(next_file, next_epochs, next_labels)
+            return
+
+        # If processing thread already signaled "done", finalize now
+        if getattr(self, "_pending_finalize", False):
+            self._pending_finalize = False
+            self._finalize_processing(True)
 
     def _finalize_processing(self, *args, **kwargs) -> None:
         self._run_active = False
@@ -621,6 +800,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     def _on_project_ready(self) -> None:
         if not getattr(self, "currentProject", None):
             return
+        opts = getattr(self.currentProject, "options", {})
+        self.parallel_mode = opts.get("parallel_mode", self.parallel_mode)
+        self.max_workers = opts.get("max_workers", self.max_workers)
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
 
@@ -749,18 +931,28 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def _export_with_post_process(self, labels: list[str]) -> None:
         """
-        Safely run the legacy ``post_process`` for Excel export.
-
-        We verify the Excel directory and count files before/after to decide
-        whether the run really produced output, then set ``_last_job_success``.
+        Run legacy post_process then decide whether *new* Excel files appeared.
+        Treat "no new files" as a warning (not fatal) because files may be overwritten or stored in subfolders.
         """
         excel_dir = self.save_folder_path.get() if hasattr(self.save_folder_path, "get") else ""
         if not excel_dir or not Path(excel_dir).is_dir():
-            self.gui_queue.put(
-                {"type": "error", "message": f"Excel output folder not found:\n{excel_dir}"}
-            )
+            self.gui_queue.put({"type": "error", "message": f"Excel output folder not found:\n{excel_dir}"})
             self._last_job_success = False
             return
+
+        out_path = Path(excel_dir)
+
+        def _excel_snapshot() -> tuple[int, float]:
+            count = 0
+            latest_mtime = 0.0
+            for p in out_path.rglob("*.xls*"):
+                try:
+                    st = p.stat().st_mtime
+                except OSError:
+                    continue
+                count += 1
+                latest_mtime = max(latest_mtime, st)
+            return count, latest_mtime
 
         original_log = self.log
 
@@ -769,30 +961,26 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             logger.log(level, message)
 
         self.log = queue_log
-        out_path = Path(excel_dir)
 
-        def _count_excels() -> int:
-            # count defensively: .xlsx/.xls/.xlsm etc.
-            return sum(1 for _ in out_path.glob("*.xls*"))
-
-        pre_count = _count_excels()
+        pre_count, pre_mtime = _excel_snapshot()
 
         try:
-            # Call the legacy post-process function
             _legacy_post_process(self, labels)
 
-            post_count = _count_excels()
-            if post_count > pre_count:
-                self._last_job_success = True
-                created = post_count - pre_count
-                self.gui_queue.put(
-                    {"type": "log", "message": f"Excel export completed ({created} new file(s))."}
-                )
+            post_count, post_mtime = _excel_snapshot()
+            created = post_count - pre_count
+            changed = post_mtime > pre_mtime
+
+            if created > 0 or changed:
+                self._last_job_success = bool(self._last_job_success or True)
+                msg = f"Excel export completed ({max(created, 0)} new file(s){' or overwrites' if created == 0 and changed else ''})."
+                self.gui_queue.put({"type": "log", "message": msg})
             else:
-                self._last_job_success = False
-                self.gui_queue.put(
-                    {"type": "error", "message": "Processing finished but no Excel files were generated."}
-                )
+                self.gui_queue.put({
+                    "type": "log",
+                    "message": "Post-process finished but no NEW Excel files were detected. "
+                               "If files were overwritten or saved elsewhere, this can be expected.",
+                })
         except Exception as err:
             logger.exception("Excel export failed")
             self._last_job_success = False

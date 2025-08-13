@@ -28,6 +28,9 @@ _DEFAULTS = {
     "options": {
         "mode": "batch",
         "run_loreta": False,
+        # Processing parallelism configuration
+        "parallel_mode": "process",
+        "max_workers": None,
     },
 }
 
