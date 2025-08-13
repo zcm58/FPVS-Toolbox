@@ -103,6 +103,10 @@ def _process_one_file(
         if raw_proc is None:
             raise RuntimeError("perform_preprocessing returned None")
 
+        del raw
+        import gc
+        gc.collect()
+
         # 2) Events — prefer explicit stim channel (BioSemi 'Status')
         stim = (
             settings.get("stim_channel")
@@ -135,8 +139,9 @@ def _process_one_file(
                 event_id={label: code},
                 tmin=tmin,
                 tmax=tmax,
-                preload=True,
+                preload=False,
                 baseline=None,
+                decim=1,
                 verbose=False,
             )
             epochs_dict[label] = [epochs]
@@ -150,6 +155,9 @@ def _process_one_file(
             log=logger.info,
         )
         run_post_export(ctx, list(event_map.keys()))
+
+        del raw_proc
+        gc.collect()
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         return {"status": "ok", "file": str(file_path), "elapsed_ms": elapsed_ms}

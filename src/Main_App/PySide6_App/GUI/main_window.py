@@ -327,6 +327,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._post_thread = None
         self._post_worker: PostProcessWorker | None = None
         self._post_backlog: deque[tuple[str, dict, list[str]]] = deque()
+        self._pending_finalize = False
         self._op_guard = OpGuard()
         try:
             update_manager.check_for_updates_async(
@@ -549,19 +550,26 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 self._finalize_processing(False)
                 return
             elif t == "done":
-                self._finalize_processing(True)
+                if self._post_worker or self._post_backlog:
+                    self._pending_finalize = True
+                else:
+                    self._finalize_processing(True)
                 return
 
         delay = 16 if processed else 50
         QTimer.singleShot(delay, self._periodic_queue_check)
 
     def _start_post_worker(self, file_name: str, epochs_dict: dict, labels: list[str]) -> None:
-        """Launch post-processing in a QThread with the correct ctor args."""
+        """Queue-aware launcher for post-processing jobs."""
+        payload = (file_name, epochs_dict, labels)
+
+        # If a worker is active, enqueue and return
         if self._post_thread and self._post_thread.isRunning():
-            logger.warning("Post-process worker already running")
+            self._post_backlog.append(payload)
+            base = os.path.basename(str(file_name))
+            self.log(f"Queued post-processing for {base}")
             return
 
-        # Supports objects that expose .get() (Tk-style) or plain strings/Paths
         save_folder = (
             self.save_folder_path.get()
             if hasattr(self.save_folder_path, "get")
@@ -581,7 +589,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         thread = QThread(self)
         worker.moveToThread(thread)
         worker.error.connect(self._on_worker_error)
-        worker.finished.connect(self._on_post_finished)
+        worker.finished.connect(self._on_post_finished)   # will drain backlog
         thread.started.connect(worker.run)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
@@ -597,8 +605,21 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         if payload:
             for msg in payload.get("logs", []):
                 self.log(msg)
+
+        # Clear current worker
         self._post_worker = None
         self._post_thread = None
+
+        # Start next queued job, if any
+        if self._post_backlog:
+            next_file, next_epochs, next_labels = self._post_backlog.popleft()
+            self._start_post_worker(next_file, next_epochs, next_labels)
+            return
+
+        # If processing thread already signaled "done", finalize now
+        if getattr(self, "_pending_finalize", False):
+            self._pending_finalize = False
+            self._finalize_processing(True)
 
     def _finalize_processing(self, *args, **kwargs) -> None:
         self._run_active = False
@@ -910,18 +931,28 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def _export_with_post_process(self, labels: list[str]) -> None:
         """
-        Safely run the legacy ``post_process`` for Excel export.
-
-        We verify the Excel directory and count files before/after to decide
-        whether the run really produced output, then set ``_last_job_success``.
+        Run legacy post_process then decide whether *new* Excel files appeared.
+        Treat "no new files" as a warning (not fatal) because files may be overwritten or stored in subfolders.
         """
         excel_dir = self.save_folder_path.get() if hasattr(self.save_folder_path, "get") else ""
         if not excel_dir or not Path(excel_dir).is_dir():
-            self.gui_queue.put(
-                {"type": "error", "message": f"Excel output folder not found:\n{excel_dir}"}
-            )
+            self.gui_queue.put({"type": "error", "message": f"Excel output folder not found:\n{excel_dir}"})
             self._last_job_success = False
             return
+
+        out_path = Path(excel_dir)
+
+        def _excel_snapshot() -> tuple[int, float]:
+            count = 0
+            latest_mtime = 0.0
+            for p in out_path.rglob("*.xls*"):
+                try:
+                    st = p.stat().st_mtime
+                except OSError:
+                    continue
+                count += 1
+                latest_mtime = max(latest_mtime, st)
+            return count, latest_mtime
 
         original_log = self.log
 
@@ -930,30 +961,26 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             logger.log(level, message)
 
         self.log = queue_log
-        out_path = Path(excel_dir)
 
-        def _count_excels() -> int:
-            # count defensively: .xlsx/.xls/.xlsm etc.
-            return sum(1 for _ in out_path.glob("*.xls*"))
-
-        pre_count = _count_excels()
+        pre_count, pre_mtime = _excel_snapshot()
 
         try:
-            # Call the legacy post-process function
             _legacy_post_process(self, labels)
 
-            post_count = _count_excels()
-            if post_count > pre_count:
-                self._last_job_success = True
-                created = post_count - pre_count
-                self.gui_queue.put(
-                    {"type": "log", "message": f"Excel export completed ({created} new file(s))."}
-                )
+            post_count, post_mtime = _excel_snapshot()
+            created = post_count - pre_count
+            changed = post_mtime > pre_mtime
+
+            if created > 0 or changed:
+                self._last_job_success = bool(self._last_job_success or True)
+                msg = f"Excel export completed ({max(created, 0)} new file(s){' or overwrites' if created == 0 and changed else ''})."
+                self.gui_queue.put({"type": "log", "message": msg})
             else:
-                self._last_job_success = False
-                self.gui_queue.put(
-                    {"type": "error", "message": "Processing finished but no Excel files were generated."}
-                )
+                self.gui_queue.put({
+                    "type": "log",
+                    "message": "Post-process finished but no NEW Excel files were detected. "
+                               "If files were overwritten or saved elsewhere, this can be expected.",
+                })
         except Exception as err:
             logger.exception("Excel export failed")
             self._last_job_success = False
