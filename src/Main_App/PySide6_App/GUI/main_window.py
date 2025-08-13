@@ -2,6 +2,7 @@
 from __future__ import annotations
 from Main_App.PySide6_App.workers.processing_worker import PostProcessWorker
 from Main_App.PySide6_App.utils.op_guard import OpGuard
+from Main_App.Performance.mp_env import set_blas_threads_single_process
 import logging
 import os
 import queue
@@ -240,6 +241,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Prevent spurious finalize/error dialogs until a run starts
         self._run_active = False
+        # Parallel processing configuration
+        self.parallel_mode = "process"
+        self.max_workers = max(1, (os.cpu_count() or 2) - 1)
+        self._n_jobs_ignored_logged = False
+        self._mp = None
 
         # Build nav + menus
         init_sidebar(self)
@@ -350,10 +356,50 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self._processing_timer.start(50)
 
         try:
-            # The legacy mixin calls ``_validate_inputs()``. Provide our own
-            # modern validation implementation (below) that builds the params
-            # and ensures files/paths exist.
-            super().start_processing()
+            if not self._n_jobs_ignored_logged:
+                logger.info(
+                    "n_jobs is ignored in this version; using parallel_mode=%s",
+                    self.parallel_mode,
+                )
+                self._n_jobs_ignored_logged = True
+            if self.parallel_mode == "process":
+                if not self._validate_inputs():
+                    self._run_active = False
+                    self._start_guard.end()
+                    return
+                self._set_controls_enabled(False)
+                self._max_progress = len(self.data_paths)
+                self.progress_bar.setValue(0)
+                self.busy = True
+                from Main_App.PySide6_App.workers.mp_runner_bridge import MpRunnerBridge
+                self._mp = MpRunnerBridge(self)
+                self._mp.progress.connect(lambda pct: self.progress_bar.setValue(pct))
+                self._mp.error.connect(
+                    lambda m: QMessageBox.critical(self, "Processing Error", m)
+                )
+                self._mp.finished.connect(
+                    lambda payload: (
+                        self._finalize_processing(True),
+                        setattr(self, "_run_active", False),
+                        self._start_guard.end(),
+                    )
+                )
+                project_root = Path(self.currentProject.project_root)
+                save_folder = Path(self.save_folder_path.get())
+                files = [Path(p) for p in self.data_paths]
+                settings = self.validated_params.copy()
+                event_map = settings.pop("event_id_map", {})
+                self._mp.start(
+                    project_root,
+                    files,
+                    settings,
+                    event_map,
+                    save_folder,
+                    self.max_workers,
+                )
+            else:
+                set_blas_threads_single_process()
+                super().start_processing()
         except Exception as e:  # pragma: no cover - GUI error path
             logger.exception(e)
             QMessageBox.critical(self, "Processing Error", str(e))
@@ -621,6 +667,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     def _on_project_ready(self) -> None:
         if not getattr(self, "currentProject", None):
             return
+        opts = getattr(self.currentProject, "options", {})
+        self.parallel_mode = opts.get("parallel_mode", self.parallel_mode)
+        self.max_workers = opts.get("max_workers", self.max_workers)
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
 
