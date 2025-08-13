@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Callable
 from PySide6.QtCore import QObject, Signal, Slot
+from types import SimpleNamespace
+from pathlib import Path
 from Main_App.PySide6_App.adapters.post_export_adapter import LegacyCtx, run_post_export
 
 
@@ -40,9 +42,18 @@ class PostProcessWorker(QObject):
             self.finished.emit({"file": self._file, "cancelled": True})
             return
         try:
+            # Ensure adapter-compatible save_folder_path (must expose .get())
+            sf = self._save_folder
+            if hasattr(sf, "get"):
+                save_folder_obj = sf  # e.g., a QLineEdit-like object already providing .get()
+            elif sf is None:
+                save_folder_obj = SimpleNamespace(get=lambda: "")
+            else:
+                save_folder_obj = SimpleNamespace(get=lambda: str(Path(sf)))
+
             ctx = LegacyCtx(
                 preprocessed_data=self._epochs,
-                save_folder_path=self._save_folder,
+                save_folder_path=save_folder_obj,
                 data_paths=self._data_paths,
                 settings=self._settings,
                 log=self._log,
