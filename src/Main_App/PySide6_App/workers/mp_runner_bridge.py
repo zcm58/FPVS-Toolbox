@@ -6,7 +6,7 @@ from multiprocessing import Queue, get_context
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from Main_App.Performance.mp_env import set_blas_threads_single_process
 from Main_App.Performance.process_runner import RunParams, run_project_parallel
@@ -54,6 +54,7 @@ class MpRunnerBridge(QObject):
         self._total = len(data_files)
         self._timer.start()
 
+    @Slot()
     def _poll(self) -> None:
         if not self._q:
             return

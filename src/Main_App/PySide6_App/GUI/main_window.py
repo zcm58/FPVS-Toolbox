@@ -17,7 +17,7 @@ from types import MethodType, SimpleNamespace, ModuleType
 from collections import deque
 
 # Qt / PySide6
-from PySide6.QtCore import QObject, QTimer, Signal, QThread
+from PySide6.QtCore import QObject, QTimer, Signal, QThread, Slot
 from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QAction  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
@@ -383,7 +383,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Default: timer on; we'll stop it in process mode
         if not self._processing_timer.isActive():
-            self._processing_timer.start(50)
+            self._processing_timer.start(100)
 
         try:
             if not getattr(self, "_n_jobs_ignored_logged", False):
@@ -467,7 +467,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             from Main_App.Performance.mp_env import set_blas_threads_single_process
             set_blas_threads_single_process()
             if not self._processing_timer.isActive():
-                self._processing_timer.start(50)
+                self._processing_timer.start(100)
             super().start_processing()
 
         except Exception as e:
@@ -519,6 +519,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             pass
         super()._finalize_processing(success)
 
+    @Slot()
     def _periodic_queue_check(self) -> None:
         if not self._run_active:
             return
@@ -556,7 +557,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     self._finalize_processing(True)
                 return
 
-        delay = 16 if processed else 50
+        delay = 100
         QTimer.singleShot(delay, self._periodic_queue_check)
 
     def _start_post_worker(self, file_name: str, epochs_dict: dict, labels: list[str]) -> None:
