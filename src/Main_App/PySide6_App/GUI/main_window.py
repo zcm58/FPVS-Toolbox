@@ -200,6 +200,14 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
       worker thread runs.
     """
 
+    # Polling strategy:
+    # - Baseline periodic timer at 100 ms keeps idle CPU low.
+    # - After a burst (messages were processed), schedule a quick one-shot
+    #   to finish draining without waiting a full baseline interval.
+    _POLL_INTERVAL_MS = 100  # baseline; do not lower below 100 ms
+    _BURST_FOLLOWUP_MS = 16  # ~60 Hz only after activity
+    _IDLE_FOLLOWUP_MS = 50  # moderate follow-up when no messages
+
     # -------------------------- lifecycle --------------------------- #
     def __init__(self) -> None:
         super().__init__()
@@ -383,7 +391,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Default: timer on; we'll stop it in process mode
         if not self._processing_timer.isActive():
-            self._processing_timer.start(100)
+            self._processing_timer.start(self._POLL_INTERVAL_MS)
 
         try:
             if not getattr(self, "_n_jobs_ignored_logged", False):
@@ -467,7 +475,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             from Main_App.Performance.mp_env import set_blas_threads_single_process
             set_blas_threads_single_process()
             if not self._processing_timer.isActive():
-                self._processing_timer.start(100)
+                self._processing_timer.start(self._POLL_INTERVAL_MS)
             super().start_processing()
 
         except Exception as e:
@@ -546,7 +554,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 self._start_post_worker(fname, epochs_dict, labels)
             elif t == "error":
                 self.log("!!! THREAD ERROR: " + msg["message"])
-                if tb := msg.get("traceback"):
+                if (tb := msg.get("traceback")):
                     self.log(tb)
                 self._finalize_processing(False)
                 return
@@ -557,7 +565,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     self._finalize_processing(True)
                 return
 
-        delay = 100
+        # Adaptive follow-up: quicker after activity, moderate when idle
+        delay = self._BURST_FOLLOWUP_MS if processed else self._IDLE_FOLLOWUP_MS
         QTimer.singleShot(delay, self._periodic_queue_check)
 
     def _start_post_worker(self, file_name: str, epochs_dict: dict, labels: list[str]) -> None:
