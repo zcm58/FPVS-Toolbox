@@ -103,7 +103,7 @@ def perform_preprocessing(
             try:
                 ds = float(downsample_rate)
                 if sf > ds:
-                    raw.resample(ds, npad="auto", window="hann", verbose=False)
+                    raw.resample(ds, npad="auto", window="hann", n_jobs=1, verbose=False)
                     log_func(f"Resampled {fname} to {raw.info['sfreq']:.1f}Hz.")
                 elif abs(sf - ds) < 1e-6:
                     log_func(f"Already at {downsample_rate}Hz; skipping resample for {fname}.")
@@ -134,6 +134,7 @@ def perform_preprocessing(
                     h_trans_bandwidth=high_trans_bw,
                     filter_length=filter_len_points,
                     skip_by_annotation="edge",
+                    n_jobs=1,
                     verbose=False,
                 )
                 log_func(f"Filter OK for {fname}.")
