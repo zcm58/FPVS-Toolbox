@@ -3,6 +3,10 @@
 
 """Entry point for launching the FPVS Toolbox GUI application."""
 
+from Main_App.Performance.mp_env import set_blas_threads_single_process
+
+set_blas_threads_single_process()
+
 USE_PYSIDE6 = True  # currently in dual GUI mode - set to False to use the legacy Tkinter GUI
 
 from ctypes import windll

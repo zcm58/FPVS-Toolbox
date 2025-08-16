@@ -96,7 +96,7 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
         out_path = out_dir / _legacy_like_fname(base_stem, label)
         if not out_path.exists():
             try:
-                epochs.save(str(out_path), overwrite=True)
+                epochs.save(str(out_path), overwrite=True, split_size=2 * 1024 ** 3)
                 written += 1
             except Exception:
                 # Keep quiet; Excel export may still succeed
