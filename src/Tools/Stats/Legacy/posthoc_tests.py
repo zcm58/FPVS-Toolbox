@@ -1,17 +1,23 @@
 # posthoc_tests.py
 # -*- coding: utf-8 -*-
-"""Utility functions for post-hoc comparisons after repeated measures ANOVA.
+"""
+Utility functions for post-hoc comparisons after repeated measures ANOVA or LME.
 
-This module implements paired comparisons across levels of a factor
-(e.g., conditions or ROIs) using paired t-tests with multiple comparison
-corrections. It is designed to be called after an RM-ANOVA to pinpoint
-which specific levels differ from each other.
+What’s new:
+- Paired comparisons now report Cohen's dz and 95% CI of the mean difference.
+- A normality check (Shapiro on paired differences) is logged (informational only).
+- Interaction post-hocs keep family-wise Holm correction within each ROI.
+- Planned contrasts helper: Category vs average(Color conditions) within ROI(s).
 
-The functions return a detailed text log explaining the results so that
-the user can easily interpret the findings in a publication-ready format.
+Functions
+---------
+run_posthoc_pairwise_tests(...)
+run_interaction_posthocs(...)
+run_planned_contrasts_category_vs_color(...)
 """
 
 from itertools import combinations
+from typing import Iterable, Tuple, Optional, List
 
 import numpy as np
 import pandas as pd
@@ -19,33 +25,27 @@ from scipy import stats
 from statsmodels.stats.multitest import multipletests
 
 
-def run_posthoc_pairwise_tests(data, dv_col, factor_col, subject_col,
-                               correction="holm", alpha=0.05):
-    """Run pairwise repeated-measures t-tests.
+def _paired_effect_size_and_ci(diff: np.ndarray, alpha: float = 0.05) -> Tuple[float, float, float]:
+    """Return (dz, ci_low, ci_high) for paired differences."""
+    diff = np.asarray(diff, dtype=float)
+    diff = diff[~np.isnan(diff)]
+    if diff.size < 3:
+        return np.nan, np.nan, np.nan
+    dz = diff.mean() / diff.std(ddof=1)
+    se = diff.std(ddof=1) / np.sqrt(diff.size)
+    ci_low, ci_high = stats.t.interval(1 - alpha, df=diff.size - 1, loc=diff.mean(), scale=se)
+    return dz, ci_low, ci_high
 
-    Parameters
-    ----------
-    data : pandas.DataFrame
-        Long-format data containing one row per observation with columns for
-        subject ID, the dependent variable, and a within-subject factor.
-    dv_col : str
-        Name of the dependent variable column.
-    factor_col : str
-        Name of the column representing the factor to compare (e.g., ``condition``
-        or ``roi``).
-    subject_col : str
-        Name of the subject identifier column.
-    correction : str, optional
-        Method for p-value correction. Any method accepted by
-        ``statsmodels.stats.multitest.multipletests`` is valid. Default ``"holm"``.
-    alpha : float, optional
-        Significance level used when interpreting corrected p-values.
 
-    Returns
-    -------
-    tuple
-        (log_output: str, results_df: pandas.DataFrame)
-    """
+def run_posthoc_pairwise_tests(
+    data: pd.DataFrame,
+    dv_col: str,
+    factor_col: str,
+    subject_col: str,
+    correction: str = "holm",
+    alpha: float = 0.05,
+):
+    """Paired, within-subject t-tests across all level pairs of `factor_col`."""
     output_lines = [
         "============================================================",
         "              Post-hoc Pairwise Comparisons",
@@ -55,171 +55,235 @@ def run_posthoc_pairwise_tests(data, dv_col, factor_col, subject_col,
         f"Significance level: alpha = {alpha}\n",
     ]
 
-    if factor_col not in data.columns or dv_col not in data.columns or subject_col not in data.columns:
-        output_lines.append("Required columns missing from data. Cannot run post-hoc tests.")
-        return "\n".join(output_lines), pd.DataFrame()
+    for c in (factor_col, dv_col, subject_col):
+        if c not in data.columns:
+            output_lines.append(f"Required column '{c}' missing. Cannot run post-hoc tests.")
+            return "\n".join(output_lines), pd.DataFrame()
 
-    levels = data[factor_col].dropna().unique()
+    levels = list(data[factor_col].dropna().unique())
     if len(levels) < 2:
         output_lines.append("Not enough levels for pairwise comparisons.")
         return "\n".join(output_lines), pd.DataFrame()
 
     comparisons = list(combinations(levels, 2))
-    test_stats = []
-    p_values = []
-    n_pairs = []
+    test_stats, p_values, n_pairs = [], [], []
+    dz_list, mdiff_list, ci_lo_list, ci_hi_list, norm_pvals = [], [], [], [], []
 
     for level_a, level_b in comparisons:
-        df_a = data[data[factor_col] == level_a]
-        df_b = data[data[factor_col] == level_b]
-        merged = pd.merge(
-            df_a[[subject_col, dv_col]],
-            df_b[[subject_col, dv_col]],
-            on=subject_col,
-            suffixes=("_a", "_b"),
-        )
+        df_a = data[data[factor_col] == level_a][[subject_col, dv_col]]
+        df_b = data[data[factor_col] == level_b][[subject_col, dv_col]]
+        merged = pd.merge(df_a, df_b, on=subject_col, suffixes=("_a", "_b"))
         pair_count = len(merged)
+
         if pair_count < 3:
             output_lines.append(f"Comparison {level_a} vs {level_b}: insufficient paired data (N={pair_count}).")
-            test_stats.append(np.nan)
-            p_values.append(np.nan)
-            n_pairs.append(pair_count)
+            test_stats.append(np.nan); p_values.append(np.nan); n_pairs.append(pair_count)
+            dz_list.append(np.nan); mdiff_list.append(np.nan); ci_lo_list.append(np.nan); ci_hi_list.append(np.nan); norm_pvals.append(np.nan)
             continue
-        t_stat, p_val = stats.ttest_rel(merged[f"{dv_col}_a"], merged[f"{dv_col}_b"])
-        test_stats.append(t_stat)
-        p_values.append(p_val)
-        n_pairs.append(pair_count)
 
-    # Correct for multiple comparisons (ignore NaNs)
-    valid_idx = [i for i, p in enumerate(p_values) if not np.isnan(p)]
+        # Paired t-test
+        t_stat, p_val = stats.ttest_rel(merged[f"{dv_col}_a"], merged[f"{dv_col}_b"])
+        test_stats.append(t_stat); p_values.append(p_val); n_pairs.append(pair_count)
+
+        # Effect size + CI
+        diff = merged[f"{dv_col}_a"] - merged[f"{dv_col}_b"]
+        dz, ci_low, ci_high = _paired_effect_size_and_ci(diff, alpha=alpha)
+        dz_list.append(dz); mdiff_list.append(float(diff.mean())); ci_lo_list.append(ci_low); ci_hi_list.append(ci_high)
+
+        # Normality (report only)
+        try:
+            sh_W, sh_p = stats.shapiro(diff.astype(float))
+        except Exception:
+            sh_p = np.nan
+        norm_pvals.append(sh_p)
+
+    # Multiple-comparison correction across valid p's
+    valid_idx = [i for i, p in enumerate(p_values) if np.isfinite(p)]
     corrected_p = [np.nan] * len(p_values)
     significant = [False] * len(p_values)
     if valid_idx:
         pvals = [p_values[i] for i in valid_idx]
         reject, pvals_corr, _, _ = multipletests(pvals, alpha=alpha, method=correction)
         for i, p_corr, rej in zip(valid_idx, pvals_corr, reject):
-            corrected_p[i] = p_corr
-            significant[i] = rej
+            corrected_p[i] = p_corr; significant[i] = bool(rej)
 
-    results_records = []
+    # Build results
+    records = []
     for idx, (level_a, level_b) in enumerate(comparisons):
-        t_stat = test_stats[idx]
-        p_val = p_values[idx]
-        p_corr = corrected_p[idx]
-        sig = significant[idx]
-        output_lines.append(f"--- {level_a} vs {level_b} ---")
-        if np.isnan(p_val):
-            output_lines.append("  Skipped: insufficient paired observations.\n")
-            continue
-        output_lines.append(f"  t({n_pairs[idx]-1}) = {t_stat:.3f}")
-        output_lines.append(f"  Raw p-value = {p_val:.4f}")
-        output_lines.append(f"  Corrected p-value = {p_corr:.4f}")
-        if sig:
-            output_lines.append("  FINDING: SIGNIFICANT DIFFERENCE after correction.\n")
-        else:
-            output_lines.append("  Finding: No significant difference after correction.\n")
-        results_records.append({
+        records.append({
             "Level_A": level_a,
             "Level_B": level_b,
             "N_Pairs": n_pairs[idx],
-            "t_statistic": t_stat,
-            "p_value": p_val,
-            "p_value_corrected": p_corr,
-            "Significant": sig,
+            "t_statistic": test_stats[idx],
+            "p_value": p_values[idx],
+            "p_value_corrected": corrected_p[idx],
+            "Significant": significant[idx],
+            "mean_diff": mdiff_list[idx],
+            "ci95_low": ci_lo_list[idx],
+            "ci95_high": ci_hi_list[idx],
+            "cohens_dz": dz_list[idx],
+            "shapiro_p_diff": norm_pvals[idx],
         })
 
+    results_df = pd.DataFrame.from_records(records)
+
+    # Human-readable log
+    for idx, (level_a, level_b) in enumerate(comparisons):
+        output_lines.append(f"--- {level_a} vs {level_b} ---")
+        if np.isnan(p_values[idx]):
+            output_lines.append("  Skipped: insufficient paired observations.\n")
+            continue
+        output_lines.append(f"  t({n_pairs[idx]-1}) = {test_stats[idx]:.3f}")
+        output_lines.append(f"  Raw p-value = {p_values[idx]:.4f}  |  Corrected p = {corrected_p[idx]:.4f}")
+        output_lines.append(f"  Mean diff (A-B) = {mdiff_list[idx]:.4f}  "
+                            f"95% CI [{ci_lo_list[idx]:.4f}, {ci_hi_list[idx]:.4f}]  "
+                            f"Cohen's dz = {dz_list[idx]:.3f}")
+        if np.isfinite(norm_pvals[idx]):
+            output_lines.append(f"  Normality of paired diffs (Shapiro p) = {norm_pvals[idx]:.3f} (report only)")
+        output_lines.append("  " + ("FINDING: SIGNIFICANT AFTER CORRECTION.\n" if significant[idx] else "Finding: Not significant after correction.\n"))
+
     output_lines.append("============================================================")
-    results_df = pd.DataFrame(results_records)
     return "\n".join(output_lines), results_df
 
 
-def run_interaction_posthocs(data, dv_col, roi_col, condition_col, subject_col,
-                             correction="holm", alpha=0.05):
-    """Run condition-wise post-hoc tests separately for each ROI.
-
-    This helper performs pairwise comparisons of the ``condition`` factor
-    within each ROI level. It simply calls :func:`run_posthoc_pairwise_tests`
-    on subsets of ``data`` corresponding to each ROI so that activity from
-    different brain regions is never combined during a comparison.
-
-    Parameters
-    ----------
-    data : pandas.DataFrame
-        Long-format table with columns for the dependent variable, ROI,
-        condition and subject identifier.
-    dv_col : str
-        Name of the dependent variable column.
-    roi_col : str
-        Column name indicating the ROI/brain region.
-    condition_col : str
-        Column name for the experimental condition factor.
-    subject_col : str
-        Column identifying subjects.
-    correction : str, optional
-        Method for p-value correction. Passed through to
-        :func:`run_posthoc_pairwise_tests`.
-    alpha : float, optional
-        Significance level used when interpreting corrected p-values.
-
-    Returns
-    -------
-    tuple
-        (log_output: str, results_df: pandas.DataFrame)
-    """
-
-    summary_lines = []
-    output_lines = []
-
-    header_main = [
+def run_interaction_posthocs(
+    data: pd.DataFrame,
+    dv_col: str,
+    roi_col: str,
+    condition_col: str,
+    subject_col: str,
+    correction: str = "holm",
+    alpha: float = 0.05,
+):
+    """Within each ROI, run pairwise condition comparisons (paired t with Holm)."""
+    header = [
         "============================================================",
         "         Post-hoc Comparisons: Condition by ROI",
         "============================================================\n",
     ]
-
-    if any(col not in data.columns for col in [dv_col, roi_col, condition_col, subject_col]):
-        output_lines.append("Required columns missing from data. Cannot run interaction post-hocs.")
-        output_lines = header_main + output_lines
-        return "\n".join(output_lines), pd.DataFrame()
-
-    unique_rois = data[roi_col].dropna().unique()
+    lines = []
     results_list = []
 
-    for roi in unique_rois:
-        output_lines.append(f"=== ROI: {roi} ===")
+    for col in (dv_col, roi_col, condition_col, subject_col):
+        if col not in data.columns:
+            lines.append(f"Required column '{col}' missing. Cannot run interaction post-hocs.")
+            return "\n".join(header + lines), pd.DataFrame()
+
+    rois = list(data[roi_col].dropna().unique())
+    summary = []
+
+    for roi in rois:
+        lines.append(f"=== ROI: {roi} ===")
         roi_subset = data[data[roi_col] == roi]
-        roi_text, roi_df = run_posthoc_pairwise_tests(
-            data=roi_subset,
-            dv_col=dv_col,
-            factor_col=condition_col,
-            subject_col=subject_col,
-            correction=correction,
-            alpha=alpha,
+        txt, df_res = run_posthoc_pairwise_tests(
+            data=roi_subset, dv_col=dv_col, factor_col=condition_col,
+            subject_col=subject_col, correction=correction, alpha=alpha
         )
-        roi_text_indented = "\n".join([f"  {line}" for line in roi_text.splitlines()])
-        output_lines.append(roi_text_indented)
-        if roi_df is not None and not roi_df.empty:
-            roi_df = roi_df.assign(ROI=roi)
-            results_list.append(roi_df)
-            sig_rows = roi_df[roi_df["Significant"]]
-            for _, row in sig_rows.iterrows():
-                summary_lines.append(
+        lines.extend(["  " + ln for ln in txt.splitlines()])
+        if df_res is not None and not df_res.empty:
+            df_res = df_res.assign(ROI=roi)
+            results_list.append(df_res)
+            for _, row in df_res[df_res["Significant"]].iterrows():
+                summary.append(
                     f"ROI {roi}: {row['Level_A']} vs {row['Level_B']} "
-                    f"(t={row['t_statistic']:.3f}, p={row['p_value_corrected']:.4f})"
+                    f"(t={row['t_statistic']:.3f}, p={row['p_value_corrected']:.4f}, dz={row['cohens_dz']:.2f})"
                 )
 
+    # Build final outputs
     results_df = pd.concat(results_list, ignore_index=True) if results_list else pd.DataFrame()
-    output_lines.append("============================================================")
+    lines.append("============================================================")
 
-    summary_section = [
+    # Summary block (family-wise correction already applied within each ROI)
+    summary_block = [
         "============================================================",
         "        SUMMARY OF SIGNIFICANT FINDINGS",
         "============================================================",
     ]
-    if summary_lines:
-        summary_section.extend(summary_lines)
-    else:
-        summary_section.append("No significant differences found.")
-    summary_section.append("")
+    summary_block.extend(summary if summary else ["No significant differences found.", ""])
+    report = "\n".join(summary_block + header + lines)
+    return report, results_df
 
-    output_lines = summary_section + header_main + output_lines
-    return "\n".join(output_lines), results_df
+
+def run_planned_contrasts_category_vs_color(
+    data: pd.DataFrame,
+    dv_col: str,
+    roi_col: str,
+    condition_col: str,
+    subject_col: str,
+    category_condition: str = "Green Fruit vs Green Veg",
+    color_conditions: Iterable[str] = ("Green Veg vs Red Veg", "Red Fruit vs Green Fruit"),
+    rois: Optional[Iterable[str]] = None,
+    alpha: float = 0.05,
+    correction: str = "holm",
+    one_tailed_greater: bool = False,
+):
+    """
+    Planned contrast: Category minus the average of Color (within ROI).
+
+    Returns (text_log, results_df) where results_df has columns:
+    ['ROI','N','mean_diff','ci95_low','ci95_high','cohens_dz','t','p_raw','p_corr','Significant']
+    """
+    lines = [
+        "============================================================",
+        "      Planned Contrast: Category vs Average(Color) by ROI",
+        "============================================================",
+        f"Category = '{category_condition}' | Colors = {tuple(color_conditions)}",
+    ]
+    needed = {dv_col, roi_col, condition_col, subject_col}
+    if not needed.issubset(set(data.columns)):
+        lines.append("Required columns missing. Cannot run planned contrasts.")
+        return "\n".join(lines), pd.DataFrame()
+
+    all_rois = list(data[roi_col].dropna().unique()) if rois is None else list(rois)
+    out_rows = []
+
+    for roi in all_rois:
+        d = data[data[roi_col] == roi]
+        wide = d.pivot_table(index=subject_col, columns=condition_col, values=dv_col, aggfunc="mean")
+        needed_cols = [category_condition, *color_conditions]
+        if not set(needed_cols).issubset(set(wide.columns)):
+            lines.append(f"ROI {roi}: Missing required conditions; skipping.")
+            continue
+
+        delta = wide[category_condition] - wide[list(color_conditions)].mean(axis=1)
+        delta = delta.dropna()
+        if delta.size < 3:
+            lines.append(f"ROI {roi}: insufficient paired data (N={delta.size}); skipping.")
+            continue
+
+        # One-sample t-test against 0 (paired by construction)
+        alt = "greater" if one_tailed_greater else "two-sided"
+        t, p = stats.ttest_1samp(delta, popmean=0.0, alternative=alt)
+        dz, ci_low, ci_high = _paired_effect_size_and_ci(delta.values, alpha=alpha)
+
+        out_rows.append({
+            "ROI": roi,
+            "N": int(delta.size),
+            "mean_diff": float(delta.mean()),
+            "ci95_low": ci_low,
+            "ci95_high": ci_high,
+            "cohens_dz": dz,
+            "t": float(t),
+            "p_raw": float(p),
+        })
+
+    res = pd.DataFrame(out_rows)
+    if res.empty:
+        lines.append("No ROI produced analyzable data for the planned contrast.")
+        return "\n".join(lines), res
+
+    # Holm correction across ROIs (small family)
+    rej, p_corr, _, _ = multipletests(res["p_raw"].values, alpha=alpha, method=correction)
+    res["p_corr"] = p_corr
+    res["Significant"] = rej
+
+    # Log
+    for _, r in res.iterrows():
+        lines.append(
+            f"ROI {r['ROI']}: Δ=Category−Color_avg = {r['mean_diff']:.4f} "
+            f"[95% CI {r['ci95_low']:.4f}, {r['ci95_high']:.4f}], dz={r['cohens_dz']:.2f}, "
+            f"t({int(r['N'])-1})={r['t']:.3f}, p_corr={r['p_corr']:.4f} "
+            + ("**SIGNIFICANT**" if r['Significant'] else "ns")
+        )
+    lines.append("============================================================")
+    return "\n".join(lines), res
