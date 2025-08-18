@@ -1,7 +1,5 @@
-import os
-import sys
-import argparse
-import logging
+from __future__ import annotations
+import os, sys, logging
 from pathlib import Path
 from typing import Optional
 
@@ -27,33 +25,46 @@ class STCViewer(QtWidgets.QMainWindow):
     def __init__(self, stc_path: str, time_ms: Optional[float] = None):
         super().__init__()
         if SettingsManager().debug_enabled():
-            logger.debug("Initializing STCViewer with PySide6 %s (Qt %s)", QtCore.__version__, QtCore.qVersion())
+            logger.debug("STCViewer PySide6=%s Qt=%s", QtCore.__version__, QtCore.qVersion())
 
         self.setWindowTitle(os.path.basename(stc_path))
+
+        # --- safe defaults (avoid race)
+        self._global_vmax: float = 1.0
+        self.cortex_lh = self.cortex_rh = None
+        self.act_lh = self.act_rh = None
+        self.heat_lh = self.heat_rh = None
+
+        # Load STC
         self.stc = mne.read_source_estimate(stc_path)
         self._setup_subjects()
         self._build_ui()
         self._load_surfaces()
 
-        # global abs-max for shared clim
-        self._global_vmax = float(np.abs(self.stc.data).max()) or 1.0
+        # Global abs-max for shared clim
+        try:
+            self._global_vmax = float(np.abs(self.stc.data).max()) or 1.0
+        except Exception:
+            self._global_vmax = 1.0
 
-        # Slider step ~= 10 ms (tstep should already be 0.01)
-        step = max(1, int(round(0.01 / self.stc.tstep)))
-        self.time_slider.setSingleStep(step)
-        self.time_slider.setPageStep(step)
-
+        # Time slider setup (block signals while configuring)
+        step = max(1, int(round(0.01 / self.stc.tstep)))  # ~10 ms step
         start_idx = max(0, self._index_for_time(0.0))
         end_idx = self.stc.data.shape[1] - 1
-        self.time_slider.setRange(start_idx, end_idx)
-
         if time_ms is not None:
-            idx = self._index_for_time(time_ms / 1000.0)
-            idx = max(start_idx, min(idx, end_idx))
+            idx = max(start_idx, min(self._index_for_time(time_ms / 1000.0), end_idx))
         else:
             idx = start_idx
+
+        self.time_slider.blockSignals(True)
+        self.time_slider.setSingleStep(step)
+        self.time_slider.setPageStep(step)
+        self.time_slider.setRange(start_idx, end_idx)
         self.time_slider.setValue(idx)
+        self.time_slider.blockSignals(False)
         self._update_time(idx)
+
+    # ---- setup
 
     def _setup_subjects(self) -> None:
         settings = SettingsManager()
@@ -119,13 +130,12 @@ class STCViewer(QtWidgets.QMainWindow):
         self.cortex_lh.SetVisibility(visible)
         self.cortex_rh.SetVisibility(visible)
 
+        # Heat maps
         self.heat_lh = lh.copy()
         self.heat_rh = rh.copy()
-        # Initialize activation arrays with NaNs (fully transparent initially)
         self.heat_lh.point_data["activation"] = np.full(lh.n_points, np.nan)
         self.heat_rh.point_data["activation"] = np.full(rh.n_points, np.nan)
 
-        # Shared clim based on global abs-max
         clim = (0.0, self._global_vmax)
 
         self.act_lh = self.plotter.add_mesh(
@@ -136,22 +146,28 @@ class STCViewer(QtWidgets.QMainWindow):
         )
         self.plotter.add_scalar_bar(title="|Source| Amplitude", n_colors=8)
 
+    # ---- interactions
+
     def _index_for_time(self, sec: float) -> int:
         return int(round((sec - self.stc.tmin) / self.stc.tstep))
 
     def _update_opacity(self, value: int) -> None:
         alpha = max(0, min(100, int(value))) / 100
         for actor in (self.cortex_lh, self.cortex_rh):
-            actor.GetProperty().SetOpacity(alpha)
+            if actor is not None:
+                actor.GetProperty().SetOpacity(alpha)
         self.plotter.render()
 
     def _toggle_cortex(self, state: int) -> None:
         visible = state == QtCore.Qt.Checked
         for actor in (self.cortex_lh, self.cortex_rh):
-            actor.SetVisibility(visible)
+            if actor is not None:
+                actor.SetVisibility(visible)
         self.plotter.render()
 
     def _update_time(self, value: int) -> None:
+        if self.stc is None or self.heat_lh is None or self.heat_rh is None:
+            return
         idx = max(0, min(int(value), self.stc.data.shape[1] - 1))
         frame = np.abs(self.stc.data[:, idx])  # magnitude for sequential cmap
 
@@ -164,9 +180,11 @@ class STCViewer(QtWidgets.QMainWindow):
         self.heat_lh.point_data["activation"] = arr_lh
         self.heat_rh.point_data["activation"] = arr_rh
 
-        # Ensure shared clim remains
-        self.act_lh.mapper.SetScalarRange(0.0, self._global_vmax)
-        self.act_rh.mapper.SetScalarRange(0.0, self._global_vmax)
+        vmax = float(getattr(self, "_global_vmax", 1.0)) or 1.0
+        if self.act_lh is not None:
+            self.act_lh.mapper.SetScalarRange(0.0, vmax)
+        if self.act_rh is not None:
+            self.act_rh.mapper.SetScalarRange(0.0, vmax)
 
         self.plotter.render()
 
