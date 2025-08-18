@@ -309,18 +309,27 @@ def launch_viewer(stc_path: str, time_ms: Optional[float] = None) -> None:
         viewer = STCViewer(stc_path, time_ms)
         _OPEN_VIEWERS.append(viewer)  # keep strong ref
 
+        # Ensure modeless + focus before showing
+        viewer.setWindowModality(QtCore.Qt.NonModal)
+        viewer.setFocusPolicy(QtCore.Qt.StrongFocus)
+        viewer.raise_()
+        viewer.activateWindow()
+        QTimer.singleShot(0, viewer.raise_)
+        QTimer.singleShot(0, viewer.activateWindow)
+
         # Log application/window state before showing
+        has_app = app is not None
+        active = app.activeWindow() if app is not None else None
+        focus = app.focusWindow() if app is not None else None
+        log.debug(
+            "app_state_before_show",
+            extra={
+                "has_instance": has_app,
+                "active": repr(active),
+                "focus": repr(focus),
+            },
+        )
         if app is not None:
-            active = app.activeWindow()
-            focus = app.focusWindow()
-            log.debug(
-                "app_state_before_show",
-                extra={
-                    "active": repr(active),
-                    "focus": repr(focus),
-                    "has_app": True,
-                },
-            )
             def _mod_val(mod):
                 try:
                     return int(mod)  # type: ignore[arg-type]
@@ -334,16 +343,15 @@ def launch_viewer(stc_path: str, time_ms: Optional[float] = None) -> None:
                 log.debug(
                     "top_level_before_show",
                     extra={
-                        "obj": w.objectName(),
+                        "repr": repr(w),
                         "title": w.windowTitle(),
                         "isModal": w.isModal(),
                         "windowModality": _mod_val(w.windowModality()),
+                        "isEnabled": w.isEnabled(),
                         "isVisible": w.isVisible(),
                         "isActiveWindow": w.isActiveWindow(),
                     },
                 )
-        else:
-            log.debug("app_state_before_show", extra={"has_app": False})
 
         _safe_show(viewer)
         _bring_to_front(viewer)
@@ -369,35 +377,41 @@ def launch_viewer(stc_path: str, time_ms: Optional[float] = None) -> None:
         viewer.installEventFilter(flt)
         viewer._event_logger = flt  # type: ignore[attr-defined]
 
+        # Sentinel timer to detect freezes
+        sentinel = QTimer(viewer)
+        sentinel.setInterval(250)
+        sentinel.timeout.connect(lambda: log.debug("sentinel tick"))
+        sentinel.start()
+        viewer._sentinel = sentinel  # type: ignore[attr-defined]
+
+        active = app.activeWindow() if app is not None else None
+        focus = app.focusWindow() if app is not None else None
+        log.debug(
+            "app_state_after_show",
+            extra={
+                "has_instance": has_app,
+                "active": repr(active),
+                "focus": repr(focus),
+            },
+        )
         if app is not None:
-            active = app.activeWindow()
-            focus = app.focusWindow()
-            log.debug(
-                "app_state_after_show",
-                extra={
-                    "active": repr(active),
-                    "focus": repr(focus),
-                    "has_app": True,
-                },
-            )
             for w in app.topLevelWidgets():
                 log.debug(
                     "top_level_after_show",
                     extra={
-                        "obj": w.objectName(),
+                        "repr": repr(w),
                         "title": w.windowTitle(),
                         "isModal": w.isModal(),
                         "windowModality": _mod_val(w.windowModality()),
+                        "isEnabled": w.isEnabled(),
                         "isVisible": w.isVisible(),
                         "isActiveWindow": w.isActiveWindow(),
                     },
                 )
-        else:
-            log.debug("app_state_after_show", extra={"has_app": False})
 
         log.info("Viewer opened", extra={"path": stc_path})
 
-        if own_app:
+        if own_app and app is not None:
             app.exec()
     except Exception:
         log.exception("Failed to open viewer", extra={"path": stc_path})
