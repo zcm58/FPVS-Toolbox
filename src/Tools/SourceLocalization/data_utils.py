@@ -1,4 +1,5 @@
-"""Utility functions for preparing data for source localization."""
+# src/Tools/SourceLocalization/data_utils.py
+""""Utility functions for preparing data for source localization."""
 
 from __future__ import annotations
 
@@ -17,7 +18,13 @@ logger = logging.getLogger(__name__)
 
 
 def _load_data(fif_path: str) -> mne.Evoked:
-    """Load epochs or evoked data and return an Evoked instance."""
+    """Load epochs or evoked data and return an Evoked instance.
+
+    Note
+    ----
+    This loader does not filter events. If the input is an Epochs file
+    (-epo.fif), it averages **all** contained epochs as-is.
+    """
     if fif_path.endswith("-epo.fif"):
         epochs = mne.read_epochs(fif_path, preload=True)
         return epochs.average()
@@ -25,7 +32,7 @@ def _load_data(fif_path: str) -> mne.Evoked:
 
 
 def _default_template_location() -> Path:
-    """Return the directory where the template MRI should reside."""
+    """Return the directory where the template MRI should reside (legacy default)."""
     base_dir = Path(__file__).resolve().parents[2]
     return base_dir / "fsaverage"
 
@@ -70,7 +77,13 @@ def _dir_size_mb(path: str | Path) -> float:
 
 
 def _threshold_stc(stc: mne.SourceEstimate, thr: float) -> mne.SourceEstimate:
-    """Return a copy of ``stc`` with values below ``thr`` zeroed (abs-based)."""
+    """Return a copy of ``stc`` with values below ``thr`` zeroed (abs-based).
+
+    Semantics
+    ---------
+    - ``0 < thr < 1`` → fraction of **max |STC|** (e.g., 0.05 = 5% of max amp).
+    - ``thr >= 1``    → absolute amplitude threshold in the STC unit.
+    """
     stc = stc.copy()
     if 0 < thr < 1:
         thr_val = thr * np.max(np.abs(stc.data))
@@ -80,10 +93,8 @@ def _threshold_stc(stc: mne.SourceEstimate, thr: float) -> mne.SourceEstimate:
     if SettingsManager().debug_enabled():
         active = int(np.count_nonzero(np.any(stc.data != 0, axis=1)))
         logger.debug(
-            "threshold_stc: thr=%s cutoff=%.5f active_vertices=%s",
-            thr,
-            thr_val,
-            active,
+            "threshold_stc",
+            extra={"thr": thr, "cutoff": float(thr_val), "active_vertices": active},
         )
     return stc
 
@@ -93,7 +104,11 @@ def _estimate_epochs_covariance(
     log_func: Callable[[str], None] = logger.info,
     baseline: Optional[Tuple[float | None, float | None]] = None,
 ) -> mne.Covariance:
-    """Return a noise covariance estimated from ``epochs``."""
+    """Return a noise covariance estimated from ``epochs``.
+
+    Uses pre-stim baseline when provided; otherwise baseline ends at 0 s.
+    Falls back to ad-hoc when there is only a single epoch.
+    """
     if len(epochs) > 1:
         if baseline is not None:
             tmin, tmax = baseline
@@ -119,11 +134,11 @@ def fetch_fsaverage_with_progress(
     stop_event = threading.Event()
 
     def _report():
-        dest = subjects_dir / "fsaverage"
+        dest2 = subjects_dir / "fsaverage"
         last = -1.0
         while not stop_event.is_set():
-            if dest.is_dir():
-                size = _dir_size_mb(dest)
+            if dest2.is_dir():
+                size = _dir_size_mb(dest2)
                 if size != last:
                     log_func(f"Downloaded {size:.1f} MB...")
                     last = size
@@ -144,12 +159,53 @@ def fetch_fsaverage_with_progress(
     return str(path)
 
 
+def _project_cache_dir(settings: SettingsManager, fallback_base: Path) -> Path:
+    """Choose a cache directory under the active project when available.
+
+    Priority:
+    1) settings.get('loreta','cache_dir')
+    2) settings.get('paths','project_root') / '.cache' / 'loreta'
+    3) fallback_base / 'fpvs_cache'  (legacy behavior)
+    """
+    # 1) explicit cache dir
+    try:
+        explicit = settings.get("loreta", "cache_dir", "")
+        if explicit:
+            p = Path(explicit).resolve()
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+    except Exception:
+        pass
+
+    # 2) project root
+    try:
+        proj_root = settings.get("paths", "project_root", "")
+        if proj_root:
+            p = Path(proj_root).resolve() / ".cache" / "loreta"
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+    except Exception:
+        pass
+
+    # 3) legacy: next to subjects_dir
+    legacy = fallback_base / "fpvs_cache"
+    legacy.mkdir(exist_ok=True)
+    return legacy
+
+
 def _prepare_forward(
     evoked: mne.Evoked,
     settings: SettingsManager,
     log_func: Callable[[str], None],
 ) -> tuple[mne.Forward, str, str]:
-    """Construct a forward model using MRI info from settings or fsaverage."""
+    """Construct a forward model using MRI info from settings or fsaverage.
+
+    Returns
+    -------
+    fwd : mne.Forward
+    subject : str
+    subjects_dir : str
+    """
     stored_dir = settings.get("loreta", "mri_path", "")
     stored_dir_path: Path | None = Path(stored_dir).resolve() if stored_dir else None
     subject = "fsaverage"
@@ -183,8 +239,8 @@ def _prepare_forward(
     trans = settings.get("paths", "trans_file", "fsaverage")
     log_func(f"Using trans file: {trans}")
 
-    cache_dir = subjects_dir_path / "fpvs_cache"
-    cache_dir.mkdir(exist_ok=True)
+    # NEW: project-aware cache location (falls back to legacy next to subjects_dir)
+    cache_dir = _project_cache_dir(settings, subjects_dir_path)
     fwd_file = cache_dir / f"forward-{subject}.fif"
 
     if fwd_file.is_file():

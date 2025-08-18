@@ -1,6 +1,5 @@
 """Source localization tools using (s/e)LORETA."""
 
-from .eloreta_gui import SourceLocalizationWindow
 from .runner import run_source_localization
 from .worker import run_localization_worker
 from .stc_utils import (

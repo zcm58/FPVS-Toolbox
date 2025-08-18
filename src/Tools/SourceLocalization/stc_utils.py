@@ -1,9 +1,9 @@
-"""Helper functions for averaging and morphing source estimates."""
+""""Helper functions for averaging and morphing source estimates."""
 
 from __future__ import annotations
 
 import os
-from typing import Callable
+from typing import Callable, List
 
 import mne
 from mne import compute_source_morph
@@ -28,17 +28,16 @@ def average_stc_files(stcs: list, *, normalize: bool = False) -> mne.SourceEstim
     If ``normalize`` is ``True`` each estimate is scaled by its peak absolute
     amplitude before averaging so that all subjects contribute equally.
     """
-
     if not stcs:
         raise ValueError("No source estimates provided")
 
-    loaded = []
+    loaded: List[mne.SourceEstimate] = []
     for stc in stcs:
         if isinstance(stc, str):
             stc = mne.read_source_estimate(stc)
         if normalize:
             stc = stc.copy()
-            peak = np.abs(stc.data).max()
+            peak = float(np.abs(stc.data).max())
             if peak > 0:
                 stc.data /= peak
         loaded.append(stc)
@@ -53,23 +52,22 @@ def average_stc_files(stcs: list, *, normalize: bool = False) -> mne.SourceEstim
 
 def _infer_average_name(files: list[str]) -> str:
     """Return a descriptive base name for averaged STC files."""
-
     if not files:
         return "Average"
 
     # use the first file as template to derive the condition name
     name = os.path.basename(files[0])
-    if name.endswith(('-lh.stc', '-rh.stc')):
+    if name.endswith(("-lh.stc", "-rh.stc")):
         name = name[:-7]
 
     # drop subject specific prefixes by splitting on the first two underscores
-    parts = name.split('_', 2)
+    parts = name.split("_", 2)
     if len(parts) == 3:
         cond = parts[2]
     else:
         cond = parts[-1]
 
-    cond = cond.replace('_', ' ').strip()
+    cond = cond.replace("_", " ").strip()
     return f"Average {cond} Response"
 
 
@@ -82,47 +80,54 @@ def average_stc_directory(
     smooth: float = 5.0,
     normalize: bool = False,
 ) -> str:
-    """Average all ``*-lh.stc`` and ``*-rh.stc`` files in ``condition_dir``."""
+    """Average all STC files in ``condition_dir`` (handles hemi pairs correctly).
 
-    stc_paths = [
+    This function detects unique STC *bases* (i.e., file path without the
+    ``-lh.stc`` / ``-rh.stc`` suffix), reads each once, morphs to ``fsaverage``
+    if needed, and computes the across-file average. The result is saved as a
+    standard STC pair (``-lh.stc`` / ``-rh.stc``).
+    """
+    # find unique bases for STC pairs
+    stc_files = [
         os.path.join(condition_dir, f)
         for f in os.listdir(condition_dir)
         if f.endswith("-lh.stc") or f.endswith("-rh.stc")
     ]
-    if not stc_paths:
+    if not stc_files:
         raise FileNotFoundError("No STC files found in directory")
 
-    groups: dict[str, list[mne.SourceEstimate]] = {"lh": [], "rh": []}
-    for path in stc_paths:
-        stc = mne.read_source_estimate(path)
-        hemi = "lh" if path.endswith("-lh.stc") else "rh"
-        subject = os.path.basename(path).rsplit("-", 1)[0]
-        stc = source_localization.morph_to_fsaverage(
-            stc,
-            subject,
-            subjects_dir,
-            smooth=smooth,
-        )
-        groups[hemi].append(stc)
+    bases = {p[:-7] for p in stc_files}  # drop "-lh.stc" / "-rh.stc"
 
-    if output_basename is None:
-        base = _infer_average_name(stc_paths)
-    else:
-        base = output_basename
-    out_path = os.path.join(condition_dir, base)
+    stcs: list[mne.SourceEstimate] = []
+    for base in sorted(bases):
+        try:
+            stc = mne.read_source_estimate(base)  # reads both hemispheres when available
+            subj = stc.subject or "fsaverage"
+            if subj != "fsaverage":
+                if not subjects_dir:
+                    raise RuntimeError(
+                        f"subjects_dir is required to morph STC from '{subj}' to fsaverage."
+                    )
+                stc = source_localization.morph_to_fsaverage(
+                    stc, subject=subj, subjects_dir=subjects_dir, smooth=smooth
+                )
+            stcs.append(stc)
+        except Exception as err:
+            log_func(f"Skipping {base}: {err}")
 
-    lh_stc = rh_stc = None
-    if groups["lh"]:
-        log_func(f"Averaging {len(groups['lh'])} LH files in {condition_dir}")
-        lh_stc = average_stc_files(groups["lh"], normalize=normalize)
-    if groups["rh"]:
-        log_func(f"Averaging {len(groups['rh'])} RH files in {condition_dir}")
-        rh_stc = average_stc_files(groups["rh"], normalize=normalize)
+    if not stcs:
+        raise RuntimeError("No valid STC bases could be loaded.")
 
-    if lh_stc is not None:
-        lh_stc.save(out_path)
-    if rh_stc is not None:
-        rh_stc.save(out_path)
+    base_name = (
+        _infer_average_name(sorted(list(bases)))
+        if output_basename is None
+        else output_basename
+    )
+    out_path = os.path.join(condition_dir, base_name)
+
+    log_func(f"Averaging {len(stcs)} STC file(s) in {condition_dir}")
+    avg_stc = average_stc_files(stcs, normalize=normalize)
+    avg_stc.save(out_path)  # writes -lh.stc / -rh.stc pair
 
     return out_path
 
@@ -136,7 +141,6 @@ def average_conditions_dir(
     normalize: bool = False,
 ) -> list[str]:
     """Average STC files in each subdirectory of ``results_dir``."""
-
     averaged = []
     for name in sorted(os.listdir(results_dir)):
         subdir = os.path.join(results_dir, name)
@@ -166,13 +170,11 @@ def _morph_to_fsaverage(
 ) -> mne.SourceEstimate:
     """Return ``stc`` morphed to the ``fsaverage`` template.
 
-    Older ``.stc`` files may miss the subject information entirely.  In that
-    case ``fsaverage`` is assumed to avoid ``compute_source_morph`` failing with
+    Older ``.stc`` files may miss the subject information entirely. In that case
+    ``fsaverage`` is assumed to avoid ``compute_source_morph`` failing with
     ``subject_from could not be inferred``.
     """
-
     subj = subject or stc.subject or "fsaverage"
-
     morph = compute_source_morph(
         stc,
         subject_from=subj,
@@ -191,7 +193,6 @@ def average_conditions_to_fsaverage(
     normalize: bool = False,
 ) -> list[str]:
     """Morph and average condition STCs to ``fsaverage``."""
-
     averaged: list[str] = []
     for name in sorted(os.listdir(results_dir)):
         subdir = os.path.join(results_dir, name)

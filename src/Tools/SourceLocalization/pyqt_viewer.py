@@ -1,3 +1,4 @@
+# src/Tools/SourceLocalization/pyqt_viewer.py
 from __future__ import annotations
 import os, sys, logging
 from pathlib import Path
@@ -43,7 +44,8 @@ class STCViewer(QtWidgets.QMainWindow):
 
         # Global abs-max for shared clim
         try:
-            self._global_vmax = float(np.abs(self.stc.data).max()) or 1.0
+            data = self._as_scalar_data(self.stc)  # supports scalar or vector STC
+            self._global_vmax = float(np.abs(data).max()) or 1.0
         except Exception:
             self._global_vmax = 1.0
 
@@ -146,10 +148,31 @@ class STCViewer(QtWidgets.QMainWindow):
         )
         self.plotter.add_scalar_bar(title="|Source| Amplitude", n_colors=8)
 
-    # ---- interactions
+    # ---- helpers & interactions
 
     def _index_for_time(self, sec: float) -> int:
         return int(round((sec - self.stc.tmin) / self.stc.tstep))
+
+    @staticmethod
+    def _as_scalar_data(stc: mne.SourceEstimate) -> np.ndarray:
+        """Return a (n_verts_total, n_times) scalar view for scalar or vector STC."""
+        data = stc.data
+        # Vector STC handling: try common layouts robustly.
+        if getattr(stc, "is_vector", False) or data.ndim == 3 or (
+            data.ndim == 2 and data.shape[0] == 3 * (len(stc.vertices[0]) + len(stc.vertices[1]))
+        ):
+            try:
+                # MNE Vector STC often (n_verts, n_times, 3)
+                if data.ndim == 3 and data.shape[2] == 3:
+                    # norm over the last axis (xyz)
+                    return np.linalg.norm(data, axis=2).T.T  # keep (n_verts, n_times)
+                # Or flattened (3*n_verts, n_times) as [x,y,z] blocks
+                n = len(stc.vertices[0]) + len(stc.vertices[1])
+                reshaped = data.reshape(3, n, -1)  # (3, n_verts, n_times)
+                return np.linalg.norm(reshaped, axis=0)  # (n_verts, n_times)
+            except Exception:
+                pass
+        return data  # already scalar (n_verts, n_times)
 
     def _update_opacity(self, value: int) -> None:
         alpha = max(0, min(100, int(value))) / 100
@@ -169,7 +192,8 @@ class STCViewer(QtWidgets.QMainWindow):
         if self.stc is None or self.heat_lh is None or self.heat_rh is None:
             return
         idx = max(0, min(int(value), self.stc.data.shape[1] - 1))
-        frame = np.abs(self.stc.data[:, idx])  # magnitude for sequential cmap
+        scalar = self._as_scalar_data(self.stc)
+        frame = np.abs(scalar[:, idx])  # magnitude for sequential cmap
 
         n_lh = len(self.stc.vertices[0])
         arr_lh = np.full(self.heat_lh.n_points, np.nan)
@@ -195,8 +219,17 @@ def launch_viewer(stc_path: str, time_ms: Optional[float] = None) -> None:
     os.environ.setdefault("QT_API", "pyside6")
     _ensure_pyvista_backend()
 
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    # High-DPI attributes must be set **before** creating the app
+    own_app = False
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
+        app = QtWidgets.QApplication(sys.argv)
+        own_app = True
+
     viewer = STCViewer(stc_path, time_ms)
     viewer.show()
-    if not QtWidgets.QApplication.instance():
+
+    if own_app:
         app.exec()

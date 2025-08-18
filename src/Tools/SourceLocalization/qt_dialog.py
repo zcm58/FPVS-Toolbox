@@ -1,7 +1,8 @@
+# src/Tools/SourceLocalization/qt_dialog.py
 from __future__ import annotations
 from pathlib import Path
 from typing import Optional, List, Tuple
-import sys, queue, multiprocessing as mp, logging, os
+import sys, queue, multiprocessing as mp, os, re
 
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtWidgets import (
@@ -14,7 +15,7 @@ from PySide6.QtGui import QAction  # project rule
 from Main_App import SettingsManager
 from . import worker
 
-log = logging.getLogger(__name__)
+DEFAULT_WORKERS = 7  # auto-capped by CPU below
 
 
 class _OpGuard:
@@ -40,7 +41,6 @@ def _safe_rel(path: Path, root: Path) -> Path:
     try:
         return path.relative_to(root)
     except Exception:
-        # last resort: just the immediate parent folder name
         return Path(path.name)
 
 
@@ -52,6 +52,9 @@ class SourceLocalizationDialog(QDialog):
         self.setMinimumSize(QSize(780, 540))
         self.setModal(True)
         self.setProperty("class", "dialog-surface")
+
+        # prove correct Qt import origin (project rule, no-ops safely)
+        self._dummy_action: QAction = QAction(self)
 
         self._guard = _OpGuard()
         self._timer = QTimer(self, interval=75)
@@ -79,26 +82,35 @@ class SourceLocalizationDialog(QDialog):
         # --- Params
         p_box = QGroupBox("Parameters"); p_box.setProperty("class", "panel")
         p = QFormLayout(p_box)
-        self.snr = QDoubleSpinBox(minimum=1.0, maximum=20.0, decimals=2, singleStep=0.1); self.snr.setValue(_f("loreta","loreta_snr",3.0))
-        self.thr = QDoubleSpinBox(minimum=0.0, maximum=1.0, decimals=3, singleStep=0.01); self.thr.setValue(_f("loreta","loreta_threshold",0.05))
-        self.t_end_ms = QSpinBox(minimum=50, maximum=3000, singleStep=10); self.t_end_ms.setValue(_i("visualization","time_window_end_ms",700))
-        self.viewer_ms = QSpinBox(minimum=0, maximum=3000, singleStep=10); self.viewer_ms.setValue(_i("visualization","time_index_ms",150))
+
+        self.snr = QDoubleSpinBox(minimum=1.0, maximum=20.0, decimals=2, singleStep=0.1)
+        self.snr.setValue(_f("loreta", "loreta_snr", 3.0))
+        self.snr.setToolTip("Inverse SNR for regularization (lambda² = 1 / SNR²).")
+
+        self.thr = QDoubleSpinBox(minimum=0.0, maximum=1.0, decimals=3, singleStep=0.01)
+        self.thr.setValue(_f("loreta", "loreta_threshold", 0.05))
+        self.thr.setToolTip("Relative threshold: values below (thr × max|STC|) → 0.")
+
+        self.t_end_ms = QSpinBox(minimum=50, maximum=3000, singleStep=10)
+        self.t_end_ms.setValue(_i("visualization", "time_window_end_ms", 700))
+        self.t_end_ms.setToolTip("Post-stimulus window end (ms) for STC export.")
+
+        self.viewer_ms = QSpinBox(minimum=0, maximum=3000, singleStep=10)
+        self.viewer_ms.setValue(_i("visualization", "time_index_ms", 150))
+        self.viewer_ms.setToolTip("Initial time (ms) when opening the viewer.")
+
         self.ids_edit = QLineEdit()
-        self.ids_edit.setPlaceholderText("Oddball IDs, e.g., 55  (comma-separated; blank = auto)")
-        self.ids_edit.setText(SettingsManager().get("analysis","oddball_event_ids",""))
+        self.ids_edit.setPlaceholderText("Oddball IDs, e.g., 55  (comma/space/comma-separated; blank = 55)")
+        # Default to 55 if no saved value
+        saved_ids = SettingsManager().get("analysis", "oddball_event_ids", "").strip()
+        self.ids_edit.setText(saved_ids or "55")
+        self.ids_edit.setToolTip("Comma/space/semicolon separated event IDs. For FPVS oddballs use 55.")
+
         p.addRow("SNR:", self.snr)
         p.addRow("Threshold (0–1):", self.thr)
         p.addRow("Post-stimulus window end (ms):", self.t_end_ms)
         p.addRow("Viewer initial time (ms):", self.viewer_ms)
         p.addRow("Oddball event IDs:", self.ids_edit)
-
-        # --- Parallel
-        par_row = QHBoxLayout()
-        self.chk_parallel = QCheckBox("Run in parallel")
-        self.spin_workers = QSpinBox(minimum=1, maximum=max(1, (os.cpu_count() or 2)-1),
-                                     value=max(1,(os.cpu_count() or 2)-1))
-        par_row.addWidget(self.chk_parallel); par_row.addWidget(QLabel("Workers:"))
-        par_row.addWidget(self.spin_workers); par_row.addStretch(1)
 
         # --- Actions
         btn_row = QHBoxLayout()
@@ -109,12 +121,11 @@ class SourceLocalizationDialog(QDialog):
         btn_row.addStretch(1); btn_row.addWidget(self.close_btn)
 
         # --- Progress + log
-        self.progress = QProgressBar(textVisible=True); self.progress.setRange(0,100); self.progress.setValue(0)
+        self.progress = QProgressBar(textVisible=True); self.progress.setRange(0, 100); self.progress.setValue(0)
         self.log = QTextEdit(readOnly=True)
 
         root.addWidget(io_box)
         root.addWidget(p_box)
-        root.addLayout(par_row)
         root.addLayout(btn_row)
         root.addWidget(self.progress)
         root.addWidget(self.log)
@@ -140,16 +151,16 @@ class SourceLocalizationDialog(QDialog):
     # ----- helpers
     def _apply_defaults_from_settings(self) -> None:
         s = SettingsManager()
-        self.in_edit.setText(s.get("loreta","last_epochs_path",""))
-        self.folder_edit.setText(s.get("loreta","last_epochs_folder",""))
-        self.out_edit.setText(s.get("loreta","last_out_dir",""))
+        self.in_edit.setText(s.get("loreta", "last_epochs_path", ""))
+        self.folder_edit.setText(s.get("loreta", "last_epochs_folder", ""))
+        self.out_edit.setText(s.get("loreta", "last_out_dir", ""))
 
     def _persist_defaults(self) -> None:
         s = SettingsManager()
-        if self.in_edit.text(): s.set("loreta","last_epochs_path", self.in_edit.text())
-        if self.folder_edit.text(): s.set("loreta","last_epochs_folder", self.folder_edit.text())
-        if self.out_edit.text(): s.set("loreta","last_out_dir", self.out_edit.text())
-        s.set("analysis","oddball_event_ids", self.ids_edit.text())
+        if self.in_edit.text(): s.set("loreta", "last_epochs_path", self.in_edit.text())
+        if self.folder_edit.text(): s.set("loreta", "last_epochs_folder", self.folder_edit.text())
+        if self.out_edit.text(): s.set("loreta", "last_out_dir", self.out_edit.text())
+        s.set("analysis", "oddball_event_ids", self.ids_edit.text())
         try: s.save()
         except Exception: pass
 
@@ -159,11 +170,10 @@ class SourceLocalizationDialog(QDialog):
             return
         p = self.in_edit.text().strip()
         if not p:
-            p = SettingsManager().get("loreta","last_epochs_path","")
+            p = SettingsManager().get("loreta", "last_epochs_path", "")
         try:
             path = Path(p)
             if path.is_file() and path.name.endswith("-epo.fif"):
-                # file -> condition folder -> '.fif files' parent
                 parent = path.parent.parent
                 if parent.exists():
                     self.folder_edit.setText(str(parent))
@@ -174,7 +184,6 @@ class SourceLocalizationDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(self, "Select epochs FIF", self.in_edit.text(), "MNE epochs (*.fif)")
         if path:
             self.in_edit.setText(path)
-            # update parent auto
             try:
                 parent = Path(path).parent.parent
                 if parent.exists():
@@ -183,14 +192,14 @@ class SourceLocalizationDialog(QDialog):
                 pass
 
     def _pick_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select parent folder containing condition subfolders", self.folder_edit.text() or str(Path.home()))
+        path = QFileDialog.getExistingDirectory(self, "Select parent folder containing condition subfolders",
+                                                self.folder_edit.text() or str(Path.home()))
         if path: self.folder_edit.setText(path)
 
     def _pick_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select output root", self.out_edit.text() or str(Path.home()))
         if path: self.out_edit.setText(path)
 
-    # ----- run
     def _gather_inputs(self, parent: Path) -> List[Path]:
         """Return all *-epo.fif under condition subfolders of `parent`."""
         if parent.is_file() and parent.name.endswith("-epo.fif"):
@@ -202,13 +211,21 @@ class SourceLocalizationDialog(QDialog):
     @staticmethod
     def _parse_ids(txt: str) -> List[int]:
         out: List[int] = []
-        for tok in txt.replace(";", ",").split(","):
-            tok = tok.strip()
-            if not tok: continue
-            try: out.append(int(tok))
-            except ValueError: pass
+        for tok in re.split(r"[,\s;]+", txt.strip()):
+            if not tok:
+                continue
+            try:
+                out.append(int(tok))
+            except ValueError:
+                continue
         return out
 
+    @staticmethod
+    def _default_workers() -> int:
+        cpu = os.cpu_count() or 2
+        return max(1, min(DEFAULT_WORKERS, max(1, cpu - 1)))
+
+    # ----- run
     def _run(self) -> None:
         if not self._guard.start():
             QMessageBox.information(self, "Busy", "Processing already running."); return
@@ -226,13 +243,11 @@ class SourceLocalizationDialog(QDialog):
             QMessageBox.warning(self, "No files", "No *-epo.fif found under the selected folder."); self._guard.done(); return
 
         ids_override = self._parse_ids(self.ids_edit.text())
-
         self.progress.setValue(0); self.log.clear()
         self._jobs.clear(); self._managers.clear(); self._pools.clear()
         self._completed = 0; self._last_stc_base = None
 
-        parallel = self.chk_parallel.isChecked()
-        max_workers = self.spin_workers.value() if parallel else 1
+        max_workers = self._default_workers()
         self._append(f"Starting {len(files)} file(s); workers={max_workers}")
 
         ctx = mp.get_context("spawn")
@@ -247,7 +262,7 @@ class SourceLocalizationDialog(QDialog):
             out_dir = (out_root / rel_cond).resolve()
             out_dir.mkdir(parents=True, exist_ok=True)
             q = mgr.Queue()
-            stc_base = f"{Path(fpath).stem}_LORETA_fsavg"  # unique per participant
+            stc_base = f"{Path(fpath).stem}_LORETA_fsavg"
             fut = pool.submit(
                 worker.run_localization_worker,
                 str(fpath), str(out_dir),

@@ -1,5 +1,4 @@
-"""Logging helpers for the source localization module."""
-
+# src/Tools/SourceLocalization/logging_utils.py
 from __future__ import annotations
 
 import logging
@@ -19,6 +18,8 @@ class QueueLogHandler(logging.Handler):
             msg = self.format(record)
             self.queue.put({"type": "log", "message": msg})
         except Exception:
-            pass
+            # Use standard handler error path instead of silently swallowing.
+            self.handleError(record)
+
 
 __all__ = ["QueueLogHandler"]
