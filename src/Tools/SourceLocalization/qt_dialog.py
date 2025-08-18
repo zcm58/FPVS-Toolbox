@@ -355,10 +355,24 @@ class SourceLocalizationDialog(QDialog):
         if not path:
             log.debug("EXIT _open_viewer (cancel)")
             return
+
         log.debug("Selected STC", extra={"path": path})
         try:
             from .pyqt_viewer import launch_viewer
             launch_viewer(path, time_ms=float(self.viewer_ms.value()))
+
+            # If this dialog is running with exec() (application-modal),
+            # it will block input to the new viewer. Make it modeless by
+            # ending the modal loop RIGHT AFTER viewer launch.
+            try:
+                self.setModal(False)
+                self.setWindowModality(Qt.NonModal)
+            except Exception:
+                pass
+            # End modal event loop without tearing down immediately.
+            # Using a singleShot avoids reentrancy issues.
+            QTimer.singleShot(0, lambda: self.done(0))
+
         except Exception as e:
             log.exception("Failed to open viewer", extra={"path": path})
             self._append(f"ERROR: {e!s}")

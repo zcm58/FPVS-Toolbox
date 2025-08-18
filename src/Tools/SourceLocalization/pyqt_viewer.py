@@ -11,6 +11,8 @@ import pyvista as pv
 from pyvistaqt import QtInteractor
 from PySide6 import QtWidgets, QtCore
 import mne
+from PySide6.QtCore import QTimer
+
 
 # Make project imports resolvable when the module is run directly
 SRC_PATH = Path(__file__).resolve().parents[2]
@@ -32,6 +34,20 @@ def _safe_show(widget: QtWidgets.QWidget) -> None:
     log.debug("Calling .show() on %s", type(widget).__name__)
     widget.show()
     log.debug("Widget shown: %s", repr(widget))
+
+def _bring_to_front(w: QtWidgets.QWidget) -> None:
+    """Raise and activate the viewer reliably on Windows."""
+    try:
+        log.debug("Bringing viewer to front")
+        w.setWindowModality(QtCore.Qt.NonModal)
+        w.setFocusPolicy(QtCore.Qt.StrongFocus)
+        w.raise_()
+        w.activateWindow()
+        QTimer.singleShot(0, w.raise_)
+        QTimer.singleShot(0, w.activateWindow)
+    except Exception:
+        log.exception("Failed to bring viewer to front")
+
 
 
 class STCViewer(QtWidgets.QMainWindow):
@@ -291,8 +307,9 @@ def launch_viewer(stc_path: str, time_ms: Optional[float] = None) -> None:
             own_app = True
 
         viewer = STCViewer(stc_path, time_ms)
-        _OPEN_VIEWERS.append(viewer)   # keep strong ref
+        _OPEN_VIEWERS.append(viewer)  # keep strong ref
         _safe_show(viewer)
+        _bring_to_front(viewer)
         log.info("Viewer opened", extra={"path": stc_path})
 
         if own_app:
