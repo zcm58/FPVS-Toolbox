@@ -14,6 +14,9 @@ from PySide6.QtGui import QAction  # project rule
 
 from Main_App import SettingsManager
 from . import worker
+from .logging_utils import get_pkg_logger
+
+log = get_pkg_logger()
 
 DEFAULT_WORKERS = 7  # auto-capped by CPU below
 
@@ -340,13 +343,21 @@ class SourceLocalizationDialog(QDialog):
 
     # ----- viewer
     def _open_viewer(self) -> None:
+        log.debug("ENTER _open_viewer")
         base = self._last_stc_base or ""
-        path, _ = QFileDialog.getOpenFileName(self, "Open STC (pick -lh.stc or -rh.stc)", base, "MNE STC (*.stc)")
-        if not path: return
-        if path.endswith("-lh.stc") or path.endswith("-rh.stc"):
-            path = path[:-7]
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open STC (pick -lh.stc or -rh.stc)", base, "MNE STC (*.stc)"
+        )
+        if not path:
+            log.debug("EXIT _open_viewer (cancel)")
+            return
+        log.debug("Selected STC", extra={"path": path})
         try:
             from .pyqt_viewer import launch_viewer
             launch_viewer(path, time_ms=float(self.viewer_ms.value()))
         except Exception as e:
+            log.exception("Failed to open viewer", extra={"path": path})
+            self._append(f"ERROR: {e!s}")
             QMessageBox.critical(self, "Viewer error", str(e))
+        finally:
+            log.debug("EXIT _open_viewer", extra={"path": path})

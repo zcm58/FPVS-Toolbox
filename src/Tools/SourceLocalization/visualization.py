@@ -1,7 +1,6 @@
 # src/Tools/SourceLocalization/visualization.py
 from __future__ import annotations
 import os
-import logging
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -12,9 +11,10 @@ from mne.surface import read_surface
 from mne.datasets import fetch_fsaverage
 
 from .data_utils import _resolve_subjects_dir
+from Tools.SourceLocalization.logging_utils import get_pkg_logger
 from Main_App import SettingsManager
 
-logger = logging.getLogger(__name__)
+log = get_pkg_logger()
 
 
 def _derive_title(path: str) -> str:
@@ -33,6 +33,7 @@ def view_source_estimate_pyvista(
     show_cortex: bool = True,
 ) -> pv.Plotter:
     """Plot source estimate heatmap with optional semi-transparent cortex."""
+    log.debug("ENTER view_source_estimate_pyvista")
     subj = getattr(stc, "subject", None) or "fsaverage"
     surf_dir = Path(subjects_dir) / subj / "surf"
 
@@ -112,6 +113,7 @@ def view_source_estimate_pyvista(
         name="act_rh",
     )
     pl.add_scalar_bar(title="|Source| Amplitude", n_colors=8)
+    log.debug("EXIT view_source_estimate_pyvista")
     return pl
 
 
@@ -126,7 +128,8 @@ def view_source_estimate(
 ) -> pv.Plotter | None:
     """Load STC, apply threshold & alpha settings, then render via PyVista."""
     if log_func is None:
-        log_func = logger.info
+        log_func = log.info
+    log.debug("ENTER view_source_estimate", extra={"path": stc_path})
     try:
         stc = mne.read_source_estimate(stc_path)
 
@@ -150,7 +153,7 @@ def view_source_estimate(
             stc = stc.copy()
             stc._data[np.abs(stc.data) < cutoff] = 0.0
             if debug:
-                logger.debug("Applied threshold cutoff=%.4e", cutoff)
+                log.debug("Applied threshold cutoff=%.4e", cutoff)
 
         # Alpha & cortex visibility
         gui_alpha = 0.5
@@ -188,8 +191,11 @@ def view_source_estimate(
             stc, subjects_dir, time_idx, cortex_alpha, show_brain_mesh
         )
         pl.show(title=window_title or _derive_title(stc_path))
+        log.debug("EXIT view_source_estimate", extra={"path": stc_path})
         return pl
 
     except Exception as err:
         log_func(f"ERROR plotting STC: {err}")
+        log.exception("view_source_estimate_failed", extra={"path": stc_path})
+        log.debug("EXIT view_source_estimate", extra={"path": stc_path})
         return None

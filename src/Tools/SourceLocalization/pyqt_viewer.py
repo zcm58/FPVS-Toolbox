@@ -1,6 +1,7 @@
 # src/Tools/SourceLocalization/pyqt_viewer.py
 from __future__ import annotations
-import os, sys, logging
+import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -15,18 +16,30 @@ sys.path.insert(0, str(SRC_PATH))
 
 from Tools.SourceLocalization.data_utils import _resolve_subjects_dir
 from Tools.SourceLocalization.backend_utils import _ensure_pyvista_backend
-from Main_App import SettingsManager, configure_logging, get_settings
+from Tools.SourceLocalization.logging_utils import get_pkg_logger
+from Main_App import SettingsManager
 
-logger = logging.getLogger(__name__)
+log = get_pkg_logger()
+
+_OPEN_VIEWERS: list[QtWidgets.QWidget] = []
+
+
+def _safe_show(widget: QtWidgets.QWidget) -> None:
+    log.debug("Calling .show() on %s", type(widget).__name__)
+    widget.show()
+    log.debug("Widget shown: %s", repr(widget))
 
 
 class STCViewer(QtWidgets.QMainWindow):
     """Qt window for interactively viewing SourceEstimate files."""
 
     def __init__(self, stc_path: str, time_ms: Optional[float] = None):
+        log.debug("ENTER STCViewer.__init__", extra={"path": stc_path})
         super().__init__()
         if SettingsManager().debug_enabled():
-            logger.debug("STCViewer PySide6=%s Qt=%s", QtCore.__version__, QtCore.qVersion())
+            log.debug(
+                "STCViewer PySide6=%s Qt=%s", QtCore.__version__, QtCore.qVersion()
+            )
 
         self.setWindowTitle(os.path.basename(stc_path))
 
@@ -37,7 +50,21 @@ class STCViewer(QtWidgets.QMainWindow):
         self.heat_lh = self.heat_rh = None
 
         # Load STC
-        self.stc = mne.read_source_estimate(stc_path)
+        try:
+            log.debug("Loading STC", extra={"path": stc_path})
+            self.stc = mne.read_source_estimate(stc_path)
+            miss = []
+            if not len(self.stc.vertices[0]):
+                miss.append("lh")
+            if not len(self.stc.vertices[1]):
+                miss.append("rh")
+            if miss:
+                log.warning(
+                    "STC missing hemisphere(s): %s", ",".join(miss), extra={"path": stc_path}
+                )
+        except Exception:
+            log.exception("Failed to read STC", extra={"path": stc_path})
+            raise
         self._setup_subjects()
         self._build_ui()
         self._load_surfaces()
@@ -65,6 +92,7 @@ class STCViewer(QtWidgets.QMainWindow):
         self.time_slider.setValue(idx)
         self.time_slider.blockSignals(False)
         self._update_time(idx)
+        log.debug("EXIT STCViewer.__init__", extra={"path": stc_path})
 
     # ---- setup
 
@@ -116,6 +144,7 @@ class STCViewer(QtWidgets.QMainWindow):
     def _load_surfaces(self) -> None:
         subject = self.stc.subject or "fsaverage"
         surf_dir = self.subjects_dir / subject / "surf"
+        log.debug("ENTER _load_surfaces", extra={"subject": subject})
 
         verts_lh, faces_lh = mne.read_surface(surf_dir / "lh.pial")
         verts_rh, faces_rh = mne.read_surface(surf_dir / "rh.pial")
@@ -147,6 +176,7 @@ class STCViewer(QtWidgets.QMainWindow):
             self.heat_rh, scalars="activation", cmap="hot", nan_opacity=0.0, name="act_rh", clim=clim
         )
         self.plotter.add_scalar_bar(title="|Source| Amplitude", n_colors=8)
+        log.debug("EXIT _load_surfaces", extra={"subject": subject})
 
     # ---- helpers & interactions
 
@@ -215,21 +245,50 @@ class STCViewer(QtWidgets.QMainWindow):
 
 def launch_viewer(stc_path: str, time_ms: Optional[float] = None) -> None:
     """Launch the STC viewer in the current PySide6 process."""
-    configure_logging(get_settings().debug_enabled())
+    log.debug("ENTER launch_viewer", extra={"path": stc_path})
     os.environ.setdefault("QT_API", "pyside6")
-    _ensure_pyvista_backend()
+    try:
+        _ensure_pyvista_backend()
 
-    # High-DPI attributes must be set **before** creating the app
-    own_app = False
-    app = QtWidgets.QApplication.instance()
-    if app is None:
-        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
-        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
-        app = QtWidgets.QApplication(sys.argv)
-        own_app = True
+        # High-DPI attributes must be set **before** creating the app
+        own_app = False
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            QtWidgets.QApplication.setAttribute(
+                QtCore.Qt.AA_EnableHighDpiScaling, True
+            )
+            QtWidgets.QApplication.setAttribute(
+                QtCore.Qt.AA_UseHighDpiPixmaps, True
+            )
+            app = QtWidgets.QApplication(sys.argv)
+            own_app = True
 
-    viewer = STCViewer(stc_path, time_ms)
-    viewer.show()
+        viewer = STCViewer(stc_path, time_ms)
+        _OPEN_VIEWERS.append(viewer)
+        _safe_show(viewer)
+        log.info("Viewer opened", extra={"path": stc_path})
 
-    if own_app:
-        app.exec()
+        if own_app:
+            app.exec()
+    except Exception:
+        log.exception("Failed to open viewer", extra={"path": stc_path})
+        raise
+    finally:
+        log.debug("EXIT launch_viewer", extra={"path": stc_path})
+
+
+def diagnose_open_stc(path: str) -> dict[str, object]:
+    """Quickly check if an STC can be loaded and minimally visualized."""
+    info: dict[str, object] = {"ok": False, "error": None}
+    p = Path(path)
+    log.info(
+        "diagnose_open_stc", extra={"path": path, "exists": p.exists(), "suffix": p.suffix, "size": p.stat().st_size if p.exists() else 0}
+    )
+    try:
+        mne.read_source_estimate(path)
+        pv.Plotter(off_screen=True).close()
+        info["ok"] = True
+    except Exception as err:
+        info["error"] = str(err)
+        log.exception("diagnose_open_stc_failed", extra={"path": path})
+    return info
