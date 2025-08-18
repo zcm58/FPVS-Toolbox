@@ -10,6 +10,7 @@ import numpy as np
 import pyvista as pv
 from mne.datasets import fetch_fsaverage
 from mne.surface import read_surface
+from PySide6 import QtWidgets
 
 from Main_App import SettingsManager
 from Tools.SourceLocalization.data_utils import _resolve_subjects_dir
@@ -158,8 +159,20 @@ def view_source_estimate(
         time_idx = int(round((time_ms / 1000.0 - stc.tmin) / stc.tstep))
         time_idx = max(0, min(time_idx, stc.data.shape[1] - 1))
 
-        pl = view_source_estimate_pyvista(stc, subjects_dir, time_idx, cortex_alpha, show_brain_mesh)
-        pl.show(title=window_title or _derive_title(stc_path))
+        pl = view_source_estimate_pyvista(
+            stc, subjects_dir, time_idx, cortex_alpha, show_brain_mesh
+        )
+        kwargs = {"title": window_title or _derive_title(stc_path)}
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            kwargs.update(
+                {"interactive": False, "auto_close": False, "window_size": (900, 700)}
+            )
+            log.debug("pv_plotter_show", extra={"blocking": False, **kwargs})
+            pl.show(**kwargs)
+        else:
+            log.debug("pv_plotter_show", extra={"blocking": True, **kwargs})
+            pl.show(**kwargs)
         log.debug("EXIT view_source_estimate", extra={"path": stc_path})
         return pl
 
