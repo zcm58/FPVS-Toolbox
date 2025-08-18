@@ -164,14 +164,15 @@ def view_source_estimate(
         )
         kwargs = {"title": window_title or _derive_title(stc_path)}
         app = QtWidgets.QApplication.instance()
-        if app is not None:
+        has_app = app is not None
+        if has_app:
             kwargs.update(
                 {"interactive": False, "auto_close": False, "window_size": (900, 700)}
             )
-            log.debug("pv_plotter_show", extra={"blocking": False, **kwargs})
+            log.debug("pv_plotter_show", extra={"has_app": True, "blocking": False, **kwargs})
             pl.show(**kwargs)
         else:
-            log.debug("pv_plotter_show", extra={"blocking": True, **kwargs})
+            log.debug("pv_plotter_show", extra={"has_app": False, "blocking": True, **kwargs})
             pl.show(**kwargs)
         log.debug("EXIT view_source_estimate", extra={"path": stc_path})
         return pl

@@ -363,11 +363,16 @@ class SourceLocalizationDialog(QDialog):
         )
         log.debug("ENTER _open_viewer", extra=pre_state)
         base = self._last_stc_base or ""
+        opts = QFileDialog.Options()
+        # Use Qt's own dialog to avoid Windows native modality quirks
+        opts |= QFileDialog.DontUseNativeDialog
+        log.debug("stc_file_dialog", extra={"native": False})
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Open STC (pick -lh.stc or -rh.stc)",
             base,
             "MNE STC (*.stc)",
+            options=opts,
         )
         if not path:
             log.debug("EXIT _open_viewer (cancel)")

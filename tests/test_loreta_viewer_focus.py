@@ -5,9 +5,10 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtWidgets
+import logging
 
 
-def test_loreta_viewer_focus(qtbot, monkeypatch):
+def test_loreta_viewer_focus(qtbot, monkeypatch, caplog):
     # Stub external dependencies
     class DummySettings:
         def __init__(self):
@@ -79,6 +80,8 @@ def test_loreta_viewer_focus(qtbot, monkeypatch):
         QtWidgets.QFileDialog, "getOpenFileName", lambda *a, **k: ("dummy-lh.stc", "")
     )
 
+    caplog.set_level(logging.DEBUG, logger="Tools.SourceLocalization")
+
     dlg._open_viewer()
 
     viewer = pyqt_viewer._OPEN_VIEWERS[-1]
@@ -89,6 +92,10 @@ def test_loreta_viewer_focus(qtbot, monkeypatch):
         assert QtWidgets.QApplication.activeWindow() is viewer
 
     qtbot.waitUntil(_active, timeout=500)
+
+    qtbot.wait(1000)
+    ticks = [r for r in caplog.records if r.message == "sentinel tick"]
+    assert len(ticks) >= 2
 
     for w in QtWidgets.QApplication.topLevelWidgets():
         assert not w.isModal()
