@@ -1,20 +1,22 @@
-# src/Tools/SourceLocalization/visualization.py
 from __future__ import annotations
+
+import logging
 import os
 from pathlib import Path
 from typing import Optional, Callable
 
+import mne
 import numpy as np
 import pyvista as pv
-import mne
-from mne.surface import read_surface
 from mne.datasets import fetch_fsaverage
+from mne.surface import read_surface
 
-from .data_utils import _resolve_subjects_dir
-from Tools.SourceLocalization.logging_utils import get_pkg_logger
 from Main_App import SettingsManager
+from Tools.SourceLocalization.data_utils import _resolve_subjects_dir
+from Tools.SourceLocalization.logging_utils import get_pkg_logger
 
 log = get_pkg_logger()
+logger = logging.getLogger(__name__)
 
 
 def _derive_title(path: str) -> str:
@@ -52,65 +54,40 @@ def view_source_estimate_pyvista(
     try:
         pl.enable_depth_peeling()
     except Exception:
-        pass  # depth peeling is backend/driver dependent
+        pass  # backend/driver dependent
 
     if show_cortex:
         cortex_mesh = mesh_lh.copy().merge(mesh_rh)
-        pl.add_mesh(
-            cortex_mesh,
-            color="lightgray",
-            opacity=cortex_alpha,
-            ambient=1.0,
-            diffuse=0.0,
-            specular=0.0,
-            name="cortex",
-        )
+        pl.add_mesh(cortex_mesh, color="lightgray", opacity=cortex_alpha, name="cortex")
 
-    # Prepare activation (abs magnitude for sequential cmap)
-    frame = np.abs(stc.data[:, time_idx])
-    n_lh = len(stc.vertices[0])
-    act_lh = np.full(mesh_lh.n_points, np.nan)
-    act_rh = np.full(mesh_rh.n_points, np.nan)
-    act_lh[stc.vertices[0]] = frame[:n_lh]
-    act_rh[stc.vertices[1]] = frame[n_lh:]
-
-    # Robust vmax across hemispheres (avoid object-array nanmax pitfall)
-    vmax = max(
-        float(np.nanmax(act_lh)) if np.any(~np.isnan(act_lh)) else 0.0,
-        float(np.nanmax(act_rh)) if np.any(~np.isnan(act_rh)) else 0.0,
-    )
-    clim = (0.0, vmax if vmax > 0 else 1.0)
-
+    # Build heat layers
     h_lh = mesh_lh.copy()
-    h_lh.point_data["activation"] = act_lh
     h_rh = mesh_rh.copy()
-    h_rh.point_data["activation"] = act_rh
+    h_lh.point_data["activation"] = np.full(h_lh.n_points, np.nan)
+    h_rh.point_data["activation"] = np.full(h_rh.n_points, np.nan)
 
-    # Slight offset to avoid z-fighting
-    try:
-        for h in (h_lh, h_rh):
-            normals = h.point_normals  # triggers computation if missing
-            h.points = h.points + normals * 1e-2
-    except Exception:
-        pass
+    # Fill current time frame
+    scalar = stc.data
+    if getattr(stc, "is_vector", False) or scalar.ndim == 3:
+        scalar = np.linalg.norm(scalar, axis=-1)  # (n_verts, n_times)
+    frame = np.abs(scalar[:, time_idx])
+    n_lh = len(stc.vertices[0])
+    arr_lh = np.full(h_lh.n_points, np.nan)
+    arr_rh = np.full(h_rh.n_points, np.nan)
+    arr_lh[stc.vertices[0]] = frame[:n_lh]
+    arr_rh[stc.vertices[1]] = frame[n_lh:]
+
+    h_lh.point_data["activation"] = arr_lh
+    h_rh.point_data["activation"] = arr_rh
+
+    vmax = float(np.nanmax(frame)) or 1.0
+    clim = (0.0, vmax)
 
     pl.add_mesh(
-        h_lh,
-        scalars="activation",
-        cmap="hot",
-        nan_opacity=0.0,
-        opacity=1.0,
-        clim=clim,
-        name="act_lh",
+        h_lh, scalars="activation", cmap="hot", nan_opacity=0.0, opacity=1.0, clim=clim, name="act_lh"
     )
     pl.add_mesh(
-        h_rh,
-        scalars="activation",
-        cmap="hot",
-        nan_opacity=0.0,
-        opacity=1.0,
-        clim=clim,
-        name="act_rh",
+        h_rh, scalars="activation", cmap="hot", nan_opacity=0.0, opacity=1.0, clim=clim, name="act_rh"
     )
     pl.add_scalar_bar(title="|Source| Amplitude", n_colors=8)
     log.debug("EXIT view_source_estimate_pyvista")
@@ -126,7 +103,7 @@ def view_source_estimate(
     log_func: Optional[Callable[[str], None]] = None,
     show_cortex: Optional[bool] = None,
 ) -> pv.Plotter | None:
-    """Load STC, apply threshold & alpha settings, then render via PyVista."""
+    """Load STC, apply threshold/alpha settings, then render via PyVista."""
     if log_func is None:
         log_func = log.info
     log.debug("ENTER view_source_estimate", extra={"path": stc_path})
@@ -136,13 +113,11 @@ def view_source_estimate(
         settings = SettingsManager()
         debug = settings.debug_enabled()
 
-        # Threshold (fraction against abs max or absolute)
+        # Threshold (fraction of abs max or absolute)
         thr_val = threshold
         if thr_val is None:
             try:
-                thr_val = float(
-                    settings.get("visualization", "threshold", fallback=0.0)
-                )
+                thr_val = float(settings.get("visualization", "threshold", fallback=0.0))
             except Exception:
                 thr_val = 0.0
         if thr_val and thr_val > 0:
@@ -158,16 +133,12 @@ def view_source_estimate(
         # Alpha & cortex visibility
         gui_alpha = 0.5
         try:
-            gui_alpha = float(
-                settings.get("visualization", "surface_opacity", fallback=0.5)
-            )
+            gui_alpha = float(settings.get("visualization", "surface_opacity", fallback=0.5))
         except Exception:
             pass
         cortex_alpha = float(alpha) if alpha is not None else gui_alpha
 
-        show_brain_mesh = (
-            settings.get("visualization", "show_brain_mesh", "True").lower() == "true"
-        )
+        show_brain_mesh = settings.get("visualization", "show_brain_mesh", "True").lower() == "true"
         if show_cortex is not None:
             show_brain_mesh = bool(show_cortex)
 
@@ -187,9 +158,7 @@ def view_source_estimate(
         time_idx = int(round((time_ms / 1000.0 - stc.tmin) / stc.tstep))
         time_idx = max(0, min(time_idx, stc.data.shape[1] - 1))
 
-        pl = view_source_estimate_pyvista(
-            stc, subjects_dir, time_idx, cortex_alpha, show_brain_mesh
-        )
+        pl = view_source_estimate_pyvista(stc, subjects_dir, time_idx, cortex_alpha, show_brain_mesh)
         pl.show(title=window_title or _derive_title(stc_path))
         log.debug("EXIT view_source_estimate", extra={"path": stc_path})
         return pl

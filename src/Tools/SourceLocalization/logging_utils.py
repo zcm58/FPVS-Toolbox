@@ -1,4 +1,3 @@
-# src/Tools/SourceLocalization/logging_utils.py
 from __future__ import annotations
 
 import logging
@@ -15,7 +14,7 @@ class QueueLogHandler(logging.Handler):
         self.queue = queue
         self.setFormatter(logging.Formatter("%(message)s"))
 
-    def emit(self, record: logging.LogRecord) -> None:  # pragma: no cover - best effort
+    def emit(self, record: logging.LogRecord) -> None:  # pragma: no cover
         try:
             msg = self.format(record)
             self.queue.put({"type": "log", "message": msg})

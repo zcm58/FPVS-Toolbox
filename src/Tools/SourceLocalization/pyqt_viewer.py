@@ -1,7 +1,8 @@
-# src/Tools/SourceLocalization/pyqt_viewer.py
 from __future__ import annotations
+
 import os
 import sys
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,7 @@ from pyvistaqt import QtInteractor
 from PySide6 import QtWidgets, QtCore
 import mne
 
+# Make project imports resolvable when the module is run directly
 SRC_PATH = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SRC_PATH))
 
@@ -19,8 +21,10 @@ from Tools.SourceLocalization.backend_utils import _ensure_pyvista_backend
 from Tools.SourceLocalization.logging_utils import get_pkg_logger
 from Main_App import SettingsManager
 
+logger = logging.getLogger(__name__)
 log = get_pkg_logger()
 
+# Keep strong references so windows are not GC'd
 _OPEN_VIEWERS: list[QtWidgets.QWidget] = []
 
 
@@ -33,12 +37,15 @@ def _safe_show(widget: QtWidgets.QWidget) -> None:
 class STCViewer(QtWidgets.QMainWindow):
     """Qt window for interactively viewing SourceEstimate files."""
 
-    def __init__(self, stc_path: str, time_ms: Optional[float] = None):
+    def __init__(self, stc_path: str, time_ms: Optional[float] = None) -> None:
         log.debug("ENTER STCViewer.__init__", extra={"path": stc_path})
         super().__init__()
+
         if SettingsManager().debug_enabled():
             log.debug(
-                "STCViewer PySide6=%s Qt=%s", QtCore.__version__, QtCore.qVersion()
+                "STCViewer PySide6=%s Qt=%s",
+                QtCore.__version__,
+                QtCore.qVersion(),
             )
 
         self.setWindowTitle(os.path.basename(stc_path))
@@ -60,18 +67,21 @@ class STCViewer(QtWidgets.QMainWindow):
                 miss.append("rh")
             if miss:
                 log.warning(
-                    "STC missing hemisphere(s): %s", ",".join(miss), extra={"path": stc_path}
+                    "STC missing hemisphere(s): %s",
+                    ",".join(miss),
+                    extra={"path": stc_path},
                 )
         except Exception:
             log.exception("Failed to read STC", extra={"path": stc_path})
             raise
+
         self._setup_subjects()
         self._build_ui()
         self._load_surfaces()
 
         # Global abs-max for shared clim
         try:
-            data = self._as_scalar_data(self.stc)  # supports scalar or vector STC
+            data = self._as_scalar_data(self.stc)
             self._global_vmax = float(np.abs(data).max()) or 1.0
         except Exception:
             self._global_vmax = 1.0
@@ -126,7 +136,12 @@ class STCViewer(QtWidgets.QMainWindow):
         self.time_slider.valueChanged.connect(self._update_time)
 
         self.cortex_cb = QtWidgets.QCheckBox("Show Cortex")
-        show_default = SettingsManager().get('visualization', 'show_brain_mesh', 'True').lower() == 'true'
+        show_default = (
+            SettingsManager()
+            .get("visualization", "show_brain_mesh", "True")
+            .lower()
+            == "true"
+        )
         self.cortex_cb.setChecked(show_default)
         self.cortex_cb.stateChanged.connect(self._toggle_cortex)
 
@@ -155,8 +170,12 @@ class STCViewer(QtWidgets.QMainWindow):
         lh = pv.PolyData(verts_lh, _fmt(faces_lh))
         rh = pv.PolyData(verts_rh, _fmt(faces_rh))
 
-        self.cortex_lh = self.plotter.add_mesh(lh, color="lightgray", opacity=0.5, name="lh")
-        self.cortex_rh = self.plotter.add_mesh(rh, color="lightgray", opacity=0.5, name="rh")
+        self.cortex_lh = self.plotter.add_mesh(
+            lh, color="lightgray", opacity=0.5, name="lh"
+        )
+        self.cortex_rh = self.plotter.add_mesh(
+            rh, color="lightgray", opacity=0.5, name="rh"
+        )
         visible = self.cortex_cb.isChecked()
         self.cortex_lh.SetVisibility(visible)
         self.cortex_rh.SetVisibility(visible)
@@ -170,10 +189,20 @@ class STCViewer(QtWidgets.QMainWindow):
         clim = (0.0, self._global_vmax)
 
         self.act_lh = self.plotter.add_mesh(
-            self.heat_lh, scalars="activation", cmap="hot", nan_opacity=0.0, name="act_lh", clim=clim
+            self.heat_lh,
+            scalars="activation",
+            cmap="hot",
+            nan_opacity=0.0,
+            name="act_lh",
+            clim=clim,
         )
         self.act_rh = self.plotter.add_mesh(
-            self.heat_rh, scalars="activation", cmap="hot", nan_opacity=0.0, name="act_rh", clim=clim
+            self.heat_rh,
+            scalars="activation",
+            cmap="hot",
+            nan_opacity=0.0,
+            name="act_rh",
+            clim=clim,
         )
         self.plotter.add_scalar_bar(title="|Source| Amplitude", n_colors=8)
         log.debug("EXIT _load_surfaces", extra={"subject": subject})
@@ -189,37 +218,39 @@ class STCViewer(QtWidgets.QMainWindow):
         data = stc.data
         # Vector STC handling: try common layouts robustly.
         if getattr(stc, "is_vector", False) or data.ndim == 3 or (
-            data.ndim == 2 and data.shape[0] == 3 * (len(stc.vertices[0]) + len(stc.vertices[1]))
+            data.ndim == 2
+            and data.shape[0] == 3 * (len(stc.vertices[0]) + len(stc.vertices[1]))
         ):
             try:
                 # MNE Vector STC often (n_verts, n_times, 3)
                 if data.ndim == 3 and data.shape[2] == 3:
-                    # norm over the last axis (xyz)
-                    return np.linalg.norm(data, axis=2).T.T  # keep (n_verts, n_times)
+                    return np.linalg.norm(data, axis=2)
                 # Or flattened (3*n_verts, n_times) as [x,y,z] blocks
                 n = len(stc.vertices[0]) + len(stc.vertices[1])
                 reshaped = data.reshape(3, n, -1)  # (3, n_verts, n_times)
-                return np.linalg.norm(reshaped, axis=0)  # (n_verts, n_times)
+                return np.linalg.norm(reshaped, axis=0)
             except Exception:
                 pass
-        return data  # already scalar (n_verts, n_times)
+        return data
 
     def _update_opacity(self, value: int) -> None:
-        alpha = max(0, min(100, int(value))) / 100
-        for actor in (self.cortex_lh, self.cortex_rh):
-            if actor is not None:
-                actor.GetProperty().SetOpacity(alpha)
+        opacity = max(0.0, min(float(value) / 100.0, 1.0))
+        if self.cortex_lh is not None:
+            self.cortex_lh.GetProperty().SetOpacity(opacity)
+        if self.cortex_rh is not None:
+            self.cortex_rh.GetProperty().SetOpacity(opacity)
         self.plotter.render()
 
     def _toggle_cortex(self, state: int) -> None:
         visible = state == QtCore.Qt.Checked
-        for actor in (self.cortex_lh, self.cortex_rh):
-            if actor is not None:
-                actor.SetVisibility(visible)
+        if self.cortex_lh is not None:
+            self.cortex_lh.SetVisibility(visible)
+        if self.cortex_rh is not None:
+            self.cortex_rh.SetVisibility(visible)
         self.plotter.render()
 
     def _update_time(self, value: int) -> None:
-        if self.stc is None or self.heat_lh is None or self.heat_rh is None:
+        if self.stc is None:
             return
         idx = max(0, min(int(value), self.stc.data.shape[1] - 1))
         scalar = self._as_scalar_data(self.stc)
@@ -246,25 +277,21 @@ class STCViewer(QtWidgets.QMainWindow):
 def launch_viewer(stc_path: str, time_ms: Optional[float] = None) -> None:
     """Launch the STC viewer in the current PySide6 process."""
     log.debug("ENTER launch_viewer", extra={"path": stc_path})
-    os.environ.setdefault("QT_API", "pyside6")
     try:
+        os.environ.setdefault("QT_API", "pyside6")
         _ensure_pyvista_backend()
 
         # High-DPI attributes must be set **before** creating the app
         own_app = False
         app = QtWidgets.QApplication.instance()
         if app is None:
-            QtWidgets.QApplication.setAttribute(
-                QtCore.Qt.AA_EnableHighDpiScaling, True
-            )
-            QtWidgets.QApplication.setAttribute(
-                QtCore.Qt.AA_UseHighDpiPixmaps, True
-            )
+            QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+            QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
             app = QtWidgets.QApplication(sys.argv)
             own_app = True
 
         viewer = STCViewer(stc_path, time_ms)
-        _OPEN_VIEWERS.append(viewer)
+        _OPEN_VIEWERS.append(viewer)   # keep strong ref
         _safe_show(viewer)
         log.info("Viewer opened", extra={"path": stc_path})
 
@@ -282,7 +309,13 @@ def diagnose_open_stc(path: str) -> dict[str, object]:
     info: dict[str, object] = {"ok": False, "error": None}
     p = Path(path)
     log.info(
-        "diagnose_open_stc", extra={"path": path, "exists": p.exists(), "suffix": p.suffix, "size": p.stat().st_size if p.exists() else 0}
+        "diagnose_open_stc",
+        extra={
+            "path": path,
+            "exists": p.exists(),
+            "suffix": p.suffix,
+            "size": p.stat().st_size if p.exists() else 0,
+        },
     )
     try:
         mne.read_source_estimate(path)

@@ -342,11 +342,15 @@ class SourceLocalizationDialog(QDialog):
         self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
 
     # ----- viewer
+    # ----- viewer
     def _open_viewer(self) -> None:
         log.debug("ENTER _open_viewer")
         base = self._last_stc_base or ""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open STC (pick -lh.stc or -rh.stc)", base, "MNE STC (*.stc)"
+            self,
+            "Open STC (pick -lh.stc or -rh.stc)",
+            base,
+            "MNE STC (*.stc)",
         )
         if not path:
             log.debug("EXIT _open_viewer (cancel)")
