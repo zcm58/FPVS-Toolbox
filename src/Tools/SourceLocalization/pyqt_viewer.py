@@ -308,8 +308,93 @@ def launch_viewer(stc_path: str, time_ms: Optional[float] = None) -> None:
 
         viewer = STCViewer(stc_path, time_ms)
         _OPEN_VIEWERS.append(viewer)  # keep strong ref
+
+        # Log application/window state before showing
+        if app is not None:
+            active = app.activeWindow()
+            focus = app.focusWindow()
+            log.debug(
+                "app_state_before_show",
+                extra={
+                    "active": repr(active),
+                    "focus": repr(focus),
+                    "has_app": True,
+                },
+            )
+            def _mod_val(mod):
+                try:
+                    return int(mod)  # type: ignore[arg-type]
+                except Exception:
+                    try:
+                        return int(mod.value)  # type: ignore[attr-defined]
+                    except Exception:
+                        return str(mod)
+
+            for w in app.topLevelWidgets():
+                log.debug(
+                    "top_level_before_show",
+                    extra={
+                        "obj": w.objectName(),
+                        "title": w.windowTitle(),
+                        "isModal": w.isModal(),
+                        "windowModality": _mod_val(w.windowModality()),
+                        "isVisible": w.isVisible(),
+                        "isActiveWindow": w.isActiveWindow(),
+                    },
+                )
+        else:
+            log.debug("app_state_before_show", extra={"has_app": False})
+
         _safe_show(viewer)
         _bring_to_front(viewer)
+
+        class _EventLogger(QtCore.QObject):
+            def eventFilter(self, obj, event):  # type: ignore[override]
+                if event.type() in (
+                    QtCore.QEvent.FocusIn,
+                    QtCore.QEvent.FocusOut,
+                    QtCore.QEvent.WindowActivate,
+                    QtCore.QEvent.WindowDeactivate,
+                ):
+                    log.debug(
+                        "viewer_event",
+                        extra={
+                            "type": int(event.type()),
+                            "title": obj.windowTitle(),
+                        },
+                    )
+                return False
+
+        flt = _EventLogger(viewer)
+        viewer.installEventFilter(flt)
+        viewer._event_logger = flt  # type: ignore[attr-defined]
+
+        if app is not None:
+            active = app.activeWindow()
+            focus = app.focusWindow()
+            log.debug(
+                "app_state_after_show",
+                extra={
+                    "active": repr(active),
+                    "focus": repr(focus),
+                    "has_app": True,
+                },
+            )
+            for w in app.topLevelWidgets():
+                log.debug(
+                    "top_level_after_show",
+                    extra={
+                        "obj": w.objectName(),
+                        "title": w.windowTitle(),
+                        "isModal": w.isModal(),
+                        "windowModality": _mod_val(w.windowModality()),
+                        "isVisible": w.isVisible(),
+                        "isActiveWindow": w.isActiveWindow(),
+                    },
+                )
+        else:
+            log.debug("app_state_after_show", extra={"has_app": False})
+
         log.info("Viewer opened", extra={"path": stc_path})
 
         if own_app:

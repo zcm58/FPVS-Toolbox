@@ -344,7 +344,24 @@ class SourceLocalizationDialog(QDialog):
     # ----- viewer
     # ----- viewer
     def _open_viewer(self) -> None:
-        log.debug("ENTER _open_viewer")
+        def _mod_val(mod):
+            try:
+                return int(mod)  # type: ignore[arg-type]
+            except Exception:
+                try:
+                    return int(mod.value)  # type: ignore[attr-defined]
+                except Exception:
+                    return str(mod)
+
+        pre_state = {
+            "isModal": self.isModal(),
+            "windowModality": _mod_val(self.windowModality()),
+            "wa_show_modal": self.testAttribute(Qt.WA_ShowModal),
+        }
+        pre_state["in_exec_loop"] = bool(
+            pre_state["isModal"] or pre_state["wa_show_modal"]
+        )
+        log.debug("ENTER _open_viewer", extra=pre_state)
         base = self._last_stc_base or ""
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -378,4 +395,13 @@ class SourceLocalizationDialog(QDialog):
             self._append(f"ERROR: {e!s}")
             QMessageBox.critical(self, "Viewer error", str(e))
         finally:
-            log.debug("EXIT _open_viewer", extra={"path": path})
+            post_state = {
+                "path": path,
+                "isModal": self.isModal(),
+                "windowModality": _mod_val(self.windowModality()),
+                "wa_show_modal": self.testAttribute(Qt.WA_ShowModal),
+            }
+            post_state["in_exec_loop"] = bool(
+                post_state["isModal"] or post_state["wa_show_modal"]
+            )
+            log.debug("EXIT _open_viewer", extra=post_state)
