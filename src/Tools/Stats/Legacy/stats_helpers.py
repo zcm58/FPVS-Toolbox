@@ -1,6 +1,8 @@
 # Helper methods extracted from stats.py
 
 import logging
+from tkinter import messagebox
+
 from Main_App import SettingsManager
 from . import stats_analysis
 
@@ -49,7 +51,8 @@ def _load_bca_upper_limit(self):
 
 
 def _validate_numeric(self, P):
-    if P in ("", "-"): return True
+    if P in ("", "-"):
+        return True
     try:
         float(P)
         return True
@@ -73,15 +76,24 @@ def aggregate_bca_sum(self, file_path, roi_name):
 
 
 def prepare_all_subject_summed_bca_data(self, roi_filter=None):
+    """Populate ``all_subject_data`` using current ROI settings.
+
+    ROIs are taken from current Settings at runtime via resolve_active_rois().
+    """
     self.log_to_main_app("Preparing summed BCA data...")
-    self.all_subject_data = stats_analysis.prepare_all_subject_summed_bca_data(
-        self.subjects,
-        self.conditions,
-        self.subject_data,
-        self.base_freq,
-        self.log_to_main_app,
-        roi_filter=roi_filter,
-    ) or {}
+    try:
+        self.all_subject_data = stats_analysis.prepare_all_subject_summed_bca_data(
+            self.subjects,
+            self.conditions,
+            self.subject_data,
+            self.base_freq,
+            self.log_to_main_app,
+            roi_filter=roi_filter,
+        ) or {}
+    except ValueError as e:
+        self.log_to_main_app(f"ROI resolution failed: {e}")
+        messagebox.showerror("ROI Error", str(e))
+        self.all_subject_data = {}
     return bool(self.all_subject_data)
 
 
