@@ -3,15 +3,19 @@
 
 from __future__ import annotations
 
+import logging
 import os
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
 from .repeated_m_anova import run_repeated_measures_anova
+from Tools.Stats.roi_resolver import ROI, resolve_active_rois
 from Main_App import SettingsManager
+
+logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
 # Regions of Interest (10-20 montage)
@@ -146,11 +150,24 @@ def _match_freq_column(columns, freq_value: float) -> Optional[str]:
 # -----------------------------------------------------------------------------
 # BCA aggregation and ANOVA
 # -----------------------------------------------------------------------------
-def aggregate_bca_sum(file_path: str, roi_name: str, base_freq: float, log_func) -> float:
+
+def aggregate_bca_sum(
+    file_path: str,
+    roi_name: str,
+    base_freq: float,
+    log_func,
+    rois: Optional[List[ROI]] = None,
+) -> float:
+    """Return summed BCA for an ROI across included harmonics.
+
+    ROIs are taken from current Settings at runtime via resolve_active_rois().
+    """
     try:
         df = pd.read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
         df.index = df.index.str.upper()
-        roi_channels = ROIS.get(roi_name)
+        rois = rois or resolve_active_rois()
+        roi_map = {r.name: r.channels for r in rois}
+        roi_channels = roi_map.get(roi_name)
         if not roi_channels:
             log_func(f"ROI {roi_name} not defined.")
             return np.nan
@@ -175,7 +192,9 @@ def aggregate_bca_sum(file_path: str, roi_name: str, base_freq: float, log_func)
 
         return float(df_roi[cols_to_sum].sum(axis=1).mean())
     except Exception as e:  # pragma: no cover
-        log_func(f"Error aggregating BCA for {os.path.basename(file_path)}, ROI {roi_name}: {e}")
+        log_func(
+            f"Error aggregating BCA for {os.path.basename(file_path)}, ROI {roi_name}: {e}"
+        )
         return np.nan
 
 
@@ -186,30 +205,53 @@ def prepare_all_subject_summed_bca_data(
     base_freq: float,
     log_func,
     roi_filter: Optional[List[str]] = None,
-):
+) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
+    """Prepare summed BCA data for all subjects and conditions.
+
+    ROIs are taken from current Settings at runtime via resolve_active_rois().
+    """
     all_subject_data: Dict[str, Dict[str, Dict[str, float]]] = {}
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
         return None
-    roi_names = roi_filter or ROIS.keys()
+
+    rois = resolve_active_rois()
+    roi_list = [r for r in rois if not roi_filter or r.name in roi_filter]
+    logger.info(
+        "stats_rois",
+        extra={
+            "roi_names": [r.name for r in roi_list],
+            "roi_counts": [len(r.channels) for r in roi_list],
+        },
+    )
+    log_func(
+        "Using "
+        f"{len(roi_list)} ROIs from Settings: {', '.join(r.name for r in roi_list)}"
+    )
 
     for pid in subjects:
         all_subject_data[pid] = {}
         for cond_name in conditions:
             file_path = subject_data.get(pid, {}).get(cond_name)
             all_subject_data[pid].setdefault(cond_name, {})
-            for roi_name in roi_names:
+            for roi in roi_list:
                 if file_path and os.path.exists(file_path):
-                    sum_val = aggregate_bca_sum(file_path, roi_name, base_freq, log_func)
+                    sum_val = aggregate_bca_sum(
+                        file_path, roi.name, base_freq, log_func, rois=rois
+                    )
                 else:
                     sum_val = np.nan
-                all_subject_data[pid][cond_name][roi_name] = sum_val
+                all_subject_data[pid][cond_name][roi.name] = sum_val
 
     log_func("Summed BCA data prep complete.")
     return all_subject_data
 
 
 def run_rm_anova(all_subject_data, log_func):
+    """Run RM-ANOVA on summed BCA data.
+
+    ROIs are taken from current Settings at runtime via resolve_active_rois().
+    """
     long_format_data = []
     for pid, cond_data in all_subject_data.items():
         for cond_name, roi_data in cond_data.items():
@@ -335,7 +377,7 @@ def run_harmonic_check(
     output_lines.append("A harmonic is flagged as 'Significant' if:")
     output_lines.append(f"1) One-tailed group test vs 0 (p < {alpha}, {correction_method} across harmonics within ROI×Condition), and")
     output_lines.append(f"2) Group mean {selected_metric} meets the threshold ({mean_value_threshold}, tail='{tail}').")
-    output_lines.append(f"(N = number of subjects contributing to that harmonic.)\n")
+    output_lines.append("(N = number of subjects contributing to that harmonic.)\n")
 
     any_significant_found = False
     loaded_dataframes: Dict[str, pd.DataFrame] = {}
@@ -389,7 +431,7 @@ def run_harmonic_check(
 
             # Collect per-harmonic stats (we'll correct across them, then print)
             for (freq_val, harm_k) in oddball_list:
-                display_col = _match_freq_column(sample_df_cols, freq_val) or f"{freq_value:.1f}_Hz"
+                display_col = _match_freq_column(sample_df_cols, freq_val) or f"{freq_val:.1f}_Hz"
                 subj_vals: List[float] = []
 
                 for pid in subjects:
