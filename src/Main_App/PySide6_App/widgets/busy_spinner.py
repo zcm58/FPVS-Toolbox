@@ -1,5 +1,5 @@
 from __future__ import annotations
-from PySide6.QtCore import QTimer, QPointF, QSize, Qt
+from PySide6.QtCore import QTimer, QPoint, QSize, Qt
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -37,8 +37,7 @@ class BusySpinner(QWidget):
     def paintEvent(self, _e) -> None:  # type: ignore[override]
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        radius = self._diameter / 2
-        center = QPointF(self.width() / 2, self.height() / 2)
+        center = QPoint(self.width() // 2, self.height() // 2)
         pen = QPen(self.palette().highlight().color())
         pen.setWidthF(max(1.5, self.devicePixelRatioF() * 1.25))
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)

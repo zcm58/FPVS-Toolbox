@@ -5,7 +5,8 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 
-from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow, StatsWorker
+from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.PySide6.stats_worker import StatsWorker
 
 
 def test_stats_focus_async(qtbot, monkeypatch):

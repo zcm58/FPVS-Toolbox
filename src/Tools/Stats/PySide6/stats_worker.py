@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from PySide6.QtCore import QObject, Signal, Slot, QRunnable, QThreadPool
-from PySide6.QtWidgets import QWidget, QPushButton, QLabel, QProgressBar
-from PySide6.QtGui import QAction
-
-_qt_refs = (QWidget, QPushButton, QLabel, QProgressBar, QAction, QThreadPool)
+from PySide6.QtCore import QObject, Signal, Slot, QRunnable
 
 logger = logging.getLogger("Tools.Stats")
 

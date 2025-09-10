@@ -125,6 +125,8 @@ class StatsWindow(QMainWindow):
         self.setWindowTitle("FPVS Statistical Analysis Tool")
 
         self._guard = OpGuard()
+        if not hasattr(self._guard, "done"):
+            self._guard.done = self._guard.end  # type: ignore[attr-defined]
         self.pool = QThreadPool.globalInstance()
         self._focus_calls = 0
 
@@ -202,7 +204,7 @@ class StatsWindow(QMainWindow):
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
         self.results_text.append(f"Error: {msg}")
-        self._guard.end()
+        self._guard.done()
         self._set_running(False)
         self._focus_self()
 
@@ -287,7 +289,7 @@ class StatsWindow(QMainWindow):
         else:
             output_text += "RM-ANOVA did not return any results or the result was empty.\n"
         self.results_text.append(output_text)
-        self._guard.end()
+        self._guard.done()
         self._set_running(False)
         self._focus_self()
 
