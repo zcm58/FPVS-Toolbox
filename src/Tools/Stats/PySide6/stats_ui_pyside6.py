@@ -1,10 +1,21 @@
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QLabel, QLineEdit, QPushButton,
-    QComboBox, QTextEdit, QHBoxLayout, QVBoxLayout,
-    QFrame, QFileDialog, QMessageBox, QApplication
+    QMainWindow,
+    QWidget,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QComboBox,
+    QTextEdit,
+    QHBoxLayout,
+    QVBoxLayout,
+    QFrame,
+    QFileDialog,
+    QMessageBox,
+    QApplication,
+    QProgressBar,
 )
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QAction
+from PySide6.QtCore import Qt, QTimer, QUrl, QThreadPool, Slot
 import os
 import json
 import pandas as pd
@@ -12,7 +23,6 @@ import numpy as np
 from types import SimpleNamespace
 from pathlib import Path
 import logging
-from scipy import stats
 from inspect import getsourcefile
 from Tools.Stats.Legacy.stats_analysis import (
     prepare_all_subject_summed_bca_data,
@@ -51,6 +61,11 @@ from Tools.Stats.Legacy.stats_export import (
     export_significance_results_to_excel as export_harmonic_results_to_excel,
 )
 from Main_App import SettingsManager
+from Main_App.PySide6_App.utils.op_guard import OpGuard
+from Main_App.PySide6_App.widgets.busy_spinner import BusySpinner
+from Tools.Stats.PySide6.stats_worker import StatsWorker
+
+_unused_qaction = QAction
 
 
 def _auto_detect_project_dir() -> str:
@@ -64,6 +79,24 @@ def _auto_detect_project_dir() -> str:
             return str(Path.cwd())
         path = path.parent
     return str(path)
+
+
+def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq):
+    message_cb("Preparing data for Summed BCA RM-ANOVA...")
+    all_subject_bca_data = prepare_all_subject_summed_bca_data(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_freq=base_freq,
+        log_func=message_cb,
+    )
+    if not all_subject_bca_data:
+        raise RuntimeError("data_prep_failed")
+    progress_cb(50)
+    message_cb("Data preparation complete. Running RM-ANOVA...")
+    _, anova_df_results = analysis_run_rm_anova(all_subject_bca_data, message_cb)
+    progress_cb(100)
+    return {"anova_df_results": anova_df_results}
 
 
 class StatsWindow(QMainWindow):
@@ -91,6 +124,10 @@ class StatsWindow(QMainWindow):
         self.setWindowFlags(self.windowFlags() | Qt.Window)
         self.setWindowTitle("FPVS Statistical Analysis Tool")
 
+        self._guard = OpGuard()
+        self.pool = QThreadPool.globalInstance()
+        self._focus_calls = 0
+
         # --- Legacy state variables ---
         self.subject_data = {}
         self.subjects = []
@@ -115,16 +152,144 @@ class StatsWindow(QMainWindow):
         self.results_textbox = self.results_text
         QTimer.singleShot(100, self._load_default_data_folder)
 
+        self._progress_updates: list[int] = []
+
     def log_to_main_app(self, message):
         """A simple logger for the standalone stats window."""
-        logger.info(f"[StatsWindow] {message}")
-        print(f"[StatsWindow] {message}")  # Also print to console for visibility
+        logger.info("stats_window", extra={"message": message})
 
     def refresh_rois(self):
         """Reload ROI definitions from settings."""
         self.rois = load_rois_from_settings()
         apply_rois_to_modules(self.rois)
         self.log_to_main_app("Refreshed ROI definitions from settings.")
+
+    def _focus_self(self) -> None:
+        self._focus_calls += 1
+        self.raise_()
+        self.activateWindow()
+
+    def _set_running(self, running: bool) -> None:
+        buttons = [
+            self.run_rm_anova_btn,
+            self.run_mixed_model_btn,
+            self.run_posthoc_btn,
+            self.run_harm_btn,
+            self.export_rm_anova_btn,
+            self.export_mixed_model_btn,
+            self.export_posthoc_btn,
+            self.export_harm_btn,
+            self.btn_scan,
+        ]
+        for b in buttons:
+            b.setEnabled(not running)
+        if running:
+            self.spinner.start()
+            self.progress_bar.setValue(0)
+        else:
+            self.spinner.stop()
+            self.progress_bar.setValue(0)
+
+    @Slot(int)
+    def _on_worker_progress(self, val: int) -> None:
+        self._progress_updates.append(val)
+        self.progress_bar.setValue(val)
+
+    @Slot(str)
+    def _on_worker_message(self, msg: str) -> None:
+        self.lbl_status.setText(msg)
+
+    @Slot(str)
+    def _on_worker_error(self, msg: str) -> None:
+        self.results_text.append(f"Error: {msg}")
+        self._guard.end()
+        self._set_running(False)
+        self._focus_self()
+
+    @Slot(dict)
+    def _on_rm_anova_finished(self, payload: dict) -> None:
+        self.rm_anova_results_data = payload.get("anova_df_results")
+        alpha = getattr(self, "_current_alpha", 0.05)
+        output_text = "============================================================\n"
+        output_text += "       Repeated Measures ANOVA (RM-ANOVA) Results\n"
+        output_text += "       Analysis conducted on: Summed BCA Data\n"
+        output_text += "============================================================\n\n"
+        output_text += (
+            "This test examines the overall effects of your experimental conditions (e.g., different stimuli),\n"
+            "the different brain regions (ROIs) you analyzed, and, crucially, whether the\n"
+            "effect of the conditions changes depending on the brain region (interaction effect).\n\n"
+        )
+        anova_df_results = self.rm_anova_results_data
+        if anova_df_results is not None and not anova_df_results.empty:
+            pes_vals = []
+            for _, row in anova_df_results.iterrows():
+                f_val = row.get('F Value', np.nan)
+                df1 = row.get('Num DF', np.nan)
+                df2 = row.get('Den DF', np.nan)
+                if not pd.isna(f_val) and not pd.isna(df1) and not pd.isna(df2) and (f_val * df1 + df2) != 0:
+                    pes_vals.append((f_val * df1) / ((f_val * df1) + df2))
+                else:
+                    pes_vals.append(np.nan)
+            anova_df_results['partial eta squared'] = pes_vals
+            output_text += "--------------------------------------------\n"
+            output_text += "           STATISTICAL TABLE (RM-ANOVA)\n"
+            output_text += "--------------------------------------------\n"
+            output_text += anova_df_results.to_string(index=False) + "\n\n"
+            self.export_rm_anova_btn.setEnabled(True)
+            output_text += "--------------------------------------------\n"
+            output_text += "       SIMPLIFIED EXPLANATION OF RESULTS\n"
+            output_text += "--------------------------------------------\n"
+            output_text += f"(A result is 'statistically significant' if its p-value ('Pr > F') is less than {alpha:.2f})\n\n"
+            for _, row in anova_df_results.iterrows():
+                effect_name_raw = str(row.get('Effect', 'Unknown Effect'))
+                p_value_raw = row.get('Pr > F', np.nan)
+                eta_sq = row.get('partial eta squared', np.nan)
+                effect_display_name = effect_name_raw.replace(':', ' by ').replace('_', ' ').title()
+                output_text += f"Effect: {effect_display_name}\n"
+                if pd.isna(p_value_raw):
+                    output_text += "  - Significance: Could not be determined (p-value missing).\n\n"
+                    continue
+                is_significant = p_value_raw < alpha
+                p_value_display = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
+                eta_sq_display = f"{eta_sq:.3f}" if not pd.isna(eta_sq) else "N/A"
+                output_text += f"  - Statistical Finding: {'SIGNIFICANT' if is_significant else 'NOT SIGNIFICANT'} (p-value = {p_value_display})\n"
+                output_text += f"  - Partial Eta Squared: {eta_sq_display}\n"
+                explanation = ""
+                if 'condition' in effect_name_raw.lower() and 'roi' in effect_name_raw.lower():
+                    explanation = (
+                        "  - Interpretation: This is often the most important finding! It means the way brain activity\n"
+                        "                    changed across conditions **depended on which brain region** you were observing.\n"
+                        if is_significant
+                        else "  - Interpretation: The effect of your conditions on brain activity was generally consistent\n"
+                        "                    across the different brain regions analyzed.\n"
+                    )
+                elif 'condition' == effect_name_raw.lower():
+                    explanation = (
+                        "  - Interpretation: Overall, averaging across all ROIs, your conditions led to statistically\n"
+                        "                    different average levels of brain activity.\n"
+                        if is_significant
+                        else "  - Interpretation: When averaging across all ROIs, your conditions did not produce\n"
+                        "                    statistically different overall levels of brain activity.\n"
+                    )
+                elif 'roi' == effect_name_raw.lower():
+                    explanation = (
+                        "  - Interpretation: Different brain regions showed reliably different average levels of activity,\n"
+                        "                    regardless of the specific experimental condition.\n"
+                        if is_significant
+                        else "  - Interpretation: There wasn't a significant overall difference in activity between the\n"
+                        "                    different brain regions analyzed.\n"
+                    )
+                output_text += explanation + "\n"
+            output_text += "--------------------------------------------\n"
+            output_text += "NOTE: This explanation simplifies the main statistical patterns. For detailed reporting\n"
+            output_text += "and follow-up analyses (e.g., post-hoc tests), please refer to the table above.\n"
+            output_text += "--------------------------------------------\n"
+        else:
+            output_text += "RM-ANOVA did not return any results or the result was empty.\n"
+        self.results_text.append(output_text)
+        self._guard.end()
+        self._set_running(False)
+        self._focus_self()
 
     def _init_ui(self):
         central = QWidget(self)
@@ -150,6 +315,16 @@ class StatsWindow(QMainWindow):
 
         self.lbl_status = QLabel("Select a folder containing FPVS results.")
         main_layout.addWidget(self.lbl_status)
+
+        prog_row = QHBoxLayout()
+        self.spinner = BusySpinner()
+        self.spinner.hide()
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        prog_row.addWidget(self.spinner)
+        prog_row.addWidget(self.progress_bar, 1)
+        main_layout.addLayout(prog_row)
 
         summed_frame = QFrame()
         summed_frame.setFrameShape(QFrame.StyledPanel)
@@ -244,12 +419,10 @@ class StatsWindow(QMainWindow):
 
     def on_run_rm_anova(self):
         if self._check_for_open_excel_files(self.le_folder.text()):
-            return # Stop if an open Excel file was found
-
+            return
         if not self.subject_data:
             QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
             return
-
         try:
             settings = SettingsManager()
             base_freq = float(settings.get("analysis", "base_freq", 6.0))
@@ -257,110 +430,26 @@ class StatsWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Settings Error", f"Could not load analysis settings: {e}")
             return
-
+        if not self._guard.start():
+            return
+        self._current_alpha = alpha
         self.results_text.clear()
         self.rm_anova_results_data = None
         self.export_rm_anova_btn.setEnabled(False)
-
-        def log_to_gui(message):
-            self.results_text.append(message)
-            QApplication.processEvents()
-
-        log_to_gui("Preparing data for Summed BCA RM-ANOVA...")
-
-        all_subject_bca_data = prepare_all_subject_summed_bca_data(
-            subjects=self.subjects, conditions=self.conditions,
-            subject_data=self.subject_data, base_freq=base_freq, log_func=log_to_gui
+        worker = StatsWorker(
+            _rm_anova_calc,
+            subjects=self.subjects,
+            conditions=self.conditions,
+            subject_data=self.subject_data,
+            base_freq=base_freq,
         )
-
-        if not all_subject_bca_data:
-            log_to_gui("\nData preparation failed. Check logs for details.")
-            return
-
-        log_to_gui("Data preparation complete. Running RM-ANOVA...")
-
-        _, anova_df_results = analysis_run_rm_anova(all_subject_bca_data, log_to_gui)
-
-        output_text = "============================================================\n"
-        output_text += "       Repeated Measures ANOVA (RM-ANOVA) Results\n"
-        output_text += "       Analysis conducted on: Summed BCA Data\n"
-        output_text += "============================================================\n\n"
-        output_text += (
-            "This test examines the overall effects of your experimental conditions (e.g., different stimuli),\n"
-            "the different brain regions (ROIs) you analyzed, and, crucially, whether the\n"
-            "effect of the conditions changes depending on the brain region (interaction effect).\n\n")
-
-        if anova_df_results is not None and not anova_df_results.empty:
-            pes_vals = []
-            for _, row in anova_df_results.iterrows():
-                f_val = row.get('F Value', np.nan)
-                df1 = row.get('Num DF', np.nan)
-                df2 = row.get('Den DF', np.nan)
-                if not pd.isna(f_val) and not pd.isna(df1) and not pd.isna(df2) and (f_val * df1 + df2) != 0:
-                    pes_vals.append((f_val * df1) / ((f_val * df1) + df2))
-                else:
-                    pes_vals.append(np.nan)
-            anova_df_results['partial eta squared'] = pes_vals
-
-            output_text += "--------------------------------------------\n"
-            output_text += "           STATISTICAL TABLE (RM-ANOVA)\n"
-            output_text += "--------------------------------------------\n"
-            output_text += anova_df_results.to_string(index=False) + "\n\n"
-            self.rm_anova_results_data = anova_df_results
-            self.export_rm_anova_btn.setEnabled(True)
-
-            output_text += "--------------------------------------------\n"
-            output_text += "       SIMPLIFIED EXPLANATION OF RESULTS\n"
-            output_text += "--------------------------------------------\n"
-            output_text += f"(A result is 'statistically significant' if its p-value ('Pr > F') is less than {alpha:.2f})\n\n"
-
-            for _, row in anova_df_results.iterrows():
-                effect_name_raw = str(row.get('Effect', 'Unknown Effect'))
-                p_value_raw = row.get('Pr > F', np.nan)
-                eta_sq = row.get('partial eta squared', np.nan)
-
-                effect_display_name = effect_name_raw.replace(':', ' by ').replace('_', ' ').title()
-                output_text += f"Effect: {effect_display_name}\n"
-
-                if pd.isna(p_value_raw):
-                    output_text += "  - Significance: Could not be determined (p-value missing).\n\n"
-                    continue
-
-                is_significant = p_value_raw < alpha
-                p_value_display = "< .0001" if p_value_raw < 0.0001 else f"{p_value_raw:.4f}"
-                eta_sq_display = f"{eta_sq:.3f}" if not pd.isna(eta_sq) else "N/A"
-
-                output_text += f"  - Statistical Finding: {'SIGNIFICANT' if is_significant else 'NOT SIGNIFICANT'} (p-value = {p_value_display})\n"
-                output_text += f"  - Partial Eta Squared: {eta_sq_display}\n"
-
-                explanation = ""
-                if 'condition' in effect_name_raw.lower() and 'roi' in effect_name_raw.lower():
-                    explanation = "  - Interpretation: This is often the most important finding! It means the way brain activity\n" \
-                                  "                    changed across conditions **depended on which brain region** you were observing.\n" if is_significant else \
-                        "  - Interpretation: The effect of your conditions on brain activity was generally consistent\n" \
-                        "                    across the different brain regions analyzed.\n"
-                elif 'condition' == effect_name_raw.lower():
-                    explanation = "  - Interpretation: Overall, averaging across all ROIs, your conditions led to statistically\n" \
-                                  "                    different average levels of brain activity.\n" if is_significant else \
-                        "  - Interpretation: When averaging across all ROIs, your conditions did not produce\n" \
-                        "                    statistically different overall levels of brain activity.\n"
-                elif 'roi' == effect_name_raw.lower():
-                    explanation = "  - Interpretation: Different brain regions showed reliably different average levels of activity,\n" \
-                                  "                    regardless of the specific experimental condition.\n" if is_significant else \
-                        "  - Interpretation: There wasn't a significant overall difference in activity between the\n" \
-                        "                    different brain regions analyzed.\n"
-
-                output_text += explanation + "\n"
-
-            output_text += "--------------------------------------------\n"
-            output_text += "NOTE: This explanation simplifies the main statistical patterns. For detailed reporting\n"
-            output_text += "and follow-up analyses (e.g., post-hoc tests), please refer to the table above.\n"
-            output_text += "--------------------------------------------\n"
-        else:
-            output_text += "RM-ANOVA did not return any results or the result was empty.\n"
-
-        self.results_text.append(output_text)
-        log_to_gui("\nAnalysis complete.")
+        worker.signals.progress.connect(self._on_worker_progress)
+        worker.signals.message.connect(self._on_worker_message)
+        worker.signals.error.connect(self._on_worker_error)
+        worker.signals.finished.connect(self._on_rm_anova_finished)
+        self._set_running(True)
+        self.pool.start(worker)
+        self._focus_self()
 
     def on_run_mixed_model(self):
         if self._check_for_open_excel_files(self.le_folder.text()):
