@@ -353,6 +353,7 @@ class StatsWindow(QMainWindow):
 
     @Slot(str)
     def _on_worker_message(self, msg: str) -> None:
+        # Route instead of writing to status first
         self._set_detected_info(msg)
 
     @Slot(str)
