@@ -268,7 +268,7 @@ class StatsWindow(QMainWindow):
         # --- UI variable proxies required by some legacy helpers ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
                                                      set=lambda v: self.le_folder.setText(v) if hasattr(self, "le_folder") else None)
-        self.detected_info_var = SimpleNamespace(set=lambda txt: self.lbl_status.setText(txt) if hasattr(self, "lbl_status") else None)
+        self.detected_info_var = SimpleNamespace(set=self._set_detected_info)
         self.roi_var = SimpleNamespace(get=lambda: ALL_ROIS_OPTION, set=lambda v: None)
         self.alpha_var = SimpleNamespace(get=lambda: "0.05", set=lambda v: None)
 
@@ -296,6 +296,15 @@ class StatsWindow(QMainWindow):
             len(names), "" if len(names) == 1 else "s", ", ".join(names)
         ) if names else "No ROIs defined in Settings."
         self.lbl_rois.setText(txt)
+
+    def _set_detected_info(self, txt: str) -> None:
+        lower_txt = txt.lower() if isinstance(txt, str) else str(txt).lower()
+        if (" roi" in lower_txt) or lower_txt.startswith("using ") or lower_txt.startswith("rois"):
+            if hasattr(self, "lbl_rois"):
+                self.lbl_rois.setText(txt)
+        else:
+            if hasattr(self, "lbl_status"):
+                self.lbl_status.setText(txt)
 
     def _focus_self(self) -> None:
         self._focus_calls += 1
@@ -344,7 +353,7 @@ class StatsWindow(QMainWindow):
 
     @Slot(str)
     def _on_worker_message(self, msg: str) -> None:
-        self.lbl_status.setText(msg)
+        self._set_detected_info(msg)
 
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
@@ -470,6 +479,8 @@ class StatsWindow(QMainWindow):
 
         # status line + ROI label (word-wrapped to prevent width growth)
         self.lbl_status = QLabel("Select a folder containing FPVS results.")
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         main_layout.addWidget(self.lbl_status)
 
         self.lbl_rois = QLabel("")
