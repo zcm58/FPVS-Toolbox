@@ -612,6 +612,9 @@ class StatsWindow(QMainWindow):
             return
         # make sure we are using current ROIs from settings
         self.refresh_rois()
+        if not self.rois:
+            QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
+            return
         try:
             settings = SettingsManager()
             base_freq = float(settings.get("analysis", "base_freq", 6.0))
@@ -646,6 +649,9 @@ class StatsWindow(QMainWindow):
             QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
             return
         self.refresh_rois()
+        if not self.rois:
+            QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
+            return
         try:
             settings = SettingsManager()
             base_freq = float(settings.get("analysis", "base_freq", 6.0))
@@ -689,6 +695,9 @@ class StatsWindow(QMainWindow):
             return
 
         self.refresh_rois()
+        if not self.rois:
+            QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
+            return
         try:
             settings = SettingsManager()
             base_freq = float(settings.get("analysis", "base_freq", 6.0))
@@ -725,6 +734,9 @@ class StatsWindow(QMainWindow):
             return
 
         self.refresh_rois()
+        if not self.rois:
+            QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
+            return
         try:
             settings = SettingsManager()
             base_freq = float(settings.get("analysis", "base_freq", 6.0))

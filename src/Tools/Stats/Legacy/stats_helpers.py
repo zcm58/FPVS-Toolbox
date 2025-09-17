@@ -98,16 +98,35 @@ def prepare_all_subject_summed_bca_data(self, roi_filter=None):
 
 
 def load_rois_from_settings(manager=None):
-    """Return ROI dictionary from settings, ensuring defaults exist."""
+    """
+    Return ROIs exactly as defined in Settings.
+
+    - If Settings ROI section/key exists: normalize & return it (filter empty names/electrodes).
+    - If empty after normalization OR if Settings missing/unreadable: return {}.
+    No hardcoded defaults.
+    """
     mgr = manager or SettingsManager()
-    pairs = mgr.get_roi_pairs() if hasattr(mgr, "get_roi_pairs") else []
-    rois = {}
-    for name, electrodes in pairs:
-        if name and electrodes:
-            rois[name] = [e.upper() for e in electrodes]
-    for name, default_chans in DEFAULT_ROIS.items():
-        rois.setdefault(name, default_chans)
-    return rois
+    rois_from_settings = None
+
+    try:
+        get_roi_pairs = getattr(mgr, "get_roi_pairs", None)
+        if callable(get_roi_pairs):
+            rois_from_settings = {
+                str(name): list(electrodes)
+                for name, electrodes in (get_roi_pairs() or [])
+            }
+    except Exception:
+        rois_from_settings = None
+
+    if rois_from_settings is not None:
+        cleaned = {
+            str(k).strip(): [str(e).strip() for e in v if str(e).strip()]
+            for k, v in rois_from_settings.items()
+            if str(k).strip() and isinstance(v, (list, tuple))
+        }
+        return cleaned
+
+    return {}
 
 
 def apply_rois_to_modules(rois_dict):
