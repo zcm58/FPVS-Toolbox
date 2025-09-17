@@ -285,9 +285,16 @@ class StatsWindow(QMainWindow):
     # --------- ROI + focus helpers ---------
 
     def refresh_rois(self):
-        """Reload ROI definitions from settings and reflect them in the label + analysis modules."""
-        self.rois = load_rois_from_settings() or {}
-        apply_rois_to_modules(self.rois)
+        """Hard-refresh ROIs from Settings (no stale merge)."""
+        fresh = load_rois_from_settings() or {}
+        # Reset any legacy/global ROI state before applying the new set.
+        try:
+            set_rois({})  # safe reset; ignore if not supported
+        except Exception:
+            pass
+        apply_rois_to_modules(fresh)
+        set_rois(fresh)
+        self.rois = fresh
         self._update_roi_label()
 
     def _update_roi_label(self):
@@ -815,6 +822,7 @@ class StatsWindow(QMainWindow):
             self._scan_button_clicked()
 
     def _scan_button_clicked(self):
+        self.refresh_rois()
         folder = self.le_folder.text()
         if not folder:
             QMessageBox.warning(self, "No Folder", "Please select a data folder first.")
