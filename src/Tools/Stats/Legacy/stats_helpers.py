@@ -8,14 +8,6 @@ from . import stats_analysis
 
 logger = logging.getLogger(__name__)
 
-# Default ROI definitions used when no user configuration exists
-DEFAULT_ROIS = {
-    "Frontal Lobe": ["F3", "F4", "Fz"],
-    "Occipital Lobe": ["O1", "O2", "Oz"],
-    "Parietal Lobe": ["P3", "P4", "Pz"],
-    "Central Lobe": ["C3", "C4", "Cz"],
-}
-
 
 def log_to_main_app(self, message):
     try:
@@ -99,11 +91,10 @@ def prepare_all_subject_summed_bca_data(self, roi_filter=None):
 
 def load_rois_from_settings(manager=None):
     """
-    Return ROIs exactly as defined in Settings.
-
-    - If Settings ROI section/key exists: normalize & return it (filter empty names/electrodes).
-    - If empty after normalization OR if Settings missing/unreadable: return {}.
-    No hardcoded defaults.
+    Return ROIs exactly as defined in Settings (case-sensitive).
+    - Trim surrounding whitespace from ROI names and electrodes
+    - Drop empty ROI names and empty/whitespace-only electrodes
+    - If Settings is missing/unreadable/empty: return {}
     """
     mgr = manager or SettingsManager()
     rois_from_settings = None
@@ -111,22 +102,29 @@ def load_rois_from_settings(manager=None):
     try:
         get_roi_pairs = getattr(mgr, "get_roi_pairs", None)
         if callable(get_roi_pairs):
-            rois_from_settings = {
-                str(name): list(electrodes)
-                for name, electrodes in (get_roi_pairs() or [])
-            }
+            pairs = get_roi_pairs() or []
+            # get_roi_pairs may return a dict or list/tuple of (name, electrodes)
+            if isinstance(pairs, dict):
+                rois_from_settings = dict(pairs)
+            else:
+                rois_from_settings = {name: electrodes for name, electrodes in pairs}
     except Exception:
         rois_from_settings = None
 
-    if rois_from_settings is not None:
-        cleaned = {
-            str(k).strip(): [str(e).strip() for e in v if str(e).strip()]
-            for k, v in rois_from_settings.items()
-            if str(k).strip() and isinstance(v, (list, tuple))
-        }
-        return cleaned
+    if rois_from_settings is None:
+        return {}
 
-    return {}
+    cleaned: dict[str, list[str]] = {}
+    for raw_name, raw_vals in rois_from_settings.items():
+        name = str(raw_name).strip()
+        if not name or not isinstance(raw_vals, (list, tuple)):
+            continue
+        # Preserve case; remove surrounding whitespace; drop empties
+        vals = [str(e).strip() for e in raw_vals if str(e).strip()]
+        cleaned[name] = vals
+
+    return cleaned
+
 
 
 def apply_rois_to_modules(rois_dict):
