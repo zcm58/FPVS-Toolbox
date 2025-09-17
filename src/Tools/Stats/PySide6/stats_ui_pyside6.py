@@ -81,7 +81,10 @@ def _first_present(d: dict, keys: Iterable[str], default=None):
 
 # --------------------------- worker functions ---------------------------
 
-def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq):
+def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, rois):
+    # Ensure this worker thread uses the latest ROIs
+    set_rois(rois)
+
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
         subjects=subjects,
@@ -98,7 +101,10 @@ def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_dat
     return {"anova_df_results": anova_df_results}
 
 
-def _lmm_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, alpha):
+def _lmm_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, alpha, rois):
+    # Ensure this worker thread uses the latest ROIs
+    set_rois(rois)
+
     message_cb("Preparing data for Mixed Effects Model…")
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
         subjects=subjects,
@@ -149,7 +155,10 @@ def _lmm_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, ba
     return {"mixed_results_df": mixed_results_df, "output_text": output_text}
 
 
-def _posthoc_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, alpha):
+def _posthoc_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, alpha, rois):
+    # Ensure this worker thread uses the latest ROIs
+    set_rois(rois)
+
     message_cb("Preparing data for Interaction Post-hoc tests…")
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
         subjects=subjects,
@@ -183,6 +192,7 @@ def _posthoc_calc(progress_cb, message_cb, *, subjects, conditions, subject_data
         alpha=alpha,
     )
     return {"results_df": results_df, "output_text": output_text}
+
 
 
 def _harmonic_calc(
@@ -635,6 +645,7 @@ class StatsWindow(QMainWindow):
             conditions=self.conditions,
             subject_data=self.subject_data,
             base_freq=base_freq,
+            rois=self.rois,  # <-- pass current ROIs
         )
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.message.connect(self._on_worker_message)
@@ -673,6 +684,7 @@ class StatsWindow(QMainWindow):
             subject_data=self.subject_data,
             base_freq=base_freq,
             alpha=alpha,
+            rois=self.rois,  # <-- pass current ROIs
         )
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.message.connect(self._on_worker_message)
@@ -719,6 +731,7 @@ class StatsWindow(QMainWindow):
             subject_data=self.subject_data,
             base_freq=base_freq,
             alpha=alpha,
+            rois=self.rois,  # <-- pass current ROIs
         )
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.message.connect(self._on_worker_message)
