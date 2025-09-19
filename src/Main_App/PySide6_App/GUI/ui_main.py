@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QScrollArea,
     QPushButton,
+    QLineEdit,
     QTextEdit,
     QProgressBar,
     QSizePolicy,
@@ -200,6 +201,27 @@ def init_ui(self) -> None:
     self.rb_batch.toggled.connect(
         lambda checked: checked and self._on_mode_changed("batch")
     )
+
+    # --- Single-file selector row (hidden unless Single is active) ---
+    self.row_single_file = QWidget(grp_proc)
+    single_hl = QHBoxLayout(self.row_single_file)
+    single_hl.setContentsMargins(0, 0, 0, 0)
+    lbl_bdf = QLabel("EEG File (.bdf):", self.row_single_file)
+    self.le_input_file = QLineEdit(self.row_single_file)
+    self.le_input_file.setReadOnly(True)
+    self.le_input_file.setPlaceholderText("Pick one .bdf for Single File mode…")
+    self.btn_select_input_file = QPushButton("Browse…", self.row_single_file)
+    single_hl.addWidget(lbl_bdf)
+    single_hl.addWidget(self.le_input_file, 1)
+    single_hl.addWidget(self.btn_select_input_file)
+    # Place directly under the Mode row within Processing Options
+    gl.addWidget(self.row_single_file, 2, 0, 1, 3)
+    self.row_single_file.setVisible(False)  # default hidden; toggled by _on_mode_changed
+    # Let main window decide when Start is enabled
+    try:
+        self.le_input_file.textChanged.connect(self._update_start_enabled)
+    except Exception:
+        pass
     main_layout.addWidget(grp_proc)
 
     # Load saved processing options
@@ -208,6 +230,12 @@ def init_ui(self) -> None:
     self.cb_loreta.setChecked(
         self.settings.get("processing", "run_loreta", "False").lower() == "true"
     )
+    # Ensure initial Start-button state matches mode
+    try:
+        self._update_start_enabled()
+    except Exception:
+        pass
+
 
     # Preprocessing placeholder
     placeholder = QLabel("⚙️ Configure preprocessing in Settings", container)

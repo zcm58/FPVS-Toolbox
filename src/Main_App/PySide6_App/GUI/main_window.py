@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QFileDialog,
     QStatusBar,
     QWidget,
 )
@@ -175,7 +176,7 @@ class _QtEntryAdapter:
             "btn_start",
             "btn_select_input_file", "le_input_file",
             "btn_select_input_folder", "le_input_folder",
-            "btn_add_event", "btn_detect",
+            "btn_add_event", "btn_add_row", "btn_detect",
             "cb_loreta",
             "btn_create_project", "btn_open_project",
         ):
@@ -307,6 +308,18 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         if hasattr(self, "btn_start"):
             self.btn_start.clicked.connect(self.start_processing)
 
+        # Wire Single-file selectors (if present in UI)
+        if hasattr(self, "btn_select_input_file"):
+            try:
+                self.btn_select_input_file.clicked.connect(self.select_single_file)
+            except Exception:
+                pass
+        if hasattr(self, "le_input_file"):
+            try:
+                self.le_input_file.textChanged.connect(self._update_start_enabled)
+            except Exception:
+                pass
+
         # Legacy compat fields used by ProcessingMixin
         self.gui_queue: queue.Queue = queue.Queue()
         self.processing_thread = None
@@ -337,6 +350,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._post_backlog: deque[tuple[str, dict, list[str]]] = deque()
         self._pending_finalize = False
         self._op_guard = OpGuard()
+        self._selected_bdf: str | None = None
         try:
             update_manager.check_for_updates_async(
                 self, silent=True, notify_if_no_update=False
@@ -678,7 +692,16 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             QMessageBox.warning(self, "No Project", "Please open or create a project first.")
             return False
 
-        # Build file list from project folder if needed
+        # File selection rules differ in Single vs Batch
+        mode_now = (self.file_mode.get() if hasattr(self, "file_mode") else "Batch")
+        if mode_now == "Single":
+            # In single mode, require an explicit .bdf selection
+            if not self.data_paths:
+                QMessageBox.warning(self, "No File Selected", "Please choose one .bdf file first.")
+                return False
+
+        # Batch: build file list from input folder if empty
+        # (Single mode may also fall back to this if data_paths somehow empty)
         if not self.data_paths:
             input_dir = Path(self.currentProject.input_folder)
             if not input_dir.is_dir():
@@ -1149,10 +1172,21 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Typical names used in our UI builder; harmless if missing
         is_single = (mode_norm == "single")
+
+        self.parallel_mode = "single" if is_single else "process"
+
         _safe_set_enabled("btn_select_input_file", is_single)
         _safe_set_enabled("le_input_file", is_single)
         _safe_set_enabled("btn_select_input_folder", not is_single)
         _safe_set_enabled("le_input_folder", not is_single)
+
+        # Toggle visibility of the single-file row, if present
+        row = getattr(self, "row_single_file", None)
+        if row and hasattr(row, "setVisible"):
+            try:
+                row.setVisible(is_single)
+            except Exception:
+                pass
 
         self.update_select_button_text()
 
@@ -1163,6 +1197,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 lbl.setText(f"Mode: {pretty}")
             except Exception:
                 pass
+
+        self._update_start_enabled()
 
     # ---------- legacy mixin hook: enable/disable controls during run ---------- #
     def _set_controls_enabled(self, enabled: bool) -> None:
@@ -1185,7 +1221,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             "btn_start",
             "btn_select_input_file", "le_input_file",
             "btn_select_input_folder", "le_input_folder",
-            "btn_add_event", "btn_detect",
+            "btn_add_event", "btn_add_row", "btn_detect",
             "cb_loreta",
             "btn_create_project", "btn_open_project",
         ):
@@ -1233,6 +1269,67 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         except Exception as e:
             self.log(f"Detect triggers failed: {e}", level=logging.ERROR)
             QMessageBox.warning(self, "Detect Triggers", f"Could not run detection: {e}")
+
+    # --------------------------- single-file helpers --------------------------- #
+    def _update_start_enabled(self) -> None:
+        """Enable Start only when valid selection exists in Single mode."""
+        btn = getattr(self, "btn_start", None)
+        if not btn:
+            return
+        try:
+            mode = self.file_mode.get()
+        except Exception:
+            mode = "Batch"
+        if mode == "Single":
+            txt = getattr(self, "le_input_file", None).text() if hasattr(self, "le_input_file") else ""
+            ok = bool(txt) and Path(txt).suffix.lower() == ".bdf" and Path(txt).exists()
+            btn.setEnabled(ok)
+        else:
+            btn.setEnabled(True)
+
+    def select_single_file(self) -> None:
+        """Windows-native file dialog to pick one .bdf under the project's input folder."""
+        if not getattr(self, "currentProject", None):
+            QMessageBox.warning(self, "No Project", "Please open or create a project first.")
+            return
+        start_dir = str(Path(self.currentProject.input_folder))
+        fname, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select EEG File (.bdf)",
+            start_dir,
+            "EEG BioSemi (*.bdf)",
+        )
+        if not fname:
+            self.log("Single-file selection canceled.")
+            self._update_start_enabled()
+            return
+        p = Path(fname)
+        if p.suffix.lower() != ".bdf":
+            QMessageBox.warning(self, "Invalid File", "Please select a .bdf file.")
+            self._update_start_enabled()
+            return
+        # Must be inside the project's input folder
+        in_root = Path(self.currentProject.input_folder).resolve()
+        try:
+            inside = in_root in p.resolve().parents
+        except Exception:
+            inside = False
+        if not inside:
+            QMessageBox.warning(
+                self,
+                "Outside Project",
+                "Please choose a .bdf inside this project's input folder.\n"
+                f"Input folder:\n{in_root}",
+            )
+            self._update_start_enabled()
+            return
+        # Accept
+        if hasattr(self, "le_input_file"):
+            self.le_input_file.setText(str(p))
+        self._selected_bdf = str(p)
+        self.data_paths = [str(p)]
+        self.log(f"Single-file selected: {p.name}")
+        self._update_start_enabled()
 
 # ----------------------------------------------------------------------
 def main() -> None:
