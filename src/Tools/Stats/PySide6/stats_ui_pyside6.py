@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import json
 import logging
 import os
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+# Qt imports proof: QAction from PySide6.QtGui
 from Main_App import SettingsManager
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.PySide6_App.widgets.busy_spinner import BusySpinner
@@ -293,6 +295,26 @@ class StatsWindow(QMainWindow):
         self._progress_updates: list[int] = []  # keep for tests
 
     # --------- ROI + focus helpers ---------
+
+    def _safe_export_call(self, func, data_obj, out_dir: str, base_name: str) -> None:
+        """
+        Call legacy export function with best-effort signature:
+          1) Preferred: func(data_obj, save_path=<file>, log_func=<callable>)
+          2) Fallback:  func(data_obj, out_dir, log_func=<callable>)
+        Ensures files are written under the active project results folder.
+        """
+        os.makedirs(out_dir, exist_ok=True)
+        fname = base_name if base_name.lower().endswith(".xlsx") else f"{base_name}.xlsx"
+        save_path = os.path.join(out_dir, fname)
+        try:
+            func(
+                data_obj,
+                save_path=save_path,
+                log_func=self._set_detected_info,
+            )
+            return
+        except TypeError:
+            func(data_obj, out_dir, log_func=self._set_detected_info)
 
     def refresh_rois(self):
         """Hard-refresh ROIs from Settings (no stale merge)."""
@@ -799,7 +821,12 @@ class StatsWindow(QMainWindow):
             return
         out_dir = self._ensure_results_dir()
         try:
-            export_rm_anova_results_to_excel(self.rm_anova_results_data, out_dir)
+            self._safe_export_call(
+                export_rm_anova_results_to_excel,
+                self.rm_anova_results_data,
+                out_dir,
+                base_name="RM-ANOVA Results.xlsx",
+            )
             self.lbl_status.setText(f"RM-ANOVA exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
@@ -810,7 +837,12 @@ class StatsWindow(QMainWindow):
             return
         out_dir = self._ensure_results_dir()
         try:
-            export_mixed_model_results_to_excel(self.mixed_model_results_data, out_dir)
+            self._safe_export_call(
+                export_mixed_model_results_to_excel,
+                self.mixed_model_results_data,
+                out_dir,
+                base_name="Mixed Model Results.xlsx",
+            )
             self.lbl_status.setText(f"Mixed Model results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
@@ -821,7 +853,12 @@ class StatsWindow(QMainWindow):
             return
         out_dir = self._ensure_results_dir()
         try:
-            export_posthoc_results_to_excel(self.posthoc_results_data, out_dir)
+            self._safe_export_call(
+                export_posthoc_results_to_excel,
+                self.posthoc_results_data,
+                out_dir,
+                base_name="Posthoc Results.xlsx",
+            )
             self.lbl_status.setText(f"Post-hoc results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
@@ -832,7 +869,12 @@ class StatsWindow(QMainWindow):
             return
         out_dir = self._ensure_results_dir()
         try:
-            export_harmonic_results_to_excel(self.harmonic_check_results_data, out_dir)
+            self._safe_export_call(
+                export_harmonic_results_to_excel,
+                self.harmonic_check_results_data,
+                out_dir,
+                base_name="Harmonic Results.xlsx",
+            )
             self.lbl_status.setText(f"Harmonic check results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
