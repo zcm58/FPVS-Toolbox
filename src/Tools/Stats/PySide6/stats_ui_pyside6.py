@@ -11,7 +11,7 @@ from typing import Iterable, Optional, Tuple, Dict, List
 import numpy as np
 import pandas as pd
 from PySide6.QtCore import Qt, QTimer, QThreadPool, Slot, QUrl
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtGui import QAction, QDesktopServices, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -343,7 +343,6 @@ class StatsWindow(QMainWindow):
             self.export_mixed_model_btn,
             self.export_posthoc_btn,
             self.export_harm_btn,
-            self.btn_scan,
             self.btn_open_results,
         ]
         for b in buttons:
@@ -388,7 +387,6 @@ class StatsWindow(QMainWindow):
             QMessageBox.critical(self, "Settings Error", f"Invalid analysis settings: {e}")
             return None
         if not (ok1 and ok2):
-            # keep behavior consistent: fail fast if settings backend errored
             QMessageBox.critical(self, "Settings Error", "Could not load analysis settings.")
             return None
         return base_freq, alpha
@@ -396,14 +394,11 @@ class StatsWindow(QMainWindow):
     # --------- centralized pre-run guards ---------
 
     def _precheck(self, *, require_anova: bool = False) -> bool:
-        # open Excel guard
         if self._check_for_open_excel_files(self.le_folder.text()):
             return False
-        # data guard
         if not self.subject_data:
-            QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
+            QMessageBox.warning(self, "No Data", "Please select a valid data folder first.")
             return False
-        # ANOVA dependency guard
         if require_anova and self.rm_anova_results_data is None:
             QMessageBox.warning(
                 self,
@@ -411,17 +406,14 @@ class StatsWindow(QMainWindow):
                 "Please run a successful RM-ANOVA before running post-hoc tests for the interaction.",
             )
             return False
-        # ROIs
         self.refresh_rois()
         if not self.rois:
             QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
             return False
-        # settings
         got = self._get_analysis_settings()
         if not got:
             return False
         self._current_base_freq, self._current_alpha = got
-        # re-entrancy + UI
         if not self._begin_run():
             return False
         return True
@@ -442,11 +434,6 @@ class StatsWindow(QMainWindow):
         return grouped
 
     def _safe_export_call(self, func, data_obj, out_dir: str, base_name: str) -> None:
-        """
-        Call legacy export function with best-effort signature:
-          1) func(data_obj, save_path=<file>, log_func=<callable>)
-          2) func(data_obj, out_dir, log_func=<callable>)  # fallback
-        """
         os.makedirs(out_dir, exist_ok=True)
         fname = base_name if base_name.lower().endswith(".xlsx") else f"{base_name}.xlsx"
         save_path = os.path.join(out_dir, fname)
@@ -461,7 +448,6 @@ class StatsWindow(QMainWindow):
             func(data_obj, out_dir, log_func=self._set_status)
 
     def export_results(self, kind: str, data, out_dir: str) -> None:
-        """Unified export adapter. Keeps UI thin, uses legacy exporters."""
         mapping = {
             "anova": (export_rm_anova_results_to_excel, ANOVA_XLS),
             "lmm": (export_mixed_model_results_to_excel, LMM_XLS),
@@ -646,14 +632,13 @@ class StatsWindow(QMainWindow):
         folder_row.addWidget(btn_browse)
         main_layout.addLayout(folder_row)
 
-        # scan + open results
+        # open results (scan button removed)
         tools_row = QHBoxLayout()
-        self.btn_scan = QPushButton("Scan Folder Contents")
-        self.btn_scan.clicked.connect(self._scan_button_clicked)
-        self.btn_scan.setShortcut("Ctrl+S")
-        tools_row.addWidget(self.btn_scan)
         self.btn_open_results = QPushButton("Open Results Folder")
         self.btn_open_results.clicked.connect(self._open_results_folder)
+        # widen a bit to pad text
+        fm = QFontMetrics(self.btn_open_results.font())
+        self.btn_open_results.setMinimumWidth(fm.horizontalAdvance(self.btn_open_results.text()) + 24)
         tools_row.addWidget(self.btn_open_results)
         tools_row.addStretch(1)
         main_layout.addLayout(tools_row)
@@ -735,7 +720,7 @@ class StatsWindow(QMainWindow):
         harm_row.addWidget(self.cb_metric)
 
         harm_row.addWidget(QLabel("Mean Threshold:"))
-        self.le_threshold = QLineEdit("0.0")
+        self.le_threshold = QLineEdit("1.64")  # default threshold for Z Score
         self.le_threshold.setFixedWidth(80)
         harm_row.addWidget(self.le_threshold)
 
@@ -828,7 +813,8 @@ class StatsWindow(QMainWindow):
             return
         self.results_text.clear()
         self.posthoc_results_data = None
-        self._update_export_buttons()
+        our = self._update_export_buttons  # keep line short
+        our()
 
         worker = StatsWorker(
             _posthoc_calc,
@@ -845,7 +831,7 @@ class StatsWindow(QMainWindow):
         if not self._precheck():
             return
         if not (self.subject_data and self.subjects and self.conditions):
-            QMessageBox.warning(self, "Data Error", "No subject data found. Please click 'Scan Folder Contents' first.")
+            QMessageBox.warning(self, "Data Error", "No subject data found. Please select a valid data folder first.")
             self._end_run()
             return
         try:
