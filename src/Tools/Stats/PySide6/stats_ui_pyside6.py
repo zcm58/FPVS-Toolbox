@@ -275,6 +275,7 @@ class StatsWindow(QMainWindow):
         self.mixed_model_results_data: pd.DataFrame | None = None
         self.posthoc_results_data: pd.DataFrame | None = None
         self.harmonic_check_results_data: list[dict] = []
+        self.harmonic_export_payload: dict | None = None
         self.rois: dict[str, list[str]] = {}
 
         # --- UI variable proxies required by some legacy helpers ---
@@ -487,6 +488,8 @@ class StatsWindow(QMainWindow):
         findings = payload.get("findings") or []
         self.results_text.setText(output_text.strip() or "(Harmonic check returned empty text. See logs for details.)")
         self.harmonic_check_results_data = findings
+        # Preserve full payload for legacy export function which expects a dict-like input
+        self.harmonic_export_payload = {"output_text": output_text, "findings": findings}
         if self.harmonic_check_results_data:
             self.export_harm_btn.setEnabled(True)
         self._end_run()
@@ -867,14 +870,33 @@ class StatsWindow(QMainWindow):
         if not self.harmonic_check_results_data:
             QMessageBox.information(self, "No Results", "Run Harmonic Check first.")
             return
+
+        # Convert results to the nested dict expected by the legacy exporter:
+        # {condition: {roi: [finding, ...]}}
+        data = self.harmonic_check_results_data
+        if isinstance(data, dict):
+            grouped = data
+        elif isinstance(data, list):
+            grouped: dict[str, dict[str, list[dict]]] = {}
+            for rec in data:
+                if not isinstance(rec, dict):
+                    continue
+                cond = rec.get("Condition") or rec.get("condition") or "Unknown"
+                roi = rec.get("ROI") or rec.get("roi") or "Unknown"
+                grouped.setdefault(cond, {}).setdefault(roi, []).append(rec)
+        else:
+            QMessageBox.critical(self, "Export Failed", f"Unexpected harmonic results type: {type(data).__name__}")
+            return
+
         out_dir = self._ensure_results_dir()
+
+        # Adapter to supply the required 'metric' kwarg while keeping _safe_export_call usage
+        def _adapter(_ignored, *, save_path, log_func):
+            metric = getattr(self, "_harmonic_metric", "") or ""
+            export_harmonic_results_to_excel(grouped, save_path, log_func, metric=metric)
+
         try:
-            self._safe_export_call(
-                export_harmonic_results_to_excel,
-                self.harmonic_check_results_data,
-                out_dir,
-                base_name="Harmonic Results.xlsx",
-            )
+            self._safe_export_call(_adapter, None, out_dir, base_name="Harmonic Results.xlsx")
             self.lbl_status.setText(f"Harmonic check results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
