@@ -84,9 +84,7 @@ def _first_present(d: dict, keys: Iterable[str], default=None):
 # --------------------------- worker functions ---------------------------
 
 def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, rois):
-    # Ensure this worker thread uses the latest ROIs
     set_rois(rois)
-
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
         subjects=subjects,
@@ -97,16 +95,13 @@ def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_dat
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
-    # run
     message_cb("Running RM-ANOVA…")
     _, anova_df_results = analysis_run_rm_anova(all_subject_bca_data, message_cb)
     return {"anova_df_results": anova_df_results}
 
 
 def _lmm_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, alpha, rois):
-    # Ensure this worker thread uses the latest ROIs
     set_rois(rois)
-
     message_cb("Preparing data for Mixed Effects Model…")
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
         subjects=subjects,
@@ -158,9 +153,7 @@ def _lmm_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, ba
 
 
 def _posthoc_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, alpha, rois):
-    # Ensure this worker thread uses the latest ROIs
     set_rois(rois)
-
     message_cb("Preparing data for Interaction Post-hoc tests…")
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
         subjects=subjects,
@@ -210,9 +203,7 @@ def _harmonic_calc(
     alpha,
     rois,
 ):
-    # Ensure analysis modules use current ROIs from settings
     set_rois(rois)
-
     tail = "greater" if selected_metric in ("Z Score", "SNR") else "two-sided"
     message_cb("Running harmonic check…")
     output_text, findings = run_harmonic_check_new(
@@ -238,7 +229,6 @@ class StatsWindow(QMainWindow):
     """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
 
     def __init__(self, parent=None, project_dir: str | None = None):
-        # pick a project dir
         if project_dir and os.path.isdir(project_dir):
             self.project_dir = project_dir
         else:
@@ -247,7 +237,6 @@ class StatsWindow(QMainWindow):
                 str(proj.project_root) if proj and hasattr(proj, "project_root") else _auto_detect_project_dir()
             )
 
-        # try to read project title
         config_path = os.path.join(self.project_dir, "project.json")
         try:
             with open(config_path, "r", encoding="utf-8") as f:
@@ -262,12 +251,11 @@ class StatsWindow(QMainWindow):
 
         self._guard = OpGuard()
         if not hasattr(self._guard, "done"):
-            # some older builds used end(); keep compatibility
             self._guard.done = self._guard.end  # type: ignore[attr-defined]
         self.pool = QThreadPool.globalInstance()
         self._focus_calls = 0
 
-        # --- Legacy-ish state ---
+        # --- state ---
         self.subject_data: dict = {}
         self.subjects: list[str] = []
         self.conditions: list[str] = []
@@ -275,34 +263,32 @@ class StatsWindow(QMainWindow):
         self.mixed_model_results_data: pd.DataFrame | None = None
         self.posthoc_results_data: pd.DataFrame | None = None
         self.harmonic_check_results_data: list[dict] = []
-        self.harmonic_export_payload: dict | None = None
         self.rois: dict[str, list[str]] = {}
+        self._harmonic_metric: str = ""
 
-        # --- UI variable proxies required by some legacy helpers ---
+        # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
                                                      set=lambda v: self.le_folder.setText(v) if hasattr(self, "le_folder") else None)
         self.detected_info_var = SimpleNamespace(set=self._set_detected_info)
         self.roi_var = SimpleNamespace(get=lambda: ALL_ROIS_OPTION, set=lambda v: None)
         self.alpha_var = SimpleNamespace(get=lambda: "0.05", set=lambda v: None)
 
-        # build UI
+        # UI
         self._init_ui()
-        self.results_textbox = self.results_text  # used in a few places
+        self.results_textbox = self.results_text
 
-        # initial ROI load and folder autodetect
         self.refresh_rois()
         QTimer.singleShot(100, self._load_default_data_folder)
 
-        self._progress_updates: list[int] = []  # keep for tests
+        self._progress_updates: list[int] = []
 
     # --------- ROI + focus helpers ---------
 
     def _safe_export_call(self, func, data_obj, out_dir: str, base_name: str) -> None:
         """
         Call legacy export function with best-effort signature:
-          1) Preferred: func(data_obj, save_path=<file>, log_func=<callable>)
-          2) Fallback:  func(data_obj, out_dir, log_func=<callable>)
-        Ensures files are written under the active project results folder.
+          1) func(data_obj, save_path=<file>, log_func=<callable>)
+          2) func(data_obj, out_dir, log_func=<callable>)  # fallback
         """
         os.makedirs(out_dir, exist_ok=True)
         fname = base_name if base_name.lower().endswith(".xlsx") else f"{base_name}.xlsx"
@@ -317,12 +303,49 @@ class StatsWindow(QMainWindow):
         except TypeError:
             func(data_obj, out_dir, log_func=self._set_detected_info)
 
+    def _group_harmonic(self, data) -> dict:
+        """list[dict] -> {condition: {roi: [records]}}"""
+        if isinstance(data, dict):
+            return data
+        grouped: dict[str, dict[str, list[dict]]] = {}
+        for rec in data or []:
+            if not isinstance(rec, dict):
+                continue
+            cond = rec.get("Condition") or rec.get("condition") or "Unknown"
+            roi = rec.get("ROI") or rec.get("roi") or "Unknown"
+            grouped.setdefault(cond, {}).setdefault(roi, []).append(rec)
+        return grouped
+
+    def export_results(self, kind: str, data, out_dir: str) -> None:
+        """Unified export adapter. Keeps UI thin, uses legacy exporters."""
+        mapping = {
+            "anova": (export_rm_anova_results_to_excel, "RM-ANOVA Results.xlsx"),
+            "lmm": (export_mixed_model_results_to_excel, "Mixed Model Results.xlsx"),
+            "posthoc": (export_posthoc_results_to_excel, "Posthoc Results.xlsx"),
+            "harmonic": (export_harmonic_results_to_excel, "Harmonic Results.xlsx"),
+        }
+        func, fname = mapping[kind]
+        if kind == "harmonic":
+            grouped = self._group_harmonic(data)
+
+            # Adapter to supply required kwargs while reusing _safe_export_call
+            def _adapter(_ignored, *, save_path, log_func):
+                export_harmonic_results_to_excel(
+                    grouped,
+                    save_path,
+                    log_func,
+                    metric=(self._harmonic_metric or ""),
+                )
+
+            self._safe_export_call(_adapter, None, out_dir, fname)
+            return
+
+        self._safe_export_call(func, data, out_dir, fname)
+
     def refresh_rois(self):
-        """Hard-refresh ROIs from Settings (no stale merge)."""
         fresh = load_rois_from_settings() or {}
-        # Reset any legacy/global ROI state before applying the new set.
         try:
-            set_rois({})  # safe reset; ignore if not supported
+            set_rois({})
         except Exception:
             pass
         apply_rois_to_modules(fresh)
@@ -388,12 +411,10 @@ class StatsWindow(QMainWindow):
 
     @Slot(int)
     def _on_worker_progress(self, val: int) -> None:
-        # kept for compatibility; we don't show a progress bar anymore
         self._progress_updates.append(val)
 
     @Slot(str)
     def _on_worker_message(self, msg: str) -> None:
-        # Route instead of writing to status first
         self._set_detected_info(msg)
 
     @Slot(str)
@@ -418,7 +439,6 @@ class StatsWindow(QMainWindow):
 
         anova_df_results = self.rm_anova_results_data
         if isinstance(anova_df_results, pd.DataFrame) and not anova_df_results.empty:
-            # robust column detection
             p_cols = ["Pr > F", "p-value", "p_value", "p", "P", "pvalue"]
             eff_cols = ["Effect", "Source", "Factor", "Term"]
 
@@ -440,7 +460,6 @@ class StatsWindow(QMainWindow):
                 elif effect_lower == "roi" or "region" in effect_lower:
                     tag = "difference between ROIs"
                 else:
-                    # unrecognized row; show but don't interpret
                     continue
 
                 if np.isfinite(p_val) and p_val < alpha:
@@ -488,8 +507,6 @@ class StatsWindow(QMainWindow):
         findings = payload.get("findings") or []
         self.results_text.setText(output_text.strip() or "(Harmonic check returned empty text. See logs for details.)")
         self.harmonic_check_results_data = findings
-        # Preserve full payload for legacy export function which expects a dict-like input
-        self.harmonic_export_payload = {"output_text": output_text, "findings": findings}
         if self.harmonic_check_results_data:
             self.export_harm_btn.setEnabled(True)
         self._end_run()
@@ -520,7 +537,7 @@ class StatsWindow(QMainWindow):
         self.btn_scan.clicked.connect(self._scan_button_clicked)
         main_layout.addWidget(self.btn_scan)
 
-        # status line + ROI label (word-wrapped to prevent width growth)
+        # status + ROI labels
         self.lbl_status = QLabel("Select a folder containing FPVS results.")
         self.lbl_status.setWordWrap(True)
         self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -531,7 +548,7 @@ class StatsWindow(QMainWindow):
         self.lbl_rois.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         main_layout.addWidget(self.lbl_rois)
 
-        # spinner row (fixed size; no progress bar)
+        # spinner
         prog_row = QHBoxLayout()
         self.spinner = BusySpinner()
         self.spinner.setFixedSize(18, 18)
@@ -645,7 +662,6 @@ class StatsWindow(QMainWindow):
         if not self.subject_data:
             QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
             return
-        # make sure we are using current ROIs from settings
         self.refresh_rois()
         if not self.rois:
             QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
@@ -670,7 +686,7 @@ class StatsWindow(QMainWindow):
             conditions=self.conditions,
             subject_data=self.subject_data,
             base_freq=base_freq,
-            rois=self.rois,  # <-- pass current ROIs
+            rois=self.rois,
         )
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.message.connect(self._on_worker_message)
@@ -709,7 +725,7 @@ class StatsWindow(QMainWindow):
             subject_data=self.subject_data,
             base_freq=base_freq,
             alpha=alpha,
-            rois=self.rois,  # <-- pass current ROIs
+            rois=self.rois,
         )
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.message.connect(self._on_worker_message)
@@ -756,7 +772,7 @@ class StatsWindow(QMainWindow):
             subject_data=self.subject_data,
             base_freq=base_freq,
             alpha=alpha,
-            rois=self.rois,  # <-- pass current ROIs
+            rois=self.rois,
         )
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.message.connect(self._on_worker_message)
@@ -789,6 +805,8 @@ class StatsWindow(QMainWindow):
             return
         if not self._begin_run():
             return
+
+        self._harmonic_metric = selected_metric  # for legacy exporter
 
         self.results_text.clear()
         self.harmonic_check_results_data = []
@@ -824,12 +842,7 @@ class StatsWindow(QMainWindow):
             return
         out_dir = self._ensure_results_dir()
         try:
-            self._safe_export_call(
-                export_rm_anova_results_to_excel,
-                self.rm_anova_results_data,
-                out_dir,
-                base_name="RM-ANOVA Results.xlsx",
-            )
+            self.export_results("anova", self.rm_anova_results_data, out_dir)
             self.lbl_status.setText(f"RM-ANOVA exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
@@ -840,12 +853,7 @@ class StatsWindow(QMainWindow):
             return
         out_dir = self._ensure_results_dir()
         try:
-            self._safe_export_call(
-                export_mixed_model_results_to_excel,
-                self.mixed_model_results_data,
-                out_dir,
-                base_name="Mixed Model Results.xlsx",
-            )
+            self.export_results("lmm", self.mixed_model_results_data, out_dir)
             self.lbl_status.setText(f"Mixed Model results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
@@ -856,12 +864,7 @@ class StatsWindow(QMainWindow):
             return
         out_dir = self._ensure_results_dir()
         try:
-            self._safe_export_call(
-                export_posthoc_results_to_excel,
-                self.posthoc_results_data,
-                out_dir,
-                base_name="Posthoc Results.xlsx",
-            )
+            self.export_results("posthoc", self.posthoc_results_data, out_dir)
             self.lbl_status.setText(f"Post-hoc results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
@@ -870,33 +873,9 @@ class StatsWindow(QMainWindow):
         if not self.harmonic_check_results_data:
             QMessageBox.information(self, "No Results", "Run Harmonic Check first.")
             return
-
-        # Convert results to the nested dict expected by the legacy exporter:
-        # {condition: {roi: [finding, ...]}}
-        data = self.harmonic_check_results_data
-        if isinstance(data, dict):
-            grouped = data
-        elif isinstance(data, list):
-            grouped: dict[str, dict[str, list[dict]]] = {}
-            for rec in data:
-                if not isinstance(rec, dict):
-                    continue
-                cond = rec.get("Condition") or rec.get("condition") or "Unknown"
-                roi = rec.get("ROI") or rec.get("roi") or "Unknown"
-                grouped.setdefault(cond, {}).setdefault(roi, []).append(rec)
-        else:
-            QMessageBox.critical(self, "Export Failed", f"Unexpected harmonic results type: {type(data).__name__}")
-            return
-
         out_dir = self._ensure_results_dir()
-
-        # Adapter to supply the required 'metric' kwarg while keeping _safe_export_call usage
-        def _adapter(_ignored, *, save_path, log_func):
-            metric = getattr(self, "_harmonic_metric", "") or ""
-            export_harmonic_results_to_excel(grouped, save_path, log_func, metric=metric)
-
         try:
-            self._safe_export_call(_adapter, None, out_dir, base_name="Harmonic Results.xlsx")
+            self.export_results("harmonic", self.harmonic_check_results_data, out_dir)
             self.lbl_status.setText(f"Harmonic check results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
