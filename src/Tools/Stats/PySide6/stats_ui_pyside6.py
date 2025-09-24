@@ -1,14 +1,12 @@
 # src/Tools/Stats/PySide6/stats_ui_pyside6.py
-
 from __future__ import annotations
-
 
 import json
 import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterable
+from typing import Iterable, Optional, Tuple, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -57,10 +55,14 @@ from Tools.Stats.Legacy.stats_helpers import load_rois_from_settings, apply_rois
 from Tools.Stats.PySide6.stats_file_scanner_pyside6 import ScanError, scan_folder_simple
 from Tools.Stats.PySide6.stats_worker import StatsWorker
 
-
 logger = logging.getLogger(__name__)
 _unused_qaction = QAction  # keep import alive for Qt resource checkers
 
+# --------------------------- constants ---------------------------
+ANOVA_XLS = "RM-ANOVA Results.xlsx"
+LMM_XLS = "Mixed Model Results.xlsx"
+POSTHOC_XLS = "Posthoc Results.xlsx"
+HARMONIC_XLS = "Harmonic Results.xlsx"
 
 # --------------------------- helpers ---------------------------
 
@@ -189,7 +191,6 @@ def _posthoc_calc(progress_cb, message_cb, *, subjects, conditions, subject_data
     return {"results_df": results_df, "output_text": output_text}
 
 
-
 def _harmonic_calc(
     progress_cb,
     message_cb,
@@ -228,7 +229,7 @@ def _harmonic_calc(
 class StatsWindow(QMainWindow):
     """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
 
-    def __init__(self, parent=None, project_dir: str | None = None):
+    def __init__(self, parent: Optional[QMainWindow] = None, project_dir: Optional[str] = None):
         if project_dir and os.path.isdir(project_dir):
             self.project_dir = project_dir
         else:
@@ -255,21 +256,28 @@ class StatsWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self._focus_calls = 0
 
+        # re-entrancy guard for scan
+        self._scan_guard = OpGuard()
+        if not hasattr(self._scan_guard, "done"):
+            self._scan_guard.done = self._scan_guard.end  # type: ignore[attr-defined]
+
         # --- state ---
-        self.subject_data: dict = {}
-        self.subjects: list[str] = []
-        self.conditions: list[str] = []
-        self.rm_anova_results_data: pd.DataFrame | None = None
-        self.mixed_model_results_data: pd.DataFrame | None = None
-        self.posthoc_results_data: pd.DataFrame | None = None
-        self.harmonic_check_results_data: list[dict] = []
-        self.rois: dict[str, list[str]] = {}
+        self.subject_data: Dict = {}
+        self.subjects: List[str] = []
+        self.conditions: List[str] = []
+        self.rm_anova_results_data: Optional[pd.DataFrame] = None
+        self.mixed_model_results_data: Optional[pd.DataFrame] = None
+        self.posthoc_results_data: Optional[pd.DataFrame] = None
+        self.harmonic_check_results_data: List[dict] = []
+        self.rois: Dict[str, List[str]] = {}
         self._harmonic_metric: str = ""
+        self._current_base_freq: float = 6.0
+        self._current_alpha: float = 0.05
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
                                                      set=lambda v: self.le_folder.setText(v) if hasattr(self, "le_folder") else None)
-        self.detected_info_var = SimpleNamespace(set=self._set_detected_info)
+        self.detected_info_var = SimpleNamespace(set=lambda t: self._set_status(t))
         self.roi_var = SimpleNamespace(get=lambda: ALL_ROIS_OPTION, set=lambda v: None)
         self.alpha_var = SimpleNamespace(get=lambda: "0.05", set=lambda v: None)
 
@@ -280,28 +288,145 @@ class StatsWindow(QMainWindow):
         self.refresh_rois()
         QTimer.singleShot(100, self._load_default_data_folder)
 
-        self._progress_updates: list[int] = []
+        self._progress_updates: List[int] = []
 
-    # --------- ROI + focus helpers ---------
+    # --------- ROI + status helpers ---------
 
-    def _safe_export_call(self, func, data_obj, out_dir: str, base_name: str) -> None:
-        """
-        Call legacy export function with best-effort signature:
-          1) func(data_obj, save_path=<file>, log_func=<callable>)
-          2) func(data_obj, out_dir, log_func=<callable>)  # fallback
-        """
-        os.makedirs(out_dir, exist_ok=True)
-        fname = base_name if base_name.lower().endswith(".xlsx") else f"{base_name}.xlsx"
-        save_path = os.path.join(out_dir, fname)
+    def refresh_rois(self) -> None:
+        fresh = load_rois_from_settings() or {}
         try:
-            func(
-                data_obj,
-                save_path=save_path,
-                log_func=self._set_detected_info,
+            set_rois({})
+        except Exception:
+            pass
+        apply_rois_to_modules(fresh)
+        set_rois(fresh)
+        self.rois = fresh
+        self._update_roi_label()
+
+    def _update_roi_label(self) -> None:
+        names = list(self.rois.keys())
+        txt = "Using {} ROI{} from Settings: {}".format(
+            len(names), "" if len(names) == 1 else "s", ", ".join(names)
+        ) if names else "No ROIs defined in Settings."
+        self._set_roi_status(txt)
+
+    def _set_status(self, txt: str) -> None:
+        if hasattr(self, "lbl_status"):
+            self.lbl_status.setText(txt)
+
+    def _set_roi_status(self, txt: str) -> None:
+        if hasattr(self, "lbl_rois"):
+            self.lbl_rois.setText(txt)
+
+    def _set_detected_info(self, txt: str) -> None:
+        """Route unknown worker messages to proper label."""
+        lower_txt = txt.lower() if isinstance(txt, str) else str(txt).lower()
+        if (" roi" in lower_txt) or lower_txt.startswith("using ") or lower_txt.startswith("rois"):
+            self._set_roi_status(txt)
+        else:
+            self._set_status(txt)
+
+    # --------- window focus / run state ---------
+
+    def _focus_self(self) -> None:
+        self._focus_calls += 1
+        self.raise_()
+        self.activateWindow()
+
+    def _set_running(self, running: bool) -> None:
+        buttons = [
+            self.run_rm_anova_btn,
+            self.run_mixed_model_btn,
+            self.run_posthoc_btn,
+            self.run_harm_btn,
+            self.export_rm_anova_btn,
+            self.export_mixed_model_btn,
+            self.export_posthoc_btn,
+            self.export_harm_btn,
+            self.btn_scan,
+            self.btn_open_results,
+        ]
+        for b in buttons:
+            b.setEnabled(not running)
+        if running:
+            self.spinner.show()
+            self.spinner.start()
+        else:
+            self.spinner.stop()
+            self.spinner.hide()
+
+    def _begin_run(self) -> bool:
+        if not self._guard.start():
+            return False
+        self._set_running(True)
+        self._focus_self()
+        return True
+
+    def _end_run(self) -> None:
+        self._set_running(False)
+        self._guard.done()
+        self._focus_self()
+
+    # --------- settings helpers ---------
+
+    def _safe_settings_get(self, section: str, key: str, default) -> Tuple[bool, object]:
+        try:
+            settings = SettingsManager()
+            val = settings.get(section, key, default)
+            return True, val
+        except Exception as e:
+            self._log_ui_error(f"settings_get:{section}/{key}", e)
+            return False, default
+
+    def _get_analysis_settings(self) -> Optional[Tuple[float, float]]:
+        ok1, bf = self._safe_settings_get("analysis", "base_freq", 6.0)
+        ok2, a = self._safe_settings_get("analysis", "alpha", 0.05)
+        try:
+            base_freq = float(bf)
+            alpha = float(a)
+        except Exception as e:
+            QMessageBox.critical(self, "Settings Error", f"Invalid analysis settings: {e}")
+            return None
+        if not (ok1 and ok2):
+            # keep behavior consistent: fail fast if settings backend errored
+            QMessageBox.critical(self, "Settings Error", "Could not load analysis settings.")
+            return None
+        return base_freq, alpha
+
+    # --------- centralized pre-run guards ---------
+
+    def _precheck(self, *, require_anova: bool = False) -> bool:
+        # open Excel guard
+        if self._check_for_open_excel_files(self.le_folder.text()):
+            return False
+        # data guard
+        if not self.subject_data:
+            QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
+            return False
+        # ANOVA dependency guard
+        if require_anova and self.rm_anova_results_data is None:
+            QMessageBox.warning(
+                self,
+                "Run ANOVA First",
+                "Please run a successful RM-ANOVA before running post-hoc tests for the interaction.",
             )
-            return
-        except TypeError:
-            func(data_obj, out_dir, log_func=self._set_detected_info)
+            return False
+        # ROIs
+        self.refresh_rois()
+        if not self.rois:
+            QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
+            return False
+        # settings
+        got = self._get_analysis_settings()
+        if not got:
+            return False
+        self._current_base_freq, self._current_alpha = got
+        # re-entrancy + UI
+        if not self._begin_run():
+            return False
+        return True
+
+    # --------- exports plumbing ---------
 
     def _group_harmonic(self, data) -> dict:
         """list[dict] -> {condition: {roi: [records]}}"""
@@ -316,19 +441,37 @@ class StatsWindow(QMainWindow):
             grouped.setdefault(cond, {}).setdefault(roi, []).append(rec)
         return grouped
 
+    def _safe_export_call(self, func, data_obj, out_dir: str, base_name: str) -> None:
+        """
+        Call legacy export function with best-effort signature:
+          1) func(data_obj, save_path=<file>, log_func=<callable>)
+          2) func(data_obj, out_dir, log_func=<callable>)  # fallback
+        """
+        os.makedirs(out_dir, exist_ok=True)
+        fname = base_name if base_name.lower().endswith(".xlsx") else f"{base_name}.xlsx"
+        save_path = os.path.join(out_dir, fname)
+        try:
+            func(
+                data_obj,
+                save_path=save_path,
+                log_func=self._set_status,
+            )
+            return
+        except TypeError:
+            func(data_obj, out_dir, log_func=self._set_status)
+
     def export_results(self, kind: str, data, out_dir: str) -> None:
         """Unified export adapter. Keeps UI thin, uses legacy exporters."""
         mapping = {
-            "anova": (export_rm_anova_results_to_excel, "RM-ANOVA Results.xlsx"),
-            "lmm": (export_mixed_model_results_to_excel, "Mixed Model Results.xlsx"),
-            "posthoc": (export_posthoc_results_to_excel, "Posthoc Results.xlsx"),
-            "harmonic": (export_harmonic_results_to_excel, "Harmonic Results.xlsx"),
+            "anova": (export_rm_anova_results_to_excel, ANOVA_XLS),
+            "lmm": (export_mixed_model_results_to_excel, LMM_XLS),
+            "posthoc": (export_posthoc_results_to_excel, POSTHOC_XLS),
+            "harmonic": (export_harmonic_results_to_excel, HARMONIC_XLS),
         }
         func, fname = mapping[kind]
         if kind == "harmonic":
             grouped = self._group_harmonic(data)
 
-            # Adapter to supply required kwargs while reusing _safe_export_call
             def _adapter(_ignored, *, save_path, log_func):
                 export_harmonic_results_to_excel(
                     grouped,
@@ -342,70 +485,38 @@ class StatsWindow(QMainWindow):
 
         self._safe_export_call(func, data, out_dir, fname)
 
-    def refresh_rois(self):
-        fresh = load_rois_from_settings() or {}
-        try:
-            set_rois({})
-        except Exception:
-            pass
-        apply_rois_to_modules(fresh)
-        set_rois(fresh)
-        self.rois = fresh
-        self._update_roi_label()
+    def _ensure_results_dir(self) -> str:
+        results_dir = os.path.join(self.project_dir, "3 - Statistical Analysis Results")
+        os.makedirs(results_dir, exist_ok=True)
+        return results_dir
 
-    def _update_roi_label(self):
-        names = list(self.rois.keys())
-        txt = "Using {} ROI{} from Settings: {}".format(
-            len(names), "" if len(names) == 1 else "s", ", ".join(names)
-        ) if names else "No ROIs defined in Settings."
-        self.lbl_rois.setText(txt)
+    def _open_results_folder(self) -> None:
+        out_dir = self._ensure_results_dir()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
-    def _set_detected_info(self, txt: str) -> None:
-        lower_txt = txt.lower() if isinstance(txt, str) else str(txt).lower()
-        if (" roi" in lower_txt) or lower_txt.startswith("using ") or lower_txt.startswith("rois"):
-            if hasattr(self, "lbl_rois"):
-                self.lbl_rois.setText(txt)
-        else:
-            if hasattr(self, "lbl_status"):
-                self.lbl_status.setText(txt)
+    def _update_export_buttons(self) -> None:
+        self.export_rm_anova_btn.setEnabled(
+            isinstance(self.rm_anova_results_data, pd.DataFrame)
+            and not self.rm_anova_results_data.empty
+        )
+        self.export_mixed_model_btn.setEnabled(
+            isinstance(self.mixed_model_results_data, pd.DataFrame)
+            and not self.mixed_model_results_data.empty
+        )
+        self.export_posthoc_btn.setEnabled(
+            isinstance(self.posthoc_results_data, pd.DataFrame)
+            and not self.posthoc_results_data.empty
+        )
+        self.export_harm_btn.setEnabled(bool(self.harmonic_check_results_data))
 
-    def _focus_self(self) -> None:
-        self._focus_calls += 1
-        self.raise_()
-        self.activateWindow()
+    # --------- worker signal wiring ---------
 
-    def _begin_run(self) -> bool:
-        if not self._guard.start():
-            return False
-        self._set_running(True)
-        self._focus_self()
-        return True
-
-    def _end_run(self) -> None:
-        self._set_running(False)
-        self._guard.done()
-        self._focus_self()
-
-    def _set_running(self, running: bool) -> None:
-        buttons = [
-            self.run_rm_anova_btn,
-            self.run_mixed_model_btn,
-            self.run_posthoc_btn,
-            self.run_harm_btn,
-            self.export_rm_anova_btn,
-            self.export_mixed_model_btn,
-            self.export_posthoc_btn,
-            self.export_harm_btn,
-            self.btn_scan,
-        ]
-        for b in buttons:
-            b.setEnabled(not running)
-        if running:
-            self.spinner.show()
-            self.spinner.start()
-        else:
-            self.spinner.stop()
-            self.spinner.hide()
+    def _wire_and_start(self, worker: StatsWorker, finished_slot) -> None:
+        worker.signals.progress.connect(self._on_worker_progress)
+        worker.signals.message.connect(self._on_worker_message)
+        worker.signals.error.connect(self._on_worker_error)
+        worker.signals.finished.connect(finished_slot)
+        self.pool.start(worker)
 
     # --------- worker signal handlers ---------
 
@@ -421,6 +532,45 @@ class StatsWindow(QMainWindow):
     def _on_worker_error(self, msg: str) -> None:
         self.results_text.append(f"Error: {msg}")
         self._end_run()
+
+    def _format_rm_anova_summary(self, df: pd.DataFrame, alpha: float) -> str:
+        out = []
+        p_candidates = ["Pr > F", "p-value", "p_value", "p", "P", "pvalue"]
+        eff_candidates = ["Effect", "Source", "Factor", "Term"]
+        p_col = next((c for c in p_candidates if c in df.columns), None)
+        eff_col = next((c for c in eff_candidates if c in df.columns), None)
+
+        if p_col is None or eff_col is None:
+            out.append("No interpretable effects were found in the ANOVA table.")
+            return "\n".join(out)
+
+        for _, row in df.iterrows():
+            effect_name = str(row.get(eff_col, "")).strip()
+            effect_lower = effect_name.lower()
+            p_raw = row.get(p_col, np.nan)
+            try:
+                p_val = float(p_raw)
+            except Exception:
+                p_val = np.nan
+
+            if any(k in effect_lower for k in ["condition:roi", "condition*roi", "condition x roi", "roi:condition", "roi*condition"]):
+                tag = "condition-by-ROI interaction"
+            elif "condition" == effect_lower or effect_lower.startswith("conditions"):
+                tag = "difference between conditions"
+            elif effect_lower == "roi" or "region" in effect_lower:
+                tag = "difference between ROIs"
+            else:
+                continue
+
+            if np.isfinite(p_val) and p_val < alpha:
+                out.append(f"  - Significant {tag} (p = {p_val:.4g}).")
+            elif np.isfinite(p_val):
+                out.append(f"  - No significant {tag} (p = {p_val:.4g}).")
+            else:
+                out.append(f"  - {tag.capitalize()}: p-value unavailable.")
+        if not out:
+            out.append("No interpretable effects were found in the ANOVA table.")
+        return "\n".join(out)
 
     @Slot(dict)
     def _on_rm_anova_finished(self, payload: dict) -> None:
@@ -439,41 +589,7 @@ class StatsWindow(QMainWindow):
 
         anova_df_results = self.rm_anova_results_data
         if isinstance(anova_df_results, pd.DataFrame) and not anova_df_results.empty:
-            p_cols = ["Pr > F", "p-value", "p_value", "p", "P", "pvalue"]
-            eff_cols = ["Effect", "Source", "Factor", "Term"]
-
-            lines = []
-            for _, row in anova_df_results.iterrows():
-                effect_name = str(_first_present(row, eff_cols, "")).strip()
-                effect_lower = effect_name.lower()
-
-                p_val = _first_present(row, p_cols, np.nan)
-                try:
-                    p_val = float(p_val)
-                except Exception:
-                    p_val = np.nan
-
-                if any(k in effect_lower for k in ["condition:roi", "condition*roi", "condition x roi", "roi:condition", "roi*condition"]):
-                    tag = "condition-by-ROI interaction"
-                elif "condition" == effect_lower or effect_lower.startswith("conditions"):
-                    tag = "difference between conditions"
-                elif effect_lower == "roi" or "region" in effect_lower:
-                    tag = "difference between ROIs"
-                else:
-                    continue
-
-                if np.isfinite(p_val) and p_val < alpha:
-                    lines.append(f"  - Significant {tag} (p = {p_val:.4g}).")
-                elif np.isfinite(p_val):
-                    lines.append(f"  - No significant {tag} (p = {p_val:.4g}).")
-                else:
-                    lines.append(f"  - {tag.capitalize()}: p-value unavailable.")
-
-            if lines:
-                output_text += "\n".join(lines) + "\n"
-            else:
-                output_text += "No interpretable effects were found in the ANOVA table.\n"
-
+            output_text += self._format_rm_anova_summary(anova_df_results, alpha) + "\n"
             output_text += "--------------------------------------------\n"
             output_text += "NOTE: For detailed reporting and post-hoc tests, refer to the tables above.\n"
             output_text += "--------------------------------------------\n"
@@ -481,6 +597,7 @@ class StatsWindow(QMainWindow):
             output_text += "RM-ANOVA returned no results.\n"
 
         self.results_text.setText(output_text)
+        self._update_export_buttons()
         self._end_run()
 
     @Slot(dict)
@@ -488,8 +605,7 @@ class StatsWindow(QMainWindow):
         self.mixed_model_results_data = payload.get("mixed_results_df")
         output_text = payload.get("output_text", "")
         self.results_text.setText(output_text)
-        if self.mixed_model_results_data is not None and not self.mixed_model_results_data.empty:
-            self.export_mixed_model_btn.setEnabled(True)
+        self._update_export_buttons()
         self._end_run()
 
     @Slot(dict)
@@ -497,8 +613,7 @@ class StatsWindow(QMainWindow):
         self.posthoc_results_data = payload.get("results_df")
         output_text = payload.get("output_text", "")
         self.results_text.setText(output_text)
-        if self.posthoc_results_data is not None and not self.posthoc_results_data.empty:
-            self.export_posthoc_btn.setEnabled(True)
+        self._update_export_buttons()
         self._end_run()
 
     @Slot(dict)
@@ -507,13 +622,12 @@ class StatsWindow(QMainWindow):
         findings = payload.get("findings") or []
         self.results_text.setText(output_text.strip() or "(Harmonic check returned empty text. See logs for details.)")
         self.harmonic_check_results_data = findings
-        if self.harmonic_check_results_data:
-            self.export_harm_btn.setEnabled(True)
+        self._update_export_buttons()
         self._end_run()
 
     # --------------------------- UI building ---------------------------
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         central = QWidget(self)
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
@@ -532,10 +646,17 @@ class StatsWindow(QMainWindow):
         folder_row.addWidget(btn_browse)
         main_layout.addLayout(folder_row)
 
-        # scan button
+        # scan + open results
+        tools_row = QHBoxLayout()
         self.btn_scan = QPushButton("Scan Folder Contents")
         self.btn_scan.clicked.connect(self._scan_button_clicked)
-        main_layout.addWidget(self.btn_scan)
+        self.btn_scan.setShortcut("Ctrl+S")
+        tools_row.addWidget(self.btn_scan)
+        self.btn_open_results = QPushButton("Open Results Folder")
+        self.btn_open_results.clicked.connect(self._open_results_folder)
+        tools_row.addWidget(self.btn_open_results)
+        tools_row.addStretch(1)
+        main_layout.addLayout(tools_row)
 
         # status + ROI labels
         self.lbl_status = QLabel("Select a folder containing FPVS results.")
@@ -573,26 +694,32 @@ class StatsWindow(QMainWindow):
 
         self.run_rm_anova_btn = QPushButton("Run RM-ANOVA")
         self.run_rm_anova_btn.clicked.connect(self.on_run_rm_anova)
+        self.run_rm_anova_btn.setShortcut("Ctrl+R")
         run_col.addWidget(self.run_rm_anova_btn)
 
         self.run_mixed_model_btn = QPushButton("Run Mixed Model")
         self.run_mixed_model_btn.clicked.connect(self.on_run_mixed_model)
+        self.run_mixed_model_btn.setShortcut("Ctrl+M")
         run_col.addWidget(self.run_mixed_model_btn)
 
         self.run_posthoc_btn = QPushButton("Run Interaction Post-hocs")
         self.run_posthoc_btn.clicked.connect(self.on_run_interaction_posthocs)
+        self.run_posthoc_btn.setShortcut("Ctrl+P")
         run_col.addWidget(self.run_posthoc_btn)
 
         self.export_rm_anova_btn = QPushButton("Export RM-ANOVA")
         self.export_rm_anova_btn.clicked.connect(self.on_export_rm_anova)
+        self.export_rm_anova_btn.setShortcut("Ctrl+Shift+R")
         export_col.addWidget(self.export_rm_anova_btn)
 
         self.export_mixed_model_btn = QPushButton("Export Mixed Model")
         self.export_mixed_model_btn.clicked.connect(self.on_export_mixed_model)
+        self.export_mixed_model_btn.setShortcut("Ctrl+Shift+M")
         export_col.addWidget(self.export_mixed_model_btn)
 
         self.export_posthoc_btn = QPushButton("Export Post-hoc Results")
         self.export_posthoc_btn.clicked.connect(self.on_export_posthoc)
+        self.export_posthoc_btn.setShortcut("Ctrl+Shift+P")
         export_col.addWidget(self.export_posthoc_btn)
 
         btn_row.addLayout(run_col, 1)
@@ -614,10 +741,12 @@ class StatsWindow(QMainWindow):
 
         self.run_harm_btn = QPushButton("Run Harmonic Check")
         self.run_harm_btn.clicked.connect(self.on_run_harmonic_check)
+        self.run_harm_btn.setShortcut("Ctrl+H")
         harm_row.addWidget(self.run_harm_btn)
 
         self.export_harm_btn = QPushButton("Export Harmonic Results")
         self.export_harm_btn.clicked.connect(self.on_export_harmonic)
+        self.export_harm_btn.setShortcut("Ctrl+Shift+H")
         harm_row.addWidget(self.export_harm_btn)
         harm_row.addStretch(1)
         vs.addLayout(harm_row)
@@ -628,6 +757,9 @@ class StatsWindow(QMainWindow):
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
         main_layout.addWidget(self.results_text, 1)
+
+        # initialize export buttons
+        self._update_export_buttons()
 
     # --------------------------- actions ---------------------------
 
@@ -656,161 +788,79 @@ class StatsWindow(QMainWindow):
 
     # ---- run buttons ----
 
-    def on_run_rm_anova(self):
-        if self._check_for_open_excel_files(self.le_folder.text()):
+    def on_run_rm_anova(self) -> None:
+        if not self._precheck():
             return
-        if not self.subject_data:
-            QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
-            return
-        self.refresh_rois()
-        if not self.rois:
-            QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
-            return
-        try:
-            settings = SettingsManager()
-            base_freq = float(settings.get("analysis", "base_freq", 6.0))
-            alpha = float(settings.get("analysis", "alpha", 0.05))
-        except Exception as e:
-            QMessageBox.critical(self, "Settings Error", f"Could not load analysis settings: {e}")
-            return
-        if not self._begin_run():
-            return
-        self._current_alpha = alpha
         self.results_text.clear()
         self.rm_anova_results_data = None
-        self.export_rm_anova_btn.setEnabled(False)
+        self._update_export_buttons()
 
         worker = StatsWorker(
             _rm_anova_calc,
             subjects=self.subjects,
             conditions=self.conditions,
             subject_data=self.subject_data,
-            base_freq=base_freq,
+            base_freq=self._current_base_freq,
             rois=self.rois,
         )
-        worker.signals.progress.connect(self._on_worker_progress)
-        worker.signals.message.connect(self._on_worker_message)
-        worker.signals.error.connect(self._on_worker_error)
-        worker.signals.finished.connect(self._on_rm_anova_finished)
-        self.pool.start(worker)
+        self._wire_and_start(worker, self._on_rm_anova_finished)
 
-    def on_run_mixed_model(self):
-        if self._check_for_open_excel_files(self.le_folder.text()):
+    def on_run_mixed_model(self) -> None:
+        if not self._precheck():
             return
-        if not self.subject_data:
-            QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
-            return
-        self.refresh_rois()
-        if not self.rois:
-            QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
-            return
-        try:
-            settings = SettingsManager()
-            base_freq = float(settings.get("analysis", "base_freq", 6.0))
-            alpha = float(settings.get("analysis", "alpha", 0.05))
-        except Exception as e:
-            QMessageBox.critical(self, "Settings Error", f"Could not load analysis settings: {e}")
-            return
-        if not self._begin_run():
-            return
-
         self.results_text.clear()
         self.mixed_model_results_data = None
-        self.export_mixed_model_btn.setEnabled(False)
+        self._update_export_buttons()
 
         worker = StatsWorker(
             _lmm_calc,
             subjects=self.subjects,
             conditions=self.conditions,
             subject_data=self.subject_data,
-            base_freq=base_freq,
-            alpha=alpha,
+            base_freq=self._current_base_freq,
+            alpha=self._current_alpha,
             rois=self.rois,
         )
-        worker.signals.progress.connect(self._on_worker_progress)
-        worker.signals.message.connect(self._on_worker_message)
-        worker.signals.error.connect(self._on_worker_error)
-        worker.signals.finished.connect(self._on_mixed_model_finished)
-        self.pool.start(worker)
+        self._wire_and_start(worker, self._on_mixed_model_finished)
 
-    def on_run_interaction_posthocs(self):
-        if self._check_for_open_excel_files(self.le_folder.text()):
+    def on_run_interaction_posthocs(self) -> None:
+        if not self._precheck(require_anova=True):
             return
-        if not self.subject_data:
-            QMessageBox.warning(self, "No Data", "Please scan a data folder first.")
-            return
-        if self.rm_anova_results_data is None:
-            QMessageBox.warning(
-                self,
-                "Run ANOVA First",
-                "Please run a successful RM-ANOVA before running post-hoc tests for the interaction.",
-            )
-            return
-
-        self.refresh_rois()
-        if not self.rois:
-            QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
-            return
-        try:
-            settings = SettingsManager()
-            base_freq = float(settings.get("analysis", "base_freq", 6.0))
-            alpha = float(settings.get("analysis", "alpha", 0.05))
-        except Exception as e:
-            QMessageBox.critical(self, "Settings Error", f"Could not load analysis settings: {e}")
-            return
-        if not self._begin_run():
-            return
-
         self.results_text.clear()
         self.posthoc_results_data = None
-        self.export_posthoc_btn.setEnabled(False)
+        self._update_export_buttons()
 
         worker = StatsWorker(
             _posthoc_calc,
             subjects=self.subjects,
             conditions=self.conditions,
             subject_data=self.subject_data,
-            base_freq=base_freq,
-            alpha=alpha,
+            base_freq=self._current_base_freq,
+            alpha=self._current_alpha,
             rois=self.rois,
         )
-        worker.signals.progress.connect(self._on_worker_progress)
-        worker.signals.message.connect(self._on_worker_message)
-        worker.signals.error.connect(self._on_worker_error)
-        worker.signals.finished.connect(self._on_posthoc_finished)
-        self.pool.start(worker)
+        self._wire_and_start(worker, self._on_posthoc_finished)
 
-    def on_run_harmonic_check(self):
-        if self._check_for_open_excel_files(self.le_folder.text()):
+    def on_run_harmonic_check(self) -> None:
+        if not self._precheck():
             return
         if not (self.subject_data and self.subjects and self.conditions):
             QMessageBox.warning(self, "Data Error", "No subject data found. Please click 'Scan Folder Contents' first.")
-            return
-
-        self.refresh_rois()
-        if not self.rois:
-            QMessageBox.warning(self, "No ROIs", "Define at least one ROI in Settings before running stats.")
+            self._end_run()
             return
         try:
-            settings = SettingsManager()
-            base_freq = float(settings.get("analysis", "base_freq", 6.0))
-            alpha = float(settings.get("analysis", "alpha", 0.05))
             selected_metric = self.cb_metric.currentText()
             mean_value_threshold = float(self.le_threshold.text())
         except ValueError:
             QMessageBox.warning(self, "Input Error", "Invalid Mean Threshold. Please enter a numeric value.")
-            return
-        except Exception as e:
-            QMessageBox.critical(self, "Settings Error", f"Could not load analysis settings: {e}")
-            return
-        if not self._begin_run():
+            self._end_run()
             return
 
         self._harmonic_metric = selected_metric  # for legacy exporter
 
         self.results_text.clear()
         self.harmonic_check_results_data = []
-        self.export_harm_btn.setEnabled(False)
+        self._update_export_buttons()
 
         worker = StatsWorker(
             _harmonic_calc,
@@ -819,93 +869,89 @@ class StatsWindow(QMainWindow):
             conditions=self.conditions,
             selected_metric=selected_metric,
             mean_value_threshold=mean_value_threshold,
-            base_freq=base_freq,
-            alpha=alpha,
+            base_freq=self._current_base_freq,
+            alpha=self._current_alpha,
             rois=self.rois,
         )
-        worker.signals.progress.connect(self._on_worker_progress)
-        worker.signals.message.connect(self._on_worker_message)
-        worker.signals.error.connect(self._on_worker_error)
-        worker.signals.finished.connect(self._on_harmonic_finished)
-        self.pool.start(worker)
+        self._wire_and_start(worker, self._on_harmonic_finished)
 
     # ---- exports ----
 
-    def _ensure_results_dir(self) -> str:
-        results_dir = os.path.join(self.project_dir, "3 - Statistical Analysis Results")
-        os.makedirs(results_dir, exist_ok=True)
-        return results_dir
-
-    def on_export_rm_anova(self):
+    def on_export_rm_anova(self) -> None:
         if not isinstance(self.rm_anova_results_data, pd.DataFrame) or self.rm_anova_results_data.empty:
             QMessageBox.information(self, "No Results", "Run RM-ANOVA first.")
             return
         out_dir = self._ensure_results_dir()
         try:
             self.export_results("anova", self.rm_anova_results_data, out_dir)
-            self.lbl_status.setText(f"RM-ANOVA exported to: {out_dir}")
+            self._set_status(f"RM-ANOVA exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
 
-    def on_export_mixed_model(self):
+    def on_export_mixed_model(self) -> None:
         if not isinstance(self.mixed_model_results_data, pd.DataFrame) or self.mixed_model_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Mixed Model first.")
             return
         out_dir = self._ensure_results_dir()
         try:
             self.export_results("lmm", self.mixed_model_results_data, out_dir)
-            self.lbl_status.setText(f"Mixed Model results exported to: {out_dir}")
+            self._set_status(f"Mixed Model results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
 
-    def on_export_posthoc(self):
+    def on_export_posthoc(self) -> None:
         if not isinstance(self.posthoc_results_data, pd.DataFrame) or self.posthoc_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Interaction Post-hocs first.")
             return
         out_dir = self._ensure_results_dir()
         try:
             self.export_results("posthoc", self.posthoc_results_data, out_dir)
-            self.lbl_status.setText(f"Post-hoc results exported to: {out_dir}")
+            self._set_status(f"Post-hoc results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
 
-    def on_export_harmonic(self):
+    def on_export_harmonic(self) -> None:
         if not self.harmonic_check_results_data:
             QMessageBox.information(self, "No Results", "Run Harmonic Check first.")
             return
         out_dir = self._ensure_results_dir()
         try:
             self.export_results("harmonic", self.harmonic_check_results_data, out_dir)
-            self.lbl_status.setText(f"Harmonic check results exported to: {out_dir}")
+            self._set_status(f"Harmonic check results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
 
     # ---- folder & scan ----
 
-    def on_browse_folder(self):
+    def on_browse_folder(self) -> None:
         start_dir = self.le_folder.text() or self.project_dir
         folder = QFileDialog.getExistingDirectory(self, "Select Data Folder", start_dir)
         if folder:
             self.le_folder.setText(folder)
             self._scan_button_clicked()
 
-    def _scan_button_clicked(self):
-        self.refresh_rois()
-        folder = self.le_folder.text()
-        if not folder:
-            QMessageBox.warning(self, "No Folder", "Please select a data folder first.")
+    def _scan_button_clicked(self) -> None:
+        if not self._scan_guard.start():
             return
         try:
-            subjects, conditions, data = scan_folder_simple(folder)
-            self.subjects = subjects
-            self.conditions = conditions
-            self.subject_data = data
-            self.lbl_status.setText(f"Scan complete: Found {len(subjects)} subjects and {len(conditions)} conditions.")
-        except ScanError as e:
-            self.lbl_status.setText(f"Scan failed: {e}")
-            QMessageBox.critical(self, "Scan Error", str(e))
+            self.refresh_rois()
+            folder = self.le_folder.text()
+            if not folder:
+                QMessageBox.warning(self, "No Folder", "Please select a data folder first.")
+                return
+            try:
+                subjects, conditions, data = scan_folder_simple(folder)
+                self.subjects = subjects
+                self.conditions = conditions
+                self.subject_data = data
+                self._set_status(f"Scan complete: Found {len(subjects)} subjects and {len(conditions)} conditions.")
+            except ScanError as e:
+                self._set_status(f"Scan failed: {e}")
+                QMessageBox.critical(self, "Scan Error", str(e))
+        finally:
+            self._scan_guard.done()
 
-    def _load_default_data_folder(self):
+    def _load_default_data_folder(self) -> None:
         default = None
         if self.parent() and hasattr(self.parent(), "currentProject"):
             proj = self.parent().currentProject
@@ -922,3 +968,15 @@ class StatsWindow(QMainWindow):
         if default:
             self.le_folder.setText(default)
             self._scan_button_clicked()
+
+    # ---- logging ----
+
+    def _log_ui_error(self, op: str, exc: Exception) -> None:
+        logger.error(
+            "ui_error",
+            extra={
+                "op": op,
+                "project_dir": getattr(self, "project_dir", ""),
+                "exc": repr(exc),
+            },
+        )
