@@ -11,8 +11,8 @@ from ctypes import windll
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication
+from config import FPVS_TOOLBOX_VERSION
 
-# High-DPI awareness (Windows)
 try:
     windll.shcore.SetProcessDpiAwareness(1)  # type: ignore[attr-defined]
 except Exception:
@@ -21,13 +21,11 @@ except Exception:
 QCoreApplication.setOrganizationName("MississippiStateUniversity")
 QCoreApplication.setOrganizationDomain("msstate.edu")
 QCoreApplication.setApplicationName("FPVS Toolbox")
+QCoreApplication.setApplicationVersion(FPVS_TOOLBOX_VERSION)
 
-# Import logging/config after DPI + app metadata
 from Main_App import configure_logging, get_settings, install_messagebox_logger  # noqa: E402
 
-
 def _maybe_run_cli_tool() -> bool:
-    """Runs a CLI sub-tool and returns True if one was invoked."""
     if "--run-image-resizer" in sys.argv:
         from Tools.Image_Resizer import pyside_resizer
         pyside_resizer.main()
@@ -38,21 +36,17 @@ def _maybe_run_cli_tool() -> bool:
         return True
     return False
 
-
 def run_app() -> int:
-    """Boot the PySide6 GUI."""
-    # Configure logging before importing MainWindow to capture module logs.
     settings = get_settings()
     debug = settings.debug_enabled()
     configure_logging(debug)
     install_messagebox_logger(debug)
 
-    from PySide6.QtWidgets import QApplication  # import here to avoid side effects on import
+    from PySide6.QtWidgets import QApplication
     from Main_App.PySide6_App.GUI.main_window import MainWindow
 
     app = QApplication([])
 
-    # Optional stylesheet co-located with this file
     qss_path = Path(__file__).resolve().parent / "qdark_sidebar.qss"
     if qss_path.exists():
         with open(qss_path, "r", encoding="utf-8") as f:
@@ -62,19 +56,13 @@ def run_app() -> int:
     window.show()
     return app.exec()
 
-
 def main() -> None:
-    """Entry point dispatcher."""
     if _maybe_run_cli_tool():
         return
-    exit_code = run_app()
-    sys.exit(exit_code)
-
+    sys.exit(run_app())
 
 if __name__ == "__main__":
-    # Critical for frozen (PyInstaller) child process bootstrap on Windows.
     mp.freeze_support()
-    # Ensure multiprocessing uses this EXE as its interpreter when frozen.
     if hasattr(sys, "frozen"):
         mp.set_executable(sys.executable)
     main()
