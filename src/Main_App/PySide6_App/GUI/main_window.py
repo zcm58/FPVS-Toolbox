@@ -3,6 +3,7 @@ from __future__ import annotations
 from Main_App.PySide6_App.workers.processing_worker import PostProcessWorker
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.Performance.mp_env import set_blas_threads_single_process
+from PySide6.QtCore import QTimer
 import logging
 import os
 import queue
@@ -212,7 +213,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     # -------------------------- lifecycle --------------------------- #
     def __init__(self) -> None:
         super().__init__()
-        update_manager.cleanup_old_executable()
+        # Local, relative import avoids circulars and path issues
+        from .update_manager import cleanup_old_executable, check_for_updates_on_launch
+        cleanup_old_executable()
 
         self.settings = SettingsManager()
         self.output_folder: str = ""
@@ -226,6 +229,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Build UI
         init_ui(self)
+
         # Poll the worker queue so the GUI stays responsive
         self._processing_timer = QTimer(self)
         self._processing_timer.setSingleShot(False)
@@ -267,24 +271,20 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         status.showMessage(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
 
         # --- Busy spinner (ENLARGED) ---
-        # Make the status bar taller & add padding
         self.statusBar().setSizeGripEnabled(False)
-        self.statusBar().setMinimumHeight(36)  # ~36 px tall
+        self.statusBar().setMinimumHeight(36)
         self.statusBar().setContentsMargins(8, 0, 8, 0)
 
-        # Larger animated text spinner
         self._busyFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         self._busyIdx = 0
         self._busyTimer = QTimer(self)
-        self._busyTimer.setInterval(120)  # ~8 FPS
+        self._busyTimer.setInterval(120)
         self._busyTimer.timeout.connect(self._tick_busy)
 
-        self._busyLabel = QLabel("")  # lives in the status bar
-        # bump font size (keeps current family/theme)
+        self._busyLabel = QLabel("")
         _big = self._busyLabel.font()
-        _big.setPointSize(max(_big.pointSize() + 4, 14))  # +4pt or at least 14pt
+        _big.setPointSize(max(_big.pointSize() + 4, 14))
         self._busyLabel.setFont(_big)
-        # add padding so it doesn't feel cramped
         self._busyLabel.setStyleSheet("padding: 0 10px;")
         self._busyLabel.setVisible(False)
         self.statusBar().addPermanentWidget(self._busyLabel)
@@ -300,9 +300,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(0)
         self.log("Welcome to the FPVS Toolbox!")
-        self.log(
-            f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}"
-        )
+        self.log(f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}")
 
         # Wire Start button
         if hasattr(self, "btn_start"):
@@ -351,12 +349,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._pending_finalize = False
         self._op_guard = OpGuard()
         self._selected_bdf: str | None = None
-        try:
-            update_manager.check_for_updates_async(
-                self, silent=True, notify_if_no_update=False
-            )
-        except Exception as e:
-            self.log(f"Auto update check failed: {e}")
+
+        # Auto update check on launch: prompt only if update exists
+        QTimer.singleShot(1000, lambda: check_for_updates_on_launch(self))
 
     # ---------------------------- logging --------------------------- #
     def _emit_backend_log(self, level: int, message: str) -> None:
