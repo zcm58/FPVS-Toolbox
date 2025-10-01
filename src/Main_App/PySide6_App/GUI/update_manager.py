@@ -137,7 +137,6 @@ def _prompt_open_release(parent: QWidget, info: _UpdateInfo) -> None:
     if m == QMessageBox.Yes and info.url:
         QDesktopServices.openUrl(QUrl(info.url))
 
-
 # ---------- util ----------
 
 def _is_newer(latest: str, current: str) -> bool:
