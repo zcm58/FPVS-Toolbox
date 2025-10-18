@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 
 # — Version & repo —
-FPVS_TOOLBOX_VERSION: str = "1.3.5"
+FPVS_TOOLBOX_VERSION: str = "1.3.6"
 FPVS_TOOLBOX_UPDATE_API: str = (
     "https://api.github.com/repos/zcm58/FPVS-Toolbox-Repo/releases/latest"
 )
