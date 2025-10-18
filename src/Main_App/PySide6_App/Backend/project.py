@@ -1,134 +1,215 @@
-"""Data model representing a preprocessing project manifest."""
-
+# src/Main_App/PySide6_App/Backend/project.py
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict
 
-
-_DEFAULTS = {
-    "subfolders": {
-        "excel": "1 - Excel Data Files",
-        "snr": "2 - SNR Plots",
-        "stats": "3 - Statistical Analysis Results",
-    },
-    "preprocessing": {
-        "low_pass": 0.1,
-        "high_pass": 50,
-        "downsample": 256,
-        "rejection_z": 5,
-        "ref_chan1": "EXG1",
-        "ref_chan2": "EXG2",
-        "max_chan_idx": 64,
-        "max_bad_chans": 10,
-    },
-    "event_map": {},
+# Stable defaults used by GUI/processing
+DEFAULTS: Dict[str, Any] = {
+    "input_folder": "Input",
+    "results_folder": "Results",
     "options": {
-        "mode": "batch",
-        "run_loreta": False,
-        # Processing parallelism configuration
-        "parallel_mode": "process",
-        "max_workers": None,
+        "mode": "single",
+        "loreta": False,
     },
+    # Friendly label; UI falls back to folder name if None/missing
+    "name": None,
+    # Event map expected by loadProject()
+    "event_map": {},
+    # Result subfolders relative to results_folder
+    "subfolders": {
+        "excel": "Excel",
+        "snr": "SNR",
+        "stats": "Stats",
+    },
+    # Preprocessing parameters expected by GUI (dict)
+    "preprocessing": {},
 }
 
 
-@dataclass
+def _resolve_subpath(project_root: Path, value: str) -> Path:
+    """Manifest -> absolute path. Relative values resolve against project_root."""
+    p = Path(value)
+    return p if p.is_absolute() else (project_root / p).resolve()
+
+
+def _relativize(project_root: Path, p: Path) -> str:
+    """
+    Absolute runtime path -> manifest-safe string.
+    If inside project_root, store as relative. Else keep absolute.
+    """
+    try:
+        pr = project_root.resolve()
+        pp = Path(p).resolve()
+        if pr == pp or pr in pp.parents:
+            return os.fspath(pp.relative_to(pr))
+    except Exception:
+        pass
+    return os.fspath(p)
+
+
 class Project:
-    """Container for project settings stored in ``project.json``."""
+    """
+    Project model for PySide6 GUI.
 
-    project_root: Path
-    name: str
-    input_folder: Path
-    subfolders: Dict[str, str]
-    preprocessing: Dict[str, Any]
-    event_map: Dict[str, int]
-    options: Dict[str, Any]
+    Public attributes:
+      - project_root: Path
+      - name: str
+      - input_folder: Path (absolute)
+      - results_folder: Path (absolute)
+      - subfolders: Dict[str, Path] (absolute paths under results_folder)
+      - options: Dict[str, Any]
+      - preprocessing: Dict[str, Any]
+      - event_map: Dict[str, Any]
+      - manifest: Dict[str, Any]  (raw, for persistence)
+    """
 
-    MANIFEST_NAME = "project.json"
+    def __init__(self, project_root: Path, manifest: Dict[str, Any]) -> None:
+        self.project_root = project_root.resolve()
+        self.manifest = manifest
 
-    def __init__(
-        self,
-        project_root: Path,
-        name: str,
-        input_folder: Path,
-        subfolders: dict[str, str],
-        preprocessing: dict[str, Any],
-        event_map: dict[str, int],
-        options: dict[str, Any],
-    ) -> None:
-        self.project_root = Path(project_root)
-        self.name = name
-        self.input_folder = Path(input_folder)
-        self.subfolders = subfolders
-        self.preprocessing = preprocessing
-        self.event_map = event_map
-        self.options = options
+        # Friendly name
+        raw_name = manifest.get("name")
+        self.name: str = str(raw_name) if raw_name else self.project_root.name
 
-    # dataclass will not auto-generate __repr__ due to custom __init__
-
-    @classmethod
-    def load(cls, path: Path | str) -> "Project":
-        """Load an existing project or scaffold a new one.
-
-        Numbered subfolders are ensured to exist and the manifest is saved
-        back to disk after loading or creating a project.
-        """
-
-        project_root = Path(path)
-        manifest_path = project_root / cls.MANIFEST_NAME
-
-        data = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
-
-        default_subfolders = {
-            "excel": "1 - Excel Data Files",
-            "snr": "2 - SNR Plots",
-            "stats": "3 - Statistical Analysis Results",
-        }
-        subfolders = {**default_subfolders, **data.get("subfolders", {})}
-
-        for folder_name in subfolders.values():
-            (project_root / folder_name).mkdir(parents=True, exist_ok=True)
-
-        preprocessing = _DEFAULTS["preprocessing"].copy()
-        preprocessing.update(data.get("preprocessing", {}))
-
-        event_map = data.get("event_map", {}) or {}
-
-        options = _DEFAULTS["options"].copy()
-        options.update(data.get("options", {}))
-
-        name = data.get("name", project_root.name)
-        input_folder = Path(data.get("input_folder", ""))
-
-        project = cls(
-            project_root=project_root,
-            name=name,
-            input_folder=input_folder,
-            subfolders=subfolders,
-            preprocessing=preprocessing,
-            event_map=event_map,
-            options=options,
+        # Resolve folders to absolute at runtime
+        self.input_folder = _resolve_subpath(
+            self.project_root, manifest.get("input_folder", DEFAULTS["input_folder"])
         )
-        project.save()
-        return project
+        self.results_folder = _resolve_subpath(
+            self.project_root, manifest.get("results_folder", DEFAULTS["results_folder"])
+        )
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Return a serializable dictionary representation."""
+        # Options with default keys ensured
+        opts = manifest.get("options", {})
+        if not isinstance(opts, dict):
+            opts = {}
+        merged_opts = DEFAULTS["options"].copy()
+        merged_opts.update(opts)
+        self.options = merged_opts
 
-        return {
-            "name": str(self.name),
-            "input_folder": str(self.input_folder),
-            "subfolders": self.subfolders,
-            "preprocessing": self.preprocessing,
-            "event_map": self.event_map,
-            "options": self.options,
-        }
+        # Preprocessing dict
+        pp = manifest.get("preprocessing", {})
+        self.preprocessing: Dict[str, Any] = pp if isinstance(pp, dict) else {}
+
+        # Event map dict
+        ev = manifest.get("event_map", {})
+        self.event_map: Dict[str, Any] = ev if isinstance(ev, dict) else {}
+
+        # Results subfolders (absolute paths under results_folder)
+        sub = manifest.get("subfolders", {})
+        if not isinstance(sub, dict):
+            sub = {}
+        merged_sub = DEFAULTS["subfolders"].copy()
+        merged_sub.update(sub)
+        self.subfolders: Dict[str, Path] = {}
+        for key, rel_name in merged_sub.items():
+            base = Path(rel_name)
+            abs_path = base if base.is_absolute() else (self.results_folder / base)
+            abs_path.mkdir(parents=True, exist_ok=True)
+            self.subfolders[key] = abs_path
+
+    @staticmethod
+    def load(path: Path) -> "Project":
+        """
+        Load a project from folder. Accepts absolute or relative manifest paths.
+        Ensures Input/Results and subfolders exist.
+        """
+        project_root = Path(path).resolve()
+        manifest_path = project_root / "project.json"
+
+        if manifest_path.exists():
+            data_raw = manifest_path.read_text(encoding="utf-8")
+            try:
+                data = json.loads(data_raw)
+            except Exception:
+                data = {}
+        else:
+            data = {}
+
+        # Shallow-merge defaults with existing data
+        merged: Dict[str, Any] = {}
+        merged.update(DEFAULTS)
+        if isinstance(data, dict):
+            merged.update(data)
+
+        # Ensure main directories exist using resolved absolute paths
+        input_dir = _resolve_subpath(project_root, merged.get("input_folder", DEFAULTS["input_folder"]))
+        results_dir = _resolve_subpath(project_root, merged.get("results_folder", DEFAULTS["results_folder"]))
+        input_dir.mkdir(parents=True, exist_ok=True)
+        results_dir.mkdir(parents=True, exist_ok=True)
+
+        proj = Project(project_root, merged)
+        return proj
 
     def save(self) -> None:
-        """Write the manifest to ``project.json`` at :attr:`project_root`."""
+        """
+        Persist manifest. Store relative paths when inside project_root.
+        Keep absolute paths for out-of-project locations.
+        """
+        manifest_path = self.project_root / "project.json"
 
-        manifest_path = self.project_root / self.MANIFEST_NAME
-        manifest_path.write_text(json.dumps(self.to_dict(), indent=2))
+        # Start from in-memory manifest to preserve unknown keys
+        data: Dict[str, Any] = dict(self.manifest)
+
+        # Friendly name handling
+        folder_name = self.project_root.name
+        name_value = getattr(self, "name", folder_name)
+        if name_value and name_value != folder_name:
+            data["name"] = name_value
+        else:
+            if "name" in data:
+                try:
+                    if str(data["name"]) == folder_name:
+                        data.pop("name", None)
+                except Exception:
+                    pass
+
+        # Normalize current runtime folders back into manifest form
+        current_input = Path(data.get("input_folder", DEFAULTS["input_folder"]))
+        current_results = Path(data.get("results_folder", DEFAULTS["results_folder"]))
+
+        if hasattr(self, "input_folder") and self.input_folder:
+            current_input = Path(self.input_folder)
+        if hasattr(self, "results_folder") and self.results_folder:
+            current_results = Path(self.results_folder)
+
+        data["input_folder"] = _relativize(self.project_root, current_input)
+        data["results_folder"] = _relativize(self.project_root, current_results)
+
+        # Options: ensure default keys exist, keep user values
+        opts = data.get("options", {})
+        if not isinstance(opts, dict):
+            opts = {}
+        normalized_opts = DEFAULTS["options"].copy()
+        normalized_opts.update(opts)
+        data["options"] = normalized_opts
+
+        # Preprocessing: ensure dict type
+        pp = data.get("preprocessing", {})
+        data["preprocessing"] = pp if isinstance(pp, dict) else {}
+
+        # Event map: ensure dict type
+        ev = data.get("event_map", {})
+        data["event_map"] = ev if isinstance(ev, dict) else {}
+
+        # Subfolders: persist relative names under results_folder when possible
+        sub_out: Dict[str, str] = {}
+        for key, abs_path in getattr(self, "subfolders", {}).items():
+            try:
+                rf = self.results_folder.resolve()
+                sp = Path(abs_path).resolve()
+                if rf == sp or rf in sp.parents:
+                    rel = os.fspath(sp.relative_to(rf))
+                    sub_out[key] = rel
+                else:
+                    sub_out[key] = os.fspath(sp)
+            except Exception:
+                sub_out[key] = os.fspath(abs_path)
+        merged_sub = DEFAULTS["subfolders"].copy()
+        merged_sub.update(sub_out)
+        data["subfolders"] = merged_sub
+
+        manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
