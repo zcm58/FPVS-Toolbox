@@ -30,7 +30,7 @@ class PlotSettingsManager:
 
     def save(self) -> None:
         self.ini_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.ini_path, 'w') as f:
+        with open(self.ini_path, 'w', encoding='utf-8') as f:
             self.config.write(f)
 
     def get(self, section: str, option: str, fallback: str = '') -> str:
