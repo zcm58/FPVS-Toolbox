@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
-from PySide6.QtCore import QSettings
+
+from Main_App.PySide6_App.utils.settings import get_app_settings
 
 
 def changeProjectsRoot(self) -> None:
-    settings = QSettings()
+    settings = get_app_settings()
     root = QFileDialog.getExistingDirectory(
         self,
         "Select Projects Root Folder",
