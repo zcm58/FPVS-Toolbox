@@ -69,11 +69,15 @@ def new_project(self) -> None:
     self.loadProject(project)
 
 
-def open_existing_project(self, parent: QWidget) -> None:
+def open_existing_project(self, parent: QWidget | None = None) -> None:
     if not _open_project_guard.start():
         return
 
     try:
+        # Derive a parent if not provided to keep backward compatibility with older callers
+        if parent is None:
+            parent = getattr(self, "window", lambda: None)() or getattr(self, "parent", lambda: None)() or None
+
         root = ensure_projects_root(parent)
         if root is None:
             QMessageBox.information(parent, "Projects Root", "Project root not set.")
@@ -162,6 +166,7 @@ def open_existing_project(self, parent: QWidget) -> None:
         self.loadProject(project)
     finally:
         _open_project_guard.end()
+
 
 
 def openProjectPath(self, folder: str) -> None:
