@@ -937,32 +937,35 @@ class StatsWindow(QMainWindow):
         finally:
             self._scan_guard.done()
 
-    def _load_default_data_folder(self) -> None:
-        default = None
+
+
+    def _preferred_stats_folder(self) -> Path:
+        """
+        Project-standard stats folder:
+          <project_root>\1 - Excel Data Files
+        """
+        # project_root comes from parent if available; else fall back to self.project_dir
+        proj_root = None
         if self.parent() and hasattr(self.parent(), "currentProject"):
-            proj = self.parent().currentProject
-            if proj:
-                root = getattr(proj, "project_root", "")
-                sub = proj.subfolders.get("excel", "")
-                cand = Path(root) / sub
-                if cand.is_dir():
-                    default = str(cand)
-        if not default:
-            cand = Path(_auto_detect_project_dir()) / "1 - Excel Data Files"
-            if cand.is_dir():
-                default = str(cand)
-        if default:
-            self.le_folder.setText(default)
+            try:
+                proj_root = Path(getattr(self.parent().currentProject, "project_root", "")).resolve()
+            except Exception:
+                proj_root = None
+        if not proj_root:
+            proj_root = Path(self.project_dir).resolve()
+        return (proj_root / "1 - Excel Data Files").resolve()
+
+    def _load_default_data_folder(self) -> None:
+        """
+        On open, auto-select <project root>\1 - Excel Data Files.
+        If it doesn't exist, do nothing (user can Browse).
+        """
+        target = self._preferred_stats_folder()
+        if target.exists() and target.is_dir():
+            self.le_folder.setText(str(target))
             self._scan_button_clicked()
+        else:
+            # Leave UI as-is; user will browse. Status hint only.
+            self._set_status("Select the project's '1 - Excel Data Files' folder to begin.")
 
-    # ---- logging ----
 
-    def _log_ui_error(self, op: str, exc: Exception) -> None:
-        logger.error(
-            "ui_error",
-            extra={
-                "op": op,
-                "project_dir": getattr(self, "project_dir", ""),
-                "exc": repr(exc),
-            },
-        )
