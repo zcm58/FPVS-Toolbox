@@ -815,7 +815,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._on_project_ready()
 
     def open_existing_project(self) -> None:
-        open_existing_project(self)
+        open_existing_project(self, self)
         self._on_project_ready()
 
     def openProjectPath(self, folder: str) -> None:  # noqa: N802 (compat)

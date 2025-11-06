@@ -1,13 +1,21 @@
 """Project management utilities extracted from main_window.py."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import sys
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QInputDialog
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QInputDialog, QWidget
 
 from .project import Project
+from Main_App.PySide6_App.config.projects_root import ensure_projects_root
+from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.PySide6_App.utils.settings import get_app_settings
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
+_open_project_guard = OpGuard()
 
 
 def select_projects_root(self) -> None:
@@ -61,31 +69,99 @@ def new_project(self) -> None:
     self.loadProject(project)
 
 
-def open_existing_project(self) -> None:
-    candidates = [d for d in self.projectsRoot.iterdir() if (d / "project.json").exists()]
-    if not candidates:
-        QMessageBox.information(
-            self, "No Projects", "No projects found under your Projects Root."
+def open_existing_project(self, parent: QWidget) -> None:
+    if not _open_project_guard.start():
+        return
+
+    try:
+        root = ensure_projects_root(parent)
+        if root is None:
+            QMessageBox.information(parent, "Projects Root", "Project root not set.")
+            logger.warning(
+                "Projects root missing.",
+                extra={"op": "open_existing_project", "path": None},
+            )
+            return
+
+        self.projectsRoot = root
+
+        try:
+            entries = list(root.iterdir())
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            logger.error(
+                "Unable to enumerate projects under %s: %s",
+                root,
+                exc,
+                exc_info=exc,
+                extra={"op": "open_existing_project", "path": str(root)},
+            )
+            QMessageBox.critical(
+                parent,
+                "Projects Root Unavailable",
+                f"Unable to access projects root:\n{root}\n{exc}",
+            )
+            return
+
+        candidates = [d for d in entries if (d / "project.json").exists()]
+        if not candidates:
+            QMessageBox.information(
+                parent,
+                "No Projects Found",
+                f"No projects found under {root}.",
+            )
+            logger.info(
+                "No projects discovered under %s.",
+                root,
+                extra={"op": "open_existing_project", "path": str(root)},
+            )
+            return
+
+        labels: list[str] = []
+        label_to_path: dict[str, Path] = {}
+        for candidate in candidates:
+            try:
+                project = Project.load(candidate)
+            except Exception as exc:
+                logger.error(
+                    "Failed to load project at %s: %s",
+                    candidate,
+                    exc,
+                    exc_info=exc,
+                    extra={"op": "open_existing_project", "path": str(candidate)},
+                )
+                continue
+            label = project.name
+            labels.append(label)
+            label_to_path[label] = candidate
+
+        if not labels:
+            QMessageBox.warning(
+                parent,
+                "Projects Unavailable",
+                "No valid projects could be loaded.",
+            )
+            return
+
+        choice, ok = QInputDialog.getItem(
+            parent,
+            "Open Existing Project",
+            "Select a project:",
+            labels,
+            0,
+            editable=False,
         )
-        return
+        if not ok or choice not in label_to_path:
+            logger.info(
+                "Project selection cancelled.",
+                extra={"op": "open_existing_project", "path": str(root)},
+            )
+            return
 
-    labels = []
-    label_to_path = {}
-    for d in candidates:
-        proj = Project.load(d)
-        label = proj.name
-        labels.append(label)
-        label_to_path[label] = d
-
-    choice, ok = QInputDialog.getItem(
-        self, "Open Project", "Select a project:", labels, editable=False
-    )
-    if not ok or choice not in label_to_path:
-        return
-
-    project = Project.load(label_to_path[choice])
-    self.currentProject = project
-    self.loadProject(project)
+        project = Project.load(label_to_path[choice])
+        self.currentProject = project
+        self.loadProject(project)
+    finally:
+        _open_project_guard.end()
 
 
 def openProjectPath(self, folder: str) -> None:
