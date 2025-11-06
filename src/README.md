@@ -4,7 +4,7 @@ The FPVS Toolbox is a work-in-progress software solution for use with BioSemi EE
 - Automated data cleaning and post processing
 - Automated statistical analysis with the ability to detect significant neural responses to experimental stimuli
 - Easy generation of publication quality figures & 3D heatmaps of brain activity
-- Automated BCA, SNR, and FFT calcuations
+- Automated BCA, SNR, and FFT calculations
 
 ## Versioning
 
