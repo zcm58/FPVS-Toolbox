@@ -18,7 +18,15 @@ def test_phase1_perf_hygiene(qtbot):
     spec = types.ModuleType("mp_env")
     exec(mp_env_path.read_text(), spec.__dict__)
     spec.set_blas_threads_single_process()
-    assert os.environ.get("OMP_NUM_THREADS")
+
+    cores = os.cpu_count() or 1
+    expected_threads = str(cores)
+    expected_numexpr_threads = str(max(1, cores // 2))
+
+    assert os.environ.get("MKL_NUM_THREADS") == expected_threads
+    assert os.environ.get("OPENBLAS_NUM_THREADS") == expected_threads
+    assert os.environ.get("OMP_NUM_THREADS") == expected_threads
+    assert os.environ.get("NUMEXPR_NUM_THREADS") == expected_numexpr_threads
 
     sys.modules.pop("Main_App", None)
     stub = types.ModuleType("Main_App")
