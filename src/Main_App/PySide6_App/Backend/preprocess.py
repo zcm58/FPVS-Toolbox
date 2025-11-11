@@ -1,131 +1,186 @@
 # -*- coding: utf-8 -*-
 """
-Qt-side preprocessor that exactly mirrors the legacy logic:
-- EXG1/EXG2 kept as EEG (for mastoids); EXG3–EXG8 set to 'misc'
-- Optional mastoid ref (if EXG1 & EXG2 present)
-- Optional channel drop by index while preserving the stim channel
-- Downsample ONLY if current sfreq > target (skip if equal; never upsample)
-- FIR filter: filter_length=8449, l/h trans bandwidths=0.1 Hz, Hamming, zero-double
-- Kurtosis-based bad detection with 10% trimmed stats, then interpolate if montage exists
-- Final average reference over good EEG channels
-Returns (raw, num_kurtosis_bads)
-"""
+Qt-side preprocessing that mirrors the legacy logic exactly.
 
+Order (legacy parity):
+1) Initial reference (EXG1 & EXG2 if present)
+2) Drop EXG1/EXG2
+3) Optional channel limit (max_idx_keep; keep stim if needed)
+4) Downsample (if requested)
+5) FIR filter (legacy mapping and kernel)
+6) Kurtosis-based rejection & interpolation
+7) Final average reference
+
+Returns (processed_raw_or_none, n_bad_by_kurtosis)
+"""
 from __future__ import annotations
 
-import os
+import logging
 import traceback
-from typing import Dict, Any, Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Dict, Any
 
 import mne
 import numpy as np
 from scipy.stats import kurtosis
 
-import config
+logger = logging.getLogger(__name__)
 
+__all__ = ["perform_preprocessing"]
 
-def _basename_from_raw(raw) -> str:
-    if getattr(raw, "filenames", None) and raw.filenames and raw.filenames[0]:
-        return os.path.basename(raw.filenames[0])
-    if getattr(raw, "filename", None):
-        return os.path.basename(raw.filename)
-    return "UnknownFile"
+# Import configuration with a graceful fallback when run standalone
+try:
+    import config  # type: ignore
+except Exception:  # pragma: no cover - fallback for isolated execution
+    class _DummyConfig:
+        DEFAULT_STIM_CHANNEL = "Status"
+
+    config = _DummyConfig()
+    logger.warning(
+        "Warning [preprocess.py]: Could not import config. Using '%s'.",
+        config.DEFAULT_STIM_CHANNEL,
+    )
 
 
 def perform_preprocessing(
     raw_input: mne.io.BaseRaw,
     params: Dict[str, Any],
     log_func: Callable[[str], None],
-    filename_for_log: Optional[str] = None,
+    filename_for_log: str = "UnknownFile",
 ) -> Tuple[Optional[mne.io.BaseRaw], int]:
-    raw = raw_input
-    fname = filename_for_log or _basename_from_raw(raw)
+    """
+    Apply preprocessing steps to the raw MNE object (legacy parity).
 
-    # Params (use same names as legacy)
+    Args:
+        raw_input: Raw MNE data to process (modified in place).
+        params: Expected keys:
+            'downsample_rate', 'low_pass', 'high_pass', 'reject_thresh',
+            'ref_channel1', 'ref_channel2', 'max_idx_keep', 'stim_channel' (optional).
+        log_func: Logger function (e.g., app.log).
+        filename_for_log: For log context.
+
+    Returns:
+        (processed_raw_or_none, n_bad_by_kurtosis)
+    """
+    raw = raw_input
     downsample_rate = params.get("downsample_rate")
-    low_pass        = params.get("low_pass")       # e.g. 0.1
-    high_pass       = params.get("high_pass")      # e.g. 40 or 50
-    reject_thresh   = params.get("reject_thresh")
-    ref1            = params.get("ref_channel1")
-    ref2            = params.get("ref_channel2")
-    max_keep        = params.get("max_idx_keep")
-    stim_ch         = params.get("stim_channel", config.DEFAULT_STIM_CHANNEL)
+    low_pass = params.get("low_pass")          # legacy mapping: low_pass -> l_freq
+    high_pass = params.get("high_pass")        # legacy mapping: high_pass -> h_freq
+    reject_thresh = params.get("reject_thresh")
+    ref1 = params.get("ref_channel1")
+    ref2 = params.get("ref_channel2")
+    max_keep = params.get("max_idx_keep")
+    stim_ch = params.get("stim_channel", config.DEFAULT_STIM_CHANNEL)
+
+    num_kurtosis_bads_identified = 0
 
     try:
-        ch_names = list(raw.info["ch_names"])
-        log_func(f"Preprocessing {len(ch_names)} chans from '{fname}'...")
+        orig_ch_names = list(raw.info["ch_names"])
+        log_func(f"Preprocessing {len(orig_ch_names)} chans from '{filename_for_log}'...")
+        log_func(
+            f"DEBUG [preprocess for {filename_for_log}]: Initial channel names ({len(orig_ch_names)}): {orig_ch_names}"
+        )
+        log_func(
+            f"DEBUG [preprocess for {filename_for_log}]: Expected stim_ch: '{stim_ch}', max_idx_keep: {max_keep}"
+        )
+        if stim_ch not in orig_ch_names:
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: WARNING - Expected stim_ch '{stim_ch}' is NOT in initial channel list."
+            )
 
-        # EXG3–EXG8 should not be treated as EEG (avoids montage complaints)
-        exg_misc = {f"EXG{i}": "misc" for i in range(3, 9)}
-        present_misc = {k: v for k, v in exg_misc.items() if k in ch_names}
-        if present_misc:
+        # 1) Initial reference (EXG1/EXG2)
+        if ref1 and ref2 and ref1 in orig_ch_names and ref2 in orig_ch_names:
             try:
-                raw.set_channel_types(present_misc, verbose=False)
-            except Exception:
-                pass  # non-fatal
-
-        # Optional initial mastoid reference
-        if ref1 and ref2 and ref1 in ch_names and ref2 in ch_names:
-            try:
-                log_func(f"Applying reference: Subtract average of {ref1} & {ref2} for {fname}...")
+                log_func(
+                    f"Applying reference: Subtract average of {ref1} & {ref2} for {filename_for_log}..."
+                )
                 raw.set_eeg_reference(ref_channels=[ref1, ref2], projection=False, verbose=False)
-                log_func(f"Initial reference applied to {fname}.")
+                log_func(f"Initial reference applied to {filename_for_log}.")
             except Exception as e:
-                log_func(f"Warn: Initial reference failed for {fname}: {e}")
+                log_func(f"Warn: Initial reference failed for {filename_for_log}: {e}")
         else:
             log_func(
-                f"Skip initial referencing for {fname} (Ref channels '{ref1}', '{ref2}' not found or not specified)."
+                f"Skip initial referencing for {filename_for_log} (Ref channels '{ref1}', '{ref2}' not found or not specified)."
             )
 
-        # Optional channel drop by index, but always preserve stim channel if present
-        before = list(raw.info["ch_names"])
-        if max_keep is not None and 0 < max_keep < len(before):
-            keep = before[:max_keep]
-            if stim_ch in before and stim_ch not in keep:
-                keep.append(stim_ch)
-            drop = [c for c in before if c not in set(keep)]
-            if drop:
-                log_func(f"Attempting to drop {len(drop)} channels from {fname}...")
-                raw.drop_channels(drop, on_missing="warn")
-                log_func(f"{len(raw.ch_names)} channels remain in {fname} after drop operation.")
+        # 2) Explicitly drop EXG1/EXG2 after initial reference
+        for ch in ("EXG1", "EXG2"):
+            if ch in raw.ch_names:
+                raw.drop_channels([ch])
+                log_func(f"Dropped {ch} after initial referencing.")
+
+        # 3) Optional channel limit (keeps stim if present)
+        current_names_before_drop = list(raw.info["ch_names"])
+        log_func(
+            f"DEBUG [preprocess for {filename_for_log}]: Channel names BEFORE drop logic ({len(current_names_before_drop)}): {current_names_before_drop}"
+        )
+        if max_keep is not None and 0 < max_keep < len(current_names_before_drop):
+            channels_to_keep_by_index = current_names_before_drop[:max_keep]
+            final_keep = list(channels_to_keep_by_index)
+            if stim_ch in current_names_before_drop and stim_ch not in final_keep:
+                final_keep.append(stim_ch)
+                log_func(
+                    f"DEBUG [preprocess for {filename_for_log}]: Stim_ch '{stim_ch}' added to keep list."
+                )
+            unique_keep = set(final_keep)
+            ordered_keep = [nm for nm in current_names_before_drop if nm in unique_keep]
+            to_drop = [nm for nm in current_names_before_drop if nm not in ordered_keep]
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: Final KEEP ({len(ordered_keep)}): {ordered_keep}"
+            )
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: Final DROP ({len(to_drop)}): {to_drop}"
+            )
+            if to_drop:
+                log_func(f"Attempting to drop {len(to_drop)} channels from {filename_for_log}...")
+                # Parity: use on_missing="warn" as in legacy
+                raw.drop_channels(to_drop, on_missing="warn")
+                log_func(
+                    f"{len(raw.ch_names)} channels remain in {filename_for_log} after drop."
+                )
+                log_func(
+                    f"DEBUG [preprocess for {filename_for_log}]: Channel names AFTER drop: {list(raw.info['ch_names'])}"
+                )
             else:
-                log_func(f"No channels were ultimately selected to be dropped for {fname}.")
+                log_func(f"No channels selected to be dropped for {filename_for_log}.")
         else:
             log_func(
-                f"Skip channel drop based on max_keep for {fname} (max_keep is None, 0, or >= num channels). "
-                f"Current channels: {len(before)}"
+                f"Skip channel drop for {filename_for_log} (max_keep: {max_keep}). Current channels: {len(current_names_before_drop)}"
             )
 
-        # Downsample ONLY if current sfreq > target; skip if equal (never upsample)
-        sf = float(raw.info["sfreq"])
+        # 4) Downsample (legacy position: BEFORE filtering)
         if downsample_rate:
-            log_func(f"Downsample check for {fname}: Curr {sf:.1f}Hz, Tgt {downsample_rate}Hz.")
-            try:
-                ds = float(downsample_rate)
-                if sf > ds:
-                    raw.resample(ds, npad="auto", window="hann", n_jobs=1, verbose=False)
-                    log_func(f"Resampled {fname} to {raw.info['sfreq']:.1f}Hz.")
-                elif abs(sf - ds) < 1e-6:
-                    log_func(f"Already at {downsample_rate}Hz; skipping resample for {fname}.")
-                else:
-                    log_func(f"Current rate {sf:.1f}Hz < target; no upsampling performed for {fname}.")
-            except Exception as e:
-                log_func(f"Warn: Resampling failed for {fname}: {e}")
+            sf = raw.info["sfreq"]
+            log_func(
+                f"Downsample check for {filename_for_log}: Curr {sf:.1f}Hz, Tgt {downsample_rate}Hz."
+            )
+            if sf > downsample_rate:
+                try:
+                    # Legacy parity: no explicit n_jobs override; let MNE decide
+                    raw.resample(downsample_rate, npad="auto", window="hann", verbose=False)
+                    log_func(f"Resampled {filename_for_log} to {raw.info['sfreq']:.1f}Hz.")
+                except Exception as resample_err:
+                    log_func(
+                        f"Warn: Resampling failed for {filename_for_log}: {resample_err}"
+                    )
+            else:
+                log_func(f"No downsampling needed for {filename_for_log}.")
         else:
-            log_func(f"Skip downsample for {fname}.")
+            log_func(f"Skip downsample for {filename_for_log}.")
 
-        # === EXACT legacy FIR settings ===
-        # (Legacy uses variable names where l_freq=low_pass, h_freq=high_pass)
+        # 5) FILTER at (possibly reduced) Fs
+        # LEGACY MAPPING: low_pass -> l_freq, high_pass -> h_freq (intentionally inverted names)
         l_freq = low_pass if (low_pass and low_pass > 0) else None
         h_freq = high_pass
         if l_freq or h_freq:
             try:
-                low_trans_bw       = 0.1
-                high_trans_bw      = 0.1
-                filter_len_points  = 8449
-                log_func(f"Filtering {fname} ({l_freq if l_freq else 'DC'}-{h_freq if h_freq else 'Nyq'}Hz) ...")
+                low_trans_bw, high_trans_bw, filter_len_points = 0.1, 0.1, 8449
+                log_func(
+                    f"Filtering {filename_for_log} ({l_freq if l_freq else 'DC'}-{h_freq if h_freq else 'Nyq'}Hz) ..."
+                )
+                # Mirror legacy exactly: no explicit picks (use MNE's default data-channel picking)
                 raw.filter(
-                    l_freq, h_freq,
+                    l_freq,
+                    h_freq,
                     method="fir",
                     phase="zero-double",
                     fir_window="hamming",
@@ -134,90 +189,119 @@ def perform_preprocessing(
                     h_trans_bandwidth=high_trans_bw,
                     filter_length=filter_len_points,
                     skip_by_annotation="edge",
-                    n_jobs=1,
                     verbose=False,
                 )
-                log_func(f"Filter OK for {fname}.")
+                log_func(f"Filter OK for {filename_for_log}.")
             except Exception as e:
-                log_func(f"Warn: Filter failed for {fname}: {e}")
+                log_func(f"Warn: Filter failed for {filename_for_log}: {e}")
         else:
-            log_func(f"Skip filter for {fname}.")
+            log_func(f"Skip filter for {filename_for_log}.")
 
-        # Kurtosis bads (10% trimmed stats), then interpolate if possible
-        num_kurtosis_bads = 0
+        # 6) Kurtosis rejection & interpolation (unchanged)
         if reject_thresh:
-            log_func(f"Kurtosis rejection for {fname} (Z > {reject_thresh})...")
+            log_func(f"Kurtosis rejection for {filename_for_log} (Z > {reject_thresh})...")
+            bad_k_auto: list[str] = []
             eeg_picks = mne.pick_types(
-                raw.info, eeg=True,
-                exclude=raw.info["bads"] + ([stim_ch] if stim_ch in raw.ch_names else [])
+                raw.info,
+                eeg=True,
+                exclude=raw.info["bads"]
+                + (
+                    [stim_ch]
+                    if (
+                        stim_ch in raw.ch_names
+                        and raw.get_channel_types(picks=stim_ch)[0] != "eeg"
+                    )
+                    else []
+                ),
             )
             if len(eeg_picks) >= 2:
                 data = raw.get_data(picks=eeg_picks)
-                k = kurtosis(data, axis=1, fisher=True, bias=False)
-                k = np.nan_to_num(k)
-
-                n = len(k)
-                trim = int(np.floor(n * 0.1))
-                bad_auto = []
-                if n - 2 * trim > 1:
-                    k_sorted  = np.sort(k)
-                    k_trimmed = k_sorted[trim:n - trim]
-                    m_t, s_t  = float(np.mean(k_trimmed)), float(np.std(k_trimmed))
-                    log_func(f"Trimmed Norm for {fname}: Mean={m_t:.3f}, Std={s_t:.3f} (N_trimmed={len(k_trimmed)})")
-                    if s_t > 1e-9:
-                        z = (k - m_t) / s_t
-                        idx = np.where(np.abs(z) > reject_thresh)[0]
-                        pick_names = [raw.info["ch_names"][i] for i in eeg_picks]
-                        bad_auto = [pick_names[i] for i in idx]
+                k_values = kurtosis(data, axis=1, fisher=True, bias=False)
+                k_values = np.nan_to_num(k_values)
+                proportion_to_cut = 0.1
+                n_k = len(k_values)
+                trim_count = int(np.floor(n_k * proportion_to_cut))
+                if n_k - 2 * trim_count > 1:
+                    k_sorted = np.sort(k_values)
+                    k_trimmed = k_sorted[trim_count : n_k - trim_count]
+                    m_trimmed, s_trimmed = float(np.mean(k_trimmed)), float(np.std(k_trimmed))
+                    log_func(
+                        f"Trimmed Norm for {filename_for_log}: Mean={m_trimmed:.3f}, Std={s_trimmed:.3f} (N_trimmed={len(k_trimmed)})"
+                    )
+                    if s_trimmed > 1e-9:
+                        z_scores = (k_values - m_trimmed) / s_trimmed
+                        bad_idx = np.where(np.abs(z_scores) > reject_thresh)[0]
+                        ch_names_pick = [raw.info["ch_names"][i] for i in eeg_picks]
+                        bad_k_auto = [ch_names_pick[i] for i in bad_idx]
                     else:
-                        log_func(f"Kurtosis Trimmed Std Dev near zero for {fname}.")
+                        log_func(f"Kurtosis Trimmed Std Dev near zero for {filename_for_log}.")
                 else:
-                    log_func(f"Not enough data for Kurtosis trimmed stats in {fname} (N_k={n}).")
-
-                if bad_auto:
-                    log_func(f"Bad by Kurtosis for {fname}: {bad_auto}")
+                    log_func(
+                        f"Not enough data for Kurtosis trimmed stats in {filename_for_log} (N_k={n_k})."
+                    )
+                num_kurtosis_bads_identified = len(bad_k_auto)
+                if bad_k_auto:
+                    log_func(
+                        f"Bad by Kurtosis for {filename_for_log}: {bad_k_auto} (Count: {num_kurtosis_bads_identified})"
+                    )
                 else:
-                    log_func(f"No channels bad by Kurtosis for {fname}.")
-
-                new_bads = [b for b in bad_auto if b not in raw.info["bads"]]
-                if new_bads:
-                    raw.info["bads"].extend(new_bads)
-                num_kurtosis_bads = len(new_bads)
-
-                if raw.info["bads"]:
-                    log_func(f"Interpolating bads in {fname}: {raw.info['bads']}")
-                    if raw.get_montage():
-                        try:
-                            raw.interpolate_bads(reset_bads=True, mode="accurate", verbose=False)
-                            log_func(f"Interpolation OK for {fname}.")
-                        except Exception as e:
-                            log_func(f"Warn: Interpolation failed for {fname}: {e}")
-                    else:
-                        log_func(f"Warn: No montage for {fname}, cannot interpolate. Bads remain: {raw.info['bads']}")
-                else:
-                    log_func(f"No bads to interpolate in {fname}.")
+                    log_func(f"No channels bad by Kurtosis for {filename_for_log}.")
             else:
-                log_func(f"Skip Kurtosis for {fname} ( < 2 good EEG channels).")
-        else:
-            log_func(f"Skip Kurtosis for {fname} (no threshold).")
+                log_func(f"Skip Kurtosis for {filename_for_log} ( < 2 good EEG channels).")
 
-        # Final average ref
+            new_bads = [b for b in (bad_k_auto if reject_thresh else []) if b not in raw.info["bads"]]
+            if new_bads:
+                raw.info["bads"].extend(new_bads)
+
+            if raw.info["bads"]:
+                log_func(f"Interpolating bads in {filename_for_log}: {raw.info['bads']}")
+                if raw.get_montage():
+                    try:
+                        raw.interpolate_bads(reset_bads=True, mode="accurate", verbose=False)
+                        log_func(f"Interpolation OK for {filename_for_log}.")
+                    except Exception as e:
+                        log_func(f"Warn: Interpolation failed for {filename_for_log}: {e}")
+                else:
+                    log_func(
+                        f"Warn: No montage for {filename_for_log}, cannot interpolate. Bads remain: {raw.info['bads']}"
+                    )
+            else:
+                log_func(f"No bads to interpolate in {filename_for_log}.")
+        else:
+            log_func(f"Skip Kurtosis for {filename_for_log} (no threshold).")
+
+        # 7) Average reference (final)
         try:
-            log_func(f"Applying average reference to {fname}...")
+            log_func(f"Applying average reference to {filename_for_log}...")
             eeg_picks_for_ref = mne.pick_types(raw.info, eeg=True, exclude=raw.info["bads"])
             if len(eeg_picks_for_ref) > 0:
-                raw.set_eeg_reference(ref_channels="average", picks=eeg_picks_for_ref, projection=True, verbose=False)
+                raw.set_eeg_reference(ref_channels="average", projection=True, verbose=False)
                 raw.apply_proj(verbose=False)
-                log_func(f"Average reference applied to {fname}.")
+                log_func(f"Average reference applied to {filename_for_log}.")
             else:
-                log_func(f"Skip average ref for {fname}: No good EEG channels.")
+                log_func(f"Skip average ref for {filename_for_log}: No good EEG channels.")
         except Exception as e:
-            log_func(f"Warn: Average reference failed for {fname}: {e}")
+            log_func(f"Warn: Average reference failed for {filename_for_log}: {e}")
 
-        log_func(f"Preprocessing OK for {fname}. {len(raw.ch_names)} channels, {raw.info['sfreq']:.1f}Hz.")
-        return raw, num_kurtosis_bads
+        log_func(
+            f"Preprocessing OK for {filename_for_log}. {len(raw.ch_names)} channels, {raw.info['sfreq']:.1f}Hz."
+        )
+        final_ch_names = list(raw.info["ch_names"])
+        log_func(
+            f"DEBUG [preprocess for {filename_for_log}]: Final channel names before returning ({len(final_ch_names)}): {final_ch_names}"
+        )
+        if stim_ch in final_ch_names:
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: Expected stim_ch '{stim_ch}' IS PRESENT at VERY END."
+            )
+        else:
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: CRITICAL! Expected stim_ch '{stim_ch}' IS NOT PRESENT at VERY END."
+            )
+
+        return raw, num_kurtosis_bads_identified
 
     except Exception as e:
-        log_func(f"!!! CRITICAL Preprocessing error for {fname}: {e}")
+        log_func(f"!!! CRITICAL Preprocessing error for {filename_for_log}: {e}")
         log_func(f"Traceback: {traceback.format_exc()}")
-        return None, 0
+        return None, num_kurtosis_bads_identified
