@@ -1,9 +1,9 @@
 # src/Main_App/PySide6_App/adapters/post_export_adapter.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Callable
 from types import SimpleNamespace
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
 
@@ -39,20 +39,24 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
     Guarantees FIF-saving toggles exist and are ON.
     """
     log = ctx.log or (lambda _m: None)
+    if isinstance(ctx.settings, dict):
+        settings_dict: Dict[str, Any] = dict(ctx.settings)
+    else:
+        settings_dict = {}
     shim = SimpleNamespace(
         preprocessed_data=ctx.preprocessed_data,
         save_folder_path=_normalize_save_folder(ctx.save_folder_path),
         data_paths=list(ctx.data_paths or []),
-        settings=ctx.settings or {},
+        settings=settings_dict,
         log=log,
     )
+    save_pref = _coerce_bool(settings_dict.get("save_preprocessed_fif"), default=False)
+    settings_dict["save_preprocessed_fif"] = save_pref
+    settings_dict["save_condition_fif"] = save_pref
     # FIF toggles some legacy branches check
-    if not hasattr(shim, "save_fif_var") or not hasattr(getattr(shim, "save_fif_var"), "get"):
-        shim.save_fif_var = SimpleNamespace(get=lambda: True)
-    if not hasattr(shim, "save_condition_fif_var") or not hasattr(getattr(shim, "save_condition_fif_var"), "get"):
-        shim.save_condition_fif_var = SimpleNamespace(get=lambda: True)
-    if not hasattr(shim, "save_condition_fif"):
-        shim.save_condition_fif = True
+    shim.save_fif_var = SimpleNamespace(get=lambda val=save_pref: val)
+    shim.save_condition_fif_var = SimpleNamespace(get=lambda val=save_pref: val)
+    shim.save_condition_fif = save_pref
     # Other common knobs
     if not hasattr(shim, "run_loreta_var") or not hasattr(getattr(shim, "run_loreta_var"), "get"):
         shim.run_loreta_var = SimpleNamespace(get=lambda: False)
@@ -121,3 +125,17 @@ def run_post_export(ctx: LegacyCtx, labels: List[str]) -> None:
 
     # Per-file FIF fallback (only writes files that are missing)
     _write_missing_fifs(ctx, save_root, labels)
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return default

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Any, Dict
+
+import config
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget,
@@ -23,6 +27,8 @@ from PySide6.QtWidgets import (
 from Main_App.Legacy_App.settings_manager import SettingsManager
 from .roi_settings_editor import ROISettingsEditor
 from ..config.projects_root import changeProjectsRoot
+from ..Backend.project import Project
+from ..Backend.preprocessing_settings import normalize_preprocessing_settings
 
 
 class SettingsPanel(QWidget):
@@ -72,9 +78,16 @@ class SettingsPanel(QWidget):
 class SettingsDialog(QDialog):
     """Dialog for editing application settings via :class:`SettingsManager`."""
 
-    def __init__(self, manager: SettingsManager, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        manager: SettingsManager,
+        parent: QWidget | None = None,
+        project: Project | None = None,
+    ) -> None:
         super().__init__(parent)
         self.manager = manager
+        self.project = project
+        self._project_cache: Dict[str, Any] | None = None
         # Stub attributes for pruned settings to avoid AttributeError if referenced
         self.data_edit = None
         self.out_edit = None
@@ -121,7 +134,12 @@ class SettingsDialog(QDialog):
         self.mode_combo.setCurrentText(self.manager.get("appearance", "mode", "System"))
         form.addRow(QLabel("Appearance Mode"), self.mode_combo)
 
-        self.stim_edit = QLineEdit(self.manager.get("stim", "channel", "Status"))
+        stim_default = (
+            self._project_preprocessing().get("stim_channel", config.DEFAULT_STIM_CHANNEL)
+            if self.project
+            else self.manager.get("stim", "channel", config.DEFAULT_STIM_CHANNEL)
+        )
+        self.stim_edit = QLineEdit(stim_default)
         form.addRow(QLabel("Stim Channel"), self.stim_edit)
 
         debug_default = self.manager.get("debug", "enabled", "False").lower() == "true"
@@ -160,24 +178,32 @@ class SettingsDialog(QDialog):
             grid.addWidget(edit, row, col * 2 + 1)
 
         pre_keys = [
-            ("preprocessing", "low_pass", "0.1"),
-            ("preprocessing", "high_pass", "50"),
-            ("preprocessing", "downsample", "256"),
-            ("preprocessing", "epoch_start", "-1"),
-            ("preprocessing", "reject_thresh", "5"),
-            ("preprocessing", "epoch_end", "125"),
-            ("preprocessing", "ref_chan1", "EXG1"),
-            ("preprocessing", "ref_chan2", "EXG2"),
-            ("preprocessing", "max_idx_keep", "64"),
-            ("preprocessing", "max_bad_chans", "10"),
+            ("preprocessing", "low_pass", "0.1", "low_pass"),
+            ("preprocessing", "high_pass", "50", "high_pass"),
+            ("preprocessing", "downsample", "256", "downsample"),
+            ("preprocessing", "epoch_start", "-1", "epoch_start_s"),
+            ("preprocessing", "reject_thresh", "5", "rejection_z"),
+            ("preprocessing", "epoch_end", "125", "epoch_end_s"),
+            ("preprocessing", "ref_chan1", "EXG1", "ref_chan1"),
+            ("preprocessing", "ref_chan2", "EXG2", "ref_chan2"),
+            ("preprocessing", "max_idx_keep", "64", "max_chan_idx_keep"),
+            ("preprocessing", "max_bad_chans", "10", "max_bad_chans"),
         ]
-        for edit, (sec, opt, fallback) in zip(self.preproc_edits, pre_keys):
-            edit.setText(self.manager.get(sec, opt, fallback))
+        project_pp = self._project_preprocessing() if self.project else None
+        for edit, (sec, opt, fallback, canonical) in zip(self.preproc_edits, pre_keys):
+            if project_pp is not None:
+                value = project_pp.get(canonical)
+                edit.setText("" if value is None else str(value))
+            else:
+                edit.setText(self.manager.get(sec, opt, fallback))
 
         self.save_fif_check = QCheckBox("Save Preprocessed .fif", self.group_preproc)
-        self.save_fif_check.setChecked(
-            self.manager.get("paths", "save_fif", "False").lower() == "true"
-        )
+        if project_pp is not None:
+            self.save_fif_check.setChecked(bool(project_pp.get("save_preprocessed_fif", False)))
+        else:
+            self.save_fif_check.setChecked(
+                self.manager.get("paths", "save_fif", "False").lower() == "true"
+            )
         grid.addWidget(self.save_fif_check, 5, 0, 1, 4)
 
         layout.addWidget(self.group_preproc)
@@ -282,28 +308,44 @@ class SettingsDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _save(self) -> None:
+        using_project = self.project is not None
+
         self.manager.set("appearance", "mode", self.mode_combo.currentText())
-        self.manager.set("stim", "channel", self.stim_edit.text())
+        if not using_project:
+            self.manager.set("stim", "channel", self.stim_edit.text())
         self.manager.set("analysis", "base_freq", self.base_freq_edit.text())
         self.manager.set("analysis", "oddball_freq", self.oddball_freq_edit.text())
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
         pre_keys = [
-            ("preprocessing", "low_pass"),
-            ("preprocessing", "high_pass"),
-            ("preprocessing", "downsample"),
-            ("preprocessing", "epoch_start"),
-            ("preprocessing", "reject_thresh"),
-            ("preprocessing", "epoch_end"),
-            ("preprocessing", "ref_chan1"),
-            ("preprocessing", "ref_chan2"),
-            ("preprocessing", "max_idx_keep"),
-            ("preprocessing", "max_bad_chans"),
+            ("preprocessing", "low_pass", "low_pass"),
+            ("preprocessing", "high_pass", "high_pass"),
+            ("preprocessing", "downsample", "downsample"),
+            ("preprocessing", "epoch_start", "epoch_start_s"),
+            ("preprocessing", "reject_thresh", "rejection_z"),
+            ("preprocessing", "epoch_end", "epoch_end_s"),
+            ("preprocessing", "ref_chan1", "ref_chan1"),
+            ("preprocessing", "ref_chan2", "ref_chan2"),
+            ("preprocessing", "max_idx_keep", "max_chan_idx_keep"),
+            ("preprocessing", "max_bad_chans", "max_bad_chans"),
         ]
-        for edit, (sec, opt) in zip(self.preproc_edits, pre_keys):
-            self.manager.set(sec, opt, edit.text())
-        self.manager.set("paths", "save_fif", str(self.save_fif_check.isChecked()))
+        if not using_project:
+            for edit, (sec, opt, _canonical) in zip(self.preproc_edits, pre_keys):
+                self.manager.set(sec, opt, edit.text())
+            self.manager.set("paths", "save_fif", str(self.save_fif_check.isChecked()))
+        else:
+            try:
+                updated = self._collect_project_preprocessing_inputs()
+                normalized = self.project.update_preprocessing(updated)
+                self._project_cache = normalized
+                self.project.save()
+            except ValueError as exc:
+                QMessageBox.warning(self, "Invalid Settings", str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - disk I/O error path
+                QMessageBox.critical(self, "Save Error", str(exc))
+                return
         self.manager.set("loreta", "mri_path", self.mri_edit.text())
         self.manager.set("loreta", "loreta_low_freq", self.low_freq_edit.text())
         self.manager.set("loreta", "loreta_high_freq", self.high_freq_edit.text())
@@ -352,3 +394,31 @@ class SettingsDialog(QDialog):
             pass
 
         self.accept()
+
+    # ------------------------------------------------------------------
+    def _project_preprocessing(self) -> Dict[str, Any]:
+        if self.project is None:
+            return {}
+        if self._project_cache is None:
+            self._project_cache = normalize_preprocessing_settings(self.project.preprocessing)
+        return self._project_cache
+
+    def _collect_project_preprocessing_inputs(self) -> Dict[str, Any]:
+        values: Dict[str, Any] = {}
+        canonical_keys = [
+            "low_pass",
+            "high_pass",
+            "downsample",
+            "epoch_start_s",
+            "rejection_z",
+            "epoch_end_s",
+            "ref_chan1",
+            "ref_chan2",
+            "max_chan_idx_keep",
+            "max_bad_chans",
+        ]
+        for edit, canonical in zip(self.preproc_edits, canonical_keys):
+            values[canonical] = edit.text()
+        values["stim_channel"] = self.stim_edit.text()
+        values["save_preprocessed_fif"] = self.save_fif_check.isChecked()
+        return values

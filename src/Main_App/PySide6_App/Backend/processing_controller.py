@@ -49,8 +49,8 @@ def start_processing(self) -> None:
             "reject_thresh": p.get("rejection_z"),
             "ref_channel1": p.get("ref_chan1"),
             "ref_channel2": p.get("ref_chan2"),
-            "max_idx_keep": p.get("max_chan_idx"),
-            "stim_channel": self.settings.get("stim", "channel", "Status"),
+            "max_idx_keep": p.get("max_chan_idx_keep"),
+            "stim_channel": p.get("stim_channel") or self.settings.get("stim", "channel", "Status"),
         }
 
         for fp in bdf_files:
