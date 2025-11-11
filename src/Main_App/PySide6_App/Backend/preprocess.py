@@ -17,15 +17,21 @@ from __future__ import annotations
 
 import logging
 import traceback
-from typing import Callable, Optional, Tuple, Dict, Any
+from typing import Callable, Optional, Tuple, Dict, Any, List
 
 import mne
 import numpy as np
 from scipy.stats import kurtosis
 
+from Main_App.PySide6_App.utils.audit import (
+    start_preproc_audit,
+    end_preproc_audit,
+    compare_preproc,
+)
+
 logger = logging.getLogger(__name__)
 
-__all__ = ["perform_preprocessing"]
+__all__ = ["perform_preprocessing", "begin_preproc_audit", "finalize_preproc_audit"]
 
 # Import configuration with a graceful fallback when run standalone
 try:
@@ -39,6 +45,49 @@ except Exception:  # pragma: no cover - fallback for isolated execution
         "Warning [preprocess.py]: Could not import config. Using '%s'.",
         config.DEFAULT_STIM_CHANNEL,
     )
+
+
+def begin_preproc_audit(
+    raw: mne.io.BaseRaw,
+    params: Dict[str, Any],
+    filename: str,
+) -> Dict[str, Any]:
+    """Capture baseline audit metadata before preprocessing mutates the Raw."""
+
+    capture = start_preproc_audit(raw, params)
+    capture["file"] = filename
+    return capture
+
+
+def finalize_preproc_audit(
+    before: Dict[str, Any],
+    raw: mne.io.BaseRaw,
+    params: Dict[str, Any],
+    filename: str,
+    *,
+    events_info: Optional[Dict[str, Any]] = None,
+    fif_written: int = 0,
+    n_rejected: int = 0,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Compute the post-state audit and log structured results."""
+
+    after = end_preproc_audit(
+        raw,
+        params,
+        filename=filename,
+        events_info=events_info,
+        fif_written=fif_written,
+        n_rejected=n_rejected,
+    )
+    problems = compare_preproc(before, after, params, events_info=events_info)
+    if problems:
+        logger.warning(
+            "preproc_audit_mismatch",
+            extra={"file": filename, "problems": problems, "audit": after},
+        )
+    else:
+        logger.info("preproc_audit", extra={"file": filename, "audit": after})
+    return after, problems
 
 
 def perform_preprocessing(

@@ -108,7 +108,7 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
     return written
 
 
-def run_post_export(ctx: LegacyCtx, labels: List[str]) -> None:
+def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
     """
     Execute legacy export. Then, for this specific file and labels,
     write any missing -epo.fif files (per-file fallback).
@@ -124,7 +124,7 @@ def run_post_export(ctx: LegacyCtx, labels: List[str]) -> None:
         raise
 
     # Per-file FIF fallback (only writes files that are missing)
-    _write_missing_fifs(ctx, save_root, labels)
+    return _write_missing_fifs(ctx, save_root, labels)
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
