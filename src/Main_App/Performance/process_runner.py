@@ -18,13 +18,14 @@ import tempfile
 import os
 import time
 import traceback
-import tempfile
 from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 from dataclasses import dataclass
 from multiprocessing import Queue, get_context
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Dict, List, Optional
+
+from Main_App.PySide6_App.Backend import preprocess as backend_preprocess
 
 import psutil  # soft memory cap
 from .mp_env import set_blas_threads_multiprocess
@@ -126,7 +127,9 @@ def _process_one_file(
         if raw is None:
             raise RuntimeError("load_eeg_file returned None")
 
-        raw_proc, _meta = perform_preprocessing(  # signatures per legacy module
+        audit_before = backend_preprocess.begin_preproc_audit(raw, settings, file_path.name)
+
+        raw_proc, n_rejected = perform_preprocessing(  # signatures per legacy module
             raw_input=raw,
             params=settings,
             log_func=logger.info,
@@ -145,12 +148,20 @@ def _process_one_file(
             or settings.get("stim")
             or "Status"
         )
+        events_source = "stim"
         try:
             # Use the configured stim channel when available
             events = mne.find_events(raw_proc, stim_channel=stim, shortest_event=1)  # type: ignore[arg-type]
         except Exception:
             # Fallback to annotations if present
             events, _ = mne.events_from_annotations(raw_proc)
+            events_source = "annotations"
+
+        events_info = {
+            "stim_channel": stim,
+            "n_events": int(len(events)),
+            "source": events_source,
+        }
 
         # Clear message if requested event IDs aren’t present
         have_codes = set(int(c) for c in events[:, 2].tolist())
@@ -186,7 +197,17 @@ def _process_one_file(
             settings=settings,
             log=logger.info,
         )
-        run_post_export(ctx, list(event_map.keys()))
+        fif_written = run_post_export(ctx, list(event_map.keys()))
+
+        audit_after, problems = backend_preprocess.finalize_preproc_audit(
+            audit_before,
+            raw_proc,
+            settings,
+            file_path.name,
+            events_info=events_info,
+            fif_written=fif_written,
+            n_rejected=n_rejected,
+        )
 
         # Done with Raw/Epochs
         del raw_proc, epochs_dict
@@ -206,7 +227,13 @@ def _process_one_file(
             pass
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        return {"status": "ok", "file": str(file_path), "elapsed_ms": elapsed_ms}
+        return {
+            "status": "ok",
+            "file": str(file_path),
+            "elapsed_ms": elapsed_ms,
+            "audit": audit_after,
+            "problems": problems,
+        }
 
     except Exception as e:  # pragma: no cover - worker error path
         return {

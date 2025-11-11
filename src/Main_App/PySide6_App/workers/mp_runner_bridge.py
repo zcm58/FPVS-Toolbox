@@ -25,6 +25,7 @@ class MpRunnerBridge(QObject):
         self._q: Optional[Queue] = None
         self._total: int = 0
         self._running = False
+        self._results: List[Dict[str, object]] = []
 
     def start(
         self,
@@ -52,6 +53,7 @@ class MpRunnerBridge(QObject):
 
         Thread(target=run_project_parallel, args=(params, self._q), daemon=True).start()
         self._total = len(data_files)
+        self._results = []
         self._timer.start()
 
     @Slot()
@@ -69,10 +71,12 @@ class MpRunnerBridge(QObject):
                     result = msg.get("result", {})
                     if result.get("status") == "error":
                         self.error.emit(str(result.get("error")))
+                    elif result.get("status") == "ok":
+                        self._results.append(result)
                 elif mtype == "done":
                     self._timer.stop()
                     self._running = False
-                    self.finished.emit({"files": self._total})
+                    self.finished.emit({"files": self._total, "results": list(self._results)})
                     break
         except Exception:
             pass
