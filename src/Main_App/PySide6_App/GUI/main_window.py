@@ -1075,46 +1075,80 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self.max_bad_channels_alert_entry = make_entry(p.get("max_bad_chans"))
 
     def saveProjectSettings(self) -> None:
-        if not self.currentProject:
-            QMessageBox.warning(
-                self, "No Project", "Please open or create a project first."
-            )
+        """Persist project options and event map. Non-blocking, idempotent."""
+        # Guard: require an open project
+        if not getattr(self, "currentProject", None):
+            QMessageBox.warning(self, "No Project", "Please open or create a project first.")
             return
 
-        self.currentProject.options["mode"] = (
-            "single"
-            if getattr(self, "rb_single", None) and self.rb_single.isChecked()
-            else "batch"
-        )
-        self.currentProject.options["run_loreta"] = (
-            self.cb_loreta.isChecked() if hasattr(self, "cb_loreta") else False
-        )
+        # Re-entrancy guard (cheap): reuse the existing OpGuard if available
+        guard = getattr(self, "_save_guard", None)
+        if guard is None:
+            # Lazy-create once; avoids coupling to other guards
+            self._save_guard = OpGuard()
+            guard = self._save_guard
+        if not guard.start():
+            QMessageBox.information(self, "Busy", "Save already in progress.")
+            return
 
-        # Ensure any active editors flush to widgets before scraping.
         try:
-            self.focusWidget()
-            self.clearFocus()
-            QApplication.processEvents()
-        except Exception:
-            pass
+            # Flush any active editors so .text() reads include the latest keystrokes
+            try:
+                self.clearFocus()
+                QApplication.processEvents()
+            except Exception:
+                pass
 
-        mapping: dict[str, int] = {}
-        for row in self.event_rows:
-            edits = row.findChildren(QLineEdit)
-            if len(edits) >= 2:
+            # Capture prior state for change detection
+            old_map: dict[str, int] = dict(getattr(self.currentProject, "event_map", {}) or {})
+            old_opts: dict = dict(getattr(self.currentProject, "options", {}) or {})
+
+            # Update options from UI without changing other keys
+            opts = getattr(self.currentProject, "options", {})
+            if not isinstance(opts, dict):
+                opts = {}
+            opts["mode"] = (
+                "single"
+                if getattr(self, "rb_single", None) and self.rb_single.isChecked()
+                else "batch"
+            )
+            opts["run_loreta"] = bool(self.cb_loreta.isChecked()) if hasattr(self, "cb_loreta") else False
+            self.currentProject.options = opts
+
+            # Build event map in one pass: {label: int(id)}
+            mapping: dict[str, int] = {}
+            for row in getattr(self, "event_rows", []):
+                edits = row.findChildren(QLineEdit)
+                if len(edits) < 2:
+                    continue
                 label = edits[0].text().strip()
                 ident = edits[1].text().strip()
-                if label:
-                    try:
-                        mapping[label] = int(ident)
-                    except Exception:
-                        continue
-        self.currentProject.event_map = mapping
+                if not label:
+                    continue
+                try:
+                    mapping[label] = int(ident)
+                except Exception:
+                    # Ignore non-integer IDs silently to match prior behavior
+                    continue
 
-        self.currentProject.save()
-        QMessageBox.information(
-            self, "Project Saved", "All settings written to project.json."
-        )
+            # If nothing changed, skip disk I/O
+            if mapping == old_map and opts == old_opts:
+                QMessageBox.information(self, "Project Saved", "No changes detected.")
+                return
+
+            # Persist live state
+            self.currentProject.event_map = mapping
+            self.currentProject.save()
+
+            QMessageBox.information(self, "Project Saved", "All settings written to project.json.")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", str(e))
+        finally:
+            # Always release guard
+            try:
+                guard.end()
+            except Exception:
+                pass
 
     # --------------------------- UI helpers --------------------------- #
     def update_select_button_text(self) -> None:

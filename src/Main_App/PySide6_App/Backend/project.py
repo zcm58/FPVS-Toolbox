@@ -50,6 +50,14 @@ def _relativize(project_root: Path, p: Path) -> str:
     return os.fspath(p)
 
 
+def _stable_dump(data: Dict[str, Any]) -> str:
+    """
+    Deterministic JSON for change-detection comparisons.
+    Do not use for on-disk pretty writes.
+    """
+    return json.dumps(data, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
+
+
 class Project:
     """
     Project model for PySide6 GUI.
@@ -135,7 +143,7 @@ class Project:
         raw_map = data.get("event_map", {})
         if not isinstance(raw_map, dict):
             raw_map = {}
-        ev_map: dict[str, int] = {}
+        ev_map: Dict[str, int] = {}
         for k, v in raw_map.items():
             try:
                 ev_map[str(k)] = int(v)
@@ -144,8 +152,7 @@ class Project:
         data["event_map"] = ev_map
 
         # Shallow-merge defaults with existing data
-        merged: Dict[str, Any] = {}
-        merged.update(DEFAULTS)
+        merged: Dict[str, Any] = dict(DEFAULTS)
         merged.update(data)
 
         # Ensure main directories exist using resolved absolute paths
@@ -156,7 +163,8 @@ class Project:
 
         proj = Project(project_root, merged)
         proj.event_map = ev_map
-        proj.manifest = data
+        # Keep the merged view as the in-memory manifest so subsequent saves retain defaults
+        proj.manifest = merged
         return proj
 
     def save(self) -> None:
@@ -166,9 +174,8 @@ class Project:
         """
         manifest_path = self.project_root / "project.json"
 
-        # Start from in-memory manifest to preserve unknown keys
-        base_manifest = self.manifest if isinstance(self.manifest, dict) else {}
-        data: Dict[str, Any] = dict(base_manifest)
+        # Build from in-memory manifest once
+        data: Dict[str, Any] = dict(self.manifest)
 
         # Friendly name handling
         folder_name = self.project_root.name
@@ -176,22 +183,20 @@ class Project:
         if name_value and name_value != folder_name:
             data["name"] = name_value
         else:
-            if "name" in data:
-                try:
-                    if str(data["name"]) == folder_name:
-                        data.pop("name", None)
-                except Exception:
-                    pass
+            # Drop redundant name equal to folder to keep file clean
+            try:
+                if "name" in data and str(data["name"]) == folder_name:
+                    data.pop("name", None)
+            except Exception:
+                pass
 
         # Normalize current runtime folders back into manifest form
-        current_input = Path(data.get("input_folder", DEFAULTS["input_folder"]))
-        current_results = Path(data.get("results_folder", DEFAULTS["results_folder"]))
-
-        if hasattr(self, "input_folder") and self.input_folder:
-            current_input = Path(self.input_folder)
-        if hasattr(self, "results_folder") and self.results_folder:
-            current_results = Path(self.results_folder)
-
+        current_input = Path(self.input_folder) if hasattr(self, "input_folder") and self.input_folder else Path(
+            data.get("input_folder", DEFAULTS["input_folder"])
+        )
+        current_results = Path(self.results_folder) if hasattr(self, "results_folder") and self.results_folder else Path(
+            data.get("results_folder", DEFAULTS["results_folder"])
+        )
         data["input_folder"] = _relativize(self.project_root, current_input)
         data["results_folder"] = _relativize(self.project_root, current_results)
 
@@ -207,23 +212,18 @@ class Project:
         pp = data.get("preprocessing", {})
         data["preprocessing"] = pp if isinstance(pp, dict) else {}
 
-        # Persist the live event map from runtime state.
-        # Normalize to {str: int} without altering keys used elsewhere.
-        live_map: dict[str, Any] = getattr(self, "event_map", {}) or {}
+        # Persist the live event map from runtime state, normalized to {str: int}
+        live_map: Dict[str, Any] = getattr(self, "event_map", {}) or {}
         if not isinstance(live_map, dict):
             live_map = {}
-        norm_map: dict[str, int] = {}
+        norm_map: Dict[str, int] = {}
         for k, v in live_map.items():
             try:
-                key_s = str(k)
-                val_i = int(v)
-                norm_map[key_s] = val_i
+                norm_map[str(k)] = int(v)
             except Exception:
                 # Skip malformed entries rather than crashing the save path.
                 continue
         data["event_map"] = norm_map
-        # Keep in-memory manifest consistent for subsequent operations.
-        self.manifest = data
 
         # Subfolders: persist relative names under results_folder when possible
         sub_out: Dict[str, str] = {}
@@ -242,4 +242,23 @@ class Project:
         merged_sub.update(sub_out)
         data["subfolders"] = merged_sub
 
-        manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Keep in-memory manifest consistent for subsequent operations.
+        self.manifest = data
+
+        # -------- Change-detection write --------
+        # Compute a deterministic compact string for compare only
+        new_compact = _stable_dump(data)
+        if manifest_path.exists():
+            try:
+                current_dict = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if not isinstance(current_dict, dict):
+                    current_dict = {}
+            except Exception:
+                current_dict = {}
+            current_compact = _stable_dump(current_dict)
+            if current_compact == new_compact:
+                # No changes; skip disk write
+                return
+
+        # Pretty write for human readability
+        manifest_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
