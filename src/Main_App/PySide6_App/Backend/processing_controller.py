@@ -1,4 +1,4 @@
-"""Processing helpers for the PySide6 app. Single-preprocessor path (PySide6 only)."""
+""""Processing helpers for the PySide6 app. Single-preprocessor path (PySide6 only)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,6 +30,29 @@ def _animate_progress_to(self, value: int) -> None:
         pass
 
 
+def _settings_get(self, section: str, key: str, default=None):
+    try:
+        return self.settings.get(section, key, default)
+    except Exception:
+        return default
+
+
+def _promote_refs_to_eeg(self, raw, ref1: str, ref2: str, filename: str) -> None:
+    """If legacy loader demoted EXG refs to misc, coerce them back to EEG before referencing."""
+    promote = {}
+    for ch in (ref1, ref2):
+        if ch in raw.ch_names:
+            try:
+                ctype = raw.get_channel_types(picks=[ch])[0]
+            except Exception:
+                ctype = None
+            if ctype != "eeg":
+                promote[ch] = "eeg"
+    if promote:
+        raw.set_channel_types(promote)
+        self.log(f"[PROMOTE] {list(promote)} → EEG before referencing for {filename}")
+
+
 def start_processing(self) -> None:
     """
     Run the pipeline on one or more .bdf files using the PySide6 preprocessing module ONLY.
@@ -56,25 +79,19 @@ def start_processing(self) -> None:
         # Preprocessing parameters with precedence: project → settings → defaults
         p = self.currentProject.preprocessing or {}
 
-        def _s(section: str, key: str, default=None):
-            try:
-                return self.settings.get(section, key, default)
-            except Exception:
-                return default
-
         ref1 = (
             p.get("ref_channel1")
             or p.get("ref_chan1")
-            or _s("preprocessing", "ref_channel1")
+            or _settings_get(self, "preprocessing", "ref_channel1")
             or "EXG1"
         )
         ref2 = (
             p.get("ref_channel2")
             or p.get("ref_chan2")
-            or _s("preprocessing", "ref_channel2")
+            or _settings_get(self, "preprocessing", "ref_channel2")
             or "EXG2"
         )
-        stim = p.get("stim_channel") or _s("stim", "channel", "Status") or "Status"
+        stim = p.get("stim_channel") or _settings_get(self, "stim", "channel", "Status") or "Status"
 
         params = {
             "downsample_rate": p.get("downsample"),
@@ -99,6 +116,9 @@ def start_processing(self) -> None:
             # Load
             self.log(f"Loading EEG file: {fp.name}")
             raw = load_eeg_file(self, str(fp))
+
+            # Ensure reference channels are EEG before referencing
+            _promote_refs_to_eeg(self, raw, ref1, ref2, fp.name)
 
             # Preprocess (single pass) with audit
             audit_before = begin_preproc_audit(raw, params, fp.name)
