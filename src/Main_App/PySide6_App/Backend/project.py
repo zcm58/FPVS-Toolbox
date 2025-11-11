@@ -4,7 +4,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
+
+from .preprocessing_settings import (
+    PREPROCESSING_CANONICAL_KEYS,
+    normalize_preprocessing_settings,
+)
 
 # Stable defaults used by GUI/processing
 DEFAULTS: Dict[str, Any] = {
@@ -100,7 +105,12 @@ class Project:
 
         # Preprocessing dict
         pp = manifest.get("preprocessing", {})
-        self.preprocessing: Dict[str, Any] = pp if isinstance(pp, dict) else {}
+        self.preprocessing: Dict[str, Any] = normalize_preprocessing_settings(
+            pp if isinstance(pp, Mapping) else {}
+        )
+        manifest["preprocessing"] = {
+            key: self.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
+        }
 
         # Event map dict
         ev = manifest.get("event_map", {})
@@ -209,8 +219,13 @@ class Project:
         data["options"] = normalized_opts
 
         # Preprocessing: ensure dict type
-        pp = data.get("preprocessing", {})
-        data["preprocessing"] = pp if isinstance(pp, dict) else {}
+        normalized_pp = normalize_preprocessing_settings(
+            self.preprocessing if isinstance(self.preprocessing, Mapping) else {}
+        )
+        self.preprocessing = normalized_pp
+        data["preprocessing"] = {
+            key: normalized_pp[key] for key in PREPROCESSING_CANONICAL_KEYS
+        }
 
         # Persist the live event map from runtime state, normalized to {str: int}
         live_map: Dict[str, Any] = getattr(self, "event_map", {}) or {}
@@ -262,3 +277,14 @@ class Project:
 
         # Pretty write for human readability
         manifest_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # ------------------------------------------------------------------
+    def update_preprocessing(self, values: Mapping[str, Any]) -> Dict[str, Any]:
+        """Update preprocessing settings using the shared normalizer."""
+
+        normalized = normalize_preprocessing_settings(values)
+        self.preprocessing = normalized
+        self.manifest["preprocessing"] = {
+            key: normalized[key] for key in PREPROCESSING_CANONICAL_KEYS
+        }
+        return normalized

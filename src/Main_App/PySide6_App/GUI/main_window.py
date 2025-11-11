@@ -1,15 +1,10 @@
 # main_window.py
 from __future__ import annotations
-from Main_App.PySide6_App.workers.processing_worker import PostProcessWorker
-from Main_App.PySide6_App.utils.op_guard import OpGuard
-from Main_App.Performance.mp_env import set_blas_threads_single_process
-from PySide6.QtCore import QTimer
 import logging
 import os
 import queue
 import subprocess
 import sys
-import re
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
 from typing import Callable
 from datetime import datetime
@@ -110,6 +105,7 @@ from Main_App.PySide6_App.Backend.project_manager import (
     openProjectPath,
     select_projects_root,
 )
+from Main_App.PySide6_App.Backend.preprocessing_settings import normalize_preprocessing_settings
 from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
 )
@@ -741,20 +737,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         return True
 
     def _build_validated_params(self) -> dict | None:
-        s = self.settings
-        p = self.currentProject.preprocessing
-
-        def _to_float(val, default=None):
-            try:
-                return float(val) if val is not None and str(val) != "" else default
-            except Exception:
-                return default
-
-        def _to_int(val, default=None):
-            try:
-                return int(val) if val is not None and str(val) != "" else default
-            except Exception:
-                return default
+        normalized = normalize_preprocessing_settings(self.currentProject.preprocessing)
 
         # Event map from UI rows → {label: int_id}
         event_map: dict[str, int] = {}
@@ -769,21 +752,32 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             QMessageBox.warning(self, "No Events", "Please add at least one event map entry.")
             return None
 
+        epoch_start = float(normalized.get("epoch_start_s", -1.0))
+        epoch_end = float(normalized.get("epoch_end_s", 125.0))
+        if epoch_end <= epoch_start:
+            QMessageBox.warning(
+                self,
+                "Invalid Epoch Window",
+                "Epoch end must be greater than epoch start.",
+            )
+            return None
+
+        stim_channel = normalized.get("stim_channel") or config.DEFAULT_STIM_CHANNEL
+
         params = {
-            # filter / resample / reject
-            "low_pass": _to_float(p.get("low_pass")),
-            "high_pass": _to_float(p.get("high_pass")),
-            "downsample": _to_int(p.get("downsample")),
-            "downsample_rate": _to_int(p.get("downsample")),  # some helpers expect this key
-            "reject_thresh": _to_float(p.get("rejection_z")),
-            "ref_channel1": p.get("ref_chan1") or None,
-            "ref_channel2": p.get("ref_chan2") or None,
-            "max_idx_keep": _to_int(p.get("max_chan_idx")),
-            "max_bad_channels_alert_thresh": _to_int(p.get("max_bad_chans"), 9999),
-            # epoching / events
-            "epoch_start": _to_float(s.get("preprocessing", "epoch_start", "-1"), -1.0),
-            "epoch_end": _to_float(s.get("preprocessing", "epoch_end", "125"), 125.0),
-            "stim_channel": s.get("preprocessing", "stim_channel", config.DEFAULT_STIM_CHANNEL),
+            "low_pass": float(normalized.get("low_pass")),
+            "high_pass": float(normalized.get("high_pass")),
+            "downsample": int(normalized.get("downsample")),
+            "downsample_rate": int(normalized.get("downsample")),
+            "reject_thresh": float(normalized.get("rejection_z")),
+            "ref_channel1": (normalized.get("ref_chan1") or None),
+            "ref_channel2": (normalized.get("ref_chan2") or None),
+            "max_idx_keep": int(normalized.get("max_chan_idx_keep")),
+            "max_bad_channels_alert_thresh": int(normalized.get("max_bad_chans")),
+            "epoch_start": epoch_start,
+            "epoch_end": epoch_end,
+            "stim_channel": stim_channel,
+            "save_preprocessed_fif": bool(normalized.get("save_preprocessed_fif", False)),
             "event_id_map": event_map,
         }
         return params
@@ -794,7 +788,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self._settings_dialog.raise_()
             self._settings_dialog.activateWindow()
             return
-        dlg = SettingsDialog(self.settings, self)
+        dlg = SettingsDialog(self.settings, self, getattr(self, "currentProject", None))
         self._settings_dialog = dlg
         dlg.exec()
         if hasattr(self, "lbl_debug"):
@@ -1058,20 +1052,16 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             edit = QLineEdit(str(value) if value is not None else "")
             return _QtEntryAdapter(edit)
 
-        p = self.currentProject.preprocessing
+        p = normalize_preprocessing_settings(self.currentProject.preprocessing)
         self.low_pass_entry = make_entry(p.get("low_pass"))
         self.high_pass_entry = make_entry(p.get("high_pass"))
         self.downsample_entry = make_entry(p.get("downsample"))
-        self.epoch_start_entry = make_entry(
-            self.settings.get("preprocessing", "epoch_start", "-1")
-        )
-        self.epoch_end_entry = make_entry(
-            self.settings.get("preprocessing", "epoch_end", "125")
-        )
+        self.epoch_start_entry = make_entry(p.get("epoch_start_s"))
+        self.epoch_end_entry = make_entry(p.get("epoch_end_s"))
         self.reject_thresh_entry = make_entry(p.get("rejection_z"))
         self.ref_channel1_entry = make_entry(p.get("ref_chan1"))
         self.ref_channel2_entry = make_entry(p.get("ref_chan2"))
-        self.max_idx_keep_entry = make_entry(p.get("max_chan_idx"))
+        self.max_idx_keep_entry = make_entry(p.get("max_chan_idx_keep"))
         self.max_bad_channels_alert_entry = make_entry(p.get("max_bad_chans"))
 
     def saveProjectSettings(self) -> None:
