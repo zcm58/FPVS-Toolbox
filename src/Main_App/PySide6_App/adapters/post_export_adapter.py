@@ -1,11 +1,16 @@
 # src/Main_App/PySide6_App/adapters/post_export_adapter.py
 from __future__ import annotations
 from dataclasses import dataclass
-from types import SimpleNamespace
+import inspect
+import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
 
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -87,6 +92,20 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
         return 0
 
     written = 0
+    settings_obj = ctx.settings or {}
+    save_pref_raw: Any = None
+    if isinstance(settings_obj, dict):
+        save_pref_raw = settings_obj.get("save_preprocessed_fif")
+    else:
+        getter = getattr(settings_obj, "get", None)
+        if callable(getter):
+            try:
+                save_pref_raw = getter("save_preprocessed_fif")
+            except TypeError:
+                save_pref_raw = None
+        if save_pref_raw is None and hasattr(settings_obj, "save_preprocessed_fif"):
+            save_pref_raw = getattr(settings_obj, "save_preprocessed_fif")
+    save_pref = _coerce_bool(save_pref_raw, default=False)
     base_stem = Path(str((ctx.data_paths or ["unknown"])[0])).stem
     for label in labels:
         ep_list = ctx.preprocessed_data.get(label, [])
@@ -99,6 +118,22 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / _legacy_like_fname(base_stem, label)
         if not out_path.exists():
+            if not save_pref:
+                frame = inspect.currentframe()
+                line_no = frame.f_lineno + 1 if frame else -1
+                if frame:
+                    del frame
+                call_site = f"{__name__}:{line_no}"
+                message = (
+                    "[AUDIT WARNING] FIF write attempted while save_preprocessed_fif=False "
+                    f"→ {out_path} (call_site={call_site})"
+                )
+                logger.warning(message)
+                if ctx.log:
+                    try:
+                        ctx.log(message)
+                    except Exception:
+                        pass
             try:
                 epochs.save(str(out_path), overwrite=True, split_size=2 * 1024 ** 3)
                 written += 1
@@ -108,7 +143,7 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
     return written
 
 
-def run_post_export(ctx: LegacyCtx, labels: List[str]) -> None:
+def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
     """
     Execute legacy export. Then, for this specific file and labels,
     write any missing -epo.fif files (per-file fallback).
@@ -124,7 +159,7 @@ def run_post_export(ctx: LegacyCtx, labels: List[str]) -> None:
         raise
 
     # Per-file FIF fallback (only writes files that are missing)
-    _write_missing_fifs(ctx, save_root, labels)
+    return _write_missing_fifs(ctx, save_root, labels)
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
@@ -139,3 +174,4 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
         if lowered in {"0", "false", "no", "off"}:
             return False
     return default
+

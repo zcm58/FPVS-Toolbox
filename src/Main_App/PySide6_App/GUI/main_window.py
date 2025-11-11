@@ -6,6 +6,7 @@ import queue
 import subprocess
 import sys
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
+from Main_App.PySide6_App.utils.audit import format_audit_summary, write_audit_json
 from typing import Callable
 from datetime import datetime
 from pathlib import Path
@@ -457,14 +458,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                         self._start_guard.end(),
                     )
                 )
-                self._mp.finished.connect(
-                    lambda _p: (
-                        (self._busy_stop() if hasattr(self, "_busy_stop") else None),
-                        self._finalize_processing(True),
-                        setattr(self, "_run_active", False),
-                        self._start_guard.end(),
-                    )
-                )
+                self._mp.finished.connect(self._on_processing_finished)
 
                 self._mp.start(
                     project_root=project_root,
@@ -512,8 +506,47 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     # --------------------------------
 
-    def _on_processing_finished(self, _payload: dict | None = None) -> None:
-        # Process-mode completion
+    def _on_processing_finished(self, payload: dict | None = None) -> None:
+        # Process-mode completion with audit logging
+        results = []
+        if isinstance(payload, dict):
+            results = payload.get("results") or []
+
+        try:
+            debug_on = self.settings.debug_enabled()
+        except Exception:
+            debug_on = False
+
+        params_snapshot = dict(getattr(self, "validated_params", {}))
+        audit_root: Path | None = None
+        if debug_on and hasattr(self, "save_folder_path"):
+            try:
+                save_root = Path(self.save_folder_path.get()).resolve()
+                audit_root = save_root.parent / "audit"
+            except Exception:
+                audit_root = None
+
+        for result in results:
+            audit = result.get("audit") or {}
+            problems = list(result.get("problems") or [])
+            line, is_warning = format_audit_summary(audit or None)
+            self.log(line, level=logging.WARNING if is_warning else logging.INFO)
+            for problem in problems:
+                self.log(f"[AUDIT WARNING] {problem}", level=logging.WARNING)
+            if debug_on and audit_root and audit:
+                try:
+                    raw_file = audit.get("file") or result.get("file", "")
+                    basename = Path(raw_file).stem if raw_file else "unknown"
+                    write_audit_json(
+                        audit_root,
+                        basename=basename,
+                        audit=audit,
+                        params=params_snapshot,
+                        problems=problems,
+                    )
+                except Exception as exc:
+                    self.log(f"Audit JSON write failed: {exc}", level=logging.WARNING)
+
         self._busy_stop()
         self._finalize_processing(True)
         self._run_active = False
