@@ -298,6 +298,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self.stacked.setCurrentIndex(0)
         self.log("Welcome to the FPVS Toolbox!")
         self.log(f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}")
+        # Announce the active preprocessor (visibility only)
+        logger.info(
+            "Using PySide6 preprocessing module: Main_App.PySide6_App.Backend.preprocess.perform_preprocessing"
+        )
+        self.log("Preprocessor: PySide6 module active")
 
         # Wire Start button
         if hasattr(self, "btn_start"):
