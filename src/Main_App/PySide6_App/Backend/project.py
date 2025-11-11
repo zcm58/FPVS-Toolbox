@@ -128,12 +128,25 @@ class Project:
                 data = {}
         else:
             data = {}
+        if not isinstance(data, dict):
+            data = {}
+
+        # Normalize persisted event_map back into memory as {str: int}
+        raw_map = data.get("event_map", {})
+        if not isinstance(raw_map, dict):
+            raw_map = {}
+        ev_map: dict[str, int] = {}
+        for k, v in raw_map.items():
+            try:
+                ev_map[str(k)] = int(v)
+            except Exception:
+                continue
+        data["event_map"] = ev_map
 
         # Shallow-merge defaults with existing data
         merged: Dict[str, Any] = {}
         merged.update(DEFAULTS)
-        if isinstance(data, dict):
-            merged.update(data)
+        merged.update(data)
 
         # Ensure main directories exist using resolved absolute paths
         input_dir = _resolve_subpath(project_root, merged.get("input_folder", DEFAULTS["input_folder"]))
@@ -142,6 +155,8 @@ class Project:
         results_dir.mkdir(parents=True, exist_ok=True)
 
         proj = Project(project_root, merged)
+        proj.event_map = ev_map
+        proj.manifest = data
         return proj
 
     def save(self) -> None:
@@ -152,7 +167,8 @@ class Project:
         manifest_path = self.project_root / "project.json"
 
         # Start from in-memory manifest to preserve unknown keys
-        data: Dict[str, Any] = dict(self.manifest)
+        base_manifest = self.manifest if isinstance(self.manifest, dict) else {}
+        data: Dict[str, Any] = dict(base_manifest)
 
         # Friendly name handling
         folder_name = self.project_root.name
@@ -191,9 +207,23 @@ class Project:
         pp = data.get("preprocessing", {})
         data["preprocessing"] = pp if isinstance(pp, dict) else {}
 
-        # Event map: ensure dict type
-        ev = data.get("event_map", {})
-        data["event_map"] = ev if isinstance(ev, dict) else {}
+        # Persist the live event map from runtime state.
+        # Normalize to {str: int} without altering keys used elsewhere.
+        live_map: dict[str, Any] = getattr(self, "event_map", {}) or {}
+        if not isinstance(live_map, dict):
+            live_map = {}
+        norm_map: dict[str, int] = {}
+        for k, v in live_map.items():
+            try:
+                key_s = str(k)
+                val_i = int(v)
+                norm_map[key_s] = val_i
+            except Exception:
+                # Skip malformed entries rather than crashing the save path.
+                continue
+        data["event_map"] = norm_map
+        # Keep in-memory manifest consistent for subsequent operations.
+        self.manifest = data
 
         # Subfolders: persist relative names under results_folder when possible
         sub_out: Dict[str, str] = {}

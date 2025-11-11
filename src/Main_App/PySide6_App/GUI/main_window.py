@@ -1090,14 +1090,25 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self.cb_loreta.isChecked() if hasattr(self, "cb_loreta") else False
         )
 
+        # Ensure any active editors flush to widgets before scraping.
+        try:
+            self.focusWidget()
+            self.clearFocus()
+            QApplication.processEvents()
+        except Exception:
+            pass
+
         mapping: dict[str, int] = {}
         for row in self.event_rows:
             edits = row.findChildren(QLineEdit)
             if len(edits) >= 2:
                 label = edits[0].text().strip()
                 ident = edits[1].text().strip()
-                if label and ident.isdigit():
-                    mapping[label] = int(ident)
+                if label:
+                    try:
+                        mapping[label] = int(ident)
+                    except Exception:
+                        continue
         self.currentProject.event_map = mapping
 
         self.currentProject.save()
