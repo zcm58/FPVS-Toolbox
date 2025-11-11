@@ -3,8 +3,8 @@
 Qt-side preprocessing that mirrors the legacy logic exactly.
 
 Order (legacy parity):
-1) Initial reference (EXG1 & EXG2 if present)
-2) Drop EXG1/EXG2
+1) Initial reference (user-selected pair; defaults set via settings UI)
+2) Drop the selected reference pair channels
 3) Optional channel limit (max_idx_keep; keep stim if needed)
 4) Downsample (if requested)
 5) FIR filter (legacy mapping and kernel)
@@ -53,7 +53,6 @@ def begin_preproc_audit(
     filename: str,
 ) -> Dict[str, Any]:
     """Capture baseline audit metadata before preprocessing mutates the Raw."""
-
     capture = start_preproc_audit(raw, params)
     capture["file"] = filename
     return capture
@@ -70,7 +69,6 @@ def finalize_preproc_audit(
     n_rejected: int = 0,
 ) -> Tuple[Dict[str, Any], List[str]]:
     """Compute the post-state audit and log structured results."""
-
     after = end_preproc_audit(
         raw,
         params,
@@ -90,6 +88,23 @@ def finalize_preproc_audit(
     return after, problems
 
 
+def _coerce_refs_to_eeg_if_needed(raw: mne.io.BaseRaw, pair: tuple[str, str]) -> List[str]:
+    """If selected ref channels are not typed as EEG, coerce them to EEG so MNE can reference them."""
+    changed: List[str] = []
+    try:
+        ch_types = dict(zip(raw.ch_names, raw.get_channel_types()))
+    except Exception:
+        ch_types = {}
+    to_flip: Dict[str, str] = {}
+    for ch in pair:
+        if ch in raw.ch_names and ch_types.get(ch) != "eeg":
+            to_flip[ch] = "eeg"
+    if to_flip:
+        raw.set_channel_types(to_flip)
+        changed = list(to_flip)
+    return changed
+
+
 def perform_preprocessing(
     raw_input: mne.io.BaseRaw,
     params: Dict[str, Any],
@@ -104,6 +119,7 @@ def perform_preprocessing(
         params: Expected keys:
             'downsample_rate', 'low_pass', 'high_pass', 'reject_thresh',
             'ref_channel1', 'ref_channel2', 'max_idx_keep', 'stim_channel' (optional).
+            Note: defaults for ref_channel1/ref_channel2 come from the settings UI at runtime.
         log_func: Logger function (e.g., app.log).
         filename_for_log: For log context.
 
@@ -111,12 +127,14 @@ def perform_preprocessing(
         (processed_raw_or_none, n_bad_by_kurtosis)
     """
     raw = raw_input
+
+    # Runtime parameters (defaults are managed by Settings UI; fall back only if absent)
     downsample_rate = params.get("downsample_rate")
     low_pass = params.get("low_pass")          # legacy mapping: low_pass -> l_freq
     high_pass = params.get("high_pass")        # legacy mapping: high_pass -> h_freq
     reject_thresh = params.get("reject_thresh")
-    ref1 = params.get("ref_channel1")
-    ref2 = params.get("ref_channel2")
+    ref1 = params.get("ref_channel1") or "EXG1"
+    ref2 = params.get("ref_channel2") or "EXG2"
     max_keep = params.get("max_idx_keep")
     stim_ch = params.get("stim_channel", config.DEFAULT_STIM_CHANNEL)
 
@@ -136,14 +154,15 @@ def perform_preprocessing(
                 f"DEBUG [preprocess for {filename_for_log}]: WARNING - Expected stim_ch '{stim_ch}' is NOT in initial channel list."
             )
 
-        # 1) Initial reference (EXG1/EXG2)
+        # 1) Initial reference (user-selected pair; e.g., EXG1/EXG2 or EXG3/EXG4)
         if ref1 and ref2 and ref1 in orig_ch_names and ref2 in orig_ch_names:
             try:
-                log_func(
-                    f"Applying reference: Subtract average of {ref1} & {ref2} for {filename_for_log}..."
-                )
+                coerced = _coerce_refs_to_eeg_if_needed(raw, (ref1, ref2))
+                if coerced:
+                    log_func(f"DEBUG: coerced {coerced} → EEG for referencing.")
+                log_func(f"Applying reference pair [{ref1}, {ref2}] on {filename_for_log}...")
                 raw.set_eeg_reference(ref_channels=[ref1, ref2], projection=False, verbose=False)
-                log_func(f"Initial reference applied to {filename_for_log}.")
+                log_func(f"AUDIT: custom_ref_applied=True pair=[{ref1},{ref2}]")
             except Exception as e:
                 log_func(f"Warn: Initial reference failed for {filename_for_log}: {e}")
         else:
@@ -151,8 +170,8 @@ def perform_preprocessing(
                 f"Skip initial referencing for {filename_for_log} (Ref channels '{ref1}', '{ref2}' not found or not specified)."
             )
 
-        # 2) Explicitly drop EXG1/EXG2 after initial reference
-        for ch in ("EXG1", "EXG2"):
+        # 2) Explicitly drop the selected reference channels after initial reference
+        for ch in (ref1, ref2):
             if ch in raw.ch_names:
                 raw.drop_channels([ch])
                 log_func(f"Dropped {ch} after initial referencing.")
@@ -181,11 +200,8 @@ def perform_preprocessing(
             )
             if to_drop:
                 log_func(f"Attempting to drop {len(to_drop)} channels from {filename_for_log}...")
-                # Parity: use on_missing="warn" as in legacy
                 raw.drop_channels(to_drop, on_missing="warn")
-                log_func(
-                    f"{len(raw.ch_names)} channels remain in {filename_for_log} after drop."
-                )
+                log_func(f"{len(raw.ch_names)} channels remain in {filename_for_log} after drop.")
                 log_func(
                     f"DEBUG [preprocess for {filename_for_log}]: Channel names AFTER drop: {list(raw.info['ch_names'])}"
                 )
@@ -204,13 +220,10 @@ def perform_preprocessing(
             )
             if sf > downsample_rate:
                 try:
-                    # Legacy parity: no explicit n_jobs override; let MNE decide
                     raw.resample(downsample_rate, npad="auto", window="hann", verbose=False)
                     log_func(f"Resampled {filename_for_log} to {raw.info['sfreq']:.1f}Hz.")
                 except Exception as resample_err:
-                    log_func(
-                        f"Warn: Resampling failed for {filename_for_log}: {resample_err}"
-                    )
+                    log_func(f"Warn: Resampling failed for {filename_for_log}: {resample_err}")
             else:
                 log_func(f"No downsampling needed for {filename_for_log}.")
         else:
@@ -226,7 +239,6 @@ def perform_preprocessing(
                 log_func(
                     f"Filtering {filename_for_log} ({l_freq if l_freq else 'DC'}-{h_freq if h_freq else 'Nyq'}Hz) ..."
                 )
-                # Mirror legacy exactly: no explicit picks (use MNE's default data-channel picking)
                 raw.filter(
                     l_freq,
                     h_freq,
@@ -302,18 +314,17 @@ def perform_preprocessing(
             if new_bads:
                 raw.info["bads"].extend(new_bads)
 
-            if raw.info["bads"]:
-                log_func(f"Interpolating bads in {filename_for_log}: {raw.info['bads']}")
-                if raw.get_montage():
-                    try:
-                        raw.interpolate_bads(reset_bads=True, mode="accurate", verbose=False)
-                        log_func(f"Interpolation OK for {filename_for_log}.")
-                    except Exception as e:
-                        log_func(f"Warn: Interpolation failed for {filename_for_log}: {e}")
-                else:
-                    log_func(
-                        f"Warn: No montage for {filename_for_log}, cannot interpolate. Bads remain: {raw.info['bads']}"
-                    )
+            if raw.info["bads"] and raw.get_montage():
+                try:
+                    log_func(f"Interpolating bads in {filename_for_log}: {raw.info['bads']}")
+                    raw.interpolate_bads(reset_bads=True, mode="accurate", verbose=False)
+                    log_func(f"Interpolation OK for {filename_for_log}.")
+                except Exception as e:
+                    log_func(f"Warn: Interpolation failed for {filename_for_log}: {e}")
+            elif raw.info["bads"]:
+                log_func(
+                    f"Warn: No montage for {filename_for_log}, cannot interpolate. Bads remain: {raw.info['bads']}"
+                )
             else:
                 log_func(f"No bads to interpolate in {filename_for_log}.")
         else:
