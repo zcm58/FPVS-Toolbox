@@ -1112,6 +1112,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 if getattr(self, "rb_single", None) and self.rb_single.isChecked()
                 else "batch"
             )
+            # Keep existing schema key as-is
             opts["run_loreta"] = bool(self.cb_loreta.isChecked()) if hasattr(self, "cb_loreta") else False
             self.currentProject.options = opts
 
@@ -1131,9 +1132,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     # Ignore non-integer IDs silently to match prior behavior
                     continue
 
-            # If nothing changed, skip disk I/O
+            # If nothing changed, skip disk I/O silently (no dialog)
             if mapping == old_map and opts == old_opts:
-                QMessageBox.information(self, "Project Saved", "No changes detected.")
                 return
 
             # Persist live state
