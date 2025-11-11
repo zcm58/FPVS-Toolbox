@@ -60,7 +60,3 @@ def test_preproc_audit_round_trip():
     assert abs(audit["sfreq"] - 256.0) < 0.05
     assert audit["stim_channel"] == "Status"
     assert audit["sha256_head"] not in {"", "NA"}
-    assert audit["req_downsample"] == 256
-    assert audit["act_sfreq"] == pytest.approx(256.0, abs=0.05)
-    assert audit["req_save_fif"] is False
-    assert audit["act_fif_written"] == 0

@@ -90,27 +90,12 @@ def end_preproc_audit(
     )
     n_events = int((events_info or {}).get("n_events", 0))
     ref_candidates = [c for c in (params.get("ref_channel1"), params.get("ref_channel2")) if c]
-    target_ds = _to_float(params.get("downsample") or params.get("downsample_rate"))
-    target_hp = _to_float(params.get("low_pass"))
-    target_lp = _to_float(params.get("high_pass"))
-    max_keep_raw = params.get("max_idx_keep")
-    try:
-        max_keep_val = int(max_keep_raw) if max_keep_raw not in (None, "") else None
-    except (TypeError, ValueError):
-        max_keep_val = None
-    req_reject = _to_float(params.get("reject_thresh"))
-
-    act_sfreq = float(_to_float(info.get("sfreq")) or 0.0)
-    act_hp = _to_float(info.get("highpass"))
-    act_lp = _to_float(info.get("lowpass"))
-    act_ref_applied = bool(info.get("custom_ref_applied", False))
-
     audit = {
         "file": filename,
-        "sfreq": act_sfreq,
-        "lowpass": act_lp,
-        "highpass": act_hp,
-        "ref_applied": act_ref_applied,
+        "sfreq": float(_to_float(info.get("sfreq")) or 0.0),
+        "lowpass": _to_float(info.get("lowpass")),
+        "highpass": _to_float(info.get("highpass")),
+        "ref_applied": bool(info.get("custom_ref_applied", False)),
         "ref_chans": ref_candidates or None,
         "n_channels": int(len(getattr(raw, "ch_names", []))),
         "ch_names": list(getattr(raw, "ch_names", [])),
@@ -120,20 +105,6 @@ def end_preproc_audit(
         "save_preprocessed_fif": bool(params.get("save_preprocessed_fif", False)),
         "fif_written": int(fif_written),
         "sha256_head": fingerprint(raw),
-        "req_downsample": target_ds,
-        "act_sfreq": act_sfreq,
-        "req_highpass": target_hp,
-        "act_highpass": act_hp,
-        "req_lowpass": target_lp,
-        "act_lowpass": act_lp,
-        "req_ref_chans": ref_candidates or None,
-        "act_ref_applied": act_ref_applied,
-        "req_stim": str(params.get("stim_channel") or ""),
-        "act_events": n_events,
-        "req_save_fif": bool(params.get("save_preprocessed_fif", False)),
-        "act_fif_written": int(fif_written),
-        "req_max_channels": max_keep_val,
-        "req_reject_thresh": req_reject,
     }
     return audit
 
@@ -270,70 +241,34 @@ def write_audit_json(
     return out_path
 
 
-def format_audit_summary(audit: Mapping[str, Any] | None) -> tuple[str, bool]:
+def format_audit_summary(audit: Mapping[str, Any] | None, problems: Sequence[str] | None) -> tuple[str, bool]:
     """Return the GUI log line and whether it should be treated as a warning."""
-
     if not audit:
         return "[AUDIT WARNING] audit data missing", True
 
-    def _fmt_hz(value: Any) -> str:
-        val = _to_float(value)
-        if val is None:
-            return "NA"
-        return f"{val:.1f}Hz"
+    problems = list(problems or [])
+    if problems:
+        return "[AUDIT WARNING] " + "; ".join(problems), True
 
-    def _fmt_float(value: Any) -> str:
-        val = _to_float(value)
-        if val is None:
-            return "NA"
-        return f"{val:g}"
-
-    def _fmt_bool(value: Any) -> str:
-        return "True" if bool(value) else "False"
-
-    req_ds = _fmt_hz(audit.get("req_downsample"))
-    act_ds = _fmt_hz(audit.get("act_sfreq") or audit.get("sfreq"))
-
-    req_hp = _fmt_hz(audit.get("req_highpass"))
-    act_hp = _fmt_hz(audit.get("act_highpass") or audit.get("highpass"))
-
-    req_lp = _fmt_hz(audit.get("req_lowpass"))
-    act_lp = _fmt_hz(audit.get("act_lowpass") or audit.get("lowpass"))
-
-    req_ref = audit.get("req_ref_chans") or []
-    act_ref = audit.get("ref_chans") or []
-
-    req_stim = audit.get("req_stim") or ""
-    stim_used = audit.get("stim_channel") or ""
-
-    req_max_channels = audit.get("req_max_channels")
-    if req_max_channels not in (None, ""):
-        req_ch_str = f"≤{req_max_channels}"
-    else:
-        req_ch_str = "NA"
-
-    act_ch_str = str(audit.get("n_channels", "NA"))
-
-    req_reject = _fmt_float(audit.get("req_reject_thresh"))
-    act_reject = str(audit.get("n_rejected", "NA"))
-
-    act_events = audit.get("act_events", audit.get("n_events", "NA"))
-
-    req_fif = _fmt_bool(audit.get("req_save_fif"))
-    act_fif_written = audit.get("act_fif_written", audit.get("fif_written", "NA"))
+    sfreq = _to_float(audit.get("sfreq")) or 0.0
+    hp = _to_float(audit.get("highpass"))
+    lp = _to_float(audit.get("lowpass"))
+    ref = audit.get("ref_chans")
+    stim = audit.get("stim_channel") or ""
+    hp_str = f"{hp:g}" if hp is not None else "DC"
+    lp_str = f"{lp:g}" if lp is not None else "Nyq"
 
     line = (
         "[AUDIT] "
-        f"DS req={req_ds} act={act_ds} | "
-        f"HP req={req_hp} act={act_hp} | "
-        f"LP req={req_lp} act={act_lp} | "
-        f"ref req={tuple(req_ref) if req_ref else 'None'} act_applied={_fmt_bool(audit.get('act_ref_applied', audit.get('ref_applied')))} "
-        f"act={tuple(act_ref) if act_ref else 'None'} | "
-        f"ch req={req_ch_str} act={act_ch_str} | "
-        f"events req_stim='{req_stim}' act={act_events} | "
-        f"reject req={req_reject} act={act_reject} | "
-        f"stim_used='{stim_used}' | "
-        f"FIF req={req_fif} act_written={act_fif_written}"
+        f"DS={sfreq:.1f}Hz "
+        f"HP={hp_str} "
+        f"LP={lp_str} "
+        f"ref={tuple(ref) if ref else 'None'} "
+        f"ch={audit.get('n_channels', 'NA')} "
+        f"events={audit.get('n_events', 'NA')} "
+        f"reject={audit.get('n_rejected', 'NA')} "
+        f"stim='{stim}' "
+        f"FIF={bool(audit.get('save_preprocessed_fif'))}"
     )
     return line, False
 

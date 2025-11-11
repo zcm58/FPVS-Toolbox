@@ -55,6 +55,4 @@ def test_fif_flag_audit_reports_zero(tmp_path):
 
     assert audit["save_preprocessed_fif"] is False
     assert audit["fif_written"] == 0
-    assert audit["req_save_fif"] is False
-    assert audit["act_fif_written"] == 0
     assert problems == []

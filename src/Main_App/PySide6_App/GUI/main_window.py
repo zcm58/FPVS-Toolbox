@@ -528,11 +528,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         for result in results:
             audit = result.get("audit") or {}
-            problems = list(result.get("problems") or [])
-            line, is_warning = format_audit_summary(audit or None)
+            problems = result.get("problems") or []
+            line, is_warning = format_audit_summary(audit, problems)
             self.log(line, level=logging.WARNING if is_warning else logging.INFO)
-            for problem in problems:
-                self.log(f"[AUDIT WARNING] {problem}", level=logging.WARNING)
             if debug_on and audit_root and audit:
                 try:
                     raw_file = audit.get("file") or result.get("file", "")
