@@ -13,7 +13,7 @@ import tempfile
 from functools import lru_cache
 from pathlib import Path
 from tkinter import messagebox
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Iterable, Dict, Set
 
 import mne
 
@@ -36,6 +36,7 @@ def _resolve_ref_pair(app) -> Tuple[str, str]:
     Resolve the desired reference pair in priority:
       project.preprocessing.{ref_channel1|ref_chan1, ref_channel2|ref_chan2}
       → settings['preprocessing'] → defaults ('EXG1','EXG2').
+    Returns raw channel labels as strings (case preserved from inputs).
     """
     try:
         p = getattr(app.currentProject, "preprocessing", {}) or {}
@@ -65,6 +66,27 @@ def _resolve_stim(app) -> str:
         return "Status"
 
 
+def _map_present_case_insensitive(names: Iterable[str]) -> Dict[str, str]:
+    """Build a case-insensitive lookup: UPPER -> actual name present."""
+    return {n.upper(): n for n in names}
+
+
+def _canon_present(raw_names: Iterable[str], candidates: Iterable[str]) -> Set[str]:
+    """
+    Return the subset of candidates that are present in raw_names,
+    matching case-insensitively but returning the actual casing from raw_names.
+    """
+    lut = _map_present_case_insensitive(raw_names)
+    out: Set[str] = set()
+    for c in candidates:
+        if not isinstance(c, str):
+            continue
+        k = c.upper()
+        if k in lut:
+            out.add(lut[k])
+    return out
+
+
 def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None):
     """
     Load an EEG file with disk-backed memmap and apply montage (no resample).
@@ -83,7 +105,6 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
         stim_name = _resolve_stim(app)
         if not ref_pair:
             ref_pair = _resolve_ref_pair(app)
-        ref_keep = {c for c in ref_pair if isinstance(c, str)}
 
         if ext == ".bdf":
             with mne.utils.use_log_level("WARNING"):
@@ -124,14 +145,19 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
 
         app.log(f"Load OK: {len(raw.ch_names)} channels @ {raw.info['sfreq']:.1f} Hz.")
 
-        # Channel typing policy for BioSemi EXG* and stim:
+        # Channel typing policy for BioSemi EXG* and stim (Policy A):
         # - Preserve the selected reference pair as EEG so set_eeg_reference can use them.
-        # - Demote all other EXG1..EXG8 to 'misc' to avoid montage warnings and accidental inclusion.
+        # - Demote all other EXG1..EXG8 to 'misc' to avoid accidental inclusion.
         # - Ensure stim channel is typed as 'stim'.
         try:
+            # Canonicalize ref pair to actual names present in raw
+            ref_keep = _canon_present(raw.ch_names, ref_pair or ())
             exg_labels = [f"EXG{i}" for i in range(1, 9)]
-            to_misc = {ch: "misc" for ch in exg_labels if ch in raw.ch_names and ch not in ref_keep}
-            to_eeg = {ch: "eeg" for ch in ref_keep if ch in raw.ch_names}
+            exg_present = _canon_present(raw.ch_names, exg_labels)
+
+            to_misc = {ch: "misc" for ch in exg_present if ch not in ref_keep}
+            to_eeg = {ch: "eeg" for ch in ref_keep}
+
             # Apply in two stages to avoid conflicts
             if to_misc:
                 raw.set_channel_types(to_misc)
@@ -139,6 +165,10 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
                 raw.set_channel_types(to_eeg)
             if stim_name in raw.ch_names:
                 raw.set_channel_types({stim_name: "stim"})
+
+            kept = sorted(ref_keep)
+            demoted = sorted([ch for ch in exg_present if ch not in ref_keep])
+            app.log(f"EXG policy A applied. Keep as EEG: {kept} | Demoted to misc: {demoted}")
         except Exception as e:
             app.log(f"Warning: EXG/stim typing adjustment failed: {e}")
 
