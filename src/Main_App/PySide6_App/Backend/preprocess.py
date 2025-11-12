@@ -162,9 +162,12 @@ def perform_preprocessing(
                     log_func(f"DEBUG: coerced {coerced} → EEG for referencing.")
                 log_func(f"Applying reference pair [{ref1}, {ref2}] on {filename_for_log}...")
                 raw.set_eeg_reference(ref_channels=[ref1, ref2], projection=False, verbose=False)
-                # Explicit audit markers (use these instead of MNE's 'custom_ref_applied')
-                raw.info["fpvs_initial_custom_ref"] = True
-                raw.info["fpvs_initial_custom_ref_pair"] = (ref1, ref2)
+                # Mark explicit FPVS flags for the audit layer (keeps MNE behavior intact).
+                try:
+                    raw.info["fpvs_initial_custom_ref"] = True
+                    raw.info["fpvs_initial_custom_ref_pair"] = (ref1, ref2)
+                except Exception:
+                    pass
                 log_func(f"AUDIT: custom_ref_applied=True pair=[{ref1},{ref2}]")
             except Exception as e:
                 log_func(f"Warn: Initial reference failed for {filename_for_log}: {e}")
@@ -315,7 +318,7 @@ def perform_preprocessing(
 
             new_bads = [b for b in (bad_k_auto if reject_thresh else []) if b not in raw.info["bads"]]
             if new_bads:
-                raw.info["bads"].extend(new_bads])
+                raw.info["bads"].extend(new_bads)
 
             if raw.info["bads"] and raw.get_montage():
                 try:
