@@ -35,6 +35,7 @@ def start_preproc_audit(raw: Any, params: Mapping[str, Any]) -> Dict[str, Any]:
         "highpass": _to_float(info.get("highpass")),
         "n_channels": len(ch_names),
         "ch_names": ch_names,
+        # FPVS-specific flag: set by the PySide6 preprocessing pipeline
         "ref_applied": bool(info.get("fpvs_initial_custom_ref", False)),
         "params_snapshot": dict(params),
     }
@@ -68,7 +69,9 @@ def fingerprint(raw: Any) -> str:
     if data.size == 0:
         return "NA"
 
-    digest = hashlib.sha256(np.ascontiguousarray(data.astype(np.float32)).tobytes()).hexdigest()
+    digest = hashlib.sha256(
+        np.ascontiguousarray(data.astype(np.float32)).tobytes()
+    ).hexdigest()
     return digest
 
 
@@ -89,12 +92,15 @@ def end_preproc_audit(
         or ""
     )
     n_events = int((events_info or {}).get("n_events", 0))
-    ref_candidates = [c for c in (params.get("ref_channel1"), params.get("ref_channel2")) if c]
+    ref_candidates = [
+        c for c in (params.get("ref_channel1"), params.get("ref_channel2")) if c
+    ]
     audit = {
         "file": filename,
         "sfreq": float(_to_float(info.get("sfreq")) or 0.0),
         "lowpass": _to_float(info.get("lowpass")),
         "highpass": _to_float(info.get("highpass")),
+        # FPVS-specific flag: same source as in start_preproc_audit
         "ref_applied": bool(info.get("fpvs_initial_custom_ref", False)),
         "ref_chans": ref_candidates or None,
         "n_channels": int(len(getattr(raw, "ch_names", []))),
@@ -119,6 +125,7 @@ def compare_preproc(
     """Return human-readable mismatches between requested and observed settings."""
     problems: List[str] = []
 
+    # Downsample check
     target_ds = _to_float(params.get("downsample") or params.get("downsample_rate"))
     if target_ds and target_ds > 0:
         if abs(float(after.get("sfreq", 0.0)) - target_ds) > 0.05:
@@ -126,6 +133,7 @@ def compare_preproc(
                 f"downsample expected {target_ds:g} got {float(after.get('sfreq', 0.0)):.2f}"
             )
 
+    # High-pass check
     target_hp = _to_float(params.get("low_pass"))
     if target_hp and target_hp > 0:
         actual_hp = _to_float(after.get("highpass"))
@@ -134,6 +142,7 @@ def compare_preproc(
                 f"highpass expected {target_hp:g} got {actual_hp if actual_hp is not None else 'NA'}"
             )
 
+    # Low-pass check
     target_lp = _to_float(params.get("high_pass"))
     if target_lp and target_lp > 0:
         actual_lp = _to_float(after.get("lowpass"))
@@ -142,7 +151,10 @@ def compare_preproc(
                 f"lowpass expected {target_lp:g} got {actual_lp if actual_lp is not None else 'NA'}"
             )
 
-    ref_expected = [c for c in (params.get("ref_channel1"), params.get("ref_channel2")) if c]
+    # Reference check: only warn if a ref pair was requested
+    ref_expected = [
+        c for c in (params.get("ref_channel1"), params.get("ref_channel2")) if c
+    ]
     if ref_expected:
         if not after.get("ref_applied"):
             problems.append("reference requested but custom_ref_applied=False")
@@ -153,6 +165,7 @@ def compare_preproc(
                     f"reference channels expected {tuple(ref_expected)} got {tuple(applied)}"
                 )
 
+    # Channel cap check
     max_keep = params.get("max_idx_keep")
     if max_keep not in (None, "", 0):
         try:
@@ -175,10 +188,12 @@ def compare_preproc(
                         f"channel cap {max_keep_int} but {actual_ch} channels remain"
                     )
 
+    # Kurtosis reject count
     n_rejected = after.get("n_rejected")
     if n_rejected is None or int(n_rejected) < 0:
         problems.append("kurtosis reject count missing")
 
+    # Stim / events integrity
     stim_channel = after.get("stim_channel")
     if stim_channel:
         ch_names_after = set((after.get("ch_names") or []))
@@ -192,6 +207,7 @@ def compare_preproc(
         if events_info and events_info.get("source") == "annotations":
             problems.append(f"stim '{stim_channel}' fallback to annotations")
 
+    # FIF write consistency
     fif_flag = bool(after.get("save_preprocessed_fif"))
     fif_written = int(after.get("fif_written", 0))
     if fif_flag:
@@ -241,7 +257,10 @@ def write_audit_json(
     return out_path
 
 
-def format_audit_summary(audit: Mapping[str, Any] | None, problems: Sequence[str] | None) -> tuple[str, bool]:
+def format_audit_summary(
+    audit: Mapping[str, Any] | None,
+    problems: Sequence[str] | None,
+) -> tuple[str, bool]:
     """Return the GUI log line and whether it should be treated as a warning."""
     if not audit:
         return "[AUDIT WARNING] audit data missing", True
