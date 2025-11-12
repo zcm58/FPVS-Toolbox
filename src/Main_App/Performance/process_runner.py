@@ -138,6 +138,18 @@ def _process_one_file(
         if raw_proc is None:
             raise RuntimeError("perform_preprocessing returned None")
 
+        # Debug: capture whether a custom ref was actually applied for audit correlation
+        try:
+            logger.info(
+                "AUDIT DEBUG: file=%s custom_ref=%s pair=%s",
+                file_path.name,
+                bool(raw_proc.info.get("fpvs_initial_custom_ref", False)),
+                raw_proc.info.get("fpvs_initial_custom_ref_pair"),
+            )
+        except Exception:
+            # Never let debug logging break the worker
+            pass
+
         # Free loader Raw ASAP
         del raw
         gc.collect()
@@ -351,52 +363,3 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
 
     if progress_queue:
         progress_queue.put({"type": "done", "count": completed})
-
-        def _submit_next_available() -> bool:
-            """Submit one file if below memory cap and capacity; return True if submitted."""
-            nonlocal remaining
-            if not remaining:
-                return False
-            if len(in_flight) >= maxw:
-                return False
-            # Soft-cap throttle: wait until memory OK
-            while not _memory_ok(params.memory_soft_limit_ratio):
-                time.sleep(params.memory_check_interval_s)
-            f = remaining.pop(0)
-            fut = pool.submit(_process_one_file, f, params.settings, params.event_map, params.save_folder)
-            in_flight[fut] = f
-            return True
-
-        # Prime the pool
-        while len(in_flight) < maxw and remaining:
-            if not _submit_next_available():
-                break
-
-        while in_flight or remaining:
-            if not in_flight and remaining:
-                # No tasks running but some remaining: try to submit again (memory might have freed)
-                _submit_next_available()
-                continue
-
-            done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED, timeout=0.5)
-            if not done:
-                # Periodically try to top up submissions if memory allows
-                _submit_next_available()
-                continue
-
-            for fut in done:
-                f = in_flight.pop(fut, None)
-                try:
-                    res = fut.result()
-                except Exception as exc:
-                    res = {"status": "error", "file": str(f) if f else "unknown", "error": str(exc)}
-                completed += 1
-                if progress_queue:
-                    progress_queue.put(
-                        {"type": "progress", "completed": completed, "total": total, "result": res}
-                    )
-                # Try to submit another task after each completion
-                _submit_next_available()
-
-        if progress_queue:
-            progress_queue.put({"type": "done", "count": completed})
