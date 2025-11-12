@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication
 from Main_App.PySide6_App.Backend.project import Project
 import Main_App.PySide6_App.Backend.project_manager as project_manager
 import Main_App.Legacy_App.validation_mixins as validation_mixins
-import Main_App.Legacy_App.load_utils as load_utils
+import Main_App.PySide6_App.Backend.loader as load_utils
 import Main_App.Legacy_App.app_logic as app_logic
 import Main_App.Legacy_App.eeg_preprocessing as eeg_preprocessing
 import Main_App.PySide6_App.Backend.processing as processing
