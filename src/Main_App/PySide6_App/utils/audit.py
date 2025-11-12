@@ -35,7 +35,7 @@ def start_preproc_audit(raw: Any, params: Mapping[str, Any]) -> Dict[str, Any]:
         "highpass": _to_float(info.get("highpass")),
         "n_channels": len(ch_names),
         "ch_names": ch_names,
-        "ref_applied": bool(info.get("custom_ref_applied", False)),
+        "ref_applied": bool(info.get("fpvs_initial_custom_ref", False)),
         "params_snapshot": dict(params),
     }
 
@@ -95,7 +95,7 @@ def end_preproc_audit(
         "sfreq": float(_to_float(info.get("sfreq")) or 0.0),
         "lowpass": _to_float(info.get("lowpass")),
         "highpass": _to_float(info.get("highpass")),
-        "ref_applied": bool(info.get("custom_ref_applied", False)),
+        "ref_applied": bool(info.get("fpvs_initial_custom_ref", False)),
         "ref_chans": ref_candidates or None,
         "n_channels": int(len(getattr(raw, "ch_names", []))),
         "ch_names": list(getattr(raw, "ch_names", [])),
