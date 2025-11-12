@@ -108,7 +108,7 @@ def _process_one_file(
         t0 = time.perf_counter()
 
         # Lazy imports (inside worker only)
-        from Main_App.Legacy_App.load_utils import load_eeg_file  # type: ignore
+        from Main_App.PySide6_App.Backend.loader import load_eeg_file  # type: ignore
         from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing  # type: ignore
         from Main_App.PySide6_App.adapters.post_export_adapter import (  # type: ignore
             LegacyCtx,
