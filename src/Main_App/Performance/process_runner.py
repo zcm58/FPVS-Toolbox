@@ -42,7 +42,7 @@ class RunParams:
     save_folder: Path
     max_workers: Optional[int] = None
     # RAM backpressure (ratio of total system memory). None disables throttling.
-    memory_soft_limit_ratio: Optional[float] = 0.85
+    memory_soft_limit_ratio: Optional[float] = None
     # How often to re-check memory when throttled
     memory_check_interval_s: float = 0.25
 
@@ -100,7 +100,7 @@ def _process_one_file(
     save_folder: Path,
 ) -> Dict[str, object]:
     """
-    Execute the legacy processing steps for a single file.
+    Execute the processing steps for a single file.
 
     Returns a small dict with status/progress. Heavy data stays within the process.
     """
@@ -109,7 +109,6 @@ def _process_one_file(
 
         # Lazy imports (inside worker only)
         from Main_App.PySide6_App.Backend.loader import load_eeg_file  # type: ignore
-        from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing  # type: ignore
         from Main_App.PySide6_App.adapters.post_export_adapter import (  # type: ignore
             LegacyCtx,
             run_post_export,
@@ -129,7 +128,8 @@ def _process_one_file(
 
         audit_before = backend_preprocess.begin_preproc_audit(raw, settings, file_path.name)
 
-        raw_proc, n_rejected = perform_preprocessing(  # signatures per legacy module
+        # Use the PySide6 preprocessing backend (mirrors legacy order/params)
+        raw_proc, n_rejected = backend_preprocess.perform_preprocessing(
             raw_input=raw,
             params=settings,
             log_func=logger.info,
@@ -250,6 +250,7 @@ def _memory_ok(limit_ratio: Optional[float]) -> bool:
         return True
     vm = psutil.virtual_memory()
     return (vm.percent / 100.0) < float(limit_ratio)
+
 
 def _scavenge_stale_memmaps() -> None:
     """Remove memmap PID folders for processes that are no longer alive."""
