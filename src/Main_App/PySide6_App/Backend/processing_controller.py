@@ -6,7 +6,7 @@ import logging
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from Main_App.Legacy_App.load_utils import load_eeg_file
+from Main_App.PySide6_App.Backend.loader import load_eeg_file
 from Main_App.PySide6_App.Backend.preprocess import (
     perform_preprocessing,
     begin_preproc_audit,
