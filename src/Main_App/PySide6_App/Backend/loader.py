@@ -7,7 +7,7 @@ Update: preserve the user-selected EXG reference pair as EEG, demote only the
 non-selected EXG* channels to misc, and type the stim channel explicitly.
 
 This is a clone of the legacy load_utils.py file. We're cloning this file here so
-we can move away from a dependency on the Legacy_App directory and streamline development.
+we can move away from a dependency on the Legacy_App directory and streamline development. Yay!!
 """
 from __future__ import annotations
 
