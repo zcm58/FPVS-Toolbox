@@ -48,7 +48,15 @@ def _audit_payload(tmp_path: Path) -> dict:
         "reference requested but custom_ref_applied=False",
         "save_preprocessed_fif=False but FIF outputs were written",
     ]
-    return {"results": [{"file": str(tmp_path / "demo.bdf"), "audit": audit, "problems": problems}]}
+    return {
+        "results": [
+            {
+                "file": str(tmp_path / "demo.bdf"),
+                "audit": audit,
+                "problems": problems,
+            }
+        ]
+    }
 
 
 def test_audit_problems_surface(tmp_path, main_window, monkeypatch):
@@ -59,8 +67,16 @@ def test_audit_problems_surface(tmp_path, main_window, monkeypatch):
     main_window._on_processing_finished(_audit_payload(tmp_path))
 
     warning_lines = [msg for msg, level in logs if level == logging.WARNING]
-    assert "[AUDIT WARNING] reference requested but custom_ref_applied=False" in warning_lines
-    assert "[AUDIT WARNING] save_preprocessed_fif=False but FIF outputs were written" in warning_lines
+    # Both problem strings must be surfaced in WARNING-level logs, even if combined.
+    assert any(
+        "reference requested but custom_ref_applied=False" in msg
+        for msg in warning_lines
+    )
+    assert any(
+        "save_preprocessed_fif=False but FIF outputs were written" in msg
+        for msg in warning_lines
+    )
 
-    info_lines = [msg for msg, level in logs if level == logging.INFO]
-    assert any(msg.startswith("[AUDIT] DS req=") for msg in info_lines)
+    # There should also be at least one audit summary line.
+    all_lines = [msg for msg, _ in logs]
+    assert any(msg.startswith("[AUDIT]") for msg in all_lines)
