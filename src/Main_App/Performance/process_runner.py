@@ -5,6 +5,7 @@ Process-based per-file runner.
 
 - Spawns one subprocess per EEG file (Windows-safe via "spawn").
 - Caps BLAS to 1 thread per worker to avoid oversubscription.
+- Uses the PySide6 loader + preprocessing backend (no direct Legacy deps).
 - Extracts events using the project's stim channel (e.g., "Status").
 - Suppresses any legacy tkinter.messagebox calls inside workers.
 - Calls the existing post-export adapter (no Legacy edits).
@@ -72,8 +73,8 @@ def _worker_init() -> None:
     sys.modules["tkinter.messagebox"] = msg
 
     # --- Memmap cleanup on worker exit ---
-    from pathlib import Path
-    base = Path(tempfile.gettempdir()) / "fpvs_memmap"
+    from pathlib import Path as _Path
+    base = _Path(tempfile.gettempdir()) / "fpvs_memmap"
     pid_dir = base / f"pid_{os.getpid()}"
     pid_dir.mkdir(parents=True, exist_ok=True)
 
@@ -100,7 +101,7 @@ def _process_one_file(
     save_folder: Path,
 ) -> Dict[str, object]:
     """
-    Execute the legacy processing steps for a single file.
+    Execute the processing steps for a single file using the PySide6 backend.
 
     Returns a small dict with status/progress. Heavy data stays within the process.
     """
@@ -110,8 +111,7 @@ def _process_one_file(
         print(f"[SENTINEL] process_runner _process_one_file running for {file_path.name}")
 
         # Lazy imports (inside worker only)
-        from Main_App.Legacy_App.load_utils import load_eeg_file  # type: ignore
-        from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing  # type: ignore
+        from Main_App.PySide6_App.Backend.loader import load_eeg_file  # type: ignore
         from Main_App.PySide6_App.adapters.post_export_adapter import (  # type: ignore
             LegacyCtx,
             run_post_export,
@@ -119,23 +119,32 @@ def _process_one_file(
         import mne  # type: ignore
         import gc
 
-        # Minimal logger-compatible stub for legacy functions
+        # Minimal logger-compatible stub for loader
         class _App:
             def log(self, msg: str) -> None:  # pragma: no cover - informational
                 logger.info(msg)
 
-        # 1) Load + preprocess (match legacy order)
-        raw = load_eeg_file(_App(), str(file_path))
+        # Resolve reference pair for loader so EXG policy keeps the right pair as EEG
+        ref_ch1 = settings.get("ref_channel1") or settings.get("ref_ch1") or "EXG1"
+        ref_ch2 = settings.get("ref_channel2") or settings.get("ref_ch2") or "EXG2"
+        ref_pair = (str(ref_ch1), str(ref_ch2))
+
+        # 1) Load
+        raw = load_eeg_file(_App(), str(file_path), ref_pair=ref_pair)
         if raw is None:
             raise RuntimeError("load_eeg_file returned None")
 
+        # 2) Preproc audit (before)
         audit_before = backend_preprocess.begin_preproc_audit(
             raw,
             settings,
             file_path.name,
         )
 
-        raw_proc, n_rejected = perform_preprocessing(  # signatures per legacy module
+        # 3) Preprocessing via PySide6 backend (handles:
+        #    initial EXG ref -> drop EXGs -> channel limit keeping stim ->
+        #    downsample -> filter -> kurtosis/interp -> final avg ref)
+        raw_proc, n_rejected = backend_preprocess.perform_preprocessing(
             raw_input=raw,
             params=settings,
             log_func=logger.info,
@@ -144,34 +153,11 @@ def _process_one_file(
         if raw_proc is None:
             raise RuntimeError("perform_preprocessing returned None")
 
-        # Explicitly ensure requested EXG reference is applied at the Raw level
-        # so that MNE's custom_ref_applied flag matches what the audit expects.
-        ref_ch1 = settings.get("ref_channel1") or settings.get("ref_ch1")
-        ref_ch2 = settings.get("ref_channel2") or settings.get("ref_ch2")
-        ref_channels = [ch for ch in (ref_ch1, ref_ch2) if ch]
-
-        try:
-            current_custom_ref = int(raw_proc.info.get("custom_ref_applied", 0))
-        except Exception:
-            current_custom_ref = 0
-
-        if ref_channels and current_custom_ref == 0:
-            # Only apply reference here if:
-            #   - EXG ref channels are configured, and
-            #   - MNE still reports "no custom reference".
-            logger.info(
-                "Applying EEG reference in process_runner to channels %s for file %s",
-                ref_channels,
-                file_path.name,
-            )
-            # In-place reference; this should flip custom_ref_applied internally.
-            mne.set_eeg_reference(raw_proc, ref_channels=ref_channels, copy=False)
-
         # Free loader Raw ASAP
         del raw
         gc.collect()
 
-        # 2) Events — prefer explicit stim channel (BioSemi 'Status')
+        # 4) Events — prefer explicit stim channel (BioSemi 'Status')
         stim = (
             settings.get("stim_channel")
             or settings.get("stim")
@@ -204,7 +190,7 @@ def _process_one_file(
                 f"Missing event codes {missing} in {file_path.name} (stim='{stim}')"
             )
 
-        # 3) Epochs per label/code (match GUI epoch window when provided)
+        # 5) Epochs per label/code (match GUI epoch window when provided)
         tmin = float(settings.get("epoch_start", -1.0))
         tmax = float(settings.get("epoch_end", 1.0))
         epochs_dict: Dict[str, List[object]] = {}
@@ -222,7 +208,7 @@ def _process_one_file(
             )
             epochs_dict[label] = [epochs]
 
-        # 4) Post-export (delegates to Legacy post_process)
+        # 6) Post-export (delegates to Legacy post_process via adapter)
         ctx = LegacyCtx(
             preprocessed_data=epochs_dict,
             save_folder_path=SimpleNamespace(get=lambda: str(save_folder)),
@@ -232,6 +218,7 @@ def _process_one_file(
         )
         fif_written = run_post_export(ctx, list(event_map.keys()))
 
+        # 7) Preproc audit (after)
         audit_after, problems = backend_preprocess.finalize_preproc_audit(
             audit_before,
             raw_proc,
@@ -291,8 +278,6 @@ def _process_one_file(
         }
 
 
-
-
 def _memory_ok(limit_ratio: Optional[float]) -> bool:
     """Return True if system memory usage is below the soft cap."""
     if limit_ratio is None:
@@ -300,12 +285,13 @@ def _memory_ok(limit_ratio: Optional[float]) -> bool:
     vm = psutil.virtual_memory()
     return (vm.percent / 100.0) < float(limit_ratio)
 
+
 def _scavenge_stale_memmaps() -> None:
     """Remove memmap PID folders for processes that are no longer alive."""
     try:
-        from pathlib import Path
-        import psutil
-        base = Path(tempfile.gettempdir()) / "fpvs_memmap"
+        from pathlib import Path as _Path
+        import psutil as _psutil
+        base = _Path(tempfile.gettempdir()) / "fpvs_memmap"
         if not base.exists():
             return
         for d in base.glob("pid_*"):
@@ -313,7 +299,7 @@ def _scavenge_stale_memmaps() -> None:
                 pid = int(d.name.split("_", 1)[1])
             except Exception:
                 continue
-            if not psutil.pid_exists(pid):
+            if not _psutil.pid_exists(pid):
                 shutil.rmtree(d, ignore_errors=True)
         try:
             base.rmdir()  # remove root if empty
@@ -343,7 +329,7 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
     completed = 0
     total = len(files)
     remaining = list(files)
-    in_flight: dict = {}
+    in_flight: Dict[object, Path] = {}
 
     with ProcessPoolExecutor(
         max_workers=maxw,
@@ -360,7 +346,13 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
             while not _memory_ok(getattr(params, "memory_soft_limit_ratio", None)):
                 time.sleep(getattr(params, "memory_check_interval_s", 0.25))
             f = remaining.pop(0)
-            fut = pool.submit(_process_one_file, f, params.settings, params.event_map, params.save_folder)
+            fut = pool.submit(
+                _process_one_file,
+                f,
+                params.settings,
+                params.event_map,
+                params.save_folder,
+            )
             in_flight[fut] = f
             return True
 
@@ -385,11 +377,20 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
                 try:
                     res = fut.result()
                 except Exception as exc:
-                    res = {"status": "error", "file": str(f) if f else "unknown", "error": str(exc)}
+                    res = {
+                        "status": "error",
+                        "file": str(f) if f else "unknown",
+                        "error": str(exc),
+                    }
                 completed += 1
                 if progress_queue:
                     progress_queue.put(
-                        {"type": "progress", "completed": completed, "total": total, "result": res}
+                        {
+                            "type": "progress",
+                            "completed": completed,
+                            "total": total,
+                            "result": res,
+                        }
                     )
 
                 _submit_next_available()
@@ -399,52 +400,3 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
 
     if progress_queue:
         progress_queue.put({"type": "done", "count": completed})
-
-        def _submit_next_available() -> bool:
-            """Submit one file if below memory cap and capacity; return True if submitted."""
-            nonlocal remaining
-            if not remaining:
-                return False
-            if len(in_flight) >= maxw:
-                return False
-            # Soft-cap throttle: wait until memory OK
-            while not _memory_ok(params.memory_soft_limit_ratio):
-                time.sleep(params.memory_check_interval_s)
-            f = remaining.pop(0)
-            fut = pool.submit(_process_one_file, f, params.settings, params.event_map, params.save_folder)
-            in_flight[fut] = f
-            return True
-
-        # Prime the pool
-        while len(in_flight) < maxw and remaining:
-            if not _submit_next_available():
-                break
-
-        while in_flight or remaining:
-            if not in_flight and remaining:
-                # No tasks running but some remaining: try to submit again (memory might have freed)
-                _submit_next_available()
-                continue
-
-            done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED, timeout=0.5)
-            if not done:
-                # Periodically try to top up submissions if memory allows
-                _submit_next_available()
-                continue
-
-            for fut in done:
-                f = in_flight.pop(fut, None)
-                try:
-                    res = fut.result()
-                except Exception as exc:
-                    res = {"status": "error", "file": str(f) if f else "unknown", "error": str(exc)}
-                completed += 1
-                if progress_queue:
-                    progress_queue.put(
-                        {"type": "progress", "completed": completed, "total": total, "result": res}
-                    )
-                # Try to submit another task after each completion
-                _submit_next_available()
-
-        if progress_queue:
-            progress_queue.put({"type": "done", "count": completed})
