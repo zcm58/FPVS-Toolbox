@@ -42,7 +42,7 @@ class RunParams:
     save_folder: Path
     max_workers: Optional[int] = None
     # RAM backpressure (ratio of total system memory). None disables throttling.
-    memory_soft_limit_ratio: Optional[float] = None
+    memory_soft_limit_ratio: Optional[float] = 0.85
     # How often to re-check memory when throttled
     memory_check_interval_s: float = 0.25
 
@@ -100,15 +100,20 @@ def _process_one_file(
     save_folder: Path,
 ) -> Dict[str, object]:
     """
-    Execute the processing steps for a single file.
+    Execute the legacy processing steps for a single file.
 
     Returns a small dict with status/progress. Heavy data stays within the process.
     """
     try:
+        # Optional sentinel to confirm this worker code is actually running.
+        # You can remove this once you've verified it appears in the console.
+        print(f"[SENTINEL] process_runner _process_one_file running for {file_path.name}")
+
         t0 = time.perf_counter()
 
         # Lazy imports (inside worker only)
-        from Main_App.PySide6_App.Backend.loader import load_eeg_file  # type: ignore
+        from Main_App.Legacy_App.load_utils import load_eeg_file  # type: ignore
+        from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing  # type: ignore
         from Main_App.PySide6_App.adapters.post_export_adapter import (  # type: ignore
             LegacyCtx,
             run_post_export,
@@ -128,8 +133,7 @@ def _process_one_file(
 
         audit_before = backend_preprocess.begin_preproc_audit(raw, settings, file_path.name)
 
-        # Use the PySide6 preprocessing backend (mirrors legacy order/params)
-        raw_proc, n_rejected = backend_preprocess.perform_preprocessing(
+        raw_proc, n_rejected = perform_preprocessing(  # signatures per legacy module
             raw_input=raw,
             params=settings,
             log_func=logger.info,
@@ -137,18 +141,6 @@ def _process_one_file(
         )
         if raw_proc is None:
             raise RuntimeError("perform_preprocessing returned None")
-
-        # Debug: capture whether a custom ref was actually applied for audit correlation
-        try:
-            logger.info(
-                "AUDIT DEBUG: file=%s custom_ref=%s pair=%s",
-                file_path.name,
-                bool(raw_proc.info.get("fpvs_initial_custom_ref", False)),
-                raw_proc.info.get("fpvs_initial_custom_ref_pair"),
-            )
-        except Exception:
-            # Never let debug logging break the worker
-            pass
 
         # Free loader Raw ASAP
         del raw
@@ -221,6 +213,45 @@ def _process_one_file(
             n_rejected=n_rejected,
         )
 
+        # --- AUDIT DEBUG: inspect what the worker thinks about referencing ---
+        try:
+            # Grab any settings keys related to referencing for context
+            ref_settings = {
+                str(k): settings[k]
+                for k in settings.keys()
+                if "ref" in str(k).lower()
+            }
+
+            info = raw_proc.info
+            fpvs_flag = info.get("fpvs_initial_custom_ref", None)
+            fpvs_pair = info.get("fpvs_initial_custom_ref_pair", None)
+            current_ref = info.get("custom_ref_applied", None)
+
+            print(
+                f"[AUDIT DEBUG] file={file_path.name} "
+                f"ref_settings={ref_settings} "
+                f"fpvs_initial_custom_ref={fpvs_flag} "
+                f"fpvs_initial_custom_ref_pair={fpvs_pair} "
+                f"custom_ref_applied={current_ref}"
+            )
+
+            # Optional: also mirror into the logger (will respect your logging config)
+            logger.warning(
+                "[AUDIT DEBUG] file=%s ref_settings=%r fpvs_initial_custom_ref=%r "
+                "fpvs_initial_custom_ref_pair=%r custom_ref_applied=%r",
+                file_path.name,
+                ref_settings,
+                fpvs_flag,
+                fpvs_pair,
+                current_ref,
+            )
+        except Exception as debug_exc:
+            print(
+                f"[AUDIT DEBUG] file={file_path.name} "
+                f"FAILED to inspect ref state: {debug_exc}"
+            )
+        # --- end AUDIT DEBUG ---
+
         # Done with Raw/Epochs
         del raw_proc, epochs_dict
         gc.collect()
@@ -256,13 +287,13 @@ def _process_one_file(
         }
 
 
+
 def _memory_ok(limit_ratio: Optional[float]) -> bool:
     """Return True if system memory usage is below the soft cap."""
     if limit_ratio is None:
         return True
     vm = psutil.virtual_memory()
     return (vm.percent / 100.0) < float(limit_ratio)
-
 
 def _scavenge_stale_memmaps() -> None:
     """Remove memmap PID folders for processes that are no longer alive."""
@@ -363,3 +394,52 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
 
     if progress_queue:
         progress_queue.put({"type": "done", "count": completed})
+
+        def _submit_next_available() -> bool:
+            """Submit one file if below memory cap and capacity; return True if submitted."""
+            nonlocal remaining
+            if not remaining:
+                return False
+            if len(in_flight) >= maxw:
+                return False
+            # Soft-cap throttle: wait until memory OK
+            while not _memory_ok(params.memory_soft_limit_ratio):
+                time.sleep(params.memory_check_interval_s)
+            f = remaining.pop(0)
+            fut = pool.submit(_process_one_file, f, params.settings, params.event_map, params.save_folder)
+            in_flight[fut] = f
+            return True
+
+        # Prime the pool
+        while len(in_flight) < maxw and remaining:
+            if not _submit_next_available():
+                break
+
+        while in_flight or remaining:
+            if not in_flight and remaining:
+                # No tasks running but some remaining: try to submit again (memory might have freed)
+                _submit_next_available()
+                continue
+
+            done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED, timeout=0.5)
+            if not done:
+                # Periodically try to top up submissions if memory allows
+                _submit_next_available()
+                continue
+
+            for fut in done:
+                f = in_flight.pop(fut, None)
+                try:
+                    res = fut.result()
+                except Exception as exc:
+                    res = {"status": "error", "file": str(f) if f else "unknown", "error": str(exc)}
+                completed += 1
+                if progress_queue:
+                    progress_queue.put(
+                        {"type": "progress", "completed": completed, "total": total, "result": res}
+                    )
+                # Try to submit another task after each completion
+                _submit_next_available()
+
+        if progress_queue:
+            progress_queue.put({"type": "done", "count": completed})
