@@ -105,11 +105,9 @@ def _process_one_file(
     Returns a small dict with status/progress. Heavy data stays within the process.
     """
     try:
-        # Optional sentinel to confirm this worker code is actually running.
-        # You can remove this once you've verified it appears in the console.
-        print(f"[SENTINEL] process_runner _process_one_file running for {file_path.name}")
-
         t0 = time.perf_counter()
+        # Debug sentinel so we know this worker path is being used
+        print(f"[SENTINEL] process_runner _process_one_file running for {file_path.name}")
 
         # Lazy imports (inside worker only)
         from Main_App.Legacy_App.load_utils import load_eeg_file  # type: ignore
@@ -131,7 +129,11 @@ def _process_one_file(
         if raw is None:
             raise RuntimeError("load_eeg_file returned None")
 
-        audit_before = backend_preprocess.begin_preproc_audit(raw, settings, file_path.name)
+        audit_before = backend_preprocess.begin_preproc_audit(
+            raw,
+            settings,
+            file_path.name,
+        )
 
         raw_proc, n_rejected = perform_preprocessing(  # signatures per legacy module
             raw_input=raw,
@@ -141,6 +143,29 @@ def _process_one_file(
         )
         if raw_proc is None:
             raise RuntimeError("perform_preprocessing returned None")
+
+        # Explicitly ensure requested EXG reference is applied at the Raw level
+        # so that MNE's custom_ref_applied flag matches what the audit expects.
+        ref_ch1 = settings.get("ref_channel1") or settings.get("ref_ch1")
+        ref_ch2 = settings.get("ref_channel2") or settings.get("ref_ch2")
+        ref_channels = [ch for ch in (ref_ch1, ref_ch2) if ch]
+
+        try:
+            current_custom_ref = int(raw_proc.info.get("custom_ref_applied", 0))
+        except Exception:
+            current_custom_ref = 0
+
+        if ref_channels and current_custom_ref == 0:
+            # Only apply reference here if:
+            #   - EXG ref channels are configured, and
+            #   - MNE still reports "no custom reference".
+            logger.info(
+                "Applying EEG reference in process_runner to channels %s for file %s",
+                ref_channels,
+                file_path.name,
+            )
+            # In-place reference; this should flip custom_ref_applied internally.
+            mne.set_eeg_reference(raw_proc, ref_channels=ref_channels, copy=False)
 
         # Free loader Raw ASAP
         del raw
@@ -155,7 +180,11 @@ def _process_one_file(
         events_source = "stim"
         try:
             # Use the configured stim channel when available
-            events = mne.find_events(raw_proc, stim_channel=stim, shortest_event=1)  # type: ignore[arg-type]
+            events = mne.find_events(
+                raw_proc,
+                stim_channel=stim,
+                shortest_event=1,
+            )  # type: ignore[arg-type]
         except Exception:
             # Fallback to annotations if present
             events, _ = mne.events_from_annotations(raw_proc)
@@ -213,44 +242,19 @@ def _process_one_file(
             n_rejected=n_rejected,
         )
 
-        # --- AUDIT DEBUG: inspect what the worker thinks about referencing ---
-        try:
-            # Grab any settings keys related to referencing for context
-            ref_settings = {
-                str(k): settings[k]
-                for k in settings.keys()
-                if "ref" in str(k).lower()
-            }
-
-            info = raw_proc.info
-            fpvs_flag = info.get("fpvs_initial_custom_ref", None)
-            fpvs_pair = info.get("fpvs_initial_custom_ref_pair", None)
-            current_ref = info.get("custom_ref_applied", None)
-
+        # If there is still a mismatch, emit a very explicit debug line
+        if audit_after.get("reference_requested") and not audit_after.get(
+            "custom_ref_applied", False
+        ):
             print(
-                f"[AUDIT DEBUG] file={file_path.name} "
-                f"ref_settings={ref_settings} "
-                f"fpvs_initial_custom_ref={fpvs_flag} "
-                f"fpvs_initial_custom_ref_pair={fpvs_pair} "
-                f"custom_ref_applied={current_ref}"
+                "[AUDIT DEBUG] "
+                f"file={file_path.name} "
+                f"ref_settings={audit_after.get('ref_settings')} "
+                f"fpvs_initial_custom_ref={audit_after.get('fpvs_initial_custom_ref')} "
+                f"fpvs_initial_custom_ref_pair={audit_after.get('fpvs_initial_custom_ref_pair')} "
+                f"custom_ref_applied={audit_after.get('custom_ref_applied')} "
+                f"({audit_after.get('custom_ref_applied_label')})"
             )
-
-            # Optional: also mirror into the logger (will respect your logging config)
-            logger.warning(
-                "[AUDIT DEBUG] file=%s ref_settings=%r fpvs_initial_custom_ref=%r "
-                "fpvs_initial_custom_ref_pair=%r custom_ref_applied=%r",
-                file_path.name,
-                ref_settings,
-                fpvs_flag,
-                fpvs_pair,
-                current_ref,
-            )
-        except Exception as debug_exc:
-            print(
-                f"[AUDIT DEBUG] file={file_path.name} "
-                f"FAILED to inspect ref state: {debug_exc}"
-            )
-        # --- end AUDIT DEBUG ---
 
         # Done with Raw/Epochs
         del raw_proc, epochs_dict
@@ -285,6 +289,7 @@ def _process_one_file(
             "error": f"{e}",
             "trace": traceback.format_exc(),
         }
+
 
 
 
