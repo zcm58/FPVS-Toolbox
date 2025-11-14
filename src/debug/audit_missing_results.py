@@ -24,6 +24,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+# Ensure that src/ is on sys.path so backend modules that do
+# absolute imports like "import Main_App" can resolve correctly.
+_THIS_FILE = Path(__file__).resolve()
+_SRC_ROOT = _THIS_FILE.parents[1]  # .../src
+if str(_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SRC_ROOT))
+
 
 def _ensure_pyside6_stubs() -> None:
     """Install minimal PySide6 stubs so backend imports work without Qt."""
@@ -83,7 +90,7 @@ except Exception as exc:  # pragma: no cover - dependency missing in diagnostics
 
 # TODO: Update this path to the Semantic Categories (or other) project root
 # before running the diagnostic locally.
-PROJECT_ROOT = Path("C:/Users/zackm/OneDrive - Mississippi State University/NERD/2 - Results/Semantic Categories/0 - Legacy Files")
+PROJECT_ROOT = Path("C:/Users/zackm/OneDrive - Mississippi State University/NERD/2 - Results/1 - FPVS Toolbox Projects/Semantic Categories")
 
 # Configure recording filenames privately before running this manual diagnostic.
 TARGET_FILES = []
