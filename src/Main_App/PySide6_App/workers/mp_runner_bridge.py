@@ -70,7 +70,17 @@ class MpRunnerBridge(QObject):
                     self.progress.emit(pct)
                     result = msg.get("result", {})
                     if result.get("status") == "error":
-                        self.error.emit(str(result.get("error")))
+                        # Compose a richer error message that includes file and stage,
+                        # while remaining backward-compatible with older payloads.
+                        raw_error = str(result.get("error") or "Unknown error")
+                        stage = str(result.get("stage") or "unknown")
+                        file_str = str(result.get("file") or "unknown")
+                        try:
+                            file_name = Path(file_str).name
+                        except Exception:
+                            file_name = file_str
+                        message = f"{file_name} [{stage}]: {raw_error}"
+                        self.error.emit(message)
                     elif result.get("status") == "ok":
                         self._results.append(result)
                 elif mtype == "done":
@@ -80,4 +90,3 @@ class MpRunnerBridge(QObject):
                     break
         except Exception:
             pass
-

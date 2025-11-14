@@ -94,21 +94,70 @@ def _memmap_path_for_file(file_path: Path) -> Path:
     return pid_dir / (file_path.stem + "_raw.dat")
 
 
-def _process_one_file(
+def _make_error_result(
+    file_path: Path,
+    stage: str,
+    exc: Exception,
+    start_time: Optional[float] = None,
+) -> Dict[str, object]:
+    """
+    Build a structured error payload for a single-file run.
+    """
+    elapsed_ms: Optional[int] = None
+    if start_time is not None:
+        try:
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        except Exception:
+            elapsed_ms = None
+
+    tb = traceback.format_exc()
+    tb_lines = tb.strip().splitlines()
+    traceback_head = "\n".join(tb_lines[:6])
+
+    logger.error(
+        "file_processing_error",
+        extra={
+            "file": str(file_path),
+            "stage": stage,
+            "error": str(exc),
+            "elapsed_ms": elapsed_ms,
+        },
+    )
+
+    payload: Dict[str, object] = {
+        "status": "error",
+        "file": str(file_path),
+        "stage": stage,
+        "error": str(exc),
+        "trace": tb,
+        "traceback_head": traceback_head,
+    }
+    if elapsed_ms is not None:
+        payload["elapsed_ms"] = elapsed_ms
+    return payload
+
+
+def _run_full_pipeline_for_file(
     file_path: Path,
     settings: Dict[str, object],
     event_map: Dict[str, int],
     save_folder: Path,
 ) -> Dict[str, object]:
     """
-    Execute the processing steps for a single file using the PySide6 backend.
+    Canonical single-file pipeline using the PySide6 backend.
 
-    Returns a small dict with status/progress. Heavy data stays within the process.
+    Pipeline order (must not change):
+      load → preproc audit (before) → preprocessing → events → epochs →
+      post_export → preproc audit (after) → cleanup.
     """
+    t0 = time.perf_counter()
+    stage = "load"
     try:
-        t0 = time.perf_counter()
         # Debug sentinel so we know this worker path is being used
-        print(f"[SENTINEL] process_runner _process_one_file running for {file_path.name}")
+        print(
+            f"[SENTINEL] process_runner _run_full_pipeline_for_file running for "
+            f"{file_path.name}"
+        )
 
         # Lazy imports (inside worker only)
         from Main_App.PySide6_App.Backend.loader import load_eeg_file  # type: ignore
@@ -116,8 +165,8 @@ def _process_one_file(
             LegacyCtx,
             run_post_export,
         )
-        import mne  # type: ignore
         import gc
+        import mne  # type: ignore
 
         # Minimal logger-compatible stub for loader
         class _App:
@@ -130,11 +179,13 @@ def _process_one_file(
         ref_pair = (str(ref_ch1), str(ref_ch2))
 
         # 1) Load
+        stage = "load"
         raw = load_eeg_file(_App(), str(file_path), ref_pair=ref_pair)
         if raw is None:
             raise RuntimeError("load_eeg_file returned None")
 
         # 2) Preproc audit (before)
+        stage = "preprocess"
         audit_before = backend_preprocess.begin_preproc_audit(
             raw,
             settings,
@@ -158,6 +209,7 @@ def _process_one_file(
         gc.collect()
 
         # 4) Events — prefer explicit stim channel (BioSemi 'Status')
+        stage = "events"
         stim = (
             settings.get("stim_channel")
             or settings.get("stim")
@@ -191,6 +243,7 @@ def _process_one_file(
             )
 
         # 5) Epochs per label/code (match GUI epoch window when provided)
+        stage = "epochs"
         tmin = float(settings.get("epoch_start", -1.0))
         tmax = float(settings.get("epoch_end", 1.0))
         epochs_dict: Dict[str, List[object]] = {}
@@ -209,6 +262,7 @@ def _process_one_file(
             epochs_dict[label] = [epochs]
 
         # 6) Post-export (delegates to Legacy post_process via adapter)
+        stage = "export"
         ctx = LegacyCtx(
             preprocessed_data=epochs_dict,
             save_folder_path=SimpleNamespace(get=lambda: str(save_folder)),
@@ -219,6 +273,7 @@ def _process_one_file(
         fif_written = run_post_export(ctx, list(event_map.keys()))
 
         # 7) Preproc audit (after)
+        stage = "audit"
         audit_after, problems = backend_preprocess.finalize_preproc_audit(
             audit_before,
             raw_proc,
@@ -287,19 +342,35 @@ def _process_one_file(
         return {
             "status": "ok",
             "file": str(file_path),
+            "stage": "done",
             "elapsed_ms": elapsed_ms,
             "audit": audit_after,
             "problems": problems,
+            "events_info": events_info,
+            "post_export_ok": bool(fif_written),
         }
-
     except Exception as e:  # pragma: no cover - worker error path
-        return {
-            "status": "error",
-            "file": str(file_path),
-            "error": f"{e}",
-            "trace": traceback.format_exc(),
-        }
+        return _make_error_result(
+            file_path=file_path,
+            stage=stage,
+            exc=e,
+            start_time=t0,
+        )
 
+
+def _process_one_file(
+    file_path: Path,
+    settings: Dict[str, object],
+    event_map: Dict[str, int],
+    save_folder: Path,
+) -> Dict[str, object]:
+    """
+    Execute the processing steps for a single file using the PySide6 backend.
+
+    This is the worker entry point used by multiprocessing. It delegates to
+    _run_full_pipeline_for_file so the same pipeline can be reused by other callers.
+    """
+    return _run_full_pipeline_for_file(file_path, settings, event_map, save_folder)
 
 
 def _memory_ok(limit_ratio: Optional[float]) -> bool:
