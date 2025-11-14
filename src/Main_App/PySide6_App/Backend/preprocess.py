@@ -166,20 +166,33 @@ def perform_preprocessing(
                 coerced = _coerce_refs_to_eeg_if_needed(raw, (ref1, ref2))
                 if coerced:
                     log_func(f"DEBUG: coerced {coerced} → EEG for referencing.")
+
                 log_func(f"Applying reference pair [{ref1}, {ref2}] on {filename_for_log}...")
                 raw.set_eeg_reference(ref_channels=[ref1, ref2], projection=False, verbose=False)
-                # Mark explicit FPVS flags for the audit layer (keeps MNE behavior intact).
+
+                # Mark explicit success in params so the audit layer can trust it
+                params["_fpvs_initial_ref_ok"] = True
+                params["_fpvs_initial_ref_pair"] = (ref1, ref2)
+
+                # Debug: inspect MNE's own custom_ref flag after applying the pair
                 try:
-                    raw.info["fpvs_initial_custom_ref"] = True
-                    raw.info["fpvs_initial_custom_ref_pair"] = (ref1, ref2)
+                    mne_custom = raw.info.get("custom_ref_applied", None)
                 except Exception:
-                    pass
+                    mne_custom = None
+                print(
+                    f"[REF APPLY] {filename_for_log}: "
+                    f"mne_custom_ref={mne_custom} "
+                    f"initial_ref_ok={params.get('_fpvs_initial_ref_ok', False)} "
+                    f"pair=({ref1},{ref2})"
+                )
+
                 log_func(f"AUDIT: custom_ref_applied=True pair=[{ref1},{ref2}]")
             except Exception as e:
                 log_func(f"Warn: Initial reference failed for {filename_for_log}: {e}")
         else:
             log_func(
-                f"Skip initial referencing for {filename_for_log} (Ref channels '{ref1}', '{ref2}' not found or not specified)."
+                f"Skip initial referencing for {filename_for_log} "
+                f"(Ref channels '{ref1}', '{ref2}' not found or not specified)."
             )
 
         # 2) Explicitly drop the selected reference channels after initial reference
@@ -334,7 +347,6 @@ def perform_preprocessing(
                 except Exception as e:
                     log_func(f"Warn: Interpolation failed for {filename_for_log}: {e}")
             elif raw.info["bads"]:
-
                 log_func(
                     f"Warn: No montage for {filename_for_log}, cannot interpolate. Bads remain: {raw.info['bads']}"
                 )
@@ -355,6 +367,19 @@ def perform_preprocessing(
                 log_func(f"Skip average ref for {filename_for_log}: No good EEG channels.")
         except Exception as e:
             log_func(f"Warn: Average reference failed for {filename_for_log}: {e}")
+
+        # Final reference state debug (after whole pipeline)
+        try:
+            mne_custom_final = raw.info.get("custom_ref_applied", None)
+        except Exception:
+            mne_custom_final = None
+        print(
+            f"[REF FINAL] {filename_for_log}: "
+            f"mne_custom_ref={mne_custom_final} "
+            f"fpvs_initial_custom_ref={raw.info.get('fpvs_initial_custom_ref', None)} "
+            f"n_ch={len(raw.ch_names)} "
+            f"bads={raw.info.get('bads', [])}"
+        )
 
         log_func(
             f"Preprocessing OK for {filename_for_log}. {len(raw.ch_names)} channels, {raw.info['sfreq']:.1f}Hz."
@@ -378,3 +403,4 @@ def perform_preprocessing(
         log_func(f"!!! CRITICAL Preprocessing error for {filename_for_log}: {e}")
         log_func(f"Traceback: {traceback.format_exc()}")
         return None, num_kurtosis_bads_identified
+
