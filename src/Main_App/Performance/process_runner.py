@@ -229,19 +229,42 @@ def _process_one_file(
             n_rejected=n_rejected,
         )
 
-        # If there is still a mismatch, emit a very explicit debug line
-        if audit_after.get("reference_requested") and not audit_after.get(
-            "custom_ref_applied", False
-        ):
-            print(
-                "[AUDIT DEBUG] "
-                f"file={file_path.name} "
-                f"ref_settings={audit_after.get('ref_settings')} "
-                f"fpvs_initial_custom_ref={audit_after.get('fpvs_initial_custom_ref')} "
-                f"fpvs_initial_custom_ref_pair={audit_after.get('fpvs_initial_custom_ref_pair')} "
-                f"custom_ref_applied={audit_after.get('custom_ref_applied')} "
-                f"({audit_after.get('custom_ref_applied_label')})"
+        # Developer-only audit debug: summarize final preprocessing state when a
+        # reference pair was requested in the settings. Uses the new audit payload
+        # schema from backend_preprocess.finalize_preproc_audit.
+        ref_expected = [
+            ch
+            for ch in (
+                settings.get("ref_channel1"),
+                settings.get("ref_channel2"),
             )
+            if ch
+        ]
+
+        if ref_expected:
+            fields = {
+                "ref_expected": tuple(ref_expected),
+                "ref_chans": audit_after.get("ref_chans"),
+                "sfreq": audit_after.get("sfreq"),
+                "lowpass": audit_after.get("lowpass"),
+                "highpass": audit_after.get("highpass"),
+                "n_channels": audit_after.get("n_channels"),
+                "stim": audit_after.get("stim_channel"),
+                "n_events": audit_after.get("n_events"),
+                "n_rejected": audit_after.get("n_rejected"),
+                "fif_written": audit_after.get("fif_written"),
+            }
+
+            parts = [f"file={file_path.name}"]
+            parts.extend(
+                f"{key}={value}"
+                for key, value in fields.items()
+                if value is not None
+            )
+            if problems:
+                parts.append(f"problems={problems}")
+
+            print("[AUDIT DEBUG] " + " ".join(parts))
 
         # Done with Raw/Epochs
         del raw_proc, epochs_dict
@@ -276,6 +299,7 @@ def _process_one_file(
             "error": f"{e}",
             "trace": traceback.format_exc(),
         }
+
 
 
 def _memory_ok(limit_ratio: Optional[float]) -> bool:
