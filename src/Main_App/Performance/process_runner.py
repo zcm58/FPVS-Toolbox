@@ -228,38 +228,78 @@ def _run_full_pipeline_for_file(
             events, _ = mne.events_from_annotations(raw_proc)
             events_source = "annotations"
 
+        # If there are no events at all, this is a true failure.
+        if events.size == 0:
+            raise RuntimeError(
+                f"No events found for {file_path.name} (source='{events_source}', stim='{stim}')"
+            )
+
         events_info = {
             "stim_channel": stim,
             "n_events": int(len(events)),
             "source": events_source,
         }
 
-        # Clear message if requested event IDs aren’t present
-        have_codes = set(int(c) for c in events[:, 2].tolist())
-        missing = [int(code) for code in event_map.values() if int(code) not in have_codes]
-        if missing:
-            raise RuntimeError(
-                f"Missing event codes {missing} in {file_path.name} (stim='{stim}')"
-            )
-
-        # 5) Epochs per label/code (match GUI epoch window when provided)
+        # 5) Epochs per label/code (tolerant of missing runs)
         stage = "epochs"
         tmin = float(settings.get("epoch_start", -1.0))
         tmax = float(settings.get("epoch_end", 1.0))
+
+        # Which event codes are actually present in this recording?
+        have_codes = {int(c) for c in events[:, 2].tolist()}
+
         epochs_dict: Dict[str, List[object]] = {}
+        total_epochs = 0
+
         for label, code in event_map.items():
+            code_int = int(code)
+
+            if code_int not in have_codes:
+                # Participant simply never saw this condition/run.
+                msg = (
+                    f"[AUDIT WARNING] {file_path.name}: label='{label}' code={code_int} "
+                    f"has 0 matching events; skipping epochs for this label."
+                )
+                logger.warning(msg)
+                print(msg)
+                epochs_dict[label] = []  # keep key present but with no runs
+                continue
+
+            # Create epochs for codes that are present; allow MNE to warn instead of raise
             epochs = mne.Epochs(
                 raw_proc,
                 events,
-                event_id={label: code},
+                event_id={label: code_int},
                 tmin=tmin,
                 tmax=tmax,
                 preload=False,
                 baseline=None,
                 decim=1,
                 verbose=False,
+                on_missing="warn",
             )
+
+            n_ep = len(epochs)
+            if n_ep == 0:
+                # Code exists in the event array but epoch window / rejection yielded no data.
+                msg = (
+                    f"[AUDIT WARNING] {file_path.name}: label='{label}' code={code_int} "
+                    f"produced 0 epochs after epoching; skipping this label."
+                )
+                logger.warning(msg)
+                print(msg)
+                epochs_dict[label] = []
+                continue
+
             epochs_dict[label] = [epochs]
+            total_epochs += n_ep
+
+        # If no epochs at all were created for any label, this is a real failure
+        if total_epochs == 0:
+            raise RuntimeError(
+                f"No epochs created for any configured labels in {file_path.name}. "
+                f"Check event_map, epoch window (tmin={tmin}, tmax={tmax}), and triggers."
+            )
 
         # 6) Post-export (delegates to Legacy post_process via adapter)
         stage = "export"
