@@ -83,7 +83,7 @@ except Exception as exc:  # pragma: no cover - dependency missing in diagnostics
 
 # TODO: Update this path to the Semantic Categories (or other) project root
 # before running the diagnostic locally.
-PROJECT_ROOT = Path("/path/to/semantic_categories_project")
+PROJECT_ROOT = Path("C:/Users/zackm/OneDrive - Mississippi State University/NERD/2 - Results/Semantic Categories/0 - Legacy Files")
 
 # Configure recording filenames privately before running this manual diagnostic.
 TARGET_FILES = []
