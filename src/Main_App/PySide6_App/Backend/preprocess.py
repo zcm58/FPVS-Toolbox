@@ -143,6 +143,12 @@ def perform_preprocessing(
     try:
         orig_ch_names = list(raw.info["ch_names"])
         log_func(f"Preprocessing {len(orig_ch_names)} chans from '{filename_for_log}'...")
+        print(
+            f"[REF DEBUG] {filename_for_log}: "
+            f"ref1={ref1!r} present1={ref1 in orig_ch_names}, "
+            f"ref2={ref2!r} present2={ref2 in orig_ch_names}, "
+            f"n_ch={len(orig_ch_names)}"
+        )
         log_func(
             f"DEBUG [preprocess for {filename_for_log}]: Initial channel names ({len(orig_ch_names)}): {orig_ch_names}"
         )
@@ -328,6 +334,7 @@ def perform_preprocessing(
                 except Exception as e:
                     log_func(f"Warn: Interpolation failed for {filename_for_log}: {e}")
             elif raw.info["bads"]:
+
                 log_func(
                     f"Warn: No montage for {filename_for_log}, cannot interpolate. Bads remain: {raw.info['bads']}"
                 )
@@ -371,4 +378,3 @@ def perform_preprocessing(
         log_func(f"!!! CRITICAL Preprocessing error for {filename_for_log}: {e}")
         log_func(f"Traceback: {traceback.format_exc()}")
         return None, num_kurtosis_bads_identified
-#end of file
