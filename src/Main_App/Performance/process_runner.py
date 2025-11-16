@@ -168,6 +168,20 @@ def _run_full_pipeline_for_file(
         import gc
         import mne  # type: ignore
 
+        # Quiet noisy MNE INFO logs in worker processes (e.g., repeated
+        # "Using data from preloaded Raw..." lines) while preserving
+        # WARNING/ERROR messages.
+        try:
+            set_level = getattr(mne, "set_log_level", None)
+            if callable(set_level):
+                set_level("WARNING")
+            else:
+                from mne.utils import set_log_level as _set_log_level  # type: ignore
+                _set_log_level("WARNING")
+        except Exception:
+            # If MNE changes its API, fail silently; core behavior is unaffected.
+            pass
+
         # Minimal logger-compatible stub for loader
         class _App:
             def log(self, msg: str) -> None:  # pragma: no cover - informational
@@ -416,6 +430,7 @@ def _run_full_pipeline_for_file(
             exc=e,
             start_time=t0,
         )
+
 
 
 def _process_one_file(
