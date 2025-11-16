@@ -1,5 +1,8 @@
 # main_window.py
 from __future__ import annotations
+
+# ruff: noqa: E402
+
 import logging
 import os
 import queue
@@ -12,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from types import MethodType, SimpleNamespace, ModuleType
 from collections import deque
+
+import psutil
 
 # Qt / PySide6
 from PySide6.QtCore import QObject, QTimer, Signal, QThread, Slot, Qt
@@ -121,6 +126,10 @@ from Main_App.PySide6_App.Backend.project_manager import (
     select_projects_root,
 )
 from Main_App.PySide6_App.Backend.preprocessing_settings import normalize_preprocessing_settings
+from Main_App.Performance.mp_env import (
+    compute_effective_max_workers,
+    set_blas_threads_single_process,
+)
 from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
 )
@@ -276,7 +285,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Parallel processing configuration
         self.parallel_mode = "process"
-        self.max_workers = max(1, (os.cpu_count() or 2) - 1)
+        default_cpu = os.cpu_count() or 1
+        default_ram = psutil.virtual_memory().total
+        self.max_workers = compute_effective_max_workers(default_ram, default_cpu, None)
         self._n_jobs_ignored_logged = False
         self._mp = None
 
@@ -534,15 +545,73 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 )
                 self._n_jobs_ignored_logged = True
 
-            # Pull project overrides if present
+            project_max_workers: int | None = None
             if getattr(self, "currentProject", None):
                 opts = getattr(self.currentProject, "options", {})
                 self.parallel_mode = opts.get(
                     "parallel_mode", getattr(self, "parallel_mode", "process")
                 )
-                self.max_workers = opts.get(
-                    "max_workers", getattr(self, "max_workers", None)
+                raw_override = opts.get("max_workers")
+                if raw_override is not None:
+                    try:
+                        override_value = int(raw_override)
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "Project max_workers override must be an integer; received %r",
+                            raw_override,
+                        )
+                    else:
+                        if override_value > 0:
+                            project_max_workers = override_value
+                        else:
+                            logger.warning(
+                                "Project max_workers override must be positive; received %r",
+                                raw_override,
+                            )
+
+            total_ram_bytes = psutil.virtual_memory().total
+            cpu_count = os.cpu_count() or 1
+            total_ram_gib = total_ram_bytes / float(1024 ** 3) if total_ram_bytes > 0 else 0.0
+            ram_tier = "default"
+            ram_cap: int | None = None
+            if 14.0 <= total_ram_gib <= 18.0:
+                ram_tier = "16GB"
+                ram_cap = 4
+            elif 28.0 <= total_ram_gib <= 36.0:
+                ram_tier = "32GB"
+                ram_cap = 5
+            elif 56.0 <= total_ram_gib <= 72.0:
+                ram_tier = "64GB"
+                ram_cap = 6
+
+            effective_max_workers = compute_effective_max_workers(
+                total_ram_bytes=total_ram_bytes,
+                cpu_count=cpu_count,
+                project_max_workers=project_max_workers,
+            )
+            if (
+                project_max_workers is not None
+                and effective_max_workers != project_max_workers
+            ):
+                logger.warning(
+                    "Clamped project max_workers from %s to %s (cpu_count=%s, ram_tier=%s, ram_cap=%s)",
+                    project_max_workers,
+                    effective_max_workers,
+                    cpu_count,
+                    ram_tier,
+                    ram_cap if ram_cap is not None else "none",
                 )
+
+            logger.info(
+                "Resolved max_workers=%s (cpu_count=%s, ram_gib=%.1f, ram_tier=%s, ram_cap=%s, project_override=%s)",
+                effective_max_workers,
+                cpu_count,
+                total_ram_gib,
+                ram_tier,
+                ram_cap if ram_cap is not None else "none",
+                project_max_workers,
+            )
+            self.max_workers = effective_max_workers
 
             # ---------- Process mode (multiprocessing) ----------
             if self.parallel_mode == "process":
@@ -612,8 +681,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 return  # IMPORTANT: do not fall through to legacy
 
             # ---------- Single mode (legacy path) ----------
-            from Main_App.Performance.mp_env import set_blas_threads_single_process
-
             set_blas_threads_single_process()
             if not self._validate_inputs():
                 try:
@@ -1130,7 +1197,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             return
         opts = getattr(self.currentProject, "options", {})
         self.parallel_mode = opts.get("parallel_mode", self.parallel_mode)
-        self.max_workers = opts.get("max_workers", self.max_workers)
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
 
