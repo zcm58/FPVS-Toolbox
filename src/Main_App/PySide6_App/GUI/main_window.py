@@ -14,7 +14,7 @@ from types import MethodType, SimpleNamespace, ModuleType
 from collections import deque
 
 # Qt / PySide6
-from PySide6.QtCore import QObject, QTimer, Signal, QThread, Slot
+from PySide6.QtCore import QObject, QTimer, Signal, QThread, Slot, Qt
 from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QAction  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
@@ -374,6 +374,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._pending_finalize = False
         self._op_guard = OpGuard()
         self._selected_bdf: str | None = None
+        self._processing_notice = None
 
         # Auto update check on launch: prompt only if update exists
         QTimer.singleShot(1000, lambda: check_for_updates_on_launch(self))
@@ -400,6 +401,40 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self.text_log.append(formatted)
         # Do not emit INFO-level messages to backend unless Debug is on.
         self._emit_backend_log(level, message)
+
+    def _show_processing_started_notice(self) -> None:
+        existing = getattr(self, "_processing_notice", None)
+        if existing is not None:
+            try:
+                existing.close()
+            except Exception:
+                pass
+            finally:
+                self._processing_notice = None
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Processing Started")
+        box.setIcon(QMessageBox.Information)
+        box.setText(
+            "Processing Data has begun. Please be patient - your computer may "
+            "become slow or unresponsive until processing is complete."
+        )
+        box.addButton("Dismiss", QMessageBox.AcceptRole)
+        box.setWindowModality(Qt.NonModal)
+
+        def _clear_notice(_: int | None = None) -> None:
+            if getattr(self, "_processing_notice", None) is box:
+                self._processing_notice = None
+
+        box.finished.connect(_clear_notice)
+
+        def _auto_close() -> None:
+            if getattr(self, "_processing_notice", None) is box and box.isVisible():
+                box.close()
+
+        self._processing_notice = box
+        box.show()
+        QTimer.singleShot(10000, _auto_close)
 
     # -------------------------- processing -------------------------- #
 
@@ -570,6 +605,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     max_workers=self.max_workers,
                 )
                 self._run_active = True
+                self._show_processing_started_notice()
                 if hasattr(self, "btn_start"):
                     self.btn_start.setText("Stop Processing")
                     self.btn_start.setEnabled(True)
@@ -598,6 +634,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
             # From here on, a run is active (single/legacy mode).
             self._run_active = True
+            self._show_processing_started_notice()
             if hasattr(self, "btn_start"):
                 self.btn_start.setText("Stop Processing")
                 self.btn_start.setEnabled(True)
