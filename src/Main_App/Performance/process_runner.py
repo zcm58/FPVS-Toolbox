@@ -626,17 +626,20 @@ def run_project_parallel(
 
     elapsed_seconds = time.perf_counter() - run_started_at
     logger.info(
-        "mp_run_summary",
-        extra={
-            "num_files": total,
-            "completed": completed,
-            "max_workers_param": params.max_workers,
-            "max_workers_used": maxw,
-            "peak_in_flight": peak_in_flight,
-            "max_memory_percent": round(max_memory_percent, 2),
-            "elapsed_seconds": round(elapsed_seconds, 3),
-            "cancelled": cancelled,
-        },
+        (
+            "mp_run_summary num_files=%d completed=%d "
+            "max_workers_param=%s max_workers_used=%d "
+            "peak_in_flight=%d max_memory_percent=%.2f "
+            "elapsed_seconds=%.3f cancelled=%s"
+        ),
+        total,
+        completed,
+        params.max_workers,
+        maxw,
+        peak_in_flight,
+        max_memory_percent,
+        elapsed_seconds,
+        cancelled,
     )
 
     # Batch-level summary: average number of channels rejected per file.
@@ -670,4 +673,3 @@ def run_project_parallel(
                 }
             )
         progress_queue.put(done_msg)
-
