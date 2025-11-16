@@ -265,7 +265,8 @@ def _run_full_pipeline_for_file(
                 epochs_dict[label] = []  # keep key present but with no runs
                 continue
 
-            # Create epochs for codes that are present; allow MNE to warn instead of raise
+            # Create epochs for codes that are present; allow MNE to warn instead of raise.
+            # Keep preload=False for memory reasons.
             epochs = mne.Epochs(
                 raw_proc,
                 events,
@@ -279,7 +280,26 @@ def _run_full_pipeline_for_file(
                 on_missing="warn",
             )
 
+            # MNE requires that bad epochs be dropped (or preload=True) before len(epochs)
+            # is called when preload=False. We do not change any reject/flat configuration
+            # here; drop_bad() will simply apply any existing thresholds and mark that
+            # the bad-epoch decision has been made.
+            epochs.drop_bad()
+
+            # For audit: how many raw events had this code, and how many epochs remain.
+            n_events_for_code = int((events[:, 2] == code_int).sum())
             n_ep = len(epochs)
+
+            logger.info(
+                "[AUDIT DEBUG] %s: label='%s' code=%s events_for_code=%d "
+                "epochs_after_drop_bad=%d",
+                file_path.name,
+                label,
+                code_int,
+                n_events_for_code,
+                n_ep,
+            )
+
             if n_ep == 0:
                 # Code exists in the event array but epoch window / rejection yielded no data.
                 msg = (
