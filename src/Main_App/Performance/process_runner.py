@@ -486,6 +486,10 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
     remaining = list(files)
     in_flight: Dict[object, Path] = {}
 
+    # Batch-level stats for n_rejected (number of channels interpolated per file)
+    total_rejected = 0
+    files_with_audit = 0
+
     with ProcessPoolExecutor(
         max_workers=maxw,
         mp_context=ctx,
@@ -537,6 +541,16 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
                         "file": str(f) if f else "unknown",
                         "error": str(exc),
                     }
+
+                # Accumulate per-file rejected-channel counts when available
+                if isinstance(res, dict) and res.get("status") == "ok":
+                    audit = res.get("audit") or {}
+                    if isinstance(audit, dict):
+                        n_rejected = audit.get("n_rejected")
+                        if isinstance(n_rejected, (int, float)):
+                            total_rejected += int(n_rejected)
+                            files_with_audit += 1
+
                 completed += 1
                 if progress_queue:
                     progress_queue.put(
@@ -553,5 +567,30 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
     # Final cleanup: remove any stale memmaps in the %TEMP% folder from previous runs
     _scavenge_stale_memmaps()
 
+    # Batch-level summary: average number of channels rejected per file.
+    avg_rejected: Optional[float] = None
+    if files_with_audit:
+        avg_rejected = total_rejected / files_with_audit
+        logger.info(
+            "batch_summary average_rejected_channels_per_file=%.2f "
+            "files_with_audit=%d total_rejected=%d",
+            avg_rejected,
+            files_with_audit,
+            total_rejected,
+        )
+
     if progress_queue:
-        progress_queue.put({"type": "done", "count": completed})
+        done_msg: Dict[str, object] = {
+            "type": "done",
+            "count": completed,
+        }
+        if avg_rejected is not None:
+            done_msg.update(
+                {
+                    "avg_rejected": avg_rejected,
+                    "total_rejected": total_rejected,
+                    "files_with_audit": files_with_audit,
+                }
+            )
+        progress_queue.put(done_msg)
+

@@ -513,7 +513,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def _on_processing_finished(self, payload: dict | None = None) -> None:
         # Process-mode completion with audit logging
-        results = []
+        results: list[dict] = []
         if isinstance(payload, dict):
             results = payload.get("results") or []
 
@@ -531,11 +531,16 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             except Exception:
                 audit_root = None
 
+        # Batch-level aggregation for rejected-channel counts
+        total_rejected = 0
+        files_with_reject_info = 0
+
         for result in results:
             audit = result.get("audit") or {}
             problems = result.get("problems") or []
             line, is_warning = format_audit_summary(audit, problems)
             self.log(line, level=logging.WARNING if is_warning else logging.INFO)
+
             if debug_on and audit_root and audit:
                 try:
                     raw_file = audit.get("file") or result.get("file", "")
@@ -550,10 +555,25 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 except Exception as exc:
                     self.log(f"Audit JSON write failed: {exc}", level=logging.WARNING)
 
+            # Aggregate per-file n_rejected if present
+            n_rejected = audit.get("n_rejected")
+            if isinstance(n_rejected, (int, float)):
+                total_rejected += int(n_rejected)
+                files_with_reject_info += 1
+
+        # Emit a single batch-level summary line to the GUI log
+        if files_with_reject_info:
+            avg_rejected = total_rejected / files_with_reject_info
+            self.log(
+                f"[AUDIT] Average number of channels rejected per file: "
+                f"{avg_rejected:.2f} (n={files_with_reject_info}, total={total_rejected})"
+            )
+
         self._busy_stop()
         self._finalize_processing(True)
         self._run_active = False
         self._start_guard.end()
+
 
     def _on_processing_error(self, message: str) -> None:
         # Process-mode error
