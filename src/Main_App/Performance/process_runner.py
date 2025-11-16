@@ -25,6 +25,7 @@ from multiprocessing import Queue, get_context
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Dict, List, Optional
+from threading import Event
 
 from Main_App.PySide6_App.Backend import preprocess as backend_preprocess
 
@@ -479,18 +480,22 @@ def _scavenge_stale_memmaps() -> None:
         pass
 
 
-def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = None) -> None:
+def run_project_parallel(
+    params: RunParams,
+    progress_queue: Optional[Queue] = None,
+    cancel_event: Optional[Event] = None,
+) -> None:
     """
     Submit one process per file and report progress via an optional Queue.
 
     Queue messages:
       - {"type":"progress","completed":int,"total":int,"result":{...}}
-      - {"type":"done","count":int}
+      - {"type":"done","count":int,"cancelled":bool, ...}
     """
     files = list(params.data_files)
     if not files:
         if progress_queue:
-            progress_queue.put({"type": "done", "count": 0})
+            progress_queue.put({"type": "done", "count": 0, "cancelled": False})
         return
 
     maxw = params.max_workers or max(1, (os.cpu_count() or 2) - 1)
@@ -505,6 +510,15 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
     total_rejected = 0
     files_with_audit = 0
 
+    cancelled = False
+
+    def _cancelled() -> bool:
+        nonlocal cancelled
+        if cancel_event is not None and cancel_event.is_set():
+            cancelled = True
+            return True
+        return False
+
     with ProcessPoolExecutor(
         max_workers=maxw,
         mp_context=ctx,
@@ -516,9 +530,13 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
             nonlocal remaining
             if not remaining or len(in_flight) >= maxw:
                 return False
+            if _cancelled():
+                return False
+
             # Optional soft-cap on system RAM
             while not _memory_ok(getattr(params, "memory_soft_limit_ratio", None)):
                 time.sleep(getattr(params, "memory_check_interval_s", 0.25))
+
             f = remaining.pop(0)
             fut = pool.submit(
                 _process_one_file,
@@ -537,6 +555,18 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
 
         # Drain
         while in_flight or remaining:
+            if _cancelled():
+                # Stop submitting new work and attempt to cancel queued futures.
+                for fut in list(in_flight.keys()):
+                    fut.cancel()
+                try:
+                    pool.shutdown(cancel_futures=True)
+                except Exception:
+                    pass
+                in_flight.clear()
+                remaining.clear()
+                break
+
             if not in_flight and remaining:
                 _submit_next_available()
                 continue
@@ -599,6 +629,11 @@ def run_project_parallel(params: RunParams, progress_queue: Optional[Queue] = No
             "type": "done",
             "count": completed,
         }
+        if cancelled:
+            done_msg["cancelled"] = True
+        else:
+            done_msg["cancelled"] = False
+
         if avg_rejected is not None:
             done_msg.update(
                 {

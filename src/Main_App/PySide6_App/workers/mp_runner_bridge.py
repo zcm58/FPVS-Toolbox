@@ -5,7 +5,7 @@ from __future__ import annotations
 from multiprocessing import Queue, get_context
 from pathlib import Path
 from typing import Dict, List, Optional
-
+from threading import Event, Thread
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from Main_App.Performance.mp_env import set_blas_threads_single_process
@@ -22,10 +22,15 @@ class MpRunnerBridge(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._poll)
+
         self._q: Optional[Queue] = None
         self._total: int = 0
-        self._running = False
+        self._running: bool = False
         self._results: List[Dict[str, object]] = []
+
+        # New: cooperative cancellation + worker thread handle
+        self._cancel_event: Optional[Event] = None
+        self._worker_thread: Optional[Thread] = None
 
     def start(
         self,
@@ -38,7 +43,14 @@ class MpRunnerBridge(QObject):
     ) -> None:
         if self._running:
             return
+
+        if not data_files:
+            # Nothing to do; emit a trivial finished payload.
+            self.finished.emit({"files": 0, "results": []})
+            return
+
         self._running = True
+        self._cancel_event = Event()
         self._q = get_context("spawn").Queue()
         params = RunParams(
             project_root=project_root,
@@ -48,13 +60,31 @@ class MpRunnerBridge(QObject):
             save_folder=save_folder,
             max_workers=max_workers,
         )
-        set_blas_threads_single_process()
-        from threading import Thread
 
-        Thread(target=run_project_parallel, args=(params, self._q), daemon=True).start()
+        set_blas_threads_single_process()
+
+        # Launch the process-based runner in a background thread
+        self._worker_thread = Thread(
+            target=run_project_parallel,
+            args=(params, self._q, self._cancel_event),
+            daemon=True,
+        )
+        self._worker_thread.start()
+
         self._total = len(data_files)
         self._results = []
         self._timer.start()
+
+    @Slot()
+    def cancel(self) -> None:
+        """
+        Request cooperative cancellation of the current run.
+        This sets an Event that run_project_parallel checks periodically.
+        """
+        if not self._running:
+            return
+        if self._cancel_event is not None:
+            self._cancel_event.set()
 
     @Slot()
     def _poll(self) -> None:
@@ -68,6 +98,7 @@ class MpRunnerBridge(QObject):
                     done = msg.get("completed", 0)
                     pct = int(100 * done / max(1, self._total))
                     self.progress.emit(pct)
+
                     result = msg.get("result", {})
                     if result.get("status") == "error":
                         # Compose a richer error message that includes file and stage,
@@ -83,10 +114,26 @@ class MpRunnerBridge(QObject):
                         self.error.emit(message)
                     elif result.get("status") == "ok":
                         self._results.append(result)
+
                 elif mtype == "done":
                     self._timer.stop()
                     self._running = False
-                    self.finished.emit({"files": self._total, "results": list(self._results)})
+
+                    cancelled = bool(msg.get("cancelled", False))
+                    payload: Dict[str, object] = {
+                        "files": self._total,
+                        "results": list(self._results),
+                    }
+                    if cancelled:
+                        payload["cancelled"] = True
+
+                    # Reset cancellation state now that run is over
+                    self._cancel_event = None
+                    self._worker_thread = None
+
+                    self.finished.emit(payload)
                     break
         except Exception:
+            # Any queue/poll issues are non-fatal to the GUI; ignore.
             pass
+
