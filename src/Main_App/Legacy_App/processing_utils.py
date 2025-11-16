@@ -160,6 +160,15 @@ class ProcessingMixin:
 
     def _finalize_processing(self, success):
         """Finalize the batch/single processing: show completion dialog and reset state."""
+        # PySide6 sets _suppress_completion_dialogs only when the user cancels a run.
+        # Treat this flag as the indicator that a cancellation occurred so we don't
+        # mis-report the run as an error when the user explicitly cancelled it.
+        cancelled = bool(getattr(self, "_suppress_completion_dialogs", False))
+
+        if cancelled and not success:
+            self.log("--- Processing Run Cancelled by User ---")
+            return
+
         if success:
             self.log("--- Processing Run Completed Successfully ---")
             if self.validated_params and self.data_paths:
