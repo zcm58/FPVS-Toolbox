@@ -73,6 +73,13 @@ class MpRunnerBridge(QObject):
         self._results = []
         self._timer.start()
 
+    def cancel(self) -> None:
+        """Cooperatively request cancellation of the current run."""
+        if not self._running:
+            return
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+
     @Slot()
     def cancel(self) -> None:
         """
