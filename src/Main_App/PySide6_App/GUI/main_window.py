@@ -44,7 +44,12 @@ logger.addHandler(logging.NullHandler())
 
 def _qt_showerror(title, message, **options):
     parent = QApplication.activeWindow()
-    if parent and getattr(parent, "_suppress_completion_dialogs", False):
+    # Suppress *all* legacy error popups when the main window says
+    # completion dialogs should be hidden, or when the run was cancelled.
+    if parent and (
+        getattr(parent, "_suppress_completion_dialogs", False)
+        or getattr(parent, "_cancel_requested", False)
+    ):
         return
     QMessageBox.critical(parent, title, message)
 
@@ -56,8 +61,13 @@ def _qt_showwarning(title, message, **options):
 
 def _qt_showinfo(title, message, **options):
     parent = QApplication.activeWindow()
-    if parent and getattr(parent, "_suppress_completion_dialogs", False):
+    # Same suppression rules for info dialogs (used by legacy completion paths).
+    if parent and (
+        getattr(parent, "_suppress_completion_dialogs", False)
+        or getattr(parent, "_cancel_requested", False)
+    ):
         return
+
     # If a run just finished, only show the "Processing Complete" info dialog
     # when the window reports a successful export (set by our post-process wrapper).
     if str(title).lower().startswith("processing complete"):
@@ -697,9 +707,24 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     def _on_processing_error(self, message: str) -> None:
         """
         Process-mode error handler wired to MpRunnerBridge.error.
-        Ensures spinner, flags, and Start/Stop button state are reset.
+
+        If the user has already requested cancellation, treat the error as part of
+        the cancelled run and *do not* show the GUI error dialog.
         """
         self._busy_stop()
+
+        if getattr(self, "_cancel_requested", False):
+            # We were in the middle of a user-initiated cancel; don't scare them
+            # with a generic "Processing Error" popup.
+            self.log(
+                f"Processing error received after cancellation request; "
+                f"suppressing dialog. Details: {message}",
+                level=logging.INFO,
+            )
+            self._finalize_processing(False, cancelled=True)
+            return
+
+        # Genuine error in a normal run: show the dialog and finalize as failure.
         QMessageBox.critical(self, "Processing Error", message)
         self._finalize_processing(False)
 
@@ -810,53 +835,80 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     def _finalize_processing(self, *args, **kwargs) -> None:
         """
         Common finalization hook for both legacy and process modes.
-        Ensures flags, spinner, and Start/Stop button state are reset.
+
+        Ensures flags, spinner, progress bar, and Start/Stop button state are reset.
+        When `cancelled=True` is passed, legacy completion/error dialogs are
+        suppressed and the run is logged as user-cancelled rather than "error".
         """
+        # Cancellation flag propagated from process-mode or queue workers.
         cancelled = bool(kwargs.pop("cancelled", False))
 
+        # Infer success flag if provided (legacy mixin passes a bool).
         success = True
         if args and isinstance(args[0], bool):
             success = args[0]
         if "success" in kwargs and isinstance(kwargs["success"], bool):
             success = kwargs["success"]
         if cancelled:
-            success = False
+            success = False  # cancelled runs are not "successful", but not fatal either.
 
+        # Reset per-run state
         self._run_active = False
-        self._cancel_requested = False
-
+        # Keep _cancel_requested True during legacy finalization so shims can see it;
+        # we reset it *after* calling the parent hook.
+        # (We still guard against double-end on the start guard.)
         try:
             self._start_guard.end()
         except Exception:
             pass
 
         try:
-            if hasattr(self, "_busy_stop"):
-                self._busy_stop()
+            self._busy_stop()
         except Exception:
             pass
 
+        # Re-enable form controls (Single/Batch radio, event map, etc.)
         try:
             self._set_controls_enabled(True)
         except Exception as exc:
-            self.log(f"_set_controls_enabled(True) failed during finalize: {exc}", level=logging.DEBUG)
+            self.log(
+                f"_set_controls_enabled(True) failed during finalize: {exc}",
+                level=logging.DEBUG,
+            )
 
+        # Reset the progress bar for the next run
+        if hasattr(self, "progress_bar"):
+            try:
+                self.progress_bar.setValue(0)
+            except Exception:
+                pass
+
+        # Restore Start button label/state in all cases
         if hasattr(self, "btn_start"):
             try:
                 self.btn_start.setText("Start Processing")
                 self.btn_start.setEnabled(True)
+                # Re-apply normal enable/disable logic (e.g., Single mode file checks)
                 self._update_start_enabled()
             except Exception:
                 pass
 
+        # Call into the legacy finalization path, optionally suppressing its dialogs
         if cancelled:
             self._suppress_completion_dialogs = True
             try:
                 super()._finalize_processing(success)
             finally:
                 self._suppress_completion_dialogs = False
+                # Now that legacy code is done and shims have seen the cancel flag,
+                # we can clear it.
+                self._cancel_requested = False
         else:
-            super()._finalize_processing(success)
+            # Normal success/error path
+            try:
+                super()._finalize_processing(success)
+            finally:
+                self._cancel_requested = False
 
     # ------------------------ Tk-style scheduling ------------------------ #
     def after(self, delay_ms: int, callback: Callable[[], None]) -> int:
