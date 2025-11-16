@@ -43,9 +43,12 @@ def test_64_gib_tier_caps_workers():
     assert compute_effective_max_workers(total_ram, cpu_count=32, project_max_workers=12) == 6
 
 
-def test_non_tier_ram_keeps_cpu_based_cap():
+def test_non_tier_ram_respects_global_cap():
     total_ram = _bytes_for_gib(24.0)
-    assert compute_effective_max_workers(total_ram, cpu_count=10, project_max_workers=None) == 9
+    # CPU-based cap would allow 9 workers, but global cap clamps at 8
+    assert compute_effective_max_workers(total_ram, cpu_count=10, project_max_workers=None) == 8
+    # Explicit overrides above the cap must also be clamped
+    assert compute_effective_max_workers(total_ram, cpu_count=24, project_max_workers=20) == 8
     assert compute_effective_max_workers(total_ram, cpu_count=10, project_max_workers=4) == 4
 
 
