@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import annotations
 """
 Process-based per-file runner.
 
@@ -11,6 +10,8 @@ Process-based per-file runner.
 - Calls the existing post-export adapter (no Legacy edits).
 - Adds RAM-aware backpressure: staged submissions + system memory soft-cap.
 """
+
+from __future__ import annotations
 
 import logging
 import atexit
@@ -24,7 +25,7 @@ from dataclasses import dataclass
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from Main_App.PySide6_App.Backend import preprocess as backend_preprocess
 
@@ -448,12 +449,12 @@ def _process_one_file(
     return _run_full_pipeline_for_file(file_path, settings, event_map, save_folder)
 
 
-def _memory_ok(limit_ratio: Optional[float]) -> bool:
-    """Return True if system memory usage is below the soft cap."""
-    if limit_ratio is None:
-        return True
+def _memory_ok(limit_ratio: Optional[float]) -> Tuple[bool, float]:
+    """Return (is_ok, percent_used) for system memory usage."""
     vm = psutil.virtual_memory()
-    return (vm.percent / 100.0) < float(limit_ratio)
+    if limit_ratio is None:
+        return True, vm.percent
+    return (vm.percent / 100.0) < float(limit_ratio), vm.percent
 
 
 def _scavenge_stale_memmaps() -> None:
@@ -504,6 +505,11 @@ def run_project_parallel(
     total = len(files)
     remaining = list(files)
     in_flight: Dict[object, Path] = {}
+    peak_in_flight = 0
+    max_memory_percent = 0.0
+    memory_limit_ratio = getattr(params, "memory_soft_limit_ratio", None)
+    memory_check_interval = getattr(params, "memory_check_interval_s", 0.25)
+    run_started_at = time.perf_counter()
 
     # Batch-level stats for n_rejected (number of channels interpolated per file)
     total_rejected = 0
@@ -525,15 +531,20 @@ def run_project_parallel(
 
         def _submit_next_available() -> bool:
             """Submit one file if capacity and (if enabled) memory is OK."""
-            nonlocal remaining
+            nonlocal remaining, peak_in_flight, max_memory_percent
             if not remaining or len(in_flight) >= maxw:
                 return False
             if _cancelled():
                 return False
 
             # Optional soft-cap on system RAM
-            while not _memory_ok(getattr(params, "memory_soft_limit_ratio", None)):
-                time.sleep(getattr(params, "memory_check_interval_s", 0.25))
+            while True:
+                mem_ok, percent_used = _memory_ok(memory_limit_ratio)
+                if percent_used > max_memory_percent:
+                    max_memory_percent = percent_used
+                if mem_ok:
+                    break
+                time.sleep(memory_check_interval)
 
             f = remaining.pop(0)
             fut = pool.submit(
@@ -544,6 +555,8 @@ def run_project_parallel(
                 params.save_folder,
             )
             in_flight[fut] = f
+            if len(in_flight) > peak_in_flight:
+                peak_in_flight = len(in_flight)
             return True
 
         # Prime pool
@@ -610,6 +623,21 @@ def run_project_parallel(
 
     # Final cleanup: remove any stale memmaps in the %TEMP% folder from previous runs
     _scavenge_stale_memmaps()
+
+    elapsed_seconds = time.perf_counter() - run_started_at
+    logger.info(
+        "mp_run_summary",
+        extra={
+            "num_files": total,
+            "completed": completed,
+            "max_workers_param": params.max_workers,
+            "max_workers_used": maxw,
+            "peak_in_flight": peak_in_flight,
+            "max_memory_percent": round(max_memory_percent, 2),
+            "elapsed_seconds": round(elapsed_seconds, 3),
+            "cancelled": cancelled,
+        },
+    )
 
     # Batch-level summary: average number of channels rejected per file.
     avg_rejected: Optional[float] = None

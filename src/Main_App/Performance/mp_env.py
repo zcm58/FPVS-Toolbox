@@ -6,6 +6,9 @@ import os
 from typing import Optional
 
 
+GLOBAL_MAX_WORKERS = 8
+
+
 def set_blas_threads_single_process() -> None:
     """Allow BLAS to use many threads in single-process mode."""
     cores = os.cpu_count() or 1
@@ -53,6 +56,8 @@ def compute_effective_max_workers(
         effective = min(desired, cpu_cap)
     else:
         effective = min(desired, cpu_cap, ram_cap)
+
+    effective = min(effective, GLOBAL_MAX_WORKERS)
 
     return max(1, effective)
 
