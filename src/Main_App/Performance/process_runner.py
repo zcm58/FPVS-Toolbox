@@ -21,11 +21,10 @@ import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 from dataclasses import dataclass
-from multiprocessing import Queue, get_context
+from multiprocessing import Queue, get_context, Event
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Dict, List, Optional
-from threading import Event
 
 from Main_App.PySide6_App.Backend import preprocess as backend_preprocess
 
@@ -516,8 +515,7 @@ def run_project_parallel(
         nonlocal cancelled
         if cancel_event is not None and cancel_event.is_set():
             cancelled = True
-            return True
-        return False
+        return cancelled
 
     with ProcessPoolExecutor(
         max_workers=maxw,
@@ -555,20 +553,14 @@ def run_project_parallel(
 
         # Drain
         while in_flight or remaining:
-            if _cancelled():
-                # Stop submitting new work and attempt to cancel queued futures.
-                for fut in list(in_flight.keys()):
-                    fut.cancel()
-                try:
-                    pool.shutdown(cancel_futures=True)
-                except Exception:
-                    pass
-                in_flight.clear()
-                remaining.clear()
-                break
-
-            if not in_flight and remaining:
-                _submit_next_available()
+            if not in_flight:
+                if _cancelled():
+                    break
+                if not _submit_next_available():
+                    # Nothing could be submitted (likely due to cancellation).
+                    if _cancelled() or not remaining:
+                        break
+                    time.sleep(0.05)
                 continue
 
             done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED, timeout=0.5)
@@ -607,7 +599,14 @@ def run_project_parallel(
                         }
                     )
 
-                _submit_next_available()
+            if _cancelled():
+                if in_flight or remaining:
+                    for fut in list(in_flight.keys()):
+                        if not fut.done():
+                            fut.cancel()
+                break
+
+            _submit_next_available()
 
     # Final cleanup: remove any stale memmaps in the %TEMP% folder from previous runs
     _scavenge_stale_memmaps()

@@ -44,6 +44,8 @@ logger.addHandler(logging.NullHandler())
 
 def _qt_showerror(title, message, **options):
     parent = QApplication.activeWindow()
+    if parent and getattr(parent, "_suppress_completion_dialogs", False):
+        return
     QMessageBox.critical(parent, title, message)
 
 
@@ -54,6 +56,8 @@ def _qt_showwarning(title, message, **options):
 
 def _qt_showinfo(title, message, **options):
     parent = QApplication.activeWindow()
+    if parent and getattr(parent, "_suppress_completion_dialogs", False):
+        return
     # If a run just finished, only show the "Processing Complete" info dialog
     # when the window reports a successful export (set by our post-process wrapper).
     if str(title).lower().startswith("processing complete"):
@@ -258,6 +262,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         # Prevent spurious finalize/error dialogs until a run starts
         self._run_active = False
         self._cancel_requested = False
+        self._suppress_completion_dialogs = False
 
         # Parallel processing configuration
         self.parallel_mode = "process"
@@ -389,113 +394,64 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     # -------------------------- processing -------------------------- #
 
     def stop_processing(self) -> None:
-        """
-        Request cancellation of the current processing run.
-
-        For process-based runs we attempt to cancel via MpRunnerBridge if it
-        exposes a suitable API. Legacy single-mode runs are allowed to finish.
-
-        NOTE: Actual hard-stop requires MpRunnerBridge to implement a cancel-like
-        method. If no such API exists, this call is a no-op and the run will
-        continue until completion.
-        """
+        """Cooperatively request cancellation for a process-mode run."""
         if not getattr(self, "_run_active", False):
             self.log("Stop requested but no processing run is active.", level=logging.INFO)
             return
 
-        self.log("Stop requested; attempting to cancel processing…", level=logging.INFO)
+        if self._cancel_requested:
+            self.log("Cancellation already requested; ignoring Stop click.", level=logging.INFO)
+            return
 
-        if self.parallel_mode == "process":
-            mp = getattr(self, "_mp", None)
-            if mp is None:
-                self.log("Stop requested but no MpRunnerBridge instance is active.", level=logging.WARNING)
-                # Nothing to cancel; do not mark the run as cancelled.
-                return
-
-            cancel_callable = None
-            for attr in ("cancel", "request_cancel", "stop", "shutdown"):
-                candidate = getattr(mp, attr, None)
-                if callable(candidate):
-                    cancel_callable = candidate
-                    break
-
-            if cancel_callable is not None:
-                self._cancel_requested = True
-                try:
-                    cancel_callable()
-                except Exception as exc:
-                    self._cancel_requested = False
-                    self.log(
-                        f"Failed to request cancel from MpRunnerBridge: {exc}",
-                        level=logging.ERROR,
-                    )
-            else:
-                # No API to actually cancel; inform once and keep run as normal.
-                self.log(
-                    "MpRunnerBridge does not expose a cancel/stop API; "
-                    "processing will continue until workers finish.",
-                    level=logging.WARNING,
-                )
-                self._cancel_requested = False
-        else:
-            # Single/legacy mode: we currently do not force-stop the legacy path.
+        if self.parallel_mode != "process":
             QMessageBox.information(
                 self,
                 "Stop Processing",
-                "Stopping an in-progress run is currently only supported in "
-                "Batch/process mode. This Single/legacy-mode run will finish normally.",
+                "Stopping an in-progress run is currently only supported in Batch/process mode.\n"
+                "This Single/legacy-mode run will finish normally.",
             )
-            # Nothing was actually cancelled
-            self._cancel_requested = False
+            return
 
-    def _request_stop_processing(self) -> None:
-        """
-        Handle a user's click on the Start/Stop button while a run is active.
-        For process-based runs we try to ask MpRunnerBridge to cancel if it
-        exposes a suitable API. Legacy single-mode runs are allowed to finish.
-        """
-        if not getattr(self, "_run_active", False):
-            self.log("Stop requested but no processing run is active.", level=logging.INFO)
+        mp = getattr(self, "_mp", None)
+        if mp is None:
+            self.log("Stop requested but no MpRunnerBridge instance is active.", level=logging.WARNING)
+            return
+
+        cancel_callable = getattr(mp, "cancel", None)
+        if not callable(cancel_callable):
+            self.log(
+                "MpRunnerBridge.cancel() is unavailable; processing will finish normally.",
+                level=logging.WARNING,
+            )
             return
 
         self._cancel_requested = True
+        if hasattr(self, "btn_start") and self.btn_start:
+            try:
+                self.btn_start.setText("Stopping…")
+                self.btn_start.setEnabled(False)
+            except Exception:
+                pass
+
         self.log("Stop requested; attempting to cancel processing…", level=logging.INFO)
-
-        if self.parallel_mode == "process":
-            mp = getattr(self, "_mp", None)
-            if mp is None:
-                self.log("Stop requested but no MpRunnerBridge instance is active.", level=logging.WARNING)
-                return
-
-            # Best-effort: call any available cancel-like method on the bridge.
-            cancel_callable = None
-            for attr in ("cancel", "request_cancel", "stop", "shutdown"):
-                candidate = getattr(mp, attr, None)
-                if callable(candidate):
-                    cancel_callable = candidate
-                    break
-
-            if cancel_callable is not None:
+        try:
+            cancel_callable()
+        except Exception as exc:
+            self._cancel_requested = False
+            if hasattr(self, "btn_start") and self.btn_start:
                 try:
-                    cancel_callable()
-                except Exception as exc:
-                    self.log(
-                        f"Failed to request cancel from MpRunnerBridge: {exc}",
-                        level=logging.ERROR,
-                    )
-            else:
-                self.log(
-                    "MpRunnerBridge does not expose a cancel/stop API; "
-                    "processing will continue until workers finish.",
-                    level=logging.WARNING,
-                )
-        else:
-            # Single/legacy mode: we currently do not force-stop the legacy path.
-            QMessageBox.information(
+                    self.btn_start.setText("Stop Processing")
+                    self.btn_start.setEnabled(True)
+                except Exception:
+                    pass
+            self.log(
+                f"Failed to request cancel from MpRunnerBridge: {exc}",
+                level=logging.ERROR,
+            )
+            QMessageBox.warning(
                 self,
                 "Stop Processing",
-                "Stopping an in-progress run is currently only supported in "
-                "Batch/process mode.\nThis Single/legacy-mode run will finish normally.",
+                "Unable to halt processing automatically. Please allow the current run to finish.",
             )
 
     # -------------------------- processing -------------------------- #
@@ -564,8 +520,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                         self._update_start_enabled()
                     return
 
-                # From here on, a run is active.
-                self._run_active = True
                 self._set_controls_enabled(False)
                 self._max_progress = len(self.data_paths)
                 if hasattr(self, "progress_bar"):
@@ -597,11 +551,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 self._mp.error.connect(self._on_processing_error)
                 self._mp.finished.connect(self._on_processing_finished)
 
-                # Update button label now that a run is active.
-                if hasattr(self, "btn_start"):
-                    self.btn_start.setText("Stop Processing")
-                    self.btn_start.setEnabled(True)
-
                 self._mp.start(
                     project_root=project_root,
                     data_files=files,
@@ -610,6 +559,10 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     save_folder=save_folder,
                     max_workers=self.max_workers,
                 )
+                self._run_active = True
+                if hasattr(self, "btn_start"):
+                    self.btn_start.setText("Stop Processing")
+                    self.btn_start.setEnabled(True)
                 return  # IMPORTANT: do not fall through to legacy
 
             # ---------- Single mode (legacy path) ----------
@@ -678,8 +631,10 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     def _on_processing_finished(self, payload: dict | None = None) -> None:
         # Process-mode completion with audit logging
         results: list[dict] = []
+        cancelled = False
         if isinstance(payload, dict):
             results = payload.get("results") or []
+            cancelled = bool(payload.get("cancelled", False))
 
         try:
             debug_on = self.settings.debug_enabled()
@@ -734,9 +689,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             )
 
         self._busy_stop()
-        success = not getattr(self, "_cancel_requested", False)
-        self._finalize_processing(success)
-        if not success:
+        success = not cancelled
+        self._finalize_processing(success, cancelled=cancelled)
+        if cancelled:
             self.log("Processing run cancelled by user.", level=logging.INFO)
 
     def _on_processing_error(self, message: str) -> None:
@@ -857,16 +812,23 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         Common finalization hook for both legacy and process modes.
         Ensures flags, spinner, and Start/Stop button state are reset.
         """
-        # Infer success flag if provided (legacy mixin passes a bool).
+        cancelled = bool(kwargs.pop("cancelled", False))
+
         success = True
         if args and isinstance(args[0], bool):
             success = args[0]
         if "success" in kwargs and isinstance(kwargs["success"], bool):
             success = kwargs["success"]
+        if cancelled:
+            success = False
 
         self._run_active = False
         self._cancel_requested = False
-        self._start_guard.end()
+
+        try:
+            self._start_guard.end()
+        except Exception:
+            pass
 
         try:
             if hasattr(self, "_busy_stop"):
@@ -874,14 +836,27 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         except Exception:
             pass
 
-        # Restore Start button label in all cases
-        if hasattr(self, "btn_start"):
-            self.btn_start.setText("Start Processing")
-            # Re-apply normal enable/disable logic (e.g., Single mode file checks)
-            self._update_start_enabled()
+        try:
+            self._set_controls_enabled(True)
+        except Exception as exc:
+            self.log(f"_set_controls_enabled(True) failed during finalize: {exc}", level=logging.DEBUG)
 
-        # Delegate to legacy finalization behavior
-        super()._finalize_processing(success)
+        if hasattr(self, "btn_start"):
+            try:
+                self.btn_start.setText("Start Processing")
+                self.btn_start.setEnabled(True)
+                self._update_start_enabled()
+            except Exception:
+                pass
+
+        if cancelled:
+            self._suppress_completion_dialogs = True
+            try:
+                super()._finalize_processing(success)
+            finally:
+                self._suppress_completion_dialogs = False
+        else:
+            super()._finalize_processing(success)
 
     # ------------------------ Tk-style scheduling ------------------------ #
     def after(self, delay_ms: int, callback: Callable[[], None]) -> int:
@@ -1194,15 +1169,31 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         return entries
 
     def _on_start_stop_clicked(self) -> None:
-        """
-        Single entry point for the main button.
-        - If no run is active, start processing.
-        - If a run is active, request a stop.
-        """
-        if getattr(self, "_run_active", False):
-            self.stop_processing()
-        else:
+        """Handle Start/Stop button clicks with confirmation on stop."""
+        if not getattr(self, "_run_active", False):
             self.start_processing()
+            if getattr(self, "_run_active", False) and hasattr(self, "btn_start"):
+                try:
+                    self.btn_start.setText("Stop Processing")
+                except Exception:
+                    pass
+            return
+
+        if self._cancel_requested:
+            self.log("Cancellation already requested; ignoring Stop click.", level=logging.INFO)
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Halt",
+            "Data processing is still in progress. Are you sure you want to halt processing?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.No:
+            return
+
+        self.stop_processing()
 
 
     def _export_with_post_process(self, labels: list[str]) -> None:

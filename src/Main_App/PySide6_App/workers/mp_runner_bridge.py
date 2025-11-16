@@ -2,10 +2,10 @@ from __future__ import annotations
 
 """Qt bridge that launches process-based preprocessing and relays progress."""
 
-from multiprocessing import Queue, get_context
+from multiprocessing import Event, Queue, get_context
 from pathlib import Path
 from typing import Dict, List, Optional
-from threading import Event, Thread
+from threading import Thread
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from Main_App.Performance.mp_env import set_blas_threads_single_process
@@ -27,8 +27,6 @@ class MpRunnerBridge(QObject):
         self._total: int = 0
         self._running: bool = False
         self._results: List[Dict[str, object]] = []
-
-        # New: cooperative cancellation + worker thread handle
         self._cancel_event: Optional[Event] = None
         self._worker_thread: Optional[Thread] = None
 
@@ -45,8 +43,9 @@ class MpRunnerBridge(QObject):
             return
 
         if not data_files:
-            # Nothing to do; emit a trivial finished payload.
-            self.finished.emit({"files": 0, "results": []})
+            self._total = 0
+            self._results = []
+            self.finished.emit({"files": 0, "results": [], "cancelled": False})
             return
 
         self._running = True
@@ -63,7 +62,6 @@ class MpRunnerBridge(QObject):
 
         set_blas_threads_single_process()
 
-        # Launch the process-based runner in a background thread
         self._worker_thread = Thread(
             target=run_project_parallel,
             args=(params, self._q, self._cancel_event),
@@ -117,19 +115,18 @@ class MpRunnerBridge(QObject):
 
                 elif mtype == "done":
                     self._timer.stop()
-                    self._running = False
-
                     cancelled = bool(msg.get("cancelled", False))
+
                     payload: Dict[str, object] = {
                         "files": self._total,
                         "results": list(self._results),
+                        "cancelled": cancelled,
                     }
-                    if cancelled:
-                        payload["cancelled"] = True
 
-                    # Reset cancellation state now that run is over
+                    self._running = False
                     self._cancel_event = None
                     self._worker_thread = None
+                    self._q = None
 
                     self.finished.emit(payload)
                     break
