@@ -1,4 +1,4 @@
-In the backend directory, please ensure that only the functionality and the the core logic of the FPVS Toolbox is 
+In the backend directory, please ensure that only the functionality and the core logic of the FPVS Toolbox is
 present. The GUI code should be kept out of this directory as much as possible and instead be placed in the GUI directory.
 
 []: # 
