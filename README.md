@@ -12,7 +12,7 @@ The FPVS Toolbox is a python based application for preprocessing, cleaning, and 
 
 ## Features currently under development:
 
-- sLORETA source localization and visualization
+- LORETA source localization and 3D visualization of neural responses on a transparent brain mesh
 
 
 ## Installation
@@ -20,7 +20,7 @@ The FPVS Toolbox is a python based application for preprocessing, cleaning, and 
 A prebuilt installer is provided with every release. 
 
 1. Download the installer from the Releases page.
-2. Double-click the `.exe` file. Because the installer is unsigned, Windows SmartScreen may warn that the app is unrecognized.
+2. Double-click the `.exe` file. Because the installer is unsigned, anti-virus software may warn you that the app is from an unverified developer. You'll need to manually bypass this warning. 
 3. Choose **More info** and then **Run anyway** to continue.
 4. Follow the prompts to select an install location. The installer places `FPVS_Toolbox.exe` and required libraries in the target folder.
 
