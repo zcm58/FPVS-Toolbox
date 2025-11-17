@@ -34,9 +34,13 @@ from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import QColorDialog
 
 
+from Main_App import SettingsManager
+from Main_App.PySide6_App.Backend.project import (
+    EXCEL_SUBFOLDER_NAME,
+    SNR_SUBFOLDER_NAME,
+)
 from Tools.Stats.Legacy.stats_helpers import load_rois_from_settings
 from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION
-from Main_App import SettingsManager
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from .worker import _Worker
 
@@ -62,6 +66,51 @@ def _auto_detect_project_dir() -> Path:
     return path
 
 
+def _load_manifest(root: Path) -> tuple[str | None, dict[str, str]]:
+    manifest = root / "project.json"
+    if not manifest.is_file():
+        return None, {}
+    try:
+        cfg = json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return None, {}
+    results_folder = cfg.get("results_folder")
+    if not isinstance(results_folder, str):
+        results_folder = None
+    subfolders = cfg.get("subfolders", {})
+    if not isinstance(subfolders, dict):
+        subfolders = {}
+    normalized: dict[str, str] = {}
+    for key, value in subfolders.items():
+        if isinstance(value, str):
+            normalized[key] = value
+    return results_folder, normalized
+
+
+def _resolve_results_root(project_root: Path, results_folder: str | None) -> Path:
+    if results_folder:
+        folder = Path(results_folder)
+        if not folder.is_absolute():
+            folder = project_root / folder
+    else:
+        folder = project_root
+    return folder.resolve()
+
+
+def _resolve_project_subfolder(
+    project_root: Path,
+    results_folder: str | None,
+    subfolders: dict[str, str],
+    key: str,
+    default_name: str,
+) -> Path:
+    name = subfolders.get(key, default_name)
+    candidate = Path(name)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (_resolve_results_root(project_root, results_folder) / candidate).resolve()
+
+
 def _project_paths(parent: QWidget | None, project_dir: str | None) -> tuple[str | None, str | None]:
     """Return Excel and SNR plot folders for the given or detected project."""
     if project_dir and os.path.isdir(project_dir):
@@ -73,17 +122,16 @@ def _project_paths(parent: QWidget | None, project_dir: str | None) -> tuple[str
         else:
             root = _auto_detect_project_dir()
 
-    manifest = root / "project.json"
-    if manifest.is_file():
+    results_folder, subfolders = _load_manifest(root)
+    if results_folder is not None or subfolders:
         try:
-            with open(manifest, "r") as f:
-                cfg = json.load(f)
-            excel_sub = cfg.get("subfolders", {}).get("excel", "1 - Excel Data Files")
-            snr_sub = cfg.get("subfolders", {}).get("snr", "2 - SNR Plots")
-            return str(root / excel_sub), str(root / snr_sub)
+            excel_path = _resolve_project_subfolder(root, results_folder, subfolders, "excel", EXCEL_SUBFOLDER_NAME)
+            snr_path = _resolve_project_subfolder(root, results_folder, subfolders, "snr", SNR_SUBFOLDER_NAME)
+            return str(excel_path), str(snr_path)
         except Exception:
             pass
-    return None, None
+    fallback_root = root if isinstance(root, Path) else Path(root)
+    return str((fallback_root / EXCEL_SUBFOLDER_NAME).resolve()), str((fallback_root / SNR_SUBFOLDER_NAME).resolve())
 
 class _SettingsDialog(QDialog):
     """Dialog for configuring plot options."""
@@ -146,28 +194,40 @@ class PlotGeneratorWindow(QWidget):
         self.stem_color_b = self.plot_mgr.get_second_color()
 
 
-        project_dir: Path | None = None
+        project_dir_path: Path | None = None
         proj = getattr(parent, "currentProject", None)
         if proj and hasattr(proj, "project_root"):
-            project_dir = Path(proj.project_root)
+            project_dir_path = Path(proj.project_root)
         else:
             env_dir = os.environ.get("FPVS_PROJECT_ROOT")
             if env_dir and Path(env_dir).is_dir():
-                project_dir = Path(env_dir)
+                project_dir_path = Path(env_dir)
             else:
-                cand = Path(_auto_detect_project_dir())
+                cand = _auto_detect_project_dir()
                 if (cand / "project.json").is_file():
-                    project_dir = cand
+                    project_dir_path = cand
 
-        if project_dir is not None:
+        if project_dir_path is not None:
             try:
-                with open(project_dir / "project.json", "r") as f:
-                    cfg = json.load(f)
-                subfolders = cfg.get("subfolders", {})
-                excel_sub = subfolders.get("excel", "1 - Excel Data Files")
-                snr_sub = subfolders.get("snr", "2 - SNR Plots")
-                default_in = str(project_dir / excel_sub)
-                default_out = str(project_dir / snr_sub)
+                results_folder, subfolders = _load_manifest(project_dir_path)
+                default_in = str(
+                    _resolve_project_subfolder(
+                        project_dir_path,
+                        results_folder,
+                        subfolders,
+                        "excel",
+                        EXCEL_SUBFOLDER_NAME,
+                    )
+                )
+                default_out = str(
+                    _resolve_project_subfolder(
+                        project_dir_path,
+                        results_folder,
+                        subfolders,
+                        "snr",
+                        SNR_SUBFOLDER_NAME,
+                    )
+                )
             except Exception:
                 pass
         else:

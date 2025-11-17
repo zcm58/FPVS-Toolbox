@@ -11,10 +11,14 @@ from .preprocessing_settings import (
     normalize_preprocessing_settings,
 )
 
+EXCEL_SUBFOLDER_NAME = "1 - Excel Data Files"
+SNR_SUBFOLDER_NAME = "2 - SNR Plots"
+STATS_SUBFOLDER_NAME = "3 - Statistical Analysis Results"
+
 # Stable defaults used by GUI/processing
 DEFAULTS: Dict[str, Any] = {
     "input_folder": "Input",
-    "results_folder": "Results",
+    "results_folder": ".",
     "options": {
         "mode": "single",
         "loreta": False,
@@ -25,9 +29,9 @@ DEFAULTS: Dict[str, Any] = {
     "event_map": {},
     # Result subfolders relative to results_folder
     "subfolders": {
-        "excel": "Excel",
-        "snr": "SNR",
-        "stats": "Stats",
+        "excel": EXCEL_SUBFOLDER_NAME,
+        "snr": SNR_SUBFOLDER_NAME,
+        "stats": STATS_SUBFOLDER_NAME,
     },
     # Preprocessing parameters expected by GUI (dict)
     "preprocessing": {},

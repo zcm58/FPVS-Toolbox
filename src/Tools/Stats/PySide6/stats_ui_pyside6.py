@@ -13,7 +13,6 @@ import pandas as pd
 from PySide6.QtCore import Qt, QTimer, QThreadPool, Slot, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QFontMetrics
 from PySide6.QtWidgets import (
-    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -31,6 +30,10 @@ from PySide6.QtWidgets import (
 
 # Qt imports proof: QAction from PySide6.QtGui
 from Main_App import SettingsManager
+from Main_App.PySide6_App.Backend.project import (
+    EXCEL_SUBFOLDER_NAME,
+    STATS_SUBFOLDER_NAME,
+)
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.PySide6_App.widgets.busy_spinner import BusySpinner
 from Tools.Stats.Legacy.interpretation_helpers import generate_lme_summary
@@ -38,8 +41,6 @@ from Tools.Stats.Legacy.mixed_effects_model import run_mixed_effects_model
 from Tools.Stats.Legacy.posthoc_tests import run_interaction_posthocs
 from Tools.Stats.Legacy.stats_analysis import (
     ALL_ROIS_OPTION,
-    _match_freq_column,
-    get_included_freqs,
     prepare_all_subject_summed_bca_data,
     run_rm_anova as analysis_run_rm_anova,
     run_harmonic_check as run_harmonic_check_new,
@@ -81,6 +82,52 @@ def _first_present(d: dict, keys: Iterable[str], default=None):
         if k in d:
             return d[k]
     return default
+
+
+def _load_manifest_data(project_root: Path, cfg: dict | None = None) -> tuple[str | None, dict[str, str]]:
+    if cfg is None:
+        manifest = project_root / "project.json"
+        if not manifest.is_file():
+            return None, {}
+        try:
+            cfg = json.loads(manifest.read_text(encoding="utf-8"))
+        except Exception:
+            return None, {}
+    results_folder = cfg.get("results_folder")
+    if not isinstance(results_folder, str):
+        results_folder = None
+    subfolders = cfg.get("subfolders", {})
+    if not isinstance(subfolders, dict):
+        subfolders = {}
+    normalized: dict[str, str] = {}
+    for key, value in subfolders.items():
+        if isinstance(value, str):
+            normalized[key] = value
+    return results_folder, normalized
+
+
+def _resolve_results_root(project_root: Path, results_folder: str | None) -> Path:
+    if results_folder:
+        base = Path(results_folder)
+        if not base.is_absolute():
+            base = project_root / base
+    else:
+        base = project_root
+    return base.resolve()
+
+
+def _resolve_project_subfolder(
+    project_root: Path,
+    results_folder: str | None,
+    subfolders: dict[str, str],
+    key: str,
+    default_name: str,
+) -> Path:
+    name = subfolders.get(key, default_name)
+    candidate = Path(name)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (_resolve_results_root(project_root, results_folder) / candidate).resolve()
 
 
 # --------------------------- worker functions ---------------------------
@@ -238,11 +285,15 @@ class StatsWindow(QMainWindow):
                 str(proj.project_root) if proj and hasattr(proj, "project_root") else _auto_detect_project_dir()
             )
 
-        config_path = os.path.join(self.project_dir, "project.json")
+        self._project_path = Path(self.project_dir).resolve()
+        self._results_folder_hint: str | None = None
+        self._subfolder_hints: dict[str, str] = {}
+
+        config_path = self._project_path / "project.json"
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
             self.project_title = cfg.get("name", cfg.get("title", os.path.basename(self.project_dir)))
+            self._results_folder_hint, self._subfolder_hints = _load_manifest_data(self._project_path, cfg)
         except Exception:
             self.project_title = os.path.basename(self.project_dir)
 
@@ -472,9 +523,15 @@ class StatsWindow(QMainWindow):
         self._safe_export_call(func, data, out_dir, fname)
 
     def _ensure_results_dir(self) -> str:
-        results_dir = os.path.join(self.project_dir, "3 - Statistical Analysis Results")
-        os.makedirs(results_dir, exist_ok=True)
-        return results_dir
+        target = _resolve_project_subfolder(
+            self._project_path,
+            self._results_folder_hint,
+            self._subfolder_hints,
+            "stats",
+            STATS_SUBFOLDER_NAME,
+        )
+        target.mkdir(parents=True, exist_ok=True)
+        return str(target)
 
     def _open_results_folder(self) -> None:
         out_dir = self._ensure_results_dir()
@@ -940,25 +997,20 @@ class StatsWindow(QMainWindow):
 
 
     def _preferred_stats_folder(self) -> Path:
-        """
-        Project-standard stats folder:
-          <project_root>\1 - Excel Data Files
-        """
-        # project_root comes from parent if available; else fall back to self.project_dir
-        proj_root = None
-        if self.parent() and hasattr(self.parent(), "currentProject"):
-            try:
-                proj_root = Path(getattr(self.parent().currentProject, "project_root", "")).resolve()
-            except Exception:
-                proj_root = None
-        if not proj_root:
-            proj_root = Path(self.project_dir).resolve()
-        return (proj_root / "1 - Excel Data Files").resolve()
+        """Default Excel folder derived from the project manifest."""
+        return _resolve_project_subfolder(
+            self._project_path,
+            self._results_folder_hint,
+            self._subfolder_hints,
+            "excel",
+            EXCEL_SUBFOLDER_NAME,
+        )
 
     def _load_default_data_folder(self) -> None:
         """
-        On open, auto-select <project root>\1 - Excel Data Files.
-        If it doesn't exist, do nothing (user can Browse).
+        On open, auto-select the manifest-defined Excel folder (defaults to
+        ``1 - Excel Data Files`` under the project root). If it doesn't exist,
+        do nothing (user can Browse).
         """
         target = self._preferred_stats_folder()
         if target.exists() and target.is_dir():
@@ -966,6 +1018,8 @@ class StatsWindow(QMainWindow):
             self._scan_button_clicked()
         else:
             # Leave UI as-is; user will browse. Status hint only.
-            self._set_status("Select the project's '1 - Excel Data Files' folder to begin.")
+            self._set_status(
+                f"Select the project's '{EXCEL_SUBFOLDER_NAME}' folder to begin."
+            )
 
 
