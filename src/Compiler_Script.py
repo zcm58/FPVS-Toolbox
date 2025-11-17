@@ -1,3 +1,8 @@
+# I use this script to compile the entire repo into a standalone .exe. I copy and paste the text below to the terminal
+# and run it from there. It will create a standalone .exe inside your repo in a 'dist' folder
+
+# After that, I package the .exe and other dependencies into an installer using Inno Setup.
+
 pyinstaller `
   --clean `
   --noconfirm `
