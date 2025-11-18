@@ -11,7 +11,7 @@ from ctypes import windll
 
 from PySide6.QtCore import QCoreApplication
 from config import FPVS_TOOLBOX_VERSION
-from Main_App.PySide6_App.utils.paths import bundle_path
+from Main_App.PySide6_App.utils.theme import apply_light_palette
 
 try:
     windll.shcore.SetProcessDpiAwareness(1)  # type: ignore[attr-defined]
@@ -46,11 +46,7 @@ def run_app() -> int:
     from Main_App.PySide6_App.GUI.main_window import MainWindow
 
     app = QApplication([])
-
-    qss_path = bundle_path("..", "..", "..", "qdark_sidebar.qss")
-    if qss_path.exists():
-        with open(qss_path, "r", encoding="utf-8") as f:
-            app.setStyleSheet(f.read())
+    apply_light_palette(app)
 
     window = MainWindow()
     window.show()
