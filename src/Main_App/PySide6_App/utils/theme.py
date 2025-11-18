@@ -7,23 +7,37 @@ from PySide6.QtWidgets import QApplication
 
 
 def apply_light_palette(app: QApplication) -> None:
-    """Apply a deterministic Fusion + light palette regardless of OS theme."""
-    app.setStyle("Fusion")
+    """
+    Apply a deterministic light palette regardless of OS theme,
+    while preserving the platform's native widget style.
+    """
+    # Keep whatever style Qt chose (Windows / macOS / etc.)
     palette = app.palette()
 
-    palette.setColor(QPalette.Window, QColor("white"))
-    palette.setColor(QPalette.Base, QColor("white"))
+    # Core light colors
+    palette.setColor(QPalette.Window, QColor(255, 255, 255))
+    palette.setColor(QPalette.Base, QColor(255, 255, 255))
     palette.setColor(QPalette.AlternateBase, QColor(245, 245, 245))
-    palette.setColor(QPalette.Text, QColor("black"))
-    palette.setColor(QPalette.WindowText, QColor("black"))
-    palette.setColor(QPalette.Button, QColor(240, 240, 240))
-    palette.setColor(QPalette.ButtonText, QColor("black"))
-    palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 220))
-    palette.setColor(QPalette.ToolTipText, QColor("black"))
-    palette.setColor(QPalette.Highlight, QColor(0, 120, 215))
-    palette.setColor(QPalette.HighlightedText, QColor("white"))
 
-    palette.setColor(QPalette.Disabled, QPalette.Text, QColor(128, 128, 128))
-    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(128, 128, 128))
+    # Text / foreground
+    palette.setColor(QPalette.Text, QColor(0, 0, 0))
+    palette.setColor(QPalette.WindowText, QColor(0, 0, 0))
+    palette.setColor(QPalette.ButtonText, QColor(0, 0, 0))
+
+    # Buttons / controls
+    palette.setColor(QPalette.Button, QColor(240, 240, 240))
+
+    # Tooltips
+    palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 220))
+    palette.setColor(QPalette.ToolTipText, QColor(0, 0, 0))
+
+    # Selection / highlight
+    palette.setColor(QPalette.Highlight, QColor(0, 120, 215))
+    palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
+
+    # Disabled state
+    disabled_text = QColor(128, 128, 128)
+    palette.setColor(QPalette.Disabled, QPalette.Text, disabled_text)
+    palette.setColor(QPalette.Disabled, QPalette.ButtonText, disabled_text)
 
     app.setPalette(palette)
