@@ -244,6 +244,18 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         cleanup_old_executable()
 
         self.settings = SettingsManager()
+
+        # Ensure legacy appearance mode stays in sync with the PySide6 theme.
+        # PySide6 now always uses a fixed light theme, so we normalize the
+        # stored value to "Light" for any legacy consumers that still read it.
+        try:
+            current_mode = self.settings.get("appearance", "mode", "System")
+            if current_mode != "Light":
+                self.settings.set("appearance", "mode", "Light")
+                self.settings.save()
+        except Exception as exc:
+            logger.debug("Unable to persist appearance.mode=Light: %s", exc)
+
         self.output_folder: str = ""
         self.data_paths: list[str] = []
         self.event_rows: list[QWidget] = []
@@ -331,11 +343,13 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(0)
         self.log("Welcome to the FPVS Toolbox!")
-        self.log(f"Appearance Mode: {self.settings.get('appearance', 'mode', 'System')}")
+        # PySide6 now enforces a fixed light theme regardless of OS settings.
+        self.log("Appearance Mode: Light (PySide6 fixed light theme)")
         # Announce the active preprocessor (visibility only)
         logger.info(
             "Using PySide6 preprocessing module: Main_App.PySide6_App.Backend.preprocess.perform_preprocessing"
         )
+
         self.log("Preprocessor: PySide6 module active")
 
         # Wire Start/Stop button – handler decides whether to start or stop

@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QGroupBox,
     QGridLayout,
-    QComboBox,
     QCheckBox,
     QDialogButtonBox,
     QFileDialog,
@@ -128,11 +127,6 @@ class SettingsDialog(QDialog):
     def _init_general_tab(self, tabs: QTabWidget) -> None:
         tab = QWidget()
         form = QFormLayout(tab)
-
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["System", "Dark", "Light"])
-        self.mode_combo.setCurrentText(self.manager.get("appearance", "mode", "System"))
-        form.addRow(QLabel("Appearance Mode"), self.mode_combo)
 
         stim_default = (
             self._project_preprocessing().get("stim_channel", config.DEFAULT_STIM_CHANNEL)
@@ -305,12 +299,9 @@ class SettingsDialog(QDialog):
             edit.setText(folder)
 
     # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
     def _save(self) -> None:
         using_project = self.project is not None
 
-        self.manager.set("appearance", "mode", self.mode_combo.currentText())
         if not using_project:
             self.manager.set("stim", "channel", self.stim_edit.text())
         self.manager.set("analysis", "base_freq", self.base_freq_edit.text())
