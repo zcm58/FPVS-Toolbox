@@ -2,11 +2,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QSettings, QThreadPool
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
 from Main_App.PySide6_App.GUI import update_manager
-from Main_App.PySide6_App.utils.paths import bundle_path
 from Main_App.PySide6_App.utils.settings import get_app_settings
+from Main_App.PySide6_App.utils.theme import apply_light_palette
 
 
 def test_get_app_settings_ini_format(qtbot) -> None:
@@ -46,17 +47,32 @@ def test_update_check_debounce(monkeypatch, qtbot) -> None:
         settings.sync()
 
 
-def test_bundle_path_qss_application(qtbot) -> None:
+def test_apply_light_palette_sets_deterministic_light_theme(qtbot) -> None:
+    """
+    The theme helper should enforce a Fusion-based light palette regardless of OS theme.
+    """
     app = QApplication.instance() or QApplication([])
     widget = QWidget()
     qtbot.addWidget(widget)
-    qss_path = bundle_path("..", "..", "..", "qdark_sidebar.qss")
-    original_style = app.styleSheet()
-    try:
-        if qss_path.exists():
-            with open(qss_path, "r", encoding="utf-8") as handle:
-                app.setStyleSheet(handle.read())
-        widget.show()
-        qtbot.wait(10)
-    finally:
-        app.setStyleSheet(original_style)
+
+    # Apply the centralized light theme
+    apply_light_palette(app)
+    pal = app.palette()
+
+    # Core surfaces: light backgrounds
+    assert pal.color(QPalette.Window) == QColor("white")
+    assert pal.color(QPalette.Base) == QColor("white")
+    assert pal.color(QPalette.AlternateBase) == QColor(245, 245, 245)
+
+    # Text: dark on light
+    assert pal.color(QPalette.Text) == QColor("black")
+    assert pal.color(QPalette.WindowText) == QColor("black")
+    assert pal.color(QPalette.ButtonText) == QColor("black")
+
+    # Highlight: fixed accent color with white highlighted text
+    assert pal.color(QPalette.Highlight) == QColor(0, 120, 215)
+    assert pal.color(QPalette.HighlightedText) == QColor("white")
+
+    # Disabled text should be gray, not pure black/white
+    assert pal.color(QPalette.Disabled, QPalette.Text) == QColor(128, 128, 128)
+    assert pal.color(QPalette.Disabled, QPalette.ButtonText) == QColor(128, 128, 128)
