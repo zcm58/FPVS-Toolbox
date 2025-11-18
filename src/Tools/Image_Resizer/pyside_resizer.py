@@ -13,7 +13,6 @@ import sys
 from typing import List, Tuple
 
 from PySide6.QtCore import QObject, QThread, Signal
-from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -28,6 +27,8 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QWidget,
 )
+
+from Main_App.PySide6_App.utils.theme import apply_light_palette
 
 try:  # pragma: no cover - fallback for running as a script
     from .image_resize_core import process_images_in_folder  # type: ignore
@@ -95,25 +96,7 @@ class FPVSImageResizerQt(QWidget):
         self._thread: QThread | None = None
         self._worker: _Worker | None = None
 
-        self._apply_light_theme()
         self._build_ui()
-
-    def _apply_light_theme(self) -> None:
-        app = QApplication.instance()
-        if not app:
-            return
-        app.setStyle("Fusion")
-        palette = app.palette()
-        palette.setColor(QPalette.Window, QColor("white"))
-        palette.setColor(QPalette.Base, QColor("white"))
-        palette.setColor(QPalette.AlternateBase, QColor(245, 245, 245))
-        palette.setColor(QPalette.Text, QColor("black"))
-        palette.setColor(QPalette.WindowText, QColor("black"))
-        palette.setColor(QPalette.Button, QColor(240, 240, 240))
-        palette.setColor(QPalette.ButtonText, QColor("black"))
-        palette.setColor(QPalette.Highlight, QColor(76, 163, 224))
-        palette.setColor(QPalette.HighlightedText, QColor("white"))
-        app.setPalette(palette)
 
     def _build_ui(self) -> None:
         layout = QGridLayout(self)
@@ -283,6 +266,7 @@ class FPVSImageResizerQt(QWidget):
 def main() -> None:
     """Launch the Qt-based FPVS image resizer."""
     app = QApplication(sys.argv)
+    apply_light_palette(app)
     win = FPVSImageResizerQt()
     win.show()
     app.exec()
