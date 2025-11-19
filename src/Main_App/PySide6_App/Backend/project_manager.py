@@ -51,18 +51,83 @@ def new_project(self) -> None:
     if not ok or not name.strip():
         return
 
-    input_folder = QFileDialog.getExistingDirectory(
-        self, "Select Input Folder (BDF files)", ""
+    group_count, ok = QInputDialog.getInt(
+        self,
+        "Experimental Groups",
+        "How many experimental groups does this project have?",
+        1,
+        1,
+        20,
+        1,
     )
-    if not input_folder:
+    if not ok:
         return
+
+    group_names: list[str] = []
+    for idx in range(group_count):
+        while True:
+            default_name = f"Group {idx + 1}" if group_count > 1 else "Default"
+            group_name, ok = QInputDialog.getText(
+                self,
+                "Group Name",
+                f"Enter a name for group #{idx + 1}:",
+                text=default_name,
+            )
+            if not ok:
+                QMessageBox.information(
+                    self,
+                    "Project Creation Cancelled",
+                    "Project creation cancelled.",
+                )
+                return
+            group_name = group_name.strip()
+            if not group_name:
+                QMessageBox.warning(
+                    self,
+                    "Group Name Required",
+                    "Group names cannot be empty.",
+                )
+                continue
+            if group_name.lower() in {existing.lower() for existing in group_names}:
+                QMessageBox.warning(
+                    self,
+                    "Duplicate Group",
+                    "Each group must have a unique name.",
+                )
+                continue
+            group_names.append(group_name)
+            break
+
+    group_folders: dict[str, str] = {}
+    for group_name in group_names:
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            f"Select Input Folder for {group_name}",
+            "",
+        )
+        if not folder:
+            QMessageBox.information(
+                self,
+                "Project Creation Cancelled",
+                "Project creation cancelled.",
+            )
+            return
+        group_folders[group_name] = folder
 
     project_dir = self.projectsRoot / name.strip()
     project_dir.mkdir(parents=True, exist_ok=True)
 
     project = Project.load(project_dir)
     project.name = name.strip()
-    project.input_folder = input_folder
+    if group_names:
+        first_group = group_names[0]
+        project.input_folder = group_folders[first_group]
+    groups_payload = {
+        group_name: {"raw_input_folder": Path(folder), "description": ""}
+        for group_name, folder in group_folders.items()
+    }
+    project.groups = groups_payload
+    project.participants = {}
     project.save()
 
     self.currentProject = project
