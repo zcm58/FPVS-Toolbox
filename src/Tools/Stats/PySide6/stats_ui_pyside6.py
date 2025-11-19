@@ -460,7 +460,7 @@ def _group_contrasts_calc(
         raise RuntimeError("Group contrasts require at least two groups with data.")
 
     message_cb("Running Between-Group Contrasts…")
-    contrasts_df = compute_group_contrasts(
+    results_df = compute_group_contrasts(
         df_long,
         subject_col="subject",
         group_col="group",
@@ -468,22 +468,143 @@ def _group_contrasts_calc(
         roi_col="roi",
         dv_col="value",
     )
-    if contrasts_df.empty:
-        raise RuntimeError("No valid contrasts could be computed.")
+    # Build an informative textual summary for the GUI
+    import math
 
-    summary = (
-        "Computed {} pairwise group contrasts across {} conditions and {} ROIs."
-        .format(len(contrasts_df), contrasts_df["condition"].nunique(), contrasts_df["roi"].nunique())
+    n_rows = int(len(results_df))
+    conditions = sorted(results_df["condition"].dropna().unique().tolist())
+    rois = sorted(results_df["roi"].dropna().unique().tolist())
+    n_conditions = len(conditions)
+    n_rois = len(rois)
+
+    lines: list[str] = []
+    lines.append("=" * 60)
+    lines.append("       Between-Group Pairwise Contrasts")
+    lines.append("=" * 60)
+    lines.append("")
+    lines.append(
+        f"Computed {n_rows} pairwise group contrasts across "
+        f"{n_conditions} conditions and {n_rois} ROIs."
     )
-    output_text = "============================================================\n"
-    output_text += "       Between-Group Pairwise Contrasts\n"
-    output_text += "============================================================\n\n"
-    output_text += summary + "\n"
-    output_text += (
-        "Each row reports Welch's t-test (unequal variances) and Cohen's d for the\n"
-        "difference between the specified groups within a condition × ROI.\n"
+    lines.append(
+        "Each row reports Welch's t-test (unequal variances) and Cohen's d for the"
     )
-    return {"results_df": contrasts_df, "output_text": output_text}
+    lines.append(
+        "difference between the specified groups within a condition \u00d7 ROI."
+    )
+
+    # Prepare a small preview table for the text area
+    preview = results_df.copy()
+    sort_cols = [c for c in ["condition", "roi", "group_1", "group_2"] if c in preview.columns]
+    if sort_cols:
+        preview = preview.sort_values(sort_cols)
+
+    preview_cols = [
+        "condition",
+        "roi",
+        "group_1",
+        "group_2",
+        "mean_1",
+        "mean_2",
+        "difference",
+        "t_stat",
+        "p_value",
+        "effect_size",
+    ]
+    preview_cols = [c for c in preview_cols if c in preview.columns]
+    preview = preview[preview_cols]
+
+    max_rows = 10
+    shown_rows = min(max_rows, n_rows)
+
+    lines.append("")
+    lines.append("--------------------------------------------")
+    lines.append("         PREVIEW OF CONTRASTS TABLE")
+    lines.append(f"         (first {shown_rows} of {n_rows} rows)")
+    lines.append("--------------------------------------------")
+
+    for _, row in preview.head(max_rows).iterrows():
+        # Defensive formatting in case of missing columns / NaNs
+        cond = row.get("condition", "")
+        roi = row.get("roi", "")
+        g1 = row.get("group_1", "")
+        g2 = row.get("group_2", "")
+        t_stat = row.get("t_stat", math.nan)
+        p_val = row.get("p_value", math.nan)
+        d_val = row.get("effect_size", math.nan)
+        try:
+            t_str = f"{float(t_stat):.3f}"
+        except Exception:
+            t_str = str(t_stat)
+        try:
+            p_str = f"{float(p_val):.4f}"
+        except Exception:
+            p_str = str(p_val)
+        try:
+            d_str = f"{float(d_val):.3f}"
+        except Exception:
+            d_str = str(d_val)
+
+        lines.append(
+            f"{cond} | {roi} | {g1} vs {g2} | "
+            f"t={t_str}, p={p_str}, d={d_str}"
+        )
+
+    # Highlight any significant contrasts
+    lines.append("")
+    lines.append("--------------------------------------------")
+    lines.append("            KEY FINDINGS")
+    lines.append("--------------------------------------------")
+
+    sig_mask = ("p_value" in results_df.columns) & results_df["p_value"].notna()
+    sig_df = results_df[sig_mask & (results_df["p_value"] < 0.05)]
+
+    if sig_df.empty:
+        lines.append("No pairwise group contrasts reached p < 0.05.")
+    else:
+        lines.append("Significant pairwise group contrasts (p < 0.05):")
+        sig_df = sig_df.sort_values("p_value")
+        for _, row in sig_df.head(10).iterrows():
+            cond = row.get("condition", "")
+            roi = row.get("roi", "")
+            g1 = row.get("group_1", "")
+            g2 = row.get("group_2", "")
+            t_stat = row.get("t_stat", math.nan)
+            p_val = row.get("p_value", math.nan)
+            d_val = row.get("effect_size", math.nan)
+            try:
+                t_str = f"{float(t_stat):.3f}"
+            except Exception:
+                t_str = str(t_stat)
+            try:
+                p_str = f"{float(p_val):.4f}"
+            except Exception:
+                p_str = str(p_val)
+            try:
+                d_str = f"{float(d_val):.3f}"
+            except Exception:
+                d_str = str(d_val)
+
+            lines.append(
+                f"- {cond} @ {roi}: {g1} vs {g2} "
+                f"(t={t_str}, p={p_str}, d={d_str})"
+            )
+        if len(sig_df) > 10:
+            lines.append(f"... and {len(sig_df) - 10} more.")
+
+    lines.append("--------------------------------------------")
+    lines.append(
+        "Refer to the exported 'Group Contrasts' table for full details on all"
+    )
+    lines.append("condition \u00d7 ROI combinations.")
+    lines.append("--------------------------------------------")
+
+    output_text = "\n".join(lines)
+
+    return {
+        "results_df": results_df,
+        "output_text": output_text,
+    }
 
 
 def _harmonic_calc(
