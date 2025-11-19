@@ -3,6 +3,11 @@ import glob
 import re
 from typing import List, Dict, Tuple
 
+EXCEL_PID_REGEX = re.compile(
+    r"(P\d+[A-Za-z]*|Sub\d+[A-Za-z]*|S\d+[A-Za-z]*)",
+    re.IGNORECASE,
+)
+
 
 # Folders to ignore during scanning (case-insensitive)
 IGNORED_FOLDERS = {".fif files", "loreta results"}
@@ -36,7 +41,7 @@ def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[s
     subject_data: Dict[str, Dict[str, str]] = {}
 
     # Pattern to match subject IDs in filenames (optional prefix + P<number>), before .xlsx
-    pid_pattern = re.compile(r"(?:[A-Za-z]*)?(P\d+).*\.xlsx$", re.IGNORECASE)
+    pid_pattern = EXCEL_PID_REGEX
 
     try:
         for entry in os.listdir(parent_folder):
