@@ -147,10 +147,27 @@ def _load_project_manifest_for_excel_root(excel_root: Path) -> dict | None:
         manifest = candidate / "project.json"
         if manifest.is_file():
             try:
-                return json.loads(manifest.read_text(encoding="utf-8"))
+                cfg = json.loads(manifest.read_text(encoding="utf-8"))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to load manifest %s: %s", manifest, exc)
                 return None
+            try:
+                results_folder, subfolders = _load_manifest_data(candidate, cfg)
+                expected_excel = _resolve_project_subfolder(
+                    candidate,
+                    results_folder,
+                    subfolders,
+                    "excel",
+                    EXCEL_SUBFOLDER_NAME,
+                )
+                expected_resolved = expected_excel.resolve()
+            except Exception:
+                expected_resolved = None
+            if expected_resolved is not None:
+                allowed = {current, *current.parents}
+                if expected_resolved not in allowed:
+                    continue
+            return cfg
     return None
 
 
@@ -189,6 +206,12 @@ def _long_format_from_bca(
     all_subject_bca_data: Dict[str, Dict[str, Dict[str, float]]],
     subject_groups: dict[str, str | None] | None = None,
 ) -> pd.DataFrame:
+    """Return a tidy dataframe for downstream models.
+
+    ``group`` is optional here; single-group projects simply omit it so legacy
+    workflows continue untouched. When present it is passed through to between
+    group ANOVA/LMM builders.
+    """
     rows = []
     groups = subject_groups or {}
     for pid, cond_data in all_subject_bca_data.items():
@@ -542,6 +565,7 @@ class StatsWindow(QMainWindow):
         self.subject_groups: Dict[str, str | None] = {}
         self.subjects: List[str] = []
         self.conditions: List[str] = []
+        self._multi_group_manifest: bool = False
         self.rm_anova_results_data: Optional[pd.DataFrame] = None
         self.mixed_model_results_data: Optional[pd.DataFrame] = None
         self.between_anova_results_data: Optional[pd.DataFrame] = None
@@ -639,10 +663,19 @@ class StatsWindow(QMainWindow):
     def _ensure_between_ready(self) -> bool:
         groups = self._known_group_labels()
         if len(groups) < 2:
+            if self._multi_group_manifest and not groups:
+                msg = (
+                    "No valid group assignments are available for between-group analysis. "
+                    "Assign participants to project groups and rescan."
+                )
+            else:
+                msg = (
+                    "Between-group analysis requires at least two groups with assigned subjects."
+                )
             QMessageBox.information(
                 self,
                 "Need Multiple Groups",
-                "Between-group analysis requires at least two groups with assigned subjects.",
+                msg,
             )
             return False
         return True
@@ -1472,11 +1505,13 @@ class StatsWindow(QMainWindow):
                 return
             try:
                 self.subject_groups = {}
+                self._multi_group_manifest = False
                 subjects, conditions, data = scan_folder_simple(folder)
                 manifest = _load_project_manifest_for_excel_root(Path(folder))
                 participants_map = _normalize_participants_map(manifest)
                 subject_groups = _map_subjects_to_groups(subjects, participants_map)
                 has_multi_groups = _has_multi_groups(manifest)
+                self._multi_group_manifest = has_multi_groups
 
                 if has_multi_groups:
                     self._warn_unknown_excel_files(data, participants_map)

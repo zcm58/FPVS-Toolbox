@@ -155,6 +155,10 @@ class _Worker(QObject):
             self._unknown_subject_files.clear()
             return {}
 
+        # Group overlays ride on top of the same averaged ROI curves that power
+        # the single-subject plot. We simply filter the already aggregated
+        # ``subject_data`` per group so the worker never re-reads Excel files or
+        # blocks the UI thread with redundant IO.
         per_group: Dict[str, Dict[str, List[float]]] = {}
         for group in self.selected_groups:
             subjects = {

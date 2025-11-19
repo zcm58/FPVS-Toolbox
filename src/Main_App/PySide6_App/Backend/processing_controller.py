@@ -26,9 +26,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RawFileInfo:
+    """Metadata tracked for each discovered raw file."""
+
     path: Path
     subject_id: str
     group: str | None = None
+
+
+# ``subject_id`` is the canonical participant label inferred from the .bdf file
+# name. ``group`` captures the multi-group assignment derived from the folder the
+# file was found in. Both values are persisted so that downstream processing,
+# participant manifests, and the Stats/Plot tools can reason about consistent
+# IDs without re-scanning the filesystem.
 
 
 _PID_REGEX = re.compile(r"\b(P\d+|Sub\d+|S\d+)\b", re.IGNORECASE)
