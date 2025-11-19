@@ -130,6 +130,56 @@ def _resolve_project_subfolder(
     return (_resolve_results_root(project_root, results_folder) / candidate).resolve()
 
 
+# --------------------------- manifest helpers ---------------------------
+
+def _load_project_manifest_for_excel_root(excel_root: Path) -> dict | None:
+    """Walk upward from an Excel folder to locate and load project.json."""
+    try:
+        current = excel_root.resolve()
+    except Exception:
+        current = excel_root
+    for candidate in (current, *current.parents):
+        manifest = candidate / "project.json"
+        if manifest.is_file():
+            try:
+                return json.loads(manifest.read_text(encoding="utf-8"))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to load manifest %s: %s", manifest, exc)
+                return None
+    return None
+
+
+def _normalize_participants_map(manifest: dict | None) -> dict[str, str]:
+    """Return {SUBJECT_ID -> group_name} using upper-case participant IDs."""
+    if not isinstance(manifest, dict):
+        return {}
+    participants = manifest.get("participants", {})
+    if not isinstance(participants, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for pid, info in participants.items():
+        if not isinstance(pid, str) or not pid.strip():
+            continue
+        if not isinstance(info, dict):
+            continue
+        group = info.get("group")
+        if not isinstance(group, str) or not group.strip():
+            continue
+        normalized[pid.strip().upper()] = group.strip()
+    return normalized
+
+
+def _map_subjects_to_groups(subjects: Iterable[str], participants_map: dict[str, str]) -> dict[str, str | None]:
+    return {pid: participants_map.get(pid.upper()) for pid in subjects}
+
+
+def _has_multi_groups(manifest: dict | None) -> bool:
+    if not isinstance(manifest, dict):
+        return False
+    groups = manifest.get("groups")
+    return isinstance(groups, dict) and bool(groups)
+
+
 # --------------------------- worker functions ---------------------------
 
 def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, rois):
@@ -149,7 +199,18 @@ def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_dat
     return {"anova_df_results": anova_df_results}
 
 
-def _lmm_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, alpha, rois):
+def _lmm_calc(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    subject_data,
+    base_freq,
+    alpha,
+    rois,
+    subject_groups: dict[str, str | None] | None = None,
+):
     set_rois(rois)
     message_cb("Preparing data for Mixed Effects Model…")
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
@@ -163,12 +224,19 @@ def _lmm_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, ba
         raise RuntimeError("Data preparation failed (empty).")
 
     long_format_data = []
+    groups = subject_groups or {}
     for pid, cond_data in all_subject_bca_data.items():
         for cond_name, roi_data in cond_data.items():
             for roi_name, value in roi_data.items():
                 if not pd.isna(value):
                     long_format_data.append(
-                        {"subject": pid, "condition": cond_name, "roi": roi_name, "value": value}
+                        {
+                            "subject": pid,
+                            "group": groups.get(pid),
+                            "condition": cond_name,
+                            "roi": roi_name,
+                            "value": value,
+                        }
                     )
     if not long_format_data:
         raise RuntimeError("No valid rows for mixed model after filtering NaNs.")
@@ -201,7 +269,18 @@ def _lmm_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, ba
     return {"mixed_results_df": mixed_results_df, "output_text": output_text}
 
 
-def _posthoc_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, alpha, rois):
+def _posthoc_calc(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    subject_data,
+    base_freq,
+    alpha,
+    rois,
+    subject_groups: dict[str, str | None] | None = None,
+):
     set_rois(rois)
     message_cb("Preparing data for Interaction Post-hoc tests…")
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
@@ -215,12 +294,19 @@ def _posthoc_calc(progress_cb, message_cb, *, subjects, conditions, subject_data
         raise RuntimeError("Data preparation failed (empty).")
 
     long_format_data = []
+    groups = subject_groups or {}
     for pid, cond_data in all_subject_bca_data.items():
         for cond_name, roi_data in cond_data.items():
             for roi_name, value in roi_data.items():
                 if not pd.isna(value):
                     long_format_data.append(
-                        {"subject": pid, "condition": cond_name, "roi": roi_name, "value": value}
+                        {
+                            "subject": pid,
+                            "group": groups.get(pid),
+                            "condition": cond_name,
+                            "roi": roi_name,
+                            "value": value,
+                        }
                     )
     if not long_format_data:
         raise RuntimeError("No valid rows for post-hoc tests after filtering NaNs.")
@@ -314,6 +400,7 @@ class StatsWindow(QMainWindow):
 
         # --- state ---
         self.subject_data: Dict = {}
+        self.subject_groups: Dict[str, str | None] = {}
         self.subjects: List[str] = []
         self.conditions: List[str] = []
         self.rm_anova_results_data: Optional[pd.DataFrame] = None
@@ -376,6 +463,33 @@ class StatsWindow(QMainWindow):
             self._set_roi_status(txt)
         else:
             self._set_status(txt)
+
+    def _warn_unknown_excel_files(self, subject_data: Dict[str, Dict[str, str]], participants_map: dict[str, str]) -> None:
+        if not subject_data:
+            return
+        unknown_files: set[str] = set()
+        for pid, cond_map in subject_data.items():
+            if not isinstance(cond_map, dict):
+                continue
+            if pid.upper() in participants_map:
+                continue
+            for filepath in cond_map.values():
+                try:
+                    unknown_files.add(os.path.basename(filepath))
+                except Exception:
+                    continue
+        if not unknown_files:
+            return
+        files_list = "\n".join(sorted(unknown_files))
+        QMessageBox.warning(
+            self,
+            "Unrecognized Excel Files",
+            (
+                "Warning: The following Excel files are not recognized in this project's subject list:\n"
+                f"{files_list}\n"
+                "Please remove these files from the folder or update the project metadata."
+            ),
+        )
 
     # --------- window focus / run state ---------
 
@@ -862,6 +976,7 @@ class StatsWindow(QMainWindow):
             base_freq=self._current_base_freq,
             alpha=self._current_alpha,
             rois=self.rois,
+            subject_groups=self.subject_groups,
         )
         self._wire_and_start(worker, self._on_mixed_model_finished)
 
@@ -881,6 +996,7 @@ class StatsWindow(QMainWindow):
             base_freq=self._current_base_freq,
             alpha=self._current_alpha,
             rois=self.rois,
+            subject_groups=self.subject_groups,
         )
         self._wire_and_start(worker, self._on_posthoc_finished)
 
@@ -983,11 +1099,23 @@ class StatsWindow(QMainWindow):
                 QMessageBox.warning(self, "No Folder", "Please select a data folder first.")
                 return
             try:
+                self.subject_groups = {}
                 subjects, conditions, data = scan_folder_simple(folder)
+                manifest = _load_project_manifest_for_excel_root(Path(folder))
+                participants_map = _normalize_participants_map(manifest)
+                subject_groups = _map_subjects_to_groups(subjects, participants_map)
+                has_multi_groups = _has_multi_groups(manifest)
+
+                if has_multi_groups:
+                    self._warn_unknown_excel_files(data, participants_map)
+
                 self.subjects = subjects
                 self.conditions = conditions
                 self.subject_data = data
-                self._set_status(f"Scan complete: Found {len(subjects)} subjects and {len(conditions)} conditions.")
+                self.subject_groups = subject_groups
+                self._set_status(
+                    f"Scan complete: Found {len(subjects)} subjects and {len(conditions)} conditions."
+                )
             except ScanError as e:
                 self._set_status(f"Scan failed: {e}")
                 QMessageBox.critical(self, "Scan Error", str(e))
