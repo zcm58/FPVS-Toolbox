@@ -116,7 +116,10 @@ from Main_App.Legacy_App.file_selection import FileSelectionMixin
 from Main_App.Legacy_App.processing_utils import ProcessingMixin
 from Main_App.Legacy_App.settings_manager import SettingsManager
 from Main_App.PySide6_App.Backend import Project
-from Main_App.PySide6_App.Backend.processing_controller import _animate_progress_to
+from Main_App.PySide6_App.Backend.processing_controller import (
+    _animate_progress_to,
+    prepare_batch_files,
+)
 from Main_App.PySide6_App.Backend.project_manager import (
     edit_project_settings,
     loadProject,
@@ -1078,16 +1081,36 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 QMessageBox.warning(self, "No File Selected", "Please choose one .bdf file first.")
                 return False
 
-        # Batch: build file list from input folder if empty
-        # (Single mode may also fall back to this if data_paths somehow empty)
-        if not self.data_paths:
+        # Batch: always build the file list from the project definition
+        # (multi-group aware via prepare_batch_files). This ensures that
+        # all .bdf files from all configured group input folders are used.
+        if mode_now == "Batch":
+            file_paths = prepare_batch_files(self.currentProject)
+            if not file_paths:
+                QMessageBox.warning(
+                    self,
+                    "No Data",
+                    "No .bdf files found in the configured input folder(s).",
+                )
+                return False
+            self.data_paths = [str(p) for p in file_paths]
+            self.log(f"Processing: {len(self.data_paths)} file(s) selected.")
+
+        # Single: if we somehow have no data_paths at this point, fall back to
+        # the legacy input_folder glob (defensive-only; normal flow requires an
+        # explicit file selection above).
+        elif not self.data_paths:
             input_dir = Path(self.currentProject.input_folder)
             if not input_dir.is_dir():
                 QMessageBox.critical(self, "Input Folder Missing", str(input_dir))
                 return False
-            bdf_files = sorted([str(p) for p in input_dir.glob("*.bdf")])
+            bdf_files = sorted(str(p) for p in input_dir.glob("*.bdf"))
             if not bdf_files:
-                QMessageBox.warning(self, "No Data", "No .bdf files found in the input folder.")
+                QMessageBox.warning(
+                    self,
+                    "No Data",
+                    "No .bdf files found in the input folder.",
+                )
                 return False
             self.data_paths = bdf_files
             self.log(f"Processing: {len(self.data_paths)} file(s) selected.")
@@ -1428,17 +1451,28 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
         loadProject(self, project)
 
-        # Auto-populate data_paths from the project's input folder
+        # Auto-populate data_paths from the project's input folder(s). For
+        # multi-group projects, this uses all configured group folders via
+        # prepare_batch_files; for legacy single-group projects, it falls back
+        # to the original input_folder behavior.
+        file_paths = prepare_batch_files(project)
+        self.data_paths = [str(p) for p in file_paths]
+
+        groups = getattr(project, "groups", {}) or {}
         input_dir = Path(project.input_folder)
-        bdf_files = sorted(input_dir.glob("*.bdf"))
-        self.data_paths = [str(p) for p in bdf_files]
+
         if self.data_paths:
-            self.log(
-                f"Project data folder set: {input_dir} ({len(self.data_paths)} .bdf files)"
-            )
+            if isinstance(groups, dict) and len(groups) >= 2:
+                self.log(
+                    f"Project data folders set ({len(groups)} groups, {len(self.data_paths)} .bdf files)"
+                )
+            else:
+                self.log(
+                    f"Project data folder set: {input_dir} ({len(self.data_paths)} .bdf files)"
+                )
         else:
             self.log(
-                f"Warning: no .bdf files found in project input folder: {input_dir}",
+                f"Warning: no .bdf files found in project input folder(s): {input_dir}",
                 level=logging.WARNING,
             )
 
