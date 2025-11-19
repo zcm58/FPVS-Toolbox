@@ -449,7 +449,7 @@ def run_interaction_posthocs(self):
         summary_section = "============================================================\n"
         summary_section += "             SUMMARY OF SIGNIFICANT FINDINGS\n"
         summary_section += "============================================================\n"
-        summary_section += "(Holm-corrected p-values < 0.05)\n"
+        summary_section += "(FDR-adjusted p-values, Benjamini–Hochberg < 0.05)\n"
 
         for finding_group in significant_findings_for_summary:
             roi = finding_group['roi']
@@ -459,7 +459,7 @@ def run_interaction_posthocs(self):
                 comp_str = f"'{row['Level_A']}' vs. '{row['Level_B']}'"
                 t_val = row['t_statistic']
                 df = row['N_Pairs'] - 1
-                p_corr = row['p_value_corrected']
+                p_corr = row['p_fdr_bh']
                 p_corr_str = "< .0001" if p_corr < 0.0001 else f"{p_corr:.4f}"
 
                 summary_section += f"  - Difference between {comp_str} is significant.\n"
