@@ -207,6 +207,7 @@ def prepare_batch_files(project: "Project") -> List[Path]:
             )
         else:
             if infos:
+                _update_project_participants(project, infos)
                 return [info.path for info in infos]
 
     # Legacy / fallback: single input_folder
