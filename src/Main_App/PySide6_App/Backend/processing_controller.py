@@ -1,4 +1,4 @@
-""""Processing helpers for the PySide6 app. Single-preprocessor path (PySide6 only)."""
+"""Processing helpers for the PySide6 app. Single-preprocessor path (PySide6 only)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,7 +26,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RawFileInfo:
-    """Metadata tracked for each discovered raw file."""
+    """
+    Metadata tracked for each discovered raw file.
+
+    - path: absolute Path to the .bdf file.
+    - subject_id: canonical participant label inferred from the file name.
+    - group: optional experimental group name, inferred from the folder
+      where the file was discovered (for multi-group projects).
+    """
 
     path: Path
     subject_id: str
@@ -38,7 +45,6 @@ class RawFileInfo:
 # file was found in. Both values are persisted so that downstream processing,
 # participant manifests, and the Stats/Plot tools can reason about consistent
 # IDs without re-scanning the filesystem.
-
 
 _PID_REGEX = re.compile(r"\b(P\d+|Sub\d+|S\d+)\b", re.IGNORECASE)
 _PID_SUFFIX_REGEX = re.compile(
@@ -59,6 +65,12 @@ def _infer_subject_id(file_path: Path) -> str:
 
 
 def _iter_group_folders(project: "Project") -> Iterable[tuple[str | None, Path]]:
+    """
+    Yield (group_name, folder_path) pairs for all configured input folders.
+
+    For legacy/single-group projects, yields a single (None, project.input_folder)
+    entry so callers can treat the iteration uniformly.
+    """
     groups = getattr(project, "groups", {}) or {}
     if isinstance(groups, dict) and groups:
         for name, info in groups.items():
@@ -72,12 +84,22 @@ def _iter_group_folders(project: "Project") -> Iterable[tuple[str | None, Path]]
 
 
 def discover_raw_files(project: "Project") -> List[RawFileInfo]:
+    """
+    Discover all .bdf files across the project's configured input folders.
+
+    For multi-group projects, this walks every group-specific folder. For
+    legacy projects, this is equivalent to scanning project.input_folder.
+    """
     files: List[RawFileInfo] = []
     seen: set[Path] = set()
     for group_name, folder in _iter_group_folders(project):
         folder_path = Path(folder)
         if not folder_path.exists():
-            logger.warning("Input folder %s for group %s does not exist", folder_path, group_name)
+            logger.warning(
+                "Input folder %s for group %s does not exist",
+                folder_path,
+                group_name,
+            )
             continue
         for candidate in sorted(folder_path.glob("*.bdf")):
             file_path = candidate.resolve()
@@ -95,6 +117,9 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
 
 
 def _group_for_path(project: "Project", file_path: Path) -> str | None:
+    """
+    Infer the group name for a manually selected file based on its parent folder.
+    """
     file_resolved = file_path.resolve()
     for group_name, folder in _iter_group_folders(project):
         if not group_name:
@@ -109,6 +134,12 @@ def _group_for_path(project: "Project", file_path: Path) -> str | None:
 
 
 def _update_project_participants(project: "Project", files: Sequence[RawFileInfo]) -> None:
+    """
+    Merge subject→group assignments from the given files into project.participants.
+
+    Conflicting assignments for the same subject are logged and the existing
+    mapping is preserved.
+    """
     if not files:
         return
 
@@ -128,7 +159,8 @@ def _update_project_participants(project: "Project", files: Sequence[RawFileInfo
         existing = participants.get(participant_id)
         if existing and existing.get("group") and existing.get("group") != group:
             logger.warning(
-                "Conflicting group assignments for participant %s (%s vs %s). Keeping existing.",
+                "Conflicting group assignments for participant %s (%s vs %s). "
+                "Keeping existing.",
                 participant_id,
                 existing.get("group"),
                 group,
@@ -143,7 +175,50 @@ def _update_project_participants(project: "Project", files: Sequence[RawFileInfo
         try:
             project.save()
         except Exception:
-            logger.exception("Failed to save updated participant metadata for project %s", project.project_root)
+            logger.exception(
+                "Failed to save updated participant metadata for project %s",
+                project.project_root,
+            )
+
+
+def prepare_batch_files(project: "Project") -> List[Path]:
+    """
+    Build the list of .bdf files for batch processing.
+
+    - For multi-group projects (project.groups non-empty), this uses
+      discover_raw_files(project) so that all configured group folders
+      contribute their .bdf files.
+
+    - For legacy/single-group projects, this falls back to scanning
+      project.input_folder directly, preserving the original behavior.
+
+    This is the single source-of-truth used by the PySide6 GUI when
+    constructing the data_files list for the performance runner.
+    """
+    # Multi-group path: use discover_raw_files + RawFileInfo
+    groups = getattr(project, "groups", {}) or {}
+    if isinstance(groups, dict) and groups:
+        try:
+            infos = discover_raw_files(project)
+        except Exception:
+            logger.exception(
+                "prepare_batch_files: discover_raw_files failed; "
+                "falling back to single input_folder scan."
+            )
+        else:
+            if infos:
+                return [info.path for info in infos]
+
+    # Legacy / fallback: single input_folder
+    input_dir = Path(project.input_folder)
+    if not input_dir.is_dir():
+        logger.warning(
+            "prepare_batch_files: input folder %s does not exist",
+            input_dir,
+        )
+        return []
+
+    return sorted(input_dir.glob("*.bdf"))
 
 
 def _animate_progress_to(self, value: int) -> None:
@@ -201,7 +276,10 @@ def start_processing(self) -> None:
                 )
         else:
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "Select .BDF File", str(input_dir), "BDF Files (*.bdf)"
+                self,
+                "Select .BDF File",
+                str(input_dir),
+                "BDF Files (*.bdf)",
             )
             if not file_path:
                 self.log("No file selected, aborting.")
@@ -233,7 +311,11 @@ def start_processing(self) -> None:
             or _settings_get(self, "preprocessing", "ref_channel2")
             or "EXG2"
         )
-        stim = p.get("stim_channel") or _settings_get(self, "stim", "channel", "Status") or "Status"
+        stim = (
+            p.get("stim_channel")
+            or _settings_get(self, "stim", "channel", "Status")
+            or "Status"
+        )
 
         params = {
             "downsample_rate": p.get("downsample"),
@@ -247,7 +329,8 @@ def start_processing(self) -> None:
         }
 
         self.log(
-            "Using PySide6 preprocessing: Main_App.PySide6_App.Backend.preprocess.perform_preprocessing"
+            "Using PySide6 preprocessing: "
+            "Main_App.PySide6_App.Backend.preprocess.perform_preprocessing"
         )
         logger.info(
             "Preproc route: PySide6 module with params=%s",
@@ -277,7 +360,10 @@ def start_processing(self) -> None:
             )
 
             # Main processing and post-processing
-            out_dir = str(self.currentProject.project_root / self.currentProject.subfolders["excel"])
+            out_dir = str(
+                self.currentProject.project_root
+                / self.currentProject.subfolders["excel"]
+            )
             self.log(f"Running main processing (run_loreta={run_loreta})")
             process_data(raw, out_dir, run_loreta)
 
@@ -293,4 +379,5 @@ def start_processing(self) -> None:
         try:
             QMessageBox.critical(self, "Processing Error", str(e))
         except Exception:
+            # If the GUI is in a bad state, we still want the log message.
             pass
