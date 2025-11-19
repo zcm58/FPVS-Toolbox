@@ -110,7 +110,6 @@ def run_mixed_group_anova(
             between=between_col,
             subject=subject_col,
             data=df,
-            detailed=True,
         )
         return _tidy_pingouin_table(pg_table)
     except ImportError:
