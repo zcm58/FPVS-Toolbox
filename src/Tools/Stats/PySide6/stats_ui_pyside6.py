@@ -66,7 +66,7 @@ ANOVA_XLS = "RM-ANOVA Results.xlsx"
 LMM_XLS = "Mixed Model Results.xlsx"
 POSTHOC_XLS = "Posthoc Results.xlsx"
 HARMONIC_XLS = "Harmonic Results.xlsx"
-ANOVA_BETWEEN_XLS = "RM-ANOVA Between Groups.xlsx"
+ANOVA_BETWEEN_XLS = "Mixed ANOVA Between Groups.xlsx"
 LMM_BETWEEN_XLS = "Mixed Model Between Groups.xlsx"
 GROUP_CONTRAST_XLS = "Group Contrasts.xlsx"
 
