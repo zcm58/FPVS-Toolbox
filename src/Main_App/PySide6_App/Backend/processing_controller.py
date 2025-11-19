@@ -1,8 +1,11 @@
 """"Processing helpers for the PySide6 app. Single-preprocessor path (PySide6 only)."""
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import dataclass
 import logging
+from pathlib import Path
+import re
+from typing import Dict, Iterable, List, Sequence, TYPE_CHECKING
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
@@ -15,7 +18,123 @@ from Main_App.PySide6_App.Backend.preprocess import (
 from Main_App.PySide6_App.Backend.processing import process_data
 from Main_App.Legacy_App.post_process import post_process
 
+if TYPE_CHECKING:
+    from Main_App.PySide6_App.Backend.project import Project
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RawFileInfo:
+    path: Path
+    subject_id: str
+    group: str | None = None
+
+
+_PID_REGEX = re.compile(r"\b(P\d+|Sub\d+|S\d+)\b", re.IGNORECASE)
+_PID_SUFFIX_REGEX = re.compile(
+    r"(_unamb|_ambig|_mid|_run\d*|_sess\d*|_task\w*|_eeg|_fpvs|_raw|_preproc|_ica).*$",
+    re.IGNORECASE,
+)
+
+
+def _infer_subject_id(file_path: Path) -> str:
+    base = file_path.stem
+    match = _PID_REGEX.search(base)
+    if match:
+        return match.group(1).upper()
+
+    cleaned = _PID_SUFFIX_REGEX.sub("", base)
+    cleaned = re.sub(r"[^a-zA-Z0-9]", "", cleaned)
+    return cleaned if cleaned else base
+
+
+def _iter_group_folders(project: "Project") -> Iterable[tuple[str | None, Path]]:
+    groups = getattr(project, "groups", {}) or {}
+    if isinstance(groups, dict) and groups:
+        for name, info in groups.items():
+            folder = info.get("raw_input_folder") if isinstance(info, dict) else None
+            if not folder:
+                continue
+            folder_path = Path(folder)
+            yield name, folder_path
+    else:
+        yield None, Path(project.input_folder)
+
+
+def discover_raw_files(project: "Project") -> List[RawFileInfo]:
+    files: List[RawFileInfo] = []
+    seen: set[Path] = set()
+    for group_name, folder in _iter_group_folders(project):
+        folder_path = Path(folder)
+        if not folder_path.exists():
+            logger.warning("Input folder %s for group %s does not exist", folder_path, group_name)
+            continue
+        for candidate in sorted(folder_path.glob("*.bdf")):
+            file_path = candidate.resolve()
+            if file_path in seen:
+                continue
+            seen.add(file_path)
+            files.append(
+                RawFileInfo(
+                    path=file_path,
+                    subject_id=_infer_subject_id(file_path),
+                    group=group_name,
+                )
+            )
+    return files
+
+
+def _group_for_path(project: "Project", file_path: Path) -> str | None:
+    file_resolved = file_path.resolve()
+    for group_name, folder in _iter_group_folders(project):
+        if not group_name:
+            continue
+        try:
+            folder_resolved = Path(folder).resolve()
+        except Exception:
+            continue
+        if folder_resolved == file_resolved.parent or folder_resolved in file_resolved.parents:
+            return group_name
+    return None
+
+
+def _update_project_participants(project: "Project", files: Sequence[RawFileInfo]) -> None:
+    if not files:
+        return
+
+    if not getattr(project, "groups", {}) or not isinstance(project.groups, dict):
+        return
+
+    participants: Dict[str, Dict[str, str]] = {}
+    if isinstance(getattr(project, "participants", None), dict):
+        participants = dict(project.participants)
+
+    changed = False
+    for info in files:
+        group = info.group
+        participant_id = info.subject_id.strip()
+        if not group or not participant_id:
+            continue
+        existing = participants.get(participant_id)
+        if existing and existing.get("group") and existing.get("group") != group:
+            logger.warning(
+                "Conflicting group assignments for participant %s (%s vs %s). Keeping existing.",
+                participant_id,
+                existing.get("group"),
+                group,
+            )
+            continue
+        if not existing or existing.get("group") != group:
+            participants[participant_id] = {"group": group}
+            changed = True
+
+    if changed:
+        project.participants = participants
+        try:
+            project.save()
+        except Exception:
+            logger.exception("Failed to save updated participant metadata for project %s", project.project_root)
 
 
 def _animate_progress_to(self, value: int) -> None:
@@ -59,14 +178,18 @@ def start_processing(self) -> None:
     Preserves the rest of the pipeline and adds structured audit logging.
     """
     try:
-        input_dir = Path(self.currentProject.input_folder)
+        project: Project = self.currentProject
+        input_dir = Path(project.input_folder)
         run_loreta = bool(getattr(self, "cb_loreta", None) and self.cb_loreta.isChecked())
 
-        # Gather input files
-        if getattr(self, "rb_batch", None) and self.rb_batch.isChecked():
-            bdf_files = sorted(input_dir.glob("*.bdf"))
-            if not bdf_files:
-                raise FileNotFoundError(f"No .bdf files in {input_dir}")
+        batch_mode = bool(getattr(self, "rb_batch", None) and self.rb_batch.isChecked())
+        raw_file_infos: List[RawFileInfo]
+        if batch_mode:
+            raw_file_infos = discover_raw_files(project)
+            if not raw_file_infos:
+                raise FileNotFoundError(
+                    "No .bdf files found in the configured input folders for this project."
+                )
         else:
             file_path, _ = QFileDialog.getOpenFileName(
                 self, "Select .BDF File", str(input_dir), "BDF Files (*.bdf)"
@@ -74,10 +197,20 @@ def start_processing(self) -> None:
             if not file_path:
                 self.log("No file selected, aborting.")
                 return
-            bdf_files = [Path(file_path)]
+            selected_path = Path(file_path)
+            raw_file_infos = [
+                RawFileInfo(
+                    path=selected_path,
+                    subject_id=_infer_subject_id(selected_path),
+                    group=_group_for_path(project, selected_path),
+                )
+            ]
+
+        bdf_files = [info.path for info in raw_file_infos]
+        _update_project_participants(project, raw_file_infos)
 
         # Preprocessing parameters with precedence: project → settings → defaults
-        p = self.currentProject.preprocessing or {}
+        p = project.preprocessing or {}
 
         ref1 = (
             p.get("ref_channel1")
