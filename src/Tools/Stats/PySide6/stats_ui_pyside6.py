@@ -1066,13 +1066,15 @@ class StatsWindow(QMainWindow):
         p_col = next((c for c in p_candidates if c in df.columns), None)
         eff_col = next((c for c in eff_candidates if c in df.columns), None)
 
-        if p_col is None or eff_col is None:
+        if p_col is None:
             out.append("No interpretable effects were found in the ANOVA table.")
             return "\n".join(out)
 
-        for _, row in df.iterrows():
-            effect_name = str(row.get(eff_col, "")).strip()
+        for idx, row in df.iterrows():
+            effect_source = row.get(eff_col, idx) if eff_col is not None else idx
+            effect_name = str(effect_source).strip()
             effect_lower = effect_name.lower()
+            effect_compact = effect_lower.replace(" ", "").replace("×", "x")
             p_raw = row.get(p_col, np.nan)
             try:
                 p_val = float(p_raw)
@@ -1091,7 +1093,14 @@ class StatsWindow(QMainWindow):
                 tag = "group-by-ROI interaction"
             elif effect_lower.startswith("group") or effect_lower == "group":
                 tag = "difference between groups"
-            elif any(k in effect_lower for k in ["condition:roi", "condition*roi", "condition x roi", "roi:condition", "roi*condition"]):
+            elif effect_compact in {
+                "condition*roi",
+                "condition:roi",
+                "conditionxroi",
+                "roi*condition",
+                "roi:condition",
+                "roixcondition",
+            }:
                 tag = "condition-by-ROI interaction"
             elif "condition" == effect_lower or effect_lower.startswith("conditions"):
                 tag = "difference between conditions"
