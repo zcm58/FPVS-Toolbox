@@ -187,7 +187,7 @@ def prepare_batch_files(project: "Project") -> List[Path]:
 
     - For multi-group projects (project.groups non-empty), this uses
       discover_raw_files(project) so that all configured group folders
-      contribute their .bdf files.
+      contribute their .bdf files, and keeps project.participants in sync.
 
     - For legacy/single-group projects, this falls back to scanning
       project.input_folder directly, preserving the original behavior.
@@ -195,7 +195,7 @@ def prepare_batch_files(project: "Project") -> List[Path]:
     This is the single source-of-truth used by the PySide6 GUI when
     constructing the data_files list for the performance runner.
     """
-    # Multi-group path: use discover_raw_files + RawFileInfo
+    # Multi-group path: use discover_raw_files + RawFileInfo and update participants
     groups = getattr(project, "groups", {}) or {}
     if isinstance(groups, dict) and groups:
         try:
@@ -203,10 +203,18 @@ def prepare_batch_files(project: "Project") -> List[Path]:
         except Exception:
             logger.exception(
                 "prepare_batch_files: discover_raw_files failed; "
-                "falling back to single input_folder scan."
+                "falling back to single input_folder scan.",
             )
         else:
             if infos:
+                try:
+                    _update_project_participants(project, infos)
+                except Exception:
+                    logger.exception(
+                        "prepare_batch_files: failed to update participants from "
+                        "discovered raw files for project %s",
+                        getattr(project, "project_root", "<unknown>"),
+                    )
                 return [info.path for info in infos]
 
     # Legacy / fallback: single input_folder
