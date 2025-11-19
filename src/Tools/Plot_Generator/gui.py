@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QStyle,
     QSizePolicy,
+    QListWidget,
+    QListWidgetItem,
 )
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import QColorDialog
@@ -41,6 +43,12 @@ from Main_App.PySide6_App.Backend.project import (
 )
 from Tools.Stats.Legacy.stats_helpers import load_rois_from_settings
 from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION
+from Tools.Plot_Generator.manifest_utils import (
+    extract_group_names,
+    has_multi_groups,
+    load_manifest_for_excel_root,
+    normalize_participants_map,
+)
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from .worker import _Worker
 
@@ -255,6 +263,10 @@ class PlotGeneratorWindow(QWidget):
 
         self._all_conditions = False
 
+        self._subject_groups_map: dict[str, str] = {}
+        self._available_groups: list[str] = []
+        self._has_multi_groups = False
+
 
         self._build_ui()
         self._overlay_width_anim = QPropertyAnimation(self.overlay_container, b"maximumWidth")
@@ -401,6 +413,21 @@ class PlotGeneratorWindow(QWidget):
         self.overlay_check = QCheckBox("Overlay Comparison")
         self.overlay_check.toggled.connect(self._overlay_toggled)
         params_form.addRow("", self.overlay_check)
+
+        self.group_box = QGroupBox("Group Options")
+        self._style_box(self.group_box)
+        group_layout = QVBoxLayout(self.group_box)
+        group_layout.setContentsMargins(6, 6, 6, 6)
+        group_layout.setSpacing(6)
+        self.group_overlay_check = QCheckBox("Overlay groups on plots")
+        self.group_overlay_check.toggled.connect(self._on_group_overlay_toggled)
+        group_layout.addWidget(self.group_overlay_check)
+        self.group_list = QListWidget()
+        self.group_list.setSelectionMode(QListWidget.NoSelection)
+        self.group_list.setMinimumHeight(80)
+        group_layout.addWidget(self.group_list)
+        self.group_box.setVisible(False)
+        params_form.addRow(self.group_box)
 
 
 
@@ -581,11 +608,18 @@ class PlotGeneratorWindow(QWidget):
             self._overlay_width_anim.setEndValue(end_width)
             self._overlay_opacity_anim.setStartValue(self.overlay_container.windowOpacity())
             self._overlay_opacity_anim.setEndValue(1.0)
+            if self.group_box.isVisible():
+                self.group_overlay_check.setChecked(False)
+                self.group_overlay_check.setEnabled(False)
+                self.group_list.setEnabled(False)
         else:
             self._overlay_width_anim.setStartValue(self.overlay_container.maximumWidth())
             self._overlay_width_anim.setEndValue(0)
             self._overlay_opacity_anim.setStartValue(self.overlay_container.windowOpacity())
             self._overlay_opacity_anim.setEndValue(0.0)
+            if self.group_box.isVisible():
+                self.group_overlay_check.setEnabled(True)
+                self.group_list.setEnabled(self.group_overlay_check.isChecked())
         self._overlay_width_anim.start()
         self._overlay_opacity_anim.start()
         if checked:
@@ -597,6 +631,10 @@ class PlotGeneratorWindow(QWidget):
         else:
             # Revert to auto-generation behavior when comparison mode is off
             self._update_chart_title_state(self.condition_combo.currentText())
+
+    def _on_group_overlay_toggled(self, checked: bool) -> None:
+        self.group_list.setEnabled(checked)
+        self._check_required()
 
     def _select_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Excel Folder")
@@ -645,6 +683,7 @@ class PlotGeneratorWindow(QWidget):
                 self.title_edit.setText(condition)
 
     def _populate_conditions(self, folder: str) -> None:
+        self._refresh_group_controls(folder)
         self.condition_combo.clear()
         self.condition_b_combo.clear()
         try:
@@ -682,6 +721,63 @@ class PlotGeneratorWindow(QWidget):
         # Update the chart title field based on the current condition
         self._update_chart_title_state(self.condition_combo.currentText())
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")
+
+    def _refresh_group_controls(self, folder: str) -> None:
+        if not hasattr(self, "group_box"):
+            return
+        manifest = None
+        if folder:
+            try:
+                manifest = load_manifest_for_excel_root(Path(folder))
+            except Exception:  # pragma: no cover - log via UI only
+                manifest = None
+        self._subject_groups_map = normalize_participants_map(manifest)
+        groups = extract_group_names(manifest)
+        self._available_groups = groups
+        self._has_multi_groups = has_multi_groups(manifest)
+        self.group_box.setVisible(self._has_multi_groups)
+        self.group_overlay_check.setChecked(False)
+        self.group_overlay_check.setEnabled(
+            self._has_multi_groups and not self.overlay_check.isChecked()
+        )
+        self.group_list.clear()
+        if self._has_multi_groups:
+            for name in groups:
+                item = QListWidgetItem(name)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked)
+                self.group_list.addItem(item)
+            self.group_list.setEnabled(False)
+        else:
+            self.group_list.setEnabled(False)
+
+    def _selected_groups(self) -> list[str]:
+        selected: list[str] = []
+        for idx in range(self.group_list.count()):
+            item = self.group_list.item(idx)
+            if item.checkState() == Qt.Checked:
+                selected.append(item.text())
+        return selected
+
+    def _group_overlay_enabled(self) -> bool:
+        return self.group_box.isVisible() and self.group_overlay_check.isChecked()
+
+    def _group_worker_kwargs(
+        self, overlay_enabled: bool, selected_groups: list[str]
+    ) -> dict:
+        if not overlay_enabled:
+            return {
+                "subject_groups": None,
+                "selected_groups": None,
+                "enable_group_overlay": False,
+                "multi_group_mode": self._has_multi_groups,
+            }
+        return {
+            "subject_groups": dict(self._subject_groups_map),
+            "selected_groups": list(selected_groups),
+            "enable_group_overlay": True,
+            "multi_group_mode": self._has_multi_groups,
+        }
 
     def _append_log(self, text: str) -> None:
         self.log.append(text)
@@ -726,7 +822,7 @@ class PlotGeneratorWindow(QWidget):
         if not self._conditions_queue:
             self._finish_all()
             return
-        folder, out_dir, x_min, x_max, y_min, y_max = self._gen_params
+        folder, out_dir, x_min, x_max, y_min, y_max, group_kwargs = self._gen_params
         condition = self._conditions_queue.pop(0)
         self._current_condition += 1
 
@@ -752,6 +848,7 @@ class PlotGeneratorWindow(QWidget):
             y_max,
             str(cond_out),
             self.stem_color,
+            **group_kwargs,
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
@@ -816,6 +913,19 @@ class PlotGeneratorWindow(QWidget):
             QMessageBox.critical(self, "Error", "Invalid axis limits.")
             return
 
+        overlay_groups = self._group_overlay_enabled()
+        selected_groups = self._selected_groups() if overlay_groups else []
+        if overlay_groups and not selected_groups:
+            QMessageBox.warning(
+                self,
+                "Group Overlay",
+                "Select at least one group before plotting.",
+            )
+            self.gen_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(False)
+            return
+        group_kwargs = self._group_worker_kwargs(overlay_groups, selected_groups)
+
         self.gen_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.log.clear()
@@ -846,6 +956,7 @@ class PlotGeneratorWindow(QWidget):
                 condition_b=cond_b,
                 stem_color_b=self.stem_color_b,
                 overlay=True,
+                **group_kwargs,
             )
             self._worker.moveToThread(self._thread)
             self._thread.started.connect(self._worker.run)
@@ -868,7 +979,15 @@ class PlotGeneratorWindow(QWidget):
                 self._conditions_queue = [self.condition_combo.currentText()]
             self._total_conditions = len(self._conditions_queue)
             self._current_condition = 0
-            self._gen_params = (folder, out_dir, x_min, x_max, y_min, y_max)
+            self._gen_params = (
+                folder,
+                out_dir,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                group_kwargs.copy(),
+            )
             self._start_next_condition()
 
     def _open_settings(self) -> None:
@@ -898,6 +1017,8 @@ class PlotGeneratorWindow(QWidget):
         )
         if self.overlay_check.isChecked():
             required = required and bool(self.condition_b_combo.currentText())
+        if self._group_overlay_enabled() and not self._selected_groups():
+            required = False
         self.gen_btn.setEnabled(required)
 
     def _generation_finished(self) -> None:

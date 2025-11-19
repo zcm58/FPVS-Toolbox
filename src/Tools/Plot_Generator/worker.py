@@ -1,14 +1,15 @@
 """Worker classes for the plot generator."""
 from __future__ import annotations
 
-import os
 import math
+import os
+import re
 from pathlib import Path
-from typing import Dict, List, Iterable, Sequence
+from typing import Dict, Iterable, List, Sequence
 
-import pandas as pd
 import matplotlib
 import numpy as np
+import pandas as pd
 from Main_App import SettingsManager
 
 matplotlib.use("Agg")
@@ -17,6 +18,19 @@ from PySide6.QtCore import QObject, Signal
 
 from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
+
+
+_PID_PATTERN = re.compile(r"(?:[A-Za-z]*)?(P\d+)", re.IGNORECASE)
+
+
+def _infer_subject_id_from_path(excel_path: Path) -> str | None:
+    """Return a best-effort subject identifier inferred from the file name."""
+
+    match = _PID_PATTERN.search(excel_path.stem)
+    if match:
+        return match.group(1).upper()
+    cleaned = excel_path.stem.strip()
+    return cleaned.upper() if cleaned else None
 
 # Global plotting style applied after imports
 plt.rcParams.update(
@@ -57,6 +71,10 @@ class _Worker(QObject):
         oddballs: Sequence[float] | None = None,
         use_matlab_style: bool = False,
         overlay: bool = False,
+        subject_groups: Dict[str, str | None] | None = None,
+        selected_groups: Sequence[str] | None = None,
+        enable_group_overlay: bool = False,
+        multi_group_mode: bool = False,
     ) -> None:
         super().__init__()
         self.folder = folder
@@ -81,6 +99,18 @@ class _Worker(QObject):
         self.oddballs: List[float] = list(oddballs or [])
         self.use_matlab_style = use_matlab_style
         self._stop_requested = False
+        normalized_groups = {
+            pid.upper(): grp
+            for pid, grp in (subject_groups or {}).items()
+            if isinstance(pid, str) and isinstance(grp, str)
+        }
+        self.subject_groups: Dict[str, str] = normalized_groups
+        ordered = [g for g in (selected_groups or []) if isinstance(g, str) and g]
+        self.selected_groups: List[str] = ordered
+        self._selected_group_set = set(ordered)
+        self.enable_group_overlay = bool(enable_group_overlay and ordered)
+        self.multi_group_mode = multi_group_mode
+        self._unknown_subject_files: set[str] = set()
 
     def run(self) -> None:
         try:
@@ -93,6 +123,74 @@ class _Worker(QObject):
 
     def _emit(self, msg: str, processed: int = 0, total: int = 0) -> None:
         self.progress.emit(msg, processed, total)
+
+    def _selected_roi_names(self) -> List[str]:
+        return list(self.roi_map.keys()) if self.selected_roi == ALL_ROIS_OPTION else [self.selected_roi]
+
+    def _aggregate_roi_data(
+        self,
+        subject_data: Dict[str, Dict[str, List[float]]],
+        subjects: Iterable[str] | None = None,
+    ) -> Dict[str, List[float]]:
+        roi_names = self._selected_roi_names()
+        filtered = set(subjects) if subjects is not None else None
+        aggregated: Dict[str, List[float]] = {}
+        for roi in roi_names:
+            rows: List[List[float]] = []
+            for pid, roi_values in subject_data.items():
+                if filtered is not None and pid not in filtered:
+                    continue
+                values = roi_values.get(roi)
+                if values:
+                    rows.append(values)
+            if rows:
+                aggregated[roi] = list(pd.DataFrame(rows).mean(axis=0))
+        return aggregated
+
+    def _build_group_curves(
+        self,
+        subject_data: Dict[str, Dict[str, List[float]]],
+    ) -> Dict[str, Dict[str, List[float]]]:
+        if not self.enable_group_overlay or not self.subject_groups:
+            self._unknown_subject_files.clear()
+            return {}
+
+        per_group: Dict[str, Dict[str, List[float]]] = {}
+        for group in self.selected_groups:
+            subjects = {
+                pid
+                for pid, grp in self.subject_groups.items()
+                if grp == group and pid in subject_data
+            }
+            if not subjects:
+                continue
+            aggregated = self._aggregate_roi_data(subject_data, subjects)
+            if aggregated:
+                per_group[group] = aggregated
+
+        if not per_group:
+            self._emit(
+                "No participants assigned to the selected groups. Showing overall average only.",
+                0,
+                0,
+            )
+        self._warn_unknown_subjects()
+        return per_group
+
+    def _warn_unknown_subjects(self) -> None:
+        if (
+            self.multi_group_mode
+            and self.enable_group_overlay
+            and self._unknown_subject_files
+        ):
+            files = ", ".join(sorted(self._unknown_subject_files))
+            self._emit(
+                "Warning: The following Excel files lack group assignments and were excluded from group overlays:"
+                f" {files}",
+                0,
+                0,
+            )
+            self._unknown_subject_files.clear()
 
     def _count_excel_files(self, condition: str) -> int:
         """Return the number of Excel files for a condition."""
@@ -112,7 +210,7 @@ class _Worker(QObject):
         *,
         offset: int = 0,
         total_override: int | None = None,
-    ) -> tuple[List[float], Dict[str, List[float]]]:
+    ) -> tuple[List[float], Dict[str, Dict[str, List[float]]]]:
         cond_folder = Path(self.folder) / condition
         if not cond_folder.is_dir():
             self._emit(f"Condition folder not found: {cond_folder}")
@@ -139,14 +237,11 @@ class _Worker(QObject):
             overall_total,
         )
 
-        roi_names = (
-            list(self.roi_map.keys())
-            if self.selected_roi == ALL_ROIS_OPTION
-            else [self.selected_roi]
-        )
+        roi_names = self._selected_roi_names()
 
-        roi_data: Dict[str, List[List[float]]] = {rn: [] for rn in roi_names}
+        subject_roi_data: Dict[str, Dict[str, List[float]]] = {}
         freqs: Iterable[float] | None = None
+        self._unknown_subject_files.clear()
 
         for excel_path in excel_files:
             if self._stop_requested:
@@ -190,6 +285,23 @@ class _Worker(QObject):
                 overall_total,
             )
 
+            subject_id = _infer_subject_id_from_path(excel_path)
+            if not subject_id:
+                self._emit(
+                    f"Skipping {excel_path.name}: unable to determine subject ID.",
+                    offset + processed_files,
+                    overall_total,
+                )
+                processed_files += 1
+                continue
+            if (
+                self.enable_group_overlay
+                and self.multi_group_mode
+                and self.subject_groups
+                and subject_id not in self.subject_groups
+            ):
+                self._unknown_subject_files.add(excel_path.name)
+
             freq_pairs: List[tuple[float, str]] = []
             for col in freq_cols:
                 try:
@@ -212,7 +324,7 @@ class _Worker(QObject):
                     continue
 
                 means = df_roi[ordered_cols].mean().tolist()
-                roi_data[roi].append(means)
+                subject_roi_data.setdefault(subject_id, {})[roi] = means
 
             processed_files += 1
             self._emit("", offset + processed_files, overall_total)
@@ -225,18 +337,11 @@ class _Worker(QObject):
             )
             return [], {}
 
-        averaged: Dict[str, List[float]] = {}
-        for roi, rows in roi_data.items():
-            if not rows:
-                self._emit(f"No data collected for ROI {roi}")
-                continue
-            averaged[roi] = list(pd.DataFrame(rows).mean(axis=0))
-
-        if not averaged:
+        if not subject_roi_data:
             self._emit("No ROI data to plot.")
             return [], {}
 
-        return list(freqs), averaged
+        return list(freqs), subject_roi_data
 
     def _run(self) -> None:
         if self.overlay and self.condition_b:
@@ -254,14 +359,27 @@ class _Worker(QObject):
                 total_override=total,
             )
             if freqs_a and data_a and freqs_b and data_b:
-                self._plot_overlay(freqs_a, data_a, data_b)
+                avg_a = self._aggregate_roi_data(data_a)
+                avg_b = self._aggregate_roi_data(data_b)
+                if avg_a and avg_b:
+                    self._plot_overlay(freqs_a, avg_a, avg_b)
             return
 
-        freqs, averaged = self._collect_data(self.condition)
-        if freqs and averaged:
-            self._plot(freqs, averaged)
+        freqs, subject_data = self._collect_data(self.condition)
+        if freqs and subject_data:
+            averaged = self._aggregate_roi_data(subject_data)
+            if not averaged:
+                self._emit("No ROI data to plot.")
+                return
+            group_curves = self._build_group_curves(subject_data)
+            self._plot(freqs, averaged, group_curves)
 
-    def _plot(self, freqs: List[float], roi_data: Dict[str, List[float]]) -> None:
+    def _plot(
+        self,
+        freqs: List[float],
+        roi_data: Dict[str, List[float]],
+        group_curves: Dict[str, Dict[str, List[float]]] | None = None,
+    ) -> None:
         mgr = SettingsManager()
         harm_str = mgr.get(
             "loreta",
@@ -275,27 +393,76 @@ class _Worker(QObject):
         odd_freqs = self.oddballs if self.oddballs else cfg_odds
 
 
+        group_curves = group_curves or {}
+        use_group_overlay = bool(group_curves)
+        color_cycle = plt.rcParams.get("axes.prop_cycle")
+        palette = (
+            color_cycle.by_key().get("color", []) if color_cycle else []
+        ) or [
+            "#1f77b4",
+            "#ff7f0e",
+            "#2ca02c",
+            "#d62728",
+            "#9467bd",
+            "#8c564b",
+        ]
+
         for roi, amps in roi_data.items():
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return
             fig, ax = plt.subplots(figsize=(12, 4))
 
-            line_color = self.stem_color
+            if use_group_overlay:
+                plotted = False
+                for idx, group_name in enumerate(self.selected_groups or group_curves.keys()):
+                    data = group_curves.get(group_name)
+                    if not data:
+                        continue
+                    vals = data.get(roi)
+                    if not vals:
+                        continue
+                    color = palette[idx % len(palette)]
+                    ax.plot(
+                        freqs,
+                        vals,
+                        label=group_name,
+                        color=color,
+                        linewidth=2.0,
+                    )
+                    plotted = True
+                ax.plot(
+                    freqs,
+                    amps,
+                    color=self.stem_color,
+                    linestyle="--",
+                    linewidth=1.5,
+                    label="All Subjects",
+                )
+                if not plotted:
+                    self._emit(
+                        "No group data available for overlay. Displaying overall average only.",
+                        0,
+                        0,
+                    )
+            else:
+                line_color = self.stem_color
+                stem_vals = amps
+                cont = ax.stem(
+                    freqs,
+                    stem_vals,
+                    linefmt=line_color,
+                    markerfmt=" ",
+                    basefmt=" ",
+                    bottom=1.0,
+                )
+                cont.markerline.set_label(self.metric)
+                self._emit(
+                    f"Plotted {len(stem_vals)} SNR stems for ROI {roi}", 0, 0
+                )
 
-            stem_vals = amps
-            cont = ax.stem(
-                freqs,
-                stem_vals,
-                linefmt=line_color,
-                markerfmt=" ",
-                basefmt=" ",
-                bottom=1.0,
-            )
-            cont.markerline.set_label(self.metric)
-            self._emit(
-                f"Plotted {len(stem_vals)} SNR stems for ROI {roi}", 0, 0
-            )
+            if use_group_overlay and (not odd_freqs or self.use_matlab_style):
+                ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
 
             if odd_freqs and not self.use_matlab_style:
                 freq_array = np.array(freqs)
