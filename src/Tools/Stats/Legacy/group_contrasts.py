@@ -6,6 +6,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from statsmodels.stats.multitest import multipletests
 
 logger = logging.getLogger(__name__)
 
@@ -90,4 +91,21 @@ def compute_group_contrasts(
                     "effect_size": cohen_d,
                 }
             )
-    return pd.DataFrame(rows)
+    results_df = pd.DataFrame(rows)
+
+    if not results_df.empty and "p_value" in results_df.columns:
+        p_values = results_df["p_value"]
+        valid_mask = p_values.notna()
+        corrected = np.full(len(results_df), np.nan)
+        if valid_mask.any():
+            _, p_fdr, _, _ = multipletests(
+                p_values.loc[valid_mask].to_numpy(), alpha=0.05, method="fdr_bh"
+            )
+            corrected[valid_mask.to_numpy()] = p_fdr
+        results_df["p_fdr_bh"] = corrected
+        results_df["sig_fdr_0_05"] = results_df["p_fdr_bh"] < 0.05
+    else:
+        results_df["p_fdr_bh"] = np.nan
+        results_df["sig_fdr_0_05"] = False
+
+    return results_df
