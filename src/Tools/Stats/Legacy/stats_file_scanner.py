@@ -6,6 +6,11 @@ import re
 import traceback
 from tkinter import filedialog, messagebox
 
+EXCEL_PID_REGEX = re.compile(
+    r"(P\d+[A-Za-z]*|Sub\d+[A-Za-z]*|S\d+[A-Za-z]*)",
+    re.IGNORECASE,
+)
+
 # Folders that should always be ignored when scanning for condition
 # subdirectories.  Stored in lower case for case-insensitive matching.
 IGNORED_FOLDERS = {".fif files", "loreta results"}
@@ -39,7 +44,7 @@ def scan_folder(self):
     # Revised PID pattern:
     # Looks for an optional prefix of letters, then P (case-insensitive) followed by digits.
     # Captures the P and digits part.
-    pid_pattern = re.compile(r"(?:[a-zA-Z]*)?(P\d+).*\.xlsx$", re.IGNORECASE)
+    pid_pattern = EXCEL_PID_REGEX
 
     try:
         for item_name in os.listdir(parent_folder):  # These are expected to be condition subfolders
