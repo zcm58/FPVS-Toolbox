@@ -556,41 +556,79 @@ def _group_contrasts_calc(
     lines.append("            KEY FINDINGS")
     lines.append("--------------------------------------------")
 
-    sig_mask = ("p_value" in results_df.columns) & results_df["p_value"].notna()
-    sig_df = results_df[sig_mask & (results_df["p_value"] < 0.05)]
+    use_fdr = "p_fdr_bh" in results_df.columns and "sig_fdr_0_05" in results_df.columns
 
-    if sig_df.empty:
-        lines.append("No pairwise group contrasts reached p < 0.05.")
-    else:
-        lines.append("Significant pairwise group contrasts (p < 0.05):")
-        sig_df = sig_df.sort_values("p_value")
-        for _, row in sig_df.head(10).iterrows():
-            cond = row.get("condition", "")
-            roi = row.get("roi", "")
-            g1 = row.get("group_1", "")
-            g2 = row.get("group_2", "")
-            t_stat = row.get("t_stat", math.nan)
-            p_val = row.get("p_value", math.nan)
-            d_val = row.get("effect_size", math.nan)
-            try:
-                t_str = f"{float(t_stat):.3f}"
-            except Exception:
-                t_str = str(t_stat)
-            try:
-                p_str = f"{float(p_val):.4f}"
-            except Exception:
-                p_str = str(p_val)
-            try:
-                d_str = f"{float(d_val):.3f}"
-            except Exception:
-                d_str = str(d_val)
-
+    if use_fdr:
+        sig_df = results_df[results_df["sig_fdr_0_05"]].copy()
+        if sig_df.empty:
             lines.append(
-                f"- {cond} @ {roi}: {g1} vs {g2} "
-                f"(t={t_str}, p={p_str}, d={d_str})"
+                "No pairwise group contrasts survived FDR correction (q = 0.05, "
+                "Benjamini–Hochberg)."
             )
-        if len(sig_df) > 10:
-            lines.append(f"... and {len(sig_df) - 10} more.")
+        else:
+            lines.append(
+                "Significant pairwise group contrasts after FDR correction "
+                "(q = 0.05, Benjamini–Hochberg):"
+            )
+            sig_df = sig_df.sort_values("p_fdr_bh")
+            for _, row in sig_df.head(10).iterrows():
+                cond = row.get("condition", "")
+                roi = row.get("roi", "")
+                g1 = row.get("group_1", "")
+                g2 = row.get("group_2", "")
+                p_fdr = row.get("p_fdr_bh", math.nan)
+                d_val = row.get("effect_size", math.nan)
+                try:
+                    p_fdr_str = f"{float(p_fdr):.4f}"
+                except Exception:
+                    p_fdr_str = str(p_fdr)
+                try:
+                    d_str = f"{float(d_val):.3f}"
+                except Exception:
+                    d_str = str(d_val)
+
+                lines.append(
+                    f"- {cond} @ {roi}: {g1} vs {g2} "
+                    f"(FDR p={p_fdr_str}, d={d_str})"
+                )
+            if len(sig_df) > 10:
+                lines.append(f"... and {len(sig_df) - 10} more.")
+    else:
+        sig_mask = ("p_value" in results_df.columns) & results_df["p_value"].notna()
+        sig_df = results_df[sig_mask & (results_df["p_value"] < 0.05)]
+
+        if sig_df.empty:
+            lines.append("No pairwise group contrasts reached p < 0.05.")
+        else:
+            lines.append("Significant pairwise group contrasts (p < 0.05):")
+            sig_df = sig_df.sort_values("p_value")
+            for _, row in sig_df.head(10).iterrows():
+                cond = row.get("condition", "")
+                roi = row.get("roi", "")
+                g1 = row.get("group_1", "")
+                g2 = row.get("group_2", "")
+                t_stat = row.get("t_stat", math.nan)
+                p_val = row.get("p_value", math.nan)
+                d_val = row.get("effect_size", math.nan)
+                try:
+                    t_str = f"{float(t_stat):.3f}"
+                except Exception:
+                    t_str = str(t_stat)
+                try:
+                    p_str = f"{float(p_val):.4f}"
+                except Exception:
+                    p_str = str(p_val)
+                try:
+                    d_str = f"{float(d_val):.3f}"
+                except Exception:
+                    d_str = str(d_val)
+
+                lines.append(
+                    f"- {cond} @ {roi}: {g1} vs {g2} "
+                    f"(t={t_str}, p={p_str}, d={d_str})"
+                )
+            if len(sig_df) > 10:
+                lines.append(f"... and {len(sig_df) - 10} more.")
 
     lines.append("--------------------------------------------")
     lines.append(
