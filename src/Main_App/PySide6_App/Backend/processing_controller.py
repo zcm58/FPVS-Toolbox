@@ -1,11 +1,11 @@
 """Processing helpers for the PySide6 app. Single-preprocessor path (PySide6 only)."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from pathlib import Path
 import re
-from typing import Dict, Iterable, List, Sequence, TYPE_CHECKING
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Dict, Iterable, List, Sequence
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
