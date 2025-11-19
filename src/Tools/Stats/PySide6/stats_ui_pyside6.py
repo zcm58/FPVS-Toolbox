@@ -37,7 +37,9 @@ from Main_App.PySide6_App.Backend.project import (
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.PySide6_App.widgets.busy_spinner import BusySpinner
 from Tools.Stats.Legacy.interpretation_helpers import generate_lme_summary
+from Tools.Stats.Legacy.group_contrasts import compute_group_contrasts
 from Tools.Stats.Legacy.mixed_effects_model import run_mixed_effects_model
+from Tools.Stats.Legacy.mixed_group_anova import run_mixed_group_anova
 from Tools.Stats.Legacy.posthoc_tests import run_interaction_posthocs
 from Tools.Stats.Legacy.stats_analysis import (
     ALL_ROIS_OPTION,
@@ -64,6 +66,9 @@ ANOVA_XLS = "RM-ANOVA Results.xlsx"
 LMM_XLS = "Mixed Model Results.xlsx"
 POSTHOC_XLS = "Posthoc Results.xlsx"
 HARMONIC_XLS = "Harmonic Results.xlsx"
+ANOVA_BETWEEN_XLS = "RM-ANOVA Between Groups.xlsx"
+LMM_BETWEEN_XLS = "Mixed Model Between Groups.xlsx"
+GROUP_CONTRAST_XLS = "Group Contrasts.xlsx"
 
 # --------------------------- helpers ---------------------------
 
@@ -180,6 +185,28 @@ def _has_multi_groups(manifest: dict | None) -> bool:
     return isinstance(groups, dict) and bool(groups)
 
 
+def _long_format_from_bca(
+    all_subject_bca_data: Dict[str, Dict[str, Dict[str, float]]],
+    subject_groups: dict[str, str | None] | None = None,
+) -> pd.DataFrame:
+    rows = []
+    groups = subject_groups or {}
+    for pid, cond_data in all_subject_bca_data.items():
+        for cond_name, roi_data in cond_data.items():
+            for roi_name, value in roi_data.items():
+                if not pd.isna(value):
+                    rows.append(
+                        {
+                            "subject": pid,
+                            "condition": cond_name,
+                            "roi": roi_name,
+                            "value": value,
+                            "group": groups.get(pid),
+                        }
+                    )
+    return pd.DataFrame(rows)
+
+
 # --------------------------- worker functions ---------------------------
 
 def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, rois):
@@ -199,6 +226,53 @@ def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_dat
     return {"anova_df_results": anova_df_results}
 
 
+def _between_group_anova_calc(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    subject_data,
+    base_freq,
+    rois,
+    subject_groups: dict[str, str | None] | None = None,
+):
+    set_rois(rois)
+    message_cb("Preparing data for Between-Group RM-ANOVA…")
+    all_subject_bca_data = prepare_all_subject_summed_bca_data(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_freq=base_freq,
+        log_func=message_cb,
+    )
+    if not all_subject_bca_data:
+        raise RuntimeError("Data preparation failed (empty).")
+
+    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    before = len(df_long)
+    df_long = df_long.dropna(subset=["group"])
+    dropped = before - len(df_long)
+    if dropped:
+        message_cb(f"Dropped {dropped} rows without group assignments for mixed ANOVA.")
+    if df_long.empty:
+        raise RuntimeError("No rows with valid group assignments for mixed ANOVA.")
+
+    df_long["group"] = df_long["group"].astype(str)
+    if df_long["group"].nunique() < 2:
+        raise RuntimeError("Mixed ANOVA requires at least two groups with valid data.")
+
+    message_cb("Running Between-Group RM-ANOVA…")
+    results = run_mixed_group_anova(
+        df_long,
+        dv_col="value",
+        subject_col="subject",
+        within_cols=["condition", "roi"],
+        between_col="group",
+    )
+    return {"anova_df_results": results}
+
+
 def _lmm_calc(
     progress_cb,
     message_cb,
@@ -210,9 +284,11 @@ def _lmm_calc(
     alpha,
     rois,
     subject_groups: dict[str, str | None] | None = None,
+    include_group: bool = False,
 ):
     set_rois(rois)
-    message_cb("Preparing data for Mixed Effects Model…")
+    prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
+    message_cb(f"Preparing data for {prep_label}…")
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
@@ -223,40 +299,58 @@ def _lmm_calc(
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
 
-    long_format_data = []
-    groups = subject_groups or {}
-    for pid, cond_data in all_subject_bca_data.items():
-        for cond_name, roi_data in cond_data.items():
-            for roi_name, value in roi_data.items():
-                if not pd.isna(value):
-                    long_format_data.append(
-                        {
-                            "subject": pid,
-                            "group": groups.get(pid),
-                            "condition": cond_name,
-                            "roi": roi_name,
-                            "value": value,
-                        }
-                    )
-    if not long_format_data:
+    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    if df_long.empty:
         raise RuntimeError("No valid rows for mixed model after filtering NaNs.")
 
-    df_long = pd.DataFrame(long_format_data)
+    dropped = 0
+    group_levels: list[str] = []
+    if include_group:
+        before = len(df_long)
+        df_long = df_long.dropna(subset=["group"])
+        dropped = before - len(df_long)
+        df_long["group"] = df_long["group"].astype(str)
+        group_levels = sorted(df_long["group"].unique())
+        if dropped:
+            message_cb(
+                f"Dropped {dropped} rows without group assignments for between-group model."
+            )
+        if len(group_levels) < 2:
+            raise RuntimeError(
+                "Between-group mixed model requires at least two groups with valid data."
+            )
+
     message_cb("Running Mixed Effects Model…")
 
+    fixed_effects = ["condition * roi"]
+    if include_group:
+        fixed_effects = ["group * condition * roi"]
+
     mixed_results_df = run_mixed_effects_model(
-        data=df_long, dv_col="value", group_col="subject", fixed_effects=["condition * roi"]
+        data=df_long,
+        dv_col="value",
+        group_col="subject",
+        fixed_effects=fixed_effects,
     )
 
     output_text = "============================================================\n"
-    output_text += "       Linear Mixed-Effects Model Results\n"
+    if include_group:
+        output_text += "       Between-Group Mixed-Effects Model Results\n"
+    else:
+        output_text += "       Linear Mixed-Effects Model Results\n"
     output_text += "       Analysis conducted on: Summed BCA Data\n"
     output_text += "============================================================\n\n"
-    output_text += (
-        "This model accounts for repeated observations from each subject by including\n"
-        "a random intercept. Fixed effects assess how conditions and ROIs influence\n"
-        "Summed BCA values, including their interaction.\n\n"
-    )
+    if include_group:
+        output_text += (
+            "Group was modeled as a between-subject factor interacting with condition\n"
+            "and ROI. Only subjects with known group assignments were included.\n\n"
+        )
+    else:
+        output_text += (
+            "This model accounts for repeated observations from each subject by including\n"
+            "a random intercept. Fixed effects assess how conditions and ROIs influence\n"
+            "Summed BCA values, including their interaction.\n\n"
+        )
     if mixed_results_df is not None and not mixed_results_df.empty:
         output_text += "--------------------------------------------\n"
         output_text += "                 FIXED EFFECTS TABLE\n"
@@ -293,25 +387,10 @@ def _posthoc_calc(
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
 
-    long_format_data = []
-    groups = subject_groups or {}
-    for pid, cond_data in all_subject_bca_data.items():
-        for cond_name, roi_data in cond_data.items():
-            for roi_name, value in roi_data.items():
-                if not pd.isna(value):
-                    long_format_data.append(
-                        {
-                            "subject": pid,
-                            "group": groups.get(pid),
-                            "condition": cond_name,
-                            "roi": roi_name,
-                            "value": value,
-                        }
-                    )
-    if not long_format_data:
+    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    if df_long.empty:
         raise RuntimeError("No valid rows for post-hoc tests after filtering NaNs.")
 
-    df_long = pd.DataFrame(long_format_data)
     message_cb("Running post-hoc tests…")
     output_text, results_df = run_interaction_posthocs(
         data=df_long,
@@ -322,6 +401,66 @@ def _posthoc_calc(
         alpha=alpha,
     )
     return {"results_df": results_df, "output_text": output_text}
+
+
+def _group_contrasts_calc(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    subject_data,
+    base_freq,
+    alpha,
+    rois,
+    subject_groups: dict[str, str | None] | None = None,
+):
+    set_rois(rois)
+    _ = alpha  # placeholder for future alpha-dependent formatting
+    message_cb("Preparing data for Between-Group Contrasts…")
+    all_subject_bca_data = prepare_all_subject_summed_bca_data(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_freq=base_freq,
+        log_func=message_cb,
+    )
+    if not all_subject_bca_data:
+        raise RuntimeError("Data preparation failed (empty).")
+
+    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    df_long = df_long.dropna(subset=["group"])
+    if df_long.empty:
+        raise RuntimeError("No rows with group assignments to compute contrasts.")
+    df_long["group"] = df_long["group"].astype(str)
+    if df_long["group"].nunique() < 2:
+        raise RuntimeError("Group contrasts require at least two groups with data.")
+
+    message_cb("Running Between-Group Contrasts…")
+    contrasts_df = compute_group_contrasts(
+        df_long,
+        subject_col="subject",
+        group_col="group",
+        condition_col="condition",
+        roi_col="roi",
+        dv_col="value",
+    )
+    if contrasts_df.empty:
+        raise RuntimeError("No valid contrasts could be computed.")
+
+    summary = (
+        "Computed {} pairwise group contrasts across {} conditions and {} ROIs."
+        .format(len(contrasts_df), contrasts_df["condition"].nunique(), contrasts_df["roi"].nunique())
+    )
+    output_text = "============================================================\n"
+    output_text += "       Between-Group Pairwise Contrasts\n"
+    output_text += "============================================================\n\n"
+    output_text += summary + "\n"
+    output_text += (
+        "Each row reports Welch's t-test (unequal variances) and Cohen's d for the\n"
+        "difference between the specified groups within a condition × ROI.\n"
+    )
+    return {"results_df": contrasts_df, "output_text": output_text}
 
 
 def _harmonic_calc(
@@ -405,6 +544,9 @@ class StatsWindow(QMainWindow):
         self.conditions: List[str] = []
         self.rm_anova_results_data: Optional[pd.DataFrame] = None
         self.mixed_model_results_data: Optional[pd.DataFrame] = None
+        self.between_anova_results_data: Optional[pd.DataFrame] = None
+        self.between_mixed_model_results_data: Optional[pd.DataFrame] = None
+        self.group_contrasts_results_data: Optional[pd.DataFrame] = None
         self.posthoc_results_data: Optional[pd.DataFrame] = None
         self.harmonic_check_results_data: List[dict] = []
         self.rois: Dict[str, List[str]] = {}
@@ -491,6 +633,20 @@ class StatsWindow(QMainWindow):
             ),
         )
 
+    def _known_group_labels(self) -> list[str]:
+        return sorted({g for g in (self.subject_groups or {}).values() if g})
+
+    def _ensure_between_ready(self) -> bool:
+        groups = self._known_group_labels()
+        if len(groups) < 2:
+            QMessageBox.information(
+                self,
+                "Need Multiple Groups",
+                "Between-group analysis requires at least two groups with assigned subjects.",
+            )
+            return False
+        return True
+
     # --------- window focus / run state ---------
 
     def _focus_self(self) -> None:
@@ -504,10 +660,16 @@ class StatsWindow(QMainWindow):
             self.run_mixed_model_btn,
             self.run_posthoc_btn,
             self.run_harm_btn,
+            self.run_between_anova_btn,
+            self.run_between_mixed_btn,
+            self.run_group_contrasts_btn,
             self.export_rm_anova_btn,
             self.export_mixed_model_btn,
             self.export_posthoc_btn,
             self.export_harm_btn,
+            self.export_between_anova_btn,
+            self.export_between_mixed_btn,
+            self.export_group_contrasts_btn,
             self.btn_open_results,
         ]
         for b in buttons:
@@ -618,6 +780,9 @@ class StatsWindow(QMainWindow):
             "lmm": (export_mixed_model_results_to_excel, LMM_XLS),
             "posthoc": (export_posthoc_results_to_excel, POSTHOC_XLS),
             "harmonic": (export_harmonic_results_to_excel, HARMONIC_XLS),
+            "anova_between": (export_rm_anova_results_to_excel, ANOVA_BETWEEN_XLS),
+            "lmm_between": (export_mixed_model_results_to_excel, LMM_BETWEEN_XLS),
+            "group_contrasts": (export_posthoc_results_to_excel, GROUP_CONTRAST_XLS),
         }
         func, fname = mapping[kind]
         if kind == "harmonic":
@@ -665,6 +830,18 @@ class StatsWindow(QMainWindow):
             and not self.posthoc_results_data.empty
         )
         self.export_harm_btn.setEnabled(bool(self.harmonic_check_results_data))
+        self.export_between_anova_btn.setEnabled(
+            isinstance(self.between_anova_results_data, pd.DataFrame)
+            and not self.between_anova_results_data.empty
+        )
+        self.export_between_mixed_btn.setEnabled(
+            isinstance(self.between_mixed_model_results_data, pd.DataFrame)
+            and not self.between_mixed_model_results_data.empty
+        )
+        self.export_group_contrasts_btn.setEnabled(
+            isinstance(self.group_contrasts_results_data, pd.DataFrame)
+            and not self.group_contrasts_results_data.empty
+        )
 
     # --------- worker signal wiring ---------
 
@@ -710,7 +887,19 @@ class StatsWindow(QMainWindow):
             except Exception:
                 p_val = np.nan
 
-            if any(k in effect_lower for k in ["condition:roi", "condition*roi", "condition x roi", "roi:condition", "roi*condition"]):
+            if (
+                "group" in effect_lower
+                and "condition" in effect_lower
+                and "roi" in effect_lower
+            ):
+                tag = "group by condition by ROI interaction"
+            elif "group" in effect_lower and "condition" in effect_lower:
+                tag = "group-by-condition interaction"
+            elif "group" in effect_lower and "roi" in effect_lower:
+                tag = "group-by-ROI interaction"
+            elif effect_lower.startswith("group") or effect_lower == "group":
+                tag = "difference between groups"
+            elif any(k in effect_lower for k in ["condition:roi", "condition*roi", "condition x roi", "roi:condition", "roi*condition"]):
                 tag = "condition-by-ROI interaction"
             elif "condition" == effect_lower or effect_lower.startswith("conditions"):
                 tag = "difference between conditions"
@@ -758,6 +947,31 @@ class StatsWindow(QMainWindow):
         self._end_run()
 
     @Slot(dict)
+    def _on_between_anova_finished(self, payload: dict) -> None:
+        self.between_anova_results_data = payload.get("anova_df_results")
+        alpha = getattr(self, "_current_alpha", 0.05)
+        output_text = "============================================================\n"
+        output_text += "       Between-Group Mixed ANOVA Results\n"
+        output_text += "============================================================\n\n"
+        output_text += (
+            "Group was treated as a between-subject factor with Condition and ROI as\n"
+            "within-subject factors. Only subjects with known group assignments were\n"
+            "included in this analysis.\n\n"
+        )
+        anova_df_results = self.between_anova_results_data
+        if isinstance(anova_df_results, pd.DataFrame) and not anova_df_results.empty:
+            output_text += self._format_rm_anova_summary(anova_df_results, alpha) + "\n"
+            output_text += "--------------------------------------------\n"
+            output_text += "Refer to the exported table for all Group main and interaction effects.\n"
+            output_text += "--------------------------------------------\n"
+        else:
+            output_text += "Between-group ANOVA returned no results.\n"
+
+        self.results_text.setText(output_text)
+        self._update_export_buttons()
+        self._end_run()
+
+    @Slot(dict)
     def _on_mixed_model_finished(self, payload: dict) -> None:
         self.mixed_model_results_data = payload.get("mixed_results_df")
         output_text = payload.get("output_text", "")
@@ -766,8 +980,24 @@ class StatsWindow(QMainWindow):
         self._end_run()
 
     @Slot(dict)
+    def _on_between_mixed_finished(self, payload: dict) -> None:
+        self.between_mixed_model_results_data = payload.get("mixed_results_df")
+        output_text = payload.get("output_text", "")
+        self.results_text.setText(output_text)
+        self._update_export_buttons()
+        self._end_run()
+
+    @Slot(dict)
     def _on_posthoc_finished(self, payload: dict) -> None:
         self.posthoc_results_data = payload.get("results_df")
+        output_text = payload.get("output_text", "")
+        self.results_text.setText(output_text)
+        self._update_export_buttons()
+        self._end_run()
+
+    @Slot(dict)
+    def _on_group_contrasts_finished(self, payload: dict) -> None:
+        self.group_contrasts_results_data = payload.get("results_df")
         output_text = payload.get("output_text", "")
         self.results_text.setText(output_text)
         self._update_export_buttons()
@@ -909,6 +1139,49 @@ class StatsWindow(QMainWindow):
 
         main_layout.addWidget(summed_frame)
 
+        between_frame = QFrame()
+        between_frame.setFrameShape(QFrame.StyledPanel)
+        between_layout = QVBoxLayout(between_frame)
+        between_title = QLabel("Between-Group Analyses:")
+        f2 = between_title.font()
+        f2.setBold(True)
+        between_title.setFont(f2)
+        between_layout.addWidget(between_title, alignment=Qt.AlignLeft)
+
+        between_row = QHBoxLayout()
+        between_run_col, between_export_col = QVBoxLayout(), QVBoxLayout()
+
+        self.run_between_anova_btn = QPushButton("Run Between-Group ANOVA")
+        self.run_between_anova_btn.clicked.connect(self.on_run_between_anova)
+        between_run_col.addWidget(self.run_between_anova_btn)
+
+        self.run_between_mixed_btn = QPushButton("Run Between-Group Mixed Model")
+        self.run_between_mixed_btn.clicked.connect(self.on_run_between_mixed_model)
+        between_run_col.addWidget(self.run_between_mixed_btn)
+
+        self.run_group_contrasts_btn = QPushButton("Run Group Contrasts")
+        self.run_group_contrasts_btn.clicked.connect(self.on_run_group_contrasts)
+        between_run_col.addWidget(self.run_group_contrasts_btn)
+
+        self.export_between_anova_btn = QPushButton("Export Between-Group ANOVA")
+        self.export_between_anova_btn.clicked.connect(self.on_export_between_anova)
+        between_export_col.addWidget(self.export_between_anova_btn)
+
+        self.export_between_mixed_btn = QPushButton("Export Between-Group Mixed Model")
+        self.export_between_mixed_btn.clicked.connect(self.on_export_between_mixed)
+        between_export_col.addWidget(self.export_between_mixed_btn)
+
+        self.export_group_contrasts_btn = QPushButton("Export Group Contrasts")
+        self.export_group_contrasts_btn.clicked.connect(self.on_export_group_contrasts)
+        between_export_col.addWidget(self.export_group_contrasts_btn)
+
+        between_row.addLayout(between_run_col, 1)
+        between_row.addSpacing(12)
+        between_row.addLayout(between_export_col, 1)
+        between_layout.addLayout(between_row)
+
+        main_layout.addWidget(between_frame)
+
         # results pane
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
@@ -979,6 +1252,72 @@ class StatsWindow(QMainWindow):
             subject_groups=self.subject_groups,
         )
         self._wire_and_start(worker, self._on_mixed_model_finished)
+
+    def on_run_between_anova(self) -> None:
+        if not self._precheck():
+            return
+        if not self._ensure_between_ready():
+            self._end_run()
+            return
+        self.results_text.clear()
+        self.between_anova_results_data = None
+        self._update_export_buttons()
+
+        worker = StatsWorker(
+            _between_group_anova_calc,
+            subjects=self.subjects,
+            conditions=self.conditions,
+            subject_data=self.subject_data,
+            base_freq=self._current_base_freq,
+            rois=self.rois,
+            subject_groups=self.subject_groups,
+        )
+        self._wire_and_start(worker, self._on_between_anova_finished)
+
+    def on_run_between_mixed_model(self) -> None:
+        if not self._precheck():
+            return
+        if not self._ensure_between_ready():
+            self._end_run()
+            return
+        self.results_text.clear()
+        self.between_mixed_model_results_data = None
+        self._update_export_buttons()
+
+        worker = StatsWorker(
+            _lmm_calc,
+            subjects=self.subjects,
+            conditions=self.conditions,
+            subject_data=self.subject_data,
+            base_freq=self._current_base_freq,
+            alpha=self._current_alpha,
+            rois=self.rois,
+            subject_groups=self.subject_groups,
+            include_group=True,
+        )
+        self._wire_and_start(worker, self._on_between_mixed_finished)
+
+    def on_run_group_contrasts(self) -> None:
+        if not self._precheck():
+            return
+        if not self._ensure_between_ready():
+            self._end_run()
+            return
+        self.results_text.clear()
+        self.group_contrasts_results_data = None
+        self._update_export_buttons()
+
+        worker = StatsWorker(
+            _group_contrasts_calc,
+            subjects=self.subjects,
+            conditions=self.conditions,
+            subject_data=self.subject_data,
+            base_freq=self._current_base_freq,
+            alpha=self._current_alpha,
+            rois=self.rois,
+            subject_groups=self.subject_groups,
+        )
+        self._wire_and_start(worker, self._on_group_contrasts_finished)
 
     def on_run_interaction_posthocs(self) -> None:
         if not self._precheck(require_anova=True):
@@ -1058,6 +1397,28 @@ class StatsWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
 
+    def on_export_between_anova(self) -> None:
+        if not isinstance(self.between_anova_results_data, pd.DataFrame) or self.between_anova_results_data.empty:
+            QMessageBox.information(self, "No Results", "Run Between-Group ANOVA first.")
+            return
+        out_dir = self._ensure_results_dir()
+        try:
+            self.export_results("anova_between", self.between_anova_results_data, out_dir)
+            self._set_status(f"Between-group ANOVA exported to: {out_dir}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Failed", str(e))
+
+    def on_export_between_mixed(self) -> None:
+        if not isinstance(self.between_mixed_model_results_data, pd.DataFrame) or self.between_mixed_model_results_data.empty:
+            QMessageBox.information(self, "No Results", "Run Between-Group Mixed Model first.")
+            return
+        out_dir = self._ensure_results_dir()
+        try:
+            self.export_results("lmm_between", self.between_mixed_model_results_data, out_dir)
+            self._set_status(f"Between-group Mixed Model exported to: {out_dir}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Failed", str(e))
+
     def on_export_posthoc(self) -> None:
         if not isinstance(self.posthoc_results_data, pd.DataFrame) or self.posthoc_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Interaction Post-hocs first.")
@@ -1066,6 +1427,17 @@ class StatsWindow(QMainWindow):
         try:
             self.export_results("posthoc", self.posthoc_results_data, out_dir)
             self._set_status(f"Post-hoc results exported to: {out_dir}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Failed", str(e))
+
+    def on_export_group_contrasts(self) -> None:
+        if not isinstance(self.group_contrasts_results_data, pd.DataFrame) or self.group_contrasts_results_data.empty:
+            QMessageBox.information(self, "No Results", "Run Group Contrasts first.")
+            return
+        out_dir = self._ensure_results_dir()
+        try:
+            self.export_results("group_contrasts", self.group_contrasts_results_data, out_dir)
+            self._set_status(f"Group contrasts exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
 
