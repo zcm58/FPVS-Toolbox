@@ -4,8 +4,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -51,6 +49,7 @@ from Tools.Stats.Legacy.stats_export import (
     export_significance_results_to_excel as export_harmonic_results_to_excel,
 )
 from Tools.Stats.Legacy.stats_helpers import apply_rois_to_modules, load_rois_from_settings
+from Tools.Stats.PySide6.stats_controller import StatsController
 from Tools.Stats.PySide6.stats_core import PipelineId, PipelineStep, RESULTS_SUBFOLDER_NAME, StepId
 from Tools.Stats.PySide6.stats_data_loader import (
     ScanError,
@@ -87,16 +86,6 @@ ANOVA_BETWEEN_XLS = "Mixed ANOVA Between Groups.xlsx"
 LMM_BETWEEN_XLS = "Mixed Model Between Groups.xlsx"
 GROUP_CONTRAST_XLS = "Group Contrasts.xlsx"
 
-
-@dataclass
-class SectionRunState:
-    name: str
-    status_label: QLabel | None = None
-    button: QPushButton | None = None
-    running: bool = False
-    start_ts: float = 0.0
-    steps: list[PipelineStep] = field(default_factory=list)
-    failed: bool = False
 
 # --------------------------- worker functions ---------------------------
 
@@ -161,8 +150,7 @@ class StatsWindow(QMainWindow):
         self._harmonic_metric: str = ""
         self._current_base_freq: float = 6.0
         self._current_alpha: float = 0.05
-        self.single_section_state = SectionRunState("Single Group Analysis")
-        self.between_section_state = SectionRunState("Between-Group Analysis")
+        self._active_pipeline: PipelineId | None = None
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
@@ -175,15 +163,13 @@ class StatsWindow(QMainWindow):
         self._init_ui()
         self.results_textbox = self.output_text
 
-        self.single_section_state.status_label = self.single_status_lbl
-        self.single_section_state.button = self.analyze_single_btn
-        self.between_section_state.status_label = self.between_status_lbl
-        self.between_section_state.button = self.analyze_between_btn
-
         self.refresh_rois()
         QTimer.singleShot(100, self._load_default_data_folder)
 
         self._progress_updates: List[int] = []
+
+        # controller
+        self._controller = StatsController(view=self)
 
     # --------- ROI + status helpers ---------
 
@@ -230,25 +216,18 @@ class StatsWindow(QMainWindow):
         log_func = getattr(logger, level_lower, logger.info)
         log_func(line)
 
-    def _section_label(self, state: SectionRunState | None) -> str:
-        if state is self.single_section_state:
+    def _section_label(self, pipeline: PipelineId | None) -> str:
+        if pipeline is PipelineId.SINGLE:
             return "Single"
-        if state is self.between_section_state:
+        if pipeline is PipelineId.BETWEEN:
             return "Between"
         return "General"
-
-    def _pipeline_id_for_state(self, state: SectionRunState | None) -> PipelineId | None:
-        if state is self.single_section_state:
-            return PipelineId.SINGLE
-        if state is self.between_section_state:
-            return PipelineId.BETWEEN
-        return None
 
     def _log_pipeline_event(
         self,
         *,
         pipeline: PipelineId | None,
-        step: PipelineStep | None = None,
+        step: StepId | None = None,
         event: str,
         extra: Optional[dict] = None,
     ) -> None:
@@ -256,8 +235,7 @@ class StatsWindow(QMainWindow):
             return
         payload = {"pipeline": pipeline.name.lower(), "event": event}
         if step:
-            payload["step"] = step.name
-            payload["step_id"] = step.id.name
+            payload["step_id"] = step.name
         if extra:
             payload.update(extra)
         logger.info(format_section_header("stats_pipeline_event"), extra=payload)
@@ -548,13 +526,13 @@ class StatsWindow(QMainWindow):
                 return None
         return None
 
-    def _build_summary_frames_for_state(self, state: SectionRunState) -> StatsSummaryFrames:
+    def _build_summary_frames(self, pipeline_id: PipelineId) -> StatsSummaryFrames:
         frames = StatsSummaryFrames()
-        if state is self.single_section_state:
+        if pipeline_id is PipelineId.SINGLE:
             frames.single_posthoc = self._to_dataframe(self.posthoc_results_data)
             frames.anova_terms = self._to_dataframe(self.rm_anova_results_data)
             frames.mixed_model_terms = self._to_dataframe(self.mixed_model_results_data)
-        elif state is self.between_section_state:
+        elif pipeline_id is PipelineId.BETWEEN:
             frames.between_contrasts = self._to_dataframe(self.group_contrasts_results_data)
             frames.anova_terms = self._to_dataframe(self.between_anova_results_data)
             frames.mixed_model_terms = self._to_dataframe(self.between_mixed_model_results_data)
@@ -594,125 +572,86 @@ class StatsWindow(QMainWindow):
         worker.signals.finished.connect(finished_slot)
         self.pool.start(worker)
 
-    def _any_section_running(self) -> bool:
-        return bool(self.single_section_state.running or self.between_section_state.running)
+    def set_busy(self, is_busy: bool) -> None:
+        self._set_running(is_busy)
 
-    def _start_section(self, state: SectionRunState, *, status_label: QLabel | None) -> None:
-        pipeline_id = self._pipeline_id_for_state(state)
+    def start_step_worker(
+        self,
+        pipeline_id: PipelineId,
+        step: PipelineStep,
+        *,
+        finished_cb,
+        error_cb,
+    ) -> None:
+        self._log_pipeline_event(pipeline=pipeline_id, step=step.id, event="start")
+        worker = StatsWorker(step.worker_fn, **step.kwargs)
+        worker.signals.finished.connect(
+            lambda payload, pid=pipeline_id, sid=step.id: finished_cb(pid, sid, payload)
+        )
+        worker.signals.error.connect(
+            lambda msg, pid=pipeline_id, sid=step.id: error_cb(pid, sid, msg)
+        )
+        worker.signals.message.connect(self._on_worker_message)
+        worker.signals.progress.connect(self._on_worker_progress)
+        self.pool.start(worker)
+        self._log_pipeline_event(pipeline=pipeline_id, step=step.id, event="end")
+
+    def ensure_pipeline_ready(self, pipeline_id: PipelineId) -> bool:
         self._log_pipeline_event(pipeline=pipeline_id, event="start")
-        state.running = True
-        state.failed = False
-        state.start_ts = time.perf_counter()
-        if state.button:
-            state.button.setEnabled(False)
-        if status_label:
-            status_label.setText("Running…")
-        self._set_running(True)
-        self._focus_self()
+        if not self._precheck(start_guard=False):
+            self._log_pipeline_event(
+                pipeline=pipeline_id, event="end", extra={"reason": "precheck_failed"}
+            )
+            return False
+        if pipeline_id is PipelineId.BETWEEN and not self._ensure_between_ready():
+            self._log_pipeline_event(
+                pipeline=pipeline_id, event="end", extra={"reason": "between_not_ready"}
+            )
+            return False
         self._log_pipeline_event(pipeline=pipeline_id, event="end")
+        return True
 
-    def _finish_section(self, state: SectionRunState, success: bool) -> None:
-        pipeline_id = self._pipeline_id_for_state(state)
-        self._log_pipeline_event(pipeline=pipeline_id, event="start", extra={"success": success})
-        state.running = False
-        state.steps = []
-        label = state.status_label
+    def on_pipeline_started(self, pipeline_id: PipelineId) -> None:
+        self._active_pipeline = pipeline_id
+        label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
+        if label:
+            label.setText("Running…")
+        btn = self.analyze_single_btn if pipeline_id is PipelineId.SINGLE else self.analyze_between_btn
+        if btn:
+            btn.setEnabled(False)
+        self._focus_self()
+        self._log_pipeline_event(pipeline=pipeline_id, event="started")
+
+    def on_analysis_finished(
+        self, pipeline_id: PipelineId, success: bool, error_message: Optional[str]
+    ) -> None:
+        label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
+        btn = self.analyze_single_btn if pipeline_id is PipelineId.SINGLE else self.analyze_between_btn
         if label:
             if success:
                 ts = datetime.now().strftime("%H:%M:%S")
                 label.setText(f"Last run OK at {ts}")
             else:
                 label.setText("Last run error (see log)")
-        if state.button:
-            state.button.setEnabled(True)
-        if not self._any_section_running():
-            self._set_running(False)
-        self._log_pipeline_event(pipeline=pipeline_id, event="end", extra={"success": success})
-
-    def _run_next_pipeline_step(self, state: SectionRunState) -> None:
-        pipeline_id = self._pipeline_id_for_state(state)
-        self._log_pipeline_event(pipeline=pipeline_id, event="start")
-        if not state.steps:
-            self._log_pipeline_event(pipeline=pipeline_id, event="end", extra={"reason": "no_steps"})
-            return
-        step = state.steps.pop(0)
-        section = self._section_label(state)
-        self.append_log(section, f"  • Starting {step.name}…")
-        worker = StatsWorker(step.worker_fn, **step.kwargs)
-        worker.signals.finished.connect(
-            lambda payload, s=state, st=step: self._pipeline_step_finished(s, st, payload)
+        if btn:
+            btn.setEnabled(True)
+        self._active_pipeline = None
+        if success:
+            section = self._section_label(pipeline_id)
+            if pipeline_id is PipelineId.SINGLE:
+                self.append_log(section, "  • Results exported for Single Group Analysis")
+            elif pipeline_id is PipelineId.BETWEEN:
+                self.append_log(section, "  • Results exported for Between-Group Analysis")
+            stats_folder = Path(self._ensure_results_dir())
+            self._prompt_view_results(self._section_label(pipeline_id), stats_folder)
+        elif error_message:
+            QMessageBox.critical(self, "Analysis Error", error_message)
+        self._update_export_buttons()
+        self._log_pipeline_event(
+            pipeline=pipeline_id, event="complete", extra={"success": success}
         )
-        worker.signals.error.connect(lambda msg, s=state, st=step: self._pipeline_step_error(s, st, msg))
-        worker.signals.message.connect(self._on_worker_message)
-        worker.signals.progress.connect(self._on_worker_progress)
-        self.pool.start(worker)
-        self._log_pipeline_event(pipeline=pipeline_id, step=step, event="end")
 
-    def _pipeline_step_finished(self, state: SectionRunState, step: PipelineStep, payload: dict) -> None:
-        pipeline_id = self._pipeline_id_for_state(state)
-        self._log_pipeline_event(pipeline=pipeline_id, step=step, event="start")
-        try:
-            step.handler(payload)
-        except Exception as exc:  # noqa: BLE001
-            section = self._section_label(state)
-            self.append_log(section, f"  • ERROR in {step.name}: {exc}", level="error")
-            self._log_pipeline_event(
-                pipeline=pipeline_id,
-                step=step,
-                event="error",
-                extra={"exception": type(exc).__name__},
-            )
-            state.failed = True
-            self._finish_section(state, False)
-            return
-
-        section = self._section_label(state)
-        self.append_log(section, f"  • {step.name} completed")
-        if state.steps:
-            self._run_next_pipeline_step(state)
-        else:
-            self._complete_pipeline(state)
-        self._log_pipeline_event(pipeline=pipeline_id, step=step, event="end")
-
-    def _pipeline_step_error(self, state: SectionRunState, step: PipelineStep, msg: str) -> None:
-        pipeline_id = self._pipeline_id_for_state(state)
-        self._log_pipeline_event(pipeline=pipeline_id, step=step, event="error", extra={"message": msg})
-        section = self._section_label(state)
-        self.append_log(section, f"  • ERROR in {step.name}: {msg}", level="error")
-        state.failed = True
-        self.append_log(section, "  • Remaining steps skipped due to previous error", level="warning")
-        self._finish_section(state, False)
-        self._log_pipeline_event(pipeline=pipeline_id, step=step, event="end", extra={"success": False})
-
-    def _complete_pipeline(self, state: SectionRunState) -> None:
-        pipeline_id = self._pipeline_id_for_state(state)
-        self._log_pipeline_event(pipeline=pipeline_id, event="start")
-        elapsed = time.perf_counter() - state.start_ts if state.start_ts else 0.0
-        if state.failed:
-            section = self._section_label(state)
-            self.append_log(
-                section,
-                f"{state.name} finished with errors (elapsed {elapsed:.1f} s)",
-                level="warning",
-            )
-            self._finish_section(state, False)
-            self._log_pipeline_event(pipeline=pipeline_id, event="complete", extra={"success": False})
-            return
-
-        if state is self.single_section_state:
-            exported = self._export_single_pipeline()
-        elif state is self.between_section_state:
-            exported = self._export_between_pipeline()
-        else:
-            exported = True
-
-        if not exported:
-            self._log_pipeline_event(pipeline=pipeline_id, event="complete", extra={"success": False})
-            self._finish_section(state, False)
-            return
-
-        section = self._section_label(state)
-        stats_folder = Path(self._ensure_results_dir())
+    def build_and_render_summary(self, pipeline_id: PipelineId) -> None:
         cfg = SummaryConfig(
             alpha=0.05,
             min_effect=0.50,
@@ -721,23 +660,93 @@ class StatsWindow(QMainWindow):
             p_col="p_fdr",
             effect_col="effect_size",
         )
-        frames = self._build_summary_frames_for_state(state)
-        try:
-            summary_text = build_summary_from_frames(frames, cfg)
-            self._render_summary(summary_text)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Error while rendering stats summary", exc_info=True)
-            self.append_log(section, f"  • Error rendering summary: {exc}", level="error")
-        if state is self.single_section_state:
-            self.append_log(section, "  • Results exported for Single Group Analysis")
-            self._prompt_view_results(section, stats_folder)
-        elif state is self.between_section_state:
-            self.append_log(section, "  • Results exported for Between-Group Analysis")
-            self._prompt_view_results(section, stats_folder)
+        frames = self._build_summary_frames(pipeline_id)
+        summary_text = build_summary_from_frames(frames, cfg)
+        self._render_summary(summary_text)
 
-        self.append_log(section, f"{state.name} finished in {elapsed:.1f} s")
-        self._finish_section(state, True)
-        self._log_pipeline_event(pipeline=pipeline_id, event="complete", extra={"success": True})
+    def export_pipeline_results(self, pipeline_id: PipelineId) -> bool:
+        if pipeline_id is PipelineId.SINGLE:
+            return self._export_single_pipeline()
+        if pipeline_id is PipelineId.BETWEEN:
+            return self._export_between_pipeline()
+        return False
+
+    def get_step_config(
+        self, pipeline_id: PipelineId, step_id: StepId
+    ) -> tuple[dict, Callable[[dict], None]]:
+        if pipeline_id is PipelineId.SINGLE:
+            if step_id is StepId.RM_ANOVA:
+                kwargs = dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    rois=self.rois,
+                )
+                handler = lambda payload: self._apply_rm_anova_results(payload, update_text=False)
+                return kwargs, handler
+            if step_id is StepId.MIXED_MODEL:
+                kwargs = dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                )
+                handler = lambda payload: self._apply_mixed_model_results(payload, update_text=False)
+                return kwargs, handler
+            if step_id is StepId.INTERACTION_POSTHOCS:
+                kwargs = dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                )
+                handler = lambda payload: self._apply_posthoc_results(payload, update_text=True)
+                return kwargs, handler
+        if pipeline_id is PipelineId.BETWEEN:
+            if step_id is StepId.BETWEEN_GROUP_ANOVA:
+                kwargs = dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                )
+                handler = lambda payload: self._apply_between_anova_results(payload, update_text=False)
+                return kwargs, handler
+            if step_id is StepId.BETWEEN_GROUP_MIXED_MODEL:
+                kwargs = dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                    include_group=True,
+                )
+                handler = lambda payload: self._apply_between_mixed_results(payload, update_text=False)
+                return kwargs, handler
+            if step_id is StepId.GROUP_CONTRASTS:
+                kwargs = dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                )
+                handler = lambda payload: self._apply_group_contrasts_results(payload, update_text=True)
+                return kwargs, handler
+        raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
 
     def _prompt_view_results(self, section: str, stats_folder: Path) -> None:
         msg = QMessageBox(self)
@@ -827,13 +836,14 @@ class StatsWindow(QMainWindow):
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
         self.output_text.append(f"Error: {msg}")
-        section = (
-            "Single"
-            if self.single_section_state.running
-            else "Between"
-            if self.between_section_state.running
-            else "General"
-        )
+        section = "General"
+        try:
+            if self._controller.is_running(PipelineId.SINGLE):
+                section = "Single"
+            elif self._controller.is_running(PipelineId.BETWEEN):
+                section = "Between"
+        except Exception:
+            section = "General"
         self.append_log(section, f"Worker error: {msg}", level="error")
         self._end_run()
 
@@ -1190,137 +1200,10 @@ class StatsWindow(QMainWindow):
     # --------------------------- actions ---------------------------
 
     def on_analyze_single_group_clicked(self) -> None:
-        pipeline_id = PipelineId.SINGLE
-        self._log_pipeline_event(pipeline=pipeline_id, event="start")
-        if self.single_section_state.running:
-            self.append_log("Single", f"{self.single_section_state.name} already running; new request ignored.")
-            self._log_pipeline_event(
-                pipeline=pipeline_id, event="end", extra={"reason": "already_running"}
-            )
-            return
-        if not self._precheck(start_guard=False):
-            self._log_pipeline_event(pipeline=pipeline_id, event="end", extra={"reason": "precheck_failed"})
-            return
-        summary = f"{len(self.subjects)} subjects, {len(self.conditions)} conditions"
-        self.append_log("Single", f"{self.single_section_state.name} started ({summary})")
-        steps = [
-            PipelineStep(
-                StepId.RM_ANOVA,
-                "RM-ANOVA",
-                run_rm_anova,
-                dict(
-                    subjects=self.subjects,
-                    conditions=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    rois=self.rois,
-                ),
-                lambda payload: self._apply_rm_anova_results(payload, update_text=False),
-            ),
-            PipelineStep(
-                StepId.MIXED_MODEL,
-                "Mixed Model",
-                run_lmm,
-                dict(
-                    subjects=self.subjects,
-                    conditions=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                    subject_groups=self.subject_groups,
-                ),
-                lambda payload: self._apply_mixed_model_results(payload, update_text=False),
-            ),
-            PipelineStep(
-                StepId.INTERACTION_POSTHOCS,
-                "Interaction Post-hocs",
-                run_posthoc,
-                dict(
-                    subjects=self.subjects,
-                    conditions=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                    subject_groups=self.subject_groups,
-                ),
-                lambda payload: self._apply_posthoc_results(payload, update_text=True),
-            ),
-        ]
-        self.single_section_state.steps = steps
-        self._start_section(self.single_section_state, status_label=self.single_status_lbl)
-        self._run_next_pipeline_step(self.single_section_state)
-        self._log_pipeline_event(pipeline=pipeline_id, event="end")
+        self._controller.run_single_group_analysis()
 
     def on_analyze_between_groups_clicked(self) -> None:
-        pipeline_id = PipelineId.BETWEEN
-        self._log_pipeline_event(pipeline=pipeline_id, event="start")
-        if self.between_section_state.running:
-            self.append_log("Between", f"{self.between_section_state.name} already running; new request ignored.")
-            self._log_pipeline_event(
-                pipeline=pipeline_id, event="end", extra={"reason": "already_running"}
-            )
-            return
-        if not self._precheck(start_guard=False):
-            self._log_pipeline_event(pipeline=pipeline_id, event="end", extra={"reason": "precheck_failed"})
-            return
-        if not self._ensure_between_ready():
-            self._log_pipeline_event(pipeline=pipeline_id, event="end", extra={"reason": "between_not_ready"})
-            return
-        summary = f"{len(self.subjects)} subjects, {len(self.conditions)} conditions"
-        self.append_log("Between", f"{self.between_section_state.name} started ({summary})")
-        steps = [
-            PipelineStep(
-                StepId.BETWEEN_GROUP_ANOVA,
-                "Between-Group ANOVA",
-                run_between_group_anova,
-                dict(
-                    subjects=self.subjects,
-                    conditions=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    rois=self.rois,
-                    subject_groups=self.subject_groups,
-                ),
-                lambda payload: self._apply_between_anova_results(payload, update_text=False),
-            ),
-            PipelineStep(
-                StepId.BETWEEN_GROUP_MIXED_MODEL,
-                "Between-Group Mixed Model",
-                run_lmm,
-                dict(
-                    subjects=self.subjects,
-                    conditions=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                    subject_groups=self.subject_groups,
-                    include_group=True,
-                ),
-                lambda payload: self._apply_between_mixed_results(payload, update_text=False),
-            ),
-            PipelineStep(
-                StepId.GROUP_CONTRASTS,
-                "Group Contrasts",
-                run_group_contrasts,
-                dict(
-                    subjects=self.subjects,
-                    conditions=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                    subject_groups=self.subject_groups,
-                ),
-                lambda payload: self._apply_group_contrasts_results(payload, update_text=True),
-            ),
-        ]
-        self.between_section_state.steps = steps
-        self._start_section(self.between_section_state, status_label=self.between_status_lbl)
-        self._run_next_pipeline_step(self.between_section_state)
-        self._log_pipeline_event(pipeline=pipeline_id, event="end")
+        self._controller.run_between_group_analysis()
 
     def _open_advanced_dialog(self, title: str, actions: list[tuple[str, Callable[[], None], bool]]) -> None:
         dialog = QDialog(self)
