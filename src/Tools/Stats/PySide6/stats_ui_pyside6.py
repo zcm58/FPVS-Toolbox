@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterable, Optional, Tuple, Dict, List, Callable
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -43,29 +43,32 @@ from Main_App.PySide6_App.Backend.project import (
 )
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.PySide6_App.widgets.busy_spinner import BusySpinner
-from Tools.Stats.Legacy.interpretation_helpers import generate_lme_summary
-from Tools.Stats.Legacy.group_contrasts import compute_group_contrasts
-from Tools.Stats.Legacy.mixed_effects_model import run_mixed_effects_model
-from Tools.Stats.Legacy.mixed_group_anova import run_mixed_group_anova
-from Tools.Stats.Legacy.posthoc_tests import run_interaction_posthocs
-from Tools.Stats.Legacy.stats_analysis import (
-    ALL_ROIS_OPTION,
-    prepare_all_subject_summed_bca_data,
-    run_rm_anova as analysis_run_rm_anova,
-    run_harmonic_check as run_harmonic_check_new,
-    set_rois,
-)
+from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION, set_rois
 from Tools.Stats.Legacy.stats_export import (
     export_mixed_model_results_to_excel,
     export_posthoc_results_to_excel,
     export_rm_anova_results_to_excel,
     export_significance_results_to_excel as export_harmonic_results_to_excel,
 )
-from Tools.Stats.Legacy.stats_helpers import load_rois_from_settings, apply_rois_to_modules
+from Tools.Stats.Legacy.stats_helpers import apply_rois_to_modules, load_rois_from_settings
 from Tools.Stats.PySide6.stats_core import PipelineId, PipelineStep, RESULTS_SUBFOLDER_NAME, StepId
-from Tools.Stats.PySide6.stats_file_scanner_pyside6 import ScanError, scan_folder_simple
+from Tools.Stats.PySide6.stats_data_loader import (
+    ScanError,
+    auto_detect_project_dir,
+    load_manifest_data,
+    load_project_scan,
+    resolve_project_subfolder,
+)
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_worker import StatsWorker
+from Tools.Stats.PySide6.stats_workers import (
+    run_between_group_anova,
+    run_group_contrasts,
+    run_harmonic_check,
+    run_lmm,
+    run_posthoc,
+    run_rm_anova,
+)
 from Tools.Stats.PySide6.summary_utils import (
     StatsSummaryFrames,
     SummaryConfig,
@@ -95,442 +98,7 @@ class SectionRunState:
     steps: list[PipelineStep] = field(default_factory=list)
     failed: bool = False
 
-# --------------------------- helpers ---------------------------
-
-def _auto_detect_project_dir() -> str:
-    """Walk upward to find a folder containing project.json."""
-    path = Path.cwd()
-    while not (path / "project.json").is_file():
-        if path.parent == path:
-            return str(Path.cwd())
-        path = path.parent
-    return str(path)
-
-
-def _first_present(d: dict, keys: Iterable[str], default=None):
-    for k in keys:
-        if k in d:
-            return d[k]
-    return default
-
-
-def _load_manifest_data(project_root: Path, cfg: dict | None = None) -> tuple[str | None, dict[str, str]]:
-    if cfg is None:
-        manifest = project_root / "project.json"
-        if not manifest.is_file():
-            return None, {}
-        try:
-            cfg = json.loads(manifest.read_text(encoding="utf-8"))
-        except Exception:
-            return None, {}
-    results_folder = cfg.get("results_folder")
-    if not isinstance(results_folder, str):
-        results_folder = None
-    subfolders = cfg.get("subfolders", {})
-    if not isinstance(subfolders, dict):
-        subfolders = {}
-    normalized: dict[str, str] = {}
-    for key, value in subfolders.items():
-        if isinstance(value, str):
-            normalized[key] = value
-    return results_folder, normalized
-
-
-def _resolve_results_root(project_root: Path, results_folder: str | None) -> Path:
-    if results_folder:
-        base = Path(results_folder)
-        if not base.is_absolute():
-            base = project_root / base
-    else:
-        base = project_root
-    return base.resolve()
-
-
-def _resolve_project_subfolder(
-    project_root: Path,
-    results_folder: str | None,
-    subfolders: dict[str, str],
-    key: str,
-    default_name: str,
-) -> Path:
-    name = subfolders.get(key, default_name)
-    candidate = Path(name)
-    if candidate.is_absolute():
-        return candidate.resolve()
-    return (_resolve_results_root(project_root, results_folder) / candidate).resolve()
-
-
-# --------------------------- manifest helpers ---------------------------
-
-def _load_project_manifest_for_excel_root(excel_root: Path) -> dict | None:
-    """Walk upward from an Excel folder to locate and load project.json."""
-    try:
-        current = excel_root.resolve()
-    except Exception:
-        current = excel_root
-    for candidate in (current, *current.parents):
-        manifest = candidate / "project.json"
-        if manifest.is_file():
-            try:
-                cfg = json.loads(manifest.read_text(encoding="utf-8"))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Failed to load manifest %s: %s", manifest, exc)
-                return None
-            try:
-                results_folder, subfolders = _load_manifest_data(candidate, cfg)
-                expected_excel = _resolve_project_subfolder(
-                    candidate,
-                    results_folder,
-                    subfolders,
-                    "excel",
-                    EXCEL_SUBFOLDER_NAME,
-                )
-                expected_resolved = expected_excel.resolve()
-            except Exception:
-                expected_resolved = None
-            if expected_resolved is not None:
-                allowed = {current, *current.parents}
-                if expected_resolved not in allowed:
-                    continue
-            return cfg
-    return None
-
-
-def _normalize_participants_map(manifest: dict | None) -> dict[str, str]:
-    """Return {SUBJECT_ID -> group_name} using upper-case participant IDs."""
-    if not isinstance(manifest, dict):
-        return {}
-    participants = manifest.get("participants", {})
-    if not isinstance(participants, dict):
-        return {}
-    normalized: dict[str, str] = {}
-    for pid, info in participants.items():
-        if not isinstance(pid, str) or not pid.strip():
-            continue
-        if not isinstance(info, dict):
-            continue
-        group = info.get("group")
-        if not isinstance(group, str) or not group.strip():
-            continue
-        normalized[pid.strip().upper()] = group.strip()
-    return normalized
-
-
-def _map_subjects_to_groups(subjects: Iterable[str], participants_map: dict[str, str]) -> dict[str, str | None]:
-    return {pid: participants_map.get(pid.upper()) for pid in subjects}
-
-
-def _has_multi_groups(manifest: dict | None) -> bool:
-    if not isinstance(manifest, dict):
-        return False
-    groups = manifest.get("groups")
-    return isinstance(groups, dict) and bool(groups)
-
-
-def _long_format_from_bca(
-    all_subject_bca_data: Dict[str, Dict[str, Dict[str, float]]],
-    subject_groups: dict[str, str | None] | None = None,
-) -> pd.DataFrame:
-    """Return a tidy dataframe for downstream models.
-
-    ``group`` is optional here; single-group projects simply omit it so legacy
-    workflows continue untouched. When present it is passed through to between
-    group ANOVA/LMM builders.
-    """
-    rows = []
-    groups = subject_groups or {}
-    for pid, cond_data in all_subject_bca_data.items():
-        for cond_name, roi_data in cond_data.items():
-            for roi_name, value in roi_data.items():
-                if not pd.isna(value):
-                    rows.append(
-                        {
-                            "subject": pid,
-                            "condition": cond_name,
-                            "roi": roi_name,
-                            "value": value,
-                            "group": groups.get(pid),
-                        }
-                    )
-    return pd.DataFrame(rows)
-
-
 # --------------------------- worker functions ---------------------------
-
-def _rm_anova_calc(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, rois):
-    set_rois(rois)
-    message_cb("Preparing data for Summed BCA RM-ANOVA…")
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        log_func=message_cb,
-    )
-    if not all_subject_bca_data:
-        raise RuntimeError("Data preparation failed (empty).")
-    message_cb("Running RM-ANOVA…")
-    _, anova_df_results = analysis_run_rm_anova(all_subject_bca_data, message_cb)
-    return {"anova_df_results": anova_df_results}
-
-
-def _between_group_anova_calc(
-    progress_cb,
-    message_cb,
-    *,
-    subjects,
-    conditions,
-    subject_data,
-    base_freq,
-    rois,
-    subject_groups: dict[str, str | None] | None = None,
-):
-    set_rois(rois)
-    message_cb("Preparing data for Between-Group RM-ANOVA…")
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        log_func=message_cb,
-    )
-    if not all_subject_bca_data:
-        raise RuntimeError("Data preparation failed (empty).")
-
-    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
-    before = len(df_long)
-    df_long = df_long.dropna(subset=["group"])
-    dropped = before - len(df_long)
-    if dropped:
-        message_cb(f"Dropped {dropped} rows without group assignments for mixed ANOVA.")
-    if df_long.empty:
-        raise RuntimeError("No rows with valid group assignments for mixed ANOVA.")
-
-    df_long["group"] = df_long["group"].astype(str)
-    if df_long["group"].nunique() < 2:
-        raise RuntimeError("Mixed ANOVA requires at least two groups with valid data.")
-
-    message_cb("Running Between-Group RM-ANOVA…")
-    results = run_mixed_group_anova(
-        df_long,
-        dv_col="value",
-        subject_col="subject",
-        within_cols=["condition", "roi"],
-        between_col="group",
-    )
-    return {"anova_df_results": results}
-
-
-def _lmm_calc(
-    progress_cb,
-    message_cb,
-    *,
-    subjects,
-    conditions,
-    subject_data,
-    base_freq,
-    alpha,
-    rois,
-    subject_groups: dict[str, str | None] | None = None,
-    include_group: bool = False,
-):
-    set_rois(rois)
-    prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
-    message_cb(f"Preparing data for {prep_label}…")
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        log_func=message_cb,
-    )
-    if not all_subject_bca_data:
-        raise RuntimeError("Data preparation failed (empty).")
-
-    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
-    if df_long.empty:
-        raise RuntimeError("No valid rows for mixed model after filtering NaNs.")
-
-    dropped = 0
-    group_levels: list[str] = []
-    if include_group:
-        before = len(df_long)
-        df_long = df_long.dropna(subset=["group"])
-        dropped = before - len(df_long)
-        df_long["group"] = df_long["group"].astype(str)
-        group_levels = sorted(df_long["group"].unique())
-        if dropped:
-            message_cb(
-                f"Dropped {dropped} rows without group assignments for between-group model."
-            )
-        if len(group_levels) < 2:
-            raise RuntimeError(
-                "Between-group mixed model requires at least two groups with valid data."
-            )
-
-    message_cb("Running Mixed Effects Model…")
-
-    fixed_effects = ["condition * roi"]
-    if include_group:
-        fixed_effects = ["group * condition * roi"]
-
-    mixed_results_df = run_mixed_effects_model(
-        data=df_long,
-        dv_col="value",
-        group_col="subject",
-        fixed_effects=fixed_effects,
-    )
-
-    output_text = "============================================================\n"
-    if include_group:
-        output_text += "       Between-Group Mixed-Effects Model Results\n"
-    else:
-        output_text += "       Linear Mixed-Effects Model Results\n"
-    output_text += "       Analysis conducted on: Summed BCA Data\n"
-    output_text += "============================================================\n\n"
-    if include_group:
-        output_text += (
-            "Group was modeled as a between-subject factor interacting with condition\n"
-            "and ROI. Only subjects with known group assignments were included.\n\n"
-        )
-    else:
-        output_text += (
-            "This model accounts for repeated observations from each subject by including\n"
-            "a random intercept. Fixed effects assess how conditions and ROIs influence\n"
-            "Summed BCA values, including their interaction.\n\n"
-        )
-    if mixed_results_df is not None and not mixed_results_df.empty:
-        output_text += "--------------------------------------------\n"
-        output_text += "                 FIXED EFFECTS TABLE\n"
-        output_text += "--------------------------------------------\n"
-        output_text += mixed_results_df.to_string(index=False) + "\n"
-        output_text += generate_lme_summary(mixed_results_df, alpha=alpha)
-    else:
-        output_text += "Mixed effects model returned no rows.\n"
-
-    return {"mixed_results_df": mixed_results_df, "output_text": output_text}
-
-
-def _posthoc_calc(
-    progress_cb,
-    message_cb,
-    *,
-    subjects,
-    conditions,
-    subject_data,
-    base_freq,
-    alpha,
-    rois,
-    subject_groups: dict[str, str | None] | None = None,
-):
-    set_rois(rois)
-    message_cb("Preparing data for Interaction Post-hoc tests…")
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        log_func=message_cb,
-    )
-    if not all_subject_bca_data:
-        raise RuntimeError("Data preparation failed (empty).")
-
-    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
-    if df_long.empty:
-        raise RuntimeError("No valid rows for post-hoc tests after filtering NaNs.")
-
-    message_cb("Running post-hoc tests…")
-    output_text, results_df = run_interaction_posthocs(
-        data=df_long,
-        dv_col="value",
-        roi_col="roi",
-        condition_col="condition",
-        subject_col="subject",
-        alpha=alpha,
-    )
-    return {"results_df": results_df, "output_text": output_text}
-
-
-def _group_contrasts_calc(
-    progress_cb,
-    message_cb,
-    *,
-    subjects,
-    conditions,
-    subject_data,
-    base_freq,
-    alpha,
-    rois,
-    subject_groups: dict[str, str | None] | None = None,
-):
-    set_rois(rois)
-    _ = alpha  # placeholder for future alpha-dependent formatting
-    message_cb("Preparing data for Between-Group Contrasts…")
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        log_func=message_cb,
-    )
-    if not all_subject_bca_data:
-        raise RuntimeError("Data preparation failed (empty).")
-
-    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
-    df_long = df_long.dropna(subset=["group"])
-    if df_long.empty:
-        raise RuntimeError("No rows with group assignments to compute contrasts.")
-    df_long["group"] = df_long["group"].astype(str)
-    if df_long["group"].nunique() < 2:
-        raise RuntimeError("Group contrasts require at least two groups with data.")
-
-    message_cb("Running Between-Group Contrasts…")
-    results_df = compute_group_contrasts(
-        df_long,
-        subject_col="subject",
-        group_col="group",
-        condition_col="condition",
-        roi_col="roi",
-        dv_col="value",
-    )
-    return {
-        "results_df": results_df,
-        "output_text": "",
-    }
-
-
-def _harmonic_calc(
-    progress_cb,
-    message_cb,
-    *,
-    subject_data,
-    subjects,
-    conditions,
-    selected_metric,
-    mean_value_threshold,
-    base_freq,
-    alpha,
-    rois,
-):
-    set_rois(rois)
-    tail = "greater" if selected_metric in ("Z Score", "SNR") else "two-sided"
-    message_cb("Running harmonic check…")
-    output_text, findings = run_harmonic_check_new(
-        subject_data=subject_data,
-        subjects=subjects,
-        conditions=conditions,
-        selected_metric=selected_metric,
-        mean_value_threshold=mean_value_threshold,
-        base_freq=base_freq,
-        log_func=message_cb,
-        max_freq=None,
-        correction_method="holm",
-        tail=tail,
-        min_subjects=3,
-        do_wilcoxon_sensitivity=True,
-    )
-    return {"output_text": output_text, "findings": findings}
-
 
 # --------------------------- main window ---------------------------
 
@@ -543,7 +111,7 @@ class StatsWindow(QMainWindow):
         else:
             proj = getattr(parent, "currentProject", None)
             self.project_dir = (
-                str(proj.project_root) if proj and hasattr(proj, "project_root") else _auto_detect_project_dir()
+                str(proj.project_root) if proj and hasattr(proj, "project_root") else auto_detect_project_dir()
             )
 
         self._project_path = Path(self.project_dir).resolve()
@@ -554,7 +122,7 @@ class StatsWindow(QMainWindow):
         try:
             cfg = json.loads(config_path.read_text(encoding="utf-8"))
             self.project_title = cfg.get("name", cfg.get("title", os.path.basename(self.project_dir)))
-            self._results_folder_hint, self._subfolder_hints = _load_manifest_data(self._project_path, cfg)
+            self._results_folder_hint, self._subfolder_hints = load_manifest_data(self._project_path, cfg)
         except Exception:
             self.project_title = os.path.basename(self.project_dir)
 
@@ -898,7 +466,7 @@ class StatsWindow(QMainWindow):
         self._safe_export_call(func, data, out_dir, fname)
 
     def _ensure_results_dir(self) -> str:
-        target = _resolve_project_subfolder(
+        target = resolve_project_subfolder(
             self._project_path,
             self._results_folder_hint,
             self._subfolder_hints,
@@ -1639,7 +1207,7 @@ class StatsWindow(QMainWindow):
             PipelineStep(
                 StepId.RM_ANOVA,
                 "RM-ANOVA",
-                _rm_anova_calc,
+                run_rm_anova,
                 dict(
                     subjects=self.subjects,
                     conditions=self.conditions,
@@ -1652,7 +1220,7 @@ class StatsWindow(QMainWindow):
             PipelineStep(
                 StepId.MIXED_MODEL,
                 "Mixed Model",
-                _lmm_calc,
+                run_lmm,
                 dict(
                     subjects=self.subjects,
                     conditions=self.conditions,
@@ -1667,7 +1235,7 @@ class StatsWindow(QMainWindow):
             PipelineStep(
                 StepId.INTERACTION_POSTHOCS,
                 "Interaction Post-hocs",
-                _posthoc_calc,
+                run_posthoc,
                 dict(
                     subjects=self.subjects,
                     conditions=self.conditions,
@@ -1706,7 +1274,7 @@ class StatsWindow(QMainWindow):
             PipelineStep(
                 StepId.BETWEEN_GROUP_ANOVA,
                 "Between-Group ANOVA",
-                _between_group_anova_calc,
+                run_between_group_anova,
                 dict(
                     subjects=self.subjects,
                     conditions=self.conditions,
@@ -1720,7 +1288,7 @@ class StatsWindow(QMainWindow):
             PipelineStep(
                 StepId.BETWEEN_GROUP_MIXED_MODEL,
                 "Between-Group Mixed Model",
-                _lmm_calc,
+                run_lmm,
                 dict(
                     subjects=self.subjects,
                     conditions=self.conditions,
@@ -1736,7 +1304,7 @@ class StatsWindow(QMainWindow):
             PipelineStep(
                 StepId.GROUP_CONTRASTS,
                 "Group Contrasts",
-                _group_contrasts_calc,
+                run_group_contrasts,
                 dict(
                     subjects=self.subjects,
                     conditions=self.conditions,
@@ -1896,7 +1464,7 @@ class StatsWindow(QMainWindow):
         self._update_export_buttons()
 
         worker = StatsWorker(
-            _rm_anova_calc,
+            run_rm_anova,
             subjects=self.subjects,
             conditions=self.conditions,
             subject_data=self.subject_data,
@@ -1913,7 +1481,7 @@ class StatsWindow(QMainWindow):
         self._update_export_buttons()
 
         worker = StatsWorker(
-            _lmm_calc,
+            run_lmm,
             subjects=self.subjects,
             conditions=self.conditions,
             subject_data=self.subject_data,
@@ -1935,7 +1503,7 @@ class StatsWindow(QMainWindow):
         self._update_export_buttons()
 
         worker = StatsWorker(
-            _between_group_anova_calc,
+            run_between_group_anova,
             subjects=self.subjects,
             conditions=self.conditions,
             subject_data=self.subject_data,
@@ -1956,7 +1524,7 @@ class StatsWindow(QMainWindow):
         self._update_export_buttons()
 
         worker = StatsWorker(
-            _lmm_calc,
+            run_lmm,
             subjects=self.subjects,
             conditions=self.conditions,
             subject_data=self.subject_data,
@@ -1979,7 +1547,7 @@ class StatsWindow(QMainWindow):
         self._update_export_buttons()
 
         worker = StatsWorker(
-            _group_contrasts_calc,
+            run_group_contrasts,
             subjects=self.subjects,
             conditions=self.conditions,
             subject_data=self.subject_data,
@@ -1999,7 +1567,7 @@ class StatsWindow(QMainWindow):
         our()
 
         worker = StatsWorker(
-            _posthoc_calc,
+            run_posthoc,
             subjects=self.subjects,
             conditions=self.conditions,
             subject_data=self.subject_data,
@@ -2027,7 +1595,7 @@ class StatsWindow(QMainWindow):
         self._update_export_buttons()
 
         worker = StatsWorker(
-            _harmonic_calc,
+            run_harmonic_check,
             subject_data=self.subject_data,
             subjects=self.subjects,
             conditions=self.conditions,
@@ -2137,24 +1705,19 @@ class StatsWindow(QMainWindow):
                 QMessageBox.warning(self, "No Folder", "Please select a data folder first.")
                 return
             try:
+                scan_result = load_project_scan(folder)
                 self.subject_groups = {}
-                self._multi_group_manifest = False
-                subjects, conditions, data = scan_folder_simple(folder)
-                manifest = _load_project_manifest_for_excel_root(Path(folder))
-                participants_map = _normalize_participants_map(manifest)
-                subject_groups = _map_subjects_to_groups(subjects, participants_map)
-                has_multi_groups = _has_multi_groups(manifest)
-                self._multi_group_manifest = has_multi_groups
+                self._multi_group_manifest = scan_result.multi_group_manifest
 
-                if has_multi_groups:
-                    self._warn_unknown_excel_files(data, participants_map)
+                if scan_result.multi_group_manifest:
+                    self._warn_unknown_excel_files(scan_result.subject_data, scan_result.participants_map)
 
-                self.subjects = subjects
-                self.conditions = conditions
-                self.subject_data = data
-                self.subject_groups = subject_groups
+                self.subjects = scan_result.subjects
+                self.conditions = scan_result.conditions
+                self.subject_data = scan_result.subject_data
+                self.subject_groups = scan_result.subject_groups
                 self._set_status(
-                    f"Scan complete: Found {len(subjects)} subjects and {len(conditions)} conditions."
+                    f"Scan complete: Found {len(scan_result.subjects)} subjects and {len(scan_result.conditions)} conditions."
                 )
             except ScanError as e:
                 self._set_status(f"Scan failed: {e}")
@@ -2166,7 +1729,7 @@ class StatsWindow(QMainWindow):
 
     def _preferred_stats_folder(self) -> Path:
         """Default Excel folder derived from the project manifest."""
-        return _resolve_project_subfolder(
+        return resolve_project_subfolder(
             self._project_path,
             self._results_folder_hint,
             self._subfolder_hints,
