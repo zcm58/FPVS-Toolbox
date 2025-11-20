@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QComboBox,
     QPlainTextEdit,
-    QTextEdit,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -741,8 +740,8 @@ class StatsWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self._focus_calls = 0
 
-        self.setMinimumSize(800, 600)
-        self.resize(1100, 750)
+        self.setMinimumSize(900, 600)
+        self.resize(1000, 750)
 
         # re-entrancy guard for scan
         self._scan_guard = OpGuard()
@@ -778,7 +777,7 @@ class StatsWindow(QMainWindow):
 
         # UI
         self._init_ui()
-        self.results_textbox = self.results_text
+        self.results_textbox = self.output_text
 
         self.single_section_state.status_label = self.single_status_lbl
         self.single_section_state.button = self.analyze_single_btn
@@ -830,9 +829,9 @@ class StatsWindow(QMainWindow):
         ts = QTime.currentTime().toString("HH:mm:ss")
         prefix = f"[{ts}] [{section}] "
         line = f"{prefix}{message}"
-        if hasattr(self, "log_output") and self.log_output is not None:
-            self.log_output.appendPlainText(line)
-            self.log_output.ensureCursorVisible()
+        if hasattr(self, "output_text") and self.output_text is not None:
+            self.output_text.appendPlainText(line)
+            self.output_text.ensureCursorVisible()
         level_lower = (level or "info").lower()
         log_func = getattr(logger, level_lower, logger.info)
         log_func(f"[{section}] {message}")
@@ -1293,7 +1292,7 @@ class StatsWindow(QMainWindow):
 
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
-        self.results_text.append(f"Error: {msg}")
+        self.output_text.appendPlainText(f"Error: {msg}")
         section = (
             "Single"
             if self.single_section_state.running
@@ -1388,7 +1387,7 @@ class StatsWindow(QMainWindow):
             output_text += "RM-ANOVA returned no results.\n"
 
         if update_text:
-            self.results_text.setText(output_text)
+            self.output_text.appendPlainText(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1413,7 +1412,7 @@ class StatsWindow(QMainWindow):
             output_text += "Between-group ANOVA returned no results.\n"
 
         if update_text:
-            self.results_text.setText(output_text)
+            self.output_text.appendPlainText(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1421,7 +1420,7 @@ class StatsWindow(QMainWindow):
         self.mixed_model_results_data = payload.get("mixed_results_df")
         output_text = payload.get("output_text", "")
         if update_text:
-            self.results_text.setText(output_text)
+            self.output_text.appendPlainText(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1429,7 +1428,7 @@ class StatsWindow(QMainWindow):
         self.between_mixed_model_results_data = payload.get("mixed_results_df")
         output_text = payload.get("output_text", "")
         if update_text:
-            self.results_text.setText(output_text)
+            self.output_text.appendPlainText(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1437,7 +1436,7 @@ class StatsWindow(QMainWindow):
         self.posthoc_results_data = payload.get("results_df")
         output_text = payload.get("output_text", "")
         if update_text:
-            self.results_text.setText(output_text)
+            self.output_text.appendPlainText(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1445,7 +1444,7 @@ class StatsWindow(QMainWindow):
         self.group_contrasts_results_data = payload.get("results_df")
         output_text = payload.get("output_text", "")
         if update_text:
-            self.results_text.setText(output_text)
+            self.output_text.appendPlainText(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1453,7 +1452,7 @@ class StatsWindow(QMainWindow):
         output_text = payload.get("output_text") or ""
         findings = payload.get("findings") or []
         if update_text:
-            self.results_text.setText(
+            self.output_text.appendPlainText(
                 output_text.strip() or "(Harmonic check returned empty text. See logs for details.)"
             )
         self.harmonic_check_results_data = findings
@@ -1635,19 +1634,12 @@ class StatsWindow(QMainWindow):
         sections_layout.addWidget(between_box)
         main_layout.addLayout(sections_layout)
 
-        # results pane
-        self.results_text = QTextEdit()
-        self.results_text.setReadOnly(True)
-        self.results_text.setMinimumHeight(140)
-        main_layout.addWidget(self.results_text, 1)
-
-        # log pane
-        self.log_text = QPlainTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setPlaceholderText("Analysis log")
-        self.log_text.setMinimumHeight(140)
-        self.log_output = self.log_text
-        main_layout.addWidget(self.log_text, 1)
+        # output pane
+        self.output_text = QPlainTextEdit()
+        self.output_text.setReadOnly(True)
+        self.output_text.setPlaceholderText("Analysis output")
+        self.output_text.setMinimumHeight(140)
+        main_layout.addWidget(self.output_text, 1)
 
         main_layout.setStretch(0, 0)  # folder row
         main_layout.setStretch(1, 0)  # tools row
@@ -1655,8 +1647,7 @@ class StatsWindow(QMainWindow):
         main_layout.setStretch(3, 0)  # ROI label
         main_layout.setStretch(4, 0)  # spinner row
         main_layout.setStretch(5, 0)  # analysis sections row
-        main_layout.setStretch(6, 1)  # results preview
-        main_layout.setStretch(7, 1)  # log pane
+        main_layout.setStretch(6, 1)  # unified output pane
 
         # initialize export buttons
         self._update_export_buttons()
@@ -1912,7 +1903,7 @@ class StatsWindow(QMainWindow):
     def on_run_rm_anova(self) -> None:
         if not self._precheck():
             return
-        self.results_text.clear()
+        self.output_text.clear()
         self.rm_anova_results_data = None
         self._update_export_buttons()
 
@@ -1929,7 +1920,7 @@ class StatsWindow(QMainWindow):
     def on_run_mixed_model(self) -> None:
         if not self._precheck():
             return
-        self.results_text.clear()
+        self.output_text.clear()
         self.mixed_model_results_data = None
         self._update_export_buttons()
 
@@ -1951,7 +1942,7 @@ class StatsWindow(QMainWindow):
         if not self._ensure_between_ready():
             self._end_run()
             return
-        self.results_text.clear()
+        self.output_text.clear()
         self.between_anova_results_data = None
         self._update_export_buttons()
 
@@ -1972,7 +1963,7 @@ class StatsWindow(QMainWindow):
         if not self._ensure_between_ready():
             self._end_run()
             return
-        self.results_text.clear()
+        self.output_text.clear()
         self.between_mixed_model_results_data = None
         self._update_export_buttons()
 
@@ -1995,7 +1986,7 @@ class StatsWindow(QMainWindow):
         if not self._ensure_between_ready():
             self._end_run()
             return
-        self.results_text.clear()
+        self.output_text.clear()
         self.group_contrasts_results_data = None
         self._update_export_buttons()
 
@@ -2014,7 +2005,7 @@ class StatsWindow(QMainWindow):
     def on_run_interaction_posthocs(self) -> None:
         if not self._precheck(require_anova=True):
             return
-        self.results_text.clear()
+        self.output_text.clear()
         self.posthoc_results_data = None
         our = self._update_export_buttons  # keep line short
         our()
@@ -2043,7 +2034,7 @@ class StatsWindow(QMainWindow):
 
         self._harmonic_metric = selected_metric  # for legacy exporter
 
-        self.results_text.clear()
+        self.output_text.clear()
         self.harmonic_check_results_data = []
         self._update_export_buttons()
 
