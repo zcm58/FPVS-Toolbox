@@ -596,9 +596,11 @@ class StatsWindow(QMainWindow):
         self.pool.start(worker)
         self._log_pipeline_event(pipeline=pipeline_id, step=step.id, event="end")
 
-    def ensure_pipeline_ready(self, pipeline_id: PipelineId) -> bool:
+    def ensure_pipeline_ready(
+        self, pipeline_id: PipelineId, *, require_anova: bool = False
+    ) -> bool:
         self._log_pipeline_event(pipeline=pipeline_id, event="start")
-        if not self._precheck(start_guard=False):
+        if not self._precheck(require_anova=require_anova, start_guard=False):
             self._log_pipeline_event(
                 pipeline=pipeline_id, event="end", extra={"reason": "precheck_failed"}
             )
@@ -623,7 +625,12 @@ class StatsWindow(QMainWindow):
         self._log_pipeline_event(pipeline=pipeline_id, event="started")
 
     def on_analysis_finished(
-        self, pipeline_id: PipelineId, success: bool, error_message: Optional[str]
+        self,
+        pipeline_id: PipelineId,
+        success: bool,
+        error_message: Optional[str],
+        *,
+        exports_ran: bool,
     ) -> None:
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         btn = self.analyze_single_btn if pipeline_id is PipelineId.SINGLE else self.analyze_between_btn
@@ -638,12 +645,15 @@ class StatsWindow(QMainWindow):
         self._active_pipeline = None
         if success:
             section = self._section_label(pipeline_id)
-            if pipeline_id is PipelineId.SINGLE:
-                self.append_log(section, "  • Results exported for Single Group Analysis")
-            elif pipeline_id is PipelineId.BETWEEN:
-                self.append_log(section, "  • Results exported for Between-Group Analysis")
-            stats_folder = Path(self._ensure_results_dir())
-            self._prompt_view_results(self._section_label(pipeline_id), stats_folder)
+            if exports_ran:
+                if pipeline_id is PipelineId.SINGLE:
+                    self.append_log(section, "  • Results exported for Single Group Analysis")
+                elif pipeline_id is PipelineId.BETWEEN:
+                    self.append_log(section, "  • Results exported for Between-Group Analysis")
+                stats_folder = Path(self._ensure_results_dir())
+                self._prompt_view_results(self._section_label(pipeline_id), stats_folder)
+            else:
+                self.append_log(section, "  • Analysis completed", level="info")
         elif error_message:
             QMessageBox.critical(self, "Analysis Error", error_message)
         self._update_export_buttons()
@@ -708,6 +718,22 @@ class StatsWindow(QMainWindow):
                     subject_groups=self.subject_groups,
                 )
                 handler = lambda payload: self._apply_posthoc_results(payload, update_text=True)
+                return kwargs, handler
+            if step_id is StepId.HARMONIC_CHECK:
+                selected_metric = self.cb_metric.currentText()
+                mean_value_threshold = float(self.threshold_spin.value())
+                self._harmonic_metric = selected_metric
+                kwargs = dict(
+                    subject_data=self.subject_data,
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    selected_metric=selected_metric,
+                    mean_value_threshold=mean_value_threshold,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                )
+                handler = lambda payload: self._apply_harmonic_results(payload, update_text=True)
                 return kwargs, handler
         if pipeline_id is PipelineId.BETWEEN:
             if step_id is StepId.BETWEEN_GROUP_ANOVA:
@@ -1340,155 +1366,50 @@ class StatsWindow(QMainWindow):
     # ---- run buttons ----
 
     def on_run_rm_anova(self) -> None:
-        if not self._precheck():
-            return
         self.output_text.clear()
         self.rm_anova_results_data = None
         self._update_export_buttons()
-
-        worker = StatsWorker(
-            run_rm_anova,
-            subjects=self.subjects,
-            conditions=self.conditions,
-            subject_data=self.subject_data,
-            base_freq=self._current_base_freq,
-            rois=self.rois,
-        )
-        self._wire_and_start(worker, self._on_rm_anova_finished)
+        self._controller.run_single_group_rm_anova_only()
 
     def on_run_mixed_model(self) -> None:
-        if not self._precheck():
-            return
         self.output_text.clear()
         self.mixed_model_results_data = None
         self._update_export_buttons()
-
-        worker = StatsWorker(
-            run_lmm,
-            subjects=self.subjects,
-            conditions=self.conditions,
-            subject_data=self.subject_data,
-            base_freq=self._current_base_freq,
-            alpha=self._current_alpha,
-            rois=self.rois,
-            subject_groups=self.subject_groups,
-        )
-        self._wire_and_start(worker, self._on_mixed_model_finished)
+        self._controller.run_single_group_mixed_model_only()
 
     def on_run_between_anova(self) -> None:
-        if not self._precheck():
-            return
-        if not self._ensure_between_ready():
-            self._end_run()
-            return
         self.output_text.clear()
         self.between_anova_results_data = None
         self._update_export_buttons()
-
-        worker = StatsWorker(
-            run_between_group_anova,
-            subjects=self.subjects,
-            conditions=self.conditions,
-            subject_data=self.subject_data,
-            base_freq=self._current_base_freq,
-            rois=self.rois,
-            subject_groups=self.subject_groups,
-        )
-        self._wire_and_start(worker, self._on_between_anova_finished)
+        self._controller.run_between_group_anova_only()
 
     def on_run_between_mixed_model(self) -> None:
-        if not self._precheck():
-            return
-        if not self._ensure_between_ready():
-            self._end_run()
-            return
         self.output_text.clear()
         self.between_mixed_model_results_data = None
         self._update_export_buttons()
-
-        worker = StatsWorker(
-            run_lmm,
-            subjects=self.subjects,
-            conditions=self.conditions,
-            subject_data=self.subject_data,
-            base_freq=self._current_base_freq,
-            alpha=self._current_alpha,
-            rois=self.rois,
-            subject_groups=self.subject_groups,
-            include_group=True,
-        )
-        self._wire_and_start(worker, self._on_between_mixed_finished)
+        self._controller.run_between_group_mixed_only()
 
     def on_run_group_contrasts(self) -> None:
-        if not self._precheck():
-            return
-        if not self._ensure_between_ready():
-            self._end_run()
-            return
         self.output_text.clear()
         self.group_contrasts_results_data = None
         self._update_export_buttons()
-
-        worker = StatsWorker(
-            run_group_contrasts,
-            subjects=self.subjects,
-            conditions=self.conditions,
-            subject_data=self.subject_data,
-            base_freq=self._current_base_freq,
-            alpha=self._current_alpha,
-            rois=self.rois,
-            subject_groups=self.subject_groups,
-        )
-        self._wire_and_start(worker, self._on_group_contrasts_finished)
+        self._controller.run_between_group_contrasts_only()
 
     def on_run_interaction_posthocs(self) -> None:
-        if not self._precheck(require_anova=True):
-            return
         self.output_text.clear()
         self.posthoc_results_data = None
         our = self._update_export_buttons  # keep line short
         our()
-
-        worker = StatsWorker(
-            run_posthoc,
-            subjects=self.subjects,
-            conditions=self.conditions,
-            subject_data=self.subject_data,
-            base_freq=self._current_base_freq,
-            alpha=self._current_alpha,
-            rois=self.rois,
-            subject_groups=self.subject_groups,
-        )
-        self._wire_and_start(worker, self._on_posthoc_finished)
+        self._controller.run_single_group_posthoc_only()
 
     def on_run_harmonic_check(self) -> None:
-        if not self._precheck():
-            return
-        if not (self.subject_data and self.subjects and self.conditions):
-            QMessageBox.warning(self, "Data Error", "No subject data found. Please select a valid data folder first.")
-            self._end_run()
-            return
         selected_metric = self.cb_metric.currentText()
-        mean_value_threshold = float(self.threshold_spin.value())
-
-        self._harmonic_metric = selected_metric  # for legacy exporter
 
         self.output_text.clear()
         self.harmonic_check_results_data = []
         self._update_export_buttons()
-
-        worker = StatsWorker(
-            run_harmonic_check,
-            subject_data=self.subject_data,
-            subjects=self.subjects,
-            conditions=self.conditions,
-            selected_metric=selected_metric,
-            mean_value_threshold=mean_value_threshold,
-            base_freq=self._current_base_freq,
-            alpha=self._current_alpha,
-            rois=self.rois,
-        )
-        self._wire_and_start(worker, self._on_harmonic_finished)
+        self._harmonic_metric = selected_metric  # for legacy exporter
+        self._controller.run_harmonic_check_only()
 
     # ---- exports ----
 

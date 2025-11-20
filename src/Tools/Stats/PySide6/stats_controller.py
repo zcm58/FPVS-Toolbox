@@ -31,10 +31,17 @@ class StatsViewProtocol:
     def on_pipeline_started(self, pipeline_id: PipelineId) -> None: ...
 
     def on_analysis_finished(
-        self, pipeline_id: PipelineId, success: bool, error_message: Optional[str]
+        self,
+        pipeline_id: PipelineId,
+        success: bool,
+        error_message: Optional[str],
+        *,
+        exports_ran: bool,
     ) -> None: ...
 
-    def ensure_pipeline_ready(self, pipeline_id: PipelineId) -> bool: ...
+    def ensure_pipeline_ready(
+        self, pipeline_id: PipelineId, *, require_anova: bool = False
+    ) -> bool: ...
 
     def export_pipeline_results(self, pipeline_id: PipelineId) -> bool: ...
 
@@ -54,6 +61,8 @@ class SectionRunState:
     failed: bool = False
     start_ts: float = 0.0
     results: Dict[StepId, dict] = field(default_factory=dict)
+    run_exports: bool = True
+    run_summary: bool = True
 
 
 SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
@@ -97,16 +106,95 @@ class StatsController:
             PipelineId.BETWEEN: SectionRunState(pipeline_id=PipelineId.BETWEEN),
         }
 
-    def run_single_group_analysis(self) -> None:
-        self._start_pipeline(PipelineId.SINGLE, SINGLE_PIPELINE_STEPS)
+    def run_single_group_analysis(
+        self,
+        *,
+        step_ids: Optional[Sequence[StepId]] = None,
+        run_exports: bool = True,
+        run_summary: bool = True,
+        require_anova: bool = False,
+    ) -> None:
+        self._start_pipeline(
+            PipelineId.SINGLE,
+            step_ids or SINGLE_PIPELINE_STEPS,
+            run_exports=run_exports,
+            run_summary=run_summary,
+            require_anova=require_anova,
+        )
 
-    def run_between_group_analysis(self) -> None:
-        self._start_pipeline(PipelineId.BETWEEN, BETWEEN_PIPELINE_STEPS)
+    def run_single_group_rm_anova_only(self) -> None:
+        self.run_single_group_analysis(
+            step_ids=(StepId.RM_ANOVA,), run_exports=False, run_summary=False
+        )
+
+    def run_single_group_mixed_model_only(self) -> None:
+        self.run_single_group_analysis(
+            step_ids=(StepId.MIXED_MODEL,), run_exports=False, run_summary=False
+        )
+
+    def run_single_group_posthoc_only(self) -> None:
+        self.run_single_group_analysis(
+            step_ids=(StepId.INTERACTION_POSTHOCS,),
+            run_exports=False,
+            run_summary=False,
+            require_anova=True,
+        )
+
+    def run_harmonic_check_only(self) -> None:
+        self._start_pipeline(
+            PipelineId.SINGLE,
+            (StepId.HARMONIC_CHECK,),
+            run_exports=False,
+            run_summary=False,
+        )
+
+    def run_between_group_analysis(
+        self,
+        *,
+        step_ids: Optional[Sequence[StepId]] = None,
+        run_exports: bool = True,
+        run_summary: bool = True,
+    ) -> None:
+        self._start_pipeline(
+            PipelineId.BETWEEN,
+            step_ids or BETWEEN_PIPELINE_STEPS,
+            run_exports=run_exports,
+            run_summary=run_summary,
+        )
+
+    def run_between_group_anova_only(self) -> None:
+        self.run_between_group_analysis(
+            step_ids=(StepId.BETWEEN_GROUP_ANOVA,),
+            run_exports=False,
+            run_summary=False,
+        )
+
+    def run_between_group_mixed_only(self) -> None:
+        self.run_between_group_analysis(
+            step_ids=(StepId.BETWEEN_GROUP_MIXED_MODEL,),
+            run_exports=False,
+            run_summary=False,
+        )
+
+    def run_between_group_contrasts_only(self) -> None:
+        self.run_between_group_analysis(
+            step_ids=(StepId.GROUP_CONTRASTS,),
+            run_exports=False,
+            run_summary=False,
+        )
 
     def is_running(self, pipeline_id: PipelineId) -> bool:
         return self._states[pipeline_id].running
 
-    def _start_pipeline(self, pipeline_id: PipelineId, step_ids: Sequence[StepId]) -> None:
+    def _start_pipeline(
+        self,
+        pipeline_id: PipelineId,
+        step_ids: Sequence[StepId],
+        *,
+        run_exports: bool = True,
+        run_summary: bool = True,
+        require_anova: bool = False,
+    ) -> None:
         state = self._states[pipeline_id]
         if state.running:
             self._view.append_log(
@@ -114,22 +202,61 @@ class StatsController:
                 f"{self._section_name(pipeline_id)} already running; new request ignored.",
             )
             self._view.on_analysis_finished(
-                pipeline_id, success=False, error_message="Pipeline already running"
+                pipeline_id,
+                success=False,
+                error_message="Pipeline already running",
+                exports_ran=False,
             )
             return
 
-        if not self._view.ensure_pipeline_ready(pipeline_id):
+        if not step_ids:
+            self._view.append_log(
+                self._section_label(pipeline_id),
+                f"{self._section_name(pipeline_id)} requested with no steps; aborting.",
+                level="error",
+            )
             self._view.on_analysis_finished(
-                pipeline_id, success=False, error_message="Precheck failed"
+                pipeline_id,
+                success=False,
+                error_message="No steps to run",
+                exports_ran=False,
             )
             return
 
-        state.steps = self._build_steps(pipeline_id, step_ids)
+        if not self._view.ensure_pipeline_ready(
+            pipeline_id, require_anova=require_anova
+        ):
+            self._view.on_analysis_finished(
+                pipeline_id,
+                success=False,
+                error_message="Precheck failed",
+                exports_ran=False,
+            )
+            return
+
+        try:
+            state.steps = self._build_steps(pipeline_id, step_ids)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stats_build_steps_failed", exc_info=True)
+            self._view.append_log(
+                self._section_label(pipeline_id),
+                f"Failed to prepare steps: {exc}",
+                level="error",
+            )
+            self._view.on_analysis_finished(
+                pipeline_id,
+                success=False,
+                error_message=str(exc),
+                exports_ran=False,
+            )
+            return
         state.running = True
         state.failed = False
         state.current_step_index = 0
         state.results.clear()
         state.start_ts = time.perf_counter()
+        state.run_exports = run_exports
+        state.run_summary = run_summary
 
         self._view.set_busy(True)
         self._view.on_pipeline_started(pipeline_id)
@@ -214,26 +341,38 @@ class StatsController:
             self._finish_pipeline(pipeline_id, success=False, error_message="Step failed")
             return
 
-        try:
-            exported = self._view.export_pipeline_results(pipeline_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("stats_export_failed", exc_info=True)
-            self._view.append_log(section, f"  • Export failed: {exc}", level="error")
-            self._finish_pipeline(pipeline_id, success=False, error_message=str(exc))
-            return
+        if state.run_exports:
+            try:
+                exported = self._view.export_pipeline_results(pipeline_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("stats_export_failed", exc_info=True)
+                self._view.append_log(section, f"  • Export failed: {exc}", level="error")
+                self._finish_pipeline(
+                    pipeline_id, success=False, error_message=str(exc)
+                )
+                return
 
-        if not exported:
-            self._view.append_log(section, "  • Export failed; see log for details", level="error")
-            self._finish_pipeline(pipeline_id, success=False, error_message="Export failed")
-            return
+            if not exported:
+                self._view.append_log(
+                    section, "  • Export failed; see log for details", level="error"
+                )
+                self._finish_pipeline(
+                    pipeline_id, success=False, error_message="Export failed"
+                )
+                return
 
-        try:
-            self._view.build_and_render_summary(pipeline_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("stats_summary_failed", exc_info=True)
-            self._view.append_log(section, f"  • Error rendering summary: {exc}", level="error")
-            self._finish_pipeline(pipeline_id, success=False, error_message=str(exc))
-            return
+        if state.run_summary:
+            try:
+                self._view.build_and_render_summary(pipeline_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("stats_summary_failed", exc_info=True)
+                self._view.append_log(
+                    section, f"  • Error rendering summary: {exc}", level="error"
+                )
+                self._finish_pipeline(
+                    pipeline_id, success=False, error_message=str(exc)
+                )
+                return
 
         self._view.append_log(
             section,
@@ -245,10 +384,18 @@ class StatsController:
         self, pipeline_id: PipelineId, *, success: bool, error_message: Optional[str]
     ) -> None:
         state = self._states[pipeline_id]
+        exports_ran = success and state.run_exports
         state.running = False
         state.steps = ()
+        state.run_exports = True
+        state.run_summary = True
         self._view.set_busy(False)
-        self._view.on_analysis_finished(pipeline_id, success=success, error_message=error_message)
+        self._view.on_analysis_finished(
+            pipeline_id,
+            success=success,
+            error_message=error_message,
+            exports_ran=exports_ran,
+        )
 
     def _section_label(self, pipeline_id: PipelineId) -> str:
         return "Single" if pipeline_id is PipelineId.SINGLE else "Between"
