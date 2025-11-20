@@ -741,6 +741,9 @@ class StatsWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self._focus_calls = 0
 
+        self.setMinimumSize(800, 600)
+        self.resize(1000, 750)
+
         # re-entrancy guard for scan
         self._scan_guard = OpGuard()
         if not hasattr(self._scan_guard, "done"):
@@ -1546,6 +1549,7 @@ class StatsWindow(QMainWindow):
         single_layout.addWidget(settings_box)
 
         single_action_row = QHBoxLayout()
+        single_action_row.addStretch(1)
         self.analyze_single_btn = QPushButton("Analyze Single Group")
         self.analyze_single_btn.clicked.connect(self.on_analyze_single_group_clicked)
         single_action_row.addWidget(self.analyze_single_btn)
@@ -1567,6 +1571,7 @@ class StatsWindow(QMainWindow):
         between_layout = QVBoxLayout(between_box)
 
         between_action_row = QHBoxLayout()
+        between_action_row.addStretch(1)
         self.analyze_between_btn = QPushButton("Analyze Group Differences")
         self.analyze_between_btn.clicked.connect(self.on_analyze_between_groups_clicked)
         between_action_row.addWidget(self.analyze_between_btn)
@@ -1586,13 +1591,25 @@ class StatsWindow(QMainWindow):
         # results pane
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
+        self.results_text.setMinimumHeight(140)
         main_layout.addWidget(self.results_text, 1)
 
         # log pane
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setPlaceholderText("Analysis log")
+        self.log_text.setMinimumHeight(140)
         main_layout.addWidget(self.log_text, 1)
+
+        main_layout.setStretch(0, 0)  # folder row
+        main_layout.setStretch(1, 0)  # tools row
+        main_layout.setStretch(2, 0)  # status label
+        main_layout.setStretch(3, 0)  # ROI label
+        main_layout.setStretch(4, 0)  # spinner row
+        main_layout.setStretch(5, 0)  # single group box
+        main_layout.setStretch(6, 0)  # between-group box
+        main_layout.setStretch(7, 1)  # results preview
+        main_layout.setStretch(8, 1)  # log pane
 
         # initialize export buttons
         self._update_export_buttons()
