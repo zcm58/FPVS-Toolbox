@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QComboBox,
-    QPlainTextEdit,
+    QTextEdit,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -64,7 +64,11 @@ from Tools.Stats.Legacy.stats_export import (
 from Tools.Stats.Legacy.stats_helpers import load_rois_from_settings, apply_rois_to_modules
 from Tools.Stats.PySide6.stats_file_scanner_pyside6 import ScanError, scan_folder_simple
 from Tools.Stats.PySide6.stats_worker import StatsWorker
-from Tools.Stats.PySide6.summary_utils import SummaryConfig, build_summary_from_files
+from Tools.Stats.PySide6.summary_utils import (
+    StatsSummaryFrames,
+    SummaryConfig,
+    build_summary_from_frames,
+)
 
 logger = logging.getLogger(__name__)
 _unused_qaction = QAction  # keep import alive for Qt resource checkers
@@ -496,8 +500,6 @@ def _group_contrasts_calc(
         dv_col="value",
     )
     # Build an informative textual summary for the GUI
-    import math
-
     n_rows = int(len(results_df))
     conditions = sorted(results_df["condition"].dropna().unique().tolist())
     rois = sorted(results_df["roi"].dropna().unique().tolist())
@@ -520,149 +522,24 @@ def _group_contrasts_calc(
         "difference between the specified groups within a condition \u00d7 ROI."
     )
 
-    # Prepare a small preview table for the text area
-    preview = results_df.copy()
-    sort_cols = [c for c in ["condition", "roi", "group_1", "group_2"] if c in preview.columns]
-    if sort_cols:
-        preview = preview.sort_values(sort_cols)
-
-    preview_cols = [
-        "condition",
-        "roi",
-        "group_1",
-        "group_2",
-        "mean_1",
-        "mean_2",
-        "difference",
-        "t_stat",
-        "p_value",
-        "effect_size",
-    ]
-    preview_cols = [c for c in preview_cols if c in preview.columns]
-    preview = preview[preview_cols]
-
-    max_rows = 10
-    shown_rows = min(max_rows, n_rows)
-
-    lines.append("")
-    lines.append("--------------------------------------------")
-    lines.append("         PREVIEW OF CONTRASTS TABLE")
-    lines.append(f"         (first {shown_rows} of {n_rows} rows)")
-    lines.append("--------------------------------------------")
-
-    for _, row in preview.head(max_rows).iterrows():
-        # Defensive formatting in case of missing columns / NaNs
-        cond = row.get("condition", "")
-        roi = row.get("roi", "")
-        g1 = row.get("group_1", "")
-        g2 = row.get("group_2", "")
-        t_stat = row.get("t_stat", math.nan)
-        p_val = row.get("p_value", math.nan)
-        d_val = row.get("effect_size", math.nan)
-        try:
-            t_str = f"{float(t_stat):.3f}"
-        except Exception:
-            t_str = str(t_stat)
-        try:
-            p_str = f"{float(p_val):.4f}"
-        except Exception:
-            p_str = str(p_val)
-        try:
-            d_str = f"{float(d_val):.3f}"
-        except Exception:
-            d_str = str(d_val)
-
-        lines.append(
-            f"{cond} | {roi} | {g1} vs {g2} | "
-            f"t={t_str}, p={p_str}, d={d_str}"
-        )
-
-    # Highlight any significant contrasts
-    lines.append("")
-    lines.append("--------------------------------------------")
-    lines.append("            KEY FINDINGS")
-    lines.append("--------------------------------------------")
-
     use_fdr = "p_fdr_bh" in results_df.columns and "sig_fdr_0_05" in results_df.columns
-
+    sig_summary = "No pairwise group contrasts survived FDR correction (q = 0.05, Benjamini–Hochberg)."
     if use_fdr:
         sig_df = results_df[results_df["sig_fdr_0_05"]].copy()
-        if sig_df.empty:
-            lines.append(
-                "No pairwise group contrasts survived FDR correction (q = 0.05, "
-                "Benjamini–Hochberg)."
+        if not sig_df.empty:
+            sig_summary = (
+                f"{len(sig_df)} contrast(s) survived FDR correction (q = 0.05, Benjamini–Hochberg)."
             )
-        else:
-            lines.append(
-                "Significant pairwise group contrasts after FDR correction "
-                "(q = 0.05, Benjamini–Hochberg):"
-            )
-            sig_df = sig_df.sort_values("p_fdr_bh")
-            for _, row in sig_df.head(10).iterrows():
-                cond = row.get("condition", "")
-                roi = row.get("roi", "")
-                g1 = row.get("group_1", "")
-                g2 = row.get("group_2", "")
-                p_fdr = row.get("p_fdr_bh", math.nan)
-                d_val = row.get("effect_size", math.nan)
-                try:
-                    p_fdr_str = f"{float(p_fdr):.4f}"
-                except Exception:
-                    p_fdr_str = str(p_fdr)
-                try:
-                    d_str = f"{float(d_val):.3f}"
-                except Exception:
-                    d_str = str(d_val)
+    elif "p_value" in results_df.columns:
+        sig_df = results_df[results_df["p_value"].notna() & (results_df["p_value"] < 0.05)]
+        if not sig_df.empty:
+            sig_summary = f"{len(sig_df)} contrast(s) reached p < 0.05 (uncorrected)."
 
-                lines.append(
-                    f"- {cond} @ {roi}: {g1} vs {g2} "
-                    f"(FDR p={p_fdr_str}, d={d_str})"
-                )
-            if len(sig_df) > 10:
-                lines.append(f"... and {len(sig_df) - 10} more.")
-    else:
-        sig_mask = ("p_value" in results_df.columns) & results_df["p_value"].notna()
-        sig_df = results_df[sig_mask & (results_df["p_value"] < 0.05)]
-
-        if sig_df.empty:
-            lines.append("No pairwise group contrasts reached p < 0.05.")
-        else:
-            lines.append("Significant pairwise group contrasts (p < 0.05):")
-            sig_df = sig_df.sort_values("p_value")
-            for _, row in sig_df.head(10).iterrows():
-                cond = row.get("condition", "")
-                roi = row.get("roi", "")
-                g1 = row.get("group_1", "")
-                g2 = row.get("group_2", "")
-                t_stat = row.get("t_stat", math.nan)
-                p_val = row.get("p_value", math.nan)
-                d_val = row.get("effect_size", math.nan)
-                try:
-                    t_str = f"{float(t_stat):.3f}"
-                except Exception:
-                    t_str = str(t_stat)
-                try:
-                    p_str = f"{float(p_val):.4f}"
-                except Exception:
-                    p_str = str(p_val)
-                try:
-                    d_str = f"{float(d_val):.3f}"
-                except Exception:
-                    d_str = str(d_val)
-
-                lines.append(
-                    f"- {cond} @ {roi}: {g1} vs {g2} "
-                    f"(t={t_str}, p={p_str}, d={d_str})"
-                )
-            if len(sig_df) > 10:
-                lines.append(f"... and {len(sig_df) - 10} more.")
-
-    lines.append("--------------------------------------------")
+    lines.append("")
+    lines.append(sig_summary)
     lines.append(
-        "Refer to the exported 'Group Contrasts' table for full details on all"
+        "Refer to the exported 'Group Contrasts' table for full details on all condition \u00d7 ROI combinations."
     )
-    lines.append("condition \u00d7 ROI combinations.")
-    lines.append("--------------------------------------------")
 
     output_text = "\n".join(lines)
 
@@ -831,7 +708,7 @@ class StatsWindow(QMainWindow):
         prefix = f"[{ts}] [{section}] "
         line = f"{prefix}{message}"
         if hasattr(self, "output_text") and self.output_text is not None:
-            self.output_text.appendPlainText(line)
+            self.output_text.append(line)
             self.output_text.ensureCursorVisible()
         level_lower = (level or "info").lower()
         log_func = getattr(logger, level_lower, logger.info)
@@ -1100,6 +977,62 @@ class StatsWindow(QMainWindow):
             and not self.group_contrasts_results_data.empty,
         )
 
+    def _to_dataframe(self, data) -> Optional[pd.DataFrame]:
+        if isinstance(data, pd.DataFrame):
+            return data
+        if isinstance(data, list) and data:
+            try:
+                df = pd.DataFrame(data)
+                return df if not df.empty else None
+            except Exception:
+                return None
+        if isinstance(data, dict) and data:
+            try:
+                df = pd.DataFrame(data)
+                if not df.empty:
+                    return df
+            except Exception:
+                pass
+            try:
+                flattened: list = []
+                for value in data.values():
+                    if isinstance(value, dict):
+                        flattened.extend(value.values())
+                    else:
+                        flattened.append(value)
+                if flattened:
+                    df = pd.DataFrame(flattened)
+                    return df if not df.empty else None
+            except Exception:
+                return None
+        return None
+
+    def _build_summary_frames_for_state(self, state: SectionRunState) -> StatsSummaryFrames:
+        frames = StatsSummaryFrames()
+        if state is self.single_section_state:
+            frames.single_posthoc = self._to_dataframe(self.posthoc_results_data)
+            frames.anova_terms = self._to_dataframe(self.rm_anova_results_data)
+            frames.mixed_model_terms = self._to_dataframe(self.mixed_model_results_data)
+        elif state is self.between_section_state:
+            frames.between_contrasts = self._to_dataframe(self.group_contrasts_results_data)
+            frames.anova_terms = self._to_dataframe(self.between_anova_results_data)
+            frames.mixed_model_terms = self._to_dataframe(self.between_mixed_model_results_data)
+        frames.harmonic_results = self._to_dataframe(self.harmonic_check_results_data)
+        return frames
+
+    def _render_summary(self, summary_text: str) -> None:
+        lines = (summary_text or "").splitlines()
+        if not lines:
+            self.output_text.append("(No summary generated.)")
+            self.output_text.append("")
+            return
+        header = lines[0].strip()
+        if header:
+            self.output_text.appendHtml(f"<b>{header}</b>")
+        for line in lines[1:]:
+            self.output_text.append(line)
+        self.output_text.append("")
+
     # --------- worker signal wiring ---------
 
     def _wire_and_start(self, worker: StatsWorker, finished_slot) -> None:
@@ -1207,12 +1140,12 @@ class StatsWindow(QMainWindow):
             min_effect=0.50,
             max_bullets=3,
             z_threshold=self._get_z_threshold_from_gui(),
-            p_col="p_fdr_bh",
+            p_col="p_fdr",
             effect_col="effect_size",
         )
-        summary_text = build_summary_from_files(stats_folder, cfg)
-        self.output_text.appendPlainText(summary_text)
-        self.output_text.appendPlainText("")
+        frames = self._build_summary_frames_for_state(state)
+        summary_text = build_summary_from_frames(frames, cfg)
+        self._render_summary(summary_text)
         if state is self.single_section_state:
             self.append_log(section, "  • Results exported for Single Group Analysis")
             self._prompt_view_results(section, stats_folder)
@@ -1310,7 +1243,7 @@ class StatsWindow(QMainWindow):
 
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
-        self.output_text.appendPlainText(f"Error: {msg}")
+        self.output_text.append(f"Error: {msg}")
         section = (
             "Single"
             if self.single_section_state.running
@@ -1405,7 +1338,7 @@ class StatsWindow(QMainWindow):
             output_text += "RM-ANOVA returned no results.\n"
 
         if update_text:
-            self.output_text.appendPlainText(output_text)
+            self.output_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1430,7 +1363,7 @@ class StatsWindow(QMainWindow):
             output_text += "Between-group ANOVA returned no results.\n"
 
         if update_text:
-            self.output_text.appendPlainText(output_text)
+            self.output_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1438,7 +1371,7 @@ class StatsWindow(QMainWindow):
         self.mixed_model_results_data = payload.get("mixed_results_df")
         output_text = payload.get("output_text", "")
         if update_text:
-            self.output_text.appendPlainText(output_text)
+            self.output_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1446,7 +1379,7 @@ class StatsWindow(QMainWindow):
         self.between_mixed_model_results_data = payload.get("mixed_results_df")
         output_text = payload.get("output_text", "")
         if update_text:
-            self.output_text.appendPlainText(output_text)
+            self.output_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1454,7 +1387,7 @@ class StatsWindow(QMainWindow):
         self.posthoc_results_data = payload.get("results_df")
         output_text = payload.get("output_text", "")
         if update_text:
-            self.output_text.appendPlainText(output_text)
+            self.output_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1462,7 +1395,7 @@ class StatsWindow(QMainWindow):
         self.group_contrasts_results_data = payload.get("results_df")
         output_text = payload.get("output_text", "")
         if update_text:
-            self.output_text.appendPlainText(output_text)
+            self.output_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -1470,7 +1403,7 @@ class StatsWindow(QMainWindow):
         output_text = payload.get("output_text") or ""
         findings = payload.get("findings") or []
         if update_text:
-            self.output_text.appendPlainText(
+            self.output_text.append(
                 output_text.strip() or "(Harmonic check returned empty text. See logs for details.)"
             )
         self.harmonic_check_results_data = findings
@@ -1653,8 +1586,9 @@ class StatsWindow(QMainWindow):
         main_layout.addLayout(sections_layout)
 
         # output pane
-        self.output_text = QPlainTextEdit()
+        self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
+        self.output_text.setAcceptRichText(True)
         self.output_text.setPlaceholderText("Analysis output")
         self.output_text.setMinimumHeight(140)
         main_layout.addWidget(self.output_text, 1)
