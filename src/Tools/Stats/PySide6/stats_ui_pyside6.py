@@ -14,7 +14,7 @@ from typing import Iterable, Optional, Tuple, Dict, List, Callable
 import numpy as np
 import pandas as pd
 from PySide6.QtCore import Qt, QTimer, QThreadPool, Slot, QUrl, QTime
-from PySide6.QtGui import QAction, QDesktopServices, QFontMetrics
+from PySide6.QtGui import QAction, QDesktopServices, QFontMetrics, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
     QDialog,
@@ -499,53 +499,9 @@ def _group_contrasts_calc(
         roi_col="roi",
         dv_col="value",
     )
-    # Build an informative textual summary for the GUI
-    n_rows = int(len(results_df))
-    conditions = sorted(results_df["condition"].dropna().unique().tolist())
-    rois = sorted(results_df["roi"].dropna().unique().tolist())
-    n_conditions = len(conditions)
-    n_rois = len(rois)
-
-    lines: list[str] = []
-    lines.append("=" * 60)
-    lines.append("       Between-Group Pairwise Contrasts")
-    lines.append("=" * 60)
-    lines.append("")
-    lines.append(
-        f"Computed {n_rows} pairwise group contrasts across "
-        f"{n_conditions} conditions and {n_rois} ROIs."
-    )
-    lines.append(
-        "Each row reports Welch's t-test (unequal variances) and Cohen's d for the"
-    )
-    lines.append(
-        "difference between the specified groups within a condition \u00d7 ROI."
-    )
-
-    use_fdr = "p_fdr_bh" in results_df.columns and "sig_fdr_0_05" in results_df.columns
-    sig_summary = "No pairwise group contrasts survived FDR correction (q = 0.05, Benjamini–Hochberg)."
-    if use_fdr:
-        sig_df = results_df[results_df["sig_fdr_0_05"]].copy()
-        if not sig_df.empty:
-            sig_summary = (
-                f"{len(sig_df)} contrast(s) survived FDR correction (q = 0.05, Benjamini–Hochberg)."
-            )
-    elif "p_value" in results_df.columns:
-        sig_df = results_df[results_df["p_value"].notna() & (results_df["p_value"] < 0.05)]
-        if not sig_df.empty:
-            sig_summary = f"{len(sig_df)} contrast(s) reached p < 0.05 (uncorrected)."
-
-    lines.append("")
-    lines.append(sig_summary)
-    lines.append(
-        "Refer to the exported 'Group Contrasts' table for full details on all condition \u00d7 ROI combinations."
-    )
-
-    output_text = "\n".join(lines)
-
     return {
         "results_df": results_df,
-        "output_text": output_text,
+        "output_text": "",
     }
 
 
@@ -1027,11 +983,22 @@ class StatsWindow(QMainWindow):
             self.output_text.append("")
             return
         header = lines[0].strip()
-        if header:
-            self.output_text.appendHtml(f"<b>{header}</b>")
-        for line in lines[1:]:
-            self.output_text.append(line)
-        self.output_text.append("")
+        try:
+            cursor = self.output_text.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            self.output_text.setTextCursor(cursor)
+            if header:
+                self.output_text.insertHtml(f"<b>{header}</b><br>")
+            for line in lines[1:]:
+                self.output_text.append(line)
+            self.output_text.append("")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to render summary text", exc_info=True)
+            if header:
+                self.output_text.append(header)
+            for line in lines[1:]:
+                self.output_text.append(line)
+            self.output_text.append("")
 
     # --------- worker signal wiring ---------
 
@@ -1144,8 +1111,12 @@ class StatsWindow(QMainWindow):
             effect_col="effect_size",
         )
         frames = self._build_summary_frames_for_state(state)
-        summary_text = build_summary_from_frames(frames, cfg)
-        self._render_summary(summary_text)
+        try:
+            summary_text = build_summary_from_frames(frames, cfg)
+            self._render_summary(summary_text)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error while rendering stats summary", exc_info=True)
+            self.append_log(section, f"  • Error rendering summary: {exc}", level="error")
         if state is self.single_section_state:
             self.append_log(section, "  • Results exported for Single Group Analysis")
             self._prompt_view_results(section, stats_folder)
