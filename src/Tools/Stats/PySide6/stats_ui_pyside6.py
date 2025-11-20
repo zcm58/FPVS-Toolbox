@@ -64,6 +64,7 @@ from Tools.Stats.Legacy.stats_export import (
 from Tools.Stats.Legacy.stats_helpers import load_rois_from_settings, apply_rois_to_modules
 from Tools.Stats.PySide6.stats_file_scanner_pyside6 import ScanError, scan_folder_simple
 from Tools.Stats.PySide6.stats_worker import StatsWorker
+from Tools.Stats.PySide6.summary_utils import SummaryConfig, build_summary_from_files
 
 logger = logging.getLogger(__name__)
 _unused_qaction = QAction  # keep import alive for Qt resource checkers
@@ -957,6 +958,12 @@ class StatsWindow(QMainWindow):
             return None
         return base_freq, alpha
 
+    def _get_z_threshold_from_gui(self) -> float:
+        try:
+            return float(self.threshold_spin.value())
+        except Exception:
+            return 1.64
+
     # --------- centralized pre-run guards ---------
 
     def _precheck(self, *, require_anova: bool = False, start_guard: bool = True) -> bool:
@@ -1195,6 +1202,17 @@ class StatsWindow(QMainWindow):
 
         section = self._section_label(state)
         stats_folder = Path(self._ensure_results_dir())
+        cfg = SummaryConfig(
+            alpha=0.05,
+            min_effect=0.50,
+            max_bullets=3,
+            z_threshold=self._get_z_threshold_from_gui(),
+            p_col="p_fdr_bh",
+            effect_col="effect_size",
+        )
+        summary_text = build_summary_from_files(stats_folder, cfg)
+        self.output_text.appendPlainText(summary_text)
+        self.output_text.appendPlainText("")
         if state is self.single_section_state:
             self.append_log(section, "  • Results exported for Single Group Analysis")
             self._prompt_view_results(section, stats_folder)
