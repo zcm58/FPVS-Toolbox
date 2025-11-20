@@ -4,9 +4,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterable, Optional, Tuple, Dict, List
+from typing import Iterable, Optional, Tuple, Dict, List, Callable
 
 import numpy as np
 import pandas as pd
@@ -14,7 +17,11 @@ from PySide6.QtCore import Qt, QTimer, QThreadPool, Slot, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QFontMetrics
 from PySide6.QtWidgets import (
     QFileDialog,
-    QFrame,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,6 +29,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QComboBox,
+    QPlainTextEdit,
     QTextEdit,
     QSizePolicy,
     QVBoxLayout,
@@ -69,6 +77,25 @@ HARMONIC_XLS = "Harmonic Results.xlsx"
 ANOVA_BETWEEN_XLS = "Mixed ANOVA Between Groups.xlsx"
 LMM_BETWEEN_XLS = "Mixed Model Between Groups.xlsx"
 GROUP_CONTRAST_XLS = "Group Contrasts.xlsx"
+
+
+@dataclass
+class PipelineStep:
+    name: str
+    worker_fn: Callable
+    kwargs: dict
+    handler: Callable[[dict], None]
+
+
+@dataclass
+class SectionRunState:
+    name: str
+    status_label: QLabel | None = None
+    button: QPushButton | None = None
+    running: bool = False
+    start_ts: float = 0.0
+    steps: list[PipelineStep] = field(default_factory=list)
+    failed: bool = False
 
 # --------------------------- helpers ---------------------------
 
@@ -736,6 +763,8 @@ class StatsWindow(QMainWindow):
         self._harmonic_metric: str = ""
         self._current_base_freq: float = 6.0
         self._current_alpha: float = 0.05
+        self.single_section_state = SectionRunState("Single Group Analysis")
+        self.between_section_state = SectionRunState("Between-Group Analysis")
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
@@ -747,6 +776,11 @@ class StatsWindow(QMainWindow):
         # UI
         self._init_ui()
         self.results_textbox = self.results_text
+
+        self.single_section_state.status_label = self.single_status_lbl
+        self.single_section_state.button = self.analyze_single_btn
+        self.between_section_state.status_label = self.between_status_lbl
+        self.between_section_state.button = self.analyze_between_btn
 
         self.refresh_rois()
         QTimer.singleShot(100, self._load_default_data_folder)
@@ -788,6 +822,16 @@ class StatsWindow(QMainWindow):
             self._set_roi_status(txt)
         else:
             self._set_status(txt)
+
+    def append_log(self, message: str, level: str = "info") -> None:
+        timestamp = datetime.now().strftime("[%H:%M:%S]")
+        line = f"{timestamp} {message}"
+        if hasattr(self, "log_text") and self.log_text is not None:
+            self.log_text.appendPlainText(line)
+            self.log_text.ensureCursorVisible()
+        level_lower = (level or "info").lower()
+        log_func = getattr(logger, level_lower, logger.info)
+        log_func(message)
 
     def _warn_unknown_excel_files(self, subject_data: Dict[str, Dict[str, str]], participants_map: dict[str, str]) -> None:
         if not subject_data:
@@ -848,24 +892,17 @@ class StatsWindow(QMainWindow):
 
     def _set_running(self, running: bool) -> None:
         buttons = [
-            self.run_rm_anova_btn,
-            self.run_mixed_model_btn,
-            self.run_posthoc_btn,
-            self.run_harm_btn,
-            self.run_between_anova_btn,
-            self.run_between_mixed_btn,
-            self.run_group_contrasts_btn,
-            self.export_rm_anova_btn,
-            self.export_mixed_model_btn,
-            self.export_posthoc_btn,
-            self.export_harm_btn,
-            self.export_between_anova_btn,
-            self.export_between_mixed_btn,
-            self.export_group_contrasts_btn,
-            self.btn_open_results,
+            getattr(self, "analyze_single_btn", None),
+            getattr(self, "single_advanced_btn", None),
+            getattr(self, "run_harm_btn", None),
+            getattr(self, "export_harm_btn", None),
+            getattr(self, "analyze_between_btn", None),
+            getattr(self, "between_advanced_btn", None),
+            getattr(self, "btn_open_results", None),
         ]
         for b in buttons:
-            b.setEnabled(not running)
+            if b:
+                b.setEnabled(not running)
         if running:
             self.spinner.show()
             self.spinner.start()
@@ -912,7 +949,7 @@ class StatsWindow(QMainWindow):
 
     # --------- centralized pre-run guards ---------
 
-    def _precheck(self, *, require_anova: bool = False) -> bool:
+    def _precheck(self, *, require_anova: bool = False, start_guard: bool = True) -> bool:
         if self._check_for_open_excel_files(self.le_folder.text()):
             return False
         if not self.subject_data:
@@ -933,7 +970,7 @@ class StatsWindow(QMainWindow):
         if not got:
             return False
         self._current_base_freq, self._current_alpha = got
-        if not self._begin_run():
+        if start_guard and not self._begin_run():
             return False
         return True
 
@@ -1009,30 +1046,41 @@ class StatsWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
     def _update_export_buttons(self) -> None:
-        self.export_rm_anova_btn.setEnabled(
+        def _maybe_enable(name: str, enabled: bool) -> None:
+            btn = getattr(self, name, None)
+            if btn:
+                btn.setEnabled(enabled)
+
+        _maybe_enable(
+            "export_rm_anova_btn",
             isinstance(self.rm_anova_results_data, pd.DataFrame)
-            and not self.rm_anova_results_data.empty
+            and not self.rm_anova_results_data.empty,
         )
-        self.export_mixed_model_btn.setEnabled(
+        _maybe_enable(
+            "export_mixed_model_btn",
             isinstance(self.mixed_model_results_data, pd.DataFrame)
-            and not self.mixed_model_results_data.empty
+            and not self.mixed_model_results_data.empty,
         )
-        self.export_posthoc_btn.setEnabled(
+        _maybe_enable(
+            "export_posthoc_btn",
             isinstance(self.posthoc_results_data, pd.DataFrame)
-            and not self.posthoc_results_data.empty
+            and not self.posthoc_results_data.empty,
         )
-        self.export_harm_btn.setEnabled(bool(self.harmonic_check_results_data))
-        self.export_between_anova_btn.setEnabled(
+        _maybe_enable("export_harm_btn", bool(self.harmonic_check_results_data))
+        _maybe_enable(
+            "export_between_anova_btn",
             isinstance(self.between_anova_results_data, pd.DataFrame)
-            and not self.between_anova_results_data.empty
+            and not self.between_anova_results_data.empty,
         )
-        self.export_between_mixed_btn.setEnabled(
+        _maybe_enable(
+            "export_between_mixed_btn",
             isinstance(self.between_mixed_model_results_data, pd.DataFrame)
-            and not self.between_mixed_model_results_data.empty
+            and not self.between_mixed_model_results_data.empty,
         )
-        self.export_group_contrasts_btn.setEnabled(
+        _maybe_enable(
+            "export_group_contrasts_btn",
             isinstance(self.group_contrasts_results_data, pd.DataFrame)
-            and not self.group_contrasts_results_data.empty
+            and not self.group_contrasts_results_data.empty,
         )
 
     # --------- worker signal wiring ---------
@@ -1043,6 +1091,157 @@ class StatsWindow(QMainWindow):
         worker.signals.error.connect(self._on_worker_error)
         worker.signals.finished.connect(finished_slot)
         self.pool.start(worker)
+
+    def _any_section_running(self) -> bool:
+        return bool(self.single_section_state.running or self.between_section_state.running)
+
+    def _start_section(self, state: SectionRunState, *, status_label: QLabel | None) -> None:
+        state.running = True
+        state.failed = False
+        state.start_ts = time.perf_counter()
+        if state.button:
+            state.button.setEnabled(False)
+        if status_label:
+            status_label.setText("Running…")
+        self._set_running(True)
+        self._focus_self()
+
+    def _finish_section(self, state: SectionRunState, success: bool) -> None:
+        state.running = False
+        state.steps = []
+        label = state.status_label
+        if label:
+            if success:
+                ts = datetime.now().strftime("%H:%M:%S")
+                label.setText(f"Last run OK at {ts}")
+            else:
+                label.setText("Last run error (see log)")
+        if state.button:
+            state.button.setEnabled(True)
+        if not self._any_section_running():
+            self._set_running(False)
+
+    def _run_next_pipeline_step(self, state: SectionRunState) -> None:
+        if not state.steps:
+            return
+        step = state.steps.pop(0)
+        self.append_log(f"  • Starting {step.name}…")
+        worker = StatsWorker(step.worker_fn, **step.kwargs)
+        worker.signals.finished.connect(
+            lambda payload, s=state, st=step: self._pipeline_step_finished(s, st, payload)
+        )
+        worker.signals.error.connect(lambda msg, s=state, st=step: self._pipeline_step_error(s, st, msg))
+        worker.signals.message.connect(self._on_worker_message)
+        worker.signals.progress.connect(self._on_worker_progress)
+        self.pool.start(worker)
+
+    def _pipeline_step_finished(self, state: SectionRunState, step: PipelineStep, payload: dict) -> None:
+        try:
+            step.handler(payload)
+        except Exception as exc:  # noqa: BLE001
+            self.append_log(f"  • ERROR in {step.name}: {exc}", level="error")
+            state.failed = True
+            self._finish_section(state, False)
+            return
+
+        self.append_log(f"  • {step.name} completed")
+        if state.steps:
+            self._run_next_pipeline_step(state)
+        else:
+            self._complete_pipeline(state)
+
+    def _pipeline_step_error(self, state: SectionRunState, step: PipelineStep, msg: str) -> None:
+        self.append_log(f"  • ERROR in {step.name}: {msg}", level="error")
+        state.failed = True
+        self.append_log("  • Remaining steps skipped due to previous error", level="warning")
+        self._finish_section(state, False)
+
+    def _complete_pipeline(self, state: SectionRunState) -> None:
+        elapsed = time.perf_counter() - state.start_ts if state.start_ts else 0.0
+        if state.failed:
+            self.append_log(
+                f"{state.name} finished with errors (elapsed {elapsed:.1f} s)",
+                level="warning",
+            )
+            self._finish_section(state, False)
+            return
+
+        if state is self.single_section_state:
+            exported = self._export_single_pipeline()
+        elif state is self.between_section_state:
+            exported = self._export_between_pipeline()
+        else:
+            exported = True
+
+        if not exported:
+            self._finish_section(state, False)
+            return
+
+        if state is self.single_section_state:
+            self.append_log("  • Results exported for Single Group Analysis")
+        elif state is self.between_section_state:
+            self.append_log("  • Results exported for Between-Group Analysis")
+
+        self.append_log(f"{state.name} finished in {elapsed:.1f} s")
+        self._finish_section(state, True)
+
+    def _export_single_pipeline(self) -> bool:
+        exports = [
+            ("anova", self.rm_anova_results_data, "RM-ANOVA"),
+            ("lmm", self.mixed_model_results_data, "Mixed Model"),
+            ("posthoc", self.posthoc_results_data, "Interaction Post-hocs"),
+        ]
+        out_dir = self._ensure_results_dir()
+        try:
+            paths: list[str] = []
+            for kind, data_obj, label in exports:
+                if data_obj is None:
+                    self.append_log(f"  • Skipping export for {label} (no data)", level="warning")
+                    return False
+                self.export_results(kind, data_obj, out_dir)
+                fname = {
+                    "anova": ANOVA_XLS,
+                    "lmm": LMM_XLS,
+                    "posthoc": POSTHOC_XLS,
+                }.get(kind, "results.xlsx")
+                paths.append(os.path.join(out_dir, fname))
+            if paths:
+                self.append_log("  • Results exported to:")
+                for p in paths:
+                    self.append_log(f"      {p}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.append_log(f"  • Export failed: {exc}", level="error")
+            return False
+
+    def _export_between_pipeline(self) -> bool:
+        exports = [
+            ("anova_between", self.between_anova_results_data, "Between-Group ANOVA"),
+            ("lmm_between", self.between_mixed_model_results_data, "Between-Group Mixed Model"),
+            ("group_contrasts", self.group_contrasts_results_data, "Group Contrasts"),
+        ]
+        out_dir = self._ensure_results_dir()
+        try:
+            paths: list[str] = []
+            for kind, data_obj, label in exports:
+                if data_obj is None:
+                    self.append_log(f"  • Skipping export for {label} (no data)", level="warning")
+                    return False
+                self.export_results(kind, data_obj, out_dir)
+                fname = {
+                    "anova_between": ANOVA_BETWEEN_XLS,
+                    "lmm_between": LMM_BETWEEN_XLS,
+                    "group_contrasts": GROUP_CONTRAST_XLS,
+                }.get(kind, "results.xlsx")
+                paths.append(os.path.join(out_dir, fname))
+            if paths:
+                self.append_log("  • Results exported to:")
+                for p in paths:
+                    self.append_log(f"      {p}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.append_log(f"  • Export failed: {exc}", level="error")
+            return False
 
     # --------- worker signal handlers ---------
 
@@ -1057,6 +1256,7 @@ class StatsWindow(QMainWindow):
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
         self.results_text.append(f"Error: {msg}")
+        self.append_log(f"Worker error: {msg}", level="error")
         self._end_run()
 
     def _format_rm_anova_summary(self, df: pd.DataFrame, alpha: float) -> str:
@@ -1119,8 +1319,7 @@ class StatsWindow(QMainWindow):
             out.append("No interpretable effects were found in the ANOVA table.")
         return "\n".join(out)
 
-    @Slot(dict)
-    def _on_rm_anova_finished(self, payload: dict) -> None:
+    def _apply_rm_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.rm_anova_results_data = payload.get("anova_df_results")
         alpha = getattr(self, "_current_alpha", 0.05)
 
@@ -1143,12 +1342,12 @@ class StatsWindow(QMainWindow):
         else:
             output_text += "RM-ANOVA returned no results.\n"
 
-        self.results_text.setText(output_text)
+        if update_text:
+            self.results_text.setText(output_text)
         self._update_export_buttons()
-        self._end_run()
+        return output_text
 
-    @Slot(dict)
-    def _on_between_anova_finished(self, payload: dict) -> None:
+    def _apply_between_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.between_anova_results_data = payload.get("anova_df_results")
         alpha = getattr(self, "_current_alpha", 0.05)
         output_text = "============================================================\n"
@@ -1168,49 +1367,87 @@ class StatsWindow(QMainWindow):
         else:
             output_text += "Between-group ANOVA returned no results.\n"
 
-        self.results_text.setText(output_text)
+        if update_text:
+            self.results_text.setText(output_text)
         self._update_export_buttons()
+        return output_text
+
+    def _apply_mixed_model_results(self, payload: dict, *, update_text: bool = True) -> str:
+        self.mixed_model_results_data = payload.get("mixed_results_df")
+        output_text = payload.get("output_text", "")
+        if update_text:
+            self.results_text.setText(output_text)
+        self._update_export_buttons()
+        return output_text
+
+    def _apply_between_mixed_results(self, payload: dict, *, update_text: bool = True) -> str:
+        self.between_mixed_model_results_data = payload.get("mixed_results_df")
+        output_text = payload.get("output_text", "")
+        if update_text:
+            self.results_text.setText(output_text)
+        self._update_export_buttons()
+        return output_text
+
+    def _apply_posthoc_results(self, payload: dict, *, update_text: bool = True) -> str:
+        self.posthoc_results_data = payload.get("results_df")
+        output_text = payload.get("output_text", "")
+        if update_text:
+            self.results_text.setText(output_text)
+        self._update_export_buttons()
+        return output_text
+
+    def _apply_group_contrasts_results(self, payload: dict, *, update_text: bool = True) -> str:
+        self.group_contrasts_results_data = payload.get("results_df")
+        output_text = payload.get("output_text", "")
+        if update_text:
+            self.results_text.setText(output_text)
+        self._update_export_buttons()
+        return output_text
+
+    def _apply_harmonic_results(self, payload: dict, *, update_text: bool = True) -> str:
+        output_text = payload.get("output_text") or ""
+        findings = payload.get("findings") or []
+        if update_text:
+            self.results_text.setText(
+                output_text.strip() or "(Harmonic check returned empty text. See logs for details.)"
+            )
+        self.harmonic_check_results_data = findings
+        self._update_export_buttons()
+        return output_text
+
+    @Slot(dict)
+    def _on_rm_anova_finished(self, payload: dict) -> None:
+        self._apply_rm_anova_results(payload)
+        self._end_run()
+
+    @Slot(dict)
+    def _on_between_anova_finished(self, payload: dict) -> None:
+        self._apply_between_anova_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_mixed_model_finished(self, payload: dict) -> None:
-        self.mixed_model_results_data = payload.get("mixed_results_df")
-        output_text = payload.get("output_text", "")
-        self.results_text.setText(output_text)
-        self._update_export_buttons()
+        self._apply_mixed_model_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_between_mixed_finished(self, payload: dict) -> None:
-        self.between_mixed_model_results_data = payload.get("mixed_results_df")
-        output_text = payload.get("output_text", "")
-        self.results_text.setText(output_text)
-        self._update_export_buttons()
+        self._apply_between_mixed_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_posthoc_finished(self, payload: dict) -> None:
-        self.posthoc_results_data = payload.get("results_df")
-        output_text = payload.get("output_text", "")
-        self.results_text.setText(output_text)
-        self._update_export_buttons()
+        self._apply_posthoc_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_group_contrasts_finished(self, payload: dict) -> None:
-        self.group_contrasts_results_data = payload.get("results_df")
-        output_text = payload.get("output_text", "")
-        self.results_text.setText(output_text)
-        self._update_export_buttons()
+        self._apply_group_contrasts_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_harmonic_finished(self, payload: dict) -> None:
-        output_text = payload.get("output_text") or ""
-        findings = payload.get("findings") or []
-        self.results_text.setText(output_text.strip() or "(Harmonic check returned empty text. See logs for details.)")
-        self.harmonic_check_results_data = findings
-        self._update_export_buttons()
+        self._apply_harmonic_results(payload)
         self._end_run()
 
     # --------------------------- UI building ---------------------------
@@ -1269,66 +1506,31 @@ class StatsWindow(QMainWindow):
         prog_row.addStretch(1)
         main_layout.addLayout(prog_row)
 
-        # summed BCA section
-        summed_frame = QFrame()
-        summed_frame.setFrameShape(QFrame.StyledPanel)
-        vs = QVBoxLayout(summed_frame)
-        title = QLabel("Summed BCA Analysis:")
-        f = title.font()
-        f.setBold(True)
-        title.setFont(f)
-        vs.addWidget(title, alignment=Qt.AlignLeft)
+        # single group section
+        single_group_box = QGroupBox("Single Group Analysis")
+        single_layout = QVBoxLayout(single_group_box)
 
-        btn_row = QHBoxLayout()
-        run_col, export_col = QVBoxLayout(), QVBoxLayout()
+        settings_box = QGroupBox("Detection / Harmonic Settings")
+        settings_layout = QFormLayout(settings_box)
+        settings_layout.setLabelAlignment(Qt.AlignLeft)
 
-        self.run_rm_anova_btn = QPushButton("Run RM-ANOVA")
-        self.run_rm_anova_btn.clicked.connect(self.on_run_rm_anova)
-        self.run_rm_anova_btn.setShortcut("Ctrl+R")
-        run_col.addWidget(self.run_rm_anova_btn)
-
-        self.run_mixed_model_btn = QPushButton("Run Mixed Model")
-        self.run_mixed_model_btn.clicked.connect(self.on_run_mixed_model)
-        self.run_mixed_model_btn.setShortcut("Ctrl+M")
-        run_col.addWidget(self.run_mixed_model_btn)
-
-        self.run_posthoc_btn = QPushButton("Run Interaction Post-hocs")
-        self.run_posthoc_btn.clicked.connect(self.on_run_interaction_posthocs)
-        self.run_posthoc_btn.setShortcut("Ctrl+P")
-        run_col.addWidget(self.run_posthoc_btn)
-
-        self.export_rm_anova_btn = QPushButton("Export RM-ANOVA")
-        self.export_rm_anova_btn.clicked.connect(self.on_export_rm_anova)
-        self.export_rm_anova_btn.setShortcut("Ctrl+Shift+R")
-        export_col.addWidget(self.export_rm_anova_btn)
-
-        self.export_mixed_model_btn = QPushButton("Export Mixed Model")
-        self.export_mixed_model_btn.clicked.connect(self.on_export_mixed_model)
-        self.export_mixed_model_btn.setShortcut("Ctrl+Shift+M")
-        export_col.addWidget(self.export_mixed_model_btn)
-
-        self.export_posthoc_btn = QPushButton("Export Post-hoc Results")
-        self.export_posthoc_btn.clicked.connect(self.on_export_posthoc)
-        self.export_posthoc_btn.setShortcut("Ctrl+Shift+P")
-        export_col.addWidget(self.export_posthoc_btn)
-
-        btn_row.addLayout(run_col, 1)
-        btn_row.addSpacing(12)
-        btn_row.addLayout(export_col, 1)
-        vs.addLayout(btn_row)
-
-        # harmonic controls
-        harm_row = QHBoxLayout()
-        harm_row.addWidget(QLabel("Metric:"))
+        metric_row = QHBoxLayout()
         self.cb_metric = QComboBox()
         self.cb_metric.addItems(["Z Score", "SNR", "Amplitude"])
-        harm_row.addWidget(self.cb_metric)
+        metric_row.addWidget(self.cb_metric)
+        metric_row.addStretch(1)
+        settings_layout.addRow(QLabel("Metric:"), metric_row)
 
-        harm_row.addWidget(QLabel("Mean Threshold:"))
-        self.le_threshold = QLineEdit("1.64")  # default threshold for Z Score
-        self.le_threshold.setFixedWidth(80)
-        harm_row.addWidget(self.le_threshold)
+        threshold_row = QHBoxLayout()
+        self.threshold_spin = QDoubleSpinBox()
+        self.threshold_spin.setRange(0.0, 10.0)
+        self.threshold_spin.setSingleStep(0.01)
+        self.threshold_spin.setValue(1.64)
+        threshold_row.addWidget(self.threshold_spin)
+        threshold_row.addStretch(1)
+        settings_layout.addRow(QLabel("Mean Threshold:"), threshold_row)
 
+        harm_row = QHBoxLayout()
         self.run_harm_btn = QPushButton("Run Harmonic Check")
         self.run_harm_btn.clicked.connect(self.on_run_harmonic_check)
         self.run_harm_btn.setShortcut("Ctrl+H")
@@ -1339,62 +1541,239 @@ class StatsWindow(QMainWindow):
         self.export_harm_btn.setShortcut("Ctrl+Shift+H")
         harm_row.addWidget(self.export_harm_btn)
         harm_row.addStretch(1)
-        vs.addLayout(harm_row)
+        settings_layout.addRow(QLabel("Harmonic Tools:"), harm_row)
 
-        main_layout.addWidget(summed_frame)
+        single_layout.addWidget(settings_box)
 
-        between_frame = QFrame()
-        between_frame.setFrameShape(QFrame.StyledPanel)
-        between_layout = QVBoxLayout(between_frame)
-        between_title = QLabel("Between-Group Analyses:")
-        f2 = between_title.font()
-        f2.setBold(True)
-        between_title.setFont(f2)
-        between_layout.addWidget(between_title, alignment=Qt.AlignLeft)
+        single_action_row = QHBoxLayout()
+        self.analyze_single_btn = QPushButton("Analyze Single Group")
+        self.analyze_single_btn.clicked.connect(self.on_analyze_single_group_clicked)
+        single_action_row.addWidget(self.analyze_single_btn)
 
-        between_row = QHBoxLayout()
-        between_run_col, between_export_col = QVBoxLayout(), QVBoxLayout()
+        self.single_advanced_btn = QPushButton("Advanced…")
+        self.single_advanced_btn.clicked.connect(self.on_single_advanced_clicked)
+        single_action_row.addWidget(self.single_advanced_btn)
+        single_action_row.addStretch(1)
+        single_layout.addLayout(single_action_row)
 
-        self.run_between_anova_btn = QPushButton("Run Between-Group ANOVA")
-        self.run_between_anova_btn.clicked.connect(self.on_run_between_anova)
-        between_run_col.addWidget(self.run_between_anova_btn)
+        self.single_status_lbl = QLabel("Idle")
+        self.single_status_lbl.setWordWrap(True)
+        single_layout.addWidget(self.single_status_lbl)
 
-        self.run_between_mixed_btn = QPushButton("Run Between-Group Mixed Model")
-        self.run_between_mixed_btn.clicked.connect(self.on_run_between_mixed_model)
-        between_run_col.addWidget(self.run_between_mixed_btn)
+        main_layout.addWidget(single_group_box)
 
-        self.run_group_contrasts_btn = QPushButton("Run Group Contrasts")
-        self.run_group_contrasts_btn.clicked.connect(self.on_run_group_contrasts)
-        between_run_col.addWidget(self.run_group_contrasts_btn)
+        # between-group section
+        between_box = QGroupBox("Between-Group Analysis")
+        between_layout = QVBoxLayout(between_box)
 
-        self.export_between_anova_btn = QPushButton("Export Between-Group ANOVA")
-        self.export_between_anova_btn.clicked.connect(self.on_export_between_anova)
-        between_export_col.addWidget(self.export_between_anova_btn)
+        between_action_row = QHBoxLayout()
+        self.analyze_between_btn = QPushButton("Analyze Group Differences")
+        self.analyze_between_btn.clicked.connect(self.on_analyze_between_groups_clicked)
+        between_action_row.addWidget(self.analyze_between_btn)
 
-        self.export_between_mixed_btn = QPushButton("Export Between-Group Mixed Model")
-        self.export_between_mixed_btn.clicked.connect(self.on_export_between_mixed)
-        between_export_col.addWidget(self.export_between_mixed_btn)
+        self.between_advanced_btn = QPushButton("Advanced…")
+        self.between_advanced_btn.clicked.connect(self.on_between_advanced_clicked)
+        between_action_row.addWidget(self.between_advanced_btn)
+        between_action_row.addStretch(1)
+        between_layout.addLayout(between_action_row)
 
-        self.export_group_contrasts_btn = QPushButton("Export Group Contrasts")
-        self.export_group_contrasts_btn.clicked.connect(self.on_export_group_contrasts)
-        between_export_col.addWidget(self.export_group_contrasts_btn)
+        self.between_status_lbl = QLabel("Idle")
+        self.between_status_lbl.setWordWrap(True)
+        between_layout.addWidget(self.between_status_lbl)
 
-        between_row.addLayout(between_run_col, 1)
-        between_row.addSpacing(12)
-        between_row.addLayout(between_export_col, 1)
-        between_layout.addLayout(between_row)
-
-        main_layout.addWidget(between_frame)
+        main_layout.addWidget(between_box)
 
         # results pane
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
         main_layout.addWidget(self.results_text, 1)
 
+        # log pane
+        self.log_text = QPlainTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setPlaceholderText("Analysis log")
+        main_layout.addWidget(self.log_text, 1)
+
         # initialize export buttons
         self._update_export_buttons()
 
     # --------------------------- actions ---------------------------
+
+    def on_analyze_single_group_clicked(self) -> None:
+        if self.single_section_state.running:
+            self.append_log(f"{self.single_section_state.name} already running; new request ignored.")
+            return
+        if not self._precheck(start_guard=False):
+            return
+        summary = f"{len(self.subjects)} subjects, {len(self.conditions)} conditions"
+        self.append_log(f"{self.single_section_state.name} started ({summary})")
+        steps = [
+            PipelineStep(
+                "RM-ANOVA",
+                _rm_anova_calc,
+                dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    rois=self.rois,
+                ),
+                lambda payload: self._apply_rm_anova_results(payload, update_text=False),
+            ),
+            PipelineStep(
+                "Mixed Model",
+                _lmm_calc,
+                dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                ),
+                lambda payload: self._apply_mixed_model_results(payload, update_text=False),
+            ),
+            PipelineStep(
+                "Interaction Post-hocs",
+                _posthoc_calc,
+                dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                ),
+                lambda payload: self._apply_posthoc_results(payload, update_text=True),
+            ),
+        ]
+        self.single_section_state.steps = steps
+        self._start_section(self.single_section_state, status_label=self.single_status_lbl)
+        self._run_next_pipeline_step(self.single_section_state)
+
+    def on_analyze_between_groups_clicked(self) -> None:
+        if self.between_section_state.running:
+            self.append_log(f"{self.between_section_state.name} already running; new request ignored.")
+            return
+        if not self._precheck(start_guard=False):
+            return
+        if not self._ensure_between_ready():
+            return
+        summary = f"{len(self.subjects)} subjects, {len(self.conditions)} conditions"
+        self.append_log(f"{self.between_section_state.name} started ({summary})")
+        steps = [
+            PipelineStep(
+                "Between-Group ANOVA",
+                _between_group_anova_calc,
+                dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                ),
+                lambda payload: self._apply_between_anova_results(payload, update_text=False),
+            ),
+            PipelineStep(
+                "Between-Group Mixed Model",
+                _lmm_calc,
+                dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                    include_group=True,
+                ),
+                lambda payload: self._apply_between_mixed_results(payload, update_text=False),
+            ),
+            PipelineStep(
+                "Group Contrasts",
+                _group_contrasts_calc,
+                dict(
+                    subjects=self.subjects,
+                    conditions=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                    subject_groups=self.subject_groups,
+                ),
+                lambda payload: self._apply_group_contrasts_results(payload, update_text=True),
+            ),
+        ]
+        self.between_section_state.steps = steps
+        self._start_section(self.between_section_state, status_label=self.between_status_lbl)
+        self._run_next_pipeline_step(self.between_section_state)
+
+    def _open_advanced_dialog(self, title: str, actions: list[tuple[str, Callable[[], None], bool]]) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        layout = QVBoxLayout(dialog)
+        for text, cb, enabled in actions:
+            btn = QPushButton(text)
+            btn.setEnabled(enabled)
+            btn.clicked.connect(cb)
+            layout.addWidget(btn)
+        layout.addStretch(1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+
+    def on_single_advanced_clicked(self) -> None:
+        actions = [
+            ("Run RM-ANOVA", self.on_run_rm_anova, True),
+            ("Run Mixed Model", self.on_run_mixed_model, True),
+            ("Run Interaction/Post-hocs", self.on_run_interaction_posthocs, True),
+            (
+                "Export RM-ANOVA",
+                self.on_export_rm_anova,
+                isinstance(self.rm_anova_results_data, pd.DataFrame) and not self.rm_anova_results_data.empty,
+            ),
+            (
+                "Export Mixed Model",
+                self.on_export_mixed_model,
+                isinstance(self.mixed_model_results_data, pd.DataFrame) and not self.mixed_model_results_data.empty,
+            ),
+            (
+                "Export Post-hocs",
+                self.on_export_posthoc,
+                isinstance(self.posthoc_results_data, pd.DataFrame) and not self.posthoc_results_data.empty,
+            ),
+        ]
+        self._open_advanced_dialog("Single Group – Advanced", actions)
+
+    def on_between_advanced_clicked(self) -> None:
+        actions = [
+            ("Run Between-Group ANOVA", self.on_run_between_anova, True),
+            ("Run Between-Group Mixed Model", self.on_run_between_mixed_model, True),
+            ("Run Group Contrasts", self.on_run_group_contrasts, True),
+            (
+                "Export Between-Group ANOVA",
+                self.on_export_between_anova,
+                isinstance(self.between_anova_results_data, pd.DataFrame)
+                and not self.between_anova_results_data.empty,
+            ),
+            (
+                "Export Between-Group Mixed Model",
+                self.on_export_between_mixed,
+                isinstance(self.between_mixed_model_results_data, pd.DataFrame)
+                and not self.between_mixed_model_results_data.empty,
+            ),
+            (
+                "Export Group Contrasts",
+                self.on_export_group_contrasts,
+                isinstance(self.group_contrasts_results_data, pd.DataFrame)
+                and not self.group_contrasts_results_data.empty,
+            ),
+        ]
+        self._open_advanced_dialog("Between-Group – Advanced", actions)
 
     def on_show_analysis_info(self) -> None:
         """
@@ -1595,13 +1974,8 @@ class StatsWindow(QMainWindow):
             QMessageBox.warning(self, "Data Error", "No subject data found. Please select a valid data folder first.")
             self._end_run()
             return
-        try:
-            selected_metric = self.cb_metric.currentText()
-            mean_value_threshold = float(self.le_threshold.text())
-        except ValueError:
-            QMessageBox.warning(self, "Input Error", "Invalid Mean Threshold. Please enter a numeric value.")
-            self._end_run()
-            return
+        selected_metric = self.cb_metric.currentText()
+        mean_value_threshold = float(self.threshold_spin.value())
 
         self._harmonic_metric = selected_metric  # for legacy exporter
 
