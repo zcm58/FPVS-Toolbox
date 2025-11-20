@@ -13,7 +13,7 @@ from typing import Iterable, Optional, Tuple, Dict, List, Callable
 
 import numpy as np
 import pandas as pd
-from PySide6.QtCore import Qt, QTimer, QThreadPool, Slot, QUrl
+from PySide6.QtCore import Qt, QTimer, QThreadPool, Slot, QUrl, QTime
 from PySide6.QtGui import QAction, QDesktopServices, QFontMetrics
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -742,7 +742,7 @@ class StatsWindow(QMainWindow):
         self._focus_calls = 0
 
         self.setMinimumSize(800, 600)
-        self.resize(1000, 750)
+        self.resize(1100, 750)
 
         # re-entrancy guard for scan
         self._scan_guard = OpGuard()
@@ -826,15 +826,23 @@ class StatsWindow(QMainWindow):
         else:
             self._set_status(txt)
 
-    def append_log(self, message: str, level: str = "info") -> None:
-        timestamp = datetime.now().strftime("[%H:%M:%S]")
-        line = f"{timestamp} {message}"
-        if hasattr(self, "log_text") and self.log_text is not None:
-            self.log_text.appendPlainText(line)
-            self.log_text.ensureCursorVisible()
+    def append_log(self, section: str, message: str, level: str = "info") -> None:
+        ts = QTime.currentTime().toString("HH:mm:ss")
+        prefix = f"[{ts}] [{section}] "
+        line = f"{prefix}{message}"
+        if hasattr(self, "log_output") and self.log_output is not None:
+            self.log_output.appendPlainText(line)
+            self.log_output.ensureCursorVisible()
         level_lower = (level or "info").lower()
         log_func = getattr(logger, level_lower, logger.info)
-        log_func(message)
+        log_func(f"[{section}] {message}")
+
+    def _section_label(self, state: SectionRunState | None) -> str:
+        if state is self.single_section_state:
+            return "Single"
+        if state is self.between_section_state:
+            return "Between"
+        return "General"
 
     def _warn_unknown_excel_files(self, subject_data: Dict[str, Dict[str, str]], participants_map: dict[str, str]) -> None:
         if not subject_data:
@@ -1128,7 +1136,8 @@ class StatsWindow(QMainWindow):
         if not state.steps:
             return
         step = state.steps.pop(0)
-        self.append_log(f"  • Starting {step.name}…")
+        section = self._section_label(state)
+        self.append_log(section, f"  • Starting {step.name}…")
         worker = StatsWorker(step.worker_fn, **step.kwargs)
         worker.signals.finished.connect(
             lambda payload, s=state, st=step: self._pipeline_step_finished(s, st, payload)
@@ -1142,27 +1151,32 @@ class StatsWindow(QMainWindow):
         try:
             step.handler(payload)
         except Exception as exc:  # noqa: BLE001
-            self.append_log(f"  • ERROR in {step.name}: {exc}", level="error")
+            section = self._section_label(state)
+            self.append_log(section, f"  • ERROR in {step.name}: {exc}", level="error")
             state.failed = True
             self._finish_section(state, False)
             return
 
-        self.append_log(f"  • {step.name} completed")
+        section = self._section_label(state)
+        self.append_log(section, f"  • {step.name} completed")
         if state.steps:
             self._run_next_pipeline_step(state)
         else:
             self._complete_pipeline(state)
 
     def _pipeline_step_error(self, state: SectionRunState, step: PipelineStep, msg: str) -> None:
-        self.append_log(f"  • ERROR in {step.name}: {msg}", level="error")
+        section = self._section_label(state)
+        self.append_log(section, f"  • ERROR in {step.name}: {msg}", level="error")
         state.failed = True
-        self.append_log("  • Remaining steps skipped due to previous error", level="warning")
+        self.append_log(section, "  • Remaining steps skipped due to previous error", level="warning")
         self._finish_section(state, False)
 
     def _complete_pipeline(self, state: SectionRunState) -> None:
         elapsed = time.perf_counter() - state.start_ts if state.start_ts else 0.0
         if state.failed:
+            section = self._section_label(state)
             self.append_log(
+                section,
                 f"{state.name} finished with errors (elapsed {elapsed:.1f} s)",
                 level="warning",
             )
@@ -1180,15 +1194,35 @@ class StatsWindow(QMainWindow):
             self._finish_section(state, False)
             return
 
+        section = self._section_label(state)
+        stats_folder = Path(self._ensure_results_dir())
         if state is self.single_section_state:
-            self.append_log("  • Results exported for Single Group Analysis")
+            self.append_log(section, "  • Results exported for Single Group Analysis")
+            self._prompt_view_results(section, stats_folder)
         elif state is self.between_section_state:
-            self.append_log("  • Results exported for Between-Group Analysis")
+            self.append_log(section, "  • Results exported for Between-Group Analysis")
+            self._prompt_view_results(section, stats_folder)
 
-        self.append_log(f"{state.name} finished in {elapsed:.1f} s")
+        self.append_log(section, f"{state.name} finished in {elapsed:.1f} s")
         self._finish_section(state, True)
 
+    def _prompt_view_results(self, section: str, stats_folder: Path) -> None:
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Statistical Analysis Complete")
+        msg.setText("Statistical analysis complete.\nView results?")
+        msg.setIcon(QMessageBox.Information)
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.Yes)
+        reply = msg.exec()
+
+        if reply == QMessageBox.Yes:
+            if stats_folder.is_dir():
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(stats_folder)))
+            else:
+                self.append_log(section, f"Stats folder not found: {stats_folder}", "error")
+
     def _export_single_pipeline(self) -> bool:
+        section = "Single"
         exports = [
             ("anova", self.rm_anova_results_data, "RM-ANOVA"),
             ("lmm", self.mixed_model_results_data, "Mixed Model"),
@@ -1199,7 +1233,7 @@ class StatsWindow(QMainWindow):
             paths: list[str] = []
             for kind, data_obj, label in exports:
                 if data_obj is None:
-                    self.append_log(f"  • Skipping export for {label} (no data)", level="warning")
+                    self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
                     return False
                 self.export_results(kind, data_obj, out_dir)
                 fname = {
@@ -1209,15 +1243,16 @@ class StatsWindow(QMainWindow):
                 }.get(kind, "results.xlsx")
                 paths.append(os.path.join(out_dir, fname))
             if paths:
-                self.append_log("  • Results exported to:")
+                self.append_log(section, "  • Results exported to:")
                 for p in paths:
-                    self.append_log(f"      {p}")
+                    self.append_log(section, f"      {p}")
             return True
         except Exception as exc:  # noqa: BLE001
-            self.append_log(f"  • Export failed: {exc}", level="error")
+            self.append_log(section, f"  • Export failed: {exc}", level="error")
             return False
 
     def _export_between_pipeline(self) -> bool:
+        section = "Between"
         exports = [
             ("anova_between", self.between_anova_results_data, "Between-Group ANOVA"),
             ("lmm_between", self.between_mixed_model_results_data, "Between-Group Mixed Model"),
@@ -1228,7 +1263,7 @@ class StatsWindow(QMainWindow):
             paths: list[str] = []
             for kind, data_obj, label in exports:
                 if data_obj is None:
-                    self.append_log(f"  • Skipping export for {label} (no data)", level="warning")
+                    self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
                     return False
                 self.export_results(kind, data_obj, out_dir)
                 fname = {
@@ -1238,12 +1273,12 @@ class StatsWindow(QMainWindow):
                 }.get(kind, "results.xlsx")
                 paths.append(os.path.join(out_dir, fname))
             if paths:
-                self.append_log("  • Results exported to:")
+                self.append_log(section, "  • Results exported to:")
                 for p in paths:
-                    self.append_log(f"      {p}")
+                    self.append_log(section, f"      {p}")
             return True
         except Exception as exc:  # noqa: BLE001
-            self.append_log(f"  • Export failed: {exc}", level="error")
+            self.append_log(section, f"  • Export failed: {exc}", level="error")
             return False
 
     # --------- worker signal handlers ---------
@@ -1259,7 +1294,14 @@ class StatsWindow(QMainWindow):
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
         self.results_text.append(f"Error: {msg}")
-        self.append_log(f"Worker error: {msg}", level="error")
+        section = (
+            "Single"
+            if self.single_section_state.running
+            else "Between"
+            if self.between_section_state.running
+            else "General"
+        )
+        self.append_log(section, f"Worker error: {msg}", level="error")
         self._end_run()
 
     def _format_rm_anova_summary(self, df: pd.DataFrame, alpha: float) -> str:
@@ -1509,8 +1551,12 @@ class StatsWindow(QMainWindow):
         prog_row.addStretch(1)
         main_layout.addLayout(prog_row)
 
+        sections_layout = QHBoxLayout()
+        sections_layout.setSpacing(10)
+
         # single group section
         single_group_box = QGroupBox("Single Group Analysis")
+        single_group_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
         single_layout = QVBoxLayout(single_group_box)
 
         settings_box = QGroupBox("Detection / Harmonic Settings")
@@ -1564,10 +1610,9 @@ class StatsWindow(QMainWindow):
         self.single_status_lbl.setWordWrap(True)
         single_layout.addWidget(self.single_status_lbl)
 
-        main_layout.addWidget(single_group_box)
-
         # between-group section
         between_box = QGroupBox("Between-Group Analysis")
+        between_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
         between_layout = QVBoxLayout(between_box)
 
         between_action_row = QHBoxLayout()
@@ -1586,7 +1631,9 @@ class StatsWindow(QMainWindow):
         self.between_status_lbl.setWordWrap(True)
         between_layout.addWidget(self.between_status_lbl)
 
-        main_layout.addWidget(between_box)
+        sections_layout.addWidget(single_group_box)
+        sections_layout.addWidget(between_box)
+        main_layout.addLayout(sections_layout)
 
         # results pane
         self.results_text = QTextEdit()
@@ -1599,6 +1646,7 @@ class StatsWindow(QMainWindow):
         self.log_text.setReadOnly(True)
         self.log_text.setPlaceholderText("Analysis log")
         self.log_text.setMinimumHeight(140)
+        self.log_output = self.log_text
         main_layout.addWidget(self.log_text, 1)
 
         main_layout.setStretch(0, 0)  # folder row
@@ -1606,10 +1654,9 @@ class StatsWindow(QMainWindow):
         main_layout.setStretch(2, 0)  # status label
         main_layout.setStretch(3, 0)  # ROI label
         main_layout.setStretch(4, 0)  # spinner row
-        main_layout.setStretch(5, 0)  # single group box
-        main_layout.setStretch(6, 0)  # between-group box
-        main_layout.setStretch(7, 1)  # results preview
-        main_layout.setStretch(8, 1)  # log pane
+        main_layout.setStretch(5, 0)  # analysis sections row
+        main_layout.setStretch(6, 1)  # results preview
+        main_layout.setStretch(7, 1)  # log pane
 
         # initialize export buttons
         self._update_export_buttons()
@@ -1618,12 +1665,12 @@ class StatsWindow(QMainWindow):
 
     def on_analyze_single_group_clicked(self) -> None:
         if self.single_section_state.running:
-            self.append_log(f"{self.single_section_state.name} already running; new request ignored.")
+            self.append_log("Single", f"{self.single_section_state.name} already running; new request ignored.")
             return
         if not self._precheck(start_guard=False):
             return
         summary = f"{len(self.subjects)} subjects, {len(self.conditions)} conditions"
-        self.append_log(f"{self.single_section_state.name} started ({summary})")
+        self.append_log("Single", f"{self.single_section_state.name} started ({summary})")
         steps = [
             PipelineStep(
                 "RM-ANOVA",
@@ -1672,14 +1719,14 @@ class StatsWindow(QMainWindow):
 
     def on_analyze_between_groups_clicked(self) -> None:
         if self.between_section_state.running:
-            self.append_log(f"{self.between_section_state.name} already running; new request ignored.")
+            self.append_log("Between", f"{self.between_section_state.name} already running; new request ignored.")
             return
         if not self._precheck(start_guard=False):
             return
         if not self._ensure_between_ready():
             return
         summary = f"{len(self.subjects)} subjects, {len(self.conditions)} conditions"
-        self.append_log(f"{self.between_section_state.name} started ({summary})")
+        self.append_log("Between", f"{self.between_section_state.name} started ({summary})")
         steps = [
             PipelineStep(
                 "Between-Group ANOVA",
