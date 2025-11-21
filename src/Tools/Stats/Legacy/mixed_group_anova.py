@@ -7,6 +7,8 @@ from typing import List
 import numpy as np
 import pandas as pd
 
+from Tools.Stats.Legacy.blas_limits import single_threaded_blas
+
 logger = logging.getLogger(__name__)
 
 
@@ -105,47 +107,49 @@ def run_mixed_group_anova(
     for col in [subject_col, within_col] + ([between_col] if between_col else []):
         df[col] = df[col].astype(str)
 
-    try:
-        import pingouin as pg  # type: ignore
-    except ImportError:
-        logger.warning(
-            "Pingouin is not available; between-group mixed ANOVA requires the "
-            "'pingouin' package. Install it to run between-group ANOVA."
-        )
-        if between_col:
-            raise RuntimeError(
-                "Between-group ANOVA is not supported in the fallback backend. "
-                "Please install 'pingouin' to use this feature."
-            )
-    else:
+    with single_threaded_blas():
         try:
-            pg_table = pg.mixed_anova(
-                dv=dv_col,
-                within=within_col,
-                between=between_col,
-                subject=subject_col,
-                data=df,
-            )
-        except Exception as exc:  # noqa: BLE001
+            import pingouin as pg  # type: ignore
+        except ImportError:
             logger.warning(
-                "Pingouin mixed_anova failed (%s); between-group ANOVA requires a working "
-                "'pingouin' installation.",
-                exc,
+                "Pingouin is not available; between-group mixed ANOVA requires the "
+                "'pingouin' package. Install it to run between-group ANOVA."
             )
-            raise
-        return _tidy_pingouin_table(pg_table)
+            if between_col:
+                raise RuntimeError(
+                    "Between-group ANOVA is not supported in the fallback backend. "
+                    "Please install 'pingouin' to use this feature."
+                )
+        else:
+            try:
+                pg_table = pg.mixed_anova(
+                    dv=dv_col,
+                    within=within_col,
+                    between=between_col,
+                    subject=subject_col,
+                    data=df,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Pingouin mixed_anova failed (%s); between-group ANOVA requires a working "
+                    "'pingouin' installation.",
+                    exc,
+                )
+                raise
+            return _tidy_pingouin_table(pg_table)
 
     try:
         from statsmodels.stats.anova import AnovaRM  # type: ignore
     except ImportError as exc:  # pragma: no cover - handled at runtime
         raise ImportError("statsmodels is required for the mixed ANOVA fallback.") from exc
 
-    model = AnovaRM(
-        df,
-        depvar=dv_col,
-        subject=subject_col,
-        within=[within_col],
-    )
-    res = model.fit()
+    with single_threaded_blas():
+        model = AnovaRM(
+            df,
+            depvar=dv_col,
+            subject=subject_col,
+            within=[within_col],
+        )
+        res = model.fit()
     table = res.anova_table
     return _tidy_statsmodels_table(table)
