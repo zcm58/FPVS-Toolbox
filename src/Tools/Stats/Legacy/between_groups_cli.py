@@ -331,7 +331,7 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                     conditions=conditions,
                     subject_data=subject_data,
                     base_freq=base_freq,
-                    roi_map=roi_map,
+                    rois=roi_map,
                     log_func=logger.info,
                 )
             phase_data[phase_label] = bca_data
