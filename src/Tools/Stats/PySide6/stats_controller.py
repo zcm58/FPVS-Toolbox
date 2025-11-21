@@ -203,12 +203,6 @@ class StatsController:
                 f"{self._section_name(pipeline_id)} already running; new request ignored.",
                 level="warning",
             )
-            self._finalize_pipeline(
-                pipeline_id,
-                success=False,
-                error_message="Pipeline already running",
-                exports_ran=False,
-            )
             return
 
         if not step_ids:
