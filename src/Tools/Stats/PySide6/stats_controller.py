@@ -71,12 +71,14 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.MIXED_MODEL,
     StepId.INTERACTION_POSTHOCS,
 )
+"""Default ordered steps for the Single pipeline."""
 
 BETWEEN_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.BETWEEN_GROUP_ANOVA,
     StepId.BETWEEN_GROUP_MIXED_MODEL,
     StepId.GROUP_CONTRASTS,
 )
+"""Default ordered steps for the Between pipeline."""
 
 STEP_LABELS: Dict[StepId, str] = {
     StepId.RM_ANOVA: "RM-ANOVA",
@@ -257,6 +259,14 @@ class StatsController:
         self._view.set_busy(True)
         self._view.on_pipeline_started(pipeline_id)
         summary = f"{self._section_name(pipeline_id)} started with {len(state.steps)} steps"
+        logger.info(
+            "stats_pipeline_start",
+            extra={
+                "pipeline": pipeline_id.name,
+                "step_count": len(state.steps),
+                "steps": [s.id.name for s in state.steps],
+            },
+        )
         self._view.append_log(self._section_label(pipeline_id), summary)
         try:
             self._run_next_step(pipeline_id)
@@ -294,6 +304,12 @@ class StatsController:
     def _run_next_step(self, pipeline_id: PipelineId) -> None:
         try:
             state = self._states[pipeline_id]
+            if not state.running:
+                logger.info(
+                    "stats_step_skip_inactive",
+                    extra={"pipeline": pipeline_id.name},
+                )
+                return
             if not state.steps or state.current_step_index >= len(state.steps):
                 self._complete_pipeline(pipeline_id)
                 return
@@ -362,7 +378,14 @@ class StatsController:
                 step.handler(payload)
                 state.results[step_id] = payload
             except Exception as exc:  # noqa: BLE001
-                logger.exception("stats_step_failed", extra={"step": step_id.name})
+                logger.exception(
+                    "stats_step_handler_error",
+                    extra={
+                        "pipeline": pipeline_id.name,
+                        "step": step_id.name,
+                        "error": str(exc),
+                    },
+                )
                 self._on_step_error(pipeline_id, step_id, str(exc))
                 return
 
@@ -482,7 +505,15 @@ class StatsController:
             pipeline_id,
             success=True,
             error_message=None,
-            exports_ran=state.run_exports,
+            exports_ran=exports_ran,
+        )
+        logger.info(
+            "stats_pipeline_complete",
+            extra={
+                "pipeline": pipeline_id.name,
+                "elapsed_s": elapsed,
+                "exports_ran": exports_ran,
+            },
         )
 
     def _finalize_pipeline(
@@ -492,13 +523,23 @@ class StatsController:
         success: bool,
         error_message: Optional[str],
         exports_ran: bool = False,
-    ) -> None:
+        ) -> None:
         state = self._states[pipeline_id]
         state.running = False
-        state.failed = False
+        state.failed = not success
         state.steps = ()
         state.run_exports = True
         state.run_summary = True
+        state.start_ts = 0.0
+        logger.info(
+            "stats_pipeline_finalized",
+            extra={
+                "pipeline": pipeline_id.name,
+                "success": success,
+                "error_message": error_message,
+                "exports_ran": exports_ran,
+            },
+        )
         try:
             self._view.set_busy(False)
         finally:
@@ -520,7 +561,7 @@ class StatsController:
         return "Single" if pipeline_id is PipelineId.SINGLE else "Between"
 
     def _section_name(self, pipeline_id: PipelineId) -> str:
-        return "Single Group Analysis" if pipeline_id is PipelineId.SINGLE else "Between-Group Analysis"
+        return "Single-Group Analysis" if pipeline_id is PipelineId.SINGLE else "Between-Group Analysis"
 
 
 __all__ = ["StatsController", "SectionRunState", "StatsViewProtocol"]

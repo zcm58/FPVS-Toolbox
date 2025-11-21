@@ -565,7 +565,10 @@ class StatsWindow(QMainWindow):
         self.pool.start(worker)
 
     def set_busy(self, is_busy: bool) -> None:
-        self._set_running(is_busy)
+        try:
+            self._set_running(is_busy)
+        except Exception:  # noqa: BLE001
+            logger.exception("stats_set_busy_failed", exc_info=True)
 
     def start_step_worker(
         self,
@@ -632,8 +635,6 @@ class StatsWindow(QMainWindow):
                     label.setText(f"Last run OK at {ts}")
                 else:
                     label.setText("Last run error (see log)")
-            if btn:
-                btn.setEnabled(True)
             self._active_pipeline = None
             if success:
                 section = self._section_label(pipeline_id)
@@ -654,6 +655,11 @@ class StatsWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             logger.exception("stats_on_analysis_finished_failed", exc_info=True)
         finally:
+            try:
+                if btn:
+                    btn.setEnabled(True)
+            except Exception:  # noqa: BLE001
+                logger.exception("stats_finish_button_enable_failed", exc_info=True)
             self._update_export_buttons()
             self._log_pipeline_event(
                 pipeline=pipeline_id, event="complete", extra={"success": success}

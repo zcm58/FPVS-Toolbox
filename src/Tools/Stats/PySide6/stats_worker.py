@@ -40,7 +40,14 @@ class StatsWorker(QRunnable):
         try:
             result = self._fn(progress_emit, message_emit, *self._args, **self._kwargs)
             payload: Dict[str, Any] = result if isinstance(result, dict) else {"result": result}
-            self.signals.finished.emit(payload)
+            try:
+                self.signals.finished.emit(payload)
+            except Exception as emit_exc:  # noqa: BLE001
+                logger.exception(
+                    "stats_run_emit_failed",
+                    extra={"op": self._op, "exc_type": type(emit_exc).__name__},
+                )
+                self.signals.error.emit(str(emit_exc))
         except Exception as exc:  # noqa: BLE001
             logger.exception("stats_run_failed", extra={"op": self._op, "exc_type": type(exc).__name__})
             self.signals.error.emit(str(exc))
