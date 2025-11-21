@@ -60,14 +60,6 @@ from Tools.Stats.PySide6.stats_data_loader import (
 )
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_worker import StatsWorker
-from Tools.Stats.PySide6.stats_workers import (
-    run_between_group_anova,
-    run_group_contrasts,
-    run_harmonic_check,
-    run_lmm,
-    run_posthoc,
-    run_rm_anova,
-)
 from Tools.Stats.PySide6.summary_utils import (
     StatsSummaryFrames,
     SummaryConfig,
@@ -594,7 +586,6 @@ class StatsWindow(QMainWindow):
         worker.signals.message.connect(self._on_worker_message)
         worker.signals.progress.connect(self._on_worker_progress)
         self.pool.start(worker)
-        self._log_pipeline_event(pipeline=pipeline_id, step=step.id, event="end")
 
     def ensure_pipeline_ready(
         self, pipeline_id: PipelineId, *, require_anova: bool = False
@@ -634,32 +625,39 @@ class StatsWindow(QMainWindow):
     ) -> None:
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         btn = self.analyze_single_btn if pipeline_id is PipelineId.SINGLE else self.analyze_between_btn
-        if label:
+        try:
+            if label:
+                if success:
+                    ts = datetime.now().strftime("%H:%M:%S")
+                    label.setText(f"Last run OK at {ts}")
+                else:
+                    label.setText("Last run error (see log)")
+            if btn:
+                btn.setEnabled(True)
+            self._active_pipeline = None
             if success:
-                ts = datetime.now().strftime("%H:%M:%S")
-                label.setText(f"Last run OK at {ts}")
-            else:
-                label.setText("Last run error (see log)")
-        if btn:
-            btn.setEnabled(True)
-        self._active_pipeline = None
-        if success:
-            section = self._section_label(pipeline_id)
-            if exports_ran:
-                if pipeline_id is PipelineId.SINGLE:
-                    self.append_log(section, "  • Results exported for Single Group Analysis")
-                elif pipeline_id is PipelineId.BETWEEN:
-                    self.append_log(section, "  • Results exported for Between-Group Analysis")
-                stats_folder = Path(self._ensure_results_dir())
-                self._prompt_view_results(self._section_label(pipeline_id), stats_folder)
-            else:
-                self.append_log(section, "  • Analysis completed", level="info")
-        elif error_message:
-            QMessageBox.critical(self, "Analysis Error", error_message)
-        self._update_export_buttons()
-        self._log_pipeline_event(
-            pipeline=pipeline_id, event="complete", extra={"success": success}
-        )
+                section = self._section_label(pipeline_id)
+                if exports_ran:
+                    if pipeline_id is PipelineId.SINGLE:
+                        self.append_log(section, "  • Results exported for Single Group Analysis")
+                    elif pipeline_id is PipelineId.BETWEEN:
+                        self.append_log(section, "  • Results exported for Between-Group Analysis")
+                    stats_folder = Path(self._ensure_results_dir())
+                    self._prompt_view_results(self._section_label(pipeline_id), stats_folder)
+                else:
+                    self.append_log(section, "  • Analysis completed", level="info")
+            elif error_message:
+                try:
+                    QMessageBox.critical(self, "Analysis Error", error_message)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to display error dialog", exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.exception("stats_on_analysis_finished_failed", exc_info=True)
+        finally:
+            self._update_export_buttons()
+            self._log_pipeline_event(
+                pipeline=pipeline_id, event="complete", extra={"success": success}
+            )
 
     def build_and_render_summary(self, pipeline_id: PipelineId) -> None:
         cfg = SummaryConfig(
@@ -693,7 +691,9 @@ class StatsWindow(QMainWindow):
                     base_freq=self._current_base_freq,
                     rois=self.rois,
                 )
-                handler = lambda payload: self._apply_rm_anova_results(payload, update_text=False)
+                def handler(payload):
+                    self._apply_rm_anova_results(payload, update_text=False)
+
                 return kwargs, handler
             if step_id is StepId.MIXED_MODEL:
                 kwargs = dict(
@@ -705,7 +705,9 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     subject_groups=self.subject_groups,
                 )
-                handler = lambda payload: self._apply_mixed_model_results(payload, update_text=False)
+                def handler(payload):
+                    self._apply_mixed_model_results(payload, update_text=False)
+
                 return kwargs, handler
             if step_id is StepId.INTERACTION_POSTHOCS:
                 kwargs = dict(
@@ -717,7 +719,9 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     subject_groups=self.subject_groups,
                 )
-                handler = lambda payload: self._apply_posthoc_results(payload, update_text=True)
+                def handler(payload):
+                    self._apply_posthoc_results(payload, update_text=True)
+
                 return kwargs, handler
             if step_id is StepId.HARMONIC_CHECK:
                 selected_metric = self.cb_metric.currentText()
@@ -733,7 +737,9 @@ class StatsWindow(QMainWindow):
                     alpha=self._current_alpha,
                     rois=self.rois,
                 )
-                handler = lambda payload: self._apply_harmonic_results(payload, update_text=True)
+                def handler(payload):
+                    self._apply_harmonic_results(payload, update_text=True)
+
                 return kwargs, handler
         if pipeline_id is PipelineId.BETWEEN:
             if step_id is StepId.BETWEEN_GROUP_ANOVA:
@@ -745,7 +751,9 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     subject_groups=self.subject_groups,
                 )
-                handler = lambda payload: self._apply_between_anova_results(payload, update_text=False)
+                def handler(payload):
+                    self._apply_between_anova_results(payload, update_text=False)
+
                 return kwargs, handler
             if step_id is StepId.BETWEEN_GROUP_MIXED_MODEL:
                 kwargs = dict(
@@ -758,7 +766,9 @@ class StatsWindow(QMainWindow):
                     subject_groups=self.subject_groups,
                     include_group=True,
                 )
-                handler = lambda payload: self._apply_between_mixed_results(payload, update_text=False)
+                def handler(payload):
+                    self._apply_between_mixed_results(payload, update_text=False)
+
                 return kwargs, handler
             if step_id is StepId.GROUP_CONTRASTS:
                 kwargs = dict(
@@ -770,7 +780,9 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     subject_groups=self.subject_groups,
                 )
-                handler = lambda payload: self._apply_group_contrasts_results(payload, update_text=True)
+                def handler(payload):
+                    self._apply_group_contrasts_results(payload, update_text=True)
+
                 return kwargs, handler
         raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
 
