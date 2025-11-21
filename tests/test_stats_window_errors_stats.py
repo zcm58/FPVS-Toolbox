@@ -1,9 +1,8 @@
 import pytest
-
-pytest.importorskip("PySide6")
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtWidgets import QMessageBox
 
+from Tools.Stats.Legacy import stats_analysis, stats_helpers
 from Tools.Stats.PySide6 import stats_workers
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
 from Tools.Stats.PySide6.stats_worker import StatsWorker
@@ -18,15 +17,30 @@ def _prepare_window(win: StatsWindow, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(win, "ensure_pipeline_ready", lambda *a, **k: True, raising=False)
 
 
+def _wait_for_idle(win: StatsWindow, qtbot, button) -> None:
+    qtbot.waitUntil(lambda: button.isEnabled(), timeout=5000)
+    qtbot.waitUntil(lambda: not win.spinner.isVisible(), timeout=5000)
+
+
 @pytest.fixture(autouse=True)
 def _stub_message_boxes(monkeypatch: pytest.MonkeyPatch) -> None:
-    for method in ("critical", "information", "warning"):
+    for method in ("critical", "information", "warning", "question"):
         monkeypatch.setattr(
             QMessageBox,
             method,
             staticmethod(lambda *args, **kwargs: QMessageBox.Ok),
             raising=False,
         )
+
+
+@pytest.fixture(autouse=True)
+def _stub_legacy_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(stats_helpers, "apply_rois_to_modules", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(stats_analysis, "set_rois", lambda *a, **k: None, raising=False)
+    from Tools.Stats.PySide6 import stats_main_window
+
+    monkeypatch.setattr(stats_main_window, "apply_rois_to_modules", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(stats_main_window, "set_rois", lambda *a, **k: None, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -42,9 +56,9 @@ def _inline_worker(monkeypatch: pytest.MonkeyPatch) -> None:
             self.signals.error.emit(str(exc))
 
     monkeypatch.setattr(StatsWorker, "run", immediate_run, raising=False)
+    monkeypatch.setattr(QThreadPool, "start", lambda self, worker: worker.run(), raising=False)
 
 
-@pytest.mark.qt
 def test_single_pipeline_worker_failure(qtbot, tmp_path, monkeypatch):
     win = StatsWindow(project_dir=str(tmp_path))
     qtbot.addWidget(win)
@@ -56,22 +70,19 @@ def test_single_pipeline_worker_failure(qtbot, tmp_path, monkeypatch):
     win.conditions = ["CondA"]
     win.subject_groups = {"S1": None}
 
-    def boom(*_args, **_kwargs):
+    def raise_single(*_args, **_kwargs):
         raise RuntimeError("simulated failure")
 
-    monkeypatch.setattr(stats_workers, "run_rm_anova", boom)
+    monkeypatch.setattr(stats_workers, "run_rm_anova", raise_single, raising=False)
 
     qtbot.mouseClick(win.analyze_single_btn, Qt.LeftButton)
-
-    qtbot.waitUntil(lambda: win.analyze_single_btn.isEnabled(), timeout=5000)
-    qtbot.waitUntil(lambda: not win.spinner.isVisible(), timeout=5000)
+    _wait_for_idle(win, qtbot, win.analyze_single_btn)
 
     log_text = win.output_text.toPlainText()
     assert "simulated failure" in log_text or "ERROR" in log_text
 
 
-@pytest.mark.qt
-def test_between_pipeline_worker_failure(qtbot, tmp_path, monkeypatch):
+def test_between_pipeline_mixed_model_failure(qtbot, tmp_path, monkeypatch):
     win = StatsWindow(project_dir=str(tmp_path))
     qtbot.addWidget(win)
     win.show()
@@ -85,21 +96,24 @@ def test_between_pipeline_worker_failure(qtbot, tmp_path, monkeypatch):
     win.conditions = ["CondA"]
     win.subject_groups = {"S1": "G1", "S2": "G2"}
 
-    def between_boom(*_args, **_kwargs):
-        raise RuntimeError("between failure")
+    monkeypatch.setattr(stats_workers, "run_between_group_anova", lambda *_a, **_k: {})
+    
+    original_run_lmm = stats_workers.run_lmm
 
-    monkeypatch.setattr(stats_workers, "run_between_group_anova", between_boom)
+    def raise_between(progress_cb, message_cb, *, include_group=False, **kwargs):
+        if include_group:
+            raise RuntimeError("between mixed failure")
+        return original_run_lmm(progress_cb, message_cb, include_group=include_group, **kwargs)
+
+    monkeypatch.setattr(stats_workers, "run_lmm", raise_between, raising=False)
 
     qtbot.mouseClick(win.analyze_between_btn, Qt.LeftButton)
-
-    qtbot.waitUntil(lambda: win.analyze_between_btn.isEnabled(), timeout=5000)
-    qtbot.waitUntil(lambda: not win.spinner.isVisible(), timeout=5000)
+    _wait_for_idle(win, qtbot, win.analyze_between_btn)
 
     log_text = win.output_text.toPlainText()
-    assert "between failure" in log_text or "ERROR" in log_text
+    assert "between mixed failure" in log_text or "ERROR" in log_text
 
 
-@pytest.mark.qt
 def test_summary_failure_releases_busy_state(qtbot, tmp_path, monkeypatch):
     win = StatsWindow(project_dir=str(tmp_path))
     qtbot.addWidget(win)
@@ -115,17 +129,19 @@ def test_summary_failure_releases_busy_state(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(stats_workers, "run_lmm", lambda *_a, **_k: {})
     monkeypatch.setattr(stats_workers, "run_posthoc", lambda *_a, **_k: {})
     monkeypatch.setattr(win, "export_pipeline_results", lambda *_a, **_k: True)
-
-    def summary_boom(*_args, **_kwargs):
+    
+    def raise_summary(*_args, **_kwargs):
         raise RuntimeError("summary failure")
 
-    monkeypatch.setattr(win, "build_and_render_summary", summary_boom, raising=False)
+    monkeypatch.setattr(
+        win,
+        "build_and_render_summary",
+        raise_summary,
+        raising=False,
+    )
 
     qtbot.mouseClick(win.analyze_single_btn, Qt.LeftButton)
-
-    qtbot.waitUntil(lambda: win.analyze_single_btn.isEnabled(), timeout=5000)
-    qtbot.waitUntil(lambda: not win.spinner.isVisible(), timeout=5000)
+    _wait_for_idle(win, qtbot, win.analyze_single_btn)
 
     log_text = win.output_text.toPlainText()
     assert "summary failure" in log_text or "ERROR" in log_text
-

@@ -258,7 +258,20 @@ class StatsController:
         self._view.on_pipeline_started(pipeline_id)
         summary = f"{self._section_name(pipeline_id)} started with {len(state.steps)} steps"
         self._view.append_log(self._section_label(pipeline_id), summary)
-        self._run_next_step(pipeline_id)
+        try:
+            self._run_next_step(pipeline_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_pipeline_start_failed",
+                exc_info=True,
+                extra={"pipeline": pipeline_id.name},
+            )
+            self._finalize_pipeline(
+                pipeline_id,
+                success=False,
+                error_message=str(exc),
+                exports_ran=False,
+            )
 
     def _build_steps(
         self, pipeline_id: PipelineId, step_ids: Sequence[StepId]
@@ -279,87 +292,153 @@ class StatsController:
         return tuple(steps)
 
     def _run_next_step(self, pipeline_id: PipelineId) -> None:
-        state = self._states[pipeline_id]
-        if not state.steps or state.current_step_index >= len(state.steps):
-            self._complete_pipeline(pipeline_id)
-            return
+        try:
+            state = self._states[pipeline_id]
+            if not state.steps or state.current_step_index >= len(state.steps):
+                self._complete_pipeline(pipeline_id)
+                return
 
-        step = state.steps[state.current_step_index]
-        section = self._section_label(pipeline_id)
-        logger.info(
-            "stats_step_start",
-            extra={"pipeline": pipeline_id.name, "step": step.id.name},
-        )
-        self._view.append_log(
-            section,
-            format_step_event(
-                pipeline_id, step.id, event="start", message=f"Starting {step.name}"
-            ),
-        )
-        self._view.start_step_worker(
-            pipeline_id,
-            step,
-            finished_cb=self._on_step_finished,
-            error_cb=self._on_step_error,
-        )
+            step = state.steps[state.current_step_index]
+            section = self._section_label(pipeline_id)
+            logger.info(
+                "stats_step_start",
+                extra={"pipeline": pipeline_id.name, "step": step.id.name},
+            )
+            self._view.append_log(
+                section,
+                format_step_event(
+                    pipeline_id,
+                    step.id,
+                    event="start",
+                    message=f"Starting {step.name}",
+                ),
+            )
+            self._view.start_step_worker(
+                pipeline_id,
+                step,
+                finished_cb=self._on_step_finished,
+                error_cb=self._on_step_error,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_run_next_step_failed",
+                exc_info=True,
+                extra={"pipeline": pipeline_id.name},
+            )
+            section = self._section_label(pipeline_id)
+            if "step" in locals():
+                self._view.append_log(
+                    section,
+                    format_step_event(
+                        pipeline_id,
+                        step.id,
+                        event="error",
+                        message=f"ERROR: {exc}",
+                    ),
+                    level="error",
+                )
+            else:
+                self._view.append_log(
+                    section,
+                    f"[{pipeline_id.name}] ERROR: {exc}",
+                    level="error",
+                )
+            self._finalize_pipeline(
+                pipeline_id,
+                success=False,
+                error_message=str(exc),
+                exports_ran=False,
+            )
 
     def _on_step_finished(self, pipeline_id: PipelineId, step_id: StepId, payload: dict) -> None:
-        state = self._states[pipeline_id]
-        if not state.running:
-            return
-        step = state.steps[state.current_step_index]
         try:
-            step.handler(payload)
-            state.results[step_id] = payload
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("stats_step_failed", extra={"step": step_id.name})
-            self._on_step_error(pipeline_id, step_id, str(exc))
-            return
+            state = self._states[pipeline_id]
+            if not state.running:
+                return
+            if state.current_step_index >= len(state.steps):
+                raise RuntimeError("Received step finished signal with no pending step")
+            step = state.steps[state.current_step_index]
+            try:
+                step.handler(payload)
+                state.results[step_id] = payload
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("stats_step_failed", extra={"step": step_id.name})
+                self._on_step_error(pipeline_id, step_id, str(exc))
+                return
 
-        logger.info(
-            "stats_step_complete",
-            extra={"pipeline": pipeline_id.name, "step": step_id.name},
-        )
-        self._view.append_log(
-            self._section_label(pipeline_id),
-            format_step_event(
-                pipeline_id, step_id, event="complete", message=f"{step.name} completed"
-            ),
-        )
-        state.current_step_index += 1
-        self._run_next_step(pipeline_id)
+            logger.info(
+                "stats_step_complete",
+                extra={"pipeline": pipeline_id.name, "step": step_id.name},
+            )
+            self._view.append_log(
+                self._section_label(pipeline_id),
+                format_step_event(
+                    pipeline_id,
+                    step_id,
+                    event="complete",
+                    message=f"{step.name} completed",
+                ),
+            )
+            state.current_step_index += 1
+            self._run_next_step(pipeline_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_step_finished_handler_error",
+                exc_info=True,
+                extra={"pipeline": pipeline_id.name, "step": step_id.name},
+            )
+            self._finalize_pipeline(
+                pipeline_id,
+                success=False,
+                error_message=str(exc),
+                exports_ran=False,
+            )
 
     def _on_step_error(self, pipeline_id: PipelineId, step_id: StepId, error_message: str) -> None:
-        state = self._states[pipeline_id]
-        section = self._section_label(pipeline_id)
-        state.failed = True
-        logger.error(
-            "stats_step_error",
-            extra={
-                "pipeline": pipeline_id.name,
-                "step": step_id.name,
-                "error": error_message,
-            },
-        )
-        self._view.append_log(
-            section,
-            format_step_event(
-                pipeline_id, step_id, event="error", message=f"ERROR: {error_message}"
-            ),
-            level="error",
-        )
-        self._finalize_pipeline(
-            pipeline_id, success=False, error_message=error_message, exports_ran=False
-        )
+        try:
+            state = self._states[pipeline_id]
+            section = self._section_label(pipeline_id)
+            state.failed = True
+            logger.error(
+                "stats_step_error",
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "step": step_id.name,
+                    "error": error_message,
+                },
+            )
+            self._view.append_log(
+                section,
+                format_step_event(
+                    pipeline_id,
+                    step_id,
+                    event="error",
+                    message=f"ERROR: {error_message}",
+                ),
+                level="error",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_step_error_handler_failed",
+                exc_info=True,
+                extra={"pipeline": pipeline_id.name, "step": step_id.name},
+            )
+            error_message = f"{error_message} (and handler failed: {exc})"
+        finally:
+            self._finalize_pipeline(
+                pipeline_id, success=False, error_message=error_message, exports_ran=False
+            )
 
     def _complete_pipeline(self, pipeline_id: PipelineId) -> None:
         state = self._states[pipeline_id]
         section = self._section_label(pipeline_id)
         elapsed = time.perf_counter() - state.start_ts if state.start_ts else 0.0
+        exports_ran = False
 
         try:
             if state.run_exports:
                 exported = self._view.export_pipeline_results(pipeline_id)
+                exports_ran = bool(exported)
                 if not exported:
                     self._view.append_log(
                         section,
@@ -377,18 +456,21 @@ class StatsController:
             if state.run_summary:
                 self._view.build_and_render_summary(pipeline_id)
         except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "stats_pipeline_completion_failed",
+            logger.error(
+                "stats_pipeline_finalize_error",
                 exc_info=True,
-                extra={"pipeline": pipeline_id.name},
+                extra={"pipeline": pipeline_id.name, "exc": str(exc)},
             )
             self._view.append_log(
                 section,
-                f"  • Error completing pipeline: {exc}",
+                f"  • Error during finalization for {pipeline_id.name}: {exc}",
                 level="error",
             )
             self._finalize_pipeline(
-                pipeline_id, success=False, error_message=str(exc), exports_ran=False
+                pipeline_id,
+                success=False,
+                error_message=f"Error during finalization for {pipeline_id.name}: {exc}",
+                exports_ran=exports_ran,
             )
             return
 
@@ -417,13 +499,22 @@ class StatsController:
         state.steps = ()
         state.run_exports = True
         state.run_summary = True
-        self._view.set_busy(False)
-        self._view.on_analysis_finished(
-            pipeline_id,
-            success=success,
-            error_message=error_message,
-            exports_ran=exports_ran if success else False,
-        )
+        try:
+            self._view.set_busy(False)
+        finally:
+            try:
+                self._view.on_analysis_finished(
+                    pipeline_id,
+                    success=success,
+                    error_message=error_message,
+                    exports_ran=exports_ran if success else False,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "stats_finalize_view_failed",
+                    exc_info=True,
+                    extra={"pipeline": pipeline_id.name},
+                )
 
     def _section_label(self, pipeline_id: PipelineId) -> str:
         return "Single" if pipeline_id is PipelineId.SINGLE else "Between"
