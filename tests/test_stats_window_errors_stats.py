@@ -98,15 +98,14 @@ def test_between_pipeline_mixed_model_failure(qtbot, tmp_path, monkeypatch):
 
     monkeypatch.setattr(stats_workers, "run_between_group_anova", lambda *_a, **_k: {})
     
-    def raise_between(*_args, **_kwargs):
-        raise RuntimeError("between mixed failure")
+    original_run_lmm = stats_workers.run_lmm
 
-    monkeypatch.setattr(
-        stats_workers,
-        "run_between_group_mixed_model",
-        raise_between,
-        raising=False,
-    )
+    def raise_between(progress_cb, message_cb, *, include_group=False, **kwargs):
+        if include_group:
+            raise RuntimeError("between mixed failure")
+        return original_run_lmm(progress_cb, message_cb, include_group=include_group, **kwargs)
+
+    monkeypatch.setattr(stats_workers, "run_lmm", raise_between, raising=False)
 
     qtbot.mouseClick(win.analyze_between_btn, Qt.LeftButton)
     _wait_for_idle(win, qtbot, win.analyze_between_btn)
