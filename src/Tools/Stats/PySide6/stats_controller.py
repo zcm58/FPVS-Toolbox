@@ -9,10 +9,15 @@ controller contains orchestration only; computational work lives in
 stats_workers and legacy analysis modules.
 """
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
+
+import pandas as pd
+import sys
 
 from . import stats_workers
 from .stats_core import PipelineId, PipelineStep, StepId
@@ -35,6 +40,7 @@ class StatsViewProtocol:
         *,
         finished_cb: Callable[[PipelineId, StepId, object], None],
         error_cb: Callable[[PipelineId, StepId, str], None],
+        message_cb: Optional[Callable[[str], None]] = None,
     ) -> None: ...
 
     def on_pipeline_started(self, pipeline_id: PipelineId) -> None: ...
@@ -60,6 +66,8 @@ class StatsViewProtocol:
         self, pipeline_id: PipelineId, step_id: StepId
     ) -> tuple[dict, Callable[[dict], None]]: ...
 
+    def ensure_results_dir(self) -> str: ...
+
 
 @dataclass
 class SectionRunState:
@@ -72,6 +80,9 @@ class SectionRunState:
     results: Dict[StepId, dict] = field(default_factory=dict)
     run_exports: bool = True
     run_summary: bool = True
+    process_mode: bool = False
+    process_job_path: Optional[Path] = None
+    process_summary_path: Optional[Path] = None
 
 
 SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
@@ -209,6 +220,10 @@ class StatsController:
         require_anova: bool = False,
     ) -> None:
         state = self._states[pipeline_id]
+        state.process_mode = False
+        state.process_job_path = None
+        state.process_summary_path = None
+
         if state.running:
             self._view.append_log(
                 self._section_label(pipeline_id),
@@ -278,6 +293,27 @@ class StatsController:
             },
         )
         self._view.append_log(self._section_label(pipeline_id), summary)
+
+        if (
+            pipeline_id is PipelineId.BETWEEN
+            and tuple(step_ids) == tuple(BETWEEN_PIPELINE_STEPS)
+        ):
+            try:
+                self._start_between_process_pipeline()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "stats_between_process_start_failed",
+                    exc_info=True,
+                    extra={"pipeline": pipeline_id.name},
+                )
+                self._finalize_pipeline(
+                    pipeline_id,
+                    success=False,
+                    error_message=str(exc),
+                    exports_ran=False,
+                )
+            return
+
         try:
             self._run_next_step(pipeline_id)
         except Exception as exc:  # noqa: BLE001
@@ -310,6 +346,91 @@ class StatsController:
                 )
             )
         return tuple(steps)
+
+    def _start_between_process_pipeline(self) -> None:
+        pipeline_id = PipelineId.BETWEEN
+        state = self._states[pipeline_id]
+        state.process_mode = True
+
+        job_spec_path, summary_path = self._build_between_job_spec(state)
+        state.process_job_path = job_spec_path
+        state.process_summary_path = summary_path
+
+        self._view.append_log(
+            self._section_label(pipeline_id),
+            "Launching between-group pipeline in isolated process…",
+        )
+
+        process_step = PipelineStep(
+            StepId.BETWEEN_GROUP_ANOVA,
+            "Between-Group Pipeline",
+            stats_workers.run_between_group_process_task,
+            {"job_spec_path": str(job_spec_path), "python_executable": sys.executable},
+            handler=lambda payload: None,
+        )
+
+        self._view.start_step_worker(
+            pipeline_id,
+            process_step,
+            finished_cb=self._on_between_process_finished,
+            error_cb=self._on_between_process_error,
+            message_cb=lambda msg, pid=pipeline_id: self._on_between_process_message(
+                pid, msg
+            ),
+        )
+
+    def _build_between_job_spec(self, state: SectionRunState) -> tuple[Path, Path]:
+        def _find_kwargs(step_id: StepId) -> dict:
+            for step in state.steps:
+                if step.id is step_id:
+                    return step.kwargs
+            return {}
+
+        anova_kwargs = _find_kwargs(StepId.BETWEEN_GROUP_ANOVA)
+        mixed_kwargs = _find_kwargs(StepId.BETWEEN_GROUP_MIXED_MODEL)
+        harmonic_kwargs = _find_kwargs(StepId.HARMONIC_CHECK)
+
+        results_dir = Path(self._view.ensure_results_dir())
+        results_dir.mkdir(parents=True, exist_ok=True)
+        ts = int(time.time())
+        job_spec_path = results_dir / f"between_group_job_{ts}.json"
+        summary_path = results_dir / "between_group_summary.json"
+
+        tail = (
+            "greater"
+            if harmonic_kwargs.get("selected_metric") in ("Z Score", "SNR")
+            else "two-sided"
+        )
+
+        spec = {
+            "subjects": anova_kwargs.get("subjects", []),
+            "conditions": anova_kwargs.get("conditions", []),
+            "subject_data": anova_kwargs.get("subject_data", {}),
+            "subject_groups": anova_kwargs.get("subject_groups", {}),
+            "roi_map": anova_kwargs.get("rois", {}),
+            "base_freq": anova_kwargs.get("base_freq", 6.0),
+            "alpha": mixed_kwargs.get("alpha", 0.05),
+            "harmonic_options": {
+                "metric": harmonic_kwargs.get("selected_metric", "Z Score"),
+                "mean_value_threshold": harmonic_kwargs.get("mean_value_threshold", 0.0),
+                "base_freq": harmonic_kwargs.get("base_freq", anova_kwargs.get("base_freq", 6.0)),
+                "correction_method": harmonic_kwargs.get("correction_method", "holm"),
+                "tail": tail,
+                "max_freq": harmonic_kwargs.get("max_freq"),
+                "min_subjects": harmonic_kwargs.get("min_subjects", 3),
+                "oddball_every_n": harmonic_kwargs.get("oddball_every_n", 5),
+                "limit_n_harmonics": harmonic_kwargs.get("limit_n_harmonics"),
+                "do_wilcoxon_sensitivity": harmonic_kwargs.get(
+                    "do_wilcoxon_sensitivity", True
+                ),
+            },
+            "output": {
+                "summary_json": str(summary_path),
+            },
+        }
+
+        job_spec_path.write_text(json.dumps(spec, indent=2))
+        return job_spec_path, summary_path
 
     def _run_next_step(self, pipeline_id: PipelineId) -> None:
         try:
@@ -375,6 +496,125 @@ class StatsController:
                 error_message=str(exc),
                 exports_ran=False,
             )
+
+    def _on_between_process_message(self, pipeline_id: PipelineId, message: str) -> None:
+        state = self._states[pipeline_id]
+        section = self._section_label(pipeline_id)
+        text = (message or "").strip()
+        if not text:
+            return
+
+        if text.startswith("STAGE_START:") or text.startswith("STAGE_DONE:"):
+            step_name = text.split(":", 1)[1]
+            try:
+                step_id = StepId[step_name]
+            except KeyError:
+                self._view.append_log(section, text)
+                return
+            event = "start" if text.startswith("STAGE_START:") else "complete"
+            self._view.append_log(
+                section,
+                format_step_event(
+                    pipeline_id, step_id, event=event, message=f"{event.title()}"
+                ),
+            )
+            idx = next((i for i, s in enumerate(state.steps) if s.id is step_id), None)
+            if idx is not None:
+                state.current_step_index = max(state.current_step_index, idx + (1 if event == "complete" else 0))
+            return
+
+        self._view.append_log(section, text)
+
+    def _deserialize_between_payload(self, step_id: StepId, raw: dict) -> dict:
+        def _df(payload: Optional[dict]) -> Optional[pd.DataFrame]:
+            if not payload:
+                return None
+            cols = payload.get("columns")
+            data = payload.get("data", [])
+            return pd.DataFrame(data, columns=cols) if cols is not None else pd.DataFrame(data)
+
+        if step_id is StepId.BETWEEN_GROUP_ANOVA:
+            return {"anova_df_results": _df(raw.get("anova_df_results"))}
+        if step_id is StepId.BETWEEN_GROUP_MIXED_MODEL:
+            return {
+                "mixed_results_df": _df(raw.get("mixed_results_df")),
+                "output_text": raw.get("output_text", ""),
+            }
+        if step_id is StepId.GROUP_CONTRASTS:
+            return {
+                "results_df": _df(raw.get("results_df")),
+                "output_text": raw.get("output_text", ""),
+            }
+        if step_id is StepId.HARMONIC_CHECK:
+            return {
+                "output_text": raw.get("output_text", ""),
+                "findings": raw.get("findings", []),
+            }
+        return raw
+
+    def _on_between_process_finished(
+        self, pipeline_id: PipelineId, step_id: StepId, payload: object
+    ) -> None:
+        try:
+            state = self._states[pipeline_id]
+            summary = payload.get("summary") if isinstance(payload, dict) else None
+            steps_data = summary.get("steps", {}) if isinstance(summary, dict) else {}
+
+            if not steps_data:
+                raise RuntimeError("Between-group process returned no results.")
+
+            for step in state.steps:
+                raw_payload = steps_data.get(step.id.name, {})
+                deserialized = self._deserialize_between_payload(step.id, raw_payload)
+                handler = getattr(step, "handler", None)
+                if handler:
+                    handler(deserialized)
+                state.results[step.id] = deserialized
+                self._view.append_log(
+                    self._section_label(pipeline_id),
+                    format_step_event(
+                        pipeline_id,
+                        step.id,
+                        event="complete",
+                        message=f"{step.name} completed",
+                    ),
+                )
+
+            state.current_step_index = len(state.steps)
+            self._complete_pipeline(pipeline_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_between_process_finish_error",
+                exc_info=True,
+                extra={"pipeline": pipeline_id.name, "error": str(exc)},
+            )
+            self._finalize_pipeline(
+                pipeline_id,
+                success=False,
+                error_message=str(exc),
+                exports_ran=False,
+            )
+
+    def _on_between_process_error(self, pipeline_id: PipelineId, step_id: StepId, error_message: str) -> None:
+        state = self._states[pipeline_id]
+        state.failed = True
+        section = self._section_label(pipeline_id)
+        self._view.append_log(
+            section,
+            format_step_event(
+                pipeline_id,
+                step_id,
+                event="error",
+                message=f"ERROR: {error_message}",
+            ),
+            level="error",
+        )
+        self._finalize_pipeline(
+            pipeline_id,
+            success=False,
+            error_message=error_message,
+            exports_ran=False,
+        )
 
     def _on_step_finished(self, pipeline_id: PipelineId, step_id: StepId, payload: object) -> None:
         try:

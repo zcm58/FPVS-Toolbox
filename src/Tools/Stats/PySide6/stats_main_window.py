@@ -614,6 +614,7 @@ class StatsWindow(QMainWindow):
         *,
         finished_cb,
         error_cb,
+        message_cb=None,
     ) -> None:
         self._log_pipeline_event(pipeline=pipeline_id, step=step.id, event="start")
         worker = StatsWorker(step.worker_fn, **step.kwargs)
@@ -624,8 +625,13 @@ class StatsWindow(QMainWindow):
             lambda msg, pid=pipeline_id, sid=step.id: error_cb(pid, sid, msg)
         )
         worker.signals.message.connect(self._on_worker_message)
+        if message_cb:
+            worker.signals.message.connect(message_cb)
         worker.signals.progress.connect(self._on_worker_progress)
         self.pool.start(worker)
+
+    def ensure_results_dir(self) -> str:
+        return self._ensure_results_dir()
 
     def ensure_pipeline_ready(
         self, pipeline_id: PipelineId, *, require_anova: bool = False
