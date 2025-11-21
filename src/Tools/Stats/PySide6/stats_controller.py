@@ -70,6 +70,7 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.RM_ANOVA,
     StepId.MIXED_MODEL,
     StepId.INTERACTION_POSTHOCS,
+    StepId.HARMONIC_CHECK,
 )
 """Default ordered steps for the Single pipeline."""
 
@@ -77,6 +78,7 @@ BETWEEN_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.BETWEEN_GROUP_ANOVA,
     StepId.BETWEEN_GROUP_MIXED_MODEL,
     StepId.GROUP_CONTRASTS,
+    StepId.HARMONIC_CHECK,
 )
 """Default ordered steps for the Between pipeline."""
 
