@@ -17,6 +17,8 @@ import logging
 import time
 from typing import Any, Callable, Dict
 
+import numpy as np
+
 import pandas as pd
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
@@ -104,6 +106,55 @@ def _long_format_from_bca(
                         }
                     )
     return pd.DataFrame(rows)
+
+
+def _validate_group_contrasts_input(
+    df: pd.DataFrame,
+    *,
+    group_col: str,
+    condition_col: str,
+    roi_col: str,
+    dv_col: str,
+) -> None:
+    """Validate long-format input for group contrasts.
+
+    Raises:
+        ValueError: If required columns are missing, data are non-numeric/non-finite,
+            or if any (condition, ROI, group) cell has insufficient data or
+            zero variance.
+    """
+
+    required_cols = {group_col, condition_col, roi_col, dv_col}
+    missing = required_cols.difference(df.columns)
+    if missing:
+        missing_list = ", ".join(sorted(missing))
+        raise ValueError(
+            f"Group contrasts aborted: missing required columns: {missing_list}."
+        )
+
+    dv_series = df[dv_col]
+    if not pd.api.types.is_numeric_dtype(dv_series):
+        raise ValueError(
+            f"Group contrasts aborted: DV column '{dv_col}' must be numeric."
+        )
+
+    dv_values = dv_series.to_numpy()
+    if not np.isfinite(dv_values).all():
+        raise ValueError("Group contrasts aborted: non-finite BCA values in DV column.")
+
+    grouped = df.groupby([condition_col, roi_col, group_col])[dv_col]
+    for (condition, roi, group), values in grouped:
+        n = len(values)
+        if n < 2:
+            raise ValueError(
+                "Group contrasts aborted: group "
+                f"{group} condition {condition} ROI {roi} has fewer than 2 observations."
+            )
+        if values.var(ddof=0) == 0:
+            raise ValueError(
+                "Group contrasts aborted: group "
+                f"{group} condition {condition} ROI {roi} has zero variance."
+            )
 
 
 def run_rm_anova(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, rois):
@@ -332,6 +383,14 @@ def run_group_contrasts(
     df_long["group"] = df_long["group"].astype(str)
     if df_long["group"].nunique() < 2:
         raise RuntimeError("Group contrasts require at least two groups with data.")
+
+    _validate_group_contrasts_input(
+        df_long,
+        group_col="group",
+        condition_col="condition",
+        roi_col="roi",
+        dv_col="value",
+    )
 
     message_cb("Running Between-Group Contrasts…")
     results_df = compute_group_contrasts(
