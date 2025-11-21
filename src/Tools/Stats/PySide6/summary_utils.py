@@ -5,7 +5,8 @@ rule-based summary string suitable for display in the unified output window.
 The summarizer is intentionally conservative: it only reports effects that
 survive Benjamini–Hochberg FDR correction and meet minimum effect-size
 thresholds. Any unexpected files or schemas are handled gracefully by returning
-fallback messages instead of raising exceptions.
+fallback messages instead of raising exceptions. It is part of the
+model/service layer and remains GUI-agnostic.
 """
 
 from __future__ import annotations

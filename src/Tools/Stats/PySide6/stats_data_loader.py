@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""Data loading helpers for the Stats pipelines.
+
+This module belongs to the model/service layer. It scans FPVS project folders,
+validates manifests, and provides normalized metadata to the controller and
+workers while remaining GUI-agnostic.
+"""
+
 import glob
 import json
 import os

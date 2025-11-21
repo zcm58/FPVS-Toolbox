@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Shared logging utilities for the Stats tool (support layer)."""
+
 from datetime import datetime
 from typing import Final
 
