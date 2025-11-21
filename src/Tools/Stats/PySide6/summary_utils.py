@@ -224,7 +224,11 @@ def _summarize_mixed_model(mixed_model_terms: Optional[pd.DataFrame], cfg: Summa
     if mixed_model_terms is None or not isinstance(mixed_model_terms, pd.DataFrame):
         return ["- Mixed model: no summary is available."]
 
-    p_col = _pick_column(mixed_model_terms, cfg.p_col, ["p_fdr_bh", "p_value_fdr", "p_value", "p_fdr"])
+    p_col = _pick_column(
+        mixed_model_terms,
+        cfg.p_col,
+        ["p_fdr_bh", "p_value_fdr", "p_value", "p_fdr", "P>|z|", "P>|t|"]
+    )
     term_col = _pick_column(mixed_model_terms, "term", ["Effect", "Term", "fixed_effect"])
     if p_col is None or term_col is None:
         return ["- Mixed model: no summary is available."]
