@@ -1116,6 +1116,11 @@ class StatsWindow(QMainWindow):
         return output_text
 
     def _apply_between_mixed_results(self, payload: dict, *, update_text: bool = True) -> str:
+        if not isinstance(payload, dict):
+            raise ValueError("Mixed-model payload must be a dict.")
+        if "mixed_results_df" not in payload:
+            raise ValueError("Mixed-model payload missing 'mixed_results_df'.")
+
         self.between_mixed_model_results_data = payload.get("mixed_results_df")
         output_text = payload.get("output_text", "")
         if update_text:
