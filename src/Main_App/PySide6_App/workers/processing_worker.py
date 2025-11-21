@@ -14,14 +14,14 @@ class PostProcessWorker(QObject):
     finished = Signal(dict)
 
     def __init__(
-        self,
-        file_name: str,
-        epochs_dict: Dict[str, Any],
-        labels: List[str],
-        save_folder: Any | None,
-        data_paths: List[str] | None,
-        settings: Optional[Any] = None,
-        logger: Optional[Callable[[str], None]] = None,
+            self,
+            file_name: str,
+            epochs_dict: Dict[str, Any],
+            labels: List[str],
+            save_folder: Any | None,
+            data_paths: List[str] | None,
+            settings: Optional[Any] = None,
+            logger: Optional[Callable[[str], None]] = None,
     ) -> None:
         super().__init__()
         self._file = file_name
@@ -41,6 +41,7 @@ class PostProcessWorker(QObject):
         if self._cancelled:
             self.finished.emit({"file": self._file, "cancelled": True})
             return
+
         try:
             # Ensure adapter-compatible save_folder_path (must expose .get())
             sf = self._save_folder
@@ -58,8 +59,22 @@ class PostProcessWorker(QObject):
                 settings=self._settings,
                 log=self._log,
             )
-            run_post_export(ctx, self._labels)
+
+            # FIX 1: Capture success status
+            success = run_post_export(ctx, self._labels)
+
+            # FIX 2: Immediate memory cleanup
+            self._epochs = None
+
+            if not success:
+                # Logic failure (e.g., no epochs to save)
+                raise RuntimeError(f"Post-export failed to write file for {self._file}")
+
             self.progress.emit(100)
             self.finished.emit({"file": self._file, "cancelled": False})
-        except Exception as e:  # pragma: no cover
+
+        except Exception as e:
             self.error.emit(str(e))
+            # FIX 3: Ensure thread terminates even on error
+            # Use a distinct status so Main App knows it failed, but thread still dies.
+            self.finished.emit({"file": self._file, "cancelled": False, "error": str(e)})
