@@ -646,3 +646,5 @@ def _run_harmonic_check_impl(
         output_lines.append("Overall: No harmonics met the significance criteria.")
 
     return "\n".join(output_lines), findings
+
+# Lela mode is in full effect
