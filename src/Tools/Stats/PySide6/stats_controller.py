@@ -384,6 +384,22 @@ class StatsController:
             if state.current_step_index >= len(state.steps):
                 raise RuntimeError("Received step finished signal with no pending step")
             step = state.steps[state.current_step_index]
+            step_name = getattr(step, "name", step_id.name)
+
+            logger.info(
+                "stats_step_finished_signal",
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "step": step_id.name,
+                    "expected_step": step.id.name,
+                },
+            )
+
+            if step_id is StepId.HARMONIC_CHECK:
+                logger.info(
+                    "stats_harmonic_check_signal",
+                    extra={"pipeline": pipeline_id.name, "step_name": step_name},
+                )
 
             handler = getattr(step, "handler", None)
             if handler is None:
@@ -430,6 +446,23 @@ class StatsController:
                 exc_info=True,
                 extra={"pipeline": pipeline_id.name, "step": step_id.name},
             )
+            try:
+                self._view.append_log(
+                    self._section_label(pipeline_id),
+                    format_step_event(
+                        pipeline_id,
+                        step_id,
+                        event="error",
+                        message=f"ERROR: {exc}",
+                    ),
+                    level="error",
+                )
+            except Exception:
+                logger.exception(
+                    "stats_step_finished_view_log_error",
+                    exc_info=True,
+                    extra={"pipeline": pipeline_id.name, "step": step_id.name},
+                )
             self._finalize_pipeline(
                 pipeline_id,
                 success=False,

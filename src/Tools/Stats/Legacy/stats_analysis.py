@@ -19,7 +19,9 @@ import pandas as pd
 import scipy.stats as stats
 from statsmodels.stats.multitest import multipletests
 
+from Tools.Stats.Legacy.excel_io import safe_read_excel
 from .repeated_m_anova import run_repeated_measures_anova
+from .blas_limits import single_threaded_blas
 from Tools.Stats.roi_resolver import ROI, resolve_active_rois
 
 logger = logging.getLogger(__name__)
@@ -170,7 +172,7 @@ def aggregate_bca_sum(
 ) -> float:
     """Return summed BCA for an ROI across included harmonics."""
     try:
-        df = pd.read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
+        df = safe_read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
         df.index = df.index.str.upper()
 
         # -------------------------------------------------------
@@ -408,6 +410,43 @@ def run_harmonic_check(
         limit_n_harmonics: Optional[int] = None,
         rois: Optional[Dict[str, List[str]]] = None,  # <--- ADDED ARGUMENT
 ):
+    with single_threaded_blas():
+        return _run_harmonic_check_impl(
+            subject_data,
+            subjects,
+            conditions,
+            selected_metric,
+            mean_value_threshold,
+            base_freq,
+            log_func,
+            max_freq,
+            correction_method,
+            tail,
+            min_subjects,
+            do_wilcoxon_sensitivity,
+            oddball_every_n,
+            limit_n_harmonics,
+            rois,
+        )
+
+
+def _run_harmonic_check_impl(
+        subject_data: Dict[str, Dict[str, str]],
+        subjects: List[str],
+        conditions: List[str],
+        selected_metric: str,
+        mean_value_threshold: float,
+        base_freq: float,
+        log_func,
+        max_freq: Optional[float] = None,
+        correction_method: str = "holm",
+        tail: str = "greater",
+        min_subjects: int = 3,
+        do_wilcoxon_sensitivity: bool = True,
+        oddball_every_n: int = 5,
+        limit_n_harmonics: Optional[int] = None,
+        rois: Optional[Dict[str, List[str]]] = None,  # <--- ADDED ARGUMENT
+):
     alpha = globals().get("HARMONIC_CHECK_ALPHA", 0.05)
 
     # Safe ROI resolution
@@ -453,7 +492,9 @@ def run_harmonic_check(
 
             try:
                 if sample_file not in loaded_dataframes:
-                    df_tmp = pd.read_excel(sample_file, sheet_name=selected_metric, index_col="Electrode")
+                    df_tmp = safe_read_excel(
+                        sample_file, sheet_name=selected_metric, index_col="Electrode"
+                    )
                     df_tmp.index = df_tmp.index.str.upper()
                     loaded_dataframes[sample_file] = df_tmp
                 sample_df_cols = loaded_dataframes[sample_file].columns
@@ -491,7 +532,9 @@ def run_harmonic_check(
                     df_cur = loaded_dataframes.get(f_path)
                     if df_cur is None:
                         try:
-                            df_cur = pd.read_excel(f_path, sheet_name=selected_metric, index_col="Electrode")
+                            df_cur = safe_read_excel(
+                                f_path, sheet_name=selected_metric, index_col="Electrode"
+                            )
                             df_cur.index = df_cur.index.str.upper()
                             loaded_dataframes[f_path] = df_cur
                         except FileNotFoundError:

@@ -50,6 +50,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from Tools.Stats.Legacy.blas_limits import single_threaded_blas
+
 logger = logging.getLogger(__name__)
 
 
@@ -354,51 +356,52 @@ def run_mixed_effects_model(
     # --- main fit (REML or ML as requested) ---
     reml_flag = (method or "reml").strip().lower() == "reml"
 
-    # First attempt with requested re_formula
-    fit = _fit_mixedlm(df, formula, group_col, re_formula, reml_flag)
+    with single_threaded_blas():
+        # First attempt with requested re_formula
+        fit = _fit_mixedlm(df, formula, group_col, re_formula, reml_flag)
 
-    # If singular AND re_formula had slopes, back off to intercept-only
-    backed_off = False
-    if fit.singular and re_formula.strip() != "1":
-        logger.warning("Falling back to random intercept only due to singularity.")
-        fit = _fit_mixedlm(df, formula, group_col, "1", reml_flag)
-        backed_off = True
+        # If singular AND re_formula had slopes, back off to intercept-only
+        backed_off = False
+        if fit.singular and re_formula.strip() != "1":
+            logger.warning("Falling back to random intercept only due to singularity.")
+            fit = _fit_mixedlm(df, formula, group_col, "1", reml_flag)
+            backed_off = True
 
-    # Inject notes
-    if backed_off:
-        fit.table["Note"] = (fit.table["Note"].mask(fit.table["Note"].astype(bool), fit.table["Note"] + "; ")
-                             .fillna("") + "Fell back to random intercept (singular slopes)")
+        # Inject notes
+        if backed_off:
+            fit.table["Note"] = (fit.table["Note"].mask(fit.table["Note"].astype(bool), fit.table["Note"] + "; ")
+                                 .fillna("") + "Fell back to random intercept (singular slopes)")
 
-    # --- optional LRTs under ML (nested models) ---
-    if do_lrt:
-        try:
-            full_ml = _fit_for_lrt(df, dv_col, group_col, processed_terms, fit.used_re_formula)
-            # Interaction
-            red_int_terms = _make_reduced_terms(processed_terms, "interaction")
-            red_int_ml = _fit_for_lrt(df, dv_col, group_col, red_int_terms, fit.used_re_formula)
-            LR_int, df_int, p_int = _lrt(full_ml, red_int_ml)
+        # --- optional LRTs under ML (nested models) ---
+        if do_lrt:
+            try:
+                full_ml = _fit_for_lrt(df, dv_col, group_col, processed_terms, fit.used_re_formula)
+                # Interaction
+                red_int_terms = _make_reduced_terms(processed_terms, "interaction")
+                red_int_ml = _fit_for_lrt(df, dv_col, group_col, red_int_terms, fit.used_re_formula)
+                LR_int, df_int, p_int = _lrt(full_ml, red_int_ml)
 
-            # Drop condition
-            red_cond_terms = _make_reduced_terms(processed_terms, "condition")
-            red_cond_ml = _fit_for_lrt(df, dv_col, group_col, red_cond_terms, fit.used_re_formula)
-            LR_c, df_c, p_c = _lrt(full_ml, red_cond_ml)
+                # Drop condition
+                red_cond_terms = _make_reduced_terms(processed_terms, "condition")
+                red_cond_ml = _fit_for_lrt(df, dv_col, group_col, red_cond_terms, fit.used_re_formula)
+                LR_c, df_c, p_c = _lrt(full_ml, red_cond_ml)
 
-            # Drop roi
-            red_roi_terms = _make_reduced_terms(processed_terms, "roi")
-            red_roi_ml = _fit_for_lrt(df, dv_col, group_col, red_roi_terms, fit.used_re_formula)
-            LR_r, df_r, p_r = _lrt(full_ml, red_roi_ml)
+                # Drop roi
+                red_roi_terms = _make_reduced_terms(processed_terms, "roi")
+                red_roi_ml = _fit_for_lrt(df, dv_col, group_col, red_roi_terms, fit.used_re_formula)
+                LR_r, df_r, p_r = _lrt(full_ml, red_roi_ml)
 
-            lrt_table = pd.DataFrame({
-                "Effect": ["Condition:ROI (interaction)", "Condition (all terms)", "ROI (all terms)"],
-                "LR": [LR_int, LR_c, LR_r],
-                "df": [df_int, df_c, df_r],
-                "p (chi2)": [p_int, p_c, p_r],
-                "Used RE": [fit.used_re_formula] * 3,
-            })
-            # Attach for caller visibility without breaking return type
-            fit.table.attrs["lrt_table"] = lrt_table
-        except Exception as e:
-            logger.warning("LRT computation failed: %s", e)
+                lrt_table = pd.DataFrame({
+                    "Effect": ["Condition:ROI (interaction)", "Condition (all terms)", "ROI (all terms)"],
+                    "LR": [LR_int, LR_c, LR_r],
+                    "df": [df_int, df_c, df_r],
+                    "p (chi2)": [p_int, p_c, p_r],
+                    "Used RE": [fit.used_re_formula] * 3,
+                })
+                # Attach for caller visibility without breaking return type
+                fit.table.attrs["lrt_table"] = lrt_table
+            except Exception as e:
+                logger.warning("LRT computation failed: %s", e)
 
     # Final tidy table (Wald), with notes retained
     table = fit.table

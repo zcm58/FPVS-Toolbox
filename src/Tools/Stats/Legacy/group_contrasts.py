@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
 
+from Tools.Stats.Legacy.blas_limits import single_threaded_blas
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,40 +59,41 @@ def compute_group_contrasts(
     except Exception as exc:  # pragma: no cover - SciPy required for Stats tool
         raise ImportError("scipy is required for group contrasts.") from exc
 
-    for (cond, roi), chunk in df.groupby([condition_col, roi_col], dropna=False):
-        cond_label = "Unknown" if cond is None else str(cond)
-        roi_label = "Unknown" if roi is None else str(roi)
-        for g1, g2 in combos:
-            g1_vals = chunk.loc[chunk[group_col] == g1, dv_col].dropna().to_numpy(dtype=float)
-            g2_vals = chunk.loc[chunk[group_col] == g2, dv_col].dropna().to_numpy(dtype=float)
-            if g1_vals.size == 0 or g2_vals.size == 0:
-                continue
-            try:
-                res = stats.ttest_ind(g1_vals, g2_vals, equal_var=False, nan_policy="omit")
-                t_stat = float(res.statistic)
-                p_val = float(res.pvalue)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("ttest_ind failed for %s vs %s (%s)", g1, g2, exc)
-                t_stat, p_val = np.nan, np.nan
-            cohen_d = _cohen_d_independent(g1_vals, g2_vals)
-            rows.append(
-                {
-                    "condition": cond_label,
-                    "roi": roi_label,
-                    "group_1": g1,
-                    "group_2": g2,
-                    "n_1": int(g1_vals.size),
-                    "n_2": int(g2_vals.size),
-                    "mean_1": float(np.mean(g1_vals)) if g1_vals.size else np.nan,
-                    "mean_2": float(np.mean(g2_vals)) if g2_vals.size else np.nan,
-                    "difference": float(np.mean(g1_vals) - np.mean(g2_vals))
-                    if g1_vals.size and g2_vals.size
-                    else np.nan,
-                    "t_stat": t_stat,
-                    "p_value": p_val,
-                    "effect_size": cohen_d,
-                }
-            )
+    with single_threaded_blas():
+        for (cond, roi), chunk in df.groupby([condition_col, roi_col], dropna=False):
+            cond_label = "Unknown" if cond is None else str(cond)
+            roi_label = "Unknown" if roi is None else str(roi)
+            for g1, g2 in combos:
+                g1_vals = chunk.loc[chunk[group_col] == g1, dv_col].dropna().to_numpy(dtype=float)
+                g2_vals = chunk.loc[chunk[group_col] == g2, dv_col].dropna().to_numpy(dtype=float)
+                if g1_vals.size == 0 or g2_vals.size == 0:
+                    continue
+                try:
+                    res = stats.ttest_ind(g1_vals, g2_vals, equal_var=False, nan_policy="omit")
+                    t_stat = float(res.statistic)
+                    p_val = float(res.pvalue)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("ttest_ind failed for %s vs %s (%s)", g1, g2, exc)
+                    t_stat, p_val = np.nan, np.nan
+                cohen_d = _cohen_d_independent(g1_vals, g2_vals)
+                rows.append(
+                    {
+                        "condition": cond_label,
+                        "roi": roi_label,
+                        "group_1": g1,
+                        "group_2": g2,
+                        "n_1": int(g1_vals.size),
+                        "n_2": int(g2_vals.size),
+                        "mean_1": float(np.mean(g1_vals)) if g1_vals.size else np.nan,
+                        "mean_2": float(np.mean(g2_vals)) if g2_vals.size else np.nan,
+                        "difference": float(np.mean(g1_vals) - np.mean(g2_vals))
+                        if g1_vals.size and g2_vals.size
+                        else np.nan,
+                        "t_stat": t_stat,
+                        "p_value": p_val,
+                        "effect_size": cohen_d,
+                    }
+                )
     results_df = pd.DataFrame(rows)
 
     if not results_df.empty and "p_value" in results_df.columns:
