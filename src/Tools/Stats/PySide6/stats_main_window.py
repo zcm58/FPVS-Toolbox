@@ -747,6 +747,10 @@ class StatsWindow(QMainWindow):
         return False
 
     def _build_harmonic_kwargs(self) -> dict:
+        # [SAFETY UPDATE] Load fresh ROIs from settings to ensure thread receives
+        # the most up-to-date map, preventing 0xC0000005 errors.
+        fresh_rois = load_rois_from_settings() or self.rois
+
         return dict(
             subject_data=self.subject_data,
             subjects=self.subjects,
@@ -755,7 +759,7 @@ class StatsWindow(QMainWindow):
             mean_value_threshold=self._harmonic_config.threshold,
             base_freq=self._current_base_freq,
             alpha=self._current_alpha,
-            rois=self.rois,
+            rois=fresh_rois,  # <--- Using fresh_rois instead of potentially stale self.rois
         )
 
     def get_step_config(
