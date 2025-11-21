@@ -1,6 +1,14 @@
 # src/Tools/Stats/PySide6/stats_controller.py
 from __future__ import annotations
 
+"""Controller layer for coordinating Stats pipelines.
+
+StatsController orchestrates the Single and Between pipelines, owns run state,
+schedules workers, and routes progress back to the view (StatsWindow). The
+controller contains orchestration only; computational work lives in
+stats_workers and legacy analysis modules.
+"""
+
 import logging
 import time
 from dataclasses import dataclass, field

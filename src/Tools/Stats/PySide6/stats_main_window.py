@@ -1,6 +1,14 @@
 # src/Tools/Stats/PySide6/stats_main_window.py
 from __future__ import annotations
 
+"""View layer for the PySide6 Stats tool.
+
+StatsWindow renders the Stats UI, wires user gestures to StatsController entry
+points, and reflects pipeline progress and logs for the user. All analysis logic
+is delegated to the controller and workers; this module focuses on layout and
+signal wiring only.
+"""
+
 import json
 import logging
 import os
@@ -1187,29 +1195,10 @@ class StatsWindow(QMainWindow):
         tools_row.addStretch(1)
         main_layout.addLayout(tools_row)
 
-        # status + ROI labels
-        self.lbl_status = QLabel("Select a folder containing FPVS results.")
-        self.lbl_status.setWordWrap(True)
-        self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        main_layout.addWidget(self.lbl_status)
-
-        self.lbl_rois = QLabel("")
-        self.lbl_rois.setWordWrap(True)
-        self.lbl_rois.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        main_layout.addWidget(self.lbl_rois)
-
-        # spinner
-        prog_row = QHBoxLayout()
-        self.spinner = BusySpinner()
-        self.spinner.setFixedSize(18, 18)
-        self.spinner.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.spinner.hide()
-        prog_row.addWidget(self.spinner, alignment=Qt.AlignLeft)
-        prog_row.addStretch(1)
-        main_layout.addLayout(prog_row)
-
-        sections_layout = QHBoxLayout()
-        sections_layout.setSpacing(10)
+        analysis_box = QGroupBox("Analysis Controls")
+        analysis_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        analysis_layout = QVBoxLayout(analysis_box)
+        analysis_layout.setSpacing(8)
 
         # single group section
         single_group_box = QGroupBox("Single Group Analysis")
@@ -1217,7 +1206,6 @@ class StatsWindow(QMainWindow):
         single_layout = QVBoxLayout(single_group_box)
 
         single_action_row = QHBoxLayout()
-        single_action_row.addStretch(1)
         self.analyze_single_btn = QPushButton("Analyze Single Group")
         self.analyze_single_btn.clicked.connect(self.on_analyze_single_group_clicked)
         single_action_row.addWidget(self.analyze_single_btn)
@@ -1225,7 +1213,6 @@ class StatsWindow(QMainWindow):
         self.single_advanced_btn = QPushButton("Advanced…")
         self.single_advanced_btn.clicked.connect(self.on_single_advanced_clicked)
         single_action_row.addWidget(self.single_advanced_btn)
-        single_action_row.addStretch(1)
         single_layout.addLayout(single_action_row)
 
         self.single_status_lbl = QLabel("Idle")
@@ -1238,7 +1225,6 @@ class StatsWindow(QMainWindow):
         between_layout = QVBoxLayout(between_box)
 
         between_action_row = QHBoxLayout()
-        between_action_row.addStretch(1)
         self.analyze_between_btn = QPushButton("Analyze Group Differences")
         self.analyze_between_btn.clicked.connect(self.on_analyze_between_groups_clicked)
         between_action_row.addWidget(self.analyze_between_btn)
@@ -1246,16 +1232,34 @@ class StatsWindow(QMainWindow):
         self.between_advanced_btn = QPushButton("Advanced…")
         self.between_advanced_btn.clicked.connect(self.on_between_advanced_clicked)
         between_action_row.addWidget(self.between_advanced_btn)
-        between_action_row.addStretch(1)
         between_layout.addLayout(between_action_row)
 
         self.between_status_lbl = QLabel("Idle")
         self.between_status_lbl.setWordWrap(True)
         between_layout.addWidget(self.between_status_lbl)
 
-        sections_layout.addWidget(single_group_box)
-        sections_layout.addWidget(between_box)
-        main_layout.addLayout(sections_layout)
+        analysis_layout.addWidget(single_group_box)
+        analysis_layout.addWidget(between_box)
+        main_layout.addWidget(analysis_box)
+
+        # status + ROI labels with spinner
+        status_row = QHBoxLayout()
+        self.spinner = BusySpinner()
+        self.spinner.setFixedSize(18, 18)
+        self.spinner.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.spinner.hide()
+        status_row.addWidget(self.spinner, alignment=Qt.AlignLeft)
+
+        self.lbl_status = QLabel("Select a folder containing FPVS results.")
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        status_row.addWidget(self.lbl_status, 1)
+        main_layout.addLayout(status_row)
+
+        self.lbl_rois = QLabel("")
+        self.lbl_rois.setWordWrap(True)
+        self.lbl_rois.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        main_layout.addWidget(self.lbl_rois)
 
         # output pane
         self.output_text = QTextEdit()
@@ -1263,15 +1267,15 @@ class StatsWindow(QMainWindow):
         self.output_text.setAcceptRichText(True)
         self.output_text.setPlaceholderText("Analysis output")
         self.output_text.setMinimumHeight(140)
+        self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_layout.addWidget(self.output_text, 1)
 
         main_layout.setStretch(0, 0)  # folder row
         main_layout.setStretch(1, 0)  # tools row
-        main_layout.setStretch(2, 0)  # status label
-        main_layout.setStretch(3, 0)  # ROI label
-        main_layout.setStretch(4, 0)  # spinner row
-        main_layout.setStretch(5, 0)  # analysis sections row
-        main_layout.setStretch(6, 1)  # unified output pane
+        main_layout.setStretch(2, 0)  # analysis controls
+        main_layout.setStretch(3, 0)  # status row
+        main_layout.setStretch(4, 0)  # ROI label
+        main_layout.setStretch(5, 1)  # output pane
 
         # initialize export buttons
         self._update_export_buttons()

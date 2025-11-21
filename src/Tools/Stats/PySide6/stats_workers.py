@@ -1,11 +1,14 @@
 """
-Worker jobs and runner for the Stats tool.
+Worker jobs and runner for the Stats tool (model/service layer).
 
 This module defines:
   * StatsWorker: QRunnable wrapper that executes a single stats job in a worker
     thread and emits signals back to the controller/view.
   * Job functions: pure computational routines for ANOVA, mixed models, group
     contrasts, harmonics, etc., used by the stats pipelines.
+
+The functions and worker stay GUI-agnostic; StatsWindow triggers them through
+StatsController.
 """
 
 from __future__ import annotations
