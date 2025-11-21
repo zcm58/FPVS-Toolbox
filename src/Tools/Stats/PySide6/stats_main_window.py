@@ -59,7 +59,7 @@ from Tools.Stats.PySide6.stats_data_loader import (
     resolve_project_subfolder,
 )
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
-from Tools.Stats.PySide6.stats_worker import StatsWorker
+from Tools.Stats.PySide6.stats_workers import StatsWorker
 from Tools.Stats.PySide6.summary_utils import (
     StatsSummaryFrames,
     SummaryConfig,
