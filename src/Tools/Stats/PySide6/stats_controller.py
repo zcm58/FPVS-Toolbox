@@ -497,15 +497,15 @@ class StatsController:
             )
             return
 
-            self._view.append_log(
-                section,
-                f"{self._section_name(pipeline_id)} finished in {elapsed:.1f} s",
-            )
+        self._view.append_log(
+            section,
+            f"{self._section_name(pipeline_id)} finished in {elapsed:.1f} s",
+        )
         self._finalize_pipeline(
             pipeline_id,
             success=True,
             error_message=None,
-            exports_ran=state.run_exports,
+            exports_ran=exports_ran,
         )
         logger.info(
             "stats_pipeline_complete",
