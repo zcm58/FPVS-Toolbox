@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -17,8 +17,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
-    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -26,7 +24,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QComboBox,
     QTextEdit,
     QSizePolicy,
     QVBoxLayout,
@@ -77,6 +74,11 @@ HARMONIC_XLS = "Harmonic Results.xlsx"
 ANOVA_BETWEEN_XLS = "Mixed ANOVA Between Groups.xlsx"
 LMM_BETWEEN_XLS = "Mixed Model Between Groups.xlsx"
 GROUP_CONTRAST_XLS = "Group Contrasts.xlsx"
+
+
+class HarmonicConfig(NamedTuple):
+    metric: str
+    threshold: float
 
 
 # --------------------------- worker functions ---------------------------
@@ -138,8 +140,12 @@ class StatsWindow(QMainWindow):
         self.group_contrasts_results_data: Optional[pd.DataFrame] = None
         self.posthoc_results_data: Optional[pd.DataFrame] = None
         self.harmonic_check_results_data: List[dict] = []
+        self._harmonic_results: dict[PipelineId, list[dict]] = {
+            PipelineId.SINGLE: [],
+            PipelineId.BETWEEN: [],
+        }
         self.rois: Dict[str, List[str]] = {}
-        self._harmonic_metric: str = ""
+        self._harmonic_config: HarmonicConfig = HarmonicConfig("Z Score", 1.64)
         self._current_base_freq: float = 6.0
         self._current_alpha: float = 0.05
         self._active_pipeline: PipelineId | None = None
@@ -293,8 +299,6 @@ class StatsWindow(QMainWindow):
         buttons = [
             getattr(self, "analyze_single_btn", None),
             getattr(self, "single_advanced_btn", None),
-            getattr(self, "run_harm_btn", None),
-            getattr(self, "export_harm_btn", None),
             getattr(self, "analyze_between_btn", None),
             getattr(self, "between_advanced_btn", None),
             getattr(self, "btn_open_results", None),
@@ -346,11 +350,21 @@ class StatsWindow(QMainWindow):
             return None
         return base_freq, alpha
 
-    def _get_z_threshold_from_gui(self) -> float:
+    def _get_harmonic_settings(self) -> Optional[HarmonicConfig]:
+        ok_metric, metric = self._safe_settings_get("analysis", "harmonic_metric", "Z Score")
+        ok_threshold, threshold = self._safe_settings_get("analysis", "harmonic_threshold", 1.64)
         try:
-            return float(self.threshold_spin.value())
-        except Exception:
-            return 1.64
+            threshold_val = float(threshold)
+        except Exception as exc:
+            QMessageBox.critical(self, "Settings Error", f"Invalid harmonic threshold: {exc}")
+            return None
+
+        if not (ok_metric and ok_threshold):
+            QMessageBox.critical(self, "Settings Error", "Could not load harmonic settings.")
+            return None
+
+        metric_str = str(metric) if metric is not None else "Z Score"
+        return HarmonicConfig(metric_str, threshold_val)
 
     # --------- centralized pre-run guards ---------
 
@@ -375,6 +389,10 @@ class StatsWindow(QMainWindow):
         if not got:
             return False
         self._current_base_freq, self._current_alpha = got
+        harmonic_cfg = self._get_harmonic_settings()
+        if not harmonic_cfg:
+            return False
+        self._harmonic_config = harmonic_cfg
         if start_guard and not self._begin_run():
             return False
         return True
@@ -427,7 +445,7 @@ class StatsWindow(QMainWindow):
                     grouped,
                     save_path,
                     log_func,
-                    metric=(self._harmonic_metric or ""),
+                    metric=self._harmonic_config.metric,
                 )
 
             self._safe_export_call(_adapter, None, out_dir, fname)
@@ -471,7 +489,6 @@ class StatsWindow(QMainWindow):
             isinstance(self.posthoc_results_data, pd.DataFrame)
             and not self.posthoc_results_data.empty,
         )
-        _maybe_enable("export_harm_btn", bool(self.harmonic_check_results_data))
         _maybe_enable(
             "export_between_anova_btn",
             isinstance(self.between_anova_results_data, pd.DataFrame)
@@ -528,7 +545,7 @@ class StatsWindow(QMainWindow):
             frames.between_contrasts = self._to_dataframe(self.group_contrasts_results_data)
             frames.anova_terms = self._to_dataframe(self.between_anova_results_data)
             frames.mixed_model_terms = self._to_dataframe(self.between_mixed_model_results_data)
-        frames.harmonic_results = self._to_dataframe(self.harmonic_check_results_data)
+        frames.harmonic_results = self._to_dataframe(self._harmonic_results.get(pipeline_id))
         return frames
 
     def _render_summary(self, summary_text: str) -> None:
@@ -609,6 +626,7 @@ class StatsWindow(QMainWindow):
 
     def on_pipeline_started(self, pipeline_id: PipelineId) -> None:
         self._active_pipeline = pipeline_id
+        self._harmonic_results[pipeline_id] = []
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
             label.setText("Running…")
@@ -670,7 +688,7 @@ class StatsWindow(QMainWindow):
             alpha=0.05,
             min_effect=0.50,
             max_bullets=3,
-            z_threshold=self._get_z_threshold_from_gui(),
+            z_threshold=self._harmonic_config.threshold,
             p_col="p_fdr",
             effect_col="effect_size",
         )
@@ -684,6 +702,18 @@ class StatsWindow(QMainWindow):
         if pipeline_id is PipelineId.BETWEEN:
             return self._export_between_pipeline()
         return False
+
+    def _build_harmonic_kwargs(self) -> dict:
+        return dict(
+            subject_data=self.subject_data,
+            subjects=self.subjects,
+            conditions=self.conditions,
+            selected_metric=self._harmonic_config.metric,
+            mean_value_threshold=self._harmonic_config.threshold,
+            base_freq=self._current_base_freq,
+            alpha=self._current_alpha,
+            rois=self.rois,
+        )
 
     def get_step_config(
         self, pipeline_id: PipelineId, step_id: StepId
@@ -730,21 +760,10 @@ class StatsWindow(QMainWindow):
 
                 return kwargs, handler
             if step_id is StepId.HARMONIC_CHECK:
-                selected_metric = self.cb_metric.currentText()
-                mean_value_threshold = float(self.threshold_spin.value())
-                self._harmonic_metric = selected_metric
-                kwargs = dict(
-                    subject_data=self.subject_data,
-                    subjects=self.subjects,
-                    conditions=self.conditions,
-                    selected_metric=selected_metric,
-                    mean_value_threshold=mean_value_threshold,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                )
-                def handler(payload):
-                    self._apply_harmonic_results(payload, update_text=True)
+                kwargs = self._build_harmonic_kwargs()
+
+                def handler(payload, *, pid=pipeline_id):
+                    self._apply_harmonic_results(payload, pipeline_id=pid, update_text=True)
 
                 return kwargs, handler
         if pipeline_id is PipelineId.BETWEEN:
@@ -790,6 +809,13 @@ class StatsWindow(QMainWindow):
                     self._apply_group_contrasts_results(payload, update_text=True)
 
                 return kwargs, handler
+            if step_id is StepId.HARMONIC_CHECK:
+                kwargs = self._build_harmonic_kwargs()
+
+                def handler(payload, *, pid=pipeline_id):
+                    self._apply_harmonic_results(payload, pipeline_id=pid, update_text=True)
+
+                return kwargs, handler
         raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
 
     def _prompt_view_results(self, section: str, stats_folder: Path) -> None:
@@ -813,6 +839,7 @@ class StatsWindow(QMainWindow):
             ("anova", self.rm_anova_results_data, "RM-ANOVA"),
             ("lmm", self.mixed_model_results_data, "Mixed Model"),
             ("posthoc", self.posthoc_results_data, "Interaction Post-hocs"),
+            ("harmonic", self._harmonic_results.get(PipelineId.SINGLE), "Harmonic Check"),
         ]
         out_dir = self._ensure_results_dir()
         try:
@@ -826,6 +853,7 @@ class StatsWindow(QMainWindow):
                     "anova": ANOVA_XLS,
                     "lmm": LMM_XLS,
                     "posthoc": POSTHOC_XLS,
+                    "harmonic": HARMONIC_XLS,
                 }.get(kind, "results.xlsx")
                 paths.append(os.path.join(out_dir, fname))
             if paths:
@@ -843,6 +871,7 @@ class StatsWindow(QMainWindow):
             ("anova_between", self.between_anova_results_data, "Between-Group ANOVA"),
             ("lmm_between", self.between_mixed_model_results_data, "Between-Group Mixed Model"),
             ("group_contrasts", self.group_contrasts_results_data, "Group Contrasts"),
+            ("harmonic", self._harmonic_results.get(PipelineId.BETWEEN), "Harmonic Check"),
         ]
         out_dir = self._ensure_results_dir()
         try:
@@ -856,6 +885,7 @@ class StatsWindow(QMainWindow):
                     "anova_between": ANOVA_BETWEEN_XLS,
                     "lmm_between": LMM_BETWEEN_XLS,
                     "group_contrasts": GROUP_CONTRAST_XLS,
+                    "harmonic": HARMONIC_XLS,
                 }.get(kind, "results.xlsx")
                 paths.append(os.path.join(out_dir, fname))
             if paths:
@@ -1036,13 +1066,16 @@ class StatsWindow(QMainWindow):
         self._update_export_buttons()
         return output_text
 
-    def _apply_harmonic_results(self, payload: dict, *, update_text: bool = True) -> str:
+    def _apply_harmonic_results(
+        self, payload: dict, *, pipeline_id: PipelineId, update_text: bool = True
+    ) -> str:
         output_text = payload.get("output_text") or ""
         findings = payload.get("findings") or []
         if update_text:
             self.output_text.append(
                 output_text.strip() or "(Harmonic check returned empty text. See logs for details.)"
             )
+        self._harmonic_results[pipeline_id] = findings
         self.harmonic_check_results_data = findings
         self._update_export_buttons()
         return output_text
@@ -1079,7 +1112,8 @@ class StatsWindow(QMainWindow):
 
     @Slot(dict)
     def _on_harmonic_finished(self, payload: dict) -> None:
-        self._apply_harmonic_results(payload)
+        pipeline_id = self._active_pipeline or PipelineId.SINGLE
+        self._apply_harmonic_results(payload, pipeline_id=pipeline_id)
         self._end_run()
 
     # --------------------------- UI building ---------------------------
@@ -1145,41 +1179,6 @@ class StatsWindow(QMainWindow):
         single_group_box = QGroupBox("Single Group Analysis")
         single_group_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
         single_layout = QVBoxLayout(single_group_box)
-
-        settings_box = QGroupBox("Detection / Harmonic Settings")
-        settings_layout = QFormLayout(settings_box)
-        settings_layout.setLabelAlignment(Qt.AlignLeft)
-
-        metric_row = QHBoxLayout()
-        self.cb_metric = QComboBox()
-        self.cb_metric.addItems(["Z Score", "SNR", "Amplitude"])
-        metric_row.addWidget(self.cb_metric)
-        metric_row.addStretch(1)
-        settings_layout.addRow(QLabel("Metric:"), metric_row)
-
-        threshold_row = QHBoxLayout()
-        self.threshold_spin = QDoubleSpinBox()
-        self.threshold_spin.setRange(0.0, 10.0)
-        self.threshold_spin.setSingleStep(0.01)
-        self.threshold_spin.setValue(1.64)
-        threshold_row.addWidget(self.threshold_spin)
-        threshold_row.addStretch(1)
-        settings_layout.addRow(QLabel("Mean Threshold:"), threshold_row)
-
-        harm_row = QHBoxLayout()
-        self.run_harm_btn = QPushButton("Run Harmonic Check")
-        self.run_harm_btn.clicked.connect(self.on_run_harmonic_check)
-        self.run_harm_btn.setShortcut("Ctrl+H")
-        harm_row.addWidget(self.run_harm_btn)
-
-        self.export_harm_btn = QPushButton("Export Harmonic Results")
-        self.export_harm_btn.clicked.connect(self.on_export_harmonic)
-        self.export_harm_btn.setShortcut("Ctrl+Shift+H")
-        harm_row.addWidget(self.export_harm_btn)
-        harm_row.addStretch(1)
-        settings_layout.addRow(QLabel("Harmonic Tools:"), harm_row)
-
-        single_layout.addWidget(settings_box)
 
         single_action_row = QHBoxLayout()
         single_action_row.addStretch(1)
@@ -1420,15 +1419,6 @@ class StatsWindow(QMainWindow):
         our()
         self._controller.run_single_group_posthoc_only()
 
-    def on_run_harmonic_check(self) -> None:
-        selected_metric = self.cb_metric.currentText()
-
-        self.output_text.clear()
-        self.harmonic_check_results_data = []
-        self._update_export_buttons()
-        self._harmonic_metric = selected_metric  # for legacy exporter
-        self._controller.run_harmonic_check_only()
-
     # ---- exports ----
 
     def on_export_rm_anova(self) -> None:
@@ -1494,17 +1484,6 @@ class StatsWindow(QMainWindow):
         try:
             self.export_results("group_contrasts", self.group_contrasts_results_data, out_dir)
             self._set_status(f"Group contrasts exported to: {out_dir}")
-        except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
-
-    def on_export_harmonic(self) -> None:
-        if not self.harmonic_check_results_data:
-            QMessageBox.information(self, "No Results", "Run Harmonic Check first.")
-            return
-        out_dir = self._ensure_results_dir()
-        try:
-            self.export_results("harmonic", self.harmonic_check_results_data, out_dir)
-            self._set_status(f"Harmonic check results exported to: {out_dir}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
 
