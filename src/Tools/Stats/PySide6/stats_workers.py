@@ -17,6 +17,11 @@ import logging
 import time
 from typing import Any, Callable, Dict
 
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 
 import pandas as pd
@@ -35,6 +40,13 @@ from Tools.Stats.Legacy.stats_analysis import (
 )
 
 logger = logging.getLogger("Tools.Stats")
+
+BETWEEN_STAGE_ORDER = (
+    "BETWEEN_GROUP_ANOVA",
+    "BETWEEN_GROUP_MIXED_MODEL",
+    "GROUP_CONTRASTS",
+    "HARMONIC_CHECK",
+)
 
 
 class StatsWorker(QRunnable):
@@ -442,4 +454,89 @@ def run_harmonic_check(
         do_wilcoxon_sensitivity=True,
     )
     return {"output_text": output_text, "findings": findings}
+
+
+def _progress_from_stage(stage_name: str, *, done: bool) -> int:
+    try:
+        idx = BETWEEN_STAGE_ORDER.index(stage_name)
+    except ValueError:
+        return 0
+    total = len(BETWEEN_STAGE_ORDER)
+    completed = idx + (1 if done else 0)
+    pct = int(completed / total * 100)
+    return max(0, min(100, pct))
+
+
+def run_between_group_process_task(
+    progress_cb,
+    message_cb,
+    *,
+    job_spec_path: str,
+    python_executable: str | None = None,
+):
+    """Spawn the between-group CLI in a separate Python process.
+
+    The CLI performs ANOVA → Mixed Model → Group Contrasts → Harmonic Check
+    sequentially and writes a JSON summary. This wrapper executes it inside a
+    worker thread, streaming stdout messages back to the GUI and enforcing
+    subprocess isolation.
+    """
+
+    job_path = Path(job_spec_path)
+    if not job_path.is_file():
+        raise FileNotFoundError(f"Job spec not found: {job_spec_path}")
+
+    exe = python_executable or sys.executable
+    cmd = [exe, "-m", "Tools.Stats.Legacy.between_groups_cli", str(job_path)]
+
+    stdout_lines: list[str] = []
+    stderr_output = ""
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    try:
+        assert process.stdout is not None
+        for line in process.stdout:
+            if line is None:
+                continue
+            stripped = line.rstrip()
+            stdout_lines.append(stripped)
+            message_cb(stripped)
+
+            if stripped.startswith("STAGE_START:"):
+                stage_name = stripped.split(":", 1)[1]
+                progress_cb(_progress_from_stage(stage_name, done=False))
+            elif stripped.startswith("STAGE_DONE:"):
+                stage_name = stripped.split(":", 1)[1]
+                progress_cb(_progress_from_stage(stage_name, done=True))
+
+        stderr_output = process.stderr.read() if process.stderr else ""
+        process.wait()
+    finally:
+        if process.stdout:
+            process.stdout.close()
+        if process.stderr:
+            process.stderr.close()
+
+    if process.returncode != 0:
+        err_msg = stderr_output.strip() or f"Between-group CLI exited with {process.returncode}"
+        raise RuntimeError(err_msg)
+
+    spec_data = json.loads(job_path.read_text())
+    summary_path = Path(spec_data.get("output", {}).get("summary_json", ""))
+    if not summary_path.is_file():
+        raise RuntimeError("Between-group CLI completed but summary file is missing.")
+
+    summary = json.loads(summary_path.read_text())
+    return {
+        "summary": summary,
+        "stdout": stdout_lines,
+        "stderr": stderr_output,
+    }
 
