@@ -33,7 +33,7 @@ class StatsViewProtocol:
         pipeline_id: PipelineId,
         step: PipelineStep,
         *,
-        finished_cb: Callable[[PipelineId, StepId, dict], None],
+        finished_cb: Callable[[PipelineId, StepId, object], None],
         error_cb: Callable[[PipelineId, StepId, str], None],
     ) -> None: ...
 
@@ -376,7 +376,7 @@ class StatsController:
                 exports_ran=False,
             )
 
-    def _on_step_finished(self, pipeline_id: PipelineId, step_id: StepId, payload: dict) -> None:
+    def _on_step_finished(self, pipeline_id: PipelineId, step_id: StepId, payload: object) -> None:
         try:
             state = self._states[pipeline_id]
             if not state.running:
@@ -384,11 +384,21 @@ class StatsController:
             if state.current_step_index >= len(state.steps):
                 raise RuntimeError("Received step finished signal with no pending step")
             step = state.steps[state.current_step_index]
+
+            handler = getattr(step, "handler", None)
+            if handler is None:
+                logger.error(
+                    "stats_step_handler_missing",
+                    extra={"pipeline": pipeline_id.name, "step": step_id.name},
+                )
+                self._on_step_error(pipeline_id, step_id, "No handler registered for step.")
+                return
+
             try:
-                step.handler(payload)
-                state.results[step_id] = payload
+                handler(payload)
+                state.results[step_id] = payload if isinstance(payload, dict) else {"result": payload}
             except Exception as exc:  # noqa: BLE001
-                logger.exception(
+                logger.error(
                     "stats_step_handler_error",
                     extra={
                         "pipeline": pipeline_id.name,
@@ -396,7 +406,7 @@ class StatsController:
                         "error": str(exc),
                     },
                 )
-                self._on_step_error(pipeline_id, step_id, str(exc))
+                self._on_step_error(pipeline_id, step_id, f"Step handler failed: {exc}")
                 return
 
             logger.info(

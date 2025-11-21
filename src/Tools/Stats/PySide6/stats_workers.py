@@ -47,7 +47,7 @@ class StatsWorker(QRunnable):
         progress = Signal(int)
         message = Signal(str)
         error = Signal(str)
-        finished = Signal(dict)
+        finished = Signal(object)
 
     def __init__(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
         super().__init__()
@@ -71,11 +71,15 @@ class StatsWorker(QRunnable):
             try:
                 self.signals.finished.emit(payload)
             except Exception as emit_exc:  # noqa: BLE001
-                logger.exception(
+                logger.error(
                     "stats_run_emit_failed",
-                    extra={"op": self._op, "exc_type": type(emit_exc).__name__},
+                    extra={
+                        "op": self._op,
+                        "callable": getattr(self._fn, "__name__", str(self._fn)),
+                        "exc": repr(emit_exc),
+                    },
                 )
-                self.signals.error.emit(str(emit_exc))
+                self.signals.error.emit(f"Worker emit failed: {emit_exc}")
         except Exception as exc:  # noqa: BLE001
             logger.exception("stats_run_failed", extra={"op": self._op, "exc_type": type(exc).__name__})
             self.signals.error.emit(str(exc))
