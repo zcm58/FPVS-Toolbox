@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QMessageBox
 from Tools.Stats.Legacy import stats_analysis, stats_helpers
 from Tools.Stats.PySide6 import stats_workers
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
-from Tools.Stats.PySide6.stats_worker import StatsWorker
+from Tools.Stats.PySide6.stats_workers import StatsWorker
 
 
 def _prepare_window(win: StatsWindow, monkeypatch: pytest.MonkeyPatch) -> None:
