@@ -467,6 +467,8 @@ class StatsController:
         section = self._section_label(pipeline_id)
         elapsed = time.perf_counter() - state.start_ts if state.start_ts else 0.0
         exports_ran = False
+        success = True
+        error_message: Optional[str] = None
 
         try:
             if state.run_exports:
@@ -478,19 +480,14 @@ class StatsController:
                         "  • Export failed; see log for details",
                         level="error",
                     )
-                    self._finalize_pipeline(
-                        pipeline_id,
-                        success=False,
-                        error_message="Export failed",
-                        exports_ran=False,
-                    )
-                    return
+                    success = False
+                    error_message = "Export failed"
 
-            if state.run_summary:
+            if success and state.run_summary:
                 self._view.build_and_render_summary(pipeline_id)
         except Exception as exc:  # noqa: BLE001
             logger.error(
-                "stats_pipeline_finalize_error",
+                "stats_pipeline_complete_error",
                 exc_info=True,
                 extra={"pipeline": pipeline_id.name, "exc": str(exc)},
             )
@@ -499,30 +496,50 @@ class StatsController:
                 f"  • Error during finalization for {pipeline_id.name}: {exc}",
                 level="error",
             )
-            self._finalize_pipeline(
-                pipeline_id,
-                success=False,
-                error_message=f"Error during finalization for {pipeline_id.name}: {exc}",
-                exports_ran=exports_ran,
-            )
-            return
+            success = False
+            error_message = error_message or f"Error during finalization for {pipeline_id.name}: {exc}"
+        finally:
+            try:
+                if success:
+                    self._view.append_log(
+                        section,
+                        f"{self._section_name(pipeline_id)} finished in {elapsed:.1f} s",
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "stats_pipeline_finalize_log_error",
+                    exc_info=True,
+                    extra={"pipeline": pipeline_id.name, "error": str(exc)},
+                )
+                success = False
+                error_message = error_message or f"Error finalizing pipeline log: {exc}"
 
-        self._view.append_log(
-            section,
-            f"{self._section_name(pipeline_id)} finished in {elapsed:.1f} s",
-        )
-        self._finalize_pipeline(
-            pipeline_id,
-            success=True,
-            error_message=None,
-            exports_ran=exports_ran,
-        )
+            finalize_exports_ran = exports_ran if success else False
+            try:
+                self._finalize_pipeline(
+                    pipeline_id,
+                    success=success,
+                    error_message=error_message,
+                    exports_ran=finalize_exports_ran,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "stats_pipeline_finalize_error",
+                    exc_info=True,
+                    extra={
+                        "pipeline": pipeline_id.name,
+                        "success": success,
+                        "error": str(exc),
+                    },
+                )
+
         logger.info(
             "stats_pipeline_complete",
             extra={
                 "pipeline": pipeline_id.name,
                 "elapsed_s": elapsed,
                 "exports_ran": exports_ran,
+                "success": success,
             },
         )
 
@@ -533,7 +550,7 @@ class StatsController:
         success: bool,
         error_message: Optional[str],
         exports_ran: bool = False,
-        ) -> None:
+    ) -> None:
         state = self._states[pipeline_id]
         state.running = False
         state.failed = not success
@@ -541,8 +558,9 @@ class StatsController:
         state.run_exports = True
         state.run_summary = True
         state.start_ts = 0.0
+
         logger.info(
-            "stats_pipeline_finalized",
+            "stats_finalize_start",
             extra={
                 "pipeline": pipeline_id.name,
                 "success": success,
@@ -550,22 +568,47 @@ class StatsController:
                 "exports_ran": exports_ran,
             },
         )
+
         try:
             self._view.set_busy(False)
-        finally:
-            try:
-                self._view.on_analysis_finished(
-                    pipeline_id,
-                    success=success,
-                    error_message=error_message,
-                    exports_ran=exports_ran if success else False,
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "stats_finalize_view_failed",
-                    exc_info=True,
-                    extra={"pipeline": pipeline_id.name},
-                )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_finalize_view_error",
+                exc_info=True,
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "view_method": "set_busy",
+                    "error": str(exc),
+                },
+            )
+
+        try:
+            self._view.on_analysis_finished(
+                pipeline_id,
+                success=success,
+                error_message=error_message,
+                exports_ran=exports_ran if success else False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_finalize_view_error",
+                exc_info=True,
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "view_method": "on_analysis_finished",
+                    "error": str(exc),
+                },
+            )
+
+        logger.info(
+            "stats_finalize_end",
+            extra={
+                "pipeline": pipeline_id.name,
+                "success": success,
+                "error_message": error_message,
+                "exports_ran": exports_ran,
+            },
+        )
 
     def _section_label(self, pipeline_id: PipelineId) -> str:
         return "Single" if pipeline_id is PipelineId.SINGLE else "Between"

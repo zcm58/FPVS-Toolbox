@@ -314,12 +314,14 @@ class StatsWindow(QMainWindow):
         for b in buttons:
             if b:
                 b.setEnabled(not running)
-        if running:
-            self.spinner.show()
-            self.spinner.start()
-        else:
-            self.spinner.stop()
-            self.spinner.hide()
+        spinner = getattr(self, "spinner", None)
+        if spinner:
+            if running:
+                spinner.show()
+                spinner.start()
+            else:
+                spinner.stop()
+                spinner.hide()
 
     def _begin_run(self) -> bool:
         if not self._guard.start():
@@ -598,8 +600,12 @@ class StatsWindow(QMainWindow):
     def set_busy(self, is_busy: bool) -> None:
         try:
             self._set_running(is_busy)
-        except Exception:  # noqa: BLE001
-            logger.exception("stats_set_busy_failed", exc_info=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_view_set_busy_error",
+                exc_info=True,
+                extra={"is_busy": is_busy, "error": str(exc)},
+            )
 
     def start_step_worker(
         self,
@@ -684,18 +690,41 @@ class StatsWindow(QMainWindow):
                     QMessageBox.critical(self, "Analysis Error", error_message)
                 except Exception:  # noqa: BLE001
                     logger.exception("Failed to display error dialog", exc_info=True)
-        except Exception:  # noqa: BLE001
-            logger.exception("stats_on_analysis_finished_failed", exc_info=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_view_on_finished_error",
+                exc_info=True,
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "success": success,
+                    "error_message": error_message,
+                    "error": str(exc),
+                },
+            )
         finally:
             try:
                 if btn:
                     btn.setEnabled(True)
             except Exception:  # noqa: BLE001
                 logger.exception("stats_finish_button_enable_failed", exc_info=True)
-            self._update_export_buttons()
-            self._log_pipeline_event(
-                pipeline=pipeline_id, event="complete", extra={"success": success}
-            )
+            try:
+                self._update_export_buttons()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "stats_update_export_buttons_failed",
+                    exc_info=True,
+                    extra={"pipeline": pipeline_id.name, "error": str(exc)},
+                )
+            try:
+                self._log_pipeline_event(
+                    pipeline=pipeline_id, event="complete", extra={"success": success}
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "stats_pipeline_event_log_failed",
+                    exc_info=True,
+                    extra={"pipeline": pipeline_id.name, "error": str(exc)},
+                )
 
     def build_and_render_summary(self, pipeline_id: PipelineId) -> None:
         cfg = SummaryConfig(
