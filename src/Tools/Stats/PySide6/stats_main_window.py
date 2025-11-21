@@ -439,6 +439,12 @@ class StatsWindow(QMainWindow):
         func, fname = mapping[kind]
         if kind == "harmonic":
             grouped = self._group_harmonic(data)
+            has_rows = any(
+                roi_entries for roi_data in grouped.values() for roi_entries in roi_data.values()
+            )
+            if not has_rows:
+                self._set_status("No harmonic check results to export.")
+                return
 
             def _adapter(_ignored, *, save_path, log_func):
                 export_harmonic_results_to_excel(
@@ -845,6 +851,21 @@ class StatsWindow(QMainWindow):
         try:
             paths: list[str] = []
             for kind, data_obj, label in exports:
+                if kind == "harmonic":
+                    grouped = self._group_harmonic(data_obj)
+                    has_rows = any(
+                        roi_entries
+                        for roi_data in grouped.values()
+                        for roi_entries in roi_data.values()
+                    )
+                    if not has_rows:
+                        self.append_log(
+                            section,
+                            f"  • Skipping export for {label} (no significant harmonics)",
+                            level="warning",
+                        )
+                        continue
+                    data_obj = grouped
                 if data_obj is None:
                     self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
                     return False
@@ -877,6 +898,21 @@ class StatsWindow(QMainWindow):
         try:
             paths: list[str] = []
             for kind, data_obj, label in exports:
+                if kind == "harmonic":
+                    grouped = self._group_harmonic(data_obj)
+                    has_rows = any(
+                        roi_entries
+                        for roi_data in grouped.values()
+                        for roi_entries in roi_data.values()
+                    )
+                    if not has_rows:
+                        self.append_log(
+                            section,
+                            f"  • Skipping export for {label} (no significant harmonics)",
+                            level="warning",
+                        )
+                        continue
+                    data_obj = grouped
                 if data_obj is None:
                     self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
                     return False
