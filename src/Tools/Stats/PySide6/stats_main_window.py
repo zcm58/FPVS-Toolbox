@@ -309,6 +309,7 @@ class StatsWindow(QMainWindow):
             getattr(self, "single_advanced_btn", None),
             getattr(self, "analyze_between_btn", None),
             getattr(self, "between_advanced_btn", None),
+            getattr(self, "lela_mode_btn", None),
             getattr(self, "btn_open_results", None),
         ]
         for b in buttons:
@@ -632,6 +633,18 @@ class StatsWindow(QMainWindow):
 
     def ensure_results_dir(self) -> str:
         return self._ensure_results_dir()
+
+    def prompt_phase_folder(self, title: str, start_dir: str | None = None) -> Optional[str]:
+        folder = QFileDialog.getExistingDirectory(self, title, start_dir or self.project_dir)
+        return folder or None
+
+    def get_analysis_settings_snapshot(self) -> tuple[float, float, dict]:
+        self.refresh_rois()
+        got = self._get_analysis_settings()
+        if not got:
+            raise RuntimeError("Unable to load analysis settings.")
+        self._current_base_freq, self._current_alpha = got
+        return self._current_base_freq, self._current_alpha, self.rois
 
     def ensure_pipeline_ready(
         self, pipeline_id: PipelineId, *, require_anova: bool = False
@@ -1278,6 +1291,10 @@ class StatsWindow(QMainWindow):
         between_action_row.addWidget(self.between_advanced_btn)
         between_layout.addLayout(between_action_row)
 
+        self.lela_mode_btn = QPushButton("Lela Mode (Cross-Phase LMM)")
+        self.lela_mode_btn.clicked.connect(self.on_run_lela_mode)
+        between_layout.addWidget(self.lela_mode_btn)
+
         self.between_status_lbl = QLabel("Idle")
         self.between_status_lbl.setWordWrap(True)
         between_layout.addWidget(self.between_status_lbl)
@@ -1489,6 +1506,9 @@ class StatsWindow(QMainWindow):
         self.between_mixed_model_results_data = None
         self._update_export_buttons()
         self._controller.run_between_group_mixed_only()
+
+    def on_run_lela_mode(self) -> None:
+        self._controller.run_lela_mode_analysis()
 
     def on_run_group_contrasts(self) -> None:
         self.output_text.clear()

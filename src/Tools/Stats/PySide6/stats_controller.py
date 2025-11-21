@@ -18,10 +18,13 @@ from typing import Any, Callable, Dict, Optional, Sequence
 
 import pandas as pd
 import sys
+from PySide6.QtCore import QThreadPool
 
 from . import stats_workers
 from .stats_core import PipelineId, PipelineStep, StepId
 from .stats_logging import format_step_event
+from .stats_data_loader import load_manifest_data, load_project_scan, resolve_project_subfolder
+from Main_App.PySide6_App.Backend.project import STATS_SUBFOLDER_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,10 @@ class StatsViewProtocol:
     ) -> tuple[dict, Callable[[dict], None]]: ...
 
     def ensure_results_dir(self) -> str: ...
+
+    def prompt_phase_folder(self, title: str, start_dir: str | None = None) -> Optional[str]: ...
+
+    def get_analysis_settings_snapshot(self) -> tuple[float, float, dict]: ...
 
 
 @dataclass
@@ -129,6 +136,7 @@ class StatsController:
             PipelineId.SINGLE: SectionRunState(pipeline_id=PipelineId.SINGLE),
             PipelineId.BETWEEN: SectionRunState(pipeline_id=PipelineId.BETWEEN),
         }
+        self._lela_running = False
 
     def run_single_group_analysis(
         self,
@@ -206,6 +214,92 @@ class StatsController:
             run_exports=False,
             run_summary=False,
         )
+
+    def run_lela_mode_analysis(self) -> None:
+        """
+        Build and launch a generic cross-phase LMM job ("Lela Mode") in the
+        legacy subprocess.
+        """
+
+        section = self._section_label(PipelineId.BETWEEN)
+        if self._states[PipelineId.BETWEEN].running or self._lela_running:
+            self._view.append_log(
+                section,
+                "[Between] Another analysis is already running; Lela Mode request ignored.",
+                level="warning",
+            )
+            return
+
+        try:
+            base_freq, _alpha, roi_map = self._view.get_analysis_settings_snapshot()
+        except Exception as exc:  # noqa: BLE001
+            self._view.append_log(section, f"[Between] Unable to load analysis settings: {exc}", level="error")
+            return
+
+        phase_specs: dict[str, dict] = {}
+        phase_roots: list[tuple[Path, dict | None]] = []
+        for idx in range(2):
+            title = f"Select Phase {idx + 1} project folder"
+            folder = self._view.prompt_phase_folder(title)
+            if not folder:
+                self._view.append_log(section, "[Between] Lela Mode cancelled (no folder selected).")
+                return
+            try:
+                scan = load_project_scan(folder)
+            except Exception as exc:  # noqa: BLE001
+                self._view.append_log(
+                    section,
+                    f"[Between] Failed to read phase project at {folder}: {exc}",
+                    level="error",
+                )
+                return
+            phase_label = Path(folder).name or f"Phase {idx + 1}"
+            phase_specs[phase_label] = {
+                "subjects": scan.subjects,
+                "conditions": scan.conditions,
+                "subject_data": scan.subject_data,
+                "group_map": scan.subject_groups,
+            }
+            phase_roots.append((Path(folder), scan.manifest))
+
+        output_dir = self._resolve_stats_output_dir(*phase_roots[0]) if phase_roots else Path.cwd()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        ts = int(time.time())
+        job_spec_path = output_dir / f"cross_phase_job_{ts}.json"
+        summary_path = output_dir / "CrossPhase_LMM_Summary.json"
+        excel_path = output_dir / "Cross-Phase LMM Analysis.xlsx"
+
+        job_spec = {
+            "mode": "cross_phase_lmm",
+            "phase_projects": phase_specs,
+            "roi_map": roi_map,
+            "base_freq": base_freq,
+            "output": {
+                "summary_json": str(summary_path),
+                "excel_report": str(excel_path),
+            },
+        }
+
+        job_spec_path.write_text(json.dumps(job_spec, indent=2))
+
+        self._lela_running = True
+        self._view.set_busy(True)
+        self._view.append_log(section, "[Between] Launching Lela Mode (cross-phase LMM)…")
+        self._view.append_log(section, "[Between] Lela Mode: running cross-phase LMM…")
+
+        worker = stats_workers.StatsWorker(
+            stats_workers.run_between_group_process_task,
+            job_spec_path=str(job_spec_path),
+            _op="cross_phase_lmm",
+        )
+        worker.signals.message.connect(
+            lambda msg, pid=PipelineId.BETWEEN: self._on_between_process_message(pid, msg)
+        )
+        worker.signals.finished.connect(
+            lambda payload, excel=excel_path: self._on_lela_mode_finished(payload, excel)
+        )
+        worker.signals.error.connect(self._on_lela_mode_error)
+        QThreadPool.globalInstance().start(worker)
 
     def is_running(self, pipeline_id: PipelineId) -> bool:
         return self._states[pipeline_id].running
@@ -432,6 +526,24 @@ class StatsController:
         job_spec_path.write_text(json.dumps(spec, indent=2))
         return job_spec_path, summary_path
 
+    def _resolve_stats_output_dir(self, excel_root: Path, manifest: dict | None) -> Path:
+        project_root = self._find_project_root(excel_root)
+        results_folder, subfolders = load_manifest_data(project_root, manifest)
+        return resolve_project_subfolder(
+            project_root,
+            results_folder,
+            subfolders,
+            "stats",
+            STATS_SUBFOLDER_NAME,
+        )
+
+    @staticmethod
+    def _find_project_root(path: Path) -> Path:
+        for candidate in (path, *path.parents):
+            if (candidate / "project.json").is_file():
+                return candidate
+        return path
+
     def _run_next_step(self, pipeline_id: PipelineId) -> None:
         try:
             state = self._states[pipeline_id]
@@ -524,6 +636,19 @@ class StatsController:
             return
 
         self._view.append_log(section, text)
+
+    def _on_lela_mode_finished(self, payload: object, excel_path: Path) -> None:
+        section = self._section_label(PipelineId.BETWEEN)
+        self._lela_running = False
+        self._view.set_busy(False)
+        self._view.append_log(section, "[Between] Lela Mode: complete — see Cross-Phase LMM Analysis.xlsx")
+        self._view.append_log(section, f"  • Excel: {excel_path}")
+
+    def _on_lela_mode_error(self, error_message: str) -> None:
+        section = self._section_label(PipelineId.BETWEEN)
+        self._lela_running = False
+        self._view.set_busy(False)
+        self._view.append_log(section, f"[Between] Lela Mode error: {error_message}", level="error")
 
     def _deserialize_between_payload(self, step_id: StepId, raw: dict) -> dict:
         def _df(payload: Optional[dict]) -> Optional[pd.DataFrame]:
