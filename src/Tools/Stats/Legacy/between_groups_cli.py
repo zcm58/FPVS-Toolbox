@@ -21,16 +21,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
 from Tools.Stats.Legacy.blas_limits import single_threaded_blas
 from Tools.Stats.Legacy.group_contrasts import compute_group_contrasts
 from Tools.Stats.Legacy.interpretation_helpers import generate_lme_summary
+from Tools.Stats.Legacy.cross_phase_lmm_core import (
+    build_cross_phase_long_df,
+    run_cross_phase_lmm,
+)
 from Tools.Stats.Legacy.mixed_effects_model import run_mixed_effects_model
 from Tools.Stats.Legacy.mixed_group_anova import run_mixed_group_anova
 from Tools.Stats.Legacy.stats_analysis import (
@@ -38,6 +43,7 @@ from Tools.Stats.Legacy.stats_analysis import (
     run_harmonic_check as legacy_run_harmonic_check,
     set_rois,
 )
+from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
 
 
 # ------------------------------ utilities -------------------------------
@@ -197,7 +203,7 @@ def _run_harmonic(spec: JobSpec, log_func: Callable[[str], None]):
 # ------------------------------ main runner -----------------------------
 
 
-def run_pipeline(spec: JobSpec) -> dict:
+def run_between_groups_pipeline(spec: JobSpec) -> dict:
     set_rois(spec.roi_map)
 
     _stage_marker("START", "BETWEEN_GROUP_ANOVA")
@@ -273,6 +279,127 @@ def run_pipeline(spec: JobSpec) -> dict:
     return results
 
 
+def run_pipeline(spec: JobSpec) -> dict:
+    """Backward-compatible alias for the between-group pipeline."""
+
+    return run_between_groups_pipeline(spec)
+
+
+def run_cross_phase_lmm_pipeline(spec: dict) -> int:
+    """
+    CLI entrypoint for generic cross-phase LMM.
+
+    Uses cross_phase_lmm_core.build_cross_phase_long_df / run_cross_phase_lmm.
+    Returns 0 on success, non-zero on failure.
+    """
+
+    logger = logging.getLogger("cross_phase_lmm")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(handler)
+
+    summary_path: Path | None = None
+
+    try:
+        # spec["phase_projects"] = {phase_label: {subjects, conditions, subject_data, group_map}}
+        phase_projects = spec.get("phase_projects")
+        if not isinstance(phase_projects, dict) or len(phase_projects) < 2:
+            raise ValueError("Cross-phase LMM requires at least two phase projects.")
+
+        phase_labels: Tuple[str, ...] = tuple(phase_projects.keys())
+        roi_map = spec.get("roi_map", {})
+        base_freq = float(spec.get("base_freq", 6.0))
+        set_rois(roi_map)
+
+        phase_data: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
+        phase_group_maps: Dict[str, Dict[str, str]] = {}
+
+        for phase_label, project_spec in phase_projects.items():
+            try:
+                subjects = project_spec["subjects"]
+                conditions = project_spec["conditions"]
+                subject_data = project_spec["subject_data"]
+            except KeyError as exc:  # pragma: no cover - defensive
+                raise ValueError(f"Missing required key for phase '{phase_label}': {exc}") from exc
+
+            logger.info("Preparing summed BCA data for phase '%s'…", phase_label)
+            with single_threaded_blas():
+                bca_data = prepare_all_subject_summed_bca_data(
+                    subjects=subjects,
+                    conditions=conditions,
+                    subject_data=subject_data,
+                    base_freq=base_freq,
+                    roi_map=roi_map,
+                    log_func=logger.info,
+                )
+            phase_data[phase_label] = bca_data
+            phase_group_maps[phase_label] = project_spec.get("group_map", {})
+
+        df_long = build_cross_phase_long_df(phase_data, phase_group_maps, phase_labels)
+        subject_count = int(df_long["subject"].nunique()) if not df_long.empty else 0
+        logger.info("Prepared cross-phase dataset with %d subjects.", subject_count)
+        logger.info("Running cross-phase LMM with factors: group, phase, condition, roi")
+
+        results = run_cross_phase_lmm(
+            df_long,
+            focal_condition=spec.get("focal_condition"),
+            focal_roi=spec.get("focal_roi"),
+            logger=logger,
+        )
+
+        effects_of_interest = results.get("effects_of_interest") or {}
+        for contrast in effects_of_interest.get("contrasts", []) or []:
+            label = contrast.get("label", "")
+            p_value = contrast.get("p")
+            logger.info("Effect of interest '%s' p-value: %s", label, p_value)
+
+        output_spec = spec.get("output", {})
+        if "summary_json" not in output_spec or "excel_report" not in output_spec:
+            raise ValueError("Cross-phase LMM output paths must be provided.")
+
+        summary_path = Path(output_spec["summary_json"])
+        excel_path = Path(output_spec["excel_report"])
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        excel_path.parent.mkdir(parents=True, exist_ok=True)
+
+        summary_path.write_text(json.dumps(results, indent=2))
+
+        fixed_effects_df = pd.DataFrame(results.get("fixed_effects") or [])
+        if fixed_effects_df.empty:
+            fixed_effects_df = pd.DataFrame(
+                columns=["effect", "estimate", "se", "stat", "p"]
+            )
+
+        with pd.ExcelWriter(excel_path, engine="xlsxwriter") as writer:
+            _auto_format_and_write_excel(
+                writer, fixed_effects_df, "Fixed Effects", logger.info
+            )
+
+            if effects_of_interest:
+                contrasts_df = pd.DataFrame(effects_of_interest.get("contrasts") or [])
+                if contrasts_df.empty:
+                    contrasts_df = pd.DataFrame(
+                        columns=["label", "estimate", "se", "stat", "p"]
+                    )
+                _auto_format_and_write_excel(
+                    writer, contrasts_df, "Effects of Interest", logger.info
+                )
+
+        logger.info("Cross-phase LMM analysis complete.")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"Cross-phase LMM failed: {exc}\n")
+        if summary_path is not None:
+            try:
+                summary_path.parent.mkdir(parents=True, exist_ok=True)
+                summary_path.write_text(json.dumps({"error": str(exc)}, indent=2))
+            except Exception:  # noqa: BLE001
+                pass
+        return 1
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Between-group stats pipeline")
     parser.add_argument("job_spec", help="Path to JSON job specification")
@@ -280,22 +407,37 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     job_path = Path(args.job_spec)
     try:
-        spec = JobSpec.load(job_path)
+        raw_spec = json.loads(job_path.read_text())
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"Failed to read job spec: {exc}\n")
         return 2
 
-    try:
-        results = run_pipeline(spec)
-        summary_payload = {
-            "steps": results.get("steps", {}),
-        }
-        spec.output_summary.parent.mkdir(parents=True, exist_ok=True)
-        spec.output_summary.write_text(json.dumps(summary_payload, indent=2))
-        return 0
-    except Exception as exc:  # noqa: BLE001
-        sys.stderr.write(f"{exc}\n")
-        return 1
+    mode = raw_spec.get("mode", "between_groups") if isinstance(raw_spec, dict) else "between_groups"
+
+    if mode == "between_groups":
+        try:
+            spec = JobSpec.load(job_path)
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"Failed to read job spec: {exc}\n")
+            return 2
+
+        try:
+            results = run_between_groups_pipeline(spec)
+            summary_payload = {
+                "steps": results.get("steps", {}),
+            }
+            spec.output_summary.parent.mkdir(parents=True, exist_ok=True)
+            spec.output_summary.write_text(json.dumps(summary_payload, indent=2))
+            return 0
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"{exc}\n")
+            return 1
+
+    if mode == "cross_phase_lmm":
+        return run_cross_phase_lmm_pipeline(raw_spec)
+
+    sys.stderr.write(f"Unknown stats mode: {mode}\n")
+    return 2
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entrypoint
