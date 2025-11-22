@@ -301,12 +301,20 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
         logger.addHandler(handler)
 
     summary_path: Path | None = None
+    excel_path: Path | None = None
 
     try:
         # spec["phase_projects"] = {phase_label: {subjects, conditions, subject_data, group_map}}
         phase_projects = spec.get("phase_projects")
         if not isinstance(phase_projects, dict) or len(phase_projects) < 2:
             raise ValueError("Cross-phase LMM requires at least two phase projects.")
+
+        output_spec = spec.get("output", {})
+        if "summary_json" not in output_spec or "excel_report" not in output_spec:
+            raise ValueError("Cross-phase LMM output paths must be provided.")
+
+        summary_path = Path(output_spec["summary_json"])
+        excel_path = Path(output_spec["excel_report"])
 
         phase_labels: Tuple[str, ...] = tuple(phase_projects.keys())
         roi_map = spec.get("roi_map", {})
@@ -317,14 +325,32 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
         phase_group_maps: Dict[str, Dict[str, str]] = {}
 
         for phase_label, project_spec in phase_projects.items():
+            if not isinstance(project_spec, dict):  # pragma: no cover - defensive
+                raise ValueError(
+                    f"Phase spec for '{phase_label}' must be a mapping; got {type(project_spec).__name__}"
+                )
             try:
-                subjects = project_spec["subjects"]
-                conditions = project_spec["conditions"]
-                subject_data = project_spec["subject_data"]
-            except KeyError as exc:  # pragma: no cover - defensive
-                raise ValueError(f"Missing required key for phase '{phase_label}': {exc}") from exc
+                subjects = project_spec.get("subjects") or []
+                conditions = project_spec.get("conditions") or []
+                subject_data = project_spec.get("subject_data") or {}
+            except Exception as exc:  # pragma: no cover - defensive
+                raise ValueError(f"Invalid phase spec for '{phase_label}': {exc}") from exc
 
-            logger.info("Preparing summed BCA data for phase '%s'…", phase_label)
+            group_map = project_spec.get("group_map") or project_spec.get("subject_groups") or {}
+
+            logger.info(
+                "Preparing summed BCA data for phase '%s' (%d subjects, %d conditions)…",
+                phase_label,
+                len(subjects),
+                len(conditions),
+            )
+
+            if not subjects or not subject_data:
+                raise ValueError(
+                    f"Lela Mode aborted: no subject data found for phase '{phase_label}'. "
+                    "Please run Stats and save the project for that phase before trying again."
+                )
+
             with single_threaded_blas():
                 bca_data = prepare_all_subject_summed_bca_data(
                     subjects=subjects,
@@ -334,11 +360,19 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                     rois=roi_map,
                     log_func=logger.info,
                 )
+
+            if bca_data is None:
+                raise ValueError(
+                    f"Lela Mode aborted: summed BCA data unavailable for phase '{phase_label}'. "
+                    "Please verify the scanned files for this project."
+                )
             phase_data[phase_label] = bca_data
-            phase_group_maps[phase_label] = project_spec.get("group_map", {})
+            phase_group_maps[phase_label] = group_map
 
         df_long = build_cross_phase_long_df(phase_data, phase_group_maps, phase_labels)
         subject_count = int(df_long["subject"].nunique()) if not df_long.empty else 0
+        if subject_count == 0:
+            raise ValueError("Cross-phase LMM requires at least one subject after phase intersection.")
         logger.info("Prepared cross-phase dataset with %d subjects.", subject_count)
         logger.info("Running cross-phase LMM with factors: group, phase, condition, roi")
 
@@ -355,12 +389,6 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
             p_value = contrast.get("p")
             logger.info("Effect of interest '%s' p-value: %s", label, p_value)
 
-        output_spec = spec.get("output", {})
-        if "summary_json" not in output_spec or "excel_report" not in output_spec:
-            raise ValueError("Cross-phase LMM output paths must be provided.")
-
-        summary_path = Path(output_spec["summary_json"])
-        excel_path = Path(output_spec["excel_report"])
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         excel_path.parent.mkdir(parents=True, exist_ok=True)
 

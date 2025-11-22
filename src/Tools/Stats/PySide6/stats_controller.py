@@ -1,6 +1,3 @@
-# src/Tools/Stats/PySide6/stats_controller.py
-from __future__ import annotations
-
 """Controller layer for coordinating Stats pipelines.
 
 StatsController orchestrates the Single and Between pipelines, owns run state,
@@ -8,6 +5,8 @@ schedules workers, and routes progress back to the view (StatsWindow). The
 controller contains orchestration only; computational work lives in
 stats_workers and legacy analysis modules.
 """
+
+from __future__ import annotations
 
 import json
 import logging
@@ -238,6 +237,7 @@ class StatsController:
 
         phase_specs: dict[str, dict] = {}
         phase_roots: list[tuple[Path, dict | None]] = []
+        phase_subject_counts: list[tuple[str, int]] = []
         for idx in range(2):
             title = f"Select Phase {idx + 1} project folder"
             folder = self._view.prompt_phase_folder(title)
@@ -260,7 +260,25 @@ class StatsController:
                 "subject_data": scan.subject_data,
                 "group_map": scan.subject_groups,
             }
+            phase_subject_counts.append((phase_label, len(scan.subjects)))
             phase_roots.append((Path(folder), scan.manifest))
+
+        missing_data_phase = next(
+            (
+                label
+                for label, spec in phase_specs.items()
+                if not spec.get("subjects") or not spec.get("subject_data")
+            ),
+            None,
+        )
+        if missing_data_phase:
+            self._view.append_log(
+                section,
+                "[Between] Lela Mode requires both phase projects to have scanned subject data. "
+                "Please run a standard Stats scan for each project first and save the project.",
+                level="error",
+            )
+            return
 
         output_dir = self._resolve_stats_output_dir(*phase_roots[0]) if phase_roots else Path.cwd()
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -279,6 +297,15 @@ class StatsController:
                 "excel_report": str(excel_path),
             },
         }
+
+        phase_log = ", ".join(
+            f"{label}: {count} subjects" for label, count in phase_subject_counts
+        )
+        self._view.append_log(
+            section,
+            f"[Between] Lela Mode spec ready for phases: {', '.join(phase_specs.keys())}. "
+            f"Subjects per phase: {phase_log}",
+        )
 
         job_spec_path.write_text(json.dumps(job_spec, indent=2))
 
