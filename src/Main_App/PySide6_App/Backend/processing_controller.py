@@ -1,4 +1,4 @@
-"""Processing helpers for the PySide6 app. Single-preprocessor path (PySide6 only)."""
+""""Processing helpers for the PySide6 app. Single-preprocessor path (PySide6 only)."""
 from __future__ import annotations
 
 import logging
@@ -113,6 +113,14 @@ def discover_raw_files(project: "Project") -> List[RawFileInfo]:
                     group=group_name,
                 )
             )
+    logger.info(
+        "discover_raw_files",
+        extra={
+            "project_root": str(getattr(project, "project_root", "")),
+            "n_files": len(files),
+            "groups": list({f.group for f in files}),
+        },
+    )
     return files
 
 
@@ -171,6 +179,13 @@ def _update_project_participants(project: "Project", files: Sequence[RawFileInfo
             changed = True
 
     if changed:
+        logger.info(
+            "participants_updated",
+            extra={
+                "project_root": str(getattr(project, "project_root", "")),
+                "n_participants": len(participants),
+            },
+        )
         project.participants = participants
         try:
             project.save()
@@ -215,6 +230,13 @@ def prepare_batch_files(project: "Project") -> List[Path]:
                         "discovered raw files for project %s",
                         getattr(project, "project_root", "<unknown>"),
                     )
+                logger.info(
+                    "prepare_batch_files_multi_group",
+                    extra={
+                        "project_root": str(getattr(project, "project_root", "")),
+                        "n_files": len(infos),
+                    },
+                )
                 return [info.path for info in infos]
 
     # Legacy / fallback: single input_folder
@@ -226,7 +248,16 @@ def prepare_batch_files(project: "Project") -> List[Path]:
         )
         return []
 
-    return sorted(input_dir.glob("*.bdf"))
+    files = sorted(input_dir.glob("*.bdf"))
+    logger.info(
+        "prepare_batch_files_single_group",
+        extra={
+            "project_root": str(getattr(project, "project_root", "")),
+            "input_folder": str(input_dir),
+            "n_files": len(files),
+        },
+    )
+    return files
 
 
 def _animate_progress_to(self, value: int) -> None:
@@ -262,6 +293,13 @@ def _promote_refs_to_eeg(self, raw, ref1: str, ref2: str, filename: str) -> None
     if promote:
         raw.set_channel_types(promote)
         self.log(f"[PROMOTE] {list(promote)} → EEG before referencing for {filename}")
+        try:
+            logger.debug(
+                "promote_refs_to_eeg",
+                extra={"file": filename, "promoted": list(promote)},
+            )
+        except Exception:
+            logger.debug("promote_refs_to_eeg_logging_failed", extra={"file": filename})
 
 
 def start_processing(self) -> None:
@@ -275,6 +313,23 @@ def start_processing(self) -> None:
         run_loreta = bool(getattr(self, "cb_loreta", None) and self.cb_loreta.isChecked())
 
         batch_mode = bool(getattr(self, "rb_batch", None) and self.rb_batch.isChecked())
+
+        try:
+            logger.info(
+                "start_processing_begin",
+                extra={
+                    "project_root": str(getattr(project, "project_root", "")),
+                    "input_folder": str(input_dir),
+                    "batch_mode": batch_mode,
+                    "run_loreta": run_loreta,
+                },
+            )
+        except Exception:
+            logger.debug(
+                "start_processing_begin_logging_failed",
+                extra={"input_folder": str(input_dir)},
+            )
+
         raw_file_infos: List[RawFileInfo]
         if batch_mode:
             raw_file_infos = discover_raw_files(project)
@@ -291,6 +346,10 @@ def start_processing(self) -> None:
             )
             if not file_path:
                 self.log("No file selected, aborting.")
+                logger.info(
+                    "start_processing_no_file_selected",
+                    extra={"input_folder": str(input_dir)},
+                )
                 return
             selected_path = Path(file_path)
             raw_file_infos = [
@@ -302,6 +361,22 @@ def start_processing(self) -> None:
             ]
 
         bdf_files = [info.path for info in raw_file_infos]
+
+        try:
+            logger.info(
+                "start_processing_file_list",
+                extra={
+                    "project_root": str(getattr(project, "project_root", "")),
+                    "n_files": len(bdf_files),
+                    "files": [str(p) for p in bdf_files],
+                },
+            )
+        except Exception:
+            logger.debug(
+                "start_processing_file_list_logging_failed",
+                extra={"n_files": len(bdf_files)},
+            )
+
         _update_project_participants(project, raw_file_infos)
 
         # Preprocessing parameters with precedence: project → settings → defaults
@@ -346,6 +421,20 @@ def start_processing(self) -> None:
         )
 
         for fp in bdf_files:
+            try:
+                logger.info(
+                    "start_processing_file_begin",
+                    extra={
+                        "file": str(fp),
+                        "project_root": str(getattr(project, "project_root", "")),
+                    },
+                )
+            except Exception:
+                logger.debug(
+                    "start_processing_file_begin_logging_failed",
+                    extra={"file": str(fp)},
+                )
+
             # Load
             self.log(f"Loading EEG file: {fp.name}")
             raw = load_eeg_file(self, str(fp))
@@ -367,23 +456,86 @@ def start_processing(self) -> None:
                 n_rejected=int(n_bad or 0),
             )
 
+            try:
+                logger.info(
+                    "start_processing_file_preproc_done",
+                    extra={
+                        "file": str(fp),
+                        "n_bad_kurtosis": int(n_bad or 0),
+                        "n_channels": len(getattr(raw.info, "ch_names", [])),
+                        "sfreq": float(raw.info.get("sfreq", -1.0)),
+                    },
+                )
+            except Exception:
+                logger.debug(
+                    "start_processing_file_preproc_done_logging_failed",
+                    extra={"file": str(fp)},
+                )
+
             # Main processing and post-processing
             out_dir = str(
                 self.currentProject.project_root
                 / self.currentProject.subfolders["excel"]
             )
             self.log(f"Running main processing (run_loreta={run_loreta})")
+            logger.debug(
+                "start_processing_call_process_data",
+                extra={"file": str(fp), "out_dir": out_dir, "run_loreta": run_loreta},
+            )
             process_data(raw, out_dir, run_loreta)
 
             condition_labels = list(self.currentProject.event_map.keys())
             self.log(f"Post-process condition labels: {condition_labels}")
+            logger.debug(
+                "start_processing_call_post_process",
+                extra={"file": str(fp), "condition_labels": condition_labels},
+            )
             post_process(self, condition_labels)
+
+            try:
+                logger.info(
+                    "start_processing_file_done",
+                    extra={
+                        "file": str(fp),
+                        "run_loreta": run_loreta,
+                        "n_condition_labels": len(condition_labels),
+                    },
+                )
+            except Exception:
+                logger.debug(
+                    "start_processing_file_done_logging_failed",
+                    extra={"file": str(fp)},
+                )
 
         _animate_progress_to(self, 100)
         self.log("Processing complete")
+        try:
+            logger.info(
+                "start_processing_complete",
+                extra={
+                    "project_root": str(getattr(project, "project_root", "")),
+                    "n_files": len(bdf_files),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "start_processing_complete_logging_failed",
+                extra={"n_files": len(bdf_files)},
+            )
 
     except Exception as e:
         self.log(f"Processing failed: {e}", level=logging.ERROR)
+        try:
+            logger.exception(
+                "start_processing_failed",
+                extra={
+                    "project_root": str(
+                        getattr(getattr(self, "currentProject", None), "project_root", "")
+                    ),
+                },
+            )
+        except Exception:
+            logger.debug("start_processing_failed_logging_failed")
         try:
             QMessageBox.critical(self, "Processing Error", str(e))
         except Exception:

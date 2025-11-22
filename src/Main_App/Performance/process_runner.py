@@ -115,8 +115,14 @@ def _make_error_result(
     tb_lines = tb.strip().splitlines()
     traceback_head = "\n".join(tb_lines[:6])
 
+    # Make the textual log message itself informative instead of just "file_processing_error",
+    # so the IDE log shows file, stage, and error even if it ignores structured "extra".
     logger.error(
-        "file_processing_error",
+        "file_processing_error file=%s stage=%s error=%s elapsed_ms=%s",
+        str(file_path),
+        stage,
+        str(exc),
+        elapsed_ms,
         extra={
             "file": str(file_path),
             "stage": stage,
@@ -159,6 +165,11 @@ def _run_full_pipeline_for_file(
             f"[SENTINEL] process_runner _run_full_pipeline_for_file running for "
             f"{file_path.name}"
         )
+        logger.info(
+            "[PIPELINE START] file=%s stage=%s",
+            file_path.name,
+            stage,
+        )
 
         # Lazy imports (inside worker only)
         from Main_App.PySide6_App.Backend.loader import load_eeg_file  # type: ignore
@@ -199,11 +210,28 @@ def _run_full_pipeline_for_file(
         if raw is None:
             raise RuntimeError("load_eeg_file returned None")
 
+        try:
+            sfreq = float(raw.info["sfreq"])  # type: ignore[index]
+            n_ch = len(raw.ch_names)
+        except Exception:
+            sfreq = -1.0
+            n_ch = -1
+        logger.info(
+            "[PIPELINE] %s: load complete sfreq=%.3f n_channels=%d",
+            file_path.name,
+            sfreq,
+            n_ch,
+        )
+
         # 2) Preproc audit (before)
         stage = "preprocess"
         audit_before = backend_preprocess.begin_preproc_audit(
             raw,
             settings,
+            file_path.name,
+        )
+        logger.info(
+            "[PIPELINE] %s: preproc audit_before complete",
             file_path.name,
         )
 
@@ -218,6 +246,20 @@ def _run_full_pipeline_for_file(
         )
         if raw_proc is None:
             raise RuntimeError("perform_preprocessing returned None")
+
+        try:
+            sfreq_proc = float(raw_proc.info["sfreq"])  # type: ignore[index]
+            n_ch_proc = len(raw_proc.ch_names)
+        except Exception:
+            sfreq_proc = -1.0
+            n_ch_proc = -1
+        logger.info(
+            "[PIPELINE] %s: preprocess complete n_rejected=%d sfreq=%.3f n_channels=%d",
+            file_path.name,
+            int(n_rejected),
+            sfreq_proc,
+            n_ch_proc,
+        )
 
         # Free loader Raw ASAP
         del raw
@@ -254,6 +296,13 @@ def _run_full_pipeline_for_file(
             "n_events": int(len(events)),
             "source": events_source,
         }
+        logger.info(
+            "[PIPELINE] %s: events complete source=%s stim=%s n_events=%d",
+            file_path.name,
+            events_source,
+            stim,
+            events_info["n_events"],
+        )
 
         # 5) Epochs per label/code (tolerant of missing runs)
         stage = "epochs"
@@ -336,6 +385,12 @@ def _run_full_pipeline_for_file(
                 f"Check event_map, epoch window (tmin={tmin}, tmax={tmax}), and triggers."
             )
 
+        logger.info(
+            "[PIPELINE] %s: epochs complete total_epochs=%d",
+            file_path.name,
+            total_epochs,
+        )
+
         # 6) Post-export (delegates to Legacy post_process via adapter)
         stage = "export"
         ctx = LegacyCtx(
@@ -346,6 +401,11 @@ def _run_full_pipeline_for_file(
             log=logger.info,
         )
         fif_written = run_post_export(ctx, list(event_map.keys()))
+        logger.info(
+            "[PIPELINE] %s: export complete fif_written=%s",
+            file_path.name,
+            bool(fif_written),
+        )
 
         # 7) Preproc audit (after)
         stage = "audit"
@@ -357,6 +417,13 @@ def _run_full_pipeline_for_file(
             events_info=events_info,
             fif_written=fif_written,
             n_rejected=n_rejected,
+        )
+
+        logger.info(
+            "[PIPELINE] %s: audit complete n_rejected=%s problems=%s",
+            file_path.name,
+            audit_after.get("n_rejected"),
+            problems,
         )
 
         # Developer-only audit debug: summarize final preprocessing state when a
@@ -414,6 +481,11 @@ def _run_full_pipeline_for_file(
             pass
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "[PIPELINE END] file=%s elapsed_ms=%d",
+            file_path.name,
+            elapsed_ms,
+        )
         return {
             "status": "ok",
             "file": str(file_path),

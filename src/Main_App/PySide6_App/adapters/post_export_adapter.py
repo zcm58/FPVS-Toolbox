@@ -39,9 +39,16 @@ def _normalize_save_folder(save_folder_path: Any) -> Any:
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        logger.error(f"Failed to create save directory {root}: {e}")
+        logger.error(
+            "post_export_normalize_save_folder_failed",
+            extra={"root": str(root), "error": str(e)},
+        )
         raise
 
+    logger.debug(
+        "post_export_normalize_save_folder",
+        extra={"root": str(root)},
+    )
     return SimpleNamespace(get=lambda r=root: str(r))
 
 
@@ -112,6 +119,24 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
         shim.file_mode = SimpleNamespace(get=lambda: "Batch")
     if not hasattr(shim, "file_type"):
         shim.file_type = SimpleNamespace(set=lambda _v: None)
+
+    try:
+        first_data = shim.data_paths[0] if shim.data_paths else None
+        logger.debug(
+            "post_export_build_shim",
+            extra={
+                "save_pref": save_pref,
+                "save_folder": shim.save_folder_path.get(),
+                "n_labels": len(ctx.preprocessed_data or {}),
+                "first_data_path": first_data,
+            },
+        )
+    except Exception:
+        logger.debug(
+            "post_export_build_shim_logging_failed",
+            extra={"data_paths_len": len(shim.data_paths or [])},
+        )
+
     return shim
 
 
@@ -135,6 +160,10 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
     try:
         import mne  # noqa: F401  # local import in worker
     except Exception:
+        logger.debug(
+            "post_export_write_missing_fifs_mne_import_failed",
+            extra={"save_root": str(save_root)},
+        )
         return 0
 
     written = 0
@@ -151,6 +180,16 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
         data_paths = ["unknown"]
     base_stem = Path(str(data_paths[0])).stem
 
+    logger.debug(
+        "post_export_write_missing_fifs_start",
+        extra={
+            "save_root": str(save_root),
+            "base_stem": base_stem,
+            "labels": labels,
+            "save_pref": save_pref,
+        },
+    )
+
     for label in labels:
         ep_list = ctx.preprocessed_data.get(label, [])
         if not ep_list:
@@ -165,7 +204,10 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            logger.error(f"Failed to create directory {out_dir}: {e}")
+            logger.error(
+                "post_export_write_missing_fifs_mkdir_failed",
+                extra={"dir": str(out_dir), "error": str(e)},
+            )
             continue
 
         out_path = out_dir / _legacy_like_fname(base_stem, label)
@@ -183,17 +225,29 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
                     except Exception:
                         pass
             try:
+                logger.debug(
+                    "post_export_write_missing_fif_saving",
+                    extra={"label": label, "out_path": str(out_path)},
+                )
                 epochs.save(str(out_path), overwrite=True, split_size=2 * 1024 ** 3)
                 written += 1
             except Exception as e:
                 # Log failure instead of silent pass
                 err_msg = f"Failed to save fallback FIF for '{label}': {e}"
-                logger.error(err_msg)
+                logger.error(
+                    "post_export_write_missing_fif_failed",
+                    extra={"label": label, "out_path": str(out_path), "error": str(e)},
+                )
                 if ctx.log:
                     try:
                         ctx.log(err_msg)
                     except Exception:
                         pass
+
+    logger.debug(
+        "post_export_write_missing_fifs_done",
+        extra={"save_root": str(save_root), "written": written},
+    )
     return written
 
 
@@ -202,24 +256,66 @@ def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
     Execute legacy export. Then, for this specific file and labels,
     write any missing -epo.fif files (per-file fallback).
     """
+    try:
+        logger.info(
+            "post_export_start",
+            extra={
+                "labels": labels,
+                "n_labels": len(labels),
+                "data_paths": list(ctx.data_paths or []),
+            },
+        )
+    except Exception:
+        logger.debug("post_export_start_logging_failed")
+
     shim = _build_legacy_shim(ctx)
 
     try:
-        save_root = Path(shim.save_folder_path.get()).resolve()
+        save_root_str = shim.save_folder_path.get()
+        save_root = Path(save_root_str).resolve()
     except Exception as e:
         # Should not happen given _normalize_save_folder checks, but good for robustness
         shim.log(f"[adapter] Invalid save path: {e}")
+        logger.error(
+            "post_export_invalid_save_path",
+            extra={"error": str(e)},
+        )
         raise
 
     # Run legacy (Excel, etc.)
     try:
+        logger.debug(
+            "post_export_call_legacy",
+            extra={"save_root": str(save_root), "labels": labels},
+        )
         _legacy_post_process(shim, labels)
     except Exception as e:
         shim.log(f"[adapter] legacy post_process failed: {e}")
+        logger.error(
+            "post_export_legacy_failed",
+            extra={"error": str(e)},
+        )
         raise
 
     # Per-file FIF fallback (only writes files that are missing)
-    return _write_missing_fifs(ctx, save_root, labels)
+    written = _write_missing_fifs(ctx, save_root, labels)
+
+    try:
+        logger.info(
+            "post_export_done",
+            extra={
+                "save_root": str(save_root),
+                "labels": labels,
+                "fallback_fifs_written": written,
+            },
+        )
+    except Exception:
+        logger.debug(
+            "post_export_done_logging_failed",
+            extra={"save_root": str(save_root), "written": written},
+        )
+
+    return written
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:

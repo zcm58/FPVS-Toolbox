@@ -52,8 +52,18 @@ def _resolve_ref_pair(app) -> Tuple[str, str]:
         except Exception:
             return default
 
-    ref1 = p.get("ref_channel1") or p.get("ref_chan1") or _s("preprocessing", "ref_channel1") or "EXG1"
-    ref2 = p.get("ref_channel2") or p.get("ref_chan2") or _s("preprocessing", "ref_channel2") or "EXG2"
+    ref1 = (
+        p.get("ref_channel1")
+        or p.get("ref_chan1")
+        or _s("preprocessing", "ref_channel1")
+        or "EXG1"
+    )
+    ref2 = (
+        p.get("ref_channel2")
+        or p.get("ref_chan2")
+        or _s("preprocessing", "ref_channel2")
+        or "EXG2"
+    )
     return str(ref1), str(ref2)
 
 
@@ -100,7 +110,7 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
     """
     ext = os.path.splitext(filepath)[1].lower()
     base = os.path.basename(filepath)
-    app.log(f"Loading: {base}...")
+    app.log(f"[LOADER START] {base}: ext='{ext}'")
     try:
         memmap_dir = _memmap_dir_for_pid()
         memmap_path = str(memmap_dir / (Path(filepath).stem + "_raw.dat"))
@@ -108,6 +118,11 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
         stim_name = _resolve_stim(app)
         if not ref_pair:
             ref_pair = _resolve_ref_pair(app)
+
+        app.log(
+            f"[LOADER DEBUG] {base}: stim='{stim_name}' "
+            f"ref_pair={ref_pair} memmap_path='{memmap_path}'"
+        )
 
         if ext == ".bdf":
             with mne.utils.use_log_level("WARNING"):
@@ -146,7 +161,9 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
         if raw is None:
             raise ValueError("MNE load returned None.")
 
-        app.log(f"Load OK: {len(raw.ch_names)} channels @ {raw.info['sfreq']:.1f} Hz.")
+        app.log(
+            f"Load OK: {len(raw.ch_names)} channels @ {raw.info['sfreq']:.1f} Hz."
+        )
 
         # Channel typing policy for BioSemi EXG* and stim (Policy A):
         # - Preserve the selected reference pair as EEG so set_eeg_reference can use them.
@@ -157,6 +174,11 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
             ref_keep = _canon_present(raw.ch_names, ref_pair or ())
             exg_labels = [f"EXG{i}" for i in range(1, 9)]
             exg_present = _canon_present(raw.ch_names, exg_labels)
+
+            app.log(
+                f"[LOADER DEBUG] {base}: exg_present={sorted(exg_present)} "
+                f"ref_keep={sorted(ref_keep)}"
+            )
 
             to_misc = {ch: "misc" for ch in exg_present if ch not in ref_keep}
             to_eeg = {ch: "eeg" for ch in ref_keep}
@@ -171,7 +193,9 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
 
             kept = sorted(ref_keep)
             demoted = sorted([ch for ch in exg_present if ch not in ref_keep])
-            app.log(f"EXG policy A applied. Keep as EEG: {kept} | Demoted to misc: {demoted}")
+            app.log(
+                f"EXG policy A applied. Keep as EEG: {kept} | Demoted to misc: {demoted}"
+            )
         except Exception as e:
             app.log(f"Warning: EXG/stim typing adjustment failed: {e}")
 
@@ -183,6 +207,7 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
         except Exception as e:
             app.log(f"Warning: Montage error: {e}")
 
+        app.log(f"[LOADER END] {base}")
         return raw
 
     except Exception as e:
