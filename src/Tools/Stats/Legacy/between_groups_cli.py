@@ -391,8 +391,7 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
 
         all_fixed_rows: list[dict] = []
         all_contrast_rows: list[dict] = []
-        backup_tests_rows: list[dict] = []
-        cell_means_rows: list[dict] = []
+        backup_rows: list[dict] = []
         per_roi_meta: dict[str, dict] = {}
         aggregated_warnings: list[str] = []
 
@@ -437,18 +436,11 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                     p_value,
                 )
 
-            backup_2x2 = results.get("backup_2x2") or {}
-            tests = backup_2x2.get("tests") or []
-            for test in tests:
-                test_with_roi = dict(test)
-                test_with_roi.setdefault("roi", roi_name)
-                backup_tests_rows.append(test_with_roi)
-
-            cell_means = backup_2x2.get("cell_means") or []
-            for mean in cell_means:
-                mean_with_roi = dict(mean)
-                mean_with_roi.setdefault("roi", roi_name)
-                cell_means_rows.append(mean_with_roi)
+            backup_results = results.get("backup_2x2_results") or []
+            for backup_row in backup_results:
+                row_with_roi = dict(backup_row)
+                row_with_roi.setdefault("roi", roi_name)
+                backup_rows.append(row_with_roi)
 
             meta = results.get("meta") or {}
             per_roi_meta[roi_name] = meta
@@ -480,6 +472,7 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                 "focal_rois": roi_order,
                 "contrasts": all_contrast_rows,
             },
+            "backup_2x2_results": backup_rows,
             "meta": combined_meta,
         }
 
@@ -510,6 +503,16 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                 columns=["roi", "label", "estimate", "se", "stat", "p"],
             )
 
+        backup_rows_df = pd.DataFrame(results.get("backup_2x2_results") or [])
+        if backup_rows_df.empty:
+            backup_rows_df = pd.DataFrame(
+                columns=["roi", "effect", "estimate", "se", "stat", "p"]
+            )
+        else:
+            backup_rows_df = backup_rows_df.reindex(
+                columns=["roi", "effect", "estimate", "se", "stat", "p", "df"],
+            )
+
         with pd.ExcelWriter(excel_path, engine="xlsxwriter") as writer:
             _auto_format_and_write_excel(
                 writer, fixed_effects_df, "Fixed Effects", logger.info
@@ -517,39 +520,14 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
 
             _auto_format_and_write_excel(writer, contrasts_df, "Contrasts", logger.info)
 
-            if backup_tests_rows:
-                backup_tests_df = pd.DataFrame(backup_tests_rows)
-                backup_tests_df = backup_tests_df.reindex(
-                    columns=[
-                        "roi",
-                        "label",
-                        "type",
-                        "phase",
-                        "group",
-                        "group1",
-                        "group2",
-                        "t",
-                        "df",
-                        "p",
-                    ]
-                )
-                _auto_format_and_write_excel(
-                    writer, backup_tests_df, "Backup 2x2 Tests", logger.info
-                )
-
-            if cell_means_rows:
-                cell_means_df = pd.DataFrame(cell_means_rows)
-                cell_means_df = cell_means_df.reindex(
-                    columns=["roi", "group", "phase", "mean", "sd", "se", "n"]
-                )
-                _auto_format_and_write_excel(
-                    writer, cell_means_df, "Cell Means", logger.info
-                )
+            _auto_format_and_write_excel(
+                writer, backup_rows_df, "Backup 2x2", logger.info
+            )
+            logger.info("Formatted sheet: Backup 2x2")
 
         if combined_meta.get("backup_2x2_used"):
             logger.info(
-                "MixedLM did not converge for at least one ROI; backup 2x2 t-tests were computed "
-                "and written to 'Backup 2x2 Tests' and 'Cell Means' sheets."
+                "MixedLM did not converge for at least one ROI; backup 2x2 results are available in the 'Backup 2x2' sheet."
             )
 
         logger.info("Cross-phase LMM analysis complete.")
