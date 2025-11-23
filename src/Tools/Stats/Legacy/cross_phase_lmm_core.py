@@ -47,13 +47,22 @@ def build_cross_phase_long_df(
     """
     Build a long-format DataFrame for generic cross-phase LMM.
 
-    phase_data[phase][pid][condition][roi] = value
-    phase_group_maps[phase][pid] = group label (e.g., "BC" / "Control").
-    Returns columns: subject, group, phase, condition, roi, value.
-    """
+    phase_data[phase][raw_subject][condition][roi] = value
+    phase_group_maps[phase][raw_subject] = group label (e.g., "BC" / "Control").
 
+    Returns columns: subject (canonical), group, phase, condition, roi, value.
+
+    Canonical subject IDs are derived from raw IDs using canonical_subject_id(),
+    so that, for example, P10BCF and P10BCL are treated as the same subject "P10"
+    across phases.
+    """
     logger = logging.getLogger(__name__)
-    phases = list(phase_data.keys())
+
+    phases: List[str] = list(phase_data.keys())
+    if not phases:
+        return pd.DataFrame(columns=["subject", "group", "phase", "condition", "roi", "value"])
+
+    # Build per-phase mappings between raw and canonical IDs
     phase_indices: Dict[str, Dict[str, Dict[str, str]]] = {}
     phase_canon_sets: List[set[str]] = []
 
@@ -88,12 +97,15 @@ def build_cross_phase_long_df(
         }
         phase_canon_sets.append(set(canon_to_raw.keys()))
 
+    # Canonical subjects present in ALL phases
     common_canon_subjects: List[str] = (
         sorted(set.intersection(*phase_canon_sets)) if phase_canon_sets else []
     )
 
+    # Log subjects that are missing in some phases (based on canonical IDs)
     dropped_for_missing: List[str] = []
-    for canon_id in sorted(set().union(*phase_canon_sets) - set(common_canon_subjects)):
+    all_canon_ids = set().union(*phase_canon_sets)
+    for canon_id in sorted(all_canon_ids - set(common_canon_subjects)):
         raw_per_phase: List[str] = []
         for phase in phases:
             raw_id = phase_indices[phase]["canon_to_raw"].get(canon_id)
@@ -101,41 +113,58 @@ def build_cross_phase_long_df(
                 raw_per_phase.append(f"{phase}:{raw_id}")
         detail = f"{canon_id} ({', '.join(sorted(raw_per_phase))})" if raw_per_phase else canon_id
         dropped_for_missing.append(detail)
-    if dropped_for_missing:
-        logger.warning("Dropping subjects missing in some phases: %s", dropped_for_missing)
 
-    # Check group consistency across phases
-    consistent_subjects: List[str] = []
+    if dropped_for_missing:
+        logger.warning(
+            "Dropping subjects missing in some phases: %s",
+            dropped_for_missing,
+        )
+
+    # Check group consistency across phases, working in canonical ID space
+    consistent_canon_subjects: List[str] = []
     dropped_for_group_conflict: List[str] = []
+
     for canon_subj in common_canon_subjects:
-        groups = []
+        groups: List[str] | None = []
         for phase in phases:
-            raw_id = phase_indices[phase]["canon_to_raw"].get(canon_subj)
+            canon_to_raw = phase_indices[phase]["canon_to_raw"]
+            raw_id = canon_to_raw.get(canon_subj)
             gmap = phase_group_maps.get(phase, {})
             if raw_id is None or raw_id not in gmap:
-                groups = None  # type: ignore[assignment]
+                groups = None
                 break
             groups.append(gmap[raw_id])
         if groups is None or len(set(groups)) != 1:
             dropped_for_group_conflict.append(canon_subj)
             continue
-        consistent_subjects.append(canon_subj)
+        consistent_canon_subjects.append(canon_subj)
+
     if dropped_for_group_conflict:
         logger.warning(
-            "Dropping subjects with inconsistent group labels: %s", sorted(set(dropped_for_group_conflict))
+            "Dropping subjects with inconsistent group labels: %s",
+            sorted(dropped_for_group_conflict),
         )
 
+    if not consistent_canon_subjects:
+        # Caller will see an empty DataFrame and raise a more specific error.
+        return pd.DataFrame(columns=["subject", "group", "phase", "condition", "roi", "value"])
+
+    # Build the long-format rows, using canonical IDs as "subject"
     rows: List[Dict[str, object]] = []
     for phase in phase_labels:
         subj_map = phase_data.get(phase, {})
         gmap = phase_group_maps.get(phase, {})
-        canon_to_raw = phase_indices[phase]["canon_to_raw"]
-        for canon_subj in consistent_subjects:
+        canon_to_raw = phase_indices.get(phase, {}).get("canon_to_raw", {})
+
+        for canon_subj in consistent_canon_subjects:
             raw_id = canon_to_raw.get(canon_subj)
-            if raw_id is None or raw_id not in subj_map:
+            if raw_id is None:
+                continue
+            subj_entry = subj_map.get(raw_id)
+            if not subj_entry:
                 continue
             group_label = gmap.get(raw_id)
-            for condition, roi_map in subj_map[raw_id].items():
+            for condition, roi_map in subj_entry.items():
                 for roi, value in roi_map.items():
                     if not np.isfinite(value):
                         continue
@@ -151,7 +180,6 @@ def build_cross_phase_long_df(
                     )
 
     return pd.DataFrame(rows, columns=["subject", "group", "phase", "condition", "roi", "value"])
-
 
 def _build_fixed_effects_table(result) -> List[Dict[str, object]]:
     fe = getattr(result, "fe_params", None)
