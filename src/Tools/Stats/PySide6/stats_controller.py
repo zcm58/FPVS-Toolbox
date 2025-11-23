@@ -23,6 +23,7 @@ from . import stats_workers
 from .stats_core import PipelineId, PipelineStep, StepId
 from .stats_logging import format_step_event
 from .stats_data_loader import load_manifest_data, load_project_scan, resolve_project_subfolder
+from .stats_subjects import canonical_group_and_phase_from_manifest, canonical_group_label
 from Main_App.PySide6_App.Backend.project import STATS_SUBFOLDER_NAME
 
 logger = logging.getLogger(__name__)
@@ -272,11 +273,54 @@ class StatsController:
                 return
             phase_label = Path(folder).name or f"Phase {idx + 1}"
             unique_label = _unique_label(phase_label, phase_labels_seen)
+            manifest_groups = {}
+            manifest_data = scan.manifest if isinstance(scan.manifest, dict) else {}
+            project_root = self._find_project_root(Path(folder))
+            manifest_path = project_root / "project.json"
+            if isinstance(manifest_data, dict):
+                manifest_groups = manifest_data.get("groups") or {}
+            # Fill in missing canonical fields for future runs.
+            updated_groups: dict[str, dict] = {}
+            for gname, gentry in (manifest_groups or {}).items():
+                if not isinstance(gentry, dict):
+                    continue
+                base_group, phase = canonical_group_and_phase_from_manifest(gname, gentry)
+                new_entry = dict(gentry)
+                if "base_group" not in new_entry and base_group:
+                    new_entry["base_group"] = base_group
+                if "phase" not in new_entry and phase:
+                    new_entry["phase"] = phase
+                updated_groups[gname] = new_entry
+            if updated_groups and manifest_path.is_file():
+                try:
+                    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    manifest_payload = manifest_data or {}
+                else:
+                    manifest_payload = manifest_data or manifest_payload
+                if isinstance(manifest_payload, dict):
+                    manifest_payload.setdefault("groups", {})
+                    for gname, gentry in updated_groups.items():
+                        manifest_payload["groups"].setdefault(gname, {}).update(gentry)
+                    try:
+                        manifest_path.write_text(
+                            json.dumps(manifest_payload, indent=2, ensure_ascii=False),
+                            encoding="utf-8",
+                        )
+                    except Exception:
+                        logger.debug("Failed to persist canonical group metadata for %s", manifest_path)
+
+            canonical_group_map: dict[str, str | None] = {}
+            for pid, raw_group in (scan.subject_groups or {}).items():
+                if raw_group is None:
+                    canonical_group_map[pid] = None
+                    continue
+                canonical_group_map[pid] = canonical_group_label(raw_group, manifest_groups)
             phase_specs[unique_label] = {
                 "subjects": scan.subjects,
                 "conditions": scan.conditions,
                 "subject_data": scan.subject_data,
-                "group_map": scan.subject_groups,
+                "group_map": canonical_group_map,
             }
             phase_subject_counts.append((unique_label, len(scan.subjects)))
             phase_roots.append((Path(folder), scan.manifest))
