@@ -1,3 +1,4 @@
+import contextlib
 import importlib.util
 import sys
 import types
@@ -14,31 +15,63 @@ def _load_module(module_name: str, path: Path) -> types.ModuleType:
     return module
 
 
+def _temporary_modules(stubs: dict[str, types.ModuleType]):
+    @contextlib.contextmanager
+    def manager():
+        existing_modules = {name: sys.modules.get(name) for name in stubs}
+        sys.modules.update(stubs)
+        try:
+            yield
+        finally:
+            for name, original in existing_modules.items():
+                if original is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+
+    return manager()
+
+
+def _preserve_modules(module_names: list[str]):
+    @contextlib.contextmanager
+    def manager():
+        existing_modules = {name: sys.modules.get(name) for name in module_names}
+        try:
+            yield
+        finally:
+            for name, module in existing_modules.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+
+    return manager()
+
+
 TOOLS_ROOT = Path(__file__).resolve().parents[1] / "src" / "Tools"
 STATS_ROOT = TOOLS_ROOT / "Stats"
 
-tools_pkg = types.ModuleType("Tools")
-tools_pkg.__path__ = [str(TOOLS_ROOT)]
-sys.modules.setdefault("Tools", tools_pkg)
+stub_modules = {
+    "Tools": types.ModuleType("Tools"),
+    "Tools.Stats": types.ModuleType("Tools.Stats"),
+    "Tools.Stats.PySide6": types.ModuleType("Tools.Stats.PySide6"),
+    "Tools.Stats.Legacy": types.ModuleType("Tools.Stats.Legacy"),
+}
 
-stats_pkg = types.ModuleType("Tools.Stats")
-stats_pkg.__path__ = [str(STATS_ROOT)]
-sys.modules.setdefault("Tools.Stats", stats_pkg)
+stub_modules["Tools"].__path__ = [str(TOOLS_ROOT)]
+stub_modules["Tools.Stats"].__path__ = [str(STATS_ROOT)]
+stub_modules["Tools.Stats.PySide6"].__path__ = [str(STATS_ROOT / "PySide6")]
+stub_modules["Tools.Stats.Legacy"].__path__ = [str(STATS_ROOT / "Legacy")]
 
-pyside_pkg = types.ModuleType("Tools.Stats.PySide6")
-pyside_pkg.__path__ = [str(STATS_ROOT / "PySide6")]
-sys.modules.setdefault("Tools.Stats.PySide6", pyside_pkg)
-
-legacy_pkg = types.ModuleType("Tools.Stats.Legacy")
-legacy_pkg.__path__ = [str(STATS_ROOT / "Legacy")]
-sys.modules.setdefault("Tools.Stats.Legacy", legacy_pkg)
-
-canonical_subjects = _load_module(
-    "Tools.Stats.PySide6.stats_subjects", STATS_ROOT / "PySide6" / "stats_subjects.py"
-)
-cross_phase_module = _load_module(
-    "Tools.Stats.Legacy.cross_phase_lmm_core", STATS_ROOT / "Legacy" / "cross_phase_lmm_core.py"
-)
+with _temporary_modules(stub_modules), _preserve_modules(
+    ["Tools.Stats.PySide6.stats_subjects", "Tools.Stats.Legacy.cross_phase_lmm_core"]
+):
+    canonical_subjects = _load_module(
+        "Tools.Stats.PySide6.stats_subjects", STATS_ROOT / "PySide6" / "stats_subjects.py"
+    )
+    cross_phase_module = _load_module(
+        "Tools.Stats.Legacy.cross_phase_lmm_core", STATS_ROOT / "Legacy" / "cross_phase_lmm_core.py"
+    )
 
 canonical_subject_id = canonical_subjects.canonical_subject_id
 build_cross_phase_long_df = cross_phase_module.build_cross_phase_long_df
