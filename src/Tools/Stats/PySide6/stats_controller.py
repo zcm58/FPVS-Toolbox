@@ -342,6 +342,41 @@ class StatsController:
             )
             return
 
+        common_conditions: set[str] | None = None
+        ordered_conditions = []
+        for spec in phase_specs.values():
+            conditions = spec.get("conditions") or []
+            ordered_conditions = ordered_conditions or list(conditions)
+            condition_set = set(conditions)
+            common_conditions = (
+                condition_set if common_conditions is None else common_conditions & condition_set
+            )
+
+        focal_condition = None
+        if common_conditions:
+            if "Angry" in common_conditions:
+                focal_condition = "Angry"
+            else:
+                focal_condition = next(
+                    (cond for cond in ordered_conditions if cond in common_conditions),
+                    sorted(common_conditions)[0],
+                )
+
+        roi_names: list[str] = []
+        if isinstance(roi_map, dict):
+            roi_names = list(roi_map.keys())
+        elif isinstance(roi_map, (list, tuple)):
+            roi_names = list(roi_map)
+
+        focal_roi = None
+        if roi_names:
+            if "Occipital Lobe" in roi_names:
+                focal_roi = "Occipital Lobe"
+            elif "Right Occipito-Temporal" in roi_names:
+                focal_roi = "Right Occipito-Temporal"
+            else:
+                focal_roi = roi_names[0]
+
         output_dir = self._resolve_stats_output_dir(*phase_roots[0]) if phase_roots else Path.cwd()
         output_dir.mkdir(parents=True, exist_ok=True)
         ts = int(time.time())
@@ -354,6 +389,8 @@ class StatsController:
             "phase_projects": phase_specs,
             "roi_map": roi_map,
             "base_freq": base_freq,
+            "focal_condition": focal_condition,
+            "focal_roi": focal_roi,
             "output": {
                 "summary_json": str(summary_path),
                 "excel_report": str(excel_path),
@@ -367,6 +404,11 @@ class StatsController:
             section,
             f"[Between] Lela Mode spec ready for phases: {', '.join(phase_specs.keys())}. "
             f"Subjects per phase: {phase_log}",
+        )
+        self._view.append_log(
+            section,
+            f"[Between] Lela Mode focal condition: {focal_condition or 'None'}; "
+            f"focal ROI: {focal_roi or 'None'}",
         )
 
         job_spec_path.write_text(json.dumps(job_spec, indent=2))
