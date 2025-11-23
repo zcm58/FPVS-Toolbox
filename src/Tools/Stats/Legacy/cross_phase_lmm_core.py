@@ -310,6 +310,23 @@ def run_cross_phase_lmm(
     if df.empty:
         raise ValueError("No data remaining after cleaning and focal filters.")
 
+    phases = sorted(df["phase"].unique().tolist())
+    if len(phases) < 2:
+        raise ValueError("Need at least two phases to fit cross-phase model.")
+
+    subject_phase_counts = df.groupby("subject")["phase"].nunique()
+    subjects_with_all_phases = subject_phase_counts[subject_phase_counts == len(phases)].index
+    dropped_subjects = sorted(set(df["subject"]) - set(subjects_with_all_phases))
+    if dropped_subjects:
+        df = df[df["subject"].isin(subjects_with_all_phases)]
+        meta_warnings.append(
+            "Dropping subjects missing focal condition/ROI in at least one phase: "
+            f"{', '.join(map(str, dropped_subjects))}"
+        )
+
+    if df.empty:
+        raise ValueError("No paired data remaining after dropping incomplete subjects.")
+
     design_formula = "group * phase"
     model_formula = f"value ~ {design_formula}"
 
