@@ -19,7 +19,7 @@ import pandas as pd
 import sys
 from PySide6.QtCore import QThreadPool
 
-from . import stats_workers
+from . import stats_cross_phase, stats_workers
 from .stats_core import PipelineId, PipelineStep, StepId
 from .stats_logging import format_step_event
 from .stats_data_loader import load_manifest_data, load_project_scan, resolve_project_subfolder
@@ -353,14 +353,6 @@ class StatsController:
             )
 
         focal_condition = None
-        if common_conditions:
-            if "Angry" in common_conditions:
-                focal_condition = "Angry"
-            else:
-                focal_condition = next(
-                    (cond for cond in ordered_conditions if cond in common_conditions),
-                    sorted(common_conditions)[0],
-                )
 
         roi_names: list[str] = []
         if isinstance(roi_map, dict):
@@ -405,9 +397,10 @@ class StatsController:
             f"[Between] Lela Mode spec ready for phases: {', '.join(phase_specs.keys())}. "
             f"Subjects per phase: {phase_log}",
         )
+        shared_conditions = sorted(common_conditions) if common_conditions else []
         self._view.append_log(
             section,
-            f"[Between] Lela Mode focal condition: {focal_condition or 'None'}; "
+            f"[Between] Lela Mode shared conditions: {', '.join(shared_conditions) if shared_conditions else 'None'}; "
             f"focal ROI: {focal_roi or 'None'}",
         )
 
@@ -419,7 +412,7 @@ class StatsController:
         self._view.append_log(section, "[Between] Lela Mode: running cross-phase LMM…")
 
         worker = stats_workers.StatsWorker(
-            stats_workers.run_between_group_process_task,
+            stats_cross_phase.run_cross_phase_lmm_job,
             job_spec_path=str(job_spec_path),
             _op="cross_phase_lmm",
         )
