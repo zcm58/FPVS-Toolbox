@@ -376,31 +376,129 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
         logger.info("Prepared cross-phase dataset with %d subjects.", subject_count)
         logger.info("Running cross-phase LMM with factors: group, phase")
 
-        results = run_cross_phase_lmm(
-            df_long,
-            focal_condition=spec.get("focal_condition"),
-            focal_roi=spec.get("focal_roi"),
-            logger=logger,
-        )
+        roi_map = spec.get("roi_map") or {}
+        df_roi_levels = sorted(df_long["roi"].unique().tolist())
+        roi_order: list[str] = []
 
-        fixed_effects = results.get("fixed_effects") or []
-        effects_of_interest = results.get("effects_of_interest") or {}
-        backup_2x2 = results.get("backup_2x2") or {}
-        meta = results.get("meta") or {}
-        for contrast in effects_of_interest.get("contrasts", []) or []:
-            label = contrast.get("label", "")
-            p_value = contrast.get("p")
-            logger.info("Effect of interest '%s' p-value: %s", label, p_value)
+        if isinstance(roi_map, dict) and roi_map:
+            for name in roi_map.keys():
+                if name in df_roi_levels:
+                    roi_order.append(name)
+        if not roi_order:
+            roi_order = df_roi_levels
+
+        focal_condition = spec.get("focal_condition")
+
+        all_fixed_rows: list[dict] = []
+        all_contrast_rows: list[dict] = []
+        backup_tests_rows: list[dict] = []
+        cell_means_rows: list[dict] = []
+        per_roi_meta: dict[str, dict] = {}
+        aggregated_warnings: list[str] = []
+
+        for roi_name in roi_order:
+            logger.info("Running cross-phase LMM for ROI '%s'", roi_name)
+            try:
+                results = run_cross_phase_lmm(
+                    df_long,
+                    focal_condition=focal_condition,
+                    focal_roi=roi_name,
+                    logger=logger,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Cross-phase LMM failed for ROI '%s': %s", roi_name, exc)
+                aggregated_warnings.append(f"{roi_name}: {exc}")
+                per_roi_meta[roi_name] = {"error": str(exc)}
+                continue
+
+            fixed_effects = results.get("fixed_effects") or []
+            for row in fixed_effects:
+                row_with_roi = dict(row)
+                row_with_roi.setdefault("roi", roi_name)
+                all_fixed_rows.append(row_with_roi)
+
+            effects_of_interest = results.get("effects_of_interest") or {}
+            contrasts = effects_of_interest.get("contrasts") or []
+            for contrast in contrasts:
+                contrast_with_roi = dict(contrast)
+                contrast_with_roi.setdefault("roi", roi_name)
+                all_contrast_rows.append(contrast_with_roi)
+                label = contrast_with_roi.get("label", "")
+                p_value = contrast_with_roi.get("p")
+                logger.info(
+                    "Effect of interest '%s' (roi=%s) p-value: %s",
+                    label,
+                    roi_name,
+                    p_value,
+                )
+
+            backup_2x2 = results.get("backup_2x2") or {}
+            tests = backup_2x2.get("tests") or []
+            for test in tests:
+                test_with_roi = dict(test)
+                test_with_roi.setdefault("roi", roi_name)
+                backup_tests_rows.append(test_with_roi)
+
+            cell_means = backup_2x2.get("cell_means") or []
+            for mean in cell_means:
+                mean_with_roi = dict(mean)
+                mean_with_roi.setdefault("roi", roi_name)
+                cell_means_rows.append(mean_with_roi)
+
+            meta = results.get("meta") or {}
+            per_roi_meta[roi_name] = meta
+            for warning in meta.get("warnings", []) or []:
+                aggregated_warnings.append(f"{roi_name}: {warning}")
+
+        if not all_fixed_rows and not all_contrast_rows:
+            aggregated_warnings.append("All ROI analyses failed. See per_roi metadata for details.")
+
+        combined_meta = {
+            "n_subjects": subject_count,
+            "phase_labels": sorted(df_long["phase"].unique().tolist()),
+            "roi_included": True,
+            "warnings": aggregated_warnings,
+            "per_roi": per_roi_meta,
+            "backup_2x2_used": any(
+                (meta or {}).get("backup_2x2_used") for meta in per_roi_meta.values()
+            ),
+        }
+
+        results = {
+            "fixed_effects": all_fixed_rows,
+            "effects_of_interest": {
+                "focal_condition": focal_condition,
+                "focal_rois": roi_order,
+                "contrasts": all_contrast_rows,
+            },
+            "meta": combined_meta,
+        }
 
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         excel_path.parent.mkdir(parents=True, exist_ok=True)
 
         summary_path.write_text(json.dumps(results, indent=2))
 
-        fixed_effects_df = pd.DataFrame(fixed_effects)
+        fixed_effects_df = pd.DataFrame(results.get("fixed_effects") or [])
         if fixed_effects_df.empty:
             fixed_effects_df = pd.DataFrame(
-                columns=["effect", "estimate", "se", "stat", "p"]
+                columns=["roi", "effect", "estimate", "se", "stat", "p"]
+            )
+        else:
+            fixed_effects_df = fixed_effects_df.reindex(
+                columns=["roi", "effect", "estimate", "se", "stat", "p"],
+            )
+
+        contrasts_df = pd.DataFrame(
+            (results.get("effects_of_interest") or {}).get("contrasts") or []
+        )
+        if contrasts_df.empty:
+            contrasts_df = pd.DataFrame(
+                columns=["roi", "label", "estimate", "se", "stat", "p"]
+            )
+        else:
+            contrasts_df = contrasts_df.reindex(
+                columns=["roi", "label", "estimate", "se", "stat", "p"],
             )
 
         with pd.ExcelWriter(excel_path, engine="xlsxwriter") as writer:
@@ -408,47 +506,40 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                 writer, fixed_effects_df, "Fixed Effects", logger.info
             )
 
-            contrasts_df = pd.DataFrame(effects_of_interest.get("contrasts") or [])
-            if contrasts_df.empty:
-                contrasts_df = pd.DataFrame(
-                    columns=["label", "estimate", "se", "stat", "p"]
-                )
-            _auto_format_and_write_excel(
-                writer, contrasts_df, "Contrasts (LMM)", logger.info
-            )
+            _auto_format_and_write_excel(writer, contrasts_df, "Contrasts", logger.info)
 
-            if isinstance(backup_2x2, dict) and (backup_2x2.get("tests") or []):
-                backup_tests_df = pd.DataFrame(backup_2x2.get("tests") or [])
-                if backup_tests_df.empty:
-                    backup_tests_df = pd.DataFrame(
-                        columns=[
-                            "label",
-                            "type",
-                            "phase",
-                            "group",
-                            "group1",
-                            "group2",
-                            "t",
-                            "df",
-                            "p",
-                        ]
-                    )
+            if backup_tests_rows:
+                backup_tests_df = pd.DataFrame(backup_tests_rows)
+                backup_tests_df = backup_tests_df.reindex(
+                    columns=[
+                        "roi",
+                        "label",
+                        "type",
+                        "phase",
+                        "group",
+                        "group1",
+                        "group2",
+                        "t",
+                        "df",
+                        "p",
+                    ]
+                )
                 _auto_format_and_write_excel(
                     writer, backup_tests_df, "Backup 2x2 Tests", logger.info
                 )
 
-                cell_means_df = pd.DataFrame(backup_2x2.get("cell_means") or [])
-                if cell_means_df.empty:
-                    cell_means_df = pd.DataFrame(
-                        columns=["group", "phase", "mean", "sd", "se", "n"]
-                    )
+            if cell_means_rows:
+                cell_means_df = pd.DataFrame(cell_means_rows)
+                cell_means_df = cell_means_df.reindex(
+                    columns=["roi", "group", "phase", "mean", "sd", "se", "n"]
+                )
                 _auto_format_and_write_excel(
                     writer, cell_means_df, "Cell Means", logger.info
                 )
 
-        if meta.get("backup_2x2_used"):
+        if combined_meta.get("backup_2x2_used"):
             logger.info(
-                "MixedLM did not converge; backup 2x2 t-tests were computed "
+                "MixedLM did not converge for at least one ROI; backup 2x2 t-tests were computed "
                 "and written to 'Backup 2x2 Tests' and 'Cell Means' sheets."
             )
 
