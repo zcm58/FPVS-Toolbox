@@ -90,6 +90,9 @@ def test_cross_phase_lmm_contrasts_and_meta():
     assert result["meta"]["n_subjects"] == len(subjects)
     assert "backup_2x2" in result
     assert "backup_2x2_used" in result["meta"]
+    backup_2x2_results = result.get("backup_2x2_results")
+    assert backup_2x2_results is not None
+    assert isinstance(backup_2x2_results, list)
     fixed_effects = result["fixed_effects"]
     assert fixed_effects and len(fixed_effects) > 0
 

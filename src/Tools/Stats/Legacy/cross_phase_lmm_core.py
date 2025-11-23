@@ -286,13 +286,27 @@ def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, objec
         mean1: float, sd1: float, n1: int, mean2: float, sd2: float, n2: int
     ) -> Dict[str, float]:
         if n1 < 2 or n2 < 2 or not np.isfinite(sd1) or not np.isfinite(sd2):
-            return {"t": float("nan"), "df": float("nan"), "p": float("nan")}
+            return {
+                "t": float("nan"),
+                "df": float("nan"),
+                "p": float("nan"),
+                "se": float("nan"),
+                "estimate": float("nan"),
+            }
         var1 = sd1 ** 2
         var2 = sd2 ** 2
         se2 = var1 / n1 + var2 / n2
         if se2 <= 0:
-            return {"t": float("nan"), "df": float("nan"), "p": float("nan")}
-        t_val = (mean1 - mean2) / np.sqrt(se2)
+            return {
+                "t": float("nan"),
+                "df": float("nan"),
+                "p": float("nan"),
+                "se": float("nan"),
+                "estimate": float("nan"),
+            }
+        se = float(np.sqrt(se2))
+        estimate = float(mean1 - mean2)
+        t_val = estimate / se
         num = se2 ** 2
         den = (var1 ** 2) / (n1 ** 2 * (n1 - 1)) + (var2 ** 2) / (n2 ** 2 * (n2 - 1))
         df_val = num / den if den > 0 else float("nan")
@@ -307,18 +321,36 @@ def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, objec
             # Normal approximation as fallback
             z = float(t_val)
             p_val = float(2 * (1 - 0.5 * (1 + erf(abs(z) / sqrt(2)))))
-        return {"t": float(t_val), "df": float(df_val), "p": float(p_val)}
+        return {
+            "t": float(t_val),
+            "df": float(df_val),
+            "p": float(p_val),
+            "se": se,
+            "estimate": estimate,
+        }
 
     def _paired_t(values_a: np.ndarray, values_b: np.ndarray) -> Dict[str, float]:
         mask = np.isfinite(values_a) & np.isfinite(values_b)
         diffs = (values_b - values_a)[mask]
         n = int(diffs.size)
         if n < 2:
-            return {"t": float("nan"), "df": float("nan"), "p": float("nan")}
+            return {
+                "t": float("nan"),
+                "df": float("nan"),
+                "p": float("nan"),
+                "se": float("nan"),
+                "estimate": float("nan"),
+            }
         mean_d = float(diffs.mean())
         sd_d = float(diffs.std(ddof=1))
         if sd_d <= 0:
-            return {"t": float("nan"), "df": float("nan"), "p": float("nan")}
+            return {
+                "t": float("nan"),
+                "df": float("nan"),
+                "p": float("nan"),
+                "se": float("nan"),
+                "estimate": float("nan"),
+            }
         se = sd_d / np.sqrt(n)
         t_val = mean_d / se
         df_val = float(n - 1)
@@ -331,7 +363,13 @@ def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, objec
 
             z = float(t_val)
             p_val = float(2 * (1 - 0.5 * (1 + erf(abs(z) / sqrt(2)))))
-        return {"t": float(t_val), "df": float(df_val), "p": float(p_val)}
+        return {
+            "t": float(t_val),
+            "df": float(df_val),
+            "p": float(p_val),
+            "se": float(se),
+            "estimate": float(mean_d),
+        }
 
     # 1) Between-group comparison at phase p0 (group1 - group0)
     wide_p0 = wide[wide["group"].isin([g0, g1])]
@@ -354,6 +392,8 @@ def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, objec
             "mean1": mean_g1,
             "mean2": mean_g0,
             "diff": float(mean_g1 - mean_g0) if np.isfinite(mean_g1) and np.isfinite(mean_g0) else float("nan"),
+            "estimate": welch.get("estimate", float("nan")),
+            "se": welch.get("se", float("nan")),
             "t": welch["t"],
             "df": welch["df"],
             "p": welch["p"],
@@ -372,6 +412,8 @@ def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, objec
             "group": g1,
             "phase1": p0,
             "phase2": p1,
+            "estimate": paired.get("estimate", float("nan")),
+            "se": paired.get("se", float("nan")),
             "t": paired["t"],
             "df": paired["df"],
             "p": paired["p"],
@@ -406,6 +448,8 @@ def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, objec
             "diff_delta": float(mean_d1 - mean_d0)
             if np.isfinite(mean_d1) and np.isfinite(mean_d0)
             else float("nan"),
+            "estimate": welch_delta.get("estimate", float("nan")),
+            "se": welch_delta.get("se", float("nan")),
             "t": welch_delta["t"],
             "df": welch_delta["df"],
             "p": welch_delta["p"],
@@ -542,6 +586,48 @@ def run_cross_phase_lmm(
 
     logger = logger or logging.getLogger(__name__)
     meta_warnings: List[str] = []
+    backup_2x2_results: List[Dict[str, object]] = []
+
+    def _effect_label_from_test(test: Dict[str, object]) -> str | None:
+        ttype = test.get("type")
+        if ttype == "between_group_at_phase":
+            return "group"
+        if ttype == "within_group_phase_diff":
+            return "phase"
+        if ttype == "interaction_diff_of_diffs":
+            return "group_x_phase"
+        return str(ttype) if ttype is not None else None
+
+    def _append_backup_rows(backup: Dict[str, object] | None) -> None:
+        if not backup:
+            return
+
+        tests = backup.get("tests") or []
+        roi_label = focal_roi if focal_roi is not None else ""
+        for test in tests:
+            effect = _effect_label_from_test(test)
+            if not effect:
+                continue
+
+            estimate = test.get("estimate")
+            if estimate is None or not np.isfinite(float(estimate)):
+                estimate = test.get("diff_delta", test.get("diff", float("nan")))
+            se_val = test.get("se")
+            stat_val = float(test.get("t", float("nan")))
+            if (se_val is None or not np.isfinite(float(se_val))) and np.isfinite(float(estimate)) and np.isfinite(stat_val) and stat_val != 0:
+                se_val = float(estimate) / stat_val
+
+            row: Dict[str, object] = {
+                "roi": roi_label,
+                "effect": effect,
+                "estimate": float(estimate) if estimate is not None else float("nan"),
+                "se": float(se_val) if se_val is not None else float("nan"),
+                "stat": stat_val,
+                "p": float(test.get("p", float("nan"))),
+            }
+            if "df" in test:
+                row["df"] = test.get("df")
+            backup_2x2_results.append(row)
 
     required_cols = {"subject", "group", "phase", "condition", "roi", "value"}
     missing = required_cols - set(df_long.columns)
@@ -633,17 +719,20 @@ def run_cross_phase_lmm(
     if result_obj is None and backup_2x2 is None:
         backup_2x2 = _run_backup_2x2(df, logger)
 
+    _append_backup_rows(backup_2x2)
+
     meta = {
         "n_subjects": int(df["subject"].nunique()),
         "phase_labels": sorted(df["phase"].unique().tolist()),
         "roi_included": True,
         "warnings": meta_warnings,
-        "backup_2x2_used": backup_2x2 is not None,
+        "backup_2x2_used": bool(backup_2x2_results),
     }
 
     return {
         "fixed_effects": fixed_effects,
         "effects_of_interest": effects_of_interest,
         "backup_2x2": backup_2x2,
+        "backup_2x2_results": backup_2x2_results,
         "meta": meta,
     }
