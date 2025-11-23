@@ -396,6 +396,9 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
         per_roi_meta: dict[str, dict] = {}
         aggregated_warnings: list[str] = []
 
+        success_count = 0
+        exit_code = 0
+
         for roi_name in roi_order:
             logger.info("Running cross-phase LMM for ROI '%s'", roi_name)
             try:
@@ -410,6 +413,8 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                 aggregated_warnings.append(f"{roi_name}: {exc}")
                 per_roi_meta[roi_name] = {"error": str(exc)}
                 continue
+
+            success_count += 1
 
             fixed_effects = results.get("fixed_effects") or []
             for row in fixed_effects:
@@ -450,8 +455,12 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
             for warning in meta.get("warnings", []) or []:
                 aggregated_warnings.append(f"{roi_name}: {warning}")
 
-        if not all_fixed_rows and not all_contrast_rows:
-            aggregated_warnings.append("All ROI analyses failed. See per_roi metadata for details.")
+        if success_count == 0:
+            exit_code = 1
+            logger.error("Cross-phase LMM failed for all ROIs; exiting with error.")
+            aggregated_warnings.append(
+                "All ROI analyses failed. See per_roi metadata for details."
+            )
 
         combined_meta = {
             "n_subjects": subject_count,
@@ -544,7 +553,7 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
             )
 
         logger.info("Cross-phase LMM analysis complete.")
-        return 0
+        return exit_code
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"Cross-phase LMM failed: {exc}\n")
         if summary_path is not None:
