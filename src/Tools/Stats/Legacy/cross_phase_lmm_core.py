@@ -280,12 +280,20 @@ def _build_contrast(
             {"label": label, "estimate": est, "se": se, "stat": float(stat), "p": p}
         )
 
-    # group effect at phase A: group1 - group0
-    _add_contrast(f"group_effect_phase={phase_labels[0]}", g1_pa - g0_pa)
-    # group effect at phase B
-    _add_contrast(f"group_effect_phase={phase_labels[1]}", g1_pb - g0_pb)
-    # interaction: (group diff at B) - (group diff at A)
-    _add_contrast("group_x_phase_interaction", (g1_pb - g0_pb) - (g1_pa - g0_pa))
+    vec_bc_vs_control_luteal = g1_pa - g0_pa
+    _add_contrast(
+        f"{group_levels[1]}_vs_{group_levels[0]}_phase={phase_labels[0]}",
+        vec_bc_vs_control_luteal,
+    )
+
+    vec_bc_f_minus_bc_l = g1_pb - g1_pa
+    _add_contrast(
+        f"{group_levels[1]}_{phase_labels[1]}_minus_{group_levels[1]}_{phase_labels[0]}",
+        vec_bc_f_minus_bc_l,
+    )
+
+    vec_interaction = (g1_pb - g1_pa) - (g0_pb - g0_pa)
+    _add_contrast("group_x_phase_difference_of_differences", vec_interaction)
 
     return contrasts
 
@@ -317,7 +325,37 @@ def run_cross_phase_lmm(
     df = df.dropna(subset=["value", "subject", "group", "phase", "condition", "roi"])
     df = df[np.isfinite(df["value"].to_numpy())]
 
-    design_formula = "group * phase * C(condition, Sum) * C(roi, Sum)"
+    if focal_condition is not None:
+        df = df[df["condition"] == focal_condition]
+        if df.empty:
+            raise ValueError(f"No rows found for focal condition '{focal_condition}'.")
+
+    if focal_roi is not None:
+        df = df[df["roi"] == focal_roi]
+        if df.empty:
+            raise ValueError(f"No rows found for focal ROI '{focal_roi}'.")
+
+    if df.empty:
+        raise ValueError("No data remaining after cleaning and focal filters.")
+
+    phases = sorted(df["phase"].unique().tolist())
+    if len(phases) < 2:
+        raise ValueError("Need at least two phases to fit cross-phase model.")
+
+    subject_phase_counts = df.groupby("subject")["phase"].nunique()
+    subjects_with_all_phases = subject_phase_counts[subject_phase_counts == len(phases)].index
+    dropped_subjects = sorted(set(df["subject"]) - set(subjects_with_all_phases))
+    if dropped_subjects:
+        df = df[df["subject"].isin(subjects_with_all_phases)]
+        meta_warnings.append(
+            "Dropping subjects missing focal condition/ROI in at least one phase: "
+            f"{', '.join(map(str, dropped_subjects))}"
+        )
+
+    if df.empty:
+        raise ValueError("No paired data remaining after dropping incomplete subjects.")
+
+    design_formula = "group * phase"
     model_formula = f"value ~ {design_formula}"
 
     try:

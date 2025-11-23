@@ -374,7 +374,7 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
         if subject_count == 0:
             raise ValueError("Cross-phase LMM requires at least one subject after phase intersection.")
         logger.info("Prepared cross-phase dataset with %d subjects.", subject_count)
-        logger.info("Running cross-phase LMM with factors: group, phase, condition, roi")
+        logger.info("Running cross-phase LMM with factors: group, phase")
 
         results = run_cross_phase_lmm(
             df_long,
@@ -405,15 +405,14 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                 writer, fixed_effects_df, "Fixed Effects", logger.info
             )
 
-            if effects_of_interest:
-                contrasts_df = pd.DataFrame(effects_of_interest.get("contrasts") or [])
-                if contrasts_df.empty:
-                    contrasts_df = pd.DataFrame(
-                        columns=["label", "estimate", "se", "stat", "p"]
-                    )
-                _auto_format_and_write_excel(
-                    writer, contrasts_df, "Effects of Interest", logger.info
+            contrasts_df = pd.DataFrame(effects_of_interest.get("contrasts") or [])
+            if contrasts_df.empty:
+                contrasts_df = pd.DataFrame(
+                    columns=["label", "estimate", "se", "stat", "p"]
                 )
+            _auto_format_and_write_excel(
+                writer, contrasts_df, "Contrasts", logger.info
+            )
 
         logger.info("Cross-phase LMM analysis complete.")
         return 0
