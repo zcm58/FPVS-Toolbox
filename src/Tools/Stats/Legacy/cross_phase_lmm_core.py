@@ -572,7 +572,6 @@ def run_cross_phase_lmm(
     if df.empty:
         raise ValueError("No data remaining after cleaning and focal filters.")
 
-    design_formula = "group * phase"
     model_formula = f"value ~ {design_formula}"
 
     try:
