@@ -34,6 +34,8 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
+from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
+
 from .blas_limits import single_threaded_blas
 
 
@@ -52,54 +54,94 @@ def build_cross_phase_long_df(
 
     logger = logging.getLogger(__name__)
     phases = list(phase_data.keys())
-    subject_sets: List[set[str]] = []
+    phase_indices: Dict[str, Dict[str, Dict[str, str]]] = {}
+    phase_canon_sets: List[set[str]] = []
+
     for phase in phases:
-        subject_sets.append(set(phase_data.get(phase, {}).keys()))
-    common_subjects: List[str] = sorted(set.intersection(*subject_sets)) if subject_sets else []
+        subj_map = phase_data.get(phase, {})
+        raw_to_canon: Dict[str, str] = {}
+        canon_to_raw_candidates: Dict[str, set[str]] = {}
+
+        for raw_id in subj_map.keys():
+            canon = canonical_subject_id(raw_id)
+            raw_to_canon[raw_id] = canon
+            canon_to_raw_candidates.setdefault(canon, set()).add(raw_id)
+
+        canon_to_raw: Dict[str, str] = {}
+        for canon_id, raw_ids in canon_to_raw_candidates.items():
+            if len(raw_ids) > 1:
+                chosen = sorted(raw_ids)[0]
+                logger.warning(
+                    "Lela Mode: multiple raw subject IDs %s share canonical ID '%s' in phase '%s'; using '%s'.",
+                    sorted(raw_ids),
+                    canon_id,
+                    phase,
+                    chosen,
+                )
+            else:
+                chosen = next(iter(raw_ids))
+            canon_to_raw[canon_id] = chosen
+
+        phase_indices[phase] = {
+            "raw_to_canon": raw_to_canon,
+            "canon_to_raw": canon_to_raw,
+        }
+        phase_canon_sets.append(set(canon_to_raw.keys()))
+
+    common_canon_subjects: List[str] = (
+        sorted(set.intersection(*phase_canon_sets)) if phase_canon_sets else []
+    )
 
     dropped_for_missing: List[str] = []
-    dropped_for_group_conflict: List[str] = []
-
-    # Drop subjects missing in any phase
-    for phase in phases:
-        missing = set(phase_data.get(phase, {}).keys()) - set(common_subjects)
-        if missing:
-            dropped_for_missing.extend(sorted(missing))
+    for canon_id in sorted(set().union(*phase_canon_sets) - set(common_canon_subjects)):
+        raw_per_phase: List[str] = []
+        for phase in phases:
+            raw_id = phase_indices[phase]["canon_to_raw"].get(canon_id)
+            if raw_id:
+                raw_per_phase.append(f"{phase}:{raw_id}")
+        detail = f"{canon_id} ({', '.join(sorted(raw_per_phase))})" if raw_per_phase else canon_id
+        dropped_for_missing.append(detail)
     if dropped_for_missing:
-        logger.warning("Dropping subjects missing in some phases: %s", sorted(set(dropped_for_missing)))
+        logger.warning("Dropping subjects missing in some phases: %s", dropped_for_missing)
 
     # Check group consistency across phases
     consistent_subjects: List[str] = []
-    for subj in common_subjects:
+    dropped_for_group_conflict: List[str] = []
+    for canon_subj in common_canon_subjects:
         groups = []
         for phase in phases:
+            raw_id = phase_indices[phase]["canon_to_raw"].get(canon_subj)
             gmap = phase_group_maps.get(phase, {})
-            if subj not in gmap:
+            if raw_id is None or raw_id not in gmap:
                 groups = None  # type: ignore[assignment]
                 break
-            groups.append(gmap[subj])
+            groups.append(gmap[raw_id])
         if groups is None or len(set(groups)) != 1:
-            dropped_for_group_conflict.append(subj)
+            dropped_for_group_conflict.append(canon_subj)
             continue
-        consistent_subjects.append(subj)
+        consistent_subjects.append(canon_subj)
     if dropped_for_group_conflict:
-        logger.warning("Dropping subjects with inconsistent group labels: %s", sorted(set(dropped_for_group_conflict)))
+        logger.warning(
+            "Dropping subjects with inconsistent group labels: %s", sorted(set(dropped_for_group_conflict))
+        )
 
     rows: List[Dict[str, object]] = []
     for phase in phase_labels:
         subj_map = phase_data.get(phase, {})
         gmap = phase_group_maps.get(phase, {})
-        for subj in consistent_subjects:
-            if subj not in subj_map:
+        canon_to_raw = phase_indices[phase]["canon_to_raw"]
+        for canon_subj in consistent_subjects:
+            raw_id = canon_to_raw.get(canon_subj)
+            if raw_id is None or raw_id not in subj_map:
                 continue
-            group_label = gmap.get(subj)
-            for condition, roi_map in subj_map[subj].items():
+            group_label = gmap.get(raw_id)
+            for condition, roi_map in subj_map[raw_id].items():
                 for roi, value in roi_map.items():
                     if not np.isfinite(value):
                         continue
                     rows.append(
                         {
-                            "subject": subj,
+                            "subject": canon_subj,
                             "group": group_label,
                             "phase": phase,
                             "condition": condition,
