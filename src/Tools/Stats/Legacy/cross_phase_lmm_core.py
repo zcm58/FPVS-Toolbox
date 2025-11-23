@@ -181,6 +181,242 @@ def build_cross_phase_long_df(
 
     return pd.DataFrame(rows, columns=["subject", "group", "phase", "condition", "roi", "value"])
 
+
+def _compute_cell_means(df: pd.DataFrame) -> List[Dict[str, object]]:
+    """
+    Compute descriptive statistics for each group x phase cell.
+
+    Returns a list of dicts with keys:
+      - group
+      - phase
+      - mean
+      - sd
+      - se
+      - n
+    """
+
+    rows: List[Dict[str, object]] = []
+    if df.empty:
+        return rows
+
+    for (group, phase), sub in df.groupby(["group", "phase"]):
+        values = sub["value"].to_numpy()
+        values = values[np.isfinite(values)]
+        n = int(values.size)
+        if n == 0:
+            continue
+        mean = float(values.mean())
+        sd = float(values.std(ddof=1)) if n > 1 else float("nan")
+        se = float(sd / np.sqrt(n)) if n > 1 and np.isfinite(sd) else float("nan")
+        rows.append(
+            {
+                "group": group,
+                "phase": phase,
+                "mean": mean,
+                "sd": sd,
+                "se": se,
+                "n": n,
+            }
+        )
+    return rows
+
+
+def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, object]:
+    """
+    Backup 2x2 analysis for the cross-phase design when MixedLM fails.
+
+    Assumes df contains columns: subject, group, phase, value,
+    and has been filtered to a single condition and ROI.
+    Performs:
+      1) Between-group comparison at one phase (group2 - group1)
+      2) Within-group phase difference for group2 (phaseB - phaseA)
+      3) Interaction: difference-of-differences between groups.
+    """
+
+    result: Dict[str, object] = {
+        "cell_means": [],
+        "tests": [],
+    }
+
+    if df.empty:
+        logger.warning("Backup 2x2: no data available.")
+        return result
+
+    groups = sorted(df["group"].dropna().astype(str).unique().tolist())
+    phases = sorted(df["phase"].dropna().astype(str).unique().tolist())
+
+    if len(groups) != 2 or len(phases) != 2:
+        logger.warning(
+            "Backup 2x2: expected exactly 2 groups and 2 phases, got groups=%s phases=%s",
+            groups,
+            phases,
+        )
+        result["cell_means"] = _compute_cell_means(df)
+        return result
+
+    g0, g1 = groups[0], groups[1]
+    p0, p1 = phases[0], phases[1]
+
+    # Build subject-level wide table: one row per subject with both phases
+    wide = (
+        df.pivot_table(
+            index=["subject", "group"],
+            columns="phase",
+            values="value",
+            aggfunc="mean",
+        )
+        .reset_index()
+    )
+
+    # Drop rows with missing phase values
+    if p0 in wide.columns and p1 in wide.columns:
+        wide = wide.dropna(subset=[p0, p1])
+    else:
+        logger.warning(
+            "Backup 2x2: pivot table missing expected phase columns %s and %s",
+            p0,
+            p1,
+        )
+        result["cell_means"] = _compute_cell_means(df)
+        return result
+
+    tests: List[Dict[str, object]] = []
+
+    def _welch_t_from_stats(
+        mean1: float, sd1: float, n1: int, mean2: float, sd2: float, n2: int
+    ) -> Dict[str, float]:
+        if n1 < 2 or n2 < 2 or not np.isfinite(sd1) or not np.isfinite(sd2):
+            return {"t": float("nan"), "df": float("nan"), "p": float("nan")}
+        var1 = sd1 ** 2
+        var2 = sd2 ** 2
+        se2 = var1 / n1 + var2 / n2
+        if se2 <= 0:
+            return {"t": float("nan"), "df": float("nan"), "p": float("nan")}
+        t_val = (mean1 - mean2) / np.sqrt(se2)
+        num = se2 ** 2
+        den = (var1 ** 2) / (n1 ** 2 * (n1 - 1)) + (var2 ** 2) / (n2 ** 2 * (n2 - 1))
+        df_val = num / den if den > 0 else float("nan")
+        p_val: float
+        try:
+            from scipy.stats import t as t_dist  # type: ignore
+
+            p_val = float(2 * (1 - t_dist.cdf(abs(t_val), df_val)))
+        except Exception:
+            from math import erf, sqrt
+
+            # Normal approximation as fallback
+            z = float(t_val)
+            p_val = float(2 * (1 - 0.5 * (1 + erf(abs(z) / sqrt(2)))))
+        return {"t": float(t_val), "df": float(df_val), "p": float(p_val)}
+
+    def _paired_t(values_a: np.ndarray, values_b: np.ndarray) -> Dict[str, float]:
+        mask = np.isfinite(values_a) & np.isfinite(values_b)
+        diffs = (values_b - values_a)[mask]
+        n = int(diffs.size)
+        if n < 2:
+            return {"t": float("nan"), "df": float("nan"), "p": float("nan")}
+        mean_d = float(diffs.mean())
+        sd_d = float(diffs.std(ddof=1))
+        if sd_d <= 0:
+            return {"t": float("nan"), "df": float("nan"), "p": float("nan")}
+        se = sd_d / np.sqrt(n)
+        t_val = mean_d / se
+        df_val = float(n - 1)
+        try:
+            from scipy.stats import t as t_dist  # type: ignore
+
+            p_val = float(2 * (1 - t_dist.cdf(abs(t_val), df_val)))
+        except Exception:
+            from math import erf, sqrt
+
+            z = float(t_val)
+            p_val = float(2 * (1 - 0.5 * (1 + erf(abs(z) / sqrt(2)))))
+        return {"t": float(t_val), "df": float(df_val), "p": float(p_val)}
+
+    # 1) Between-group comparison at phase p0 (group1 - group0)
+    wide_p0 = wide[wide["group"].isin([g0, g1])]
+    g0_vals = wide_p0.loc[wide_p0["group"] == g0, p0].to_numpy()
+    g1_vals = wide_p0.loc[wide_p0["group"] == g1, p0].to_numpy()
+    g0_vals = g0_vals[np.isfinite(g0_vals)]
+    g1_vals = g1_vals[np.isfinite(g1_vals)]
+    mean_g0 = float(g0_vals.mean()) if g0_vals.size > 0 else float("nan")
+    mean_g1 = float(g1_vals.mean()) if g1_vals.size > 0 else float("nan")
+    sd_g0 = float(g0_vals.std(ddof=1)) if g0_vals.size > 1 else float("nan")
+    sd_g1 = float(g1_vals.std(ddof=1)) if g1_vals.size > 1 else float("nan")
+    welch = _welch_t_from_stats(mean_g1, sd_g1, int(g1_vals.size), mean_g0, sd_g0, int(g0_vals.size))
+    tests.append(
+        {
+            "label": f"{g1} vs {g0} at phase={p0}",
+            "type": "between_group_at_phase",
+            "phase": p0,
+            "group1": g1,
+            "group2": g0,
+            "mean1": mean_g1,
+            "mean2": mean_g0,
+            "diff": float(mean_g1 - mean_g0) if np.isfinite(mean_g1) and np.isfinite(mean_g0) else float("nan"),
+            "t": welch["t"],
+            "df": welch["df"],
+            "p": welch["p"],
+        }
+    )
+
+    # 2) Within-group phase difference for group g1 (p1 - p0)
+    wide_g1 = wide[wide["group"] == g1]
+    vals_p0_g1 = wide_g1[p0].to_numpy()
+    vals_p1_g1 = wide_g1[p1].to_numpy()
+    paired = _paired_t(vals_p0_g1, vals_p1_g1)
+    tests.append(
+        {
+            "label": f"{g1} {p1} minus {g1} {p0}",
+            "type": "within_group_phase_diff",
+            "group": g1,
+            "phase1": p0,
+            "phase2": p1,
+            "t": paired["t"],
+            "df": paired["df"],
+            "p": paired["p"],
+        }
+    )
+
+    # 3) Interaction: difference-of-differences between groups
+    # delta = phase1 - phase0 for each subject, compare between groups
+    wide_dd = wide[wide["group"].isin([g0, g1])].copy()
+    wide_dd["delta"] = wide_dd[p1] - wide_dd[p0]
+    d0 = wide_dd.loc[wide_dd["group"] == g0, "delta"].to_numpy()
+    d1 = wide_dd.loc[wide_dd["group"] == g1, "delta"].to_numpy()
+    d0 = d0[np.isfinite(d0)]
+    d1 = d1[np.isfinite(d1)]
+    mean_d0 = float(d0.mean()) if d0.size > 0 else float("nan")
+    mean_d1 = float(d1.mean()) if d1.size > 0 else float("nan")
+    sd_d0 = float(d0.std(ddof=1)) if d0.size > 1 else float("nan")
+    sd_d1 = float(d1.std(ddof=1)) if d1.size > 1 else float("nan")
+    welch_delta = _welch_t_from_stats(
+        mean_d1, sd_d1, int(d1.size), mean_d0, sd_d0, int(d0.size)
+    )
+    tests.append(
+        {
+            "label": "group x phase difference-of-differences",
+            "type": "interaction_diff_of_diffs",
+            "group1": g1,
+            "group2": g0,
+            "phase1": p1,
+            "phase0": p0,
+            "mean_delta1": mean_d1,
+            "mean_delta2": mean_d0,
+            "diff_delta": float(mean_d1 - mean_d0)
+            if np.isfinite(mean_d1) and np.isfinite(mean_d0)
+            else float("nan"),
+            "t": welch_delta["t"],
+            "df": welch_delta["df"],
+            "p": welch_delta["p"],
+        }
+    )
+
+    result["cell_means"] = _compute_cell_means(df)
+    result["tests"] = tests
+    logger.info("Backup 2x2: computed %d tests.", len(tests))
+    return result
+
 def _build_fixed_effects_table(result) -> List[Dict[str, object]]:
     fe = getattr(result, "fe_params", None)
     bse = getattr(result, "bse_fe", None)
@@ -318,6 +554,24 @@ def run_cross_phase_lmm(
     df = df[np.isfinite(df["value"].to_numpy())]
 
     design_formula = "group * phase * C(condition, Sum) * C(roi, Sum)"
+
+    if focal_condition is not None:
+        df = df[df["condition"] == focal_condition]
+        if df.empty:
+            raise ValueError(
+                f"No data remaining after filtering for focal condition '{focal_condition}'."
+            )
+        design_formula = "group * phase"
+
+    if focal_roi is not None:
+        df = df[df["roi"] == focal_roi]
+        if df.empty:
+            raise ValueError(f"No data remaining after filtering for focal ROI '{focal_roi}'.")
+        design_formula = "group * phase"
+
+    if df.empty:
+        raise ValueError("No data remaining after cleaning and focal filters.")
+
     model_formula = f"value ~ {design_formula}"
 
     try:
@@ -326,6 +580,7 @@ def run_cross_phase_lmm(
         raise ImportError("statsmodels is required. Install via `pip install statsmodels`.") from e
 
     result_obj = None
+    backup_2x2: Dict[str, object] | None = None
     with single_threaded_blas():
         try:
             model = smf.mixedlm(model_formula, df, groups=df["subject"])
@@ -333,6 +588,7 @@ def run_cross_phase_lmm(
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("Cross-phase MixedLM failed: %s", exc)
             meta_warnings.append(f"MixedLM failed to converge: {exc}")
+            backup_2x2 = _run_backup_2x2(df, logger)
 
     fixed_effects = _build_fixed_effects_table(result_obj) if result_obj is not None else None
 
@@ -371,16 +627,23 @@ def run_cross_phase_lmm(
     if result_obj is None or not getattr(result_obj, "converged", False):
         if "MixedLM failed to converge" not in meta_warnings:
             meta_warnings.append("MixedLM did not converge.")
+        if backup_2x2 is None:
+            backup_2x2 = _run_backup_2x2(df, logger)
+
+    if result_obj is None and backup_2x2 is None:
+        backup_2x2 = _run_backup_2x2(df, logger)
 
     meta = {
         "n_subjects": int(df["subject"].nunique()),
         "phase_labels": sorted(df["phase"].unique().tolist()),
         "roi_included": True,
         "warnings": meta_warnings,
+        "backup_2x2_used": backup_2x2 is not None,
     }
 
     return {
         "fixed_effects": fixed_effects,
         "effects_of_interest": effects_of_interest,
+        "backup_2x2": backup_2x2,
         "meta": meta,
     }

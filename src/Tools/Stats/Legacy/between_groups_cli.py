@@ -383,7 +383,10 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
             logger=logger,
         )
 
+        fixed_effects = results.get("fixed_effects") or []
         effects_of_interest = results.get("effects_of_interest") or {}
+        backup_2x2 = results.get("backup_2x2") or {}
+        meta = results.get("meta") or {}
         for contrast in effects_of_interest.get("contrasts", []) or []:
             label = contrast.get("label", "")
             p_value = contrast.get("p")
@@ -394,7 +397,7 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
 
         summary_path.write_text(json.dumps(results, indent=2))
 
-        fixed_effects_df = pd.DataFrame(results.get("fixed_effects") or [])
+        fixed_effects_df = pd.DataFrame(fixed_effects)
         if fixed_effects_df.empty:
             fixed_effects_df = pd.DataFrame(
                 columns=["effect", "estimate", "se", "stat", "p"]
@@ -411,7 +414,42 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                     columns=["label", "estimate", "se", "stat", "p"]
                 )
             _auto_format_and_write_excel(
-                writer, contrasts_df, "Contrasts", logger.info
+                writer, contrasts_df, "Contrasts (LMM)", logger.info
+            )
+
+            if isinstance(backup_2x2, dict) and (backup_2x2.get("tests") or []):
+                backup_tests_df = pd.DataFrame(backup_2x2.get("tests") or [])
+                if backup_tests_df.empty:
+                    backup_tests_df = pd.DataFrame(
+                        columns=[
+                            "label",
+                            "type",
+                            "phase",
+                            "group",
+                            "group1",
+                            "group2",
+                            "t",
+                            "df",
+                            "p",
+                        ]
+                    )
+                _auto_format_and_write_excel(
+                    writer, backup_tests_df, "Backup 2x2 Tests", logger.info
+                )
+
+                cell_means_df = pd.DataFrame(backup_2x2.get("cell_means") or [])
+                if cell_means_df.empty:
+                    cell_means_df = pd.DataFrame(
+                        columns=["group", "phase", "mean", "sd", "se", "n"]
+                    )
+                _auto_format_and_write_excel(
+                    writer, cell_means_df, "Cell Means", logger.info
+                )
+
+        if meta.get("backup_2x2_used"):
+            logger.info(
+                "MixedLM did not converge; backup 2x2 t-tests were computed "
+                "and written to 'Backup 2x2 Tests' and 'Cell Means' sheets."
             )
 
         logger.info("Cross-phase LMM analysis complete.")
