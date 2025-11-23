@@ -28,6 +28,22 @@ from Main_App.PySide6_App.Backend.project import STATS_SUBFOLDER_NAME
 logger = logging.getLogger(__name__)
 
 
+def _unique_label(base_label: str, existing_labels: set[str]) -> str:
+    """Return a label that is unique within ``existing_labels``.
+
+    If ``base_label`` already exists, add a numeric suffix. The chosen label is
+    inserted into ``existing_labels`` before returning.
+    """
+
+    label = base_label
+    suffix = 2
+    while label in existing_labels:
+        label = f"{base_label} ({suffix})"
+        suffix += 1
+    existing_labels.add(label)
+    return label
+
+
 class StatsViewProtocol:
     """Minimal interface the controller expects from the view (StatsWindow)."""
 
@@ -238,6 +254,7 @@ class StatsController:
         phase_specs: dict[str, dict] = {}
         phase_roots: list[tuple[Path, dict | None]] = []
         phase_subject_counts: list[tuple[str, int]] = []
+        phase_labels_seen: set[str] = set()
         for idx in range(2):
             title = f"Select Phase {idx + 1} project folder"
             folder = self._view.prompt_phase_folder(title)
@@ -254,13 +271,14 @@ class StatsController:
                 )
                 return
             phase_label = Path(folder).name or f"Phase {idx + 1}"
-            phase_specs[phase_label] = {
+            unique_label = _unique_label(phase_label, phase_labels_seen)
+            phase_specs[unique_label] = {
                 "subjects": scan.subjects,
                 "conditions": scan.conditions,
                 "subject_data": scan.subject_data,
                 "group_map": scan.subject_groups,
             }
-            phase_subject_counts.append((phase_label, len(scan.subjects)))
+            phase_subject_counts.append((unique_label, len(scan.subjects)))
             phase_roots.append((Path(folder), scan.manifest))
 
         missing_data_phase = next(
