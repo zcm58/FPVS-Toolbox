@@ -108,6 +108,7 @@ class StatsWorker(QRunnable):
                         "op": self._op,
                         "step_id": self._step_id,
                         "callable": getattr(self._fn, "__name__", str(self._fn)),
+                        "exc": repr(emit_exc),
                     },
                 )
                 step_label = self._step_id or self._op
