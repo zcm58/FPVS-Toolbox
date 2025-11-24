@@ -46,7 +46,7 @@ def compute_effective_max_workers(
     if total_ram_gib < 12.0:
         # 8GB Tier (and below):
         # Windows/OS uses ~3GB. Leaving ~5GB. 2 workers is the safe max.
-        ram_cap = 4
+        ram_cap = 2
     elif total_ram_gib < 20.0:
         # 16GB Tier (covers 12GB-19GB): Your setting.
         ram_cap = 4
