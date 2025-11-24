@@ -1,6 +1,3 @@
-# src/Tools/Stats/PySide6/stats_main_window.py
-from __future__ import annotations
-
 """View layer for the PySide6 Stats tool.
 
 StatsWindow renders the Stats UI, wires user gestures to StatsController entry
@@ -8,6 +5,8 @@ points, and reflects pipeline progress and logs for the user. All analysis logic
 is delegated to the controller and workers; this module focuses on layout and
 signal wiring only.
 """
+
+from __future__ import annotations
 
 import json
 import logging
@@ -639,7 +638,12 @@ class StatsWindow(QMainWindow):
 
         self._log_pipeline_event(pipeline=pipeline_id, step=step.id, event="start")
 
-        worker = StatsWorker(step.worker_fn, **step.kwargs)
+        worker = StatsWorker(
+            step.worker_fn,
+            **step.kwargs,
+            _op=step.name,
+            _step_id=getattr(step.id, "name", str(step.id)),
+        )
 
         try:
             logger.info(
@@ -672,16 +676,39 @@ class StatsWindow(QMainWindow):
                 },
             )
             try:
+                logger.info(
+                    "stats_view_finished_before_controller",
+                    extra={
+                        "pipeline": getattr(pid, "name", str(pid)),
+                        "step": getattr(sid, "name", str(sid)),
+                    },
+                )
                 finished_cb(pid, sid, payload)
+                logger.info(
+                    "stats_view_finished_after_controller",
+                    extra={
+                        "pipeline": getattr(pid, "name", str(pid)),
+                        "step": getattr(sid, "name", str(sid)),
+                    },
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.exception(
-                    "stats_view_finished_slot_handler_error",
+                    "stats_view_finished_controller_exception",
                     extra={
                         "pipeline": getattr(pid, "name", str(pid)),
                         "step": getattr(sid, "name", str(sid)),
                         "error": str(exc),
                     },
                 )
+                try:
+                    section = self._section_label(pid)
+                    self.append_log(
+                        section,
+                        f"ERROR handling results for {getattr(sid, 'name', sid)}: {exc}",
+                        level="error",
+                    )
+                except Exception:
+                    logger.exception("stats_view_finished_error_reporting_failed")
 
         def _on_error(message: str, pid=pipeline_id, sid=step.id):
             logger.error(
