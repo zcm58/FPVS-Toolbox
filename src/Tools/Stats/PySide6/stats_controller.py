@@ -22,11 +22,26 @@ from PySide6.QtCore import QThreadPool
 from . import stats_cross_phase, stats_workers
 from .stats_core import PipelineId, PipelineStep, StepId
 from .stats_logging import format_step_event
-from .stats_data_loader import load_manifest_data, load_project_scan, resolve_project_subfolder
+from .stats_data_loader import (
+    load_manifest_data,
+    load_project_scan,
+    resolve_project_subfolder,
+    scan_folder_simple,
+    ScanError,
+)
 from .stats_subjects import canonical_group_and_phase_from_manifest, canonical_group_label
-from Main_App.PySide6_App.Backend.project import STATS_SUBFOLDER_NAME
+from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
 
 logger = logging.getLogger(__name__)
+
+
+def _subject_data_has_files(subject_data: dict | None) -> bool:
+    if not isinstance(subject_data, dict):
+        return False
+    return any(
+        isinstance(cond_map, dict) and any(cond_map.values())
+        for cond_map in subject_data.values()
+    )
 
 
 def _unique_label(base_label: str, existing_labels: set[str]) -> str:
@@ -231,6 +246,67 @@ class StatsController:
             run_summary=False,
         )
 
+    def _ensure_phase_subject_data(
+        self,
+        label: str,
+        spec: dict,
+        *,
+        project_root: Path,
+        manifest: dict | None,
+        selected_folder: Path,
+    ) -> tuple[bool, dict]:
+        subjects = spec.get("subjects") or []
+        conditions = spec.get("conditions") or []
+        subject_data = spec.get("subject_data") or {}
+        has_files = _subject_data_has_files(subject_data)
+        used_manifest_excel = False
+        excel_dir = selected_folder
+
+        if not (subjects and has_files):
+            results_folder, subfolders = load_manifest_data(project_root, manifest)
+            excel_dir = resolve_project_subfolder(
+                project_root,
+                results_folder,
+                subfolders,
+                "excel",
+                EXCEL_SUBFOLDER_NAME,
+            )
+            if excel_dir != selected_folder and excel_dir.is_dir():
+                try:
+                    subjects, conditions, subject_data = scan_folder_simple(str(excel_dir))
+                except ScanError as exc:  # pragma: no cover - filesystem guard
+                    logger.info(
+                        "lela_mode_phase_scan_error",
+                        extra={
+                            "phase": label,
+                            "excel_dir": str(excel_dir),
+                            "error": str(exc),
+                        },
+                    )
+                else:
+                    has_files = _subject_data_has_files(subject_data)
+                    used_manifest_excel = True
+
+        has_scanned = bool(subjects) and has_files
+        updated_spec = dict(spec)
+        updated_spec["subjects"] = subjects
+        updated_spec["conditions"] = conditions
+        updated_spec["subject_data"] = subject_data
+
+        logger.info(
+            "lela_mode_phase_data_check",
+            extra={
+                "phase": label,
+                "selected_folder": str(selected_folder),
+                "excel_dir": str(excel_dir),
+                "subjects_count": len(subjects),
+                "conditions_count": len(conditions),
+                "has_subject_files": has_files,
+                "used_manifest_excel": used_manifest_excel,
+            },
+        )
+        return has_scanned, updated_spec
+
     def run_lela_mode_analysis(self) -> None:
         """
         Build and launch a generic cross-phase LMM job ("Lela Mode") in the
@@ -253,7 +329,7 @@ class StatsController:
             return
 
         phase_specs: dict[str, dict] = {}
-        phase_roots: list[tuple[Path, dict | None]] = []
+        phase_entries: list[tuple[str, Path, dict | None, Path]] = []
         phase_subject_counts: list[tuple[str, int]] = []
         phase_labels_seen: set[str] = set()
         for idx in range(2):
@@ -323,16 +399,27 @@ class StatsController:
                 "group_map": canonical_group_map,
             }
             phase_subject_counts.append((unique_label, len(scan.subjects)))
-            phase_roots.append((Path(folder), scan.manifest))
+            phase_entries.append((unique_label, Path(folder), manifest_data, project_root))
 
-        missing_data_phase = next(
-            (
-                label
-                for label, spec in phase_specs.items()
-                if not spec.get("subjects") or not spec.get("subject_data")
-            ),
-            None,
-        )
+        missing_data_phase = None
+        for label, spec in list(phase_specs.items()):
+            entry = next((item for item in phase_entries if item[0] == label), None)
+            if not entry:
+                continue
+            _, selected_folder, manifest_data, project_root = entry
+            has_data, normalized_spec = self._ensure_phase_subject_data(
+                label,
+                spec,
+                project_root=project_root,
+                manifest=manifest_data,
+                selected_folder=selected_folder,
+            )
+            phase_specs[label] = normalized_spec
+            if not has_data:
+                missing_data_phase = label
+                break
+
+        phase_roots = [(entry[1], entry[2]) for entry in phase_entries]
         if missing_data_phase:
             self._view.append_log(
                 section,
@@ -369,7 +456,10 @@ class StatsController:
             else:
                 focal_roi = roi_names[0]
 
-        output_dir = self._resolve_stats_output_dir(*phase_roots[0]) if phase_roots else Path.cwd()
+        first_root = phase_roots[0] if phase_roots else None
+        output_dir = (
+            self._resolve_stats_output_dir(*first_root) if first_root else Path.cwd()
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
         ts = int(time.time())
         job_spec_path = output_dir / f"cross_phase_job_{ts}.json"
