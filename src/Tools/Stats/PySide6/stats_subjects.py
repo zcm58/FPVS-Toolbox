@@ -1,4 +1,4 @@
-"""Subject ID and group utilities for the Stats tool."""
+""""Subject ID and group utilities for the Stats tool."""
 
 # This file is primarily used with Lela Mode (aka the cross phase LLM)
 
@@ -11,7 +11,11 @@ from typing import Dict, Tuple, Any
 
 logger = logging.getLogger(__name__)
 
+# Primary pattern: preserve legacy behavior for IDs that start with P#, Sub#, or S#.
 _CANONICAL_SUBJECT_PATTERN = re.compile(r"^(P\d+|Sub\d+|S\d+)", re.IGNORECASE)
+# Fallback pattern: detect an uppercase/lowercase 'P' followed immediately by digits
+# anywhere in the string (e.g., 'SCP7_Fruit vs Veg_Results' -> 'P7').
+_FALLBACK_P_SUBJECT_PATTERN = re.compile(r"[Pp]\d+")
 
 
 def _coerce_str_or_empty(value: Any) -> str:
@@ -62,14 +66,23 @@ def canonical_subject_id(raw_id: str | None) -> str:
     """
     Derive a phase-agnostic subject ID from a raw Stats subject ID.
 
-    Examples:
+    Primary behavior (unchanged):
       - 'P10BCF' -> 'P10'
       - 'P10BCL' -> 'P10'
       - 'P2CGF'  -> 'P2'
       - 'P2CGL'  -> 'P2'
       - 'P1'     -> 'P1'
-      - 'XYZ123' -> 'XYZ123' (no change if it doesn't match the pattern)
+      - 'Sub3XYZ' -> 'Sub3'
+      - 'S4PhaseA' -> 'S4'
 
+    Fallback behavior (new):
+      - If the primary pattern does not match, search anywhere for 'P'/'p'
+        followed immediately by one or more digits:
+          - 'SCP7_Fruit vs Veg_Results.xlsx' -> 'P7'
+          - 'SCP21_Red Fruit vs Green Fruit_Results' -> 'P21'
+          - 'scp15_green fruit vs green veg.xlsx' -> 'P15'
+
+    If nothing matches and the input is non-empty, returns the original string.
     For None or empty inputs, returns an empty string.
     """
 
@@ -79,8 +92,23 @@ def canonical_subject_id(raw_id: str | None) -> str:
     if not raw_id:
         return ""
 
+    # Primary: keep existing behavior for IDs that start with P#, Sub#, or S#.
     match = _CANONICAL_SUBJECT_PATTERN.match(raw_id)
-    return match.group(1) if match else raw_id
+    if match:
+        return match.group(1)
+
+    # Fallback: detect 'P'/'p' followed by digits anywhere in the string.
+    # This supports filenames like:
+    #   'SCP7_Fruit vs Veg_Results.xlsx'           -> 'P7'
+    #   'SCP21_Red Fruit vs Green Fruit_Results'   -> 'P21'
+    #   'scp15_green fruit vs green veg.xlsx'      -> 'P15'
+    fallback = _FALLBACK_P_SUBJECT_PATTERN.search(raw_id)
+    if fallback:
+        # Normalize casing (e.g., 'p7' -> 'P7').
+        return fallback.group(0).upper()
+
+    # As before, if nothing matches, return the input unchanged.
+    return raw_id
 
 
 def canonical_group_and_phase_from_manifest(
