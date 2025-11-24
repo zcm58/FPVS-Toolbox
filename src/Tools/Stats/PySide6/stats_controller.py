@@ -25,6 +25,8 @@ from .stats_logging import format_step_event
 from .stats_data_loader import (
     load_manifest_data,
     load_project_scan,
+    map_subjects_to_groups,
+    normalize_participants_map,
     resolve_project_subfolder,
     scan_folder_simple,
     ScanError,
@@ -292,6 +294,19 @@ class StatsController:
         updated_spec["subjects"] = subjects
         updated_spec["conditions"] = conditions
         updated_spec["subject_data"] = subject_data
+
+        manifest_groups = manifest.get("groups") if isinstance(manifest, dict) else {}
+        participants_map = normalize_participants_map(manifest)
+        subject_groups = map_subjects_to_groups(subjects, participants_map)
+        existing_group_map = spec.get("group_map") or {}
+        group_map: dict[str, str | None] = {}
+        for pid in subjects:
+            raw_group = subject_groups.get(pid)
+            if raw_group is None and pid in existing_group_map:
+                group_map[pid] = existing_group_map.get(pid)
+                continue
+            group_map[pid] = canonical_group_label(raw_group, manifest_groups)
+        updated_spec["group_map"] = group_map
 
         logger.info(
             "lela_mode_phase_data_check",
