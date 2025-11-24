@@ -370,6 +370,9 @@ def run_cross_phase_lmm_job(progress_cb, message_cb, *, job_spec_path: str):
     per_roi_meta: dict[str, dict] = {}
     aggregated_warnings: list[str] = []
 
+    total_runs = 0
+    successful_runs = 0
+
     for roi_name in roi_order:
         roi_meta_warnings: list[str] = []
         backup_used = False
@@ -377,6 +380,7 @@ def run_cross_phase_lmm_job(progress_cb, message_cb, *, job_spec_path: str):
             message_cb(
                 f"Running cross-phase LMM for ROI '{roi_name}', condition '{condition}'"
             )
+            total_runs += 1
             try:
                 df_subset = _subset_df_for_condition(
                     df_long, condition=condition, roi=roi_name
@@ -410,6 +414,7 @@ def run_cross_phase_lmm_job(progress_cb, message_cb, *, job_spec_path: str):
                 backup_used = True
                 continue
 
+            successful_runs += 1
             for row in results.get("fixed_effects", []):
                 row_with_meta = dict(row)
                 row_with_meta.setdefault("roi", roi_name)
@@ -445,6 +450,14 @@ def run_cross_phase_lmm_job(progress_cb, message_cb, *, job_spec_path: str):
         "per_roi": per_roi_meta,
         "backup_2x2_used": any(meta.get("backup_2x2_used") for meta in per_roi_meta.values()),
     }
+
+    if total_runs > 0 and successful_runs == 0:
+        message_cb(
+            "Cross-phase MixedLM failed for all ROI/condition pairs; aborting without writing results."
+        )
+        raise RuntimeError(
+            "Cross-phase MixedLM failed for all ROI/condition pairs; see logs for details."
+        )
 
     results_payload = {
         "fixed_effects": fixed_rows,
