@@ -9,11 +9,14 @@ workers while remaining GUI-agnostic.
 
 import glob
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
+
+from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
 
 # Folders to ignore during scanning (case-insensitive)
 IGNORED_FOLDERS = {".fif files", "loreta results"}
@@ -37,6 +40,9 @@ class ProjectScanResult:
     participants_map: Dict[str, str]
     subject_groups: Dict[str, str | None]
     multi_group_manifest: bool
+
+
+logger = logging.getLogger(__name__)
 
 
 def auto_detect_project_dir() -> str:
@@ -148,6 +154,27 @@ def normalize_participants_map(manifest: dict | None) -> dict[str, str]:
         if not isinstance(group, str) or not group.strip():
             continue
         normalized[pid.strip().upper()] = group.strip()
+
+    # Example: manifest participants {"SCP7": "DEFAULT"} and Excel filename
+    # "SCP7_Fruit vs Veg_Results.xlsx" (PID "P7").
+    # We now add an alias "P7" -> "DEFAULT" so the scan and warning logic
+    # sees this as a known subject.
+    for pid_raw, group in list(normalized.items()):
+        pid_canonical = canonical_subject_id(pid_raw)
+        pid_canonical = pid_canonical.strip().upper() if pid_canonical else ""
+        if not pid_canonical or pid_canonical == pid_raw:
+            continue
+        existing_group = normalized.get(pid_canonical)
+        if existing_group is None:
+            normalized[pid_canonical] = group
+        elif existing_group != group:
+            logger.warning(
+                "Conflicting canonical participant IDs detected: %s (%s) vs %s (%s)",
+                pid_raw,
+                group,
+                pid_canonical,
+                existing_group,
+            )
     return normalized
 
 
