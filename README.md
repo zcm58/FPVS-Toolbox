@@ -1,3 +1,5 @@
+![Snake animation](https://github.com/thepiyushmalhotra/thepiyushmalhotra/blob/output/github-contribution-grid-snake.svg)
+
 # FPVS Toolbox
 
 The FPVS Toolbox is a python based application for preprocessing, cleaning, and analyzing EEG data collected from Fast Periodic Visual Stimulation (FPVS) oddball paradigm experiments on BioSemi systems. The purpose of this project is to reduce the time needed to analyze data and to standardize an analysis pipeline. 
