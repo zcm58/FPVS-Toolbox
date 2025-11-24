@@ -88,7 +88,7 @@ class StatsWorker(QRunnable):
                     extra={
                         "op": self._op,
                         "step_id": self._step_id,
-                        "thread": threading.get_ident(),
+                        "worker_thread_id": threading.get_ident(),
                         "payload_keys": list(payload.keys()),
                     },
                 )
@@ -98,7 +98,7 @@ class StatsWorker(QRunnable):
                     extra={
                         "op": self._op,
                         "step_id": self._step_id,
-                        "thread": threading.get_ident(),
+                        "worker_thread_id": threading.get_ident(),
                     },
                 )
             except Exception as emit_exc:  # noqa: BLE001
@@ -114,7 +114,10 @@ class StatsWorker(QRunnable):
                 step_label = self._step_id or self._op
                 self.signals.error.emit(f"Worker emit failed for {step_label}: {emit_exc}")
         except Exception as exc:  # noqa: BLE001
-            logger.exception("stats_run_failed", extra={"op": self._op, "exc_type": type(exc).__name__})
+            logger.exception(
+                "stats_run_failed",
+                extra={"op": self._op, "exc_type": type(exc).__name__},
+            )
             self.signals.error.emit(str(exc))
         finally:
             dt_ms = (time.perf_counter() - t0) * 1000.0
