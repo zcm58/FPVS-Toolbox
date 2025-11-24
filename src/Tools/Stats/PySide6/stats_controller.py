@@ -1074,7 +1074,7 @@ class StatsController:
                 handler(payload)
                 state.results[step_id] = payload if isinstance(payload, dict) else {"result": payload}
             except Exception as exc:  # noqa: BLE001
-                logger.error(
+                logger.exception(
                     "stats_step_handler_error",
                     extra={
                         "pipeline": pipeline_id.name,

@@ -14,6 +14,7 @@ StatsController.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any, Callable, Dict
 
@@ -69,6 +70,7 @@ class StatsWorker(QRunnable):
         self._args = args
         # Optional op name for structured logs; removed from kwargs before calling fn
         self._op: str = kwargs.pop("_op", getattr(fn, "__name__", "stats_op"))
+        self._step_id: str | None = kwargs.pop("_step_id", None)
         self._kwargs = kwargs
 
     @Slot()
@@ -81,17 +83,35 @@ class StatsWorker(QRunnable):
             result = self._fn(progress_emit, message_emit, *self._args, **self._kwargs)
             payload: Dict[str, Any] = result if isinstance(result, dict) else {"result": result}
             try:
+                logger.info(
+                    "stats_worker_emit_finished_enter",
+                    extra={
+                        "op": self._op,
+                        "step_id": self._step_id,
+                        "thread": threading.get_ident(),
+                        "payload_keys": list(payload.keys()),
+                    },
+                )
                 self.signals.finished.emit(payload)
+                logger.info(
+                    "stats_worker_emit_finished_exit",
+                    extra={
+                        "op": self._op,
+                        "step_id": self._step_id,
+                        "thread": threading.get_ident(),
+                    },
+                )
             except Exception as emit_exc:  # noqa: BLE001
-                logger.error(
+                logger.exception(
                     "stats_run_emit_failed",
                     extra={
                         "op": self._op,
+                        "step_id": self._step_id,
                         "callable": getattr(self._fn, "__name__", str(self._fn)),
-                        "exc": repr(emit_exc),
                     },
                 )
-                self.signals.error.emit(f"Worker emit failed: {emit_exc}")
+                step_label = self._step_id or self._op
+                self.signals.error.emit(f"Worker emit failed for {step_label}: {emit_exc}")
         except Exception as exc:  # noqa: BLE001
             logger.exception("stats_run_failed", extra={"op": self._op, "exc_type": type(exc).__name__})
             self.signals.error.emit(str(exc))
@@ -457,7 +477,11 @@ def run_harmonic_check(
         do_wilcoxon_sensitivity=True,
     )
     message_cb("Harmonic check completed.")
-    return {"output_text": output_text, "findings": findings}
+    payload: Dict[str, Any] = {
+        "output_text": output_text if output_text is not None else "",
+        "findings": findings if findings is not None else [],
+    }
+    return payload
 
 
 def _progress_from_stage(stage_name: str, *, done: bool) -> int:
