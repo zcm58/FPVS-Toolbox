@@ -119,6 +119,13 @@ class StatsWindow(QMainWindow):
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.Window)
         self.setWindowTitle("FPVS Statistical Analysis Tool")
+        logger.info(
+            "stats_window_init",
+            extra={
+                "window_id": id(self),
+                "project_dir": self.project_dir,
+            },
+        )
 
         self._guard = OpGuard()
         if not hasattr(self._guard, "done"):
@@ -673,6 +680,7 @@ class StatsWindow(QMainWindow):
                     "step": getattr(sid, "name", str(sid)),
                     "payload_type": payload_type,
                     "payload_keys": payload_keys,
+                    "is_harmonic_check": getattr(sid, "name", str(sid)) == "HARMONIC_CHECK",
                 },
             )
             try:
@@ -814,6 +822,15 @@ class StatsWindow(QMainWindow):
         *,
         exports_ran: bool,
     ) -> None:
+        logger.info(
+            "stats_analysis_finished_enter",
+            extra={
+                "pipeline": pipeline_id.name,
+                "success": success,
+                "error_message": error_message or "",
+                "exports_ran": bool(exports_ran),
+            },
+        )
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         btn = self.analyze_single_btn if pipeline_id is PipelineId.SINGLE else self.analyze_between_btn
         try:
@@ -875,6 +892,16 @@ class StatsWindow(QMainWindow):
                     exc_info=True,
                     extra={"pipeline": pipeline_id.name, "error": str(exc)},
                 )
+
+    def closeEvent(self, event):  # type: ignore[override]
+        logger.info(
+            "stats_window_close_event",
+            extra={
+                "window_id": id(self),
+                "project_dir": getattr(self, "project_dir", ""),
+            },
+        )
+        super().closeEvent(event)
 
     def build_and_render_summary(self, pipeline_id: PipelineId) -> None:
         cfg = SummaryConfig(

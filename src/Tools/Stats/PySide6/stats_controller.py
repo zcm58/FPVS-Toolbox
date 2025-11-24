@@ -980,6 +980,16 @@ class StatsController:
           - The actual handler being invoked
           - Basic payload shape (type / keys) before we touch it
         """
+        state = self._states[pipeline_id]
+        logger.info(
+            "stats_step_finished_enter_detailed",
+            extra={
+                "pipeline": pipeline_id.name,
+                "step": step_id.name,
+                "current_step_index": state.current_step_index,
+                "num_steps": len(state.steps),
+            },
+        )
         try:
             # --- entry trace ---
             try:
@@ -1106,7 +1116,25 @@ class StatsController:
             )
 
             # Advance to next step and kick the pipeline forward
+            logger.info(
+                "stats_step_finished_before_advance",
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "step": step_id.name,
+                    "current_step_index": state.current_step_index,
+                    "num_steps": len(state.steps),
+                },
+            )
             state.current_step_index += 1
+            logger.info(
+                "stats_step_finished_after_advance",
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "step": step_id.name,
+                    "current_step_index": state.current_step_index,
+                    "num_steps": len(state.steps),
+                },
+            )
             logger.info(
                 "stats_step_advance",
                 extra={
@@ -1192,6 +1220,16 @@ class StatsController:
 
     def _complete_pipeline(self, pipeline_id: PipelineId) -> None:
         state = self._states[pipeline_id]
+        logger.info(
+            "stats_pipeline_complete_enter",
+            extra={
+                "pipeline": pipeline_id.name,
+                "start_ts_present": bool(state.start_ts),
+                "run_exports": bool(state.run_exports),
+                "run_summary": bool(state.run_summary),
+                "num_steps": len(state.steps),
+            },
+        )
         section = self._section_label(pipeline_id)
         elapsed = time.perf_counter() - state.start_ts if state.start_ts else 0.0
         exports_ran = False
@@ -1244,6 +1282,15 @@ class StatsController:
 
             finalize_exports_ran = exports_ran if success else False
             try:
+                logger.info(
+                    "stats_pipeline_finalize_call",
+                    extra={
+                        "pipeline": pipeline_id.name,
+                        "success": success,
+                        "error_message": error_message or "",
+                        "exports_ran": finalize_exports_ran,
+                    },
+                )
                 self._finalize_pipeline(
                     pipeline_id,
                     success=success,
@@ -1280,6 +1327,15 @@ class StatsController:
         exports_ran: bool = False,
     ) -> None:
         state = self._states[pipeline_id]
+        logger.info(
+            "stats_finalize_pipeline_enter",
+            extra={
+                "pipeline": pipeline_id.name,
+                "success": success,
+                "error_message": error_message or "",
+                "exports_ran": bool(exports_ran),
+            },
+        )
         state.running = False
         state.failed = not success
         state.steps = ()
@@ -1335,6 +1391,13 @@ class StatsController:
                 "success": success,
                 "error_message": error_message,
                 "exports_ran": exports_ran,
+            },
+        )
+        logger.info(
+            "stats_finalize_pipeline_exit",
+            extra={
+                "pipeline": pipeline_id.name,
+                "success": success,
             },
         )
 
