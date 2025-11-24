@@ -338,6 +338,7 @@ def run_posthoc(
     alpha,
     rois,
     subject_groups: dict[str, str | None] | None = None,
+    **kwargs,
 ):
     set_rois(rois)
     message_cb("Preparing data for Interaction Post-hoc tests…")
@@ -364,6 +365,7 @@ def run_posthoc(
         subject_col="subject",
         alpha=alpha,
     )
+    message_cb("Post-hoc interaction tests completed.")
     return {"results_df": results_df, "output_text": output_text}
 
 
@@ -435,6 +437,7 @@ def run_harmonic_check(
     base_freq,
     alpha,
     rois,
+    **kwargs,
 ):
     set_rois(rois)
     tail = "greater" if selected_metric in ("Z Score", "SNR") else "two-sided"
@@ -453,6 +456,7 @@ def run_harmonic_check(
         min_subjects=3,
         do_wilcoxon_sensitivity=True,
     )
+    message_cb("Harmonic check completed.")
     return {"output_text": output_text, "findings": findings}
 
 
