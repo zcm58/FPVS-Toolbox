@@ -971,21 +971,72 @@ class StatsController:
         )
 
     def _on_step_finished(self, pipeline_id: PipelineId, step_id: StepId, payload: object) -> None:
+        """
+        Central handler for step completion in both Single and Between pipelines.
+
+        This version adds extra diagnostics so we can trace:
+          - Whether the slot is being entered at all
+          - The current step index vs. total steps
+          - The actual handler being invoked
+          - Basic payload shape (type / keys) before we touch it
+        """
         try:
+            # --- entry trace ---
+            try:
+                payload_type = type(payload).__name__
+                payload_keys = list(payload.keys()) if isinstance(payload, dict) else None
+            except Exception:
+                payload_type = type(payload).__name__
+                payload_keys = None
+
+            logger.info(
+                "stats_step_finished_enter",
+                extra={
+                    "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
+                    "step": getattr(step_id, "name", str(step_id)),
+                    "payload_type": payload_type,
+                    "payload_keys": payload_keys,
+                },
+            )
+
             state = self._states[pipeline_id]
+
             if not state.running:
+                logger.warning(
+                    "stats_step_finished_ignored_inactive",
+                    extra={
+                        "pipeline": pipeline_id.name,
+                        "step": step_id.name,
+                        "current_step_index": state.current_step_index,
+                        "total_steps": len(state.steps),
+                    },
+                )
                 return
+
             if state.current_step_index >= len(state.steps):
+                logger.error(
+                    "stats_step_finished_no_pending_step",
+                    extra={
+                        "pipeline": pipeline_id.name,
+                        "step": step_id.name,
+                        "current_step_index": state.current_step_index,
+                        "total_steps": len(state.steps),
+                    },
+                )
                 raise RuntimeError("Received step finished signal with no pending step")
+
             step = state.steps[state.current_step_index]
             step_name = getattr(step, "name", step_id.name)
 
+            # This is the main "we got the finished signal" marker
             logger.info(
                 "stats_step_finished_signal",
                 extra={
                     "pipeline": pipeline_id.name,
                     "step": step_id.name,
                     "expected_step": step.id.name,
+                    "current_step_index": state.current_step_index,
+                    "total_steps": len(state.steps),
                 },
             )
 
@@ -999,10 +1050,25 @@ class StatsController:
             if handler is None:
                 logger.error(
                     "stats_step_handler_missing",
-                    extra={"pipeline": pipeline_id.name, "step": step_id.name},
+                    extra={
+                        "pipeline": pipeline_id.name,
+                        "step": step_id.name,
+                        "current_step_index": state.current_step_index,
+                    },
                 )
                 self._on_step_error(pipeline_id, step_id, "No handler registered for step.")
                 return
+
+            logger.info(
+                "stats_step_handler_invoke",
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "step": step_id.name,
+                    "handler": repr(handler),
+                    "payload_type": payload_type,
+                    "payload_keys": payload_keys,
+                },
+            )
 
             try:
                 handler(payload)
@@ -1014,6 +1080,7 @@ class StatsController:
                         "pipeline": pipeline_id.name,
                         "step": step_id.name,
                         "error": str(exc),
+                        "current_step_index": state.current_step_index,
                     },
                 )
                 self._on_step_error(pipeline_id, step_id, f"Step handler failed: {exc}")
@@ -1021,8 +1088,13 @@ class StatsController:
 
             logger.info(
                 "stats_step_complete",
-                extra={"pipeline": pipeline_id.name, "step": step_id.name},
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "step": step_id.name,
+                    "current_step_index": state.current_step_index,
+                },
             )
+
             self._view.append_log(
                 self._section_label(pipeline_id),
                 format_step_event(
@@ -1032,13 +1104,29 @@ class StatsController:
                     message=f"{step.name} completed",
                 ),
             )
+
+            # Advance to next step and kick the pipeline forward
             state.current_step_index += 1
+            logger.info(
+                "stats_step_advance",
+                extra={
+                    "pipeline": pipeline_id.name,
+                    "step": step_id.name,
+                    "next_step_index": state.current_step_index,
+                    "total_steps": len(state.steps),
+                },
+            )
             self._run_next_step(pipeline_id)
+
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "stats_step_finished_handler_error",
                 exc_info=True,
-                extra={"pipeline": pipeline_id.name, "step": step_id.name},
+                extra={
+                    "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
+                    "step": getattr(step_id, "name", str(step_id)),
+                    "error": str(exc),
+                },
             )
             try:
                 self._view.append_log(
@@ -1055,7 +1143,10 @@ class StatsController:
                 logger.exception(
                     "stats_step_finished_view_log_error",
                     exc_info=True,
-                    extra={"pipeline": pipeline_id.name, "step": step_id.name},
+                    extra={
+                        "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
+                        "step": getattr(step_id, "name", str(step_id)),
+                    },
                 )
             self._finalize_pipeline(
                 pipeline_id,

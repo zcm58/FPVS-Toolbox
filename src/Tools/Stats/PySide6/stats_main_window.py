@@ -609,27 +609,131 @@ class StatsWindow(QMainWindow):
             )
 
     def start_step_worker(
-        self,
-        pipeline_id: PipelineId,
-        step: PipelineStep,
-        *,
-        finished_cb,
-        error_cb,
-        message_cb=None,
+            self,
+            pipeline_id: PipelineId,
+            step: PipelineStep,
+            *,
+            finished_cb,
+            error_cb,
+            message_cb=None,
     ) -> None:
+        """Create and start a StatsWorker for a single pipeline step.
+
+        Added diagnostics:
+          - Entry log with pipeline / step metadata.
+          - Log when the worker is constructed and submitted to the pool.
+          - Logs when the finished/error slots are entered, including payload type/keys.
+        """
+        try:
+            logger.info(
+                "stats_view_start_step_worker_enter",
+                extra={
+                    "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
+                    "step": getattr(step.id, "name", str(step.id)),
+                    "step_name": getattr(step, "name", repr(step)),
+                    "kwargs_keys": list(step.kwargs.keys()) if isinstance(step.kwargs, dict) else None,
+                },
+            )
+        except Exception:
+            logger.exception("stats_view_start_step_worker_log_enter_failed")
+
         self._log_pipeline_event(pipeline=pipeline_id, step=step.id, event="start")
+
         worker = StatsWorker(step.worker_fn, **step.kwargs)
-        worker.signals.finished.connect(
-            lambda payload, pid=pipeline_id, sid=step.id: finished_cb(pid, sid, payload)
-        )
-        worker.signals.error.connect(
-            lambda msg, pid=pipeline_id, sid=step.id: error_cb(pid, sid, msg)
-        )
+
+        try:
+            logger.info(
+                "stats_view_worker_created",
+                extra={
+                    "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
+                    "step": getattr(step.id, "name", str(step.id)),
+                    "worker_class": type(worker).__name__,
+                },
+            )
+        except Exception:
+            logger.exception("stats_view_worker_created_log_failed")
+
+        def _on_finished(payload, pid=pipeline_id, sid=step.id):
+            # This is the first place we know the Qt finished signal reached the view.
+            try:
+                payload_type = type(payload).__name__
+                payload_keys = list(payload.keys()) if isinstance(payload, dict) else None
+            except Exception:
+                payload_type = type(payload).__name__
+                payload_keys = None
+
+            logger.info(
+                "stats_view_finished_slot_enter",
+                extra={
+                    "pipeline": getattr(pid, "name", str(pid)),
+                    "step": getattr(sid, "name", str(sid)),
+                    "payload_type": payload_type,
+                    "payload_keys": payload_keys,
+                },
+            )
+            try:
+                finished_cb(pid, sid, payload)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "stats_view_finished_slot_handler_error",
+                    extra={
+                        "pipeline": getattr(pid, "name", str(pid)),
+                        "step": getattr(sid, "name", str(sid)),
+                        "error": str(exc),
+                    },
+                )
+
+        def _on_error(message: str, pid=pipeline_id, sid=step.id):
+            logger.error(
+                "stats_view_error_slot_enter",
+                extra={
+                    "pipeline": getattr(pid, "name", str(pid)),
+                    "step": getattr(sid, "name", str(sid)),
+                    "message": message,
+                },
+            )
+            try:
+                error_cb(pid, sid, message)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "stats_view_error_slot_handler_error",
+                    extra={
+                        "pipeline": getattr(pid, "name", str(pid)),
+                        "step": getattr(sid, "name", str(sid)),
+                        "error": str(exc),
+                    },
+                )
+
+        worker.signals.finished.connect(_on_finished)
+        worker.signals.error.connect(_on_error)
         worker.signals.message.connect(self._on_worker_message)
         if message_cb:
             worker.signals.message.connect(message_cb)
         worker.signals.progress.connect(self._on_worker_progress)
+
+        try:
+            logger.info(
+                "stats_view_start_worker_submit",
+                extra={
+                    "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
+                    "step": getattr(step.id, "name", str(step.id)),
+                },
+            )
+        except Exception:
+            logger.exception("stats_view_start_worker_submit_log_failed")
+
         self.pool.start(worker)
+
+        try:
+            logger.info(
+                "stats_view_start_step_worker_exit",
+                extra={
+                    "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
+                    "step": getattr(step.id, "name", str(step.id)),
+                },
+            )
+        except Exception:
+            logger.exception("stats_view_start_step_worker_exit_log_failed")
 
     def ensure_results_dir(self) -> str:
         return self._ensure_results_dir()
