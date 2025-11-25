@@ -49,10 +49,10 @@ def compute_effective_max_workers(
         ram_cap = 2
     elif total_ram_gib < 20.0:
         # 16GB Tier (covers 12GB-19GB): Your setting.
-        ram_cap = 3
+        ram_cap = 2
     elif total_ram_gib < 40.0:
         # 32GB Tier (covers 24GB-39GB): Your setting.
-        ram_cap = 6
+        ram_cap = 5
     elif total_ram_gib < 80.0:
         # 64GB Tier (covers 40GB-79GB): Your setting.
         ram_cap = 7
