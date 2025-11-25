@@ -1203,6 +1203,7 @@ class StatsWindow(QMainWindow):
     def _apply_rm_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.rm_anova_results_data = payload.get("anova_df_results")
         alpha = getattr(self, "_current_alpha", 0.05)
+
         output_text = build_rm_anova_output(self.rm_anova_results_data, alpha)
         if update_text:
             self.output_text.append(output_text)
@@ -1212,6 +1213,7 @@ class StatsWindow(QMainWindow):
     def _apply_between_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.between_anova_results_data = payload.get("anova_df_results")
         alpha = getattr(self, "_current_alpha", 0.05)
+
         output_text = build_between_anova_output(self.between_anova_results_data, alpha)
         if update_text:
             self.output_text.append(output_text)
