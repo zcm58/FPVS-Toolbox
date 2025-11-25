@@ -132,6 +132,9 @@ class StatsWindow(QMainWindow):
             self._guard.done = self._guard.end  # type: ignore[attr-defined]
         self.pool = QThreadPool.globalInstance()
         self._focus_calls = 0
+        # Strong references to active StatsWorker instances to avoid any
+        # lifetime / GC edge cases that could drop Qt signals.
+        self._active_workers: list[StatsWorker] = []
 
         self.setMinimumSize(900, 600)
         self.resize(1000, 750)
@@ -625,10 +628,11 @@ class StatsWindow(QMainWindow):
     ) -> None:
         """Create and start a StatsWorker for a single pipeline step.
 
-        Added diagnostics:
+        Diagnostics:
           - Entry log with pipeline / step metadata.
           - Log when the worker is constructed and submitted to the pool.
           - Logs when the finished/error slots are entered, including payload type/keys.
+          - Tracks workers in self._active_workers so signals can't be dropped by GC.
         """
         try:
             logger.info(
@@ -663,6 +667,48 @@ class StatsWindow(QMainWindow):
             )
         except Exception:
             logger.exception("stats_view_worker_created_log_failed")
+
+        # Track worker strongly so it cannot be garbage-collected while
+        # signals are in-flight. This also gives us better diagnostics.
+        try:
+            if not hasattr(self, "_active_workers"):
+                self._active_workers = []
+            self._active_workers.append(worker)
+            logger.info(
+                "stats_view_worker_tracked",
+                extra={
+                    "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
+                    "step": getattr(step.id, "name", str(step.id)),
+                    "worker_id": id(worker),
+                    "active_workers_len": len(self._active_workers),
+                },
+            )
+        except Exception:
+            logger.exception("stats_view_worker_tracked_log_failed")
+
+        def _release_worker(w=worker, pid=pipeline_id, sid=step.id):
+            """Remove the worker from the active set once it has finished/error'd."""
+            try:
+                active = getattr(self, "_active_workers", None)
+                if active is not None and w in active:
+                    active.remove(w)
+                logger.info(
+                    "stats_view_worker_released",
+                    extra={
+                        "pipeline": getattr(pid, "name", str(pid)),
+                        "step": getattr(sid, "name", str(sid)),
+                        "worker_id": id(w),
+                        "active_workers_len": len(active) if active is not None else -1,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "stats_view_worker_release_failed",
+                    extra={
+                        "pipeline": getattr(pid, "name", str(pid)),
+                        "step": getattr(sid, "name", str(sid)),
+                    },
+                )
 
         def _on_finished(payload, pid=pipeline_id, sid=step.id):
             # This is the first place we know the Qt finished signal reached the view.
@@ -717,6 +763,8 @@ class StatsWindow(QMainWindow):
                     )
                 except Exception:
                     logger.exception("stats_view_finished_error_reporting_failed")
+            finally:
+                _release_worker()
 
         def _on_error(message: str, pid=pipeline_id, sid=step.id):
             logger.error(
@@ -738,6 +786,8 @@ class StatsWindow(QMainWindow):
                         "error": str(exc),
                     },
                 )
+            finally:
+                _release_worker()
 
         worker.signals.finished.connect(_on_finished)
         worker.signals.error.connect(_on_error)
