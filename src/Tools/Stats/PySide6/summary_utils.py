@@ -15,7 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
+import numpy as np
 import pandas as pd
+
+from Tools.Stats.PySide6.stats_core import PipelineId
 
 
 @dataclass
@@ -136,6 +139,162 @@ def build_summary_from_frames(frames: StatsSummaryFrames, config: SummaryConfig)
         "favorite statistics expert (for example, ChatGPT) for help interpreting these findings.",
     ]
     return "\n".join(parts)
+
+
+def to_dataframe(data) -> Optional[pd.DataFrame]:
+    if isinstance(data, pd.DataFrame):
+        return data
+    if isinstance(data, list) and data:
+        try:
+            df = pd.DataFrame(data)
+            return df if not df.empty else None
+        except Exception:
+            return None
+    if isinstance(data, dict) and data:
+        try:
+            df = pd.DataFrame(data)
+            if not df.empty:
+                return df
+        except Exception:
+            pass
+        try:
+            flattened: list = []
+            for value in data.values():
+                if isinstance(value, dict):
+                    flattened.extend(value.values())
+                else:
+                    flattened.append(value)
+            if flattened:
+                df = pd.DataFrame(flattened)
+                return df if not df.empty else None
+        except Exception:
+            return None
+    return None
+
+
+def build_summary_frames_from_results(
+    pipeline_id: PipelineId,
+    *,
+    single_posthoc: Optional[pd.DataFrame] = None,
+    rm_anova_results: Optional[pd.DataFrame] = None,
+    mixed_model_results: Optional[pd.DataFrame] = None,
+    between_contrasts: Optional[pd.DataFrame] = None,
+    between_anova_results: Optional[pd.DataFrame] = None,
+    between_mixed_model_results: Optional[pd.DataFrame] = None,
+    harmonic_results: Optional[pd.DataFrame | list[dict]] = None,
+) -> StatsSummaryFrames:
+    frames = StatsSummaryFrames()
+    if pipeline_id is PipelineId.SINGLE:
+        frames.single_posthoc = to_dataframe(single_posthoc)
+        frames.anova_terms = to_dataframe(rm_anova_results)
+        frames.mixed_model_terms = to_dataframe(mixed_model_results)
+    elif pipeline_id is PipelineId.BETWEEN:
+        frames.between_contrasts = to_dataframe(between_contrasts)
+        frames.anova_terms = to_dataframe(between_anova_results)
+        frames.mixed_model_terms = to_dataframe(between_mixed_model_results)
+    frames.harmonic_results = to_dataframe(harmonic_results)
+    return frames
+
+
+def format_rm_anova_summary(df: pd.DataFrame, alpha: float) -> str:
+    out = []
+    p_candidates = ["Pr > F", "p-value", "p_value", "p", "P", "pvalue"]
+    eff_candidates = ["Effect", "Source", "Factor", "Term"]
+    p_col = next((c for c in p_candidates if c in df.columns), None)
+    eff_col = next((c for c in eff_candidates if c in df.columns), None)
+
+    if p_col is None:
+        out.append("No interpretable effects were found in the ANOVA table.")
+        return "\n".join(out)
+
+    for idx, row in df.iterrows():
+        effect_source = row.get(eff_col, idx) if eff_col is not None else idx
+        effect_name = str(effect_source).strip()
+        effect_lower = effect_name.lower()
+        effect_compact = effect_lower.replace(" ", "").replace("×", "x")
+        p_raw = row.get(p_col, np.nan)
+        try:
+            p_val = float(p_raw)
+        except Exception:
+            p_val = np.nan
+
+        if (
+            "group" in effect_lower
+            and "condition" in effect_lower
+            and "roi" in effect_lower
+        ):
+            tag = "group by condition by ROI interaction"
+        elif "group" in effect_lower and "condition" in effect_lower:
+            tag = "group-by-condition interaction"
+        elif "group" in effect_lower and "roi" in effect_lower:
+            tag = "group-by-ROI interaction"
+        elif effect_lower.startswith("group") or effect_lower == "group":
+            tag = "difference between groups"
+        elif effect_compact in {
+            "condition*roi",
+            "condition:roi",
+            "conditionxroi",
+            "roi*condition",
+            "roi:condition",
+            "roixcondition",
+        }:
+            tag = "condition-by-ROI interaction"
+        elif "condition" == effect_lower or effect_lower.startswith("conditions"):
+            tag = "difference between conditions"
+        elif effect_lower == "roi" or "region" in effect_lower:
+            tag = "difference between ROIs"
+        else:
+            continue
+
+        if np.isfinite(p_val) and p_val < alpha:
+            out.append(f"  - Significant {tag} (p = {p_val:.4g}).")
+        elif np.isfinite(p_val):
+            out.append(f"  - No significant {tag} (p = {p_val:.4g}).")
+        else:
+            out.append(f"  - {tag.capitalize()}: p-value unavailable.")
+    if not out:
+        out.append("No interpretable effects were found in the ANOVA table.")
+    return "\n".join(out)
+
+
+def build_rm_anova_output(anova_df_results: Optional[pd.DataFrame], alpha: float) -> str:
+    output_text = "============================================================\n"
+    output_text += "       Repeated Measures ANOVA (RM-ANOVA) Results\n"
+    output_text += "       Analysis conducted on: Summed BCA Data\n"
+    output_text += "============================================================\n\n"
+    output_text += (
+        "This test examines the overall effects of your experimental conditions (e.g., different stimuli),\n"
+        "the different brain regions (ROIs) you analyzed, and whether the\n"
+        "effect of the conditions changes depending on the brain region (interaction effect).\n\n"
+    )
+
+    if isinstance(anova_df_results, pd.DataFrame) and not anova_df_results.empty:
+        output_text += format_rm_anova_summary(anova_df_results, alpha) + "\n"
+        output_text += "--------------------------------------------\n"
+        output_text += "NOTE: For detailed reporting and post-hoc tests, refer to the tables above.\n"
+        output_text += "--------------------------------------------\n"
+    else:
+        output_text += "RM-ANOVA returned no results.\n"
+    return output_text
+
+
+def build_between_anova_output(anova_df_results: Optional[pd.DataFrame], alpha: float) -> str:
+    output_text = "============================================================\n"
+    output_text += "       Between-Group Mixed ANOVA Results\n"
+    output_text += "============================================================\n\n"
+    output_text += (
+        "Group was treated as a between-subject factor with Condition and ROI as\n"
+        "within-subject factors. Only subjects with known group assignments were\n"
+        "included in this analysis.\n\n"
+    )
+    if isinstance(anova_df_results, pd.DataFrame) and not anova_df_results.empty:
+        output_text += format_rm_anova_summary(anova_df_results, alpha) + "\n"
+        output_text += "--------------------------------------------\n"
+        output_text += "Refer to the exported table for all Group main and interaction effects.\n"
+        output_text += "--------------------------------------------\n"
+    else:
+        output_text += "Between-group ANOVA returned no results.\n"
+    return output_text
 
 
 def _pick_column(df: pd.DataFrame, preferred: str, fallbacks: Iterable[str]) -> Optional[str]:
