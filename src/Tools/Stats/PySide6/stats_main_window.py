@@ -136,8 +136,8 @@ class StatsWindow(QMainWindow):
         # lifetime / GC edge cases that could drop Qt signals.
         self._active_workers: list[StatsWorker] = []
 
-        self.setMinimumSize(900, 600)
-        self.resize(1000, 750)
+        self.setMinimumSize(400, 600)
+        self.resize(400, 600)
 
         # re-entrancy guard for scan
         self._scan_guard = OpGuard()
