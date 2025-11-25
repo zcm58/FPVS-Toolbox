@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Shared types and constants for the Stats tool (support layer)."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
