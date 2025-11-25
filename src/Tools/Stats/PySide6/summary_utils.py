@@ -18,7 +18,16 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.PySide6.stats_core import PipelineId
+from Tools.Stats.PySide6.stats_core import (
+    ANOVA_BETWEEN_XLS,
+    ANOVA_XLS,
+    GROUP_CONTRAST_XLS,
+    HARMONIC_XLS,
+    LMM_BETWEEN_XLS,
+    LMM_XLS,
+    POSTHOC_XLS,
+    PipelineId,
+)
 
 
 @dataclass
@@ -38,15 +47,6 @@ class StatsSummaryFrames:
     harmonic_results: Optional[pd.DataFrame] = None
     anova_terms: Optional[pd.DataFrame] = None
     mixed_model_terms: Optional[pd.DataFrame] = None
-
-
-POSTHOC_XLS = "Posthoc Results.xlsx"
-GROUP_CONTRAST_XLS = "Group Contrasts.xlsx"
-HARMONIC_XLS = "Harmonic Results.xlsx"
-ANOVA_XLS = "RM-ANOVA Results.xlsx"
-ANOVA_BETWEEN_XLS = "Mixed ANOVA Between Groups.xlsx"
-LMM_XLS = "Mixed Model Results.xlsx"
-LMM_BETWEEN_XLS = "Mixed Model Between Groups.xlsx"
 
 
 def build_summary_from_files(stats_folder: Path, config: SummaryConfig) -> str:

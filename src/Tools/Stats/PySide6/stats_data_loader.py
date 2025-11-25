@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """Data loading helpers for the Stats pipelines.
 
 This module belongs to the model/service layer. It scans FPVS project folders,
 validates manifests, and provides normalized metadata to the controller and
 workers while remaining GUI-agnostic.
 """
+
+from __future__ import annotations
 
 import glob
 import json
@@ -14,7 +14,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Callable, Dict, Iterable, List, Tuple
 
 from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
 
@@ -187,6 +187,81 @@ def has_multi_groups(manifest: dict | None) -> bool:
         return False
     groups = manifest.get("groups")
     return isinstance(groups, dict) and bool(groups)
+
+
+def group_harmonic_results(data) -> dict[str, dict[str, list[dict]]]:
+    """Normalize harmonic check findings into a nested mapping for export."""
+
+    if isinstance(data, dict):
+        return data
+
+    grouped: dict[str, dict[str, list[dict]]] = {}
+    for rec in data or []:
+        if not isinstance(rec, dict):
+            continue
+        cond = rec.get("Condition") or rec.get("condition") or "Unknown"
+        roi = rec.get("ROI") or rec.get("roi") or "Unknown"
+        grouped.setdefault(cond, {}).setdefault(roi, []).append(rec)
+    return grouped
+
+
+def safe_export_call(
+    func: Callable[..., None],
+    data_obj,
+    out_dir: str | Path,
+    base_name: str,
+    *,
+    log_func: Callable[[str], None],
+) -> Path:
+    """Invoke an export helper, handling legacy signatures and paths."""
+
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    fname = base_name if str(base_name).lower().endswith(".xlsx") else f"{base_name}.xlsx"
+    save_path = out_path / fname
+    try:
+        func(data_obj, save_path=save_path, log_func=log_func)
+    except TypeError:
+        func(data_obj, str(out_path), log_func=log_func)
+    return save_path
+
+
+def ensure_results_dir(
+    project_root: Path,
+    results_folder_hint: str | None,
+    subfolder_hints: dict[str, str],
+    *,
+    results_subfolder_name: str,
+    subfolder_key: str = "stats",
+) -> Path:
+    """Compute and create the Stats results directory."""
+
+    target = resolve_project_subfolder(
+        project_root,
+        results_folder_hint,
+        subfolder_hints,
+        subfolder_key,
+        results_subfolder_name,
+    )
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def check_for_open_excel_files(folder_path: str) -> list[str]:
+    """Return Excel filenames that appear to be open (Windows rename guard)."""
+
+    if not folder_path or not os.path.isdir(folder_path):
+        return []
+
+    open_files: list[str] = []
+    for name in os.listdir(folder_path):
+        if name.lower().endswith((".xlsx", ".xls")):
+            fpath = os.path.join(folder_path, name)
+            try:
+                os.rename(fpath, fpath)
+            except OSError:
+                open_files.append(name)
+    return open_files
 
 
 def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[str, Dict[str, str]]]:

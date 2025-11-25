@@ -53,12 +53,28 @@ from Tools.Stats.Legacy.stats_export import (
 )
 from Tools.Stats.Legacy.stats_helpers import apply_rois_to_modules, load_rois_from_settings
 from Tools.Stats.PySide6.stats_controller import StatsController
-from Tools.Stats.PySide6.stats_core import PipelineId, PipelineStep, RESULTS_SUBFOLDER_NAME, StepId
+from Tools.Stats.PySide6.stats_core import (
+    ANOVA_BETWEEN_XLS,
+    ANOVA_XLS,
+    GROUP_CONTRAST_XLS,
+    HARMONIC_XLS,
+    LMM_BETWEEN_XLS,
+    LMM_XLS,
+    PipelineId,
+    PipelineStep,
+    POSTHOC_XLS,
+    RESULTS_SUBFOLDER_NAME,
+    StepId,
+)
 from Tools.Stats.PySide6.stats_data_loader import (
+    check_for_open_excel_files,
+    ensure_results_dir,
+    group_harmonic_results,
     ScanError,
     auto_detect_project_dir,
     load_manifest_data,
     load_project_scan,
+    safe_export_call,
     resolve_project_subfolder,
 )
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
@@ -70,21 +86,10 @@ from Tools.Stats.PySide6.summary_utils import (
     build_rm_anova_output,
     build_summary_from_frames,
     build_summary_frames_from_results,
-    to_dataframe,
 )
 
 logger = logging.getLogger(__name__)
 _unused_qaction = QAction  # keep import alive for Qt resource checkers
-
-# --------------------------- constants ---------------------------
-ANOVA_XLS = "RM-ANOVA Results.xlsx"
-LMM_XLS = "Mixed Model Results.xlsx"
-POSTHOC_XLS = "Posthoc Results.xlsx"
-HARMONIC_XLS = "Harmonic Results.xlsx"
-ANOVA_BETWEEN_XLS = "Mixed ANOVA Between Groups.xlsx"
-LMM_BETWEEN_XLS = "Mixed Model Between Groups.xlsx"
-GROUP_CONTRAST_XLS = "Group Contrasts.xlsx"
-
 
 class HarmonicConfig(NamedTuple):
     metric: str
@@ -423,31 +428,9 @@ class StatsWindow(QMainWindow):
     # --------- exports plumbing ---------
 
     def _group_harmonic(self, data) -> dict:
-        """list[dict] -> {condition: {roi: [records]}}"""
-        if isinstance(data, dict):
-            return data
-        grouped: dict[str, dict[str, list[dict]]] = {}
-        for rec in data or []:
-            if not isinstance(rec, dict):
-                continue
-            cond = rec.get("Condition") or rec.get("condition") or "Unknown"
-            roi = rec.get("ROI") or rec.get("roi") or "Unknown"
-            grouped.setdefault(cond, {}).setdefault(roi, []).append(rec)
-        return grouped
+        """Proxy to keep legacy call sites stable while delegating grouping."""
 
-    def _safe_export_call(self, func, data_obj, out_dir: str, base_name: str) -> None:
-        os.makedirs(out_dir, exist_ok=True)
-        fname = base_name if base_name.lower().endswith(".xlsx") else f"{base_name}.xlsx"
-        save_path = os.path.join(out_dir, fname)
-        try:
-            func(
-                data_obj,
-                save_path=save_path,
-                log_func=self._set_status,
-            )
-            return
-        except TypeError:
-            func(data_obj, out_dir, log_func=self._set_status)
+        return group_harmonic_results(data)
 
     def export_results(self, kind: str, data, out_dir: str) -> None:
         mapping = {
@@ -477,20 +460,18 @@ class StatsWindow(QMainWindow):
                     metric=self._harmonic_config.metric,
                 )
 
-            self._safe_export_call(_adapter, None, out_dir, fname)
+            safe_export_call(_adapter, None, out_dir, fname, log_func=self._set_status)
             return
 
-        self._safe_export_call(func, data, out_dir, fname)
+        safe_export_call(func, data, out_dir, fname, log_func=self._set_status)
 
     def _ensure_results_dir(self) -> str:
-        target = resolve_project_subfolder(
+        target = ensure_results_dir(
             self._project_path,
             self._results_folder_hint,
             self._subfolder_hints,
-            "stats",
-            STATS_SUBFOLDER_NAME,
+            results_subfolder_name=STATS_SUBFOLDER_NAME,
         )
-        target.mkdir(parents=True, exist_ok=True)
         return str(target)
 
     def _open_results_folder(self) -> None:
@@ -533,9 +514,6 @@ class StatsWindow(QMainWindow):
             isinstance(self.group_contrasts_results_data, pd.DataFrame)
             and not self.group_contrasts_results_data.empty,
         )
-
-    def _to_dataframe(self, data) -> Optional[pd.DataFrame]:
-        return to_dataframe(data)
 
     def _build_summary_frames(self, pipeline_id: PipelineId) -> StatsSummaryFrames:
         return build_summary_frames_from_results(
@@ -1093,6 +1071,12 @@ class StatsWindow(QMainWindow):
         out_dir = self._ensure_results_dir()
         try:
             paths: list[str] = []
+            name_map = {
+                "anova": ANOVA_XLS,
+                "lmm": LMM_XLS,
+                "posthoc": POSTHOC_XLS,
+                "harmonic": HARMONIC_XLS,
+            }
             for kind, data_obj, label in exports:
                 if kind == "harmonic":
                     grouped = self._group_harmonic(data_obj)
@@ -1113,13 +1097,7 @@ class StatsWindow(QMainWindow):
                     self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
                     return False
                 self.export_results(kind, data_obj, out_dir)
-                fname = {
-                    "anova": ANOVA_XLS,
-                    "lmm": LMM_XLS,
-                    "posthoc": POSTHOC_XLS,
-                    "harmonic": HARMONIC_XLS,
-                }.get(kind, "results.xlsx")
-                paths.append(os.path.join(out_dir, fname))
+                paths.append(os.path.join(out_dir, name_map[kind]))
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
@@ -1140,6 +1118,12 @@ class StatsWindow(QMainWindow):
         out_dir = self._ensure_results_dir()
         try:
             paths: list[str] = []
+            name_map = {
+                "anova_between": ANOVA_BETWEEN_XLS,
+                "lmm_between": LMM_BETWEEN_XLS,
+                "group_contrasts": GROUP_CONTRAST_XLS,
+                "harmonic": HARMONIC_XLS,
+            }
             for kind, data_obj, label in exports:
                 if kind == "harmonic":
                     grouped = self._group_harmonic(data_obj)
@@ -1160,13 +1144,7 @@ class StatsWindow(QMainWindow):
                     self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
                     return False
                 self.export_results(kind, data_obj, out_dir)
-                fname = {
-                    "anova_between": ANOVA_BETWEEN_XLS,
-                    "lmm_between": LMM_BETWEEN_XLS,
-                    "group_contrasts": GROUP_CONTRAST_XLS,
-                    "harmonic": HARMONIC_XLS,
-                }.get(kind, "results.xlsx")
-                paths.append(os.path.join(out_dir, fname))
+                paths.append(os.path.join(out_dir, name_map[kind]))
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
@@ -1550,16 +1528,7 @@ class StatsWindow(QMainWindow):
 
     def _check_for_open_excel_files(self, folder_path: str) -> bool:
         """Best-effort check to avoid writing to open Excel files."""
-        if not folder_path or not os.path.isdir(folder_path):
-            return False
-        open_files = []
-        for name in os.listdir(folder_path):
-            if name.lower().endswith((".xlsx", ".xls")):
-                fpath = os.path.join(folder_path, name)
-                try:
-                    os.rename(fpath, fpath)
-                except OSError:
-                    open_files.append(name)
+        open_files = check_for_open_excel_files(folder_path)
         if open_files:
             file_list_str = "\n - ".join(open_files)
             error_message = (
