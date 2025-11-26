@@ -525,9 +525,9 @@ class StatsController:
             lambda msg, pid=PipelineId.BETWEEN: self._on_between_process_message(pid, msg)
         )
         worker.signals.finished.connect(
-            lambda payload, excel=excel_path: self._on_lela_mode_finished(payload, excel)
+            lambda payload, excel=excel_path: self._on_lela_worker_finished(payload, excel)
         )
-        worker.signals.error.connect(self._on_lela_mode_error)
+        worker.signals.error.connect(self._on_lela_worker_error)
         QThreadPool.globalInstance().start(worker)
 
     def is_running(self, pipeline_id: PipelineId) -> bool:
@@ -866,18 +866,26 @@ class StatsController:
 
         self._view.append_log(section, text)
 
-    def _on_lela_mode_finished(self, payload: object, excel_path: Path) -> None:
-        section = self._section_label(PipelineId.BETWEEN)
-        self._lela_running = False
-        self._view.set_busy(False)
-        self._view.append_log(section, "[Between] Lela Mode: complete — see Cross-Phase LMM Analysis.xlsx")
-        self._view.append_log(section, f"  • Excel: {excel_path}")
+    def _on_lela_worker_finished(self, payload: object, excel_path: Path) -> None:
+        try:
+            stats_folder: Path | None = None
+            if isinstance(payload, dict):
+                raw_folder = payload.get("stats_folder")
+                if raw_folder:
+                    stats_folder = Path(raw_folder)
+            if stats_folder is None:
+                stats_folder = excel_path
+            self._view._on_lela_mode_finished(stats_folder)
+        finally:
+            self._lela_running = False
+            self._view.set_busy(False)
 
-    def _on_lela_mode_error(self, error_message: str) -> None:
-        section = self._section_label(PipelineId.BETWEEN)
-        self._lela_running = False
-        self._view.set_busy(False)
-        self._view.append_log(section, f"[Between] Lela Mode error: {error_message}", level="error")
+    def _on_lela_worker_error(self, error_message: str) -> None:
+        try:
+            self._view._on_lela_mode_error(error_message)
+        finally:
+            self._lela_running = False
+            self._view.set_busy(False)
 
     def _deserialize_between_payload(self, step_id: StepId, raw: dict) -> dict:
         def _df(payload: Optional[dict]) -> Optional[pd.DataFrame]:
