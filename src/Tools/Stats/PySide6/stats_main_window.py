@@ -427,12 +427,7 @@ class StatsWindow(QMainWindow):
 
     # --------- exports plumbing ---------
 
-    def _group_harmonic(self, data) -> dict:
-        """Proxy to keep legacy call sites stable while delegating grouping."""
-
-        return group_harmonic_results(data)
-
-    def export_results(self, kind: str, data, out_dir: str) -> None:
+    def export_results(self, kind: str, data, out_dir: str) -> list[Path]:
         mapping = {
             "anova": (export_rm_anova_results_to_excel, ANOVA_XLS),
             "lmm": (export_mixed_model_results_to_excel, LMM_XLS),
@@ -444,13 +439,13 @@ class StatsWindow(QMainWindow):
         }
         func, fname = mapping[kind]
         if kind == "harmonic":
-            grouped = self._group_harmonic(data)
+            grouped = group_harmonic_results(data)
             has_rows = any(
                 roi_entries for roi_data in grouped.values() for roi_entries in roi_data.values()
             )
             if not has_rows:
                 self._set_status("No harmonic check results to export.")
-                return
+                return []
 
             def _adapter(_ignored, *, save_path, log_func):
                 export_harmonic_results_to_excel(
@@ -460,10 +455,14 @@ class StatsWindow(QMainWindow):
                     metric=self._harmonic_config.metric,
                 )
 
-            safe_export_call(_adapter, None, out_dir, fname, log_func=self._set_status)
-            return
+            path = safe_export_call(_adapter, None, out_dir, fname, log_func=self._set_status)
+            return [path]
 
-        safe_export_call(func, data, out_dir, fname, log_func=self._set_status)
+        if data is None:
+            return []
+
+        path = safe_export_call(func, data, out_dir, fname, log_func=self._set_status)
+        return [path]
 
     def _ensure_results_dir(self) -> str:
         target = ensure_results_dir(
@@ -1070,34 +1069,23 @@ class StatsWindow(QMainWindow):
         ]
         out_dir = self._ensure_results_dir()
         try:
-            paths: list[str] = []
-            name_map = {
-                "anova": ANOVA_XLS,
-                "lmm": LMM_XLS,
-                "posthoc": POSTHOC_XLS,
-                "harmonic": HARMONIC_XLS,
-            }
+            paths: list[Path] = []
             for kind, data_obj, label in exports:
-                if kind == "harmonic":
-                    grouped = self._group_harmonic(data_obj)
-                    has_rows = any(
-                        roi_entries
-                        for roi_data in grouped.values()
-                        for roi_entries in roi_data.values()
-                    )
-                    if not has_rows:
+                if data_obj is None:
+                    self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
+                    return False
+                result_paths = self.export_results(kind, data_obj, out_dir)
+                if not result_paths:
+                    if kind == "harmonic":
                         self.append_log(
                             section,
                             f"  • Skipping export for {label} (no significant harmonics)",
                             level="warning",
                         )
                         continue
-                    data_obj = grouped
-                if data_obj is None:
                     self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
                     return False
-                self.export_results(kind, data_obj, out_dir)
-                paths.append(os.path.join(out_dir, name_map[kind]))
+                paths.extend(result_paths)
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
@@ -1117,34 +1105,23 @@ class StatsWindow(QMainWindow):
         ]
         out_dir = self._ensure_results_dir()
         try:
-            paths: list[str] = []
-            name_map = {
-                "anova_between": ANOVA_BETWEEN_XLS,
-                "lmm_between": LMM_BETWEEN_XLS,
-                "group_contrasts": GROUP_CONTRAST_XLS,
-                "harmonic": HARMONIC_XLS,
-            }
+            paths: list[Path] = []
             for kind, data_obj, label in exports:
-                if kind == "harmonic":
-                    grouped = self._group_harmonic(data_obj)
-                    has_rows = any(
-                        roi_entries
-                        for roi_data in grouped.values()
-                        for roi_entries in roi_data.values()
-                    )
-                    if not has_rows:
+                if data_obj is None:
+                    self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
+                    return False
+                result_paths = self.export_results(kind, data_obj, out_dir)
+                if not result_paths:
+                    if kind == "harmonic":
                         self.append_log(
                             section,
                             f"  • Skipping export for {label} (no significant harmonics)",
                             level="warning",
                         )
                         continue
-                    data_obj = grouped
-                if data_obj is None:
                     self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
                     return False
-                self.export_results(kind, data_obj, out_dir)
-                paths.append(os.path.join(out_dir, name_map[kind]))
+                paths.extend(result_paths)
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:

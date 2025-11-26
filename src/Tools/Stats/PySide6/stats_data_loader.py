@@ -219,10 +219,18 @@ def safe_export_call(
     out_path.mkdir(parents=True, exist_ok=True)
     fname = base_name if str(base_name).lower().endswith(".xlsx") else f"{base_name}.xlsx"
     save_path = out_path / fname
+    log_func(f"Exporting {base_name} to {save_path}")
+
     try:
-        func(data_obj, save_path=save_path, log_func=log_func)
-    except TypeError:
-        func(data_obj, str(out_path), log_func=log_func)
+        try:
+            func(data_obj, save_path=save_path, log_func=log_func)
+        except TypeError:
+            func(data_obj, str(out_path), log_func=log_func)
+    except Exception as exc:  # noqa: BLE001
+        log_func(f"Export failed for {base_name}: {exc}")
+        raise
+
+    log_func(f"Export completed for {base_name}")
     return save_path
 
 
