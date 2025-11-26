@@ -213,18 +213,31 @@ def safe_export_call(
     *,
     log_func: Callable[[str], None],
 ) -> Path:
-    """Invoke an export helper, handling legacy signatures and paths."""
+    """Invoke an export helper, handling legacy signatures and paths.
+
+    Tries the modern signature first:
+        func(data_obj, save_path=path, log_func=log_func)
+
+    If that raises TypeError, fall back to the legacy form:
+        func(data_obj, out_dir, log_func=log_func)
+
+    Returns the Path that should contain the exported Excel file.
+    """
 
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
+
     fname = base_name if str(base_name).lower().endswith(".xlsx") else f"{base_name}.xlsx"
     save_path = out_path / fname
+
     log_func(f"Exporting {base_name} to {save_path}")
 
     try:
         try:
+            # Preferred modern signature
             func(data_obj, save_path=save_path, log_func=log_func)
         except TypeError:
+            # Legacy signature that expects an output directory instead of a file path
             func(data_obj, str(out_path), log_func=log_func)
     except Exception as exc:  # noqa: BLE001
         log_func(f"Export failed for {base_name}: {exc}")
@@ -232,6 +245,7 @@ def safe_export_call(
 
     log_func(f"Export completed for {base_name}")
     return save_path
+
 
 
 def ensure_results_dir(

@@ -438,10 +438,14 @@ class StatsWindow(QMainWindow):
             "group_contrasts": (export_posthoc_results_to_excel, GROUP_CONTRAST_XLS),
         }
         func, fname = mapping[kind]
+
+        # Special handling for harmonic exports
         if kind == "harmonic":
             grouped = group_harmonic_results(data)
             has_rows = any(
-                roi_entries for roi_data in grouped.values() for roi_entries in roi_data.values()
+                roi_entries
+                for roi_data in grouped.values()
+                for roi_entries in roi_data.values()
             )
             if not has_rows:
                 self._set_status("No harmonic check results to export.")
@@ -455,13 +459,26 @@ class StatsWindow(QMainWindow):
                     metric=self._harmonic_config.metric,
                 )
 
-            path = safe_export_call(_adapter, None, out_dir, fname, log_func=self._set_status)
+            path = safe_export_call(
+                _adapter,
+                None,
+                out_dir,
+                fname,
+                log_func=self._set_status,
+            )
             return [path]
 
+        # Non-harmonic exports: if there's no data, nothing to export
         if data is None:
             return []
 
-        path = safe_export_call(func, data, out_dir, fname, log_func=self._set_status)
+        path = safe_export_call(
+            func,
+            data,
+            out_dir,
+            fname,
+            log_func=self._set_status,
+        )
         return [path]
 
     def _ensure_results_dir(self) -> str:
@@ -1068,14 +1085,23 @@ class StatsWindow(QMainWindow):
             ("harmonic", self._harmonic_results.get(PipelineId.SINGLE), "Harmonic Check"),
         ]
         out_dir = self._ensure_results_dir()
+
         try:
             paths: list[Path] = []
+
             for kind, data_obj, label in exports:
                 if data_obj is None:
-                    self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
+                    self.append_log(
+                        section,
+                        f"  • Skipping export for {label} (no data)",
+                        level="warning",
+                    )
                     return False
+
                 result_paths = self.export_results(kind, data_obj, out_dir)
+
                 if not result_paths:
+                    # Only harmonic is allowed to “legitimately” export nothing
                     if kind == "harmonic":
                         self.append_log(
                             section,
@@ -1083,14 +1109,23 @@ class StatsWindow(QMainWindow):
                             level="warning",
                         )
                         continue
-                    self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
+
+                    self.append_log(
+                        section,
+                        f"  • Export produced no files for {label}",
+                        level="error",
+                    )
                     return False
+
                 paths.extend(result_paths)
+
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
                     self.append_log(section, f"      {p}")
+
             return True
+
         except Exception as exc:  # noqa: BLE001
             self.append_log(section, f"  • Export failed: {exc}", level="error")
             return False
@@ -1104,13 +1139,21 @@ class StatsWindow(QMainWindow):
             ("harmonic", self._harmonic_results.get(PipelineId.BETWEEN), "Harmonic Check"),
         ]
         out_dir = self._ensure_results_dir()
+
         try:
             paths: list[Path] = []
+
             for kind, data_obj, label in exports:
                 if data_obj is None:
-                    self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
+                    self.append_log(
+                        section,
+                        f"  • Skipping export for {label} (no data)",
+                        level="warning",
+                    )
                     return False
+
                 result_paths = self.export_results(kind, data_obj, out_dir)
+
                 if not result_paths:
                     if kind == "harmonic":
                         self.append_log(
@@ -1119,14 +1162,23 @@ class StatsWindow(QMainWindow):
                             level="warning",
                         )
                         continue
-                    self.append_log(section, f"  • Skipping export for {label} (no data)", level="warning")
+
+                    self.append_log(
+                        section,
+                        f"  • Export produced no files for {label}",
+                        level="error",
+                    )
                     return False
+
                 paths.extend(result_paths)
+
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
                     self.append_log(section, f"      {p}")
+
             return True
+
         except Exception as exc:  # noqa: BLE001
             self.append_log(section, f"  • Export failed: {exc}", level="error")
             return False
