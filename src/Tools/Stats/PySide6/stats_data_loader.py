@@ -236,6 +236,12 @@ def ensure_results_dir(
 ) -> Path:
     """Compute and create the Stats results directory."""
 
+    if not project_root.exists():
+        logger.warning(
+            "ensure_results_dir called with non-existent project_root: %s",
+            project_root,
+        )
+
     target = resolve_project_subfolder(
         project_root,
         results_folder_hint,
@@ -243,8 +249,13 @@ def ensure_results_dir(
         subfolder_key,
         results_subfolder_name,
     )
+
     target.mkdir(parents=True, exist_ok=True)
+
+    logger.info("ensure_results_dir using results directory: %s", target)
+
     return target
+
 
 
 def check_for_open_excel_files(folder_path: str) -> list[str]:
