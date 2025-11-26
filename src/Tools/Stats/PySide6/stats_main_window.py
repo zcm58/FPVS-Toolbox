@@ -1314,6 +1314,24 @@ class StatsWindow(QMainWindow):
         self._apply_harmonic_results(payload, pipeline_id=pipeline_id)
         self._end_run()
 
+    @Slot(object)
+    def _on_lela_mode_finished(self, stats_folder: Path | None = None) -> None:
+        try:
+            section = self._section_label(PipelineId.BETWEEN)
+            self.append_log(section, "[Between] Lela Mode: complete — see Cross-Phase LMM Analysis.xlsx")
+            if stats_folder:
+                self.append_log(section, f"  • Excel: {stats_folder}")
+        finally:
+            self._end_run()
+
+    @Slot(str)
+    def _on_lela_mode_error(self, message: str) -> None:
+        try:
+            section = self._section_label(PipelineId.BETWEEN)
+            self.append_log(section, f"[Between] Lela Mode error: {message}", level="error")
+        finally:
+            self._end_run()
+
     # --------------------------- UI building ---------------------------
 
     def _init_ui(self) -> None:
