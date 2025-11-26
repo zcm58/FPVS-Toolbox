@@ -1596,7 +1596,25 @@ class StatsWindow(QMainWindow):
         self._controller.run_between_group_mixed_only()
 
     def on_run_lela_mode(self) -> None:
-        self._controller.run_lela_mode_analysis()
+        """
+        Run Lela mode (cross-phase single + between analyses).
+
+        This mirrors the other run buttons by:
+        - going through _precheck with start_guard=True (which calls _begin_run()),
+        - delegating the actual work to the controller, and
+        - making sure _end_run() is called if the controller raises.
+        """
+        # If your other run-* methods clear output/results first, you can mirror that here.
+        # Keeping this minimal to avoid changing behavior.
+        if not self._precheck(start_guard=True, require_anova=False):
+            return
+
+        try:
+            self._controller.run_lela_mode_analysis()
+        except Exception:
+            # Ensure the guard / busy state is released even on error
+            self._end_run()
+            raise
 
     def on_run_group_contrasts(self) -> None:
         self.output_text.clear()
@@ -1719,7 +1737,6 @@ class StatsWindow(QMainWindow):
             self._scan_guard.done()
 
 
-
     def _preferred_stats_folder(self) -> Path:
         """Default Excel folder derived from the project manifest."""
         return resolve_project_subfolder(
@@ -1745,5 +1762,3 @@ class StatsWindow(QMainWindow):
             self._set_status(
                 f"Select the project's '{EXCEL_SUBFOLDER_NAME}' folder to begin."
             )
-
-
