@@ -3,7 +3,7 @@
 This page describes how the FPVS Toolbox processes EEG data from raw
 recordings to frequency-domain metrics and ROI-level summaries.
 
-The pipeline is designed to mirror standard processing pipeline using MATLAB and EEGLab. Please see the relevant 
+The pipeline is designed to mirror a standard processing pipeline using MATLAB and EEGLab. Please see the relevant 
 publications for more information on this methodology. 
 
 ---
