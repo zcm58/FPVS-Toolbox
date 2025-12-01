@@ -46,8 +46,8 @@ metrics.
   how to interpret the outputs.
 
 - [Relevant Publications](relevant-publications.md)  
-  Papers describing FPVS, SSVEP/frequency-tagging methods, preprocessing
-  choices, and statistical approaches used in this toolbox.
+  A brief overview of relevant publications on FPVS and the preprocessing pipeline used
+inside the FPVS Toolbox. 
 
 - [Tutorials & Walkthroughs](tutorial.md)  
   Step-by-step examples on how to use the FPVS Toolbox.
