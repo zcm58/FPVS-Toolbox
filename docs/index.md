@@ -45,11 +45,11 @@ metrics.
   Overview of single-group and between-group analyses, models used, and
   how to interpret the outputs.
 
-- [Relevant Publications](publications.md)  
+- [Relevant Publications](relevant-publications.md)  
   Papers describing FPVS, SSVEP/frequency-tagging methods, preprocessing
   choices, and statistical approaches used in this toolbox.
 
-- [Tutorials & Walkthroughs](tutorials/quickstart.md)  
+- [Tutorials & Walkthroughs](tutorial.md)  
   Step-by-step examples on how to use the FPVS Toolbox.
 
 ---
