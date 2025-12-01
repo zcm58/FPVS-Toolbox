@@ -10,7 +10,7 @@ The FPVS Toolbox is a python based application for preprocessing, cleaning, and 
 - Automated batch preprocessing pipeline: referencing, filtering, resampling, kurtosis-based channel rejection and channel interpolation
 - Extraction of epochs and post-processing metrics (FFT, SNR, BCA, Z-score)
 - Built in Statistical analysis tool with repeated-measures ANOVA, linear mixed-effects models, and post-hoc pairwise tests to check for significant FPVS oddball responses.
-- Users can easily process datasets multiple experimental groups 
+- Users can easily process and analyze datasets with multiple experimental groups 
 
 
 ## Features currently under development:
