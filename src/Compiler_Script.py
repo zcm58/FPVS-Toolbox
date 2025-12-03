@@ -3,6 +3,8 @@
 
 # After that, I package the .exe and other dependencies into an installer using Inno Setup.
 
+# 12/3/25 at 3:32PM: Adding a checkpoint prior to implementing any LMM reference selection in stats tool.
+
 pyinstaller `
   --clean `
   --noconfirm `
