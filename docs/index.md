@@ -2,7 +2,9 @@
 
 The Fast Periodic Visual Stimulation (FPVS) Toolbox allows you to easily process
 EEG data from FPVS experiments and run statistical analyses on the resulting
-metrics. 
+metrics. As of now, FPVS Toolbox only supports the BioSemi data format (.BDF) and FPVS experiments ran with PyschoPy. 
+
+**This documentation page is a work in progress and is not yet complete.**
 
 > Current app version: **v1.5.0**
 
@@ -12,12 +14,24 @@ metrics.
 
 1. **Install FPVS Toolbox**  
    Download the latest installer from the GitHub Releases page and run it
-   on Windows. You may have to bypass Windows Defender if prompted. 
+   on Windows. You may have to bypass Windows Defender if prompted. When you run FPVS Toolbox for the first time, you
+   will be asked to select a "Project Root". This is where all the different results from various projects you create
+   within FPVS Toolbox will live. I recommend that you avoid using cloud based folders like OneDrive - it sometimes
+   causes issues with Statistical Analysis. 
 
+--- 
 
 2. **Create or open a project**  
-   From the main window, choose a project root folder and set basic metadata
-   (project name, groups, subject list, trigger IDs).
+
+From the main window, choose "Create New Project". You will be prompted to title your project, select the number
+of experimental groups, and to name each group. Next, you will select the input folder for each group (wherever you
+have stored your .BDF files).
+
+
+   You will need to input titles for each FPVS Condition in your experiment in the Main App GUI, as well as the 
+   PsychoPy trigger code associated with that condition. 
+
+--- 
 
 
 3. **Process EEG data**  
