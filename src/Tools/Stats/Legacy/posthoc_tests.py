@@ -6,7 +6,7 @@ Utility functions for post-hoc comparisons after repeated measures ANOVA or LME.
 What’s new:
 - Paired comparisons now report Cohen's dz and 95% CI of the mean difference.
 - A normality check (Shapiro on paired differences) is logged (informational only).
-- Interaction post-hocs keep family-wise Holm correction within each ROI.
+- Interaction post-hocs keep Benjamini–Hochberg FDR control within each ROI.
 - Planned contrasts helper: Category vs average(Color conditions) within ROI(s).
 
 Functions
@@ -42,7 +42,7 @@ def run_posthoc_pairwise_tests(
     dv_col: str,
     factor_col: str,
     subject_col: str,
-    correction: str = "holm",
+    correction: str = "fdr_bh",
     alpha: float = 0.05,
 ):
     """Paired, within-subject t-tests across all level pairs of `factor_col`."""
@@ -116,7 +116,7 @@ def run_posthoc_pairwise_tests(
             "N_Pairs": n_pairs[idx],
             "t_statistic": test_stats[idx],
             "p_value": p_values[idx],
-            "p_value_corrected": corrected_p[idx],
+            "p_fdr_bh": corrected_p[idx],
             "Significant": significant[idx],
             "mean_diff": mdiff_list[idx],
             "ci95_low": ci_lo_list[idx],
@@ -134,7 +134,7 @@ def run_posthoc_pairwise_tests(
             output_lines.append("  Skipped: insufficient paired observations.\n")
             continue
         output_lines.append(f"  t({n_pairs[idx]-1}) = {test_stats[idx]:.3f}")
-        output_lines.append(f"  Raw p-value = {p_values[idx]:.4f}  |  Corrected p = {corrected_p[idx]:.4f}")
+        output_lines.append(f"  Raw p-value = {p_values[idx]:.4f}  |  FDR-adjusted p (BH) = {corrected_p[idx]:.4f}")
         output_lines.append(f"  Mean diff (A-B) = {mdiff_list[idx]:.4f}  "
                             f"95% CI [{ci_lo_list[idx]:.4f}, {ci_hi_list[idx]:.4f}]  "
                             f"Cohen's dz = {dz_list[idx]:.3f}")
@@ -152,10 +152,10 @@ def run_interaction_posthocs(
     roi_col: str,
     condition_col: str,
     subject_col: str,
-    correction: str = "holm",
+    correction: str = "fdr_bh",
     alpha: float = 0.05,
 ):
-    """Within each ROI, run pairwise condition comparisons (paired t with Holm)."""
+    """Within each ROI, run pairwise condition comparisons (paired t with BH-FDR)."""
     header = [
         "============================================================",
         "         Post-hoc Comparisons: Condition by ROI",
@@ -186,7 +186,7 @@ def run_interaction_posthocs(
             for _, row in df_res[df_res["Significant"]].iterrows():
                 summary.append(
                     f"ROI {roi}: {row['Level_A']} vs {row['Level_B']} "
-                    f"(t={row['t_statistic']:.3f}, p={row['p_value_corrected']:.4f}, dz={row['cohens_dz']:.2f})"
+                    f"(t={row['t_statistic']:.3f}, p={row['p_fdr_bh']:.4f}, dz={row['cohens_dz']:.2f})"
                 )
 
     # Build final outputs

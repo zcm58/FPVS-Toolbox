@@ -1,0 +1,10 @@
+site_name: FPVS Toolbox
+theme:
+  name: material
+
+nav:
+  - Home: index.md
+  - Processing Pipeline: processing-pipeline.md
+  - Statistical Analysis: statistical-analysis.md
+  - Relevant Publications: relevant-publications.md
+  - Tutorials: tutorials.md

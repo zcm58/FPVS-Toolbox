@@ -11,44 +11,41 @@ The resulting values can be saved to Excel alongside other metrics.
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import numpy as np
 import pandas as pd
-from typing import Sequence
+
+from Tools.Stats.Legacy.noise_utils import compute_noise_stats_for_bin
 
 __all__ = ["compute_full_snr_df", "compute_full_snr"]
 
 
 def _compute_snr_for_amplitudes(
     amplitudes: np.ndarray,
-    window_size: int = 12,
-    exclude_radius: int = 2,
+    window_size: int = 10,
+    exclude_radius: int = 1,
 ) -> np.ndarray:
     """Return full-spectrum SNR for a single channel.
 
     Parameters
     ----------
-    amplitudes:
+    amplitudes
         1-D numpy array of FFT amplitudes for one channel.
-    window_size:
-        Half window size on each side used when estimating the noise floor.
-    exclude_radius:
-        Number of bins around the target bin to exclude from the noise estimate.
+    window_size
+        Half window size on each side used when estimating the noise floor
+        (±window_size bins).
+    exclude_radius
+        Kept for backward compatibility; the actual exclusion of immediate
+        neighbors is handled inside ``compute_noise_stats_for_bin`` and is
+        fixed at ±1 bin around the target.
     """
     num_bins = amplitudes.shape[0]
     snr = np.zeros(num_bins)
     for idx in range(num_bins):
-        low = idx - window_size
-        high = idx + window_size
-        exclude = set(range(idx - exclude_radius, idx + exclude_radius + 1))
-        valid = [
-            i
-            for i in range(low, high + 1)
-            if 0 <= i < num_bins and i not in exclude
-        ]
-        if len(valid) >= 4:
-            noise_mean = np.mean(amplitudes[valid])
-        else:
-            noise_mean = 0.0
+        noise_mean, _ = compute_noise_stats_for_bin(
+            amplitudes, idx, window_size=window_size, min_bins=4
+        )
         signal = amplitudes[idx]
         snr[idx] = signal / noise_mean if noise_mean > 1e-12 else 0.0
     return snr
@@ -58,28 +55,31 @@ def compute_full_snr_df(
     data_uv: np.ndarray,
     sfreq: float,
     electrode_names: Sequence[str],
-    window_size: int = 12,
-    exclude_radius: int = 2,
+    window_size: int = 10,
+    exclude_radius: int = 1,
 ) -> pd.DataFrame:
     """Compute the SNR for every FFT bin for each channel.
 
     Parameters
     ----------
-    data_uv:
-        Array of averaged EEG data in microvolts with shape ``(n_channels, n_timepoints)``.
-    sfreq:
+    data_uv
+        Array of averaged EEG data in microvolts with shape (n_channels, n_timepoints).
+    sfreq
         Sampling rate of the data in Hz.
-    electrode_names:
+    electrode_names
         Channel names corresponding to ``data_uv`` order.
-    window_size:
-        Half of the sliding window (in bins) used to estimate the noise floor.
-    exclude_radius:
-        Number of bins around the target bin excluded from noise estimate.
+    window_size
+        Half of the sliding window (in bins) used to estimate the noise floor
+        (±window_size).
+    exclude_radius
+        Deprecated. Immediate neighbors are always excluded by the shared noise
+        helper; this argument is kept only for API compatibility.
 
     Returns
     -------
     pandas.DataFrame
-        DataFrame indexed by ``electrode_names`` with columns named ``"{freq:.1f}_Hz"``.
+        DataFrame indexed by ``electrode_names`` with columns named
+        ``"{freq:.1f}_Hz"``.
     """
     num_channels, num_times = data_uv.shape
     num_bins = num_times // 2 + 1
@@ -103,10 +103,10 @@ def compute_full_snr_df(
 def compute_full_snr(
     data_uv: np.ndarray,
     sfreq: float,
-    window_size: int = 12,
-    exclude_radius: int = 2,
+    window_size: int = 10,
+    exclude_radius: int = 1,
 ) -> np.ndarray:
-    """Return full-spectrum SNR values as a ``(n_channels, n_bins)`` array."""
+    """Return full-spectrum SNR values as a (n_channels, n_bins) array."""
 
     num_channels, num_times = data_uv.shape
     num_bins = num_times // 2 + 1
@@ -120,4 +120,3 @@ def compute_full_snr(
             amplitudes[ch_idx], window_size=window_size, exclude_radius=exclude_radius
         )
     return snr_matrix
-

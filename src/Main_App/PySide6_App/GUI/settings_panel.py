@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
     QHBoxLayout,
+    QComboBox,
     QDialog,
     QTabWidget,
     QGroupBox,
@@ -218,6 +219,17 @@ class SettingsDialog(QDialog):
         self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"))
         form.addRow(QLabel("Alpha value for ANOVA"), self.alpha_edit)
 
+        self.harm_metric_combo = QComboBox()
+        self.harm_metric_combo.addItems(["Z Score"])
+        current_metric = self.manager.get("analysis", "harmonic_metric", "Z Score")
+        idx = self.harm_metric_combo.findText(current_metric)
+        if idx >= 0:
+            self.harm_metric_combo.setCurrentIndex(idx)
+        form.addRow(QLabel("Harmonic Detection Metric"), self.harm_metric_combo)
+
+        self.harm_threshold_edit = QLineEdit(self.manager.get("analysis", "harmonic_threshold", "1.64"))
+        form.addRow(QLabel("Harmonic Threshold"), self.harm_threshold_edit)
+
         self.roi_editor = ROISettingsEditor(self, self.manager.get_roi_pairs())
         form.addRow(QLabel("Regions of Interest"), self.roi_editor)
 
@@ -308,6 +320,8 @@ class SettingsDialog(QDialog):
         self.manager.set("analysis", "oddball_freq", self.oddball_freq_edit.text())
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
+        self.manager.set("analysis", "harmonic_metric", self.harm_metric_combo.currentText())
+        self.manager.set("analysis", "harmonic_threshold", self.harm_threshold_edit.text())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
         pre_keys = [
             ("preprocessing", "low_pass", "low_pass"),

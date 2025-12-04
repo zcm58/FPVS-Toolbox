@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
+from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -23,6 +23,8 @@ ROW_MIN_HEIGHT = 40   # total button height (card)
 TEXT_BOX_PX = 22      # common vertical box for the text (matches icon box)
 TEXT_NUDGE_PX = -1    # small vertical nudge to lift text
 # ---------------------------------------------------------------------------
+
+DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox-Repo/"  # MkDocs site for documentation
 
 
 def white_icon(source: QIcon | str | Path) -> QIcon:
@@ -215,5 +217,9 @@ def init_sidebar(self) -> None:
 
     # Bottom group
     make_button(lay, "btn_settings", "Settings", "settings", self.open_settings_window)
-    make_button(lay, "btn_info", "Information", None, self.show_relevant_publications)
+
+    def _open_docs() -> None:
+        QDesktopServices.openUrl(QUrl(DOCS_URL))
+
+    make_button(lay, "btn_info", "Information", None, _open_docs)
     make_button(lay, "btn_help", "Help", None, self.show_about_dialog)

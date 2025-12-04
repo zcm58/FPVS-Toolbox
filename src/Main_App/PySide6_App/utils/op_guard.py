@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 from contextlib import contextmanager
-from typing import Optional
+from typing import Optional, Generator
 
 
 class OpGuard:
@@ -39,10 +39,12 @@ class OpGuard:
         """
         if not self._lock.acquire(blocking=False):
             return False
+
+        # Defensive check: If internal state is inconsistent, force fail-safe.
         if self._active:
-            # Should not occur with the lock held, but be defensive.
             self._lock.release()
             return False
+
         self._active = True
         self._started_at = time.perf_counter()
         return True
@@ -80,7 +82,7 @@ class OpGuard:
             pass
 
     @contextmanager
-    def scope(self):
+    def scope(self) -> Generator[bool, None, None]:
         """
         Context manager that yields True if acquired, else False.
         Always releases if acquired.

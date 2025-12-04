@@ -53,6 +53,18 @@ def begin_preproc_audit(
     filename: str,
 ) -> Dict[str, Any]:
     """Capture baseline audit metadata before preprocessing mutates the Raw."""
+    try:
+        logger.debug(
+            "begin_preproc_audit_start",
+            extra={
+                "file": filename,
+                "sfreq": float(raw.info.get("sfreq", -1.0)),
+                "n_channels": len(raw.info.get("ch_names", [])),
+            },
+        )
+    except Exception:
+        # Audit logging must not affect behavior
+        logger.debug("begin_preproc_audit_start_logging_failed", extra={"file": filename})
     capture = start_preproc_audit(raw, params)
     capture["file"] = filename
     return capture
@@ -69,6 +81,22 @@ def finalize_preproc_audit(
     n_rejected: int = 0,
 ) -> Tuple[Dict[str, Any], List[str]]:
     """Compute the post-state audit and log structured results."""
+    try:
+        logger.debug(
+            "finalize_preproc_audit_start",
+            extra={
+                "file": filename,
+                "events_info_present": events_info is not None,
+                "fif_written": fif_written,
+                "n_rejected": n_rejected,
+            },
+        )
+    except Exception:
+        logger.debug(
+            "finalize_preproc_audit_start_logging_failed",
+            extra={"file": filename},
+        )
+
     after = end_preproc_audit(
         raw,
         params,
@@ -141,6 +169,25 @@ def perform_preprocessing(
     num_kurtosis_bads_identified = 0
 
     try:
+        # Module-level logger entry for high-level preprocessing start
+        try:
+            logger.info(
+                "preprocess_start",
+                extra={
+                    "file": filename_for_log,
+                    "downsample_rate": downsample_rate,
+                    "low_pass": low_pass,
+                    "high_pass": high_pass,
+                    "reject_thresh": reject_thresh,
+                    "max_idx_keep": max_keep,
+                    "stim_ch": stim_ch,
+                },
+            )
+        except Exception:
+            logger.debug(
+                "preprocess_start_logging_failed", extra={"file": filename_for_log}
+            )
+
         orig_ch_names = list(raw.info["ch_names"])
         orig_sfreq = float(raw.info["sfreq"])
         log_func(
@@ -217,6 +264,19 @@ def perform_preprocessing(
             if ch in raw.ch_names:
                 raw.drop_channels([ch])
                 log_func(f"Dropped {ch} after initial referencing.")
+        try:
+            logger.debug(
+                "preprocess_stage_after_drop_refs",
+                extra={
+                    "file": filename_for_log,
+                    "n_channels": len(raw.info.get("ch_names", [])),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "preprocess_stage_after_drop_refs_logging_failed",
+                extra={"file": filename_for_log},
+            )
 
         # 3) Optional channel limit (keeps stim if present)
         current_names_before_drop = list(raw.info["ch_names"])
@@ -271,6 +331,19 @@ def perform_preprocessing(
                 f"Skip channel drop for {filename_for_log} (max_keep: {max_keep}). "
                 f"Current channels: {len(current_names_before_drop)}"
             )
+        try:
+            logger.debug(
+                "preprocess_stage_after_channel_limit",
+                extra={
+                    "file": filename_for_log,
+                    "n_channels": len(raw.info.get("ch_names", [])),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "preprocess_stage_after_channel_limit_logging_failed",
+                extra={"file": filename_for_log},
+            )
 
         # 4) Downsample (legacy position: BEFORE filtering)
         if downsample_rate:
@@ -315,6 +388,19 @@ def perform_preprocessing(
         else:
             log_func(f"Skip downsample for {filename_for_log}.")
             print(f"[DS] {filename_for_log}: skip (no downsample_rate set)")
+        try:
+            logger.debug(
+                "preprocess_stage_after_downsample",
+                extra={
+                    "file": filename_for_log,
+                    "sfreq": float(raw.info.get("sfreq", -1.0)),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "preprocess_stage_after_downsample_logging_failed",
+                extra={"file": filename_for_log},
+            )
 
         # 5) FILTER at (possibly reduced) Fs
         # LEGACY MAPPING: low_pass -> l_freq, high_pass -> h_freq (intentionally inverted names)
@@ -360,6 +446,19 @@ def perform_preprocessing(
         else:
             log_func(f"Skip filter for {filename_for_log}.")
             print(f"[FILTER] {filename_for_log}: skip (no l_freq/h_freq)")
+        try:
+            logger.debug(
+                "preprocess_stage_after_filter",
+                extra={
+                    "file": filename_for_log,
+                    "sfreq": float(raw.info.get("sfreq", -1.0)),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "preprocess_stage_after_filter_logging_failed",
+                extra={"file": filename_for_log},
+            )
 
         # 6) Kurtosis rejection & interpolation
         if reject_thresh:
@@ -495,6 +594,19 @@ def perform_preprocessing(
                 f"Skip Kurtosis for {filename_for_log} (no threshold)."
             )
             print(f"[KURTOSIS] {filename_for_log}: skip (no threshold)")
+        try:
+            logger.debug(
+                "preprocess_stage_after_kurtosis",
+                extra={
+                    "file": filename_for_log,
+                    "n_bads": len(raw.info.get("bads", [])),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "preprocess_stage_after_kurtosis_logging_failed",
+                extra={"file": filename_for_log},
+            )
 
         # 7) Average reference (final)
         try:
@@ -555,6 +667,22 @@ def perform_preprocessing(
                 f"Expected stim_ch '{stim_ch}' IS NOT PRESENT at VERY END."
             )
 
+        try:
+            logger.info(
+                "preprocess_ok",
+                extra={
+                    "file": filename_for_log,
+                    "n_channels": len(final_ch_names),
+                    "sfreq": float(raw.info.get("sfreq", -1.0)),
+                    "n_rejected": num_kurtosis_bads_identified,
+                },
+            )
+        except Exception:
+            logger.debug(
+                "preprocess_ok_logging_failed",
+                extra={"file": filename_for_log},
+            )
+
         return raw, num_kurtosis_bads_identified
 
     except Exception as e:
@@ -562,4 +690,18 @@ def perform_preprocessing(
             f"!!! CRITICAL Preprocessing error for {filename_for_log}: {e}"
         )
         log_func(f"Traceback: {traceback.format_exc()}")
+        try:
+            logger.error(
+                "preprocess_error",
+                extra={
+                    "file": filename_for_log,
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "preprocess_error_logging_failed",
+                extra={"file": filename_for_log},
+            )
         return None, num_kurtosis_bads_identified

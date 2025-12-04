@@ -1,8 +1,11 @@
 """"Processing helpers for the PySide6 app. Single-preprocessor path (PySide6 only)."""
 from __future__ import annotations
 
-from pathlib import Path
 import logging
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Dict, Iterable, List, Sequence
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
@@ -15,7 +18,246 @@ from Main_App.PySide6_App.Backend.preprocess import (
 from Main_App.PySide6_App.Backend.processing import process_data
 from Main_App.Legacy_App.post_process import post_process
 
+if TYPE_CHECKING:
+    from Main_App.PySide6_App.Backend.project import Project
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RawFileInfo:
+    """
+    Metadata tracked for each discovered raw file.
+
+    - path: absolute Path to the .bdf file.
+    - subject_id: canonical participant label inferred from the file name.
+    - group: optional experimental group name, inferred from the folder
+      where the file was discovered (for multi-group projects).
+    """
+
+    path: Path
+    subject_id: str
+    group: str | None = None
+
+
+# ``subject_id`` is the canonical participant label inferred from the .bdf file
+# name. ``group`` captures the multi-group assignment derived from the folder the
+# file was found in. Both values are persisted so that downstream processing,
+# participant manifests, and the Stats/Plot tools can reason about consistent
+# IDs without re-scanning the filesystem.
+
+_PID_REGEX = re.compile(r"\b(P\d+|Sub\d+|S\d+)\b", re.IGNORECASE)
+_PID_SUFFIX_REGEX = re.compile(
+    r"(_unamb|_ambig|_mid|_run\d*|_sess\d*|_task\w*|_eeg|_fpvs|_raw|_preproc|_ica).*$",
+    re.IGNORECASE,
+)
+
+
+def _infer_subject_id(file_path: Path) -> str:
+    base = file_path.stem
+    match = _PID_REGEX.search(base)
+    if match:
+        return match.group(1).upper()
+
+    cleaned = _PID_SUFFIX_REGEX.sub("", base)
+    cleaned = re.sub(r"[^a-zA-Z0-9]", "", cleaned)
+    return cleaned if cleaned else base
+
+
+def _iter_group_folders(project: "Project") -> Iterable[tuple[str | None, Path]]:
+    """
+    Yield (group_name, folder_path) pairs for all configured input folders.
+
+    For legacy/single-group projects, yields a single (None, project.input_folder)
+    entry so callers can treat the iteration uniformly.
+    """
+    groups = getattr(project, "groups", {}) or {}
+    if isinstance(groups, dict) and groups:
+        for name, info in groups.items():
+            folder = info.get("raw_input_folder") if isinstance(info, dict) else None
+            if not folder:
+                continue
+            folder_path = Path(folder)
+            yield name, folder_path
+    else:
+        yield None, Path(project.input_folder)
+
+
+def discover_raw_files(project: "Project") -> List[RawFileInfo]:
+    """
+    Discover all .bdf files across the project's configured input folders.
+
+    For multi-group projects, this walks every group-specific folder. For
+    legacy projects, this is equivalent to scanning project.input_folder.
+    """
+    files: List[RawFileInfo] = []
+    seen: set[Path] = set()
+    for group_name, folder in _iter_group_folders(project):
+        folder_path = Path(folder)
+        if not folder_path.exists():
+            logger.warning(
+                "Input folder %s for group %s does not exist",
+                folder_path,
+                group_name,
+            )
+            continue
+        for candidate in sorted(folder_path.glob("*.bdf")):
+            file_path = candidate.resolve()
+            if file_path in seen:
+                continue
+            seen.add(file_path)
+            files.append(
+                RawFileInfo(
+                    path=file_path,
+                    subject_id=_infer_subject_id(file_path),
+                    group=group_name,
+                )
+            )
+    logger.info(
+        "discover_raw_files",
+        extra={
+            "project_root": str(getattr(project, "project_root", "")),
+            "n_files": len(files),
+            "groups": list({f.group for f in files}),
+        },
+    )
+    return files
+
+
+def _group_for_path(project: "Project", file_path: Path) -> str | None:
+    """
+    Infer the group name for a manually selected file based on its parent folder.
+    """
+    file_resolved = file_path.resolve()
+    for group_name, folder in _iter_group_folders(project):
+        if not group_name:
+            continue
+        try:
+            folder_resolved = Path(folder).resolve()
+        except Exception:
+            continue
+        if folder_resolved == file_resolved.parent or folder_resolved in file_resolved.parents:
+            return group_name
+    return None
+
+
+def _update_project_participants(project: "Project", files: Sequence[RawFileInfo]) -> None:
+    """
+    Merge subject→group assignments from the given files into project.participants.
+
+    Conflicting assignments for the same subject are logged and the existing
+    mapping is preserved.
+    """
+    if not files:
+        return
+
+    if not getattr(project, "groups", {}) or not isinstance(project.groups, dict):
+        return
+
+    participants: Dict[str, Dict[str, str]] = {}
+    if isinstance(getattr(project, "participants", None), dict):
+        participants = dict(project.participants)
+
+    changed = False
+    for info in files:
+        group = info.group
+        participant_id = info.subject_id.strip()
+        if not group or not participant_id:
+            continue
+        existing = participants.get(participant_id)
+        if existing and existing.get("group") and existing.get("group") != group:
+            logger.warning(
+                "Conflicting group assignments for participant %s (%s vs %s). "
+                "Keeping existing.",
+                participant_id,
+                existing.get("group"),
+                group,
+            )
+            continue
+        if not existing or existing.get("group") != group:
+            participants[participant_id] = {"group": group}
+            changed = True
+
+    if changed:
+        logger.info(
+            "participants_updated",
+            extra={
+                "project_root": str(getattr(project, "project_root", "")),
+                "n_participants": len(participants),
+            },
+        )
+        project.participants = participants
+        try:
+            project.save()
+        except Exception:
+            logger.exception(
+                "Failed to save updated participant metadata for project %s",
+                project.project_root,
+            )
+
+
+def prepare_batch_files(project: "Project") -> List[Path]:
+    """
+    Build the list of .bdf files for batch processing.
+
+    - For multi-group projects (project.groups non-empty), this uses
+      discover_raw_files(project) so that all configured group folders
+      contribute their .bdf files, and keeps project.participants in sync.
+
+    - For legacy/single-group projects, this falls back to scanning
+      project.input_folder directly, preserving the original behavior.
+
+    This is the single source-of-truth used by the PySide6 GUI when
+    constructing the data_files list for the performance runner.
+    """
+    # Multi-group path: use discover_raw_files + RawFileInfo and update participants
+    groups = getattr(project, "groups", {}) or {}
+    if isinstance(groups, dict) and groups:
+        try:
+            infos = discover_raw_files(project)
+        except Exception:
+            logger.exception(
+                "prepare_batch_files: discover_raw_files failed; "
+                "falling back to single input_folder scan.",
+            )
+        else:
+            if infos:
+                try:
+                    _update_project_participants(project, infos)
+                except Exception:
+                    logger.exception(
+                        "prepare_batch_files: failed to update participants from "
+                        "discovered raw files for project %s",
+                        getattr(project, "project_root", "<unknown>"),
+                    )
+                logger.info(
+                    "prepare_batch_files_multi_group",
+                    extra={
+                        "project_root": str(getattr(project, "project_root", "")),
+                        "n_files": len(infos),
+                    },
+                )
+                return [info.path for info in infos]
+
+    # Legacy / fallback: single input_folder
+    input_dir = Path(project.input_folder)
+    if not input_dir.is_dir():
+        logger.warning(
+            "prepare_batch_files: input folder %s does not exist",
+            input_dir,
+        )
+        return []
+
+    files = sorted(input_dir.glob("*.bdf"))
+    logger.info(
+        "prepare_batch_files_single_group",
+        extra={
+            "project_root": str(getattr(project, "project_root", "")),
+            "input_folder": str(input_dir),
+            "n_files": len(files),
+        },
+    )
+    return files
 
 
 def _animate_progress_to(self, value: int) -> None:
@@ -51,6 +293,13 @@ def _promote_refs_to_eeg(self, raw, ref1: str, ref2: str, filename: str) -> None
     if promote:
         raw.set_channel_types(promote)
         self.log(f"[PROMOTE] {list(promote)} → EEG before referencing for {filename}")
+        try:
+            logger.debug(
+                "promote_refs_to_eeg",
+                extra={"file": filename, "promoted": list(promote)},
+            )
+        except Exception:
+            logger.debug("promote_refs_to_eeg_logging_failed", extra={"file": filename})
 
 
 def start_processing(self) -> None:
@@ -59,25 +308,79 @@ def start_processing(self) -> None:
     Preserves the rest of the pipeline and adds structured audit logging.
     """
     try:
-        input_dir = Path(self.currentProject.input_folder)
+        project: Project = self.currentProject
+        input_dir = Path(project.input_folder)
         run_loreta = bool(getattr(self, "cb_loreta", None) and self.cb_loreta.isChecked())
 
-        # Gather input files
-        if getattr(self, "rb_batch", None) and self.rb_batch.isChecked():
-            bdf_files = sorted(input_dir.glob("*.bdf"))
-            if not bdf_files:
-                raise FileNotFoundError(f"No .bdf files in {input_dir}")
+        batch_mode = bool(getattr(self, "rb_batch", None) and self.rb_batch.isChecked())
+
+        try:
+            logger.info(
+                "start_processing_begin",
+                extra={
+                    "project_root": str(getattr(project, "project_root", "")),
+                    "input_folder": str(input_dir),
+                    "batch_mode": batch_mode,
+                    "run_loreta": run_loreta,
+                },
+            )
+        except Exception:
+            logger.debug(
+                "start_processing_begin_logging_failed",
+                extra={"input_folder": str(input_dir)},
+            )
+
+        raw_file_infos: List[RawFileInfo]
+        if batch_mode:
+            raw_file_infos = discover_raw_files(project)
+            if not raw_file_infos:
+                raise FileNotFoundError(
+                    "No .bdf files found in the configured input folders for this project."
+                )
         else:
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "Select .BDF File", str(input_dir), "BDF Files (*.bdf)"
+                self,
+                "Select .BDF File",
+                str(input_dir),
+                "BDF Files (*.bdf)",
             )
             if not file_path:
                 self.log("No file selected, aborting.")
+                logger.info(
+                    "start_processing_no_file_selected",
+                    extra={"input_folder": str(input_dir)},
+                )
                 return
-            bdf_files = [Path(file_path)]
+            selected_path = Path(file_path)
+            raw_file_infos = [
+                RawFileInfo(
+                    path=selected_path,
+                    subject_id=_infer_subject_id(selected_path),
+                    group=_group_for_path(project, selected_path),
+                )
+            ]
+
+        bdf_files = [info.path for info in raw_file_infos]
+
+        try:
+            logger.info(
+                "start_processing_file_list",
+                extra={
+                    "project_root": str(getattr(project, "project_root", "")),
+                    "n_files": len(bdf_files),
+                    "files": [str(p) for p in bdf_files],
+                },
+            )
+        except Exception:
+            logger.debug(
+                "start_processing_file_list_logging_failed",
+                extra={"n_files": len(bdf_files)},
+            )
+
+        _update_project_participants(project, raw_file_infos)
 
         # Preprocessing parameters with precedence: project → settings → defaults
-        p = self.currentProject.preprocessing or {}
+        p = project.preprocessing or {}
 
         ref1 = (
             p.get("ref_channel1")
@@ -91,7 +394,11 @@ def start_processing(self) -> None:
             or _settings_get(self, "preprocessing", "ref_channel2")
             or "EXG2"
         )
-        stim = p.get("stim_channel") or _settings_get(self, "stim", "channel", "Status") or "Status"
+        stim = (
+            p.get("stim_channel")
+            or _settings_get(self, "stim", "channel", "Status")
+            or "Status"
+        )
 
         params = {
             "downsample_rate": p.get("downsample"),
@@ -105,7 +412,8 @@ def start_processing(self) -> None:
         }
 
         self.log(
-            "Using PySide6 preprocessing: Main_App.PySide6_App.Backend.preprocess.perform_preprocessing"
+            "Using PySide6 preprocessing: "
+            "Main_App.PySide6_App.Backend.preprocess.perform_preprocessing"
         )
         logger.info(
             "Preproc route: PySide6 module with params=%s",
@@ -113,6 +421,20 @@ def start_processing(self) -> None:
         )
 
         for fp in bdf_files:
+            try:
+                logger.info(
+                    "start_processing_file_begin",
+                    extra={
+                        "file": str(fp),
+                        "project_root": str(getattr(project, "project_root", "")),
+                    },
+                )
+            except Exception:
+                logger.debug(
+                    "start_processing_file_begin_logging_failed",
+                    extra={"file": str(fp)},
+                )
+
             # Load
             self.log(f"Loading EEG file: {fp.name}")
             raw = load_eeg_file(self, str(fp))
@@ -134,21 +456,88 @@ def start_processing(self) -> None:
                 n_rejected=int(n_bad or 0),
             )
 
+            try:
+                logger.info(
+                    "start_processing_file_preproc_done",
+                    extra={
+                        "file": str(fp),
+                        "n_bad_kurtosis": int(n_bad or 0),
+                        "n_channels": len(getattr(raw.info, "ch_names", [])),
+                        "sfreq": float(raw.info.get("sfreq", -1.0)),
+                    },
+                )
+            except Exception:
+                logger.debug(
+                    "start_processing_file_preproc_done_logging_failed",
+                    extra={"file": str(fp)},
+                )
+
             # Main processing and post-processing
-            out_dir = str(self.currentProject.project_root / self.currentProject.subfolders["excel"])
+            out_dir = str(
+                self.currentProject.project_root
+                / self.currentProject.subfolders["excel"]
+            )
             self.log(f"Running main processing (run_loreta={run_loreta})")
+            logger.debug(
+                "start_processing_call_process_data",
+                extra={"file": str(fp), "out_dir": out_dir, "run_loreta": run_loreta},
+            )
             process_data(raw, out_dir, run_loreta)
 
             condition_labels = list(self.currentProject.event_map.keys())
             self.log(f"Post-process condition labels: {condition_labels}")
+            logger.debug(
+                "start_processing_call_post_process",
+                extra={"file": str(fp), "condition_labels": condition_labels},
+            )
             post_process(self, condition_labels)
+
+            try:
+                logger.info(
+                    "start_processing_file_done",
+                    extra={
+                        "file": str(fp),
+                        "run_loreta": run_loreta,
+                        "n_condition_labels": len(condition_labels),
+                    },
+                )
+            except Exception:
+                logger.debug(
+                    "start_processing_file_done_logging_failed",
+                    extra={"file": str(fp)},
+                )
 
         _animate_progress_to(self, 100)
         self.log("Processing complete")
+        try:
+            logger.info(
+                "start_processing_complete",
+                extra={
+                    "project_root": str(getattr(project, "project_root", "")),
+                    "n_files": len(bdf_files),
+                },
+            )
+        except Exception:
+            logger.debug(
+                "start_processing_complete_logging_failed",
+                extra={"n_files": len(bdf_files)},
+            )
 
     except Exception as e:
         self.log(f"Processing failed: {e}", level=logging.ERROR)
         try:
+            logger.exception(
+                "start_processing_failed",
+                extra={
+                    "project_root": str(
+                        getattr(getattr(self, "currentProject", None), "project_root", "")
+                    ),
+                },
+            )
+        except Exception:
+            logger.debug("start_processing_failed_logging_failed")
+        try:
             QMessageBox.critical(self, "Processing Error", str(e))
         except Exception:
+            # If the GUI is in a bad state, we still want the log message.
             pass
