@@ -141,13 +141,13 @@ Events are derived in one of two ways:
 1. **From annotations**  
    If the recording contains MNE annotations that correspond to your
    condition IDs, they are mapped directly using the IDs and labels you
-   configure in the Event Map.
+   configure in the Event Map. 
 
 2. **From the stim channel**  
    If annotations are not available, events are detected from the stim
    channel (e.g., `Status`) using `mne.find_events`.  
-   - The IDs you configure in the Event Map (e.g., `21` for
-     “Positive Valence”) are matched to codes on the stim channel.
+   - The IDs you configure in the Event Map (e.g., '21' for
+     “Condition ABC”) are matched to codes on the stim channel.
    - Empty event sets (no events found for a given ID) are logged as
      warnings.
 
@@ -156,9 +156,9 @@ Events are derived in one of two ways:
 For each label/ID pair defined in the Event Map:
 
 - MNE `Epochs` objects are created with user-specified start and end
-  times relative to each event (e.g., from −0.5 s to +5.0 s).
-- Epochs inherit the preprocessed, average-referenced data, so later
-  frequency-domain analysis operates on cleaned signals.
+  times relative to each event (e.g., from −0.5 s to +5.0 s). In FPVS Experiments, `Epochs` refer to one 
+experimental condition. Each condition must be analyzed separately. 
+
 - Successful epoch sets are stored per condition label and used for
   downstream spectral analysis and metric computation.
 
@@ -188,15 +188,39 @@ In brief:
 
 ## 5. FPVS metrics (SNR, baseline-corrected amplitude)
 
-For each channel, condition, and harmonic, the toolbox computes:
+For each channel, condition, and harmonic, the toolbox computes the following metrics: 
 
+--- 
 - **SNR (Signal-to-Noise Ratio)**  
-  Amplitude at the target bin divided by the mean (or median) amplitude
-  in the surrounding baseline bins.
 
-- **Baseline-corrected amplitude (BCA)**  
+In frequency-domain analyses of fast periodic visual stimulation (FPVS) with electroencephalography (EEG), signal-to-noise ratio (SNR) is a core metric for quantifying neural responses at stimulation frequencies. Within oddball paradigms where deviant stimuli are periodically included among a stream of base images, SNR provides a robust, objective estimate of response strength at the oddball frequency and its harmonics. The standard method for calculating SNR involves dividing the amplitude at the frequency of interest by the mean amplitude of surrounding frequency bins, assumed to reflect background noise (Rossion et al., 2015; Zimmermann et al., 2019).
+A methodological consensus has emerged around the use of a 20-bin local noise window—10 bins on either side of the target frequency—with specific exclusions to ensure a clean estimate. First, the immediately adjacent frequency bins are systematically excluded to mitigate contamination from spectral leakage of the target response (Stothart et al., 2017; Georges et al., 2020). Second, many studies further discard the two most extreme amplitude values among the noise bins (i.e., the highest and lowest), which can otherwise inflate or deflate the average due to unrelated spectral artifacts or narrowband EEG noise (Dzhelyova & Rossion, 2014a; Poncet et al., 2019).
+For example, Georges et al. (2020) and Zimmermann et al. (2019) both implemented this 20-bin ±10 approach, excluding the neighboring bins as well as the extreme values to derive a robust noise floor. This practice, introduced in foundational studies (e.g., Liu-Shuang et al., 2014), ensures the SNR reflects genuine periodic neural responses rather than local noise fluctuations or harmonics from unrelated sources.
+The resulting SNR values are used not only for individual participant-level inference but also for generating z-scores and evaluating signal strength across scalp topographies. Because the frequency bins used for noise estimation are drawn from the same power spectrum and close in frequency to the signal bin, this method yields a locally normalized, frequency-specific measure that is highly sensitive to subtle categorical effects in the EEG signal (Rossion et al., 2015; Poncet et al., 2019).
+
+**References**
+
+- Dzhelyova, M., & Rossion, B. (2014a). The effect of parametric stimulus variation on individual face discrimination indexed by fast periodic visual stimulation. Journal of Vision, 14(12), 1–18. https://doi.org/10.1167/14.12.22
+- Georges, C., Retter, T. L., & Rossion, B. (2020). Face-selective responses in the human brain: A periodic stimulation approach. NeuroImage, 214, 116703. https://doi.org/10.1016/j.neuroimage.2020.116703
+- Liu-Shuang, J., Norcia, A. M., & Rossion, B. (2014). An objective index of individual face discrimination in the right occipito-temporal cortex by means of fast periodic oddball stimulation. Neuropsychologia, 52, 57–72. https://doi.org/10.1016/j.neuropsychologia.2013.10.022
+- Poncet, F., Rossion, B., & Jacques, C. (2019). Evidence for the existence of a face-selective neural response in the human brain with fast periodic visual stimulation. NeuroImage, 189, 150–162. https://doi.org/10.1016/j.neuroimage.2019.01.021
+- Rossion, B., Torfs, K., Jacques, C., & Liu-Shuang, J. (2015). Fast periodic presentation of natural images reveals a robust face-selective electrophysiological response in the human brain. Journal of Vision, 15(1), 1–18. https://doi.org/10.1167/15.1.15
+- Stothart, G., Quadflieg, S., & Kazanina, N. (2017). Semantic processing in the human brain: Electrophysiological evidence from fast periodic visual stimulation. Neuropsychologia, 100, 57–63. https://doi.org/10.1016/j.neuropsychologia.2017.03.006
+- Zimmermann, J. F., Groh-Bordin, C., & Roesler, F. (2019). Familiarity and identity-specificity of face representations in fast periodic visual stimulation. NeuroImage, 193, 162–171. https://doi.org/10.1016/j.neuroimage.2019.03.026
+
+--- 
+
+**Baseline-corrected amplitude (BCA)**  
+
   Amplitude at the target bin minus the baseline estimate.
 
+--- 
+**Z-Scores (placeholder)**
+
+Need to include some information regarding Z-Scores here. 
+
+
+--- 
 These metrics are then aggregated:
 
 - Across epochs for each subject and condition.
