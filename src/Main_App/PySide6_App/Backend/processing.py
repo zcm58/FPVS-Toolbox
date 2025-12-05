@@ -25,4 +25,5 @@ def process_data(raw: Optional[mne.io.BaseRaw], output_dir: str, run_loreta: boo
         Whether to run LORETA source localization (reserved for future hook).
     """
     # Placeholder: keep for compatibility; real work is handled elsewhere.
+    # LORETA processing is not implemented; run_loreta is currently ignored.
     return

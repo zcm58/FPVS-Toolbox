@@ -258,7 +258,6 @@ def loadProject(self, project: Project) -> None:
     mode = project.options.get("mode", "batch").lower()
     self.rb_single.setChecked(mode == "single")
     self.rb_batch.setChecked(mode == "batch")
-    self.cb_loreta.setChecked(bool(project.options.get("run_loreta", False)))
 
     for row in list(self.event_rows):
         row.setParent(None)

@@ -201,7 +201,6 @@ class _QtEntryAdapter:
                 "btn_select_input_file", "le_input_file",
                 "btn_select_input_folder", "le_input_folder",
                 "btn_add_event", "btn_add_row", "btn_detect",
-                "cb_loreta",
                 "btn_create_project", "btn_open_project",
         ):
             _safe_enable(n)
@@ -386,7 +385,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._start_guard = OpGuard()
 
         # Flags/vars the mixin expects
-        self.run_loreta_var = SimpleNamespace(get=lambda: self.cb_loreta.isChecked())
+        self.run_loreta_var = SimpleNamespace(get=lambda: False)
         self.save_fif_var = SimpleNamespace(get=lambda: True)
         self.save_folder_path = SimpleNamespace(get=lambda: "", set=lambda v: None)
         self.file_mode = SimpleNamespace(get=lambda: "Batch")
@@ -1550,8 +1549,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 if getattr(self, "rb_single", None) and self.rb_single.isChecked()
                 else "batch"
             )
-            # Keep existing schema key as-is
-            opts["run_loreta"] = bool(self.cb_loreta.isChecked()) if hasattr(self, "cb_loreta") else False
+            # Keep existing schema key but hard-disable LORETA in the PySide6 GUI
+            opts["run_loreta"] = False
             self.currentProject.options = opts
 
             # Build event map in one pass: {label: int(id)}
@@ -1703,7 +1702,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 "btn_select_input_file", "le_input_file",
                 "btn_select_input_folder", "le_input_folder",
                 "btn_add_event", "btn_add_row", "btn_detect",
-                "cb_loreta",
                 "btn_create_project", "btn_open_project",
         ):
             _safe_enable(n)
