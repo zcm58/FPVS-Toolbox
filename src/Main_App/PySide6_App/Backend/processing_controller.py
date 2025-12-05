@@ -310,7 +310,7 @@ def start_processing(self) -> None:
     try:
         project: Project = self.currentProject
         input_dir = Path(project.input_folder)
-        run_loreta = bool(getattr(self, "cb_loreta", None) and self.cb_loreta.isChecked())
+        run_loreta = False
 
         batch_mode = bool(getattr(self, "rb_batch", None) and self.rb_batch.isChecked())
 
@@ -477,7 +477,9 @@ def start_processing(self) -> None:
                 self.currentProject.project_root
                 / self.currentProject.subfolders["excel"]
             )
-            self.log(f"Running main processing (run_loreta={run_loreta})")
+            self.log(
+                f"Running main processing (run_loreta={run_loreta}; LORETA disabled in GUI)"
+            )
             logger.debug(
                 "start_processing_call_process_data",
                 extra={"file": str(fp), "out_dir": out_dir, "run_loreta": run_loreta},

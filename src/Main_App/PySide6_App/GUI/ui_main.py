@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QGridLayout,
     QRadioButton,
-    QCheckBox,
     QButtonGroup,
     QScrollArea,
     QPushButton,
@@ -189,8 +188,6 @@ def init_ui(self) -> None:
     self.rb_batch = QRadioButton("Batch Folder", grp_proc)
     gl.addWidget(self.rb_single, 0, 1)
     gl.addWidget(self.rb_batch, 0, 2)
-    self.cb_loreta = QCheckBox("Run LORETA during processing?", grp_proc)
-    gl.addWidget(self.cb_loreta, 1, 0, 1, 3)
     self.mode_group = QButtonGroup(self)
     self.mode_group.setExclusive(True)
     self.mode_group.addButton(self.rb_single)
@@ -215,7 +212,7 @@ def init_ui(self) -> None:
     single_hl.addWidget(self.le_input_file, 1)
     single_hl.addWidget(self.btn_select_input_file)
     # Place directly under the Mode row within Processing Options
-    gl.addWidget(self.row_single_file, 2, 0, 1, 3)
+    gl.addWidget(self.row_single_file, 1, 0, 1, 3)
     self.row_single_file.setVisible(False)  # default hidden; toggled by _on_mode_changed
     # Let main window decide when Start is enabled
     try:
@@ -227,9 +224,6 @@ def init_ui(self) -> None:
     # Load saved processing options
     mode = self.settings.get("processing", "mode", "batch").lower()
     (self.rb_batch if mode == "batch" else self.rb_single).setChecked(True)
-    self.cb_loreta.setChecked(
-        self.settings.get("processing", "run_loreta", "False").lower() == "true"
-    )
     # Ensure initial Start-button state matches mode
     try:
         self._update_start_enabled()
