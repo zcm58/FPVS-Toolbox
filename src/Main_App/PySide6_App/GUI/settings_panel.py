@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 import config
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -88,6 +88,8 @@ class SettingsDialog(QDialog):
         self.manager = manager
         self.project = project
         self._project_cache: Dict[str, Any] | None = None
+        self._loreta_tab_index: int = -1
+        self._loreta_warning_shown: bool = False
         # Stub attributes for pruned settings to avoid AttributeError if referenced
         self.data_edit = None
         self.out_edit = None
@@ -106,14 +108,16 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         layout = QVBoxLayout(self)
 
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
 
-        self._init_general_tab(tabs)
-        self._init_preproc_tab(tabs)
-        self._init_stats_tab(tabs)
-        self._init_oddball_tab(tabs)
-        self._init_loreta_tab(tabs)
+        self._init_general_tab(self.tabs)
+        self._init_preproc_tab(self.tabs)
+        self._init_stats_tab(self.tabs)
+        self._init_oddball_tab(self.tabs)
+        self.loreta_tab = self._init_loreta_tab()
+        self._loreta_tab_index = self.tabs.addTab(self.loreta_tab, "LORETA")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         self.btn_changeRoot = QPushButton("Change Projects Root…", self)
         self.btn_changeRoot.clicked.connect(lambda: changeProjectsRoot(self))
@@ -255,7 +259,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(tab, "Oddball")
 
     # ------------------------------------------------------------------
-    def _init_loreta_tab(self, tabs: QTabWidget) -> None:
+    def _init_loreta_tab(self) -> QWidget:
         tab = QWidget()
         form = QFormLayout(tab)
 
@@ -292,7 +296,29 @@ class SettingsDialog(QDialog):
         self.auto_loc_check.setChecked(auto_default)
         form.addRow(self.auto_loc_check)
 
-        tabs.addTab(tab, "LORETA")
+        return tab
+
+    @Slot(int)
+    def _on_tab_changed(self, index: int) -> None:
+        """
+        Show a one-time warning when the LORETA tab is opened.
+        The user must acknowledge the dialog before interacting with that tab.
+        """
+        if (
+            index == getattr(self, "_loreta_tab_index", -1)
+            and not getattr(self, "_loreta_warning_shown", False)
+        ):
+            self._loreta_warning_shown = True
+            QMessageBox.warning(
+                self,
+                "LORETA Source Localization",
+                (
+                    "Warning: LORETA Source localization is not currently functional.\n\n"
+                    "Changing these settings and/or attempting to use the LORETA module "
+                    "is not recommended at this time."
+                ),
+                QMessageBox.Ok,
+            )
 
     # ------------------------------------------------------------------
     def _with_browse(self, edit: QLineEdit) -> QWidget:
