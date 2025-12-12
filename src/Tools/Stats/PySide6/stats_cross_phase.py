@@ -291,6 +291,7 @@ def run_cross_phase_lmm_job(progress_cb, message_cb, *, job_spec_path: str):
 
     phase_data: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
     phase_group_maps: Dict[str, Dict[str, str]] = {}
+    phase_code_map: Dict[str, str] = {}
 
     phase_labels: list[str] = list(phase_projects.keys())
     conditions_to_analyze, missing_by_phase = _condition_intersection_with_order(
@@ -302,6 +303,16 @@ def run_cross_phase_lmm_job(progress_cb, message_cb, *, job_spec_path: str):
         conditions = project_spec.get("conditions") or []
         subject_data = project_spec.get("subject_data") or {}
         group_map = project_spec.get("group_map") or project_spec.get("subject_groups") or {}
+        phase_code = (project_spec.get("phase_code") or "").strip()
+        if phase_code:
+            phase_code_map[phase_label] = phase_code
+        group_levels_in_phase = sorted(
+            {str(val).strip().upper() for val in group_map.values() if str(val).strip()}
+        )
+        logger.info(
+            "lela_phase_group_summary",
+            extra={"phase_label": phase_label, "phase_code": phase_code or None, "group_codes": group_levels_in_phase},
+        )
 
         message_cb(
             f"Preparing summed BCA data for phase '{phase_label}' ({len(subjects)} subjects, {len(conditions)} conditions)…"
@@ -333,8 +344,31 @@ def run_cross_phase_lmm_job(progress_cb, message_cb, *, job_spec_path: str):
     if not conditions_to_analyze:
         raise ValueError("No shared conditions found across phases for Lela Mode.")
 
-    df_long = build_cross_phase_long_df(phase_data, phase_group_maps, tuple(phase_labels))
+    df_long = build_cross_phase_long_df(
+        phase_data,
+        phase_group_maps,
+        tuple(phase_labels),
+        phase_label_to_code=phase_code_map,
+    )
     df_long = df_long.rename(columns={"value": "bca"})
+
+    group_levels = [g for g in sorted(df_long["group"].dropna().unique().tolist()) if str(g).strip()]
+    phase_levels = [p for p in sorted(df_long["phase"].dropna().unique().tolist()) if str(p).strip()]
+    logger.info(
+        "lela_phase_levels",
+        extra={"group_levels": group_levels, "phase_levels": phase_levels, "phase_codes": phase_code_map},
+    )
+    message_cb(
+        "[Between] Lela Mode: group codes "
+        f"{group_levels if group_levels else '[]'}, "
+        f"phase codes {phase_levels if phase_levels else '[]'}"
+    )
+
+    if len(group_levels) != 2 or len(phase_levels) != 2:
+        raise ValueError(
+            "Cross-phase LMM requires exactly 2 groups and 2 phases after merging datasets; "
+            f"found groups={group_levels}, phases={phase_levels}."
+        )
 
     if conditions_to_analyze:
         df_long = df_long[df_long["condition"].isin(conditions_to_analyze)]

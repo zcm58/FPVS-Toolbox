@@ -43,6 +43,8 @@ def build_cross_phase_long_df(
     phase_data: Dict[str, Dict[str, Dict[str, Dict[str, float]]]],
     phase_group_maps: Dict[str, Dict[str, str]],
     phase_labels: Tuple[str, str],
+    *,
+    phase_label_to_code: Dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """
     Build a long-format DataFrame for generic cross-phase LMM.
@@ -125,16 +127,25 @@ def build_cross_phase_long_df(
     dropped_for_group_conflict: List[str] = []
 
     for canon_subj in common_canon_subjects:
-        groups: List[str] | None = []
+        groups: List[tuple[str, str | None, str | None]] = []
         for phase in phases:
             canon_to_raw = phase_indices[phase]["canon_to_raw"]
             raw_id = canon_to_raw.get(canon_subj)
             gmap = phase_group_maps.get(phase, {})
             if raw_id is None or raw_id not in gmap:
-                groups = None
-                break
-            groups.append(gmap[raw_id])
-        if groups is None or len(set(groups)) != 1:
+                groups.append((phase, None, None))
+                continue
+            raw_group = gmap[raw_id]
+            normalized = " ".join(str(raw_group).split()).upper() if raw_group else ""
+            groups.append((phase, normalized or None, raw_group))
+
+        normalized_groups = [entry[1] for entry in groups if entry[1]]
+        if not normalized_groups or len(set(normalized_groups)) != 1:
+            phase_group_details = {phase: raw for phase, _norm, raw in groups}
+            logger.warning(
+                "Dropping subject with inconsistent group labels",
+                extra={"subject": canon_subj, "groups": phase_group_details},
+            )
             dropped_for_group_conflict.append(canon_subj)
             continue
         consistent_canon_subjects.append(canon_subj)
@@ -164,6 +175,7 @@ def build_cross_phase_long_df(
             if not subj_entry:
                 continue
             group_label = gmap.get(raw_id)
+            phase_value = phase_label_to_code.get(phase, phase) if phase_label_to_code else phase
             for condition, roi_map in subj_entry.items():
                 for roi, value in roi_map.items():
                     if not np.isfinite(value):
@@ -172,7 +184,7 @@ def build_cross_phase_long_df(
                         {
                             "subject": canon_subj,
                             "group": group_label,
-                            "phase": phase,
+                            "phase": phase_value,
                             "condition": condition,
                             "roi": roi,
                             "value": float(value),
