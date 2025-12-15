@@ -30,6 +30,16 @@ class PlotSettingsManager:
             self.set("plot", "scalp_min", "-1.0")
         if not self.config.has_option("plot", "scalp_max"):
             self.set("plot", "scalp_max", "1.0")
+        if not self.config.has_option("scalp", "title_a_template"):
+            self.set("scalp", "title_a_template", "{condition} {roi} scalp map")
+        if not self.config.has_option("scalp", "title_b_template"):
+            self.set("scalp", "title_b_template", "{condition} {roi} scalp map")
+        if not self.config.has_option("scalp", "include_scalp_maps"):
+            self.set("scalp", "include_scalp_maps", self.get("plot", "include_scalp_maps", "false"))
+        if not self.config.has_option("scalp", "scalp_min"):
+            self.set("scalp", "scalp_min", self.get("plot", "scalp_min", "-1.0"))
+        if not self.config.has_option("scalp", "scalp_max"):
+            self.set("scalp", "scalp_max", self.get("plot", "scalp_max", "1.0"))
 
     def load(self) -> None:
         self.config.read(self.ini_path)
@@ -75,16 +85,33 @@ class PlotSettingsManager:
     def get_scalp_bounds(self) -> tuple[float, float]:
         """Return stored scalp vmin/vmax bounds."""
 
-        vmin = self.get_float("plot", "scalp_min", -1.0)
-        vmax = self.get_float("plot", "scalp_max", 1.0)
+        vmin = self.get_float("scalp", "scalp_min", self.get_float("plot", "scalp_min", -1.0))
+        vmax = self.get_float("scalp", "scalp_max", self.get_float("plot", "scalp_max", 1.0))
         return vmin, vmax
 
     def set_scalp_bounds(self, vmin: float, vmax: float) -> None:
         self.set("plot", "scalp_min", str(vmin))
         self.set("plot", "scalp_max", str(vmax))
+        self.set("scalp", "scalp_min", str(vmin))
+        self.set("scalp", "scalp_max", str(vmax))
 
     def include_scalp_maps(self) -> bool:
-        return self.get_bool("plot", "include_scalp_maps", False)
+        return self.get_bool(
+            "scalp", "include_scalp_maps", self.get_bool("plot", "include_scalp_maps", False)
+        )
 
     def set_include_scalp_maps(self, enabled: bool) -> None:
         self.set("plot", "include_scalp_maps", str(enabled))
+        self.set("scalp", "include_scalp_maps", str(enabled))
+
+    def get_scalp_title_a_template(self) -> str:
+        return self.get("scalp", "title_a_template", "{condition} {roi} scalp map")
+
+    def get_scalp_title_b_template(self) -> str:
+        return self.get("scalp", "title_b_template", "{condition} {roi} scalp map")
+
+    def set_scalp_title_a_template(self, template: str) -> None:
+        self.set("scalp", "title_a_template", template)
+
+    def set_scalp_title_b_template(self, template: str) -> None:
+        self.set("scalp", "title_b_template", template)

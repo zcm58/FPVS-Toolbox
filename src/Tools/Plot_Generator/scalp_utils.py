@@ -100,9 +100,16 @@ def summarize_subject_scalp(
 
 def prepare_scalp_inputs(
     subject_maps: Dict[str, Dict[str, float]],
-    roi_channels: Sequence[str],
+    roi_channels: Sequence[str] | None = None,
+    *,
+    mask_non_roi: bool = False,
 ) -> ScalpInputs | None:
-    """Aggregate subject scalp maps and return data aligned to BioSemi64."""
+    """Aggregate subject scalp maps and return data aligned to BioSemi64.
+
+    The default behavior returns whole-head values without masking electrodes
+    outside the selected ROI. Set ``mask_non_roi`` to ``True`` to zero out
+    electrodes that are not part of the ROI channel list.
+    """
 
     if not subject_maps:
         return None
@@ -125,7 +132,8 @@ def prepare_scalp_inputs(
         return None
 
     mean_values = np.nan_to_num(mean_values, nan=0.0)
-    roi_set = {c.upper() for c in roi_channels}
-    mask = [name.upper() not in roi_set for name in info.ch_names]
-    mean_values[mask] = 0.0
+    if mask_non_roi and roi_channels:
+        roi_set = {c.upper() for c in roi_channels}
+        mask = [name.upper() not in roi_set for name in info.ch_names]
+        mean_values[mask] = 0.0
     return ScalpInputs(data=mean_values, info=info)
