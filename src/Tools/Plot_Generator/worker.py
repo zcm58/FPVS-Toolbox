@@ -247,7 +247,12 @@ class _Worker(QObject):
         return inputs
 
     def _plot_scalp_map(
-        self, ax: plt.Axes, scalp_inputs: ScalpInputs, title: str
+        self,
+        ax: plt.Axes,
+        scalp_inputs: ScalpInputs,
+        title: str,
+        *,
+        cax: plt.Axes | None = None,
     ) -> None:
         """Render a scalp topomap for the provided electrode data."""
         vlim = None
@@ -283,7 +288,10 @@ class _Worker(QObject):
             )
 
         im.set_alpha(0.85)
-        cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        if cax is not None:
+            cbar = plt.colorbar(im, cax=cax)
+        else:
+            cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cbar.ax.set_ylabel("uV")
         ax.set_title(title, fontsize=10)
 
@@ -564,13 +572,20 @@ class _Worker(QObject):
                 return
             has_scalp = scalp_inputs is not None and self.include_scalp_maps
             if has_scalp:
-                fig = plt.figure(figsize=(12, 7))
-                gs = fig.add_gridspec(2, 1, height_ratios=[3, 2], hspace=0.35)
-                ax = fig.add_subplot(gs[0, 0])
-                scalp_axes = [fig.add_subplot(gs[1, 0])]
+                fig = plt.figure(figsize=(12, 7), constrained_layout=True)
+                gs = fig.add_gridspec(
+                    2,
+                    2,
+                    height_ratios=[3, 2],
+                    width_ratios=[1.0, 0.06],
+                )
+                # Columns reserve space for the topomap and a dedicated colorbar
+                # axis to keep the layout centered.
+                ax = fig.add_subplot(gs[0, :])
+                scalp_axes = [(fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1]))]
             else:
                 fig, ax = plt.subplots(figsize=(12, 4))
-                scalp_axes: list[plt.Axes] = []
+                scalp_axes: list[tuple[plt.Axes, plt.Axes]] = []
 
             if use_group_overlay:
                 plotted = False
@@ -673,15 +688,18 @@ class _Worker(QObject):
             fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
 
             if has_scalp and scalp_inputs:
+                scalp_ax, cbar_ax = scalp_axes[0]
                 self._plot_scalp_map(
-                    scalp_axes[0],
+                    scalp_ax,
                     scalp_inputs,
                     self._format_scalp_title(
                         self.scalp_title_a_template, self.condition, roi
                     ),
+                    cax=cbar_ax,
                 )
 
-            fig.tight_layout(rect=[0, 0, 1, 0.93])
+            if not has_scalp:
+                fig.tight_layout(rect=[0, 0, 1, 0.93])
             fname = f"{self.condition}_{roi}_{self.metric}.png"
             fig.savefig(self.out_dir / fname, dpi=300, bbox_inches="tight", pad_inches=0.05)
             plt.close(fig)
@@ -718,30 +736,30 @@ class _Worker(QObject):
             has_scalp = has_scalp_a or has_scalp_b
 
             if has_scalp:
-                fig = plt.figure(figsize=(12, 7))
+                fig = plt.figure(figsize=(12, 7), constrained_layout=True)
                 gs = fig.add_gridspec(
                     2,
-                    2,
+                    4,
                     height_ratios=[3, 2],
-                    hspace=0.35,
-                    wspace=0.25,
+                    width_ratios=[1.0, 0.06, 1.0, 0.06],
                 )
+                # Columns alternate between the topomap and a dedicated colorbar
+                # axis to keep the bottom row centered and symmetric.
                 ax = fig.add_subplot(gs[0, :])
 
-                scalp_axes: list[tuple[str, plt.Axes, ScalpInputs]] = []
+                scalp_axes: list[tuple[str, plt.Axes, plt.Axes, ScalpInputs]] = []
                 if has_scalp_a and scalp_a:
-                    target = gs[1, 0] if has_scalp_b else gs[1, :]
                     scalp_axes.append(
                         (
                             self._format_scalp_title(
                                 self.scalp_title_a_template, self.condition, roi
                             ),
-                            fig.add_subplot(target),
+                            fig.add_subplot(gs[1, 0]),
+                            fig.add_subplot(gs[1, 1]),
                             scalp_a,
                         )
                     )
                 if has_scalp_b and scalp_b:
-                    target = gs[1, 1] if has_scalp_a else gs[1, :]
                     scalp_axes.append(
                         (
                             self._format_scalp_title(
@@ -749,13 +767,14 @@ class _Worker(QObject):
                                 self.condition_b or "",
                                 roi,
                             ),
-                            fig.add_subplot(target),
+                            fig.add_subplot(gs[1, 2]),
+                            fig.add_subplot(gs[1, 3]),
                             scalp_b,
                         )
                     )
             else:
                 fig, ax = plt.subplots(figsize=(12, 4))
-                scalp_axes = []
+                scalp_axes: list[tuple[str, plt.Axes, plt.Axes, ScalpInputs]] = []
 
             ax.plot(freqs, data_a[roi], color=self.stem_color, label=self.condition)
             ax.plot(
@@ -830,24 +849,15 @@ class _Worker(QObject):
             combined_title = f"{base}: {roi}"
             fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
 
-            for label, scalp_ax, scalp_inputs in scalp_axes:
+            for label, scalp_ax, cbar_ax, scalp_inputs in scalp_axes:
                 self._plot_scalp_map(
                     scalp_ax,
                     scalp_inputs,
                     label,
+                    cax=cbar_ax,
                 )
 
-            # tight_layout() often warns with MNE topomaps/colorbars; use explicit spacing.
-            if has_scalp:
-                fig.subplots_adjust(
-                    left=0.06,
-                    right=0.98,
-                    bottom=0.06,
-                    top=0.90,
-                    hspace=0.45,
-                    wspace=0.25,
-                )
-            else:
+            if not has_scalp:
                 fig.tight_layout(rect=[0, 0, 1, 0.93])
 
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
