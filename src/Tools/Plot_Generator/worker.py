@@ -252,20 +252,41 @@ class _Worker(QObject):
         return inputs
 
     def _plot_scalp_map(
-        self, ax: plt.Axes, scalp_inputs: ScalpInputs, title: str
+            self, ax: plt.Axes, scalp_inputs: ScalpInputs, title: str
     ) -> None:
-        im, _ = mne.viz.plot_topomap(
-            scalp_inputs.data,
-            scalp_inputs.info,
-            axes=ax,
-            cmap="RdBu_r",
-            vmin=self.scalp_vmin,
-            vmax=self.scalp_vmax,
-            contours=0,
-            sensors=True,
-            show=False,
-            outlines="head",
-        )
+        """Render a scalp topomap for the provided ROI-masked electrode data."""
+        vlim = None
+        if self.scalp_vmin is not None and self.scalp_vmax is not None:
+            vlim = (float(self.scalp_vmin), float(self.scalp_vmax))
+
+        try:
+            # MNE versions that use vlim (e.g., mne==1.9.0)
+            im, _ = mne.viz.plot_topomap(
+                scalp_inputs.data,
+                scalp_inputs.info,
+                axes=ax,
+                cmap="RdBu_r",
+                vlim=vlim,
+                contours=0,
+                sensors=True,
+                show=False,
+                outlines="head",
+            )
+        except TypeError:
+            # Fallback for older MNE versions that use vmin/vmax
+            im, _ = mne.viz.plot_topomap(
+                scalp_inputs.data,
+                scalp_inputs.info,
+                axes=ax,
+                cmap="RdBu_r",
+                vmin=None if vlim is None else vlim[0],
+                vmax=None if vlim is None else vlim[1],
+                contours=0,
+                sensors=True,
+                show=False,
+                outlines="head",
+            )
+
         im.set_alpha(0.85)
         cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cbar.ax.set_ylabel("uV")
@@ -666,12 +687,12 @@ class _Worker(QObject):
             self._emit(f"Saved {fname}")
 
     def _plot_overlay(
-        self,
-        freqs: List[float],
-        data_a: Dict[str, List[float]],
-        data_b: Dict[str, List[float]],
-        scalp_a: ScalpInputs | None = None,
-        scalp_b: ScalpInputs | None = None,
+            self,
+            freqs: List[float],
+            data_a: Dict[str, List[float]],
+            data_b: Dict[str, List[float]],
+            scalp_a: ScalpInputs | None = None,
+            scalp_b: ScalpInputs | None = None,
     ) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
         mgr = SettingsManager()
@@ -690,13 +711,22 @@ class _Worker(QObject):
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return
+
             has_scalp_a = scalp_a is not None and self.include_scalp_maps
             has_scalp_b = scalp_b is not None and self.include_scalp_maps
             has_scalp = has_scalp_a or has_scalp_b
+
             if has_scalp:
                 fig = plt.figure(figsize=(12, 7))
-                gs = fig.add_gridspec(2, 2, height_ratios=[3, 2], hspace=0.35)
+                gs = fig.add_gridspec(
+                    2,
+                    2,
+                    height_ratios=[3, 2],
+                    hspace=0.35,
+                    wspace=0.25,
+                )
                 ax = fig.add_subplot(gs[0, :])
+
                 scalp_axes: list[tuple[str, plt.Axes, ScalpInputs]] = []
                 if has_scalp_a and scalp_a:
                     target = gs[1, 0] if has_scalp_b else gs[1, :]
@@ -709,7 +739,12 @@ class _Worker(QObject):
                 scalp_axes = []
 
             ax.plot(freqs, data_a[roi], color=self.stem_color, label=self.condition)
-            ax.plot(freqs, data_b.get(roi, []), color=self.stem_color_b, label=self.condition_b)
+            ax.plot(
+                freqs,
+                data_b.get(roi, []),
+                color=self.stem_color_b,
+                label=self.condition_b,
+            )
 
             if odd_freqs:
                 freq_array = np.array(freqs)
@@ -737,11 +772,13 @@ class _Worker(QObject):
                         zorder=4,
                         label=label_b,
                     )
+
             tick_start = math.ceil(self.x_min)
             tick_end = math.floor(self.x_max) + 1
             ax.set_xticks(range(tick_start, tick_end))
             ax.set_xlim(self.x_min, self.x_max)
             ax.set_ylim(self.y_min, self.y_max)
+
             for fx in range(max(1, tick_start), tick_end):
                 ax.axvline(
                     fx,
@@ -758,6 +795,7 @@ class _Worker(QObject):
                     linewidth=0.5,
                     zorder=0,
                 )
+
             if not self.use_matlab_style:
                 ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
 
@@ -780,8 +818,26 @@ class _Worker(QObject):
                     f"{label} {roi} scalp map",
                 )
 
-            fig.tight_layout(rect=[0, 0, 1, 0.93])
+            # tight_layout() often warns with MNE topomaps/colorbars; use explicit spacing.
+            if has_scalp:
+                fig.subplots_adjust(
+                    left=0.06,
+                    right=0.98,
+                    bottom=0.06,
+                    top=0.90,
+                    hspace=0.45,
+                    wspace=0.25,
+                )
+            else:
+                fig.tight_layout(rect=[0, 0, 1, 0.93])
+
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
-            fig.savefig(self.out_dir / fname, dpi=300, bbox_inches="tight", pad_inches=0.05)
+            fig.savefig(
+                self.out_dir / fname,
+                dpi=300,
+                bbox_inches="tight",
+                pad_inches=0.05,
+            )
             plt.close(fig)
             self._emit(f"Saved {fname}")
+
