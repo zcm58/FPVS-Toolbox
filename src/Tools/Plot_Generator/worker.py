@@ -10,6 +10,7 @@ from typing import Dict, Iterable, List, Sequence
 import matplotlib
 import numpy as np
 import pandas as pd
+import mne
 from Main_App import SettingsManager
 
 matplotlib.use("Agg")
@@ -18,6 +19,12 @@ from PySide6.QtCore import QObject, Signal
 
 from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
+from Tools.Plot_Generator.scalp_utils import (
+    ScalpInputs,
+    prepare_scalp_inputs,
+    select_oddball_harmonics,
+    summarize_subject_scalp,
+)
 
 
 _PID_PATTERN = re.compile(r"(?:[A-Za-z]*)?(P\d+)", re.IGNORECASE)
@@ -75,6 +82,9 @@ class _Worker(QObject):
         selected_groups: Sequence[str] | None = None,
         enable_group_overlay: bool = False,
         multi_group_mode: bool = False,
+        include_scalp_maps: bool = False,
+        scalp_vmin: float = -1.0,
+        scalp_vmax: float = 1.0,
     ) -> None:
         super().__init__()
         self.folder = folder
@@ -111,6 +121,10 @@ class _Worker(QObject):
         self.enable_group_overlay = bool(enable_group_overlay and ordered)
         self.multi_group_mode = multi_group_mode
         self._unknown_subject_files: set[str] = set()
+        self.include_scalp_maps = include_scalp_maps
+        self.scalp_vmin = scalp_vmin
+        self.scalp_vmax = scalp_vmax
+        self._scalp_warning_emitted = False
 
     def run(self) -> None:
         try:
@@ -146,6 +160,24 @@ class _Worker(QObject):
             if rows:
                 aggregated[roi] = list(pd.DataFrame(rows).mean(axis=0))
         return aggregated
+
+    def _scalp_oddball_frequencies(self) -> List[float]:
+        mgr = SettingsManager()
+        harm_str = mgr.get(
+            "loreta",
+            "oddball_harmonics",
+            "1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8",
+        )
+        try:
+            configured = [float(h) for h in harm_str.replace(";", ",").split(",") if h.strip()]
+        except Exception:
+            configured = []
+        base_freq = 0.0
+        try:
+            base_freq = float(mgr.get("analysis", "base_freq", "0.0"))
+        except Exception:
+            base_freq = 0.0
+        return select_oddball_harmonics(configured, base_freq=base_freq)
 
     def _build_group_curves(
         self,
@@ -196,6 +228,49 @@ class _Worker(QObject):
             )
             self._unknown_subject_files.clear()
 
+    def _prepare_scalp_inputs(
+        self, subject_maps: Dict[str, Dict[str, float]]
+    ) -> ScalpInputs | None:
+        if not self.include_scalp_maps:
+            return None
+        if self.selected_roi == ALL_ROIS_OPTION:
+            if not self._scalp_warning_emitted:
+                self._emit(
+                    "Scalp maps require selecting a single ROI. Skipping scalp rendering.",
+                    0,
+                    0,
+                )
+                self._scalp_warning_emitted = True
+            return None
+
+        inputs = prepare_scalp_inputs(
+            subject_maps,
+            self.roi_map.get(self.selected_roi, []),
+        )
+        if inputs is None and subject_maps:
+            self._emit("No scalp map data available for plotting.")
+        return inputs
+
+    def _plot_scalp_map(
+        self, ax: plt.Axes, scalp_inputs: ScalpInputs, title: str
+    ) -> None:
+        im, _ = mne.viz.plot_topomap(
+            scalp_inputs.data,
+            scalp_inputs.info,
+            axes=ax,
+            cmap="RdBu_r",
+            vmin=self.scalp_vmin,
+            vmax=self.scalp_vmax,
+            contours=0,
+            sensors=True,
+            show=False,
+            outlines="head",
+        )
+        im.set_alpha(0.85)
+        cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.ax.set_ylabel("uV")
+        ax.set_title(title, fontsize=10)
+
     def _count_excel_files(self, condition: str) -> int:
         """Return the number of Excel files for a condition."""
         cond_folder = Path(self.folder) / condition
@@ -214,11 +289,11 @@ class _Worker(QObject):
         *,
         offset: int = 0,
         total_override: int | None = None,
-    ) -> tuple[List[float], Dict[str, Dict[str, List[float]]]]:
+        ) -> tuple[List[float], Dict[str, Dict[str, List[float]]], Dict[str, Dict[str, float]]]:
         cond_folder = Path(self.folder) / condition
         if not cond_folder.is_dir():
             self._emit(f"Condition folder not found: {cond_folder}")
-            return [], {}
+            return [], {}, {}
 
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -244,13 +319,27 @@ class _Worker(QObject):
         roi_names = self._selected_roi_names()
 
         subject_roi_data: Dict[str, Dict[str, List[float]]] = {}
+        subject_scalp_data: Dict[str, Dict[str, float]] = {}
+        collect_scalp = self.include_scalp_maps and (
+            self.selected_roi != ALL_ROIS_OPTION
+        )
+        if self.include_scalp_maps and self.selected_roi == ALL_ROIS_OPTION:
+            self._emit(
+                "Scalp maps require selecting a single ROI. Skipping scalp rendering.",
+                0,
+                0,
+            )
+            self._scalp_warning_emitted = True
+        scalp_oddballs = self._scalp_oddball_frequencies() if collect_scalp else []
+        warned_missing_bca = False
+        warned_missing_z = False
         freqs: Iterable[float] | None = None
         self._unknown_subject_files.clear()
 
         for excel_path in excel_files:
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
-                return
+                return [], {}, {}
             self._emit(
                 f"Reading {excel_path.name}",
                 offset + processed_files,
@@ -306,6 +395,36 @@ class _Worker(QObject):
             ):
                 self._unknown_subject_files.add(excel_path.name)
 
+            scalp_map: Dict[str, float] | None = None
+            if collect_scalp:
+                has_bca = "BCA (uV)" in xls.sheet_names
+                has_z = "Z Score" in xls.sheet_names
+                if not has_bca and not warned_missing_bca:
+                    self._emit(
+                        "BCA (uV) sheet missing; scalp maps skipped.",
+                        offset + processed_files,
+                        overall_total,
+                    )
+                    warned_missing_bca = True
+                if not has_z and not warned_missing_z:
+                    self._emit(
+                        "Z Score sheet missing; scalp maps skipped.",
+                        offset + processed_files,
+                        overall_total,
+                    )
+                    warned_missing_z = True
+                if has_bca and has_z:
+                    try:
+                        df_bca = pd.read_excel(xls, sheet_name="BCA (uV)")
+                        df_z = pd.read_excel(xls, sheet_name="Z Score")
+                        scalp_map = summarize_subject_scalp(
+                            df_bca,
+                            df_z,
+                            scalp_oddballs,
+                        )
+                    except Exception as e:  # pragma: no cover - logged to UI
+                        self._emit(f"Failed reading scalp data in {excel_path.name}: {e}")
+
             freq_pairs: List[tuple[float, str]] = []
             for col in freq_cols:
                 try:
@@ -330,6 +449,9 @@ class _Worker(QObject):
                 means = df_roi[ordered_cols].mean().tolist()
                 subject_roi_data.setdefault(subject_id, {})[roi] = means
 
+            if scalp_map is not None:
+                subject_scalp_data[subject_id] = scalp_map
+
             processed_files += 1
             self._emit("", offset + processed_files, overall_total)
 
@@ -339,25 +461,25 @@ class _Worker(QObject):
                 offset + processed_files,
                 overall_total,
             )
-            return [], {}
+            return [], {}, {}
 
         if not subject_roi_data:
             self._emit("No ROI data to plot.")
-            return [], {}
+            return [], {}, {}
 
-        return list(freqs), subject_roi_data
+        return list(freqs), subject_roi_data, subject_scalp_data
 
     def _run(self) -> None:
         if self.overlay and self.condition_b:
             total_a = self._count_excel_files(self.condition)
             total_b = self._count_excel_files(self.condition_b)
             total = total_a + total_b
-            freqs_a, data_a = self._collect_data(
+            freqs_a, data_a, scalp_a = self._collect_data(
                 self.condition,
                 offset=0,
                 total_override=total,
             )
-            freqs_b, data_b = self._collect_data(
+            freqs_b, data_b, scalp_b = self._collect_data(
                 self.condition_b,
                 offset=total_a,
                 total_override=total,
@@ -366,23 +488,29 @@ class _Worker(QObject):
                 avg_a = self._aggregate_roi_data(data_a)
                 avg_b = self._aggregate_roi_data(data_b)
                 if avg_a and avg_b:
-                    self._plot_overlay(freqs_a, avg_a, avg_b)
+                    scalp_inputs_a = self._prepare_scalp_inputs(scalp_a)
+                    scalp_inputs_b = self._prepare_scalp_inputs(scalp_b)
+                    self._plot_overlay(
+                        freqs_a, avg_a, avg_b, scalp_inputs_a, scalp_inputs_b
+                    )
             return
 
-        freqs, subject_data = self._collect_data(self.condition)
+        freqs, subject_data, scalp_data = self._collect_data(self.condition)
         if freqs and subject_data:
             averaged = self._aggregate_roi_data(subject_data)
             if not averaged:
                 self._emit("No ROI data to plot.")
                 return
             group_curves = self._build_group_curves(subject_data)
-            self._plot(freqs, averaged, group_curves)
+            scalp_inputs = self._prepare_scalp_inputs(scalp_data)
+            self._plot(freqs, averaged, group_curves, scalp_inputs)
 
     def _plot(
         self,
         freqs: List[float],
         roi_data: Dict[str, List[float]],
         group_curves: Dict[str, Dict[str, List[float]]] | None = None,
+        scalp_inputs: ScalpInputs | None = None,
     ) -> None:
         mgr = SettingsManager()
         harm_str = mgr.get(
@@ -395,7 +523,6 @@ class _Worker(QObject):
         except Exception:
             cfg_odds = []
         odd_freqs = self.oddballs if self.oddballs else cfg_odds
-
 
         group_curves = group_curves or {}
         use_group_overlay = bool(group_curves)
@@ -415,7 +542,15 @@ class _Worker(QObject):
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return
-            fig, ax = plt.subplots(figsize=(12, 4))
+            has_scalp = scalp_inputs is not None and self.include_scalp_maps
+            if has_scalp:
+                fig = plt.figure(figsize=(12, 7))
+                gs = fig.add_gridspec(2, 1, height_ratios=[3, 2], hspace=0.35)
+                ax = fig.add_subplot(gs[0, 0])
+                scalp_axes = [fig.add_subplot(gs[1, 0])]
+            else:
+                fig, ax = plt.subplots(figsize=(12, 4))
+                scalp_axes: list[plt.Axes] = []
 
             if use_group_overlay:
                 plotted = False
@@ -465,9 +600,6 @@ class _Worker(QObject):
                     f"Plotted {len(stem_vals)} SNR stems for ROI {roi}", 0, 0
                 )
 
-            if use_group_overlay and (not odd_freqs or self.use_matlab_style):
-                ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
-
             if odd_freqs and not self.use_matlab_style:
                 freq_array = np.array(freqs)
                 for idx, odd in enumerate(odd_freqs):
@@ -481,7 +613,6 @@ class _Worker(QObject):
                         zorder=4,
                         label=label,
                     )
-                ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
                 self._emit(
                     f"Marked {len(odd_freqs)} oddball points on ROI {roi}", 0, 0
                 )
@@ -510,13 +641,25 @@ class _Worker(QObject):
             if not self.use_matlab_style:
                 ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
 
+            handles, _labels = ax.get_legend_handles_labels()
+            if handles:
+                ax.legend(loc="upper right", frameon=True)
+
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
             combined_title = f"{self.title}: {roi}"
             fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
-            fig.tight_layout(rect=[0, 0, 1, 0.95])
+
+            if has_scalp and scalp_inputs:
+                self._plot_scalp_map(
+                    scalp_axes[0],
+                    scalp_inputs,
+                    f"{roi} scalp map",
+                )
+
+            fig.tight_layout(rect=[0, 0, 1, 0.93])
             fname = f"{self.condition}_{roi}_{self.metric}.png"
             fig.savefig(self.out_dir / fname, dpi=300, bbox_inches="tight", pad_inches=0.05)
             plt.close(fig)
@@ -527,6 +670,8 @@ class _Worker(QObject):
         freqs: List[float],
         data_a: Dict[str, List[float]],
         data_b: Dict[str, List[float]],
+        scalp_a: ScalpInputs | None = None,
+        scalp_b: ScalpInputs | None = None,
     ) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
         mgr = SettingsManager()
@@ -545,7 +690,24 @@ class _Worker(QObject):
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return
-            fig, ax = plt.subplots(figsize=(12, 4))
+            has_scalp_a = scalp_a is not None and self.include_scalp_maps
+            has_scalp_b = scalp_b is not None and self.include_scalp_maps
+            has_scalp = has_scalp_a or has_scalp_b
+            if has_scalp:
+                fig = plt.figure(figsize=(12, 7))
+                gs = fig.add_gridspec(2, 2, height_ratios=[3, 2], hspace=0.35)
+                ax = fig.add_subplot(gs[0, :])
+                scalp_axes: list[tuple[str, plt.Axes, ScalpInputs]] = []
+                if has_scalp_a and scalp_a:
+                    target = gs[1, 0] if has_scalp_b else gs[1, :]
+                    scalp_axes.append((self.condition, fig.add_subplot(target), scalp_a))
+                if has_scalp_b and scalp_b:
+                    target = gs[1, 1] if has_scalp_a else gs[1, :]
+                    scalp_axes.append((self.condition_b or "", fig.add_subplot(target), scalp_b))
+            else:
+                fig, ax = plt.subplots(figsize=(12, 4))
+                scalp_axes = []
+
             ax.plot(freqs, data_a[roi], color=self.stem_color, label=self.condition)
             ax.plot(freqs, data_b.get(roi, []), color=self.stem_color_b, label=self.condition_b)
 
@@ -599,15 +761,26 @@ class _Worker(QObject):
             if not self.use_matlab_style:
                 ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
 
+            handles, _labels = ax.get_legend_handles_labels()
+            if handles:
+                ax.legend(loc="upper right", frameon=True)
+
             ax.set_xlabel(self.xlabel)
             ax.set_ylabel(self.ylabel)
             base = self.title or f"{self.condition} vs {self.condition_b}"
-            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
             combined_title = f"{base}: {roi}"
             fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
-            fig.tight_layout(rect=[0, 0, 1, 0.95])
+
+            for label, scalp_ax, scalp_inputs in scalp_axes:
+                self._plot_scalp_map(
+                    scalp_ax,
+                    scalp_inputs,
+                    f"{label} {roi} scalp map",
+                )
+
+            fig.tight_layout(rect=[0, 0, 1, 0.93])
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
             fig.savefig(self.out_dir / fname, dpi=300, bbox_inches="tight", pad_inches=0.05)
             plt.close(fig)

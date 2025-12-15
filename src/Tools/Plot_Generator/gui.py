@@ -189,17 +189,24 @@ class _SettingsDialog(QDialog):
 class PlotGeneratorWindow(QWidget):
     """Main window for generating plots."""
 
-    def __init__(self, parent: QWidget | None = None, project_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        project_dir: str | None = None,
+        plot_mgr: PlotSettingsManager | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Generate SNR Plots")
         self.roi_map = load_rois_from_settings()
 
         mgr = SettingsManager()
-        self.plot_mgr = PlotSettingsManager()
+        self.plot_mgr = plot_mgr or PlotSettingsManager()
         default_in = self.plot_mgr.get("paths", "input_folder", "")
         default_out = self.plot_mgr.get("paths", "output_folder", "")
         self.stem_color = self.plot_mgr.get_stem_color()
         self.stem_color_b = self.plot_mgr.get_second_color()
+        self.scalp_min, self.scalp_max = self.plot_mgr.get_scalp_bounds()
+        self.include_scalp_maps = self.plot_mgr.include_scalp_maps()
 
 
         project_dir_path: Path | None = None
@@ -255,6 +262,9 @@ class PlotGeneratorWindow(QWidget):
             "y_max_snr": "3.0",
             "input_folder": default_in,
             "output_folder": default_out,
+            "include_scalp_maps": self.include_scalp_maps,
+            "scalp_min": self.scalp_min,
+            "scalp_max": self.scalp_max,
         }
         self._orig_defaults = self._defaults.copy()
         self._conditions_queue: list[str] = []
@@ -286,7 +296,21 @@ class PlotGeneratorWindow(QWidget):
 
         self._thread: QThread | None = None
         self._worker: _Worker | None = None
-        self._gen_params: tuple[str, str, float, float, float, float] | None = None
+        self._gen_params: (
+            tuple[
+                str,
+                str,
+                float,
+                float,
+                float,
+                float,
+                dict,
+                bool,
+                float,
+                float,
+            ]
+            | None
+        ) = None
 
     def _bold_label(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -294,6 +318,11 @@ class PlotGeneratorWindow(QWidget):
         font.setBold(True)
         label.setFont(font)
         return label
+
+    def _toggle_scalp_controls(self, checked: bool) -> None:
+        self.include_scalp_maps = checked
+        self.scalp_min_spin.setEnabled(checked)
+        self.scalp_max_spin.setEnabled(checked)
 
     def _style_box(self, box: QGroupBox) -> None:
         font = box.font()
@@ -435,6 +464,33 @@ class PlotGeneratorWindow(QWidget):
         self.roi_combo.addItems([ALL_ROIS_OPTION] + list(self.roi_map.keys()))
         self.roi_combo.setToolTip("Select the region of interest")
         params_form.addRow(QLabel("ROI:"), self.roi_combo)
+
+        self.scalp_check = QCheckBox("Include scalp maps")
+        self.scalp_check.setChecked(self.include_scalp_maps)
+        self.scalp_check.toggled.connect(self._toggle_scalp_controls)
+        params_form.addRow("", self.scalp_check)
+
+        scalp_row = QHBoxLayout()
+        scalp_row.setContentsMargins(10, 0, 10, 0)
+        scalp_row.setSpacing(6)
+        self.scalp_min_spin = QDoubleSpinBox()
+        self.scalp_min_spin.setRange(-9999.0, 9999.0)
+        self.scalp_min_spin.setDecimals(2)
+        self.scalp_min_spin.setSingleStep(0.1)
+        self.scalp_min_spin.setValue(float(self.scalp_min))
+        self.scalp_min_spin.setSuffix(" uV")
+        self.scalp_max_spin = QDoubleSpinBox()
+        self.scalp_max_spin.setRange(-9999.0, 9999.0)
+        self.scalp_max_spin.setDecimals(2)
+        self.scalp_max_spin.setSingleStep(0.1)
+        self.scalp_max_spin.setValue(float(self.scalp_max))
+        self.scalp_max_spin.setSuffix(" uV")
+        scalp_row.addWidget(self.scalp_min_spin)
+        scalp_row.addWidget(QLabel("to"))
+        scalp_row.addWidget(self.scalp_max_spin)
+        params_form.addRow(QLabel("Scalp range (uV):"), scalp_row)
+
+        self._toggle_scalp_controls(self.include_scalp_maps)
 
         self.title_edit = QLineEdit(self._defaults["title_snr"])
         self.title_edit.setPlaceholderText("e.g. Fruit vs Veg")
@@ -704,6 +760,10 @@ class PlotGeneratorWindow(QWidget):
     def _save_defaults(self) -> None:
         self.plot_mgr.set("paths", "input_folder", self.folder_edit.text())
         self.plot_mgr.set("paths", "output_folder", self.out_edit.text())
+        self.plot_mgr.set_include_scalp_maps(self.scalp_check.isChecked())
+        self.plot_mgr.set_scalp_bounds(
+            self.scalp_min_spin.value(), self.scalp_max_spin.value()
+        )
         self.plot_mgr.save()
         QMessageBox.information(self, "Defaults", "Default folders saved.")
 
@@ -718,6 +778,9 @@ class PlotGeneratorWindow(QWidget):
         self.ylabel_edit.setText(self._defaults["ylabel_snr"])
         self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
         self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
+        self.scalp_check.setChecked(bool(self._defaults.get("include_scalp_maps", False)))
+        self.scalp_min_spin.setValue(float(self._defaults.get("scalp_min", -1.0)))
+        self.scalp_max_spin.setValue(float(self._defaults.get("scalp_max", 1.0)))
         # Update the chart title field based on the current condition
         self._update_chart_title_state(self.condition_combo.currentText())
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")
@@ -822,7 +885,18 @@ class PlotGeneratorWindow(QWidget):
         if not self._conditions_queue:
             self._finish_all()
             return
-        folder, out_dir, x_min, x_max, y_min, y_max, group_kwargs = self._gen_params
+        (
+            folder,
+            out_dir,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            group_kwargs,
+            include_scalp,
+            scalp_min,
+            scalp_max,
+        ) = self._gen_params
         condition = self._conditions_queue.pop(0)
         self._current_condition += 1
 
@@ -848,6 +922,9 @@ class PlotGeneratorWindow(QWidget):
             y_max,
             str(cond_out),
             self.stem_color,
+            include_scalp_maps=include_scalp,
+            scalp_vmin=scalp_min,
+            scalp_vmax=scalp_max,
             **group_kwargs,
         )
         self._worker.moveToThread(self._thread)
@@ -913,6 +990,10 @@ class PlotGeneratorWindow(QWidget):
             QMessageBox.critical(self, "Error", "Invalid axis limits.")
             return
 
+        include_scalp = self.scalp_check.isChecked()
+        scalp_min = self.scalp_min_spin.value()
+        scalp_max = self.scalp_max_spin.value()
+
         overlay_groups = self._group_overlay_enabled()
         selected_groups = self._selected_groups() if overlay_groups else []
         if overlay_groups and not selected_groups:
@@ -956,6 +1037,9 @@ class PlotGeneratorWindow(QWidget):
                 condition_b=cond_b,
                 stem_color_b=self.stem_color_b,
                 overlay=True,
+                include_scalp_maps=include_scalp,
+                scalp_vmin=scalp_min,
+                scalp_vmax=scalp_max,
                 **group_kwargs,
             )
             self._worker.moveToThread(self._thread)
@@ -987,6 +1071,9 @@ class PlotGeneratorWindow(QWidget):
                 y_min,
                 y_max,
                 group_kwargs.copy(),
+                include_scalp,
+                scalp_min,
+                scalp_max,
             )
             self._start_next_condition()
 
