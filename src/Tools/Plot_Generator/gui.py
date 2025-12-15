@@ -207,6 +207,8 @@ class PlotGeneratorWindow(QWidget):
         self.stem_color_b = self.plot_mgr.get_second_color()
         self.scalp_min, self.scalp_max = self.plot_mgr.get_scalp_bounds()
         self.include_scalp_maps = self.plot_mgr.include_scalp_maps()
+        self.scalp_title_a_template = self.plot_mgr.get_scalp_title_a_template()
+        self.scalp_title_b_template = self.plot_mgr.get_scalp_title_b_template()
 
 
         project_dir_path: Path | None = None
@@ -265,6 +267,8 @@ class PlotGeneratorWindow(QWidget):
             "include_scalp_maps": self.include_scalp_maps,
             "scalp_min": self.scalp_min,
             "scalp_max": self.scalp_max,
+            "scalp_title_a_template": self.scalp_title_a_template,
+            "scalp_title_b_template": self.scalp_title_b_template,
         }
         self._orig_defaults = self._defaults.copy()
         self._conditions_queue: list[str] = []
@@ -308,6 +312,8 @@ class PlotGeneratorWindow(QWidget):
                 bool,
                 float,
                 float,
+                str,
+                str,
             ]
             | None
         ) = None
@@ -323,6 +329,14 @@ class PlotGeneratorWindow(QWidget):
         self.include_scalp_maps = checked
         self.scalp_min_spin.setEnabled(checked)
         self.scalp_max_spin.setEnabled(checked)
+        self.scalp_title_a_edit.setEnabled(checked)
+        self._update_scalp_title_b_visibility()
+
+    def _update_scalp_title_b_visibility(self) -> None:
+        show_b = self.include_scalp_maps and self.overlay_check.isChecked()
+        self.scalp_title_b_label.setVisible(show_b)
+        self.scalp_title_b_edit.setVisible(show_b)
+        self.scalp_title_b_edit.setEnabled(show_b)
 
     def _style_box(self, box: QGroupBox) -> None:
         font = box.font()
@@ -489,6 +503,21 @@ class PlotGeneratorWindow(QWidget):
         scalp_row.addWidget(QLabel("to"))
         scalp_row.addWidget(self.scalp_max_spin)
         params_form.addRow(QLabel("Scalp range (uV):"), scalp_row)
+
+        self.scalp_title_a_edit = QLineEdit(self.scalp_title_a_template)
+        self.scalp_title_a_edit.setPlaceholderText("{condition} {roi} scalp map")
+        self.scalp_title_a_edit.setToolTip(
+            "Title template for scalp maps. Use {condition} and {roi} placeholders."
+        )
+        params_form.addRow(QLabel("Scalp title (A):"), self.scalp_title_a_edit)
+
+        self.scalp_title_b_edit = QLineEdit(self.scalp_title_b_template)
+        self.scalp_title_b_edit.setPlaceholderText("{condition} {roi} scalp map")
+        self.scalp_title_b_edit.setToolTip(
+            "Title template for Condition B scalp maps. Use {condition} and {roi}."
+        )
+        self.scalp_title_b_label = QLabel("Scalp title (B):")
+        params_form.addRow(self.scalp_title_b_label, self.scalp_title_b_edit)
 
         self._toggle_scalp_controls(self.include_scalp_maps)
 
@@ -687,6 +716,7 @@ class PlotGeneratorWindow(QWidget):
         else:
             # Revert to auto-generation behavior when comparison mode is off
             self._update_chart_title_state(self.condition_combo.currentText())
+        self._update_scalp_title_b_visibility()
 
     def _on_group_overlay_toggled(self, checked: bool) -> None:
         self.group_list.setEnabled(checked)
@@ -703,6 +733,16 @@ class PlotGeneratorWindow(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if folder:
             self.out_edit.setText(folder)
+
+    def _persist_scalp_settings(self, save: bool = True) -> None:
+        self.plot_mgr.set_include_scalp_maps(self.scalp_check.isChecked())
+        self.plot_mgr.set_scalp_bounds(
+            self.scalp_min_spin.value(), self.scalp_max_spin.value()
+        )
+        self.plot_mgr.set_scalp_title_a_template(self.scalp_title_a_edit.text())
+        self.plot_mgr.set_scalp_title_b_template(self.scalp_title_b_edit.text())
+        if save:
+            self.plot_mgr.save()
 
     def _choose_color(self, which: str) -> None:
         init = self.stem_color if which == "a" else self.stem_color_b
@@ -760,10 +800,7 @@ class PlotGeneratorWindow(QWidget):
     def _save_defaults(self) -> None:
         self.plot_mgr.set("paths", "input_folder", self.folder_edit.text())
         self.plot_mgr.set("paths", "output_folder", self.out_edit.text())
-        self.plot_mgr.set_include_scalp_maps(self.scalp_check.isChecked())
-        self.plot_mgr.set_scalp_bounds(
-            self.scalp_min_spin.value(), self.scalp_max_spin.value()
-        )
+        self._persist_scalp_settings(save=False)
         self.plot_mgr.save()
         QMessageBox.information(self, "Defaults", "Default folders saved.")
 
@@ -781,6 +818,8 @@ class PlotGeneratorWindow(QWidget):
         self.scalp_check.setChecked(bool(self._defaults.get("include_scalp_maps", False)))
         self.scalp_min_spin.setValue(float(self._defaults.get("scalp_min", -1.0)))
         self.scalp_max_spin.setValue(float(self._defaults.get("scalp_max", 1.0)))
+        self.scalp_title_a_edit.setText(self._defaults.get("scalp_title_a_template", ""))
+        self.scalp_title_b_edit.setText(self._defaults.get("scalp_title_b_template", ""))
         # Update the chart title field based on the current condition
         self._update_chart_title_state(self.condition_combo.currentText())
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")
@@ -896,6 +935,8 @@ class PlotGeneratorWindow(QWidget):
             include_scalp,
             scalp_min,
             scalp_max,
+            scalp_title_a,
+            scalp_title_b,
         ) = self._gen_params
         condition = self._conditions_queue.pop(0)
         self._current_condition += 1
@@ -925,6 +966,8 @@ class PlotGeneratorWindow(QWidget):
             include_scalp_maps=include_scalp,
             scalp_vmin=scalp_min,
             scalp_vmax=scalp_max,
+            scalp_title_a_template=scalp_title_a,
+            scalp_title_b_template=scalp_title_b,
             **group_kwargs,
         )
         self._worker.moveToThread(self._thread)
@@ -1006,6 +1049,7 @@ class PlotGeneratorWindow(QWidget):
             self.cancel_btn.setEnabled(False)
             return
         group_kwargs = self._group_worker_kwargs(overlay_groups, selected_groups)
+        self._persist_scalp_settings(save=True)
 
         self.gen_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
@@ -1040,6 +1084,8 @@ class PlotGeneratorWindow(QWidget):
                 include_scalp_maps=include_scalp,
                 scalp_vmin=scalp_min,
                 scalp_vmax=scalp_max,
+                scalp_title_a_template=self.scalp_title_a_edit.text(),
+                scalp_title_b_template=self.scalp_title_b_edit.text(),
                 **group_kwargs,
             )
             self._worker.moveToThread(self._thread)
@@ -1074,6 +1120,8 @@ class PlotGeneratorWindow(QWidget):
                 include_scalp,
                 scalp_min,
                 scalp_max,
+                self.scalp_title_a_edit.text(),
+                self.scalp_title_b_edit.text(),
             )
             self._start_next_condition()
 

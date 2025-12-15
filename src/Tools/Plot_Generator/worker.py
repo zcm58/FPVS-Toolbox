@@ -85,6 +85,8 @@ class _Worker(QObject):
         include_scalp_maps: bool = False,
         scalp_vmin: float = -1.0,
         scalp_vmax: float = 1.0,
+        scalp_title_a_template: str = "{condition} {roi} scalp map",
+        scalp_title_b_template: str = "{condition} {roi} scalp map",
     ) -> None:
         super().__init__()
         self.folder = folder
@@ -124,7 +126,9 @@ class _Worker(QObject):
         self.include_scalp_maps = include_scalp_maps
         self.scalp_vmin = scalp_vmin
         self.scalp_vmax = scalp_vmax
-        self._scalp_warning_emitted = False
+        self.scalp_title_a_template = scalp_title_a_template
+        self.scalp_title_b_template = scalp_title_b_template
+        self._scalp_title_warned = False
 
     def run(self) -> None:
         try:
@@ -233,15 +237,6 @@ class _Worker(QObject):
     ) -> ScalpInputs | None:
         if not self.include_scalp_maps:
             return None
-        if self.selected_roi == ALL_ROIS_OPTION:
-            if not self._scalp_warning_emitted:
-                self._emit(
-                    "Scalp maps require selecting a single ROI. Skipping scalp rendering.",
-                    0,
-                    0,
-                )
-                self._scalp_warning_emitted = True
-            return None
 
         inputs = prepare_scalp_inputs(
             subject_maps,
@@ -252,9 +247,9 @@ class _Worker(QObject):
         return inputs
 
     def _plot_scalp_map(
-            self, ax: plt.Axes, scalp_inputs: ScalpInputs, title: str
+        self, ax: plt.Axes, scalp_inputs: ScalpInputs, title: str
     ) -> None:
-        """Render a scalp topomap for the provided ROI-masked electrode data."""
+        """Render a scalp topomap for the provided electrode data."""
         vlim = None
         if self.scalp_vmin is not None and self.scalp_vmax is not None:
             vlim = (float(self.scalp_vmin), float(self.scalp_vmax))
@@ -291,6 +286,19 @@ class _Worker(QObject):
         cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cbar.ax.set_ylabel("uV")
         ax.set_title(title, fontsize=10)
+
+    def _format_scalp_title(self, template: str, condition: str, roi: str) -> str:
+        try:
+            return template.format(condition=condition, roi=roi)
+        except Exception:
+            if not self._scalp_title_warned:
+                self._emit(
+                    "Invalid scalp title template detected. Reverting to default.",
+                    0,
+                    0,
+                )
+                self._scalp_title_warned = True
+            return f"{condition} {roi} scalp map"
 
     def _count_excel_files(self, condition: str) -> int:
         """Return the number of Excel files for a condition."""
@@ -341,16 +349,7 @@ class _Worker(QObject):
 
         subject_roi_data: Dict[str, Dict[str, List[float]]] = {}
         subject_scalp_data: Dict[str, Dict[str, float]] = {}
-        collect_scalp = self.include_scalp_maps and (
-            self.selected_roi != ALL_ROIS_OPTION
-        )
-        if self.include_scalp_maps and self.selected_roi == ALL_ROIS_OPTION:
-            self._emit(
-                "Scalp maps require selecting a single ROI. Skipping scalp rendering.",
-                0,
-                0,
-            )
-            self._scalp_warning_emitted = True
+        collect_scalp = self.include_scalp_maps
         scalp_oddballs = self._scalp_oddball_frequencies() if collect_scalp else []
         warned_missing_bca = False
         warned_missing_z = False
@@ -677,7 +676,9 @@ class _Worker(QObject):
                 self._plot_scalp_map(
                     scalp_axes[0],
                     scalp_inputs,
-                    f"{roi} scalp map",
+                    self._format_scalp_title(
+                        self.scalp_title_a_template, self.condition, roi
+                    ),
                 )
 
             fig.tight_layout(rect=[0, 0, 1, 0.93])
@@ -730,10 +731,28 @@ class _Worker(QObject):
                 scalp_axes: list[tuple[str, plt.Axes, ScalpInputs]] = []
                 if has_scalp_a and scalp_a:
                     target = gs[1, 0] if has_scalp_b else gs[1, :]
-                    scalp_axes.append((self.condition, fig.add_subplot(target), scalp_a))
+                    scalp_axes.append(
+                        (
+                            self._format_scalp_title(
+                                self.scalp_title_a_template, self.condition, roi
+                            ),
+                            fig.add_subplot(target),
+                            scalp_a,
+                        )
+                    )
                 if has_scalp_b and scalp_b:
                     target = gs[1, 1] if has_scalp_a else gs[1, :]
-                    scalp_axes.append((self.condition_b or "", fig.add_subplot(target), scalp_b))
+                    scalp_axes.append(
+                        (
+                            self._format_scalp_title(
+                                self.scalp_title_b_template,
+                                self.condition_b or "",
+                                roi,
+                            ),
+                            fig.add_subplot(target),
+                            scalp_b,
+                        )
+                    )
             else:
                 fig, ax = plt.subplots(figsize=(12, 4))
                 scalp_axes = []
@@ -815,7 +834,7 @@ class _Worker(QObject):
                 self._plot_scalp_map(
                     scalp_ax,
                     scalp_inputs,
-                    f"{label} {roi} scalp map",
+                    label,
                 )
 
             # tight_layout() often warns with MNE topomaps/colorbars; use explicit spacing.
