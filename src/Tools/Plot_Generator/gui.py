@@ -333,6 +333,8 @@ class PlotGeneratorWindow(QWidget):
         return label
 
     def _toggle_scalp_controls(self, checked: bool) -> None:
+        if not hasattr(self, "scalp_min_spin"):
+            return
         self.include_scalp_maps = checked
         self.scalp_min_spin.setEnabled(checked)
         self.scalp_max_spin.setEnabled(checked)
@@ -586,8 +588,6 @@ class PlotGeneratorWindow(QWidget):
         self.scalp_title_b_label = QLabel("Scalp title (B):")
         params_form.addRow(self.scalp_title_b_label, scalp_b_row)
 
-        self._toggle_scalp_controls(self.include_scalp_maps)
-
         self.title_edit = QLineEdit(self._defaults["title_snr"])
         self.title_edit.setPlaceholderText("e.g. Fruit vs Veg")
         self.title_edit.setToolTip("Title shown on the plot")
@@ -838,6 +838,7 @@ class PlotGeneratorWindow(QWidget):
         self.overlay_check.toggled.connect(self._check_required)
         self.scalp_title_a_edit.textChanged.connect(self._check_required)
         self.scalp_title_b_edit.textChanged.connect(self._check_required)
+        self._toggle_scalp_controls(self.include_scalp_maps)
         self._check_required()
 
         advanced_body.setVisible(advanced_box.isChecked())
