@@ -28,6 +28,14 @@ class _ParticipantFiles:
     cond_b_file: Path
 
 
+@dataclass(frozen=True)
+class RatioRow:
+    pid: str
+    snr_a: float | None
+    snr_b: float | None
+    ratio: float | None
+
+
 class RatioCalcWorker(QObject):
     progress = Signal(int)
     error = Signal(str)
@@ -80,7 +88,7 @@ def compute_ratios(
     participants_map = _build_participant_files(participants, subject_data, inputs)
     if not participants_map:
         log_warning("No participants with both conditions available.")
-        empty_df = _build_output_frame({}, [], inputs.cond_a, inputs.cond_b)
+        empty_df = _build_output_frame({}, [], {}, inputs.cond_a, inputs.cond_b)
         return RatioCalcResult(empty_df, {}, warnings, inputs.output_path)
 
     _emit(progress_cb, 12)
@@ -90,7 +98,7 @@ def compute_ratios(
     selected_roi_names = [r.name for r in rois]
     if not rois:
         log_warning("No ROI definitions available after filtering.")
-        empty_df = _build_output_frame({}, selected_roi_names, inputs.cond_a, inputs.cond_b)
+        empty_df = _build_output_frame({}, selected_roi_names, {}, inputs.cond_a, inputs.cond_b)
         return RatioCalcResult(empty_df, {}, warnings, inputs.output_path)
 
     z_scores = _load_roi_z_scores(participants_map.values(), rois, log_warning)
@@ -103,7 +111,7 @@ def compute_ratios(
     ratios = _compute_ratio_table(participants_map.values(), rois, sig_freqs, inputs, log_warning)
     _emit(progress_cb, 85)
 
-    df = _build_output_frame(ratios, selected_roi_names, inputs.cond_a, inputs.cond_b)
+    df = _build_output_frame(ratios, selected_roi_names, sig_freqs, inputs.cond_a, inputs.cond_b)
     _emit(progress_cb, 90)
     _write_excel(df, inputs.output_path, log_info)
     _emit(progress_cb, 100)
@@ -194,8 +202,8 @@ def _compute_ratio_table(
     sig_freqs: dict[str, list[float]],
     inputs: RatioCalcInputs,
     log_warning: LogCallback,
-) -> dict[str, dict[str, float]]:
-    ratios: dict[str, dict[str, float]] = {roi.name: {} for roi in rois}
+) -> dict[str, list[RatioRow]]:
+    ratios: dict[str, list[RatioRow]] = {roi.name: [] for roi in rois}
     for part in participants:
         snr_a = _load_snr(part.cond_a_file, rois, log_warning, part.pid)
         snr_b = _load_snr(part.cond_b_file, rois, log_warning, part.pid)
@@ -204,7 +212,6 @@ def _compute_ratio_table(
             freqs = sig_freqs.get(roi.name, [])
             if not freqs:
                 log_warning(f"No significant harmonics for ROI {roi.name}; skipping ratios.")
-                ratios.setdefault(roi.name, {})[part.pid] = np.nan
                 continue
 
             summary_a = _summary_for_roi(snr_a.get(roi.name), freqs)
@@ -212,18 +219,19 @@ def _compute_ratio_table(
 
             if summary_a is None or summary_b is None:
                 log_warning(
-                    f"Missing ROI data for participant {part.pid} in ROI {roi.name}; setting ratio to NaN."
+                    f"Missing ROI data for participant {part.pid} in ROI {roi.name}; skipping participant."
                 )
-                ratios.setdefault(roi.name, {})[part.pid] = np.nan
                 continue
 
             if summary_b == 0:
                 log_warning(
-                    f"Denominator SNR is zero for participant {part.pid} ROI {roi.name}; ratio undefined."
+                    f"Denominator SNR is zero for participant {part.pid} ROI {roi.name}; skipping participant."
                 )
-                ratios.setdefault(roi.name, {})[part.pid] = np.nan
                 continue
-            ratios.setdefault(roi.name, {})[part.pid] = summary_a / summary_b
+            ratio_value = summary_a / summary_b
+            ratios.setdefault(roi.name, []).append(
+                RatioRow(pid=part.pid, snr_a=summary_a, snr_b=summary_b, ratio=ratio_value)
+            )
     return ratios
 
 
@@ -270,41 +278,89 @@ def _summary_for_roi(series: pd.Series | None, freqs: list[float]) -> float | No
 
 
 def _build_output_frame(
-    ratios: dict[str, dict[str, float]],
+    ratios: dict[str, list[RatioRow]],
     roi_filter: list[str],
+    sig_freqs: dict[str, list[float]],
     cond_a: str,
     cond_b: str,
 ) -> pd.DataFrame:
-    rows: list[dict[str, float | str | int]] = []
-    all_pids = sorted({pid for roi_data in ratios.values() for pid in roi_data.keys()})
-    roi_names = roi_filter if roi_filter else list(ratios.keys())
+    rows: list[dict[str, float | str | int | None]] = []
+    roi_names = roi_filter if roi_filter else list(ratios.keys()) or list(sig_freqs.keys())
+
     for roi in roi_names:
-        row: dict[str, float | str | int] = {}
-        label = f"{cond_a} to {cond_b} - {roi}"
-        row["Ratio per ROI"] = label
-        ratios_for_roi = ratios.get(roi, {})
-        series = pd.Series(ratios_for_roi)
-        for pid in all_pids:
-            row[pid] = ratios_for_roi.get(pid, np.nan)
-        n = int(series.count()) if not series.empty else 0
-        row["N"] = n
-        mean = float(series.mean()) if n else np.nan
-        median = float(series.median()) if n else np.nan
-        std = float(series.std()) if n else np.nan
-        variance = float(series.var()) if n else np.nan
-        row["Mean"] = mean
-        row["Median"] = median
-        row["Std"] = std
-        row["Variance"] = variance
+        label = f"{cond_a} vs {cond_b} - {roi}"
+        sig_count = len(sig_freqs.get(roi, []))
+        roi_ratios = ratios.get(roi, []) if sig_count else []
+
+        for entry in roi_ratios:
+            rows.append(
+                {
+                    "Ratio Label": label,
+                    "PID": entry.pid,
+                    "SNR_A": entry.snr_a,
+                    "SNR_B": entry.snr_b,
+                    "Ratio": entry.ratio,
+                    "SigHarmonics_N": sig_count,
+                    "N": None,
+                    "Mean": None,
+                    "Median": None,
+                    "Std": None,
+                    "Variance": None,
+                    "CV%": None,
+                    "Min": None,
+                    "Max": None,
+                }
+            )
+
+        ratio_series = pd.Series([entry.ratio for entry in roi_ratios if entry.ratio is not None])
+        n = int(ratio_series.count()) if not ratio_series.empty else 0
+        mean = float(ratio_series.mean()) if n else np.nan
+        median = float(ratio_series.median()) if n else np.nan
+        std = float(ratio_series.std()) if n else np.nan
+        variance = float(ratio_series.var()) if n else np.nan
         if mean is not None and not np.isnan(mean) and mean != 0:
             cv = float((std / mean) * 100) if std is not None else np.nan
         else:
             cv = np.nan
-        row["CV%"] = cv if np.isfinite(cv) else np.nan
-        row["Min"] = float(series.min()) if n else np.nan
-        row["Max"] = float(series.max()) if n else np.nan
-        rows.append(row)
-    columns = ["Ratio per ROI", *all_pids, "N", "Mean", "Median", "Std", "Variance", "CV%", "Min", "Max"]
+        min_val = float(ratio_series.min()) if n else np.nan
+        max_val = float(ratio_series.max()) if n else np.nan
+
+        rows.append(
+            {
+                "Ratio Label": label,
+                "PID": "SUMMARY",
+                "SNR_A": None,
+                "SNR_B": None,
+                "Ratio": None,
+                "SigHarmonics_N": sig_count,
+                "N": n,
+                "Mean": mean,
+                "Median": median,
+                "Std": std,
+                "Variance": variance,
+                "CV%": cv if np.isfinite(cv) else np.nan,
+                "Min": min_val,
+                "Max": max_val,
+            }
+        )
+        rows.append({})
+
+    columns = [
+        "Ratio Label",
+        "PID",
+        "SNR_A",
+        "SNR_B",
+        "Ratio",
+        "SigHarmonics_N",
+        "N",
+        "Mean",
+        "Median",
+        "Std",
+        "Variance",
+        "CV%",
+        "Min",
+        "Max",
+    ]
     return pd.DataFrame(rows, columns=columns)
 
 
