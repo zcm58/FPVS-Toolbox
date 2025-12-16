@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QProgressBar,
     QSplitter,
+    QToolButton,
     QWidget,
     QMenuBar,
     QDialog,
@@ -338,6 +339,40 @@ class PlotGeneratorWindow(QWidget):
         self.scalp_title_b_edit.setVisible(show_b)
         self.scalp_title_b_edit.setEnabled(show_b)
 
+    def _toggle_log_panel(self, expanded: bool) -> None:
+        # Arrow state
+        if hasattr(self, "log_toggle_btn"):
+            self.log_toggle_btn.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+
+        # Show/hide body
+        if hasattr(self, "log_body"):
+            self.log_body.setVisible(expanded)
+
+        # Give space back to the controls by resizing the vertical splitter
+        splitter = getattr(self, "_main_splitter", None)
+        if splitter is None:
+            return
+
+        sizes = splitter.sizes()
+        total = sum(sizes) if sizes else 0
+
+        if not expanded:
+            # store current expanded sizes once
+            self._log_splitter_sizes = sizes
+
+            # keep a small strip for the header-only group
+            collapsed_h = 52  # header strip height
+            if total > collapsed_h:
+                splitter.setSizes([total - collapsed_h, collapsed_h])
+        else:
+            # restore previous sizes if available
+            if self._log_splitter_sizes and len(self._log_splitter_sizes) == 2:
+                splitter.setSizes(self._log_splitter_sizes)
+            else:
+                # sensible fallback
+                if total:
+                    splitter.setSizes([int(total * 0.75), int(total * 0.25)])
+
     def _style_box(self, box: QGroupBox) -> None:
         font = box.font()
         font.setPointSize(10)
@@ -639,6 +674,8 @@ class PlotGeneratorWindow(QWidget):
         controls_splitter.setSizes([600, 300])
 
         splitter = QSplitter(Qt.Vertical)
+        self._main_splitter = splitter
+        self._log_splitter_sizes: list[int] | None = None
         splitter.addWidget(controls_splitter)
 
         console_box = QGroupBox()
@@ -650,9 +687,14 @@ class PlotGeneratorWindow(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(10, 10, 10, 10)
         header.setSpacing(8)
-        label = self._bold_label("Log Output")
-        label.setStyleSheet("color: gray;")
-        header.addWidget(label)
+        self.log_toggle_btn = QToolButton()
+        self.log_toggle_btn.setText("Log Output")
+        self.log_toggle_btn.setCheckable(True)
+        self.log_toggle_btn.setChecked(True)
+        self.log_toggle_btn.setArrowType(Qt.DownArrow)
+        self.log_toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.log_toggle_btn.toggled.connect(self._toggle_log_panel)
+        header.addWidget(self.log_toggle_btn)
         header.addStretch()
         clear_btn = QPushButton()
         clear_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
@@ -662,12 +704,19 @@ class PlotGeneratorWindow(QWidget):
         header.addWidget(clear_btn)
         console_layout.addLayout(header)
 
+        self.log_body = QWidget()
+        log_body_layout = QVBoxLayout(self.log_body)
+        log_body_layout.setContentsMargins(0, 0, 0, 0)
+        log_body_layout.setSpacing(0)
+
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         font = self.log.font()
         font.setBold(False)
         self.log.setFont(font)
-        console_layout.addWidget(self.log)
+        log_body_layout.addWidget(self.log)
+
+        console_layout.addWidget(self.log_body)
 
         splitter.addWidget(console_box)
         splitter.setSizes([500, 200])
