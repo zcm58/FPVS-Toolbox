@@ -54,8 +54,8 @@ plt.rcParams.update(
 
 _ZERO_MIDPOINT_COLOR = "#b6e3b6"
 _SCALP_CMAP = LinearSegmentedColormap.from_list(
-    "RdBuGreen",
-    ["#b2182b", _ZERO_MIDPOINT_COLOR, "#2166ac"],
+    "BlueGreenRed",
+    ["#2166ac", _ZERO_MIDPOINT_COLOR, "#b2182b"],
 )
 
 
@@ -294,33 +294,18 @@ class _Worker(QObject):
 
         vlim = (float(vmin), float(vmax))
         norm: TwoSlopeNorm | None = None
-        if vlim[0] < 0 < vlim[1]:
+        use_cnorm = vlim[0] < 0 < vlim[1]
+        if use_cnorm:
             norm = TwoSlopeNorm(vmin=vlim[0], vcenter=0.0, vmax=vlim[1])
 
-        try:
-            # MNE versions that use vlim (e.g., mne==1.9.x)
-            im, _ = mne.viz.plot_topomap(
-                scalp_inputs.data,
-                scalp_inputs.info,
-                axes=ax,
-                cmap=_SCALP_CMAP,
-                vlim=vlim,
-                cnorm=norm,
-                contours=0,
-                sensors=True,
-                show=False,
-                outlines="head",
-            )
-        except TypeError:
-            # Fallback for older MNE versions that use vmin/vmax
+        im = None
+        if use_cnorm and norm is not None:
             try:
                 im, _ = mne.viz.plot_topomap(
                     scalp_inputs.data,
                     scalp_inputs.info,
                     axes=ax,
                     cmap=_SCALP_CMAP,
-                    vmin=vlim[0],
-                    vmax=vlim[1],
                     cnorm=norm,
                     contours=0,
                     sensors=True,
@@ -328,21 +313,52 @@ class _Worker(QObject):
                     outlines="head",
                 )
             except TypeError:
+                use_cnorm = False
                 lim = max(abs(vlim[0]), abs(vlim[1]))
+                vlim = (-lim, lim)
+
+        if im is None:
+            try:
+                # MNE versions that use vlim (e.g., mne==1.9.x)
                 im, _ = mne.viz.plot_topomap(
                     scalp_inputs.data,
                     scalp_inputs.info,
                     axes=ax,
                     cmap=_SCALP_CMAP,
-                    vmin=-lim,
-                    vmax=lim,
+                    vlim=vlim,
                     contours=0,
                     sensors=True,
                     show=False,
                     outlines="head",
                 )
-
-        im.set_alpha(0.85)
+            except TypeError:
+                try:
+                    im, _ = mne.viz.plot_topomap(
+                        scalp_inputs.data,
+                        scalp_inputs.info,
+                        axes=ax,
+                        cmap=_SCALP_CMAP,
+                        vmin=vlim[0],
+                        vmax=vlim[1],
+                        contours=0,
+                        sensors=True,
+                        show=False,
+                        outlines="head",
+                    )
+                except TypeError:
+                    lim = max(abs(vlim[0]), abs(vlim[1]))
+                    im, _ = mne.viz.plot_topomap(
+                        scalp_inputs.data,
+                        scalp_inputs.info,
+                        axes=ax,
+                        cmap=_SCALP_CMAP,
+                        vmin=-lim,
+                        vmax=lim,
+                        contours=0,
+                        sensors=True,
+                        show=False,
+                        outlines="head",
+                    )
 
         if cax is None:
             divider = make_axes_locatable(ax)
@@ -634,16 +650,17 @@ class _Worker(QObject):
             has_scalp = scalp_inputs is not None and self.include_scalp_maps
             if has_scalp:
                 fig = plt.figure(figsize=(10, 7), constrained_layout=True)
+                cbar_width = 0.03
                 gs = fig.add_gridspec(
                     2,
-                    2,
+                    3,
                     height_ratios=[3, 2],
-                    width_ratios=[1.0, 0.03],
+                    width_ratios=[cbar_width, 1.0, cbar_width],
                 )
-                # Columns reserve space for the topomap and a dedicated colorbar
-                # axis to keep the layout centered.
                 ax = fig.add_subplot(gs[0, :])
-                scalp_axes = [(fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1]))]
+                spacer_ax = fig.add_subplot(gs[1, 0])
+                spacer_ax.axis("off")
+                scalp_axes = [(fig.add_subplot(gs[1, 1]), fig.add_subplot(gs[1, 2]))]
             else:
                 fig, ax = plt.subplots(figsize=(10, 4))
                 scalp_axes: list[tuple[plt.Axes, plt.Axes]] = []
