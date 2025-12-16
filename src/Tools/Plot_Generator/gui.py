@@ -440,8 +440,8 @@ class PlotGeneratorWindow(QWidget):
         box.setStyleSheet("QGroupBox::title {font-weight: bold;}")
 
     def _build_ui(self) -> None:
-        self.setMinimumWidth(720)
-        self.resize(880, 840)
+        self.setMinimumWidth(500)
+        self.resize(500, 750)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(8, 8, 8, 8)
