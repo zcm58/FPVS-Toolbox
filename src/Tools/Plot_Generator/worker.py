@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
 import matplotlib
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 import numpy as np
 import pandas as pd
 import mne
@@ -48,6 +49,13 @@ plt.rcParams.update(
         "xtick.major.size": 6,
         "ytick.major.size": 6,
     }
+)
+
+
+_ZERO_MIDPOINT_COLOR = "#b6e3b6"
+_SCALP_CMAP = LinearSegmentedColormap.from_list(
+    "RdBuGreen",
+    ["#b2182b", _ZERO_MIDPOINT_COLOR, "#2166ac"],
 )
 
 
@@ -273,9 +281,21 @@ class _Worker(QObject):
         # Local import so this is copy/paste safe without touching module imports.
         from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-        vlim = None
-        if self.scalp_vmin is not None and self.scalp_vmax is not None:
-            vlim = (float(self.scalp_vmin), float(self.scalp_vmax))
+        vmin = self.scalp_vmin
+        vmax = self.scalp_vmax
+
+        if vmin is None or vmax is None:
+            data = np.asarray(scalp_inputs.data, dtype=float)
+            max_abs = float(np.nanmax(np.abs(data))) if data.size else 0.0
+            if max_abs == 0:
+                max_abs = 1.0
+            vmin = -max_abs
+            vmax = max_abs
+
+        vlim = (float(vmin), float(vmax))
+        norm: TwoSlopeNorm | None = None
+        if vlim[0] < 0 < vlim[1]:
+            norm = TwoSlopeNorm(vmin=vlim[0], vcenter=0.0, vmax=vlim[1])
 
         try:
             # MNE versions that use vlim (e.g., mne==1.9.x)
@@ -283,8 +303,9 @@ class _Worker(QObject):
                 scalp_inputs.data,
                 scalp_inputs.info,
                 axes=ax,
-                cmap="RdBu_r",
+                cmap=_SCALP_CMAP,
                 vlim=vlim,
+                cnorm=norm,
                 contours=0,
                 sensors=True,
                 show=False,
@@ -292,18 +313,34 @@ class _Worker(QObject):
             )
         except TypeError:
             # Fallback for older MNE versions that use vmin/vmax
-            im, _ = mne.viz.plot_topomap(
-                scalp_inputs.data,
-                scalp_inputs.info,
-                axes=ax,
-                cmap="RdBu_r",
-                vmin=None if vlim is None else vlim[0],
-                vmax=None if vlim is None else vlim[1],
-                contours=0,
-                sensors=True,
-                show=False,
-                outlines="head",
-            )
+            try:
+                im, _ = mne.viz.plot_topomap(
+                    scalp_inputs.data,
+                    scalp_inputs.info,
+                    axes=ax,
+                    cmap=_SCALP_CMAP,
+                    vmin=vlim[0],
+                    vmax=vlim[1],
+                    cnorm=norm,
+                    contours=0,
+                    sensors=True,
+                    show=False,
+                    outlines="head",
+                )
+            except TypeError:
+                lim = max(abs(vlim[0]), abs(vlim[1]))
+                im, _ = mne.viz.plot_topomap(
+                    scalp_inputs.data,
+                    scalp_inputs.info,
+                    axes=ax,
+                    cmap=_SCALP_CMAP,
+                    vmin=-lim,
+                    vmax=lim,
+                    contours=0,
+                    sensors=True,
+                    show=False,
+                    outlines="head",
+                )
 
         im.set_alpha(0.85)
 
@@ -316,7 +353,7 @@ class _Worker(QObject):
         cbar.ax.yaxis.set_label_position("right")
         cbar.ax.yaxis.set_ticks_position("right")
 
-        ax.set_title(title, fontsize=10, pad=6)
+        ax.set_title(title, fontsize=12, fontweight="bold", pad=8)
         ax.set_anchor("C")
 
     def _format_scalp_title(self, template: str, condition: str, roi: str) -> str:
@@ -596,19 +633,19 @@ class _Worker(QObject):
                 return
             has_scalp = scalp_inputs is not None and self.include_scalp_maps
             if has_scalp:
-                fig = plt.figure(figsize=(12, 7), constrained_layout=True)
+                fig = plt.figure(figsize=(10, 7), constrained_layout=True)
                 gs = fig.add_gridspec(
                     2,
                     2,
                     height_ratios=[3, 2],
-                    width_ratios=[1.0, 0.06],
+                    width_ratios=[1.0, 0.03],
                 )
                 # Columns reserve space for the topomap and a dedicated colorbar
                 # axis to keep the layout centered.
                 ax = fig.add_subplot(gs[0, :])
                 scalp_axes = [(fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1]))]
             else:
-                fig, ax = plt.subplots(figsize=(12, 4))
+                fig, ax = plt.subplots(figsize=(10, 4))
                 scalp_axes: list[tuple[plt.Axes, plt.Axes]] = []
 
             if use_group_overlay:
@@ -725,7 +762,10 @@ class _Worker(QObject):
             if not has_scalp:
                 fig.tight_layout(rect=[0, 0, 1, 0.93])
             fname = f"{self.condition}_{roi}_{self.metric}.png"
-            fig.savefig(self.out_dir / fname, dpi=300, bbox_inches="tight", pad_inches=0.05)
+            save_kwargs = {"dpi": 300, "pad_inches": 0.05}
+            if not has_scalp:
+                save_kwargs["bbox_inches"] = "tight"
+            fig.savefig(self.out_dir / fname, **save_kwargs)
             plt.close(fig)
             self._emit(f"Saved {fname}")
 
@@ -762,7 +802,7 @@ class _Worker(QObject):
 
             if has_scalp:
                 # Outer layout: top SNR axis + bottom scalp row.
-                fig = plt.figure(figsize=(12, 7))
+                fig = plt.figure(figsize=(10, 7))
                 outer = fig.add_gridspec(
                     2,
                     1,
@@ -803,7 +843,7 @@ class _Worker(QObject):
                     scalp_ax = fig.add_subplot(bottom[0, i])
                     scalp_axes.append((scalp_ax, label, inputs))
             else:
-                fig, ax = plt.subplots(figsize=(12, 4))
+                fig, ax = plt.subplots(figsize=(10, 4))
                 scalp_axes = []
 
             # --- SNR overlay curves ---
@@ -819,7 +859,7 @@ class _Worker(QObject):
                 freq_array = np.array(freqs)
                 for idx, odd in enumerate(odd_freqs):
                     closest = int(np.abs(freq_array - odd).argmin())
-                    val_a = data_a[impose := roi][closest]  # keep existing behavior
+                    val_a = data_a[roi][closest]
                     val_b = data_b[roi][closest] if roi in data_b and data_b[roi] else None
 
                     label_a = "A-Peaks" if idx == 0 else "_nolegend_"
