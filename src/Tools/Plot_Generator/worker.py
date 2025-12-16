@@ -247,20 +247,38 @@ class _Worker(QObject):
         return inputs
 
     def _plot_scalp_map(
-        self,
-        ax: plt.Axes,
-        scalp_inputs: ScalpInputs,
-        title: str,
-        *,
-        cax: plt.Axes | None = None,
+            self,
+            ax: plt.Axes,
+            scalp_inputs: ScalpInputs,
+            title: str,
+            *,
+            cax: plt.Axes | None = None,
     ) -> None:
-        """Render a scalp topomap for the provided electrode data."""
+        """Render a scalp topomap for the provided electrode data.
+
+        Parameters
+        ----------
+        ax
+            Target matplotlib Axes to render the topomap into.
+        scalp_inputs
+            Container holding the per-electrode data vector and an MNE Info object
+            with BioSemi64 channel locations already set.
+        title
+            Title to display above the topomap.
+        cax
+            Optional explicit Axes to use for the colorbar. If not provided, a
+            dedicated colorbar Axes is appended to the right of `ax` to keep
+            map+colorbar centering stable across figures.
+        """
+        # Local import so this is copy/paste safe without touching module imports.
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+
         vlim = None
         if self.scalp_vmin is not None and self.scalp_vmax is not None:
             vlim = (float(self.scalp_vmin), float(self.scalp_vmax))
 
         try:
-            # MNE versions that use vlim (e.g., mne==1.9.0)
+            # MNE versions that use vlim (e.g., mne==1.9.x)
             im, _ = mne.viz.plot_topomap(
                 scalp_inputs.data,
                 scalp_inputs.info,
@@ -288,12 +306,18 @@ class _Worker(QObject):
             )
 
         im.set_alpha(0.85)
-        if cax is not None:
-            cbar = plt.colorbar(im, cax=cax)
-        else:
-            cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+        if cax is None:
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="4.5%", pad=0.08)
+
+        cbar = plt.colorbar(im, cax=cax)
         cbar.ax.set_ylabel("uV")
-        ax.set_title(title, fontsize=10)
+        cbar.ax.yaxis.set_label_position("right")
+        cbar.ax.yaxis.set_ticks_position("right")
+
+        ax.set_title(title, fontsize=10, pad=6)
+        ax.set_anchor("C")
 
     def _format_scalp_title(self, template: str, condition: str, roi: str) -> str:
         try:
@@ -714,6 +738,7 @@ class _Worker(QObject):
             scalp_b: ScalpInputs | None = None,
     ) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
+
         mgr = SettingsManager()
         harm_str = mgr.get(
             "loreta",
@@ -731,51 +756,57 @@ class _Worker(QObject):
                 self._emit("Generation cancelled by user.")
                 return
 
-            has_scalp_a = scalp_a is not None and self.include_scalp_maps
-            has_scalp_b = scalp_b is not None and self.include_scalp_maps
+            has_scalp_a = bool(self.include_scalp_maps and scalp_a is not None)
+            has_scalp_b = bool(self.include_scalp_maps and scalp_b is not None)
             has_scalp = has_scalp_a or has_scalp_b
 
             if has_scalp:
-                fig = plt.figure(figsize=(12, 7), constrained_layout=True)
-                gs = fig.add_gridspec(
+                # Outer layout: top SNR axis + bottom scalp row.
+                fig = plt.figure(figsize=(12, 7))
+                outer = fig.add_gridspec(
                     2,
-                    4,
+                    1,
                     height_ratios=[3, 2],
-                    width_ratios=[1.0, 0.06, 1.0, 0.06],
+                    hspace=0.35,
                 )
-                # Columns alternate between the topomap and a dedicated colorbar
-                # axis to keep the bottom row centered and symmetric.
-                ax = fig.add_subplot(gs[0, :])
+                ax = fig.add_subplot(outer[0, 0])
 
-                scalp_axes: list[tuple[str, plt.Axes, plt.Axes, ScalpInputs]] = []
-                if has_scalp_a and scalp_a:
-                    scalp_axes.append(
+                # Bottom row becomes 1x2 when both scalp maps exist, otherwise 1x1 (centered).
+                scalp_items: list[tuple[str, ScalpInputs]] = []
+                if has_scalp_a and scalp_a is not None:
+                    scalp_items.append(
                         (
-                            self._format_scalp_title(
-                                self.scalp_title_a_template, self.condition, roi
-                            ),
-                            fig.add_subplot(gs[1, 0]),
-                            fig.add_subplot(gs[1, 1]),
+                            self._format_scalp_title(self.scalp_title_a_template, self.condition, roi),
                             scalp_a,
                         )
                     )
-                if has_scalp_b and scalp_b:
-                    scalp_axes.append(
+                if has_scalp_b and scalp_b is not None:
+                    scalp_items.append(
                         (
                             self._format_scalp_title(
                                 self.scalp_title_b_template,
                                 self.condition_b or "",
                                 roi,
                             ),
-                            fig.add_subplot(gs[1, 2]),
-                            fig.add_subplot(gs[1, 3]),
                             scalp_b,
                         )
                     )
+
+                n_maps = len(scalp_items)
+                bottom = outer[1, 0].subgridspec(
+                    1,
+                    n_maps,
+                    wspace=0.25,
+                )
+                scalp_axes: list[tuple[plt.Axes, str, ScalpInputs]] = []
+                for i, (label, inputs) in enumerate(scalp_items):
+                    scalp_ax = fig.add_subplot(bottom[0, i])
+                    scalp_axes.append((scalp_ax, label, inputs))
             else:
                 fig, ax = plt.subplots(figsize=(12, 4))
-                scalp_axes: list[tuple[str, plt.Axes, plt.Axes, ScalpInputs]] = []
+                scalp_axes = []
 
+            # --- SNR overlay curves ---
             ax.plot(freqs, data_a[roi], color=self.stem_color, label=self.condition)
             ax.plot(
                 freqs,
@@ -788,10 +819,10 @@ class _Worker(QObject):
                 freq_array = np.array(freqs)
                 for idx, odd in enumerate(odd_freqs):
                     closest = int(np.abs(freq_array - odd).argmin())
-                    val_a = data_a[roi][closest]
-                    val_b = data_b[roi][closest]
+                    val_a = data_a[impose := roi][closest]  # keep existing behavior
+                    val_b = data_b[roi][closest] if roi in data_b and data_b[roi] else None
+
                     label_a = "A-Peaks" if idx == 0 else "_nolegend_"
-                    label_b = "B-Peaks" if idx == 0 else "_nolegend_"
                     ax.scatter(
                         freq_array[closest],
                         val_a,
@@ -801,15 +832,17 @@ class _Worker(QObject):
                         zorder=4,
                         label=label_a,
                     )
-                    ax.scatter(
-                        freq_array[closest],
-                        val_b,
-                        marker="^",
-                        facecolor=self.stem_color_b,
-                        edgecolor="black",
-                        zorder=4,
-                        label=label_b,
-                    )
+                    if val_b is not None:
+                        label_b = "B-Peaks" if idx == 0 else "_nolegend_"
+                        ax.scatter(
+                            freq_array[closest],
+                            val_b,
+                            marker="^",
+                            facecolor=self.stem_color_b,
+                            edgecolor="black",
+                            zorder=4,
+                            label=label_b,
+                        )
 
             tick_start = math.ceil(self.x_min)
             tick_end = math.floor(self.x_max) + 1
@@ -849,24 +882,29 @@ class _Worker(QObject):
             combined_title = f"{base}: {roi}"
             fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
 
-            for label, scalp_ax, cbar_ax, scalp_inputs in scalp_axes:
+            # --- Scalp maps (bottom row) ---
+            for scalp_ax, label, scalp_inputs in scalp_axes:
                 self._plot_scalp_map(
                     scalp_ax,
                     scalp_inputs,
                     label,
-                    cax=cbar_ax,
+                    cax=None,  # colorbar will be appended to the right of each scalp axis
                 )
 
+            # Layout:
             if not has_scalp:
                 fig.tight_layout(rect=[0, 0, 1, 0.93])
+            else:
+                # Keep a little room for suptitle, avoid tight_layout warnings with MNE axes.
+                fig.subplots_adjust(top=0.90)
 
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
             fig.savefig(
                 self.out_dir / fname,
                 dpi=300,
-                bbox_inches="tight",
                 pad_inches=0.05,
             )
             plt.close(fig)
             self._emit(f"Saved {fname}")
+
 
