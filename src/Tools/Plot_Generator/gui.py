@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QDoubleSpinBox,
     QCheckBox,
     QStyle,
@@ -63,6 +64,7 @@ def _auto_detect_project_dir() -> str:
     return str(path)
 
 ALL_CONDITIONS_OPTION = "All Conditions"
+RIGHT_PANEL_MAX_W = 560
 
 
 def _auto_detect_project_dir() -> Path:
@@ -282,6 +284,8 @@ class PlotGeneratorWindow(QWidget):
         self._available_groups: list[str] = []
         self._has_multi_groups = False
 
+        self._log_last_expanded_height: int | None = None
+
 
         self._build_ui()
         self._overlay_width_anim = QPropertyAnimation(self.overlay_container, b"maximumWidth")
@@ -334,12 +338,31 @@ class PlotGeneratorWindow(QWidget):
         self.scalp_max_spin.setEnabled(checked)
         self.scalp_title_a_edit.setEnabled(checked)
         self._update_scalp_title_b_visibility()
+        self._update_scalp_title_warnings()
+        self._check_required()
 
     def _update_scalp_title_b_visibility(self) -> None:
         show_b = self.include_scalp_maps and self.overlay_check.isChecked()
         self.scalp_title_b_label.setVisible(show_b)
         self.scalp_title_b_edit.setVisible(show_b)
         self.scalp_title_b_edit.setEnabled(show_b)
+        self._update_scalp_title_warnings()
+
+    def _update_scalp_title_warnings(self) -> None:
+        include_scalp = self.scalp_check.isChecked()
+        need_b = include_scalp and self.overlay_check.isChecked()
+        show_a = include_scalp and not self.scalp_title_a_edit.text().strip()
+        show_b = need_b and not self.scalp_title_b_edit.text().strip()
+        self.scalp_title_a_warning.setVisible(show_a)
+        self.scalp_title_b_warning.setVisible(show_b and self.scalp_title_b_edit.isVisible())
+
+    def _scalp_titles_valid(self) -> bool:
+        if not self.scalp_check.isChecked():
+            return True
+        has_a = bool(self.scalp_title_a_edit.text().strip())
+        if not self.overlay_check.isChecked():
+            return has_a
+        return has_a and bool(self.scalp_title_b_edit.text().strip())
 
     def _toggle_log_panel(self, expanded: bool) -> None:
         self.log_toggle_btn.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
@@ -356,16 +379,15 @@ class PlotGeneratorWindow(QWidget):
         collapsed_h = 52  # header strip height
 
         if not expanded:
-            # store current state
             self._log_splitter_sizes = sizes
             self._log_prev_window_height = self.height()
+            self._log_last_expanded_height = self.height()
 
             top_h, bottom_h = sizes[0], sizes[1]
             delta = max(0, bottom_h - collapsed_h)
 
             splitter.setSizes([top_h, collapsed_h])
 
-            # shrink the window so the top doesn't expand
             min_h = self.minimumSizeHint().height()
             new_h = max(min_h, self.height() - delta)
             if new_h < self.height():
@@ -374,11 +396,9 @@ class PlotGeneratorWindow(QWidget):
             if self._log_splitter_sizes and len(self._log_splitter_sizes) == 2:
                 splitter.setSizes(self._log_splitter_sizes)
 
-            if self._log_prev_window_height is not None:
-                # only grow back if needed; don’t forcibly shrink if user resized larger
-                target = self._log_prev_window_height
-                if self.height() < target:
-                    self.resize(self.width(), target)
+            target = self._log_last_expanded_height or self._log_prev_window_height
+            if target is not None and self.height() < target:
+                self.resize(self.width(), target)
 
     def _style_box(self, box: QGroupBox) -> None:
         font = box.font()
@@ -405,11 +425,9 @@ class PlotGeneratorWindow(QWidget):
         menu.addAction(action)
         root_layout.addWidget(menu)
 
-        controls_splitter = QSplitter(Qt.Horizontal)
-        controls_splitter.setContentsMargins(0, 0, 0, 0)
-
         file_box = QGroupBox("File I/O")
         self._style_box(file_box)
+        file_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum))
         file_layout = QVBoxLayout(file_box)
         file_layout.setContentsMargins(8, 8, 8, 8)
         file_layout.setSpacing(6)
@@ -464,6 +482,8 @@ class PlotGeneratorWindow(QWidget):
 
         params_box = QGroupBox("Plot Parameters")
         self._style_box(params_box)
+        params_box.setMaximumWidth(RIGHT_PANEL_MAX_W)
+        params_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum))
         params_form = QFormLayout(params_box)
         params_form.setContentsMargins(10, 10, 10, 10)
         params_form.setSpacing(8)
@@ -535,40 +555,36 @@ class PlotGeneratorWindow(QWidget):
         self.scalp_check.toggled.connect(self._toggle_scalp_controls)
         params_form.addRow("", self.scalp_check)
 
-        scalp_row = QHBoxLayout()
-        scalp_row.setContentsMargins(10, 0, 10, 0)
-        scalp_row.setSpacing(6)
-        self.scalp_min_spin = QDoubleSpinBox()
-        self.scalp_min_spin.setRange(-9999.0, 9999.0)
-        self.scalp_min_spin.setDecimals(2)
-        self.scalp_min_spin.setSingleStep(0.1)
-        self.scalp_min_spin.setValue(float(self.scalp_min))
-        self.scalp_min_spin.setSuffix(" uV")
-        self.scalp_max_spin = QDoubleSpinBox()
-        self.scalp_max_spin.setRange(-9999.0, 9999.0)
-        self.scalp_max_spin.setDecimals(2)
-        self.scalp_max_spin.setSingleStep(0.1)
-        self.scalp_max_spin.setValue(float(self.scalp_max))
-        self.scalp_max_spin.setSuffix(" uV")
-        scalp_row.addWidget(self.scalp_min_spin)
-        scalp_row.addWidget(QLabel("to"))
-        scalp_row.addWidget(self.scalp_max_spin)
-        params_form.addRow(QLabel("Scalp range (uV):"), scalp_row)
-
         self.scalp_title_a_edit = QLineEdit(self.scalp_title_a_template)
         self.scalp_title_a_edit.setPlaceholderText("{condition} {roi} scalp map")
         self.scalp_title_a_edit.setToolTip(
             "Title template for scalp maps. Use {condition} and {roi} placeholders."
         )
-        params_form.addRow(QLabel("Scalp title (A):"), self.scalp_title_a_edit)
+        scalp_a_row = QHBoxLayout()
+        scalp_a_row.setContentsMargins(0, 0, 0, 0)
+        scalp_a_row.setSpacing(4)
+        scalp_a_row.addWidget(self.scalp_title_a_edit)
+        self.scalp_title_a_warning = QLabel("Required")
+        self.scalp_title_a_warning.setStyleSheet("color: red;")
+        self.scalp_title_a_warning.setVisible(False)
+        scalp_a_row.addWidget(self.scalp_title_a_warning)
+        params_form.addRow(QLabel("Scalp title (A):"), scalp_a_row)
 
         self.scalp_title_b_edit = QLineEdit(self.scalp_title_b_template)
         self.scalp_title_b_edit.setPlaceholderText("{condition} {roi} scalp map")
         self.scalp_title_b_edit.setToolTip(
             "Title template for Condition B scalp maps. Use {condition} and {roi}."
         )
+        scalp_b_row = QHBoxLayout()
+        scalp_b_row.setContentsMargins(0, 0, 0, 0)
+        scalp_b_row.setSpacing(4)
+        scalp_b_row.addWidget(self.scalp_title_b_edit)
+        self.scalp_title_b_warning = QLabel("Required")
+        self.scalp_title_b_warning.setStyleSheet("color: red;")
+        self.scalp_title_b_warning.setVisible(False)
+        scalp_b_row.addWidget(self.scalp_title_b_warning)
         self.scalp_title_b_label = QLabel("Scalp title (B):")
-        params_form.addRow(self.scalp_title_b_label, self.scalp_title_b_edit)
+        params_form.addRow(self.scalp_title_b_label, scalp_b_row)
 
         self._toggle_scalp_controls(self.include_scalp_maps)
 
@@ -586,6 +602,9 @@ class PlotGeneratorWindow(QWidget):
 
         ranges_box = QGroupBox("Axis Ranges")
         self._style_box(ranges_box)
+        ranges_box.setSizePolicy(
+            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        )
         ranges_form = QFormLayout(ranges_box)
         ranges_form.setContentsMargins(10, 10, 10, 10)
         ranges_form.setSpacing(8)
@@ -632,11 +651,42 @@ class PlotGeneratorWindow(QWidget):
         y_row.addWidget(self.ymax_spin)
         ranges_form.addRow(QLabel("Y Range:"), y_row)
 
+        scalp_row = QHBoxLayout()
+        scalp_row.setContentsMargins(10, 10, 10, 10)
+        scalp_row.setSpacing(6)
+        self.scalp_min_spin = QDoubleSpinBox()
+        self.scalp_min_spin.setRange(-9999.0, 9999.0)
+        self.scalp_min_spin.setDecimals(2)
+        self.scalp_min_spin.setSingleStep(0.1)
+        self.scalp_min_spin.setValue(float(self.scalp_min))
+        self.scalp_min_spin.setSuffix(" uV")
+        self.scalp_max_spin = QDoubleSpinBox()
+        self.scalp_max_spin.setRange(-9999.0, 9999.0)
+        self.scalp_max_spin.setDecimals(2)
+        self.scalp_max_spin.setSingleStep(0.1)
+        self.scalp_max_spin.setValue(float(self.scalp_max))
+        self.scalp_max_spin.setSuffix(" uV")
+        scalp_row.addWidget(self.scalp_min_spin)
+        scalp_row.addWidget(QLabel("to"))
+        scalp_row.addWidget(self.scalp_max_spin)
+        ranges_form.addRow(QLabel("Scalp range (uV):"), scalp_row)
+
         advanced_box = QGroupBox("Advanced")
         self._style_box(advanced_box)
+        advanced_box.setCheckable(True)
+        advanced_box.setChecked(False)
+        advanced_box.setMaximumWidth(RIGHT_PANEL_MAX_W)
+        advanced_box.setSizePolicy(
+            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        )
         advanced_layout = QVBoxLayout(advanced_box)
         advanced_layout.setContentsMargins(10, 10, 10, 10)
         advanced_layout.setSpacing(8)
+
+        advanced_body = QWidget()
+        advanced_body_layout = QVBoxLayout(advanced_body)
+        advanced_body_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_body_layout.setSpacing(8)
 
         advanced_form = QFormLayout()
         advanced_form.setContentsMargins(0, 0, 0, 0)
@@ -644,12 +694,16 @@ class PlotGeneratorWindow(QWidget):
         advanced_form.addRow(QLabel("Chart title:"), self.title_edit)
         advanced_form.addRow(QLabel("X-axis label:"), self.xlabel_edit)
         advanced_form.addRow(QLabel("Y-axis label:"), self.ylabel_edit)
-        advanced_layout.addLayout(advanced_form)
-        advanced_layout.addWidget(ranges_box)
+        advanced_body_layout.addLayout(advanced_form)
+        advanced_body_layout.addWidget(ranges_box)
+        advanced_layout.addWidget(advanced_body)
 
-        actions_box = QGroupBox("Actions")
-        self._style_box(actions_box)
-        actions_layout = QVBoxLayout(actions_box)
+        actions_container = QWidget()
+        actions_container.setMaximumWidth(RIGHT_PANEL_MAX_W)
+        actions_container.setSizePolicy(
+            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        )
+        actions_layout = QVBoxLayout(actions_container)
         actions_layout.setContentsMargins(10, 10, 10, 10)
         actions_layout.setSpacing(8)
 
@@ -699,24 +753,36 @@ class PlotGeneratorWindow(QWidget):
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(8)
         left_layout.addWidget(file_box)
+        left_layout.addWidget(advanced_box)
+        left_layout.addStretch(1)
 
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(10, 10, 10, 10)
         right_layout.setSpacing(8)
         right_layout.addWidget(params_box)
-        right_layout.addWidget(advanced_box)
-        right_layout.addWidget(actions_box)
+        right_layout.addStretch(1)
 
-        controls_splitter.addWidget(left_container)
-        controls_splitter.addWidget(right_container)
-        controls_splitter.setSizes([600, 300])
+        top_grid = QGridLayout()
+        top_grid.setContentsMargins(0, 0, 0, 0)
+        top_grid.setHorizontalSpacing(10)
+        top_grid.setVerticalSpacing(8)
+        top_grid.addWidget(left_container, 0, 0)
+        top_grid.addWidget(right_container, 0, 1)
+
+        top_widget = QWidget()
+        self._top_controls = top_widget
+        top_layout = QVBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(8)
+        top_layout.addLayout(top_grid)
+        top_layout.addWidget(actions_container)
 
         splitter = QSplitter(Qt.Vertical)
         self._main_splitter = splitter
         self._log_splitter_sizes: list[int] | None = None
         self._log_prev_window_height: int | None = None
-        splitter.addWidget(controls_splitter)
+        splitter.addWidget(top_widget)
 
         console_box = QGroupBox()
         self._style_box(console_box)
@@ -767,10 +833,15 @@ class PlotGeneratorWindow(QWidget):
 
         self.folder_edit.textChanged.connect(self._check_required)
         self.out_edit.textChanged.connect(self._check_required)
-        self.condition_combo.currentTextChanged.connect(self._check_required)
-        self.condition_b_combo.currentTextChanged.connect(self._check_required)
+        self.condition_combo.currentTextChanged.connect(self._on_condition_a_changed)
+        self.condition_b_combo.currentTextChanged.connect(self._on_condition_b_changed)
         self.overlay_check.toggled.connect(self._check_required)
+        self.scalp_title_a_edit.textChanged.connect(self._check_required)
+        self.scalp_title_b_edit.textChanged.connect(self._check_required)
         self._check_required()
+
+        advanced_body.setVisible(advanced_box.isChecked())
+        advanced_box.toggled.connect(advanced_body.setVisible)
 
     def _overlay_toggled(self, checked: bool) -> None:
         for anim in (self._overlay_width_anim, self._overlay_opacity_anim):
@@ -807,6 +878,7 @@ class PlotGeneratorWindow(QWidget):
             # Revert to auto-generation behavior when comparison mode is off
             self._update_chart_title_state(self.condition_combo.currentText())
         self._update_scalp_title_b_visibility()
+        self._update_scalp_title_warnings()
 
     def _on_group_overlay_toggled(self, checked: bool) -> None:
         self.group_list.setEnabled(checked)
@@ -847,6 +919,18 @@ class PlotGeneratorWindow(QWidget):
                 self.color_b_btn.setStyleSheet(f"background-color: {self.stem_color_b};")
                 self.plot_mgr.set_second_color(self.stem_color_b)
             self.plot_mgr.save()
+
+    def _on_condition_a_changed(self, condition: str) -> None:
+        self._update_chart_title_state(condition)
+        self.scalp_title_a_edit.clear()
+        self._update_scalp_title_warnings()
+        self._check_required()
+
+    def _on_condition_b_changed(self, condition: str) -> None:
+        _ = condition  # unused value required by signal signature
+        self.scalp_title_b_edit.clear()
+        self._update_scalp_title_warnings()
+        self._check_required()
 
     def _update_chart_title_state(self, condition: str) -> None:
         """Enable/disable the title field based on the selected condition."""
@@ -1127,6 +1211,22 @@ class PlotGeneratorWindow(QWidget):
         scalp_min = self.scalp_min_spin.value()
         scalp_max = self.scalp_max_spin.value()
 
+        if include_scalp:
+            if not self.scalp_title_a_edit.text().strip():
+                QMessageBox.warning(
+                    self,
+                    "Scalp Title",
+                    "Please enter a scalp title for Condition A.",
+                )
+                return
+            if self.overlay_check.isChecked() and not self.scalp_title_b_edit.text().strip():
+                QMessageBox.warning(
+                    self,
+                    "Scalp Title",
+                    "Please enter a scalp title for Condition B.",
+                )
+                return
+
         overlay_groups = self._group_overlay_enabled()
         selected_groups = self._selected_groups() if overlay_groups else []
         if overlay_groups and not selected_groups:
@@ -1244,6 +1344,9 @@ class PlotGeneratorWindow(QWidget):
             required = required and bool(self.condition_b_combo.currentText())
         if self._group_overlay_enabled() and not self._selected_groups():
             required = False
+        if not self._scalp_titles_valid():
+            required = False
+        self._update_scalp_title_warnings()
         self.gen_btn.setEnabled(required)
 
     def _generation_finished(self) -> None:
