@@ -54,17 +54,8 @@ from Tools.Plot_Generator.manifest_utils import (
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from .worker import _Worker
 
-def _auto_detect_project_dir() -> str:
-    """Return folder containing ``project.json`` or CWD if not found."""
-    path = Path.cwd()
-    while not (path / "project.json").is_file():
-        if path.parent == path:
-            return str(Path.cwd())
-        path = path.parent
-    return str(path)
-
 ALL_CONDITIONS_OPTION = "All Conditions"
-RIGHT_PANEL_MAX_W = 560
+PANEL_MAX_W = 520
 
 
 def _auto_detect_project_dir() -> Path:
@@ -122,7 +113,9 @@ def _resolve_project_subfolder(
     return (_resolve_results_root(project_root, results_folder) / candidate).resolve()
 
 
-def _project_paths(parent: QWidget | None, project_dir: str | None) -> tuple[str | None, str | None]:
+def _project_paths(
+    parent: QWidget | None, project_dir: str | Path | None
+) -> tuple[str | None, str | None]:
     """Return Excel and SNR plot folders for the given or detected project."""
     if project_dir and os.path.isdir(project_dir):
         root = Path(project_dir)
@@ -200,6 +193,8 @@ class PlotGeneratorWindow(QWidget):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Generate SNR Plots")
+        self._ui_initializing = True
+        self._populating_conditions = False
         self.roi_map = load_rois_from_settings()
 
         mgr = SettingsManager()
@@ -324,6 +319,7 @@ class PlotGeneratorWindow(QWidget):
             ]
             | None
         ) = None
+        self._ui_initializing = False
 
     def _bold_label(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -436,6 +432,7 @@ class PlotGeneratorWindow(QWidget):
         file_form = QFormLayout()
         file_form.setContentsMargins(0, 0, 0, 0)
         file_form.setSpacing(6)
+        file_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
@@ -484,11 +481,12 @@ class PlotGeneratorWindow(QWidget):
 
         params_box = QGroupBox("Plot Parameters")
         self._style_box(params_box)
-        params_box.setMaximumWidth(RIGHT_PANEL_MAX_W)
+        params_box.setMaximumWidth(PANEL_MAX_W)
         params_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum))
         params_form = QFormLayout(params_box)
         params_form.setContentsMargins(10, 10, 10, 10)
         params_form.setSpacing(8)
+        params_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         self.condition_combo = QComboBox()
         self.condition_combo.setToolTip("Select the condition to plot")
@@ -675,7 +673,7 @@ class PlotGeneratorWindow(QWidget):
         self._style_box(advanced_box)
         advanced_box.setCheckable(True)
         advanced_box.setChecked(False)
-        advanced_box.setMaximumWidth(RIGHT_PANEL_MAX_W)
+        advanced_box.setMaximumWidth(PANEL_MAX_W)
         advanced_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         )
@@ -699,7 +697,7 @@ class PlotGeneratorWindow(QWidget):
         advanced_layout.addWidget(advanced_body)
 
         actions_container = QWidget()
-        actions_container.setMaximumWidth(RIGHT_PANEL_MAX_W)
+        actions_container.setMaximumWidth(PANEL_MAX_W)
         actions_container.setSizePolicy(
             QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         )
@@ -754,14 +752,12 @@ class PlotGeneratorWindow(QWidget):
         left_layout.setSpacing(8)
         left_layout.addWidget(file_box)
         left_layout.addWidget(advanced_box)
-        left_layout.addStretch(1)
 
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(10, 10, 10, 10)
         right_layout.setSpacing(8)
         right_layout.addWidget(params_box)
-        right_layout.addStretch(1)
 
         top_grid = QGridLayout()
         top_grid.setContentsMargins(0, 0, 0, 0)
@@ -769,9 +765,14 @@ class PlotGeneratorWindow(QWidget):
         top_grid.setVerticalSpacing(8)
         top_grid.addWidget(left_container, 0, 0)
         top_grid.addWidget(right_container, 0, 1)
+        top_grid.setColumnStretch(0, 1)
+        top_grid.setColumnStretch(1, 1)
 
         top_widget = QWidget()
         self._top_controls = top_widget
+        top_widget.setSizePolicy(
+            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        )
         top_layout = QVBoxLayout(top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(8)
@@ -826,6 +827,9 @@ class PlotGeneratorWindow(QWidget):
 
         splitter.addWidget(console_box)
         splitter.setSizes([500, 200])
+        splitter.setChildrenCollapsible(False)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
         root_layout.addWidget(splitter)
 
         root_layout.setSpacing(10)
@@ -863,6 +867,8 @@ class PlotGeneratorWindow(QWidget):
             self._overlay_width_anim.setEndValue(0)
             self._overlay_opacity_anim.setStartValue(self.overlay_container.windowOpacity())
             self._overlay_opacity_anim.setEndValue(0.0)
+            self.scalp_title_b_edit.clear()
+            self.scalp_title_b_warning.setVisible(False)
             if self.group_box.isVisible():
                 self.group_overlay_check.setEnabled(True)
                 self.group_list.setEnabled(self.group_overlay_check.isChecked())
@@ -923,13 +929,15 @@ class PlotGeneratorWindow(QWidget):
 
     def _on_condition_a_changed(self, condition: str) -> None:
         self._update_chart_title_state(condition)
-        self.scalp_title_a_edit.clear()
+        if not (self._ui_initializing or self._populating_conditions):
+            self.scalp_title_a_edit.clear()
         self._update_scalp_title_warnings()
         self._check_required()
 
     def _on_condition_b_changed(self, condition: str) -> None:
         _ = condition  # unused value required by signal signature
-        self.scalp_title_b_edit.clear()
+        if not (self._ui_initializing or self._populating_conditions):
+            self.scalp_title_b_edit.clear()
         self._update_scalp_title_warnings()
         self._check_required()
 
@@ -954,23 +962,27 @@ class PlotGeneratorWindow(QWidget):
                 self.title_edit.setText(condition)
 
     def _populate_conditions(self, folder: str) -> None:
-        self._refresh_group_controls(folder)
-        self.condition_combo.clear()
-        self.condition_b_combo.clear()
+        self._populating_conditions = True
         try:
-            subfolders = [
-                f.name
-                for f in Path(folder).iterdir()
-                if f.is_dir() and ".fif" not in f.name.lower()
-            ]
-        except Exception:
-            subfolders = []
-        if subfolders:
-            self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
-            self.condition_combo.addItems(subfolders)
-            self.condition_b_combo.addItems(subfolders)
-            # Default to "All Conditions" which auto-generates chart names
-            self._update_chart_title_state(ALL_CONDITIONS_OPTION)
+            self._refresh_group_controls(folder)
+            self.condition_combo.clear()
+            self.condition_b_combo.clear()
+            try:
+                subfolders = [
+                    f.name
+                    for f in Path(folder).iterdir()
+                    if f.is_dir() and ".fif" not in f.name.lower()
+                ]
+            except Exception:
+                subfolders = []
+            if subfolders:
+                self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
+                self.condition_combo.addItems(subfolders)
+                self.condition_b_combo.addItems(subfolders)
+                # Default to "All Conditions" which auto-generates chart names
+                self._update_chart_title_state(ALL_CONDITIONS_OPTION)
+        finally:
+            self._populating_conditions = False
 
     def _save_defaults(self) -> None:
         self.plot_mgr.set("paths", "input_folder", self.folder_edit.text())
