@@ -340,38 +340,43 @@ class PlotGeneratorWindow(QWidget):
         self.scalp_title_b_edit.setEnabled(show_b)
 
     def _toggle_log_panel(self, expanded: bool) -> None:
-        # Arrow state
-        if hasattr(self, "log_toggle_btn"):
-            self.log_toggle_btn.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+        self.log_toggle_btn.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+        self.log_body.setVisible(expanded)
 
-        # Show/hide body
-        if hasattr(self, "log_body"):
-            self.log_body.setVisible(expanded)
-
-        # Give space back to the controls by resizing the vertical splitter
         splitter = getattr(self, "_main_splitter", None)
         if splitter is None:
             return
 
         sizes = splitter.sizes()
-        total = sum(sizes) if sizes else 0
+        if len(sizes) != 2:
+            return
+
+        collapsed_h = 52  # header strip height
 
         if not expanded:
-            # store current expanded sizes once
+            # store current state
             self._log_splitter_sizes = sizes
+            self._log_prev_window_height = self.height()
 
-            # keep a small strip for the header-only group
-            collapsed_h = 52  # header strip height
-            if total > collapsed_h:
-                splitter.setSizes([total - collapsed_h, collapsed_h])
+            top_h, bottom_h = sizes[0], sizes[1]
+            delta = max(0, bottom_h - collapsed_h)
+
+            splitter.setSizes([top_h, collapsed_h])
+
+            # shrink the window so the top doesn't expand
+            min_h = self.minimumSizeHint().height()
+            new_h = max(min_h, self.height() - delta)
+            if new_h < self.height():
+                self.resize(self.width(), new_h)
         else:
-            # restore previous sizes if available
             if self._log_splitter_sizes and len(self._log_splitter_sizes) == 2:
                 splitter.setSizes(self._log_splitter_sizes)
-            else:
-                # sensible fallback
-                if total:
-                    splitter.setSizes([int(total * 0.75), int(total * 0.25)])
+
+            if self._log_prev_window_height is not None:
+                # only grow back if needed; don’t forcibly shrink if user resized larger
+                target = self._log_prev_window_height
+                if self.height() < target:
+                    self.resize(self.width(), target)
 
     def _style_box(self, box: QGroupBox) -> None:
         font = box.font()
@@ -676,6 +681,7 @@ class PlotGeneratorWindow(QWidget):
         splitter = QSplitter(Qt.Vertical)
         self._main_splitter = splitter
         self._log_splitter_sizes: list[int] | None = None
+        self._log_prev_window_height: int | None = None
         splitter.addWidget(controls_splitter)
 
         console_box = QGroupBox()
