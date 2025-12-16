@@ -54,7 +54,6 @@ from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from .worker import _Worker
 
 ALL_CONDITIONS_OPTION = "All Conditions"
-PANEL_MAX_W = 500
 
 
 def _auto_detect_project_dir() -> Path:
@@ -405,6 +404,9 @@ class PlotGeneratorWindow(QWidget):
         box.setStyleSheet("QGroupBox::title {font-weight: bold;}")
 
     def _build_ui(self) -> None:
+        self.setMinimumWidth(820)
+        self.resize(1000, 880)
+
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(10, 10, 10, 10)
         root_layout.setSpacing(8)
@@ -424,15 +426,15 @@ class PlotGeneratorWindow(QWidget):
 
         file_box = QGroupBox("File I/O")
         self._style_box(file_box)
-        file_box.setMaximumWidth(PANEL_MAX_W)
-        file_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum))
+        file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         file_layout = QVBoxLayout(file_box)
         file_layout.setContentsMargins(8, 8, 8, 8)
         file_layout.setSpacing(6)
         file_form = QFormLayout()
         file_form.setContentsMargins(0, 0, 0, 0)
         file_form.setSpacing(6)
-        file_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        file_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        file_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
@@ -481,12 +483,12 @@ class PlotGeneratorWindow(QWidget):
 
         params_box = QGroupBox("Plot Parameters")
         self._style_box(params_box)
-        params_box.setMaximumWidth(PANEL_MAX_W)
-        params_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum))
+        params_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         params_form = QFormLayout(params_box)
         params_form.setContentsMargins(8, 8, 8, 8)
         params_form.setSpacing(8)
-        params_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        params_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        params_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self.condition_combo = QComboBox()
         self.condition_combo.setToolTip("Select the condition to plot")
@@ -673,9 +675,8 @@ class PlotGeneratorWindow(QWidget):
         self._style_box(advanced_box)
         advanced_box.setCheckable(True)
         advanced_box.setChecked(False)
-        advanced_box.setMaximumWidth(PANEL_MAX_W)
         advanced_box.setSizePolicy(
-            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         )
         advanced_layout = QVBoxLayout(advanced_box)
         advanced_layout.setContentsMargins(8, 8, 8, 8)
@@ -692,6 +693,8 @@ class PlotGeneratorWindow(QWidget):
         advanced_form = QFormLayout()
         advanced_form.setContentsMargins(0, 0, 0, 0)
         advanced_form.setSpacing(8)
+        advanced_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        advanced_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         advanced_form.addRow(QLabel("Chart title:"), self.title_edit)
         advanced_form.addRow(QLabel("X-axis label:"), self.xlabel_edit)
         advanced_form.addRow(QLabel("Y-axis label:"), self.ylabel_edit)
@@ -700,97 +703,38 @@ class PlotGeneratorWindow(QWidget):
         advanced_layout.addWidget(advanced_body)
         self._advanced_body = advanced_body
 
-        actions_container = QWidget()
-        actions_container.setMaximumWidth(PANEL_MAX_W)
-        actions_container.setSizePolicy(
-            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        )
-        actions_layout = QVBoxLayout(actions_container)
-        actions_layout.setContentsMargins(8, 8, 8, 8)
-        actions_layout.setSpacing(8)
-
-        btn_row = QHBoxLayout()
-        btn_row.setContentsMargins(0, 0, 0, 0)
-        btn_row.setSpacing(8)
-        self.save_defaults_btn = QPushButton("Save Defaults")
-        self.save_defaults_btn.setToolTip("Save current folders as defaults")
-        self.save_defaults_btn.clicked.connect(self._save_defaults)
-        self.load_defaults_btn = QPushButton("Reset to Default settings")
-        self.load_defaults_btn.setToolTip("Reset all values to defaults")
-        self.load_defaults_btn.clicked.connect(self._load_defaults)
-        self.gen_btn = QPushButton("Generate")
-        self.gen_btn.setToolTip("Start plot generation")
-        self.gen_btn.clicked.connect(self._generate)
-        self.gen_btn.setEnabled(False)
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setToolTip("Cancel generation")
-        self.cancel_btn.setEnabled(False)
-        self.cancel_btn.clicked.connect(self._cancel_generation)
-        left_btns = QHBoxLayout()
-        left_btns.setSpacing(6)
-        for w in (self.save_defaults_btn, self.load_defaults_btn):
-            left_btns.addWidget(w)
-
-        right_btns = QHBoxLayout()
-        right_btns.setSpacing(6)
-        self.gen_btn.setDefault(True)
-        self.gen_btn.setAutoDefault(True)
-        self.gen_btn.setMinimumWidth(110)
-        right_btns.addWidget(self.gen_btn)
-        right_btns.addWidget(self.cancel_btn)
-
-        btn_row.addLayout(left_btns)
-        btn_row.addStretch()
-        btn_row.addLayout(right_btns)
-        actions_layout.addLayout(btn_row)
-
         self.progress_bar = QProgressBar()
         self.progress_bar.setStyleSheet(
             "QProgressBar::chunk {background-color: #16C60C;}"
         )
-        actions_layout.addWidget(self.progress_bar)
 
-        left_container = QWidget()
-        left_container.setSizePolicy(
+        progress_box = QGroupBox("Progress")
+        self._style_box(progress_box)
+        progress_box.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        )
+        progress_layout = QVBoxLayout(progress_box)
+        progress_layout.setContentsMargins(10, 10, 10, 10)
+        progress_layout.setSpacing(6)
+        progress_layout.addWidget(self.progress_bar)
+
+        top_content = QWidget()
+        top_content.setSizePolicy(
             QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         )
-        left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
-        left_layout.addWidget(file_box)
-        left_layout.addWidget(advanced_box)
-
-        right_container = QWidget()
-        right_container.setSizePolicy(
-            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        )
-        right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
-        right_layout.addWidget(params_box)
-
-        columns_row = QHBoxLayout()
-        columns_row.setContentsMargins(0, 0, 0, 0)
-        columns_row.setSpacing(10)
-        columns_row.addWidget(left_container)
-        columns_row.addWidget(right_container)
-
-        top_widget = QWidget()
-        self._top_controls = top_widget
-        top_widget.setSizePolicy(
-            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        )
-        top_layout = QVBoxLayout(top_widget)
+        top_layout = QVBoxLayout(top_content)
         top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(8)
-        top_layout.addLayout(columns_row)
-        top_layout.addWidget(actions_container)
+        top_layout.setSpacing(10)
+        top_layout.addWidget(file_box)
+        top_layout.addWidget(params_box)
+        top_layout.addWidget(advanced_box)
+        top_layout.addWidget(progress_box)
 
         splitter = QSplitter(Qt.Vertical)
         self._main_splitter = splitter
         self._log_splitter_sizes: list[int] | None = None
         self._log_prev_window_height: int | None = None
-        splitter.addWidget(top_widget)
+        splitter.addWidget(top_content)
 
         console_box = QGroupBox()
         self._style_box(console_box)
@@ -804,8 +748,8 @@ class PlotGeneratorWindow(QWidget):
         self.log_toggle_btn = QToolButton()
         self.log_toggle_btn.setText("Log Output")
         self.log_toggle_btn.setCheckable(True)
-        self.log_toggle_btn.setChecked(True)
-        self.log_toggle_btn.setArrowType(Qt.DownArrow)
+        self.log_toggle_btn.setChecked(False)
+        self.log_toggle_btn.setArrowType(Qt.RightArrow)
         self.log_toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.log_toggle_btn.toggled.connect(self._toggle_log_panel)
         header.addWidget(self.log_toggle_btn)
@@ -832,15 +776,47 @@ class PlotGeneratorWindow(QWidget):
 
         console_layout.addWidget(self.log_body)
 
+        self.log_body.setVisible(False)
+
         splitter.addWidget(console_box)
         splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
-        top_h = top_widget.sizeHint().height()
+        top_h = top_content.sizeHint().height()
         log_h = max(180, int(top_h * 0.45))
         splitter.setSizes([top_h, log_h])
         root_layout.addWidget(splitter)
+
+        self.save_defaults_btn = QPushButton("Save Defaults")
+        self.save_defaults_btn.setToolTip("Save current folders as defaults")
+        self.save_defaults_btn.clicked.connect(self._save_defaults)
+        self.load_defaults_btn = QPushButton("Reset to Default settings")
+        self.load_defaults_btn.setToolTip("Reset all values to defaults")
+        self.load_defaults_btn.clicked.connect(self._load_defaults)
+        self.gen_btn = QPushButton("Generate")
+        self.gen_btn.setToolTip("Start plot generation")
+        self.gen_btn.clicked.connect(self._generate)
+        self.gen_btn.setEnabled(False)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setToolTip("Cancel generation")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._cancel_generation)
+        self.gen_btn.setDefault(True)
+        self.gen_btn.setAutoDefault(True)
+        self.gen_btn.setMinimumWidth(110)
+
+        actions_widget = QWidget()
+        actions_layout = QHBoxLayout(actions_widget)
+        actions_layout.setContentsMargins(8, 8, 8, 8)
+        actions_layout.setSpacing(12)
+        actions_layout.addWidget(self.save_defaults_btn)
+        actions_layout.addWidget(self.load_defaults_btn)
+        actions_layout.addSpacing(12)
+        actions_layout.addWidget(self.gen_btn)
+        actions_layout.addWidget(self.cancel_btn)
+
+        root_layout.addWidget(actions_widget, alignment=Qt.AlignHCenter)
 
         self.folder_edit.textChanged.connect(self._check_required)
         self.out_edit.textChanged.connect(self._check_required)
@@ -854,6 +830,8 @@ class PlotGeneratorWindow(QWidget):
 
         advanced_body.setVisible(advanced_box.isChecked())
         advanced_box.toggled.connect(self._on_advanced_toggled)
+
+        self._toggle_log_panel(False)
 
     def _on_advanced_toggled(self, checked: bool) -> None:
         if hasattr(self, "_advanced_body"):
