@@ -7,7 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, QThread, QPropertyAnimation, Qt
+from PySide6.QtCore import (
+    QParallelAnimationGroup,
+    QPropertyAnimation,
+    QSignalBlocker,
+    QThread,
+    Qt,
+)
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -32,6 +38,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QListWidget,
     QListWidgetItem,
+    QGraphicsOpacityEffect,
 )
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import QColorDialog
@@ -281,14 +288,41 @@ class PlotGeneratorWindow(QWidget):
 
 
         self._build_ui()
-        self._overlay_width_anim = QPropertyAnimation(self.overlay_container, b"maximumWidth")
-        self._overlay_width_anim.setDuration(200)
-        self._overlay_opacity_anim = QPropertyAnimation(self.overlay_container, b"windowOpacity")
+        self._overlay_gap_size = 12
+        self._overlay_width_anim = QPropertyAnimation(
+            self.condB_container, b"maximumWidth"
+        )
+        self._overlay_gap1_anim = QPropertyAnimation(
+            self.overlay_gap1, b"maximumWidth"
+        )
+        self._overlay_gap2_anim = QPropertyAnimation(
+            self.overlay_gap2, b"maximumWidth"
+        )
+        for anim in (
+            self._overlay_width_anim,
+            self._overlay_gap1_anim,
+            self._overlay_gap2_anim,
+        ):
+            anim.setDuration(200)
+        self._overlay_opacity_anim = QPropertyAnimation(
+            self._condB_opacity_effect, b"opacity"
+        )
         self._overlay_opacity_anim.setDuration(200)
-        self.overlay_container.setVisible(self.overlay_check.isChecked())
-        self.condition_b_label.setVisible(self.overlay_check.isChecked())
-        self.overlay_container.setMaximumWidth(0)
-        self.overlay_container.setWindowOpacity(0.0)
+        self._overlay_anim_group = QParallelAnimationGroup(self)
+        if self.overlay_check.isChecked():
+            self.condB_container.setMaximumWidth(
+                self.condB_container.sizeHint().width()
+            )
+            self.overlay_gap1.setMaximumWidth(self._overlay_gap_size)
+            self.overlay_gap2.setMaximumWidth(self._overlay_gap_size)
+            self._condB_opacity_effect.setOpacity(1.0)
+            self.condB_container.setVisible(True)
+        else:
+            self.condB_container.setMaximumWidth(0)
+            self.overlay_gap1.setMaximumWidth(0)
+            self.overlay_gap2.setMaximumWidth(0)
+            self._condB_opacity_effect.setOpacity(0.0)
+            self.condB_container.setVisible(False)
         # Prepare animation for smooth progress updates
         self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
         self._progress_anim.setDuration(200)
@@ -344,13 +378,22 @@ class PlotGeneratorWindow(QWidget):
         self.scalp_title_b_edit.setEnabled(show_b)
         self._update_scalp_title_warnings()
 
+    def _set_invalid_state(self, edit: QLineEdit, invalid: bool) -> None:
+        edit.setProperty("invalid", invalid)
+        edit.style().unpolish(edit)
+        edit.style().polish(edit)
+
     def _update_scalp_title_warnings(self) -> None:
         include_scalp = self.scalp_check.isChecked()
         need_b = include_scalp and self.overlay_check.isChecked()
-        show_a = include_scalp and not self.scalp_title_a_edit.text().strip()
-        show_b = need_b and not self.scalp_title_b_edit.text().strip()
-        self.scalp_title_a_warning.setVisible(show_a)
-        self.scalp_title_b_warning.setVisible(show_b and self.scalp_title_b_edit.isVisible())
+        invalid_a = include_scalp and not self.scalp_title_a_edit.text().strip()
+        invalid_b = (
+            need_b
+            and self.scalp_title_b_edit.isVisible()
+            and not self.scalp_title_b_edit.text().strip()
+        )
+        self._set_invalid_state(self.scalp_title_a_edit, invalid_a)
+        self._set_invalid_state(self.scalp_title_b_edit, invalid_b)
 
     def _scalp_titles_valid(self) -> bool:
         if not self.scalp_check.isChecked():
@@ -410,6 +453,10 @@ class PlotGeneratorWindow(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(10, 10, 10, 10)
         root_layout.setSpacing(8)
+        self.setStyleSheet(
+            self.styleSheet()
+            + "\nQLineEdit[invalid=\"true\"] {border: 1px solid red;}"
+        )
 
         menu = QMenuBar()
         menu.setNativeMenuBar(False)
@@ -509,26 +556,75 @@ class PlotGeneratorWindow(QWidget):
         self.color_b_btn.setToolTip("Color for Condition B")
         self.color_b_btn.clicked.connect(lambda: self._choose_color("b"))
 
-        cond_a_widget = QWidget()
-        cond_a_row = QHBoxLayout(cond_a_widget)
-        cond_a_row.setContentsMargins(0, 0, 0, 0)
-        cond_a_row.setSpacing(6)
-        cond_a_row.addWidget(self.condition_combo)
-        cond_a_row.addWidget(self.color_a_btn)
-        params_form.addRow(QLabel("Condition A:"), cond_a_widget)
+        self.roi_combo = QComboBox()
+        self.roi_combo.addItems([ALL_ROIS_OPTION] + list(self.roi_map.keys()))
+        self.roi_combo.setToolTip("Select the region of interest")
+
+        cond_a_container = QWidget()
+        cond_a_layout = QHBoxLayout(cond_a_container)
+        cond_a_layout.setContentsMargins(0, 0, 0, 0)
+        cond_a_layout.setSpacing(6)
+        cond_a_layout.addWidget(self.condition_combo)
+        cond_a_layout.addWidget(self.color_a_btn)
+
+        self.condB_container = QWidget()
+        cond_b_layout = QHBoxLayout(self.condB_container)
+        cond_b_layout.setContentsMargins(0, 0, 0, 0)
+        cond_b_layout.setSpacing(6)
+        cond_b_layout.addWidget(self.condition_b_combo)
+        cond_b_layout.addWidget(self.color_b_btn)
+        self._condB_opacity_effect = QGraphicsOpacityEffect(self.condB_container)
+        self.condB_container.setGraphicsEffect(self._condB_opacity_effect)
+
+        roi_container = QWidget()
+        roi_layout = QHBoxLayout(roi_container)
+        roi_layout.setContentsMargins(0, 0, 0, 0)
+        roi_layout.setSpacing(6)
+        roi_layout.addWidget(self.roi_combo)
+
+        gap1 = QWidget()
+        gap1.setFixedHeight(1)
+        gap1.setMaximumWidth(0)
+        gap1.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        gap2 = QWidget()
+        gap2.setFixedHeight(1)
+        gap2.setMaximumWidth(0)
+        gap2.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        row_container = QWidget()
+        row_layout = QHBoxLayout(row_container)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+        row_layout.addStretch(1)
+        row_layout.addWidget(cond_a_container)
+        row_layout.addWidget(gap1)
+        row_layout.addWidget(self.condB_container)
+        row_layout.addWidget(gap2)
+        row_layout.addWidget(roi_container)
+        row_layout.addStretch(1)
+        params_form.addRow("", row_container)
+
+        self.overlay_gap1 = gap1
+        self.overlay_gap2 = gap2
 
         self.overlay_check = QCheckBox("Overlay Comparison")
         self.overlay_check.toggled.connect(self._overlay_toggled)
-        params_form.addRow("", self.overlay_check)
 
-        self.overlay_container = QWidget()
-        oc_layout = QHBoxLayout(self.overlay_container)
-        oc_layout.setContentsMargins(0, 0, 0, 0)
-        oc_layout.setSpacing(6)
-        oc_layout.addWidget(self.condition_b_combo)
-        oc_layout.addWidget(self.color_b_btn)
-        self.condition_b_label = QLabel("Condition B:")
-        params_form.addRow(self.condition_b_label, self.overlay_container)
+        overlay_row = QWidget()
+        overlay_layout = QHBoxLayout(overlay_row)
+        overlay_layout.setContentsMargins(0, 0, 0, 0)
+        overlay_layout.setSpacing(12)
+        overlay_layout.addStretch(1)
+        overlay_layout.addWidget(self.overlay_check)
+
+        self.scalp_check = QCheckBox("Include scalp maps")
+        self.scalp_check.setChecked(self.include_scalp_maps)
+        self.scalp_check.toggled.connect(self._toggle_scalp_controls)
+        overlay_layout.addWidget(self.scalp_check)
+        overlay_layout.addStretch(1)
+
+        params_form.addRow("", overlay_row)
 
         self.group_box = QGroupBox("Group Options")
         self._style_box(self.group_box)
@@ -545,48 +641,22 @@ class PlotGeneratorWindow(QWidget):
         self.group_box.setVisible(False)
         params_form.addRow(self.group_box)
 
-
-
-        self.roi_combo = QComboBox()
-        self.roi_combo.addItems([ALL_ROIS_OPTION] + list(self.roi_map.keys()))
-        self.roi_combo.setToolTip("Select the region of interest")
-        params_form.addRow(QLabel("ROI:"), self.roi_combo)
-
-        self.scalp_check = QCheckBox("Include scalp maps")
-        self.scalp_check.setChecked(self.include_scalp_maps)
-        self.scalp_check.toggled.connect(self._toggle_scalp_controls)
-        params_form.addRow("", self.scalp_check)
-
         self.scalp_title_a_edit = QLineEdit(self.scalp_title_a_template)
         self.scalp_title_a_edit.setPlaceholderText("{condition} {roi} scalp map")
         self.scalp_title_a_edit.setToolTip(
             "Title template for scalp maps. Use {condition} and {roi} placeholders."
         )
-        scalp_a_row = QHBoxLayout()
-        scalp_a_row.setContentsMargins(0, 0, 0, 0)
-        scalp_a_row.setSpacing(4)
-        scalp_a_row.addWidget(self.scalp_title_a_edit)
-        self.scalp_title_a_warning = QLabel("Required")
-        self.scalp_title_a_warning.setStyleSheet("color: red;")
-        self.scalp_title_a_warning.setVisible(False)
-        scalp_a_row.addWidget(self.scalp_title_a_warning)
-        params_form.addRow(QLabel("Scalp title (A):"), scalp_a_row)
+        self.scalp_title_a_edit.setProperty("invalid", False)
+        params_form.addRow(QLabel("Scalp title (A):"), self.scalp_title_a_edit)
 
         self.scalp_title_b_edit = QLineEdit(self.scalp_title_b_template)
         self.scalp_title_b_edit.setPlaceholderText("{condition} {roi} scalp map")
         self.scalp_title_b_edit.setToolTip(
             "Title template for Condition B scalp maps. Use {condition} and {roi}."
         )
-        scalp_b_row = QHBoxLayout()
-        scalp_b_row.setContentsMargins(0, 0, 0, 0)
-        scalp_b_row.setSpacing(4)
-        scalp_b_row.addWidget(self.scalp_title_b_edit)
-        self.scalp_title_b_warning = QLabel("Required")
-        self.scalp_title_b_warning.setStyleSheet("color: red;")
-        self.scalp_title_b_warning.setVisible(False)
-        scalp_b_row.addWidget(self.scalp_title_b_warning)
+        self.scalp_title_b_edit.setProperty("invalid", False)
         self.scalp_title_b_label = QLabel("Scalp title (B):")
-        params_form.addRow(self.scalp_title_b_label, scalp_b_row)
+        params_form.addRow(self.scalp_title_b_label, self.scalp_title_b_edit)
 
         self.title_edit = QLineEdit(self._defaults["title_snr"])
         self.title_edit.setPlaceholderText("e.g. Fruit vs Veg")
@@ -671,16 +741,28 @@ class PlotGeneratorWindow(QWidget):
         scalp_row.addWidget(self.scalp_max_spin)
         ranges_form.addRow(QLabel("Scalp range (uV):"), scalp_row)
 
-        advanced_box = QGroupBox("Advanced")
+        advanced_box = QGroupBox()
         self._style_box(advanced_box)
-        advanced_box.setCheckable(True)
-        advanced_box.setChecked(False)
         advanced_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         )
         advanced_layout = QVBoxLayout(advanced_box)
         advanced_layout.setContentsMargins(8, 8, 8, 8)
-        advanced_layout.setSpacing(8)
+        advanced_layout.setSpacing(4)
+
+        adv_header = QHBoxLayout()
+        adv_header.setContentsMargins(2, 2, 2, 2)
+        adv_header.setSpacing(6)
+        self.advanced_toggle_btn = QToolButton()
+        self.advanced_toggle_btn.setText("Advanced")
+        self.advanced_toggle_btn.setCheckable(True)
+        self.advanced_toggle_btn.setChecked(False)
+        self.advanced_toggle_btn.setArrowType(Qt.RightArrow)
+        self.advanced_toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.advanced_toggle_btn.toggled.connect(self._on_advanced_toggled)
+        adv_header.addWidget(self.advanced_toggle_btn)
+        adv_header.addStretch()
+        advanced_layout.addLayout(adv_header)
 
         advanced_body = QWidget()
         advanced_body.setSizePolicy(
@@ -720,7 +802,7 @@ class PlotGeneratorWindow(QWidget):
 
         top_content = QWidget()
         top_content.setSizePolicy(
-            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         )
         top_layout = QVBoxLayout(top_content)
         top_layout.setContentsMargins(0, 0, 0, 0)
@@ -743,8 +825,8 @@ class PlotGeneratorWindow(QWidget):
         console_layout.setSpacing(8)
 
         header = QHBoxLayout()
-        header.setContentsMargins(10, 10, 10, 10)
-        header.setSpacing(8)
+        header.setContentsMargins(2, 2, 2, 2)
+        header.setSpacing(6)
         self.log_toggle_btn = QToolButton()
         self.log_toggle_btn.setText("Log Output")
         self.log_toggle_btn.setCheckable(True)
@@ -828,43 +910,64 @@ class PlotGeneratorWindow(QWidget):
         self._toggle_scalp_controls(self.include_scalp_maps)
         self._check_required()
 
-        advanced_body.setVisible(advanced_box.isChecked())
-        advanced_box.toggled.connect(self._on_advanced_toggled)
+        advanced_body.setVisible(False)
+        self.advanced_toggle_btn.toggled.connect(self._on_advanced_toggled)
 
         self._toggle_log_panel(False)
 
     def _on_advanced_toggled(self, checked: bool) -> None:
         if hasattr(self, "_advanced_body"):
             self._advanced_body.setVisible(checked)
+        if hasattr(self, "advanced_toggle_btn"):
+            self.advanced_toggle_btn.setArrowType(
+                Qt.DownArrow if checked else Qt.RightArrow
+            )
         self.adjustSize()
 
     def _overlay_toggled(self, checked: bool) -> None:
-        for anim in (self._overlay_width_anim, self._overlay_opacity_anim):
-            anim.stop()
+        self._overlay_anim_group.stop()
+        self._overlay_anim_group = QParallelAnimationGroup(self)
+        target_width = self.condB_container.sizeHint().width() if checked else 0
+        target_gap = self._overlay_gap_size if checked else 0
+
         if checked:
-            end_width = self.overlay_container.sizeHint().width()
-            self.overlay_container.setVisible(True)
-            self._overlay_width_anim.setStartValue(self.overlay_container.maximumWidth())
-            self._overlay_width_anim.setEndValue(end_width)
-            self._overlay_opacity_anim.setStartValue(self.overlay_container.windowOpacity())
-            self._overlay_opacity_anim.setEndValue(1.0)
+            self.condB_container.setVisible(True)
             if self.group_box.isVisible():
                 self.group_overlay_check.setChecked(False)
                 self.group_overlay_check.setEnabled(False)
                 self.group_list.setEnabled(False)
         else:
-            self._overlay_width_anim.setStartValue(self.overlay_container.maximumWidth())
-            self._overlay_width_anim.setEndValue(0)
-            self._overlay_opacity_anim.setStartValue(self.overlay_container.windowOpacity())
-            self._overlay_opacity_anim.setEndValue(0.0)
             self.scalp_title_b_edit.clear()
-            self.scalp_title_b_warning.setVisible(False)
             if self.group_box.isVisible():
                 self.group_overlay_check.setEnabled(True)
                 self.group_list.setEnabled(self.group_overlay_check.isChecked())
-        self._overlay_width_anim.start()
-        self._overlay_opacity_anim.start()
-        self.condition_b_label.setVisible(checked)
+
+        self._overlay_width_anim.setStartValue(self.condB_container.maximumWidth())
+        self._overlay_width_anim.setEndValue(target_width)
+        self._overlay_gap1_anim.setStartValue(self.overlay_gap1.maximumWidth())
+        self._overlay_gap1_anim.setEndValue(target_gap)
+        self._overlay_gap2_anim.setStartValue(self.overlay_gap2.maximumWidth())
+        self._overlay_gap2_anim.setEndValue(target_gap)
+        self._overlay_opacity_anim.setStartValue(
+            self._condB_opacity_effect.opacity()
+        )
+        self._overlay_opacity_anim.setEndValue(1.0 if checked else 0.0)
+
+        for anim in (
+            self._overlay_width_anim,
+            self._overlay_gap1_anim,
+            self._overlay_gap2_anim,
+            self._overlay_opacity_anim,
+        ):
+            self._overlay_anim_group.addAnimation(anim)
+
+        if not checked:
+            def _hide_b() -> None:
+                self.condB_container.setVisible(False)
+
+            self._overlay_anim_group.finished.connect(_hide_b)
+
+        self._overlay_anim_group.start()
         if checked:
             self.title_edit.setEnabled(True)
             self.title_edit.clear()
