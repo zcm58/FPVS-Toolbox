@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QThread, QPropertyAnimation, Qt
+from PySide6.QtCore import QSignalBlocker, QThread, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
-    QGridLayout,
     QDoubleSpinBox,
     QCheckBox,
     QStyle,
@@ -55,7 +54,7 @@ from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from .worker import _Worker
 
 ALL_CONDITIONS_OPTION = "All Conditions"
-PANEL_MAX_W = 520
+PANEL_MAX_W = 500
 
 
 def _auto_detect_project_dir() -> Path:
@@ -425,6 +424,7 @@ class PlotGeneratorWindow(QWidget):
 
         file_box = QGroupBox("File I/O")
         self._style_box(file_box)
+        file_box.setMaximumWidth(PANEL_MAX_W)
         file_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum))
         file_layout = QVBoxLayout(file_box)
         file_layout.setContentsMargins(8, 8, 8, 8)
@@ -484,7 +484,7 @@ class PlotGeneratorWindow(QWidget):
         params_box.setMaximumWidth(PANEL_MAX_W)
         params_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum))
         params_form = QFormLayout(params_box)
-        params_form.setContentsMargins(10, 10, 10, 10)
+        params_form.setContentsMargins(8, 8, 8, 8)
         params_form.setSpacing(8)
         params_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
@@ -622,7 +622,7 @@ class PlotGeneratorWindow(QWidget):
         self.xmax_spin.setValue(float(self._defaults["x_max"]))
         self.xmax_spin.setToolTip("Maximum X frequency")
         x_row = QHBoxLayout()
-        x_row.setContentsMargins(10, 10, 10, 10)
+        x_row.setContentsMargins(0, 0, 0, 0)
         x_row.setSpacing(8)
         x_row.addWidget(self.xmin_spin)
         x_row.addWidget(QLabel("to"))
@@ -642,7 +642,7 @@ class PlotGeneratorWindow(QWidget):
         self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
         self.ymax_spin.setToolTip("Maximum Y value")
         y_row = QHBoxLayout()
-        y_row.setContentsMargins(10, 10, 10, 10)
+        y_row.setContentsMargins(0, 0, 0, 0)
         y_row.setSpacing(8)
         y_row.addWidget(self.ymin_spin)
         y_row.addWidget(QLabel("to"))
@@ -650,7 +650,7 @@ class PlotGeneratorWindow(QWidget):
         ranges_form.addRow(QLabel("Y Range:"), y_row)
 
         scalp_row = QHBoxLayout()
-        scalp_row.setContentsMargins(10, 10, 10, 10)
+        scalp_row.setContentsMargins(0, 0, 0, 0)
         scalp_row.setSpacing(6)
         self.scalp_min_spin = QDoubleSpinBox()
         self.scalp_min_spin.setRange(-9999.0, 9999.0)
@@ -678,10 +678,13 @@ class PlotGeneratorWindow(QWidget):
             QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         )
         advanced_layout = QVBoxLayout(advanced_box)
-        advanced_layout.setContentsMargins(10, 10, 10, 10)
+        advanced_layout.setContentsMargins(8, 8, 8, 8)
         advanced_layout.setSpacing(8)
 
         advanced_body = QWidget()
+        advanced_body.setSizePolicy(
+            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        )
         advanced_body_layout = QVBoxLayout(advanced_body)
         advanced_body_layout.setContentsMargins(0, 0, 0, 0)
         advanced_body_layout.setSpacing(8)
@@ -695,6 +698,7 @@ class PlotGeneratorWindow(QWidget):
         advanced_body_layout.addLayout(advanced_form)
         advanced_body_layout.addWidget(ranges_box)
         advanced_layout.addWidget(advanced_body)
+        self._advanced_body = advanced_body
 
         actions_container = QWidget()
         actions_container.setMaximumWidth(PANEL_MAX_W)
@@ -702,11 +706,11 @@ class PlotGeneratorWindow(QWidget):
             QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         )
         actions_layout = QVBoxLayout(actions_container)
-        actions_layout.setContentsMargins(10, 10, 10, 10)
+        actions_layout.setContentsMargins(8, 8, 8, 8)
         actions_layout.setSpacing(8)
 
         btn_row = QHBoxLayout()
-        btn_row.setContentsMargins(10, 10, 10, 10)
+        btn_row.setContentsMargins(0, 0, 0, 0)
         btn_row.setSpacing(8)
         self.save_defaults_btn = QPushButton("Save Defaults")
         self.save_defaults_btn.setToolTip("Save current folders as defaults")
@@ -747,26 +751,29 @@ class PlotGeneratorWindow(QWidget):
         actions_layout.addWidget(self.progress_bar)
 
         left_container = QWidget()
+        left_container.setSizePolicy(
+            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        )
         left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(10, 10, 10, 10)
+        left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
         left_layout.addWidget(file_box)
         left_layout.addWidget(advanced_box)
 
         right_container = QWidget()
+        right_container.setSizePolicy(
+            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        )
         right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(10, 10, 10, 10)
+        right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
         right_layout.addWidget(params_box)
 
-        top_grid = QGridLayout()
-        top_grid.setContentsMargins(0, 0, 0, 0)
-        top_grid.setHorizontalSpacing(10)
-        top_grid.setVerticalSpacing(8)
-        top_grid.addWidget(left_container, 0, 0)
-        top_grid.addWidget(right_container, 0, 1)
-        top_grid.setColumnStretch(0, 1)
-        top_grid.setColumnStretch(1, 1)
+        columns_row = QHBoxLayout()
+        columns_row.setContentsMargins(0, 0, 0, 0)
+        columns_row.setSpacing(10)
+        columns_row.addWidget(left_container)
+        columns_row.addWidget(right_container)
 
         top_widget = QWidget()
         self._top_controls = top_widget
@@ -776,7 +783,7 @@ class PlotGeneratorWindow(QWidget):
         top_layout = QVBoxLayout(top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(8)
-        top_layout.addLayout(top_grid)
+        top_layout.addLayout(columns_row)
         top_layout.addWidget(actions_container)
 
         splitter = QSplitter(Qt.Vertical)
@@ -826,14 +833,14 @@ class PlotGeneratorWindow(QWidget):
         console_layout.addWidget(self.log_body)
 
         splitter.addWidget(console_box)
-        splitter.setSizes([500, 200])
         splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        root_layout.addWidget(splitter)
 
-        root_layout.setSpacing(10)
-        root_layout.setContentsMargins(10, 10, 10, 10)
+        top_h = top_widget.sizeHint().height()
+        log_h = max(180, int(top_h * 0.45))
+        splitter.setSizes([top_h, log_h])
+        root_layout.addWidget(splitter)
 
         self.folder_edit.textChanged.connect(self._check_required)
         self.out_edit.textChanged.connect(self._check_required)
@@ -846,7 +853,12 @@ class PlotGeneratorWindow(QWidget):
         self._check_required()
 
         advanced_body.setVisible(advanced_box.isChecked())
-        advanced_box.toggled.connect(advanced_body.setVisible)
+        advanced_box.toggled.connect(self._on_advanced_toggled)
+
+    def _on_advanced_toggled(self, checked: bool) -> None:
+        if hasattr(self, "_advanced_body"):
+            self._advanced_body.setVisible(checked)
+        self.adjustSize()
 
     def _overlay_toggled(self, checked: bool) -> None:
         for anim in (self._overlay_width_anim, self._overlay_opacity_anim):
@@ -965,8 +977,7 @@ class PlotGeneratorWindow(QWidget):
         self._populating_conditions = True
         try:
             self._refresh_group_controls(folder)
-            self.condition_combo.clear()
-            self.condition_b_combo.clear()
+            subfolders: list[str] = []
             try:
                 subfolders = [
                     f.name
@@ -975,12 +986,24 @@ class PlotGeneratorWindow(QWidget):
                 ]
             except Exception:
                 subfolders = []
-            if subfolders:
-                self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
-                self.condition_combo.addItems(subfolders)
-                self.condition_b_combo.addItems(subfolders)
-                # Default to "All Conditions" which auto-generates chart names
-                self._update_chart_title_state(ALL_CONDITIONS_OPTION)
+
+            with QSignalBlocker(self.condition_combo), QSignalBlocker(
+                self.condition_b_combo
+            ):
+                self.condition_combo.clear()
+                self.condition_b_combo.clear()
+                if subfolders:
+                    self.condition_combo.addItem(ALL_CONDITIONS_OPTION)
+                    self.condition_combo.addItems(subfolders)
+                    self.condition_b_combo.addItems(subfolders)
+            # Default to "All Conditions" which auto-generates chart names
+            self._update_chart_title_state(
+                ALL_CONDITIONS_OPTION
+                if subfolders
+                else self.condition_combo.currentText()
+            )
+            self._update_scalp_title_warnings()
+            self._check_required()
         finally:
             self._populating_conditions = False
 
