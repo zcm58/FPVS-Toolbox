@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -28,13 +28,31 @@ class _ParticipantFiles:
     cond_b_file: Path
 
 
-@dataclass(frozen=True)
+@dataclass
 class RatioRow:
     pid: str
-    snr_a: float | None
-    snr_b: float | None
+    summary_a: float | None
+    summary_b: float | None
     ratio: float | None
     sig_count: int
+    metric_used: str
+    skip_reason: str | None = None
+    include_in_summary: bool = True
+    outlier_flag: bool = False
+    outlier_method: str | None = None
+    outlier_score: float | None = None
+    snr_a: float | None = None
+    snr_b: float | None = None
+
+
+@dataclass
+class RatioCalcSummaryCounts:
+    participants_total: int = 0
+    participants_used_per_roi: dict[str, int] = field(default_factory=dict)
+    skipped_denominator_zero: int = 0
+    skipped_missing: int = 0
+    skipped_nonpositive_bca: int = 0
+    outliers_flagged_per_roi: dict[str, int] = field(default_factory=dict)
 
 
 class RatioCalcWorker(QObject):
@@ -54,7 +72,7 @@ class RatioCalcWorker(QObject):
             logger.exception(msg)
             self.error.emit(msg)
             result = RatioCalcResult(
-                pd.DataFrame(), {}, None, [msg], self.inputs.output_path, self.inputs.output_path.parent
+                pd.DataFrame(), {}, None, [msg], {}, self.inputs.output_path, self.inputs.output_path.parent
             )
         self.finished.emit(result)
 
@@ -65,6 +83,7 @@ def compute_ratios(
     error_cb: LogCallback | None = None,
 ) -> RatioCalcResult:
     warnings: list[str] = []
+    summary_counts = RatioCalcSummaryCounts()
 
     def log_warning(message: str) -> None:
         warnings.append(message)
@@ -89,10 +108,19 @@ def compute_ratios(
         log_warning(f"Condition {inputs.cond_b} not found in {excel_root}.")
 
     participants_map = _build_participant_files(participants, subject_data, inputs)
+    summary_counts.participants_total = len(participants_map)
     if not participants_map:
         log_warning("No participants with both conditions available.")
-        empty_df = _build_output_frame({}, [], {}, inputs.cond_a, inputs.cond_b, inputs.significance_mode)
-        return RatioCalcResult(empty_df, {}, None, warnings, inputs.output_path, inputs.output_path.parent)
+        empty_df = _build_output_frame(
+            {},
+            [],
+            {},
+            inputs.cond_a,
+            inputs.cond_b,
+            inputs.significance_mode,
+            inputs.outlier_action,
+        )
+        return RatioCalcResult(empty_df, {}, None, warnings, asdict(summary_counts), inputs.output_path, inputs.output_path.parent)
 
     _emit(progress_cb, 12)
     rois = inputs.rois
@@ -108,8 +136,9 @@ def compute_ratios(
             inputs.cond_a,
             inputs.cond_b,
             inputs.significance_mode,
+            inputs.outlier_action,
         )
-        return RatioCalcResult(empty_df, {}, None, warnings, inputs.output_path, inputs.output_path.parent)
+        return RatioCalcResult(empty_df, {}, None, warnings, asdict(summary_counts), inputs.output_path, inputs.output_path.parent)
 
     z_scores = _load_roi_z_scores(participants_map.values(), rois, log_warning)
     _emit(progress_cb, 40)
@@ -123,7 +152,12 @@ def compute_ratios(
         log_warning("No significant harmonics identified for any ROI.")
     _emit(progress_cb, 50)
 
-    ratios = _compute_ratio_table(participants_map.values(), rois, sig_freqs, sig_freqs_by_pid, inputs, log_warning)
+    participants_seq = list(participants_map.values())
+    ratios = _compute_ratio_table(
+        participants_seq, rois, sig_freqs, sig_freqs_by_pid, inputs, log_warning, summary_counts
+    )
+    _apply_outlier_detection(ratios, inputs, log_warning, summary_counts)
+    summary_counts.participants_used_per_roi = _participants_used(ratios, inputs.outlier_action)
     _emit(progress_cb, 85)
 
     df = _build_output_frame(
@@ -133,12 +167,28 @@ def compute_ratios(
         inputs.cond_a,
         inputs.cond_b,
         inputs.significance_mode,
+        inputs.outlier_action,
     )
     _emit(progress_cb, 90)
     _write_excel(df, inputs.output_path, log_info)
     _emit(progress_cb, 100)
 
-    return RatioCalcResult(df, sig_freqs, sig_freqs_by_pid, warnings, inputs.output_path, inputs.output_path.parent)
+    log_info(f"Participants total: {summary_counts.participants_total}")
+    log_info(f"Participants used per ROI: {summary_counts.participants_used_per_roi}")
+    log_info(f"Skipped denominator zero: {summary_counts.skipped_denominator_zero}")
+    log_info(f"Skipped missing data: {summary_counts.skipped_missing}")
+    log_info(f"Skipped non-positive BCA: {summary_counts.skipped_nonpositive_bca}")
+    log_info(f"Outliers flagged per ROI: {summary_counts.outliers_flagged_per_roi}")
+
+    return RatioCalcResult(
+        df,
+        sig_freqs,
+        sig_freqs_by_pid,
+        warnings,
+        asdict(summary_counts),
+        inputs.output_path,
+        inputs.output_path.parent,
+    )
 
 
 def _emit(progress_cb: ProgressCallback | None, value: int) -> None:
@@ -254,11 +304,13 @@ def _compute_ratio_table(
     individual_sig_freqs: dict[str, dict[str, list[float]]] | None,
     inputs: RatioCalcInputs,
     log_warning: LogCallback,
+    summary_counts: RatioCalcSummaryCounts,
 ) -> dict[str, list[RatioRow]]:
     ratios: dict[str, list[RatioRow]] = {roi.name: [] for roi in rois}
+    metric_label = "BCA" if inputs.metric == "bca" else "SNR"
     for part in participants:
-        snr_a = _load_snr(part.cond_a_file, rois, log_warning, part.pid)
-        snr_b = _load_snr(part.cond_b_file, rois, log_warning, part.pid)
+        metric_a = _load_metric_data(part.cond_a_file, rois, log_warning, part.pid, inputs.metric)
+        metric_b = _load_metric_data(part.cond_b_file, rois, log_warning, part.pid, inputs.metric)
 
         for roi in rois:
             if inputs.significance_mode == "individual" and individual_sig_freqs is not None:
@@ -269,56 +321,83 @@ def _compute_ratio_table(
                 log_warning(f"No significant harmonics for ROI {roi.name}; skipping ratios.")
                 continue
 
-            summary_a = _summary_for_roi(snr_a.get(roi.name), freqs)
-            summary_b = _summary_for_roi(snr_b.get(roi.name), freqs)
+            summary_a = _summary_for_roi(metric_a.get(roi.name), freqs, inputs.metric, inputs.bca_negative_mode)
+            summary_b = _summary_for_roi(metric_b.get(roi.name), freqs, inputs.metric, inputs.bca_negative_mode)
 
             if summary_a is None or summary_b is None:
+                summary_counts.skipped_missing += 1
                 log_warning(f"Missing ROI data for participant {part.pid} in ROI {roi.name}; skipping participant.")
                 continue
 
-            if summary_b == 0:
-                log_warning(f"Denominator SNR is zero for participant {part.pid} ROI {roi.name}; skipping participant.")
-                continue
-            ratio_value = summary_a / summary_b
+            skip_reason: str | None = None
+            include_in_summary = True
+
+            if inputs.metric == "bca" and inputs.bca_negative_mode == "strict":
+                if summary_a <= 0 or summary_b <= 0:
+                    skip_reason = "Non-positive BCA sum"
+                    include_in_summary = False
+                    summary_counts.skipped_nonpositive_bca += 1
+                    log_warning(f"Non-positive BCA sum for participant {part.pid} ROI {roi.name}; skipping ratio.")
+                    if summary_b == 0:
+                        summary_counts.skipped_denominator_zero += 1
+
+            if skip_reason is None and summary_b == 0:
+                summary_counts.skipped_denominator_zero += 1
+                log_warning(f"Denominator {metric_label} is zero for participant {part.pid} ROI {roi.name}; skipping participant.")
+                if inputs.metric == "bca":
+                    skip_reason = "Denominator zero"
+                    include_in_summary = False
+                else:
+                    continue
+
+            ratio_value = None if skip_reason else summary_a / summary_b
             ratios.setdefault(roi.name, []).append(
                 RatioRow(
                     pid=part.pid,
-                    snr_a=summary_a,
-                    snr_b=summary_b,
+                    summary_a=summary_a,
+                    summary_b=summary_b,
                     ratio=ratio_value,
                     sig_count=len(freqs),
+                    metric_used=metric_label,
+                    skip_reason=skip_reason,
+                    include_in_summary=include_in_summary,
+                    snr_a=summary_a,
+                    snr_b=summary_b,
                 )
             )
     return ratios
 
 
-def _load_snr(file_path: Path, rois: list[ROI], log_warning: LogCallback, pid: str) -> dict[str, pd.Series]:
+def _load_metric_data(
+    file_path: Path, rois: list[ROI], log_warning: LogCallback, pid: str, metric: str
+) -> dict[str, pd.Series]:
+    sheet_name = "BCA (uV)" if metric == "bca" else "SNR"
     try:
-        df = pd.read_excel(file_path, sheet_name="SNR")
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
     except FileNotFoundError:
         log_warning(f"Missing file for participant {pid}: {file_path}")
         return {}
     except Exception as exc:  # noqa: BLE001
-        log_warning(f"Failed to read SNR sheet for {pid}: {exc}")
+        log_warning(f"Failed to read {sheet_name} sheet for {pid}: {exc}")
         return {}
 
     if "Electrode" not in df.columns:
-        log_warning(f"Electrode column missing in SNR for {pid}.")
+        log_warning(f"Electrode column missing in {sheet_name} for {pid}.")
         return {}
 
     freq_cols = [c for c in df.columns if c != "Electrode"]
     df["Electrode"] = df["Electrode"].astype(str).str.upper()
-    snr_data: dict[str, pd.Series] = {}
+    metric_data: dict[str, pd.Series] = {}
     for roi in rois:
         mask = df["Electrode"].isin([c.upper() for c in roi.channels])
         if not mask.any():
-            log_warning(f"No matching channels for ROI {roi.name} in SNR for {pid}.")
+            log_warning(f"No matching channels for ROI {roi.name} in {sheet_name} for {pid}.")
             continue
-        snr_data[roi.name] = df.loc[mask, freq_cols].mean(axis=0, skipna=True)
-    return snr_data
+        metric_data[roi.name] = df.loc[mask, freq_cols].mean(axis=0, skipna=True)
+    return metric_data
 
 
-def _summary_for_roi(series: pd.Series | None, freqs: list[float]) -> float | None:
+def _summary_for_roi(series: pd.Series | None, freqs: list[float], metric: str, negative_mode: str) -> float | None:
     if series is None:
         return None
     values = []
@@ -329,7 +408,87 @@ def _summary_for_roi(series: pd.Series | None, freqs: list[float]) -> float | No
         values.append(series[col])
     if not values:
         return None
-    return float(np.nanmean(values))
+    arr = np.array(values, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    if arr.size == 0:
+        return None
+    if metric == "bca":
+        if negative_mode == "rectify":
+            arr = np.maximum(arr, 0)
+        return float(np.nansum(arr))
+    return float(np.nanmean(arr))
+
+
+def _apply_outlier_detection(
+    ratios: dict[str, list[RatioRow]],
+    inputs: RatioCalcInputs,
+    log_warning: LogCallback,
+    summary_counts: RatioCalcSummaryCounts,
+) -> None:
+    if not inputs.outlier_enabled:
+        return
+    for roi_name, rows in ratios.items():
+        valid_indices = [idx for idx, row in enumerate(rows) if row.ratio is not None and np.isfinite(row.ratio)]
+        if len(valid_indices) < 5:
+            log_warning(f"Outlier detection skipped for ROI {roi_name}: fewer than 5 valid ratios.")
+            continue
+        values = np.array([rows[idx].ratio for idx in valid_indices], dtype=float)
+        if inputs.outlier_method == "mad":
+            median = float(np.nanmedian(values))
+            mad = float(np.nanmedian(np.abs(values - median)))
+            if mad == 0:
+                log_warning(f"MAD is zero for ROI {roi_name}; treating all robust z as 0.")
+                scores = np.zeros_like(values)
+            else:
+                scores = 0.6745 * (values - median) / mad
+            flags = np.abs(scores) > inputs.outlier_threshold
+            method_label = "MAD (robust z)"
+            for idx, score, flag in zip(valid_indices, scores, flags):
+                rows[idx].outlier_method = method_label
+                rows[idx].outlier_score = float(score)
+                rows[idx].outlier_flag = bool(flag)
+                if flag:
+                    summary_counts.outliers_flagged_per_roi[roi_name] = (
+                        summary_counts.outliers_flagged_per_roi.get(roi_name, 0) + 1
+                    )
+                    if inputs.outlier_action == "exclude":
+                        rows[idx].include_in_summary = False
+        else:
+            q1 = float(np.nanpercentile(values, 25))
+            q3 = float(np.nanpercentile(values, 75))
+            iqr = q3 - q1
+            lower = q1 - inputs.outlier_threshold * iqr
+            upper = q3 + inputs.outlier_threshold * iqr
+            method_label = "IQR"
+            for idx, val in zip(valid_indices, values):
+                score = np.nan
+                flag = False
+                if val < lower:
+                    score = val - lower
+                    flag = True
+                elif val > upper:
+                    score = val - upper
+                    flag = True
+                rows[idx].outlier_method = method_label
+                rows[idx].outlier_score = float(score) if score == score else np.nan
+                rows[idx].outlier_flag = flag
+                if flag:
+                    summary_counts.outliers_flagged_per_roi[roi_name] = (
+                        summary_counts.outliers_flagged_per_roi.get(roi_name, 0) + 1
+                    )
+                    if inputs.outlier_action == "exclude":
+                        rows[idx].include_in_summary = False
+
+
+def _participants_used(ratios: dict[str, list[RatioRow]], outlier_action: str) -> dict[str, int]:
+    usage: dict[str, int] = {}
+    for roi_name, rows in ratios.items():
+        usage[roi_name] = sum(
+            1
+            for row in rows
+            if row.ratio is not None and (row.include_in_summary or outlier_action != "exclude")
+        )
+    return usage
 
 
 def _build_output_frame(
@@ -339,6 +498,7 @@ def _build_output_frame(
     cond_a: str,
     cond_b: str,
     significance_mode: str,
+    outlier_action: str,
 ) -> pd.DataFrame:
     rows: list[dict[str, float | str | int | None]] = []
     roi_names = roi_filter if roi_filter else list(ratios.keys()) or list(sig_freqs.keys())
@@ -355,7 +515,14 @@ def _build_output_frame(
                     "PID": entry.pid,
                     "SNR_A": entry.snr_a,
                     "SNR_B": entry.snr_b,
+                    "SummaryA": entry.summary_a,
+                    "SummaryB": entry.summary_b,
                     "Ratio": entry.ratio,
+                    "MetricUsed": entry.metric_used,
+                    "SkipReason": entry.skip_reason or "",
+                    "OutlierFlag": bool(entry.outlier_flag),
+                    "OutlierMethod": entry.outlier_method or "",
+                    "OutlierScore": entry.outlier_score,
                     "SigHarmonics_N": entry.sig_count,
                     "N": None,
                     "Mean": None,
@@ -368,7 +535,12 @@ def _build_output_frame(
                 }
             )
 
-        ratio_series = pd.Series([entry.ratio for entry in roi_ratios if entry.ratio is not None])
+        ratio_values = [
+            entry.ratio
+            for entry in roi_ratios
+            if entry.ratio is not None and (entry.include_in_summary or outlier_action != "exclude")
+        ]
+        ratio_series = pd.Series(ratio_values)
         n = int(ratio_series.count()) if not ratio_series.empty else 0
         mean = float(ratio_series.mean()) if n else np.nan
         median = float(ratio_series.median()) if n else np.nan
@@ -389,7 +561,14 @@ def _build_output_frame(
                 "PID": "SUMMARY",
                 "SNR_A": None,
                 "SNR_B": None,
+                "SummaryA": None,
+                "SummaryB": None,
                 "Ratio": None,
+                "MetricUsed": None,
+                "SkipReason": "",
+                "OutlierFlag": None,
+                "OutlierMethod": None,
+                "OutlierScore": None,
                 "SigHarmonics_N": sig_count_summary,
                 "N": n,
                 "Mean": mean,
@@ -408,7 +587,14 @@ def _build_output_frame(
         "PID",
         "SNR_A",
         "SNR_B",
+        "SummaryA",
+        "SummaryB",
         "Ratio",
+        "MetricUsed",
+        "SkipReason",
+        "OutlierFlag",
+        "OutlierMethod",
+        "OutlierScore",
         "SigHarmonics_N",
         "N",
         "Mean",
