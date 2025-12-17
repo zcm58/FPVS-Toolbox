@@ -32,6 +32,7 @@ from Tools.Stats.PySide6.stats_data_loader import (
     load_manifest_data,
     resolve_project_subfolder,
 )
+from Tools.Stats.roi_resolver import ROI
 
 
 class RatioCalculatorWindow(QMainWindow):
@@ -49,6 +50,7 @@ class RatioCalculatorWindow(QMainWindow):
         self._filename_user_edited = False
         self._pending_logs: list[str] = []
         self._default_excel_root: Path | None = None
+        self._roi_definitions: list[ROI] = []
 
         central = QWidget(self)
         self.setCentralWidget(central)
@@ -127,6 +129,11 @@ class RatioCalculatorWindow(QMainWindow):
         self.threshold_spin.setValue(1.64)
         self.threshold_spin.setEnabled(False)
         form.addRow(QLabel("Z-score threshold:"), self.threshold_spin)
+
+        self.significance_combo = QComboBox(group)
+        self.significance_combo.addItem("Group-level (default)", userData="group")
+        self.significance_combo.addItem("Per-participant (experimental)", userData="individual")
+        form.addRow(QLabel("Significance mode:"), self.significance_combo)
         return group
 
     def _build_output_group(self) -> QGroupBox:
@@ -230,9 +237,7 @@ class RatioCalculatorWindow(QMainWindow):
             )
         if excel_root:
             fallback = Path(excel_root).parent
-            self._queue_log(
-                f"Using '{fallback}' for results because project root could not be resolved."
-            )
+            self._queue_log(f"Using '{fallback}' for results because project root could not be resolved.")
             return fallback
         return None
 
@@ -249,11 +254,22 @@ class RatioCalculatorWindow(QMainWindow):
         self.cond_b_combo.blockSignals(False)
         self._update_default_filename(force=False)
 
-    def set_rois(self, rois: Iterable[str]) -> None:
+    def set_rois(self, rois: Iterable[ROI]) -> None:
+        self._roi_definitions = list(rois)
         self.roi_combo.blockSignals(True)
         self.roi_combo.clear()
-        for roi in rois:
-            self.roi_combo.addItem(roi)
+        if not self._roi_definitions:
+            self.roi_combo.addItem("No ROIs defined in Settings")
+            item = self.roi_combo.model().item(0)
+            if item:
+                item.setEnabled(False)
+            self.compute_btn.setEnabled(False)
+            self.append_log("No ROIs defined in Settings. Please add ROI pairs in Settings to proceed.")
+        else:
+            self.roi_combo.addItem("All ROIs")
+            for roi in self._roi_definitions:
+                self.roi_combo.addItem(roi.name)
+            self.compute_btn.setEnabled(True)
         self.roi_combo.blockSignals(False)
 
     def append_log(self, message: str) -> None:
@@ -335,7 +351,11 @@ class RatioCalculatorWindow(QMainWindow):
             return
         roi_name = self.roi_combo.currentText() or None
         threshold = float(self.threshold_spin.value())
+        significance_mode = self.significance_combo.currentData() or "group"
         output_path = self._resolve_output_path()
+        if not self._roi_definitions:
+            self.append_log("No ROIs available. Define ROIs in Settings before computing ratios.")
+            return
         inputs = RatioCalcInputs(
             excel_root=excel_root,
             cond_a=cond_a,
@@ -343,6 +363,8 @@ class RatioCalculatorWindow(QMainWindow):
             roi_name=roi_name,
             z_threshold=threshold,
             output_path=output_path,
+            significance_mode=significance_mode,
+            rois=self._roi_definitions,
         )
         self.compute_requested.emit(inputs)
 

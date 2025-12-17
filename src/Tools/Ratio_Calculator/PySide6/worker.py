@@ -12,7 +12,7 @@ from PySide6.QtCore import QObject, Signal
 from Tools.Ratio_Calculator.PySide6.model import RatioCalcInputs, RatioCalcResult
 from Tools.Stats.PySide6.stats_data_loader import ScanError, scan_folder_simple
 from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
-from Tools.Stats.roi_resolver import ROI, resolve_active_rois
+from Tools.Stats.roi_resolver import ROI
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ class RatioRow:
     snr_a: float | None
     snr_b: float | None
     ratio: float | None
+    sig_count: int
 
 
 class RatioCalcWorker(QObject):
@@ -52,7 +53,9 @@ class RatioCalcWorker(QObject):
             msg = f"Ratio calculation failed: {exc}"
             logger.exception(msg)
             self.error.emit(msg)
-            result = RatioCalcResult(pd.DataFrame(), {}, [msg], self.inputs.output_path)
+            result = RatioCalcResult(
+                pd.DataFrame(), {}, None, [msg], self.inputs.output_path, self.inputs.output_path.parent
+            )
         self.finished.emit(result)
 
 
@@ -88,35 +91,54 @@ def compute_ratios(
     participants_map = _build_participant_files(participants, subject_data, inputs)
     if not participants_map:
         log_warning("No participants with both conditions available.")
-        empty_df = _build_output_frame({}, [], {}, inputs.cond_a, inputs.cond_b)
-        return RatioCalcResult(empty_df, {}, warnings, inputs.output_path)
+        empty_df = _build_output_frame({}, [], {}, inputs.cond_a, inputs.cond_b, inputs.significance_mode)
+        return RatioCalcResult(empty_df, {}, None, warnings, inputs.output_path, inputs.output_path.parent)
 
     _emit(progress_cb, 12)
-    rois = resolve_active_rois()
+    rois = inputs.rois
     if inputs.roi_name and inputs.roi_name.lower() != "all rois":
         rois = [roi for roi in rois if roi.name == inputs.roi_name]
     selected_roi_names = [r.name for r in rois]
     if not rois:
         log_warning("No ROI definitions available after filtering.")
-        empty_df = _build_output_frame({}, selected_roi_names, {}, inputs.cond_a, inputs.cond_b)
-        return RatioCalcResult(empty_df, {}, warnings, inputs.output_path)
+        empty_df = _build_output_frame(
+            {},
+            selected_roi_names,
+            {},
+            inputs.cond_a,
+            inputs.cond_b,
+            inputs.significance_mode,
+        )
+        return RatioCalcResult(empty_df, {}, None, warnings, inputs.output_path, inputs.output_path.parent)
 
     z_scores = _load_roi_z_scores(participants_map.values(), rois, log_warning)
     _emit(progress_cb, 40)
-    sig_freqs = _determine_significant_frequencies(z_scores, inputs.z_threshold)
+    sig_freqs_by_pid: dict[str, dict[str, list[float]]] | None = None
+    if inputs.significance_mode == "individual":
+        sig_freqs_by_pid = _determine_significant_frequencies_individual(z_scores, inputs.z_threshold)
+        sig_freqs = _merge_individual_sig_freqs(sig_freqs_by_pid)
+    else:
+        sig_freqs = _determine_significant_frequencies_group(z_scores, inputs.z_threshold)
     if not any(sig_freqs.values()):
         log_warning("No significant harmonics identified for any ROI.")
     _emit(progress_cb, 50)
 
-    ratios = _compute_ratio_table(participants_map.values(), rois, sig_freqs, inputs, log_warning)
+    ratios = _compute_ratio_table(participants_map.values(), rois, sig_freqs, sig_freqs_by_pid, inputs, log_warning)
     _emit(progress_cb, 85)
 
-    df = _build_output_frame(ratios, selected_roi_names, sig_freqs, inputs.cond_a, inputs.cond_b)
+    df = _build_output_frame(
+        ratios,
+        selected_roi_names,
+        sig_freqs,
+        inputs.cond_a,
+        inputs.cond_b,
+        inputs.significance_mode,
+    )
     _emit(progress_cb, 90)
     _write_excel(df, inputs.output_path, log_info)
     _emit(progress_cb, 100)
 
-    return RatioCalcResult(df, sig_freqs, warnings, inputs.output_path)
+    return RatioCalcResult(df, sig_freqs, sig_freqs_by_pid, warnings, inputs.output_path, inputs.output_path.parent)
 
 
 def _emit(progress_cb: ProgressCallback | None, value: int) -> None:
@@ -136,9 +158,7 @@ def _build_participant_files(
         cond_b_file = conds.get(inputs.cond_b)
         if not cond_a_file or not cond_b_file:
             continue
-        participants_map[pid] = _ParticipantFiles(
-            pid=pid, cond_a_file=Path(cond_a_file), cond_b_file=Path(cond_b_file)
-        )
+        participants_map[pid] = _ParticipantFiles(pid=pid, cond_a_file=Path(cond_a_file), cond_b_file=Path(cond_b_file))
     return participants_map
 
 
@@ -174,7 +194,7 @@ def _load_roi_z_scores(
     return data
 
 
-def _determine_significant_frequencies(
+def _determine_significant_frequencies_group(
     z_scores: dict[str, dict[str, pd.Series]], threshold: float
 ) -> dict[str, list[float]]:
     sig_freqs: dict[str, list[float]] = {}
@@ -196,10 +216,42 @@ def _determine_significant_frequencies(
     return sig_freqs
 
 
+def _determine_significant_frequencies_individual(
+    z_scores: dict[str, dict[str, pd.Series]], threshold: float
+) -> dict[str, dict[str, list[float]]]:
+    sig_freqs: dict[str, dict[str, list[float]]] = {}
+    for roi_name, per_part in z_scores.items():
+        sig_freqs[roi_name] = {}
+        for pid, series in per_part.items():
+            sig_freqs[roi_name][pid] = _sig_freqs_for_series(series, threshold)
+    return sig_freqs
+
+
+def _sig_freqs_for_series(series: pd.Series, threshold: float) -> list[float]:
+    selected: list[float] = []
+    for col, value in series.items():
+        try:
+            freq_val = float(str(col).split("_")[0])
+        except (TypeError, ValueError):
+            continue
+        if value > threshold:
+            selected.append(freq_val)
+    return selected
+
+
+def _merge_individual_sig_freqs(sig_freqs: dict[str, dict[str, list[float]]]) -> dict[str, list[float]]:
+    merged: dict[str, list[float]] = {}
+    for roi_name, per_pid in sig_freqs.items():
+        combined = sorted({freq for freqs in per_pid.values() for freq in freqs})
+        merged[roi_name] = combined
+    return merged
+
+
 def _compute_ratio_table(
     participants: Iterable[_ParticipantFiles],
     rois: list[ROI],
     sig_freqs: dict[str, list[float]],
+    individual_sig_freqs: dict[str, dict[str, list[float]]] | None,
     inputs: RatioCalcInputs,
     log_warning: LogCallback,
 ) -> dict[str, list[RatioRow]]:
@@ -209,7 +261,10 @@ def _compute_ratio_table(
         snr_b = _load_snr(part.cond_b_file, rois, log_warning, part.pid)
 
         for roi in rois:
-            freqs = sig_freqs.get(roi.name, [])
+            if inputs.significance_mode == "individual" and individual_sig_freqs is not None:
+                freqs = individual_sig_freqs.get(roi.name, {}).get(part.pid, [])
+            else:
+                freqs = sig_freqs.get(roi.name, [])
             if not freqs:
                 log_warning(f"No significant harmonics for ROI {roi.name}; skipping ratios.")
                 continue
@@ -218,26 +273,26 @@ def _compute_ratio_table(
             summary_b = _summary_for_roi(snr_b.get(roi.name), freqs)
 
             if summary_a is None or summary_b is None:
-                log_warning(
-                    f"Missing ROI data for participant {part.pid} in ROI {roi.name}; skipping participant."
-                )
+                log_warning(f"Missing ROI data for participant {part.pid} in ROI {roi.name}; skipping participant.")
                 continue
 
             if summary_b == 0:
-                log_warning(
-                    f"Denominator SNR is zero for participant {part.pid} ROI {roi.name}; skipping participant."
-                )
+                log_warning(f"Denominator SNR is zero for participant {part.pid} ROI {roi.name}; skipping participant.")
                 continue
             ratio_value = summary_a / summary_b
             ratios.setdefault(roi.name, []).append(
-                RatioRow(pid=part.pid, snr_a=summary_a, snr_b=summary_b, ratio=ratio_value)
+                RatioRow(
+                    pid=part.pid,
+                    snr_a=summary_a,
+                    snr_b=summary_b,
+                    ratio=ratio_value,
+                    sig_count=len(freqs),
+                )
             )
     return ratios
 
 
-def _load_snr(
-    file_path: Path, rois: list[ROI], log_warning: LogCallback, pid: str
-) -> dict[str, pd.Series]:
+def _load_snr(file_path: Path, rois: list[ROI], log_warning: LogCallback, pid: str) -> dict[str, pd.Series]:
     try:
         df = pd.read_excel(file_path, sheet_name="SNR")
     except FileNotFoundError:
@@ -283,14 +338,15 @@ def _build_output_frame(
     sig_freqs: dict[str, list[float]],
     cond_a: str,
     cond_b: str,
+    significance_mode: str,
 ) -> pd.DataFrame:
     rows: list[dict[str, float | str | int | None]] = []
     roi_names = roi_filter if roi_filter else list(ratios.keys()) or list(sig_freqs.keys())
 
     for roi in roi_names:
         label = f"{cond_a} vs {cond_b} - {roi}"
-        sig_count = len(sig_freqs.get(roi, []))
-        roi_ratios = ratios.get(roi, []) if sig_count else []
+        sig_count_group = len(sig_freqs.get(roi, []))
+        roi_ratios = ratios.get(roi, []) if sig_count_group or significance_mode == "individual" else []
 
         for entry in roi_ratios:
             rows.append(
@@ -300,7 +356,7 @@ def _build_output_frame(
                     "SNR_A": entry.snr_a,
                     "SNR_B": entry.snr_b,
                     "Ratio": entry.ratio,
-                    "SigHarmonics_N": sig_count,
+                    "SigHarmonics_N": entry.sig_count,
                     "N": None,
                     "Mean": None,
                     "Median": None,
@@ -325,6 +381,8 @@ def _build_output_frame(
         min_val = float(ratio_series.min()) if n else np.nan
         max_val = float(ratio_series.max()) if n else np.nan
 
+        sig_count_summary = sig_count_group or max((entry.sig_count for entry in roi_ratios), default=0)
+
         rows.append(
             {
                 "Ratio Label": label,
@@ -332,7 +390,7 @@ def _build_output_frame(
                 "SNR_A": None,
                 "SNR_B": None,
                 "Ratio": None,
-                "SigHarmonics_N": sig_count,
+                "SigHarmonics_N": sig_count_summary,
                 "N": n,
                 "Mean": mean,
                 "Median": median,
