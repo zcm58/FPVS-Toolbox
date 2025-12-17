@@ -9,7 +9,7 @@ The Ratio Calculator computes ROI-level SNR ratios between two conditions from a
 - **ROIs:** Loaded only from ROI pairs defined in **Settings**; channel membership follows the saved Stats ROI settings. Defaults (Frontal/Parietal/Central/Occipital) are not added automatically.
 - **Sheets used:** `SNR` and `Z Score` with an `Electrode` column plus frequency columns named `{freq:.4f}_Hz`.
 
-## Computation
+## Metrics and stability rules
 1. **Significance mode (Advanced → Significance mode):**
    - **Group-level (default/recommended):**
      - For each ROI, compute mean Z-scores per harmonic across participants (Condition A only).
@@ -17,41 +17,48 @@ The Ratio Calculator computes ROI-level SNR ratios between two conditions from a
    - **Per-participant (experimental):**
      - For each participant and ROI, compute mean Z-scores per harmonic across ROI channels (Condition A only).
      - Each participant uses their own significant harmonics set (Z > 1.64).
-2. **Summary metric (per participant & ROI):**
-   - **SNR (default metric):** Mean SNR across the significant harmonics for each condition (group shared set or participant-specific set depending on the mode).
-   - **BCA (uV):** Sum of ROI-mean BCA across the significant harmonics for each condition using the `BCA (uV)` sheet and the same frequency columns as SNR.
-3. **Ratio:** `summary_A / summary_B` using the selected metric.
-
-## Metric modes (SNR vs BCA)
-- **Default:** SNR with the existing behavior preserved.
-- **Metric dropdown:** Choose between SNR and BCA without affecting other defaults (significance remains group-level unless changed).
-- **BCA negative handling (Advanced, shown only in BCA mode):**
-  - **Strict (default):** If either condition’s summed BCA ≤ 0, the ratio is skipped (row retained with `SkipReason`).
-  - **Rectify negatives to 0:** Negative ROI-mean BCA values per harmonic are clamped to 0 before summing; ratios are skipped if the denominator remains 0.
-
-## Outlier detection (Advanced, optional)
-- Disabled by default; enabling toggles per-ROI detection on computed ratios (requires ≥5 valid ratios).
-- **Methods:**
-  - **MAD (robust z, default when enabled):** `robust_z = 0.6745 * (x - median) / MAD`; if MAD is 0, robust z-scores are treated as 0.
-  - **IQR:** Flags ratios below `Q1 - k*IQR` or above `Q3 + k*IQR` (k = threshold).
-- **Threshold defaults:** MAD = 3.5; IQR multiplier = 1.5.
-- **Actions:**
-  - **Flag only (default):** Outliers are marked but still included in summary stats.
-  - **Exclude from summary stats:** Outliers remain in participant rows but are omitted from summary aggregates.
+2. **Minimum significant harmonics (K):**
+   - Advanced setting default **K = 3** (range 1–50).
+   - If the significant set for an ROI/participant is smaller than K, the ROI is considered unstable: participant rows are skipped from summary stats and the SUMMARY row records the skip reason with `N_used = 0`.
+3. **Summary metric (Advanced → Summary metric):**
+   - Default: **LogRatio**. Ratio is still exported, but summary statistics (mean/median/std/variance/CV%) are computed on LogRatio for symmetry and skew reduction.
+   - Optional: **Ratio** if you prefer raw ratios for the summary calculations.
+   - Derived fields always exported when valid:
+     - **SummaryA**, **SummaryB** (metric-specific aggregates)
+     - **Ratio = SummaryA / SummaryB**
+     - **LogRatio = ln(Ratio)** when SummaryA > 0 and SummaryB > 0
+     - **RatioPercent = (exp(LogRatio) - 1) * 100**
+4. **Metric modes (SNR vs BCA):**
+   - **Default:** SNR (mean across harmonics).
+   - **BCA (uV):** Sum across harmonics; negative handling (shown only in BCA mode):
+     - **Strict (default):** If either summed BCA ≤ 0, the row is skipped.
+     - **Rectify negatives to 0:** Negative harmonic values are clamped to 0 before summing; ratios are still skipped if the denominator remains 0.
+5. **Denominator stability floor (Advanced → Denominator stability):**
+   - Optional checkbox (off by default).
+   - **Norm-referenced (quantile, default mode when enabled):**
+     - Reference group: current dataset (young controls placeholder).
+     - Quantile default **0.05** (range 0.01–0.25).
+     - Scope: **Per ROI (default)** or **Global** across ROIs.
+     - If SummaryB < floor value → Ratio/LogRatio invalid, `SkipReason = denom_below_floor`, row excluded from summaries.
+   - **Absolute value:** Uses a user-supplied floor when provided.
+6. **Outlier detection (Advanced → Outlier detection):**
+   - Disabled by default; requires ≥5 base-valid rows.
+   - **Methods:** MAD (robust z, default) or IQR; thresholds default to 3.5 (MAD) / 1.5 (IQR).
+   - **Metric:** Summary metric (default), Ratio, or LogRatio.
+   - **Actions:** Flag only (default) or **Exclude from analysis and summary**; excluded rows remain in the export with `ExcludedAsOutlier=True` and are removed from quantile floor calculations and summary stats.
 
 ## Output
-- Default output folder: `4 - Ratio Calculator Results` under the active project root (auto-created). You can override the folder
-  and filename; `.xlsx` is appended automatically.
+- Default output folder: `4 - Ratio Calculator Results` under the active project root (auto-created). You can override the folder and filename; `.xlsx` is appended automatically.
 - Single-sheet Excel export formatted via `_auto_format_and_write_excel(...)` in a **vertical layout**:
-  - Columns: Ratio Label, PID, SNR_A, SNR_B, SummaryA, SummaryB, Ratio, MetricUsed, SkipReason, OutlierFlag, OutlierMethod, OutlierScore, SigHarmonics_N, N, Mean, Median, Std, Variance, CV%, Min, Max.
-  - Participant rows list each PID with ROI summaries for the chosen metric (`SummaryA`/`SummaryB`) alongside legacy SNR columns. `SigHarmonics_N` reflects the count of significant harmonics actually used for that participant (group mode uses the shared ROI count).
-  - SUMMARY rows appear after each ROI block with per-ROI statistics (blank separator row after each block).
-  - Outliers (if enabled) are flagged per participant, and summary stats optionally exclude them depending on the selected action.
+  - Columns: Ratio Label, PID, SNR_A, SNR_B, SummaryA, SummaryB, Ratio, LogRatio, RatioPercent, MetricUsed, SkipReason, IncludedInSummary, OutlierFlag, OutlierMethod, OutlierScore, ExcludedAsOutlier, SigHarmonics_N, DenomFloor, N_detected, N_base_valid, N_outliers_excluded, N_floor_excluded, N_used, N, Mean, Median, Std, Variance, CV%, MeanRatio_fromLog, MedianRatio_fromLog, Min, Max, MinRatio, MaxRatio.
+  - Participant rows list each PID with ROI summaries for the chosen metric (`SummaryA`/`SummaryB`) alongside legacy SNR columns and QC flags.
+  - SUMMARY rows appear after each ROI block with per-ROI statistics, QC counts, and interpretability helpers (`MeanRatio_fromLog`, `MedianRatio_fromLog`).
+  - Outliers (if enabled) are flagged per participant; exclusions are tracked separately from skip reasons.
 
 ## Skip rules and warnings
 - Missing condition files for a participant.
 - Missing `SNR` or `Z Score` sheets.
 - ROI without matching channels in a file.
-- No significant harmonics for an ROI (ratios left blank/NaN).
-- Denominator summary equals zero.
+- Insufficient significant harmonics (SigHarmonics_N < K) for an ROI.
+- Denominator summary equals zero or falls below the stability floor.
 - Non-positive summed BCA when using strict negative handling.

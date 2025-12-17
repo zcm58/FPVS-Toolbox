@@ -19,7 +19,8 @@ def _write_participant_file(
     bca_values: list[list[float]] | None = None,
 ) -> None:
     electrodes = ["O1", "O2", "Oz"]
-    freqs = ["1.2000_Hz", "2.4000_Hz"]
+    freq_count = len(snr_values[0])
+    freqs = [f"{1.2 * (idx + 1):.4f}_Hz" for idx in range(freq_count)]
     snr_df = pd.DataFrame({"Electrode": electrodes})
     z_df = pd.DataFrame({"Electrode": electrodes})
     for idx, freq in enumerate(freqs):
@@ -51,6 +52,16 @@ def _make_inputs(view, controller, excel_root: Path, roi_name: str, **overrides)
         "outlier_threshold": float(view.outlier_threshold_spin.value()),
         "outlier_action": view.outlier_action_combo.currentData(),
         "bca_negative_mode": view.bca_handling_combo.currentData(),
+        "min_significant_harmonics": int(view.min_sig_harmonics_spin.value()),
+        "denominator_floor_enabled": view.denom_floor_checkbox.isChecked(),
+        "denominator_floor_mode": view.denom_floor_mode_combo.currentData(),
+        "denominator_floor_quantile": float(view.denom_floor_quantile_spin.value()),
+        "denominator_floor_scope": view.denom_floor_scope_combo.currentData(),
+        "denominator_floor_reference": view.denom_floor_reference_combo.currentData(),
+        "denominator_floor_absolute": float(view.denom_floor_absolute_spin.value()),
+        "summary_metric": view.summary_metric_combo.currentData(),
+        "outlier_metric": view.outlier_metric_combo.currentData(),
+        "require_denom_sig": False,
     }
     params.update(overrides)
     return RatioCalcInputs(**params)
@@ -77,7 +88,10 @@ def test_ratio_calculator_smoke(tmp_path, qtbot, monkeypatch):
     cond_a_dir.mkdir(parents=True)
     cond_b_dir.mkdir(parents=True)
 
-    participants = {"P01": ([10.0, 8.0], [2.0, 0.5]), "P02": ([12.0, 9.0], [2.5, 0.7])}
+    participants = {
+        "P01": ([10.0, 8.0, 9.0], [2.0, 2.5, 2.2]),
+        "P02": ([12.0, 9.0, 8.0], [2.5, 2.2, 2.0]),
+    }
     for pid, (snr_vals, z_vals) in participants.items():
         _write_participant_file(cond_a_dir / f"{pid}_A.xlsx", snr_values=[snr_vals] * 3, z_values=[z_vals] * 3)
         _write_participant_file(cond_b_dir / f"{pid}_B.xlsx", snr_values=[[v / 2 for v in snr_vals]] * 3, z_values=[z_vals] * 3)
@@ -114,20 +128,34 @@ def test_ratio_calculator_smoke(tmp_path, qtbot, monkeypatch):
         "SummaryA",
         "SummaryB",
         "Ratio",
+        "LogRatio",
+        "RatioPercent",
         "MetricUsed",
         "SkipReason",
+        "IncludedInSummary",
         "OutlierFlag",
         "OutlierMethod",
         "OutlierScore",
+        "ExcludedAsOutlier",
         "SigHarmonics_N",
+        "DenomFloor",
+        "N_detected",
+        "N_base_valid",
+        "N_outliers_excluded",
+        "N_floor_excluded",
+        "N_used",
         "N",
         "Mean",
         "Median",
         "Std",
         "Variance",
         "CV%",
+        "MeanRatio_fromLog",
+        "MedianRatio_fromLog",
         "Min",
         "Max",
+        "MinRatio",
+        "MaxRatio",
     ]
     roi_rows = df[df["Ratio Label"].str.contains("Bilateral OT", na=False)]
     assert not roi_rows.empty
@@ -136,6 +164,7 @@ def test_ratio_calculator_smoke(tmp_path, qtbot, monkeypatch):
     assert (participant_rows["SigHarmonics_N"] > 0).any()
     summary_row = roi_rows[roi_rows["PID"] == "SUMMARY"].iloc[0]
     assert summary_row["N"] == len(participants)
+    assert summary_row["N_used"] == len(participants)
     assert (participant_rows["MetricUsed"] == "SNR").all()
     assert (participant_rows["OutlierFlag"] == False).all()  # noqa: E712
 
@@ -173,20 +202,20 @@ def test_ratio_calculator_bca_strict(tmp_path, qtbot, monkeypatch):
     cond_b_dir.mkdir(parents=True)
 
     participant_data = {
-        "P01": {"a": [2.0, 2.0], "b": [-1.0, -1.0]},
-        "P02": {"a": [3.0, 3.0], "b": [1.0, 1.0]},
+        "P01": {"a": [2.0, 2.0, 2.0], "b": [-1.0, -1.0, -1.0]},
+        "P02": {"a": [3.0, 3.0, 3.0], "b": [1.0, 1.0, 1.0]},
     }
     for pid, values in participant_data.items():
         _write_participant_file(
             cond_a_dir / f"{pid}_A.xlsx",
             snr_values=[values["a"]] * 3,
-            z_values=[[3.0, 3.0]] * 3,
+            z_values=[[3.0, 3.0, 3.0]] * 3,
             bca_values=[values["a"]] * 3,
         )
         _write_participant_file(
             cond_b_dir / f"{pid}_B.xlsx",
             snr_values=[values["b"]] * 3,
-            z_values=[[3.0, 3.0]] * 3,
+            z_values=[[3.0, 3.0, 3.0]] * 3,
             bca_values=[values["b"]] * 3,
         )
 
@@ -240,17 +269,17 @@ def test_ratio_calculator_outlier_detection(tmp_path, qtbot, monkeypatch):
     ratios = {"P01": 1.0, "P02": 1.1, "P03": 1.2, "P04": 1.05, "P05": 8.0}
     base = 2.0
     for pid, ratio in ratios.items():
-        cond_a_vals = [base * ratio, base * ratio]
-        cond_b_vals = [base, base]
+        cond_a_vals = [base * ratio, base * ratio, base * ratio]
+        cond_b_vals = [base, base, base]
         _write_participant_file(
             cond_a_dir / f"{pid}_A.xlsx",
             snr_values=[cond_a_vals] * 3,
-            z_values=[[3.0, 3.0]] * 3,
+            z_values=[[3.0, 3.0, 3.0]] * 3,
         )
         _write_participant_file(
             cond_b_dir / f"{pid}_B.xlsx",
             snr_values=[cond_b_vals] * 3,
-            z_values=[[3.0, 3.0]] * 3,
+            z_values=[[3.0, 3.0, 3.0]] * 3,
         )
 
     monkeypatch.chdir(project_root)
@@ -285,4 +314,4 @@ def test_ratio_calculator_outlier_detection(tmp_path, qtbot, monkeypatch):
     assert flagged["OutlierMethod"] == "MAD (robust z)"
     summary_row = roi_rows[roi_rows["PID"] == "SUMMARY"].iloc[0]
     assert summary_row["N"] == 4
-    assert summary_row["Mean"] < 2
+    assert summary_row["MeanRatio_fromLog"] < 2
