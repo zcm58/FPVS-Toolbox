@@ -1,6 +1,11 @@
+import os
 from pathlib import Path
 
 import pandas as pd
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QMessageBox
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from Tools.Ratio_Calculator.PySide6.controller import RatioCalculatorController
 from Tools.Ratio_Calculator.PySide6.model import RatioCalcInputs
@@ -21,6 +26,16 @@ def _write_participant_file(path: Path, snr_values: list[list[float]], z_values:
 
 
 def test_ratio_calculator_smoke(tmp_path, qtbot, monkeypatch):
+    class FakeSettingsManager:
+        def get_roi_pairs(self):
+            return [("Bilateral OT", ["O1", "O2"])]
+
+    monkeypatch.setattr("Main_App.SettingsManager", lambda *_, **__: FakeSettingsManager())
+    monkeypatch.setattr(
+        "Tools.Ratio_Calculator.PySide6.controller.SettingsManager",
+        lambda *_, **__: FakeSettingsManager(),
+    )
+
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / "project.json").write_text("{}")
@@ -45,15 +60,23 @@ def test_ratio_calculator_smoke(tmp_path, qtbot, monkeypatch):
     assert detected_root == excel_root
     controller.set_excel_root(detected_root)
     view.cond_b_combo.setCurrentText("ConditionB")
+    roi_items = [view.roi_combo.itemText(i) for i in range(view.roi_combo.count())]
+    assert "Bilateral OT" in roi_items
+    for default_roi in ("Occipital Lobe", "Frontal Lobe", "Parietal Lobe", "Central Lobe"):
+        assert default_roi not in roi_items
+    view.roi_combo.setCurrentText("Bilateral OT")
+    view.significance_combo.setCurrentIndex(view.significance_combo.findData("individual"))
 
     output_path = view._resolve_output_path()
     inputs = RatioCalcInputs(
         excel_root=excel_root,
         cond_a=view.cond_a_combo.currentText(),
         cond_b=view.cond_b_combo.currentText(),
-        roi_name="Occipital Lobe",
+        roi_name="Bilateral OT",
         z_threshold=1.64,
         output_path=output_path,
+        significance_mode=view.significance_combo.currentData(),
+        rois=controller._rois,
     )
 
     result = controller.compute_ratios_sync(inputs)
@@ -77,9 +100,21 @@ def test_ratio_calculator_smoke(tmp_path, qtbot, monkeypatch):
         "Min",
         "Max",
     ]
-    roi_rows = df[df["Ratio Label"].str.contains("Occipital Lobe", na=False)]
+    roi_rows = df[df["Ratio Label"].str.contains("Bilateral OT", na=False)]
     assert not roi_rows.empty
     participant_rows = roi_rows[roi_rows["PID"] != "SUMMARY"]
     assert len(participant_rows) >= 1
+    assert (participant_rows["SigHarmonics_N"] > 0).any()
     summary_row = roi_rows[roi_rows["PID"] == "SUMMARY"].iloc[0]
     assert summary_row["N"] == len(participants)
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *_, **__: QMessageBox.Yes)
+    opened = []
+
+    def _fake_open(url):
+        opened.append(url)
+        return True
+
+    monkeypatch.setattr(QDesktopServices, "openUrl", _fake_open)
+    controller._on_finished(result)
+    assert opened
