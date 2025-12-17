@@ -25,6 +25,16 @@ class RatioCalcInputs:
     outlier_threshold: float
     outlier_action: str
     bca_negative_mode: str
+    min_significant_harmonics: int
+    denominator_floor_enabled: bool
+    denominator_floor_mode: str
+    denominator_floor_quantile: float
+    denominator_floor_scope: str
+    denominator_floor_reference: str
+    denominator_floor_absolute: float | None
+    summary_metric: str
+    outlier_metric: str
+    require_denom_sig: bool
 
 
 @dataclass

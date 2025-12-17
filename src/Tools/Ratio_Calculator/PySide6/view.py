@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QProgressBar,
+    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -140,6 +141,21 @@ class RatioCalculatorWindow(QMainWindow):
         self.threshold_spin.setEnabled(False)
         form.addRow(QLabel("Z-score threshold:"), self.threshold_spin)
 
+        self.significance_combo = QComboBox(group)
+        self.significance_combo.addItem("Group-level (default)", userData="group")
+        self.significance_combo.addItem("Per-participant (experimental)", userData="individual")
+        form.addRow(QLabel("Significance mode:"), self.significance_combo)
+
+        self.min_sig_harmonics_spin = QSpinBox(group)
+        self.min_sig_harmonics_spin.setRange(1, 50)
+        self.min_sig_harmonics_spin.setValue(3)
+        form.addRow(QLabel("Minimum significant harmonics (K):"), self.min_sig_harmonics_spin)
+
+        self.summary_metric_combo = QComboBox(group)
+        self.summary_metric_combo.addItem("LogRatio (default)", userData="logratio")
+        self.summary_metric_combo.addItem("Ratio", userData="ratio")
+        form.addRow(QLabel("Summary metric for stats:"), self.summary_metric_combo)
+
         self.outlier_checkbox = QCheckBox("Enable outlier detection", group)
         self.outlier_checkbox.stateChanged.connect(self._on_outlier_toggled)
         form.addRow(self.outlier_checkbox)
@@ -149,6 +165,12 @@ class RatioCalculatorWindow(QMainWindow):
         self.outlier_method_combo.addItem("IQR", userData="iqr")
         self.outlier_method_combo.currentIndexChanged.connect(self._on_outlier_method_changed)
         form.addRow(QLabel("Outlier method:"), self.outlier_method_combo)
+
+        self.outlier_metric_combo = QComboBox(group)
+        self.outlier_metric_combo.addItem("Use summary metric (default)", userData="summary")
+        self.outlier_metric_combo.addItem("Ratio", userData="ratio")
+        self.outlier_metric_combo.addItem("LogRatio", userData="logratio")
+        form.addRow(QLabel("Metric for outliers:"), self.outlier_metric_combo)
 
         self.outlier_threshold_spin = QDoubleSpinBox(group)
         self.outlier_threshold_spin.setDecimals(2)
@@ -163,10 +185,38 @@ class RatioCalculatorWindow(QMainWindow):
         self.outlier_action_combo.addItem("Exclude from summary stats", userData="exclude")
         form.addRow(QLabel("Outlier action:"), self.outlier_action_combo)
 
-        self.significance_combo = QComboBox(group)
-        self.significance_combo.addItem("Group-level (default)", userData="group")
-        self.significance_combo.addItem("Per-participant (experimental)", userData="individual")
-        form.addRow(QLabel("Significance mode:"), self.significance_combo)
+        self.denom_floor_checkbox = QCheckBox("Enable denominator stability floor", group)
+        self.denom_floor_checkbox.stateChanged.connect(self._on_denom_floor_toggled)
+        form.addRow(self.denom_floor_checkbox)
+
+        self.denom_floor_mode_combo = QComboBox(group)
+        self.denom_floor_mode_combo.addItem("Norm-referenced (quantile)", userData="quantile")
+        self.denom_floor_mode_combo.addItem("Absolute value", userData="absolute")
+        self.denom_floor_mode_combo.currentIndexChanged.connect(self._on_denom_floor_mode_changed)
+        form.addRow(QLabel("Floor mode:"), self.denom_floor_mode_combo)
+
+        self.denom_floor_reference_combo = QComboBox(group)
+        self.denom_floor_reference_combo.addItem("Young controls (current dataset)", userData="current_young")
+        form.addRow(QLabel("Reference group:"), self.denom_floor_reference_combo)
+
+        self.denom_floor_quantile_spin = QDoubleSpinBox(group)
+        self.denom_floor_quantile_spin.setDecimals(3)
+        self.denom_floor_quantile_spin.setRange(0.01, 0.25)
+        self.denom_floor_quantile_spin.setSingleStep(0.01)
+        self.denom_floor_quantile_spin.setValue(0.05)
+        form.addRow(QLabel("Quantile:"), self.denom_floor_quantile_spin)
+
+        self.denom_floor_scope_combo = QComboBox(group)
+        self.denom_floor_scope_combo.addItem("Per ROI", userData="per_roi")
+        self.denom_floor_scope_combo.addItem("Global across ROIs", userData="global")
+        form.addRow(QLabel("Scope:"), self.denom_floor_scope_combo)
+
+        self.denom_floor_absolute_spin = QDoubleSpinBox(group)
+        self.denom_floor_absolute_spin.setDecimals(3)
+        self.denom_floor_absolute_spin.setRange(0.0, 1e9)
+        self.denom_floor_absolute_spin.setSingleStep(0.1)
+        self.denom_floor_absolute_spin.setValue(0.0)
+        form.addRow(QLabel("Absolute floor value:"), self.denom_floor_absolute_spin)
 
         self.bca_handling_label = QLabel("Negative BCA handling:", group)
         self.bca_handling_combo = QComboBox(group)
@@ -175,6 +225,7 @@ class RatioCalculatorWindow(QMainWindow):
         form.addRow(self.bca_handling_label, self.bca_handling_combo)
         self._update_outlier_controls()
         self._update_bca_controls()
+        self._update_denom_floor_controls()
         return group
 
     def _build_output_group(self) -> QGroupBox:
@@ -330,15 +381,25 @@ class RatioCalculatorWindow(QMainWindow):
             self.outlier_method_combo,
             self.outlier_threshold_spin,
             self.outlier_action_combo,
+            self.outlier_metric_combo,
             self.output_dir_edit,
             self.output_filename_edit,
             self.output_browse_btn,
             self.compute_btn,
             self.bca_handling_combo,
+            self.summary_metric_combo,
+            self.min_sig_harmonics_spin,
+            self.denom_floor_checkbox,
+            self.denom_floor_mode_combo,
+            self.denom_floor_quantile_spin,
+            self.denom_floor_scope_combo,
+            self.denom_floor_reference_combo,
+            self.denom_floor_absolute_spin,
         ):
             widget.setEnabled(not busy)
         self.progress.setVisible(busy or self.progress.value() > 0)
         self._update_outlier_controls()
+        self._update_denom_floor_controls()
 
     def set_progress(self, value: int) -> None:
         self.progress.setValue(value)
@@ -358,6 +419,7 @@ class RatioCalculatorWindow(QMainWindow):
             self.append_log(f"Skipped (denominator zero): {counts.get('skipped_denominator_zero', 0)}")
             self.append_log(f"Skipped (non-positive BCA): {counts.get('skipped_nonpositive_bca', 0)}")
             self.append_log(f"Outliers flagged per ROI: {counts.get('outliers_flagged_per_roi', {})}")
+            self.append_log(f"Denominator floor exclusions per ROI: {counts.get('floor_excluded_per_roi', {})}")
         self.statusBar().showMessage("Completed", 3000)
 
     # UI events --------------------------------------------------------------
@@ -414,6 +476,12 @@ class RatioCalculatorWindow(QMainWindow):
     def _on_outlier_threshold_changed(self, _: float) -> None:
         self._outlier_threshold_user_edited = True
 
+    def _on_denom_floor_toggled(self, _: int) -> None:
+        self._update_denom_floor_controls()
+
+    def _on_denom_floor_mode_changed(self, _: int) -> None:
+        self._update_denom_floor_controls()
+
     def _on_compute(self) -> None:
         if self._busy:
             self.append_log("A computation is already running.")
@@ -455,6 +523,16 @@ class RatioCalculatorWindow(QMainWindow):
             outlier_threshold=float(self.outlier_threshold_spin.value()),
             outlier_action=self.outlier_action_combo.currentData() or "flag",
             bca_negative_mode=self.bca_handling_combo.currentData() or "strict",
+            min_significant_harmonics=int(self.min_sig_harmonics_spin.value()),
+            denominator_floor_enabled=self.denom_floor_checkbox.isChecked(),
+            denominator_floor_mode=self.denom_floor_mode_combo.currentData() or "quantile",
+            denominator_floor_quantile=float(self.denom_floor_quantile_spin.value()),
+            denominator_floor_scope=self.denom_floor_scope_combo.currentData() or "per_roi",
+            denominator_floor_reference=self.denom_floor_reference_combo.currentData() or "current_young",
+            denominator_floor_absolute=float(self.denom_floor_absolute_spin.value()),
+            summary_metric=self.summary_metric_combo.currentData() or "logratio",
+            outlier_metric=self.outlier_metric_combo.currentData() or "summary",
+            require_denom_sig=False,
         )
         self.compute_requested.emit(inputs)
 
@@ -505,7 +583,12 @@ class RatioCalculatorWindow(QMainWindow):
 
     def _update_outlier_controls(self) -> None:
         enabled = self.outlier_checkbox.isChecked()
-        for widget in (self.outlier_method_combo, self.outlier_threshold_spin, self.outlier_action_combo):
+        for widget in (
+            self.outlier_method_combo,
+            self.outlier_threshold_spin,
+            self.outlier_action_combo,
+            self.outlier_metric_combo,
+        ):
             widget.setEnabled(enabled and not self._busy)
         if not enabled:
             self._outlier_threshold_user_edited = False
@@ -514,3 +597,15 @@ class RatioCalculatorWindow(QMainWindow):
         is_bca = (self.metric_combo.currentData() or "snr") == "bca"
         self.bca_handling_combo.setVisible(is_bca)
         self.bca_handling_label.setVisible(is_bca)
+
+    def _update_denom_floor_controls(self) -> None:
+        enabled = self.denom_floor_checkbox.isChecked() and not self._busy
+        mode = self.denom_floor_mode_combo.currentData() or "quantile"
+        for widget in (
+            self.denom_floor_mode_combo,
+            self.denom_floor_reference_combo,
+            self.denom_floor_scope_combo,
+        ):
+            widget.setEnabled(enabled)
+        self.denom_floor_quantile_spin.setEnabled(enabled and mode == "quantile")
+        self.denom_floor_absolute_spin.setEnabled(enabled and mode == "absolute")
