@@ -9,6 +9,7 @@ import pandas as pd
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -51,6 +52,9 @@ class RatioCalculatorWindow(QMainWindow):
         self._pending_logs: list[str] = []
         self._default_excel_root: Path | None = None
         self._roi_definitions: list[ROI] = []
+        self._outlier_threshold_defaults: dict[str, float] = {"mad": 3.5, "iqr": 1.5}
+        self._last_outlier_method = "mad"
+        self._outlier_threshold_user_edited = False
 
         central = QWidget(self)
         self.setCentralWidget(central)
@@ -105,6 +109,12 @@ class RatioCalculatorWindow(QMainWindow):
         form = QFormLayout(group)
         form.setLabelAlignment(Qt.AlignLeft)
 
+        self.metric_combo = QComboBox(group)
+        self.metric_combo.addItem("SNR (default)", userData="snr")
+        self.metric_combo.addItem("BCA (uV)", userData="bca")
+        self.metric_combo.currentIndexChanged.connect(self._on_metric_changed)
+        form.addRow(QLabel("Metric:"), self.metric_combo)
+
         self.cond_a_combo = QComboBox(group)
         self.cond_a_combo.currentTextChanged.connect(self._on_conditions_changed)
         self.cond_b_combo = QComboBox(group)
@@ -130,10 +140,41 @@ class RatioCalculatorWindow(QMainWindow):
         self.threshold_spin.setEnabled(False)
         form.addRow(QLabel("Z-score threshold:"), self.threshold_spin)
 
+        self.outlier_checkbox = QCheckBox("Enable outlier detection", group)
+        self.outlier_checkbox.stateChanged.connect(self._on_outlier_toggled)
+        form.addRow(self.outlier_checkbox)
+
+        self.outlier_method_combo = QComboBox(group)
+        self.outlier_method_combo.addItem("MAD (robust z)", userData="mad")
+        self.outlier_method_combo.addItem("IQR", userData="iqr")
+        self.outlier_method_combo.currentIndexChanged.connect(self._on_outlier_method_changed)
+        form.addRow(QLabel("Outlier method:"), self.outlier_method_combo)
+
+        self.outlier_threshold_spin = QDoubleSpinBox(group)
+        self.outlier_threshold_spin.setDecimals(2)
+        self.outlier_threshold_spin.setRange(0.01, 50.0)
+        self.outlier_threshold_spin.setSingleStep(0.1)
+        self.outlier_threshold_spin.setValue(self._outlier_threshold_defaults["mad"])
+        self.outlier_threshold_spin.valueChanged.connect(self._on_outlier_threshold_changed)
+        form.addRow(QLabel("Outlier threshold:"), self.outlier_threshold_spin)
+
+        self.outlier_action_combo = QComboBox(group)
+        self.outlier_action_combo.addItem("Flag only (default)", userData="flag")
+        self.outlier_action_combo.addItem("Exclude from summary stats", userData="exclude")
+        form.addRow(QLabel("Outlier action:"), self.outlier_action_combo)
+
         self.significance_combo = QComboBox(group)
         self.significance_combo.addItem("Group-level (default)", userData="group")
         self.significance_combo.addItem("Per-participant (experimental)", userData="individual")
         form.addRow(QLabel("Significance mode:"), self.significance_combo)
+
+        self.bca_handling_label = QLabel("Negative BCA handling:", group)
+        self.bca_handling_combo = QComboBox(group)
+        self.bca_handling_combo.addItem("Strict (require summed BCA > 0)", userData="strict")
+        self.bca_handling_combo.addItem("Rectify negatives to 0 before summing", userData="rectify")
+        form.addRow(self.bca_handling_label, self.bca_handling_combo)
+        self._update_outlier_controls()
+        self._update_bca_controls()
         return group
 
     def _build_output_group(self) -> QGroupBox:
@@ -284,13 +325,20 @@ class RatioCalculatorWindow(QMainWindow):
             self.cond_a_combo,
             self.cond_b_combo,
             self.roi_combo,
+            self.metric_combo,
+            self.outlier_checkbox,
+            self.outlier_method_combo,
+            self.outlier_threshold_spin,
+            self.outlier_action_combo,
             self.output_dir_edit,
             self.output_filename_edit,
             self.output_browse_btn,
             self.compute_btn,
+            self.bca_handling_combo,
         ):
             widget.setEnabled(not busy)
         self.progress.setVisible(busy or self.progress.value() > 0)
+        self._update_outlier_controls()
 
     def set_progress(self, value: int) -> None:
         self.progress.setValue(value)
@@ -302,6 +350,14 @@ class RatioCalculatorWindow(QMainWindow):
     def handle_result(self, result: RatioCalcResult) -> None:
         self._last_df = result.dataframe
         self.append_log(f"Saved results to {result.output_path}")
+        counts = result.summary_counts or {}
+        if counts:
+            self.append_log(f"Participants total: {counts.get('participants_total', 0)}")
+            self.append_log(f"Participants used per ROI: {counts.get('participants_used_per_roi', {})}")
+            self.append_log(f"Skipped (missing data): {counts.get('skipped_missing', 0)}")
+            self.append_log(f"Skipped (denominator zero): {counts.get('skipped_denominator_zero', 0)}")
+            self.append_log(f"Skipped (non-positive BCA): {counts.get('skipped_nonpositive_bca', 0)}")
+            self.append_log(f"Outliers flagged per ROI: {counts.get('outliers_flagged_per_roi', {})}")
         self.statusBar().showMessage("Completed", 3000)
 
     # UI events --------------------------------------------------------------
@@ -332,6 +388,32 @@ class RatioCalculatorWindow(QMainWindow):
             return
         self.output_dir_edit.setText(path)
 
+    def _on_metric_changed(self, _: int) -> None:
+        self._update_bca_controls()
+
+    def _on_outlier_toggled(self, state: int) -> None:
+        enabled = bool(state)
+        if enabled:
+            current_method = self.outlier_method_combo.currentData()
+            self.outlier_threshold_spin.setValue(self._outlier_threshold_defaults.get(current_method, 3.5))
+            self._outlier_threshold_user_edited = False
+        self._update_outlier_controls()
+
+    def _on_outlier_method_changed(self, _: int) -> None:
+        method = self.outlier_method_combo.currentData()
+        previous_default = self._outlier_threshold_defaults.get(self._last_outlier_method, 3.5)
+        if not self._outlier_threshold_user_edited and self.outlier_checkbox.isChecked():
+            self.outlier_threshold_spin.setValue(self._outlier_threshold_defaults.get(method, 3.5))
+        elif (
+            self.outlier_checkbox.isChecked()
+            and abs(self.outlier_threshold_spin.value() - previous_default) < 1e-9
+        ):
+            self.outlier_threshold_spin.setValue(self._outlier_threshold_defaults.get(method, 3.5))
+        self._last_outlier_method = method
+
+    def _on_outlier_threshold_changed(self, _: float) -> None:
+        self._outlier_threshold_user_edited = True
+
     def _on_compute(self) -> None:
         if self._busy:
             self.append_log("A computation is already running.")
@@ -356,6 +438,8 @@ class RatioCalculatorWindow(QMainWindow):
         if not self._roi_definitions:
             self.append_log("No ROIs available. Define ROIs in Settings before computing ratios.")
             return
+        metric = self.metric_combo.currentData() or "snr"
+        outlier_enabled = self.outlier_checkbox.isChecked()
         inputs = RatioCalcInputs(
             excel_root=excel_root,
             cond_a=cond_a,
@@ -365,6 +449,12 @@ class RatioCalculatorWindow(QMainWindow):
             output_path=output_path,
             significance_mode=significance_mode,
             rois=self._roi_definitions,
+            metric=metric,
+            outlier_enabled=outlier_enabled,
+            outlier_method=self.outlier_method_combo.currentData() or "mad",
+            outlier_threshold=float(self.outlier_threshold_spin.value()),
+            outlier_action=self.outlier_action_combo.currentData() or "flag",
+            bca_negative_mode=self.bca_handling_combo.currentData() or "strict",
         )
         self.compute_requested.emit(inputs)
 
@@ -412,3 +502,15 @@ class RatioCalculatorWindow(QMainWindow):
 
     def _on_filename_edited(self, _: str) -> None:
         self._filename_user_edited = True
+
+    def _update_outlier_controls(self) -> None:
+        enabled = self.outlier_checkbox.isChecked()
+        for widget in (self.outlier_method_combo, self.outlier_threshold_spin, self.outlier_action_combo):
+            widget.setEnabled(enabled and not self._busy)
+        if not enabled:
+            self._outlier_threshold_user_edited = False
+
+    def _update_bca_controls(self) -> None:
+        is_bca = (self.metric_combo.currentData() or "snr") == "bca"
+        self.bca_handling_combo.setVisible(is_bca)
+        self.bca_handling_label.setVisible(is_bca)
