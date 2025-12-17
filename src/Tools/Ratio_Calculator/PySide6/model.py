@@ -46,3 +46,5 @@ class RatioCalcResult:
     summary_counts: dict[str, object]
     output_path: Path
     output_folder: Path
+    summary_table: list[dict[str, object]] | None = None
+    exclusions: list[dict[str, object]] | None = None

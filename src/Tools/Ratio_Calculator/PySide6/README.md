@@ -50,10 +50,10 @@ The Ratio Calculator computes ROI-level SNR ratios between two conditions from a
 ## Output
 - Default output folder: `4 - Ratio Calculator Results` under the active project root (auto-created). You can override the folder and filename; `.xlsx` is appended automatically.
 - Single-sheet Excel export formatted via `_auto_format_and_write_excel(...)` in a **vertical layout**:
-  - Columns: Ratio Label, PID, SNR_A, SNR_B, SummaryA, SummaryB, Ratio, LogRatio, RatioPercent, MetricUsed, SkipReason, IncludedInSummary, OutlierFlag, OutlierMethod, OutlierScore, ExcludedAsOutlier, SigHarmonics_N, DenomFloor, N_detected, N_base_valid, N_outliers_excluded, N_floor_excluded, N_used, N, Mean, Median, Std, Variance, CV%, MeanRatio_fromLog, MedianRatio_fromLog, Min, Max, MinRatio, MaxRatio.
-  - Participant rows list each PID with ROI summaries for the chosen metric (`SummaryA`/`SummaryB`) alongside legacy SNR columns and QC flags.
-  - SUMMARY rows appear after each ROI block with per-ROI statistics, QC counts, and interpretability helpers (`MeanRatio_fromLog`, `MedianRatio_fromLog`).
-  - Outliers (if enabled) are flagged per participant; exclusions are tracked separately from skip reasons.
+  - Columns: Ratio Label, PID, **metric-specific Summary columns** (`SNR_A`/`SNR_B` or `BCA_A`/`BCA_B`), SummaryA, SummaryB, Ratio, LogRatio, RatioPercent, MetricUsed, SkipReason, IncludedInSummary, OutlierFlag, OutlierMethod, OutlierScore, ExcludedAsOutlier, SigHarmonics_N, DenomFloor, N_detected, N_base_valid, N_outliers_excluded, N_floor_excluded, N_used, N, N_used_untrimmed, N_used_trimmed, N_trimmed_excluded, Mean, Median, Std, Variance, CV%, MeanRatio_fromLog, MedianRatio_fromLog, Min, Max, MinRatio, MaxRatio, Mean_trim, Median_trim, Std_trim, Variance_trim, gCV%_trim, MeanRatio_fromLog_trim, MedianRatio_fromLog_trim, MinRatio_trim, MaxRatio_trim.
+  - Participant rows list each PID with ROI summaries for the chosen metric (`SummaryA`/`SummaryB`) alongside metric-specific columns and QC flags.
+  - SUMMARY rows appear after each ROI block with per-ROI statistics and QC counts; **SUMMARY_TRIMMED** rows follow immediately and exclude the single highest and lowest LogRatio before recomputing stats.
+  - Outliers (if enabled) are flagged per participant; exclusions are tracked separately from skip reasons and surfaced in the post-run summary dialog.
 
 ## Skip rules and warnings
 - Missing condition files for a participant.

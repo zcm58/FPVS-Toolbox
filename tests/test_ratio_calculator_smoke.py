@@ -120,7 +120,7 @@ def test_ratio_calculator_smoke(tmp_path, qtbot, monkeypatch):
     assert output_path.exists()
     assert output_path.parent == project_root / "4 - Ratio Calculator Results"
     df = result.dataframe
-    assert list(df.columns) == [
+    expected_columns = [
         "Ratio Label",
         "PID",
         "SNR_A",
@@ -145,6 +145,9 @@ def test_ratio_calculator_smoke(tmp_path, qtbot, monkeypatch):
         "N_floor_excluded",
         "N_used",
         "N",
+        "N_used_untrimmed",
+        "N_used_trimmed",
+        "N_trimmed_excluded",
         "Mean",
         "Median",
         "Std",
@@ -156,10 +159,20 @@ def test_ratio_calculator_smoke(tmp_path, qtbot, monkeypatch):
         "Max",
         "MinRatio",
         "MaxRatio",
+        "Mean_trim",
+        "Median_trim",
+        "Std_trim",
+        "Variance_trim",
+        "gCV%_trim",
+        "MeanRatio_fromLog_trim",
+        "MedianRatio_fromLog_trim",
+        "MinRatio_trim",
+        "MaxRatio_trim",
     ]
+    assert list(df.columns) == expected_columns
     roi_rows = df[df["Ratio Label"].str.contains("Bilateral OT", na=False)]
     assert not roi_rows.empty
-    participant_rows = roi_rows[roi_rows["PID"] != "SUMMARY"]
+    participant_rows = roi_rows[~roi_rows["PID"].isin(["SUMMARY", "SUMMARY_TRIMMED"])]
     assert len(participant_rows) >= 1
     assert (participant_rows["SigHarmonics_N"] > 0).any()
     summary_row = roi_rows[roi_rows["PID"] == "SUMMARY"].iloc[0]

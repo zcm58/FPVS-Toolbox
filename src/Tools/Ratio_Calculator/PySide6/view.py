@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME
 from Tools.Ratio_Calculator.PySide6.model import RatioCalcInputs, RatioCalcResult
+from Tools.Ratio_Calculator.PySide6.summary_dialog import RatioSummaryDialog
 from Tools.Stats.PySide6.stats_data_loader import (
     auto_detect_project_dir,
     load_manifest_data,
@@ -56,6 +57,7 @@ class RatioCalculatorWindow(QMainWindow):
         self._outlier_threshold_defaults: dict[str, float] = {"mad": 3.5, "iqr": 1.5}
         self._last_outlier_method = "mad"
         self._outlier_threshold_user_edited = False
+        self._summary_dialog: RatioSummaryDialog | None = None
 
         central = QWidget(self)
         self.setCentralWidget(central)
@@ -421,6 +423,18 @@ class RatioCalculatorWindow(QMainWindow):
             self.append_log(f"Outliers flagged per ROI: {counts.get('outliers_flagged_per_roi', {})}")
             self.append_log(f"Denominator floor exclusions per ROI: {counts.get('floor_excluded_per_roi', {})}")
         self.statusBar().showMessage("Completed", 3000)
+        self._show_summary_report(result)
+
+    def _show_summary_report(self, result: RatioCalcResult) -> None:
+        if not (result.summary_table or result.exclusions):
+            return
+        if self._summary_dialog is not None:
+            try:
+                self._summary_dialog.close()
+            except Exception:  # noqa: BLE001
+                self._summary_dialog = None
+        self._summary_dialog = RatioSummaryDialog(result.summary_table or [], result.exclusions or [], result.output_folder, self)
+        self._summary_dialog.show()
 
     # UI events --------------------------------------------------------------
     def _select_excel_root(self) -> None:
