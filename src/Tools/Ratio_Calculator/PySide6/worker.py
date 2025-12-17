@@ -86,7 +86,7 @@ class RatioCalcWorker(QObject):
             logger.exception(msg)
             self.error.emit(msg)
             result = RatioCalcResult(
-                pd.DataFrame(), {}, None, [msg], {}, self.inputs.output_path, self.inputs.output_path.parent
+                pd.DataFrame(), {}, None, [msg], {}, self.inputs.output_path, self.inputs.output_path.parent, [], []
             )
         self.finished.emit(result)
 
@@ -134,8 +134,20 @@ def compute_ratios(
             inputs.significance_mode,
             inputs.outlier_action,
             inputs.summary_metric,
+            inputs.metric,
         )
-        return RatioCalcResult(empty_df, {}, None, warnings, asdict(summary_counts), inputs.output_path, inputs.output_path.parent)
+        summary_table, exclusions = _build_report_tables(empty_df)
+        return RatioCalcResult(
+            empty_df,
+            {},
+            None,
+            warnings,
+            asdict(summary_counts),
+            inputs.output_path,
+            inputs.output_path.parent,
+            summary_table,
+            exclusions,
+        )
 
     _emit(progress_cb, 12)
     rois = inputs.rois
@@ -153,8 +165,20 @@ def compute_ratios(
             inputs.significance_mode,
             inputs.outlier_action,
             inputs.summary_metric,
+            inputs.metric,
         )
-        return RatioCalcResult(empty_df, {}, None, warnings, asdict(summary_counts), inputs.output_path, inputs.output_path.parent)
+        summary_table, exclusions = _build_report_tables(empty_df)
+        return RatioCalcResult(
+            empty_df,
+            {},
+            None,
+            warnings,
+            asdict(summary_counts),
+            inputs.output_path,
+            inputs.output_path.parent,
+            summary_table,
+            exclusions,
+        )
 
     z_scores = _load_roi_z_scores(participants_map.values(), rois, log_warning)
     _emit(progress_cb, 40)
@@ -187,10 +211,12 @@ def compute_ratios(
         inputs.significance_mode,
         inputs.outlier_action,
         inputs.summary_metric,
+        inputs.metric,
     )
     _emit(progress_cb, 90)
     _write_excel(df, inputs.output_path, log_info)
     _emit(progress_cb, 100)
+    summary_table, exclusions = _build_report_tables(df)
 
     log_info(f"Participants total: {summary_counts.participants_total}")
     log_info(f"Participants used per ROI: {summary_counts.participants_used_per_roi}")
@@ -208,6 +234,8 @@ def compute_ratios(
         asdict(summary_counts),
         inputs.output_path,
         inputs.output_path.parent,
+        summary_table,
+        exclusions,
     )
 
 
@@ -637,9 +665,12 @@ def _build_output_frame(
     significance_mode: str,
     outlier_action: str,
     summary_metric: str,
+    metric: str,
 ) -> pd.DataFrame:
+    metric_a_col, metric_b_col = _metric_columns(metric)
     rows: list[dict[str, float | str | int | None]] = []
     roi_names = roi_filter if roi_filter else list(ratios.keys()) or list(sig_freqs.keys())
+    columns = _result_columns(metric_a_col, metric_b_col)
 
     for roi in roi_names:
         label = f"{cond_a} vs {cond_b} - {roi}"
@@ -650,10 +681,14 @@ def _build_output_frame(
         n_base_valid = sum(1 for entry in roi_ratios if entry.base_valid)
         n_outlier_excluded = sum(1 for entry in roi_ratios if entry.excluded_as_outlier)
         n_floor_excluded = sum(
-            1 for entry in roi_ratios if entry.base_valid and not entry.include_in_summary and (entry.skip_reason or "") == "denom_below_floor"
+            1
+            for entry in roi_ratios
+            if entry.base_valid and not entry.include_in_summary and (entry.skip_reason or "") == "denom_below_floor"
         )
         n_used = sum(
-            1 for entry in roi_ratios if entry.include_in_summary and _summary_metric_value(entry.ratio, entry.log_ratio, summary_metric) is not None
+            1
+            for entry in roi_ratios
+            if entry.include_in_summary and _summary_metric_value(entry.ratio, entry.log_ratio, summary_metric) is not None
         )
 
         summary_metric_values = [
@@ -662,29 +697,23 @@ def _build_output_frame(
             if entry.include_in_summary
         ]
         summary_metric_series = pd.Series([v for v in summary_metric_values if v is not None and np.isfinite(v)])
-        n = int(summary_metric_series.count()) if not summary_metric_series.empty else 0
-        mean = float(summary_metric_series.mean()) if n else np.nan
-        median = float(summary_metric_series.median()) if n else np.nan
-        std = float(summary_metric_series.std()) if n else np.nan
-        variance = float(summary_metric_series.var()) if n else np.nan
-        if mean is not None and not np.isnan(mean) and mean != 0:
-            cv = float((std / mean) * 100) if std is not None else np.nan
-        else:
-            cv = np.nan
-        min_val = float(summary_metric_series.min()) if n else np.nan
-        max_val = float(summary_metric_series.max()) if n else np.nan
-
-        ratio_used_series = pd.Series([entry.ratio for entry in roi_ratios if entry.include_in_summary and entry.ratio is not None])
-        min_ratio = float(ratio_used_series.min()) if not ratio_used_series.empty else np.nan
-        max_ratio = float(ratio_used_series.max()) if not ratio_used_series.empty else np.nan
+        log_ratio_series = pd.Series(
+            [entry.log_ratio for entry in roi_ratios if entry.include_in_summary and not entry.excluded_as_outlier and entry.log_ratio is not None and np.isfinite(entry.log_ratio)]
+        )
+        ratio_used_series = pd.Series(
+            [entry.ratio for entry in roi_ratios if entry.include_in_summary and entry.ratio is not None and np.isfinite(entry.ratio)]
+        )
+        untrimmed_stats = _compute_summary_stats(summary_metric_series, log_ratio_series, ratio_used_series, summary_metric)
+        trimmed_stats, n_trimmed_excluded, n_used_trimmed = _compute_trimmed_stats(log_ratio_series)
 
         for entry in roi_ratios:
-            rows.append(
+            row = {col: None for col in columns}
+            row.update(
                 {
                     "Ratio Label": label,
                     "PID": entry.pid,
-                    "SNR_A": entry.snr_a,
-                    "SNR_B": entry.snr_b,
+                    metric_a_col: entry.snr_a,
+                    metric_b_col: entry.snr_b,
                     "SummaryA": entry.summary_a,
                     "SummaryB": entry.summary_b,
                     "Ratio": entry.ratio,
@@ -699,50 +728,19 @@ def _build_output_frame(
                     "ExcludedAsOutlier": bool(entry.excluded_as_outlier),
                     "SigHarmonics_N": entry.sig_count,
                     "DenomFloor": entry.denom_floor,
-                    "N_detected": None,
-                    "N_base_valid": None,
-                    "N_outliers_excluded": None,
-                    "N_floor_excluded": None,
-                    "N_used": None,
-                    "N": None,
-                    "Mean": None,
-                    "Median": None,
-                    "Std": None,
-                    "Variance": None,
-                    "CV%": None,
-                    "MeanRatio_fromLog": None,
-                    "MedianRatio_fromLog": None,
-                    "Min": None,
-                    "Max": None,
-                    "MinRatio": None,
-                    "MaxRatio": None,
                 }
             )
+            rows.append(row)
 
         sig_count_summary = sig_count_group or max((entry.sig_count for entry in roi_ratios), default=0)
-
-        mean_ratio_from_log = float(np.exp(summary_metric_series.mean())) if summary_metric == "logratio" and n else np.nan
-        median_ratio_from_log = float(np.exp(summary_metric_series.median())) if summary_metric == "logratio" and n else np.nan
         skip_for_summary = roi_comp.skip_reason or ""
 
-        rows.append(
+        summary_row = {col: None for col in columns}
+        summary_row.update(
             {
                 "Ratio Label": label,
                 "PID": "SUMMARY",
-                "SNR_A": None,
-                "SNR_B": None,
-                "SummaryA": None,
-                "SummaryB": None,
-                "Ratio": None,
-                "LogRatio": None,
-                "RatioPercent": None,
-                "MetricUsed": None,
                 "SkipReason": skip_for_summary,
-                "IncludedInSummary": None,
-                "OutlierFlag": None,
-                "OutlierMethod": None,
-                "OutlierScore": None,
-                "ExcludedAsOutlier": None,
                 "SigHarmonics_N": sig_count_summary,
                 "DenomFloor": roi_ratios[0].denom_floor if roi_ratios else None,
                 "N_detected": roi_comp.n_detected,
@@ -750,27 +748,85 @@ def _build_output_frame(
                 "N_outliers_excluded": n_outlier_excluded,
                 "N_floor_excluded": n_floor_excluded,
                 "N_used": n_used,
-                "N": n,
-                "Mean": mean,
-                "Median": median,
-                "Std": std,
-                "Variance": variance,
-                "CV%": cv if np.isfinite(cv) else np.nan,
-                "MeanRatio_fromLog": mean_ratio_from_log if np.isfinite(mean_ratio_from_log) else np.nan,
-                "MedianRatio_fromLog": median_ratio_from_log if np.isfinite(median_ratio_from_log) else np.nan,
-                "Min": min_val,
-                "Max": max_val,
-                "MinRatio": min_ratio,
-                "MaxRatio": max_ratio,
+                "N": untrimmed_stats.n,
+                "N_used_untrimmed": n_used,
+                "N_used_trimmed": n_used_trimmed,
+                "N_trimmed_excluded": n_trimmed_excluded,
+                "Mean": untrimmed_stats.mean,
+                "Median": untrimmed_stats.median,
+                "Std": untrimmed_stats.std,
+                "Variance": untrimmed_stats.variance,
+                "CV%": untrimmed_stats.cv,
+                "MeanRatio_fromLog": untrimmed_stats.mean_ratio_from_log,
+                "MedianRatio_fromLog": untrimmed_stats.median_ratio_from_log,
+                "Min": untrimmed_stats.min_val,
+                "Max": untrimmed_stats.max_val,
+                "MinRatio": untrimmed_stats.min_ratio,
+                "MaxRatio": untrimmed_stats.max_ratio,
             }
         )
+        rows.append(summary_row)
+
+        trimmed_row = {col: None for col in columns}
+        trimmed_row.update(
+            {
+                "Ratio Label": label,
+                "PID": "SUMMARY_TRIMMED",
+                "SkipReason": skip_for_summary,
+                "SigHarmonics_N": sig_count_summary,
+                "DenomFloor": roi_ratios[0].denom_floor if roi_ratios else None,
+                "N_detected": roi_comp.n_detected,
+                "N_base_valid": n_base_valid,
+                "N_outliers_excluded": n_outlier_excluded,
+                "N_floor_excluded": n_floor_excluded,
+                "N_used": n_used_trimmed,
+                "N": trimmed_stats.n,
+                "N_used_untrimmed": n_used,
+                "N_used_trimmed": n_used_trimmed,
+                "N_trimmed_excluded": n_trimmed_excluded,
+                "Mean": trimmed_stats.mean,
+                "Median": trimmed_stats.median,
+                "Std": trimmed_stats.std,
+                "Variance": trimmed_stats.variance,
+                "CV%": trimmed_stats.cv,
+                "MeanRatio_fromLog": trimmed_stats.mean_ratio_from_log,
+                "MedianRatio_fromLog": trimmed_stats.median_ratio_from_log,
+                "Min": trimmed_stats.min_val,
+                "Max": trimmed_stats.max_val,
+                "MinRatio": trimmed_stats.min_ratio,
+                "MaxRatio": trimmed_stats.max_ratio,
+                "Mean_trim": trimmed_stats.mean,
+                "Median_trim": trimmed_stats.median,
+                "Std_trim": trimmed_stats.std,
+                "Variance_trim": trimmed_stats.variance,
+                "gCV%_trim": trimmed_stats.gcv,
+                "MeanRatio_fromLog_trim": trimmed_stats.mean_ratio_from_log,
+                "MedianRatio_fromLog_trim": trimmed_stats.median_ratio_from_log,
+                "MinRatio_trim": trimmed_stats.min_ratio,
+                "MaxRatio_trim": trimmed_stats.max_ratio,
+            }
+        )
+        rows.append(trimmed_row)
         rows.append({})
 
-    columns = [
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _write_excel(df: pd.DataFrame, output_path: Path, log_func: LogCallback) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
+            _auto_format_and_write_excel(writer, df, "Ratio Calculator", log_func)
+    except Exception as exc:  # noqa: BLE001
+        log_func(f"Failed to write Excel file: {exc}")
+
+
+def _result_columns(metric_a_col: str, metric_b_col: str) -> list[str]:
+    return [
         "Ratio Label",
         "PID",
-        "SNR_A",
-        "SNR_B",
+        metric_a_col,
+        metric_b_col,
         "SummaryA",
         "SummaryB",
         "Ratio",
@@ -791,6 +847,9 @@ def _build_output_frame(
         "N_floor_excluded",
         "N_used",
         "N",
+        "N_used_untrimmed",
+        "N_used_trimmed",
+        "N_trimmed_excluded",
         "Mean",
         "Median",
         "Std",
@@ -802,14 +861,239 @@ def _build_output_frame(
         "Max",
         "MinRatio",
         "MaxRatio",
+        "Mean_trim",
+        "Median_trim",
+        "Std_trim",
+        "Variance_trim",
+        "gCV%_trim",
+        "MeanRatio_fromLog_trim",
+        "MedianRatio_fromLog_trim",
+        "MinRatio_trim",
+        "MaxRatio_trim",
     ]
-    return pd.DataFrame(rows, columns=columns)
 
 
-def _write_excel(df: pd.DataFrame, output_path: Path, log_func: LogCallback) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
-            _auto_format_and_write_excel(writer, df, "Ratio Calculator", log_func)
-    except Exception as exc:  # noqa: BLE001
-        log_func(f"Failed to write Excel file: {exc}")
+def _metric_columns(metric: str) -> tuple[str, str]:
+    if metric == "bca":
+        return "BCA_A", "BCA_B"
+    return "SNR_A", "SNR_B"
+
+
+@dataclass
+class _SummaryStats:
+    n: int
+    mean: float
+    median: float
+    std: float
+    variance: float
+    cv: float
+    mean_ratio_from_log: float
+    median_ratio_from_log: float
+    min_val: float
+    max_val: float
+    min_ratio: float
+    max_ratio: float
+    gcv: float
+
+
+def _geometric_cv(std: float) -> float:
+    if std is None or not np.isfinite(std):
+        return np.nan
+    return float(np.sqrt(np.exp(float(std) ** 2) - 1) * 100)
+
+
+def _compute_summary_stats(
+    summary_metric_series: pd.Series, log_ratio_series: pd.Series, ratio_series: pd.Series, summary_metric: str
+) -> _SummaryStats:
+    n = int(summary_metric_series.count()) if not summary_metric_series.empty else 0
+    mean = float(summary_metric_series.mean()) if n else np.nan
+    median = float(summary_metric_series.median()) if n else np.nan
+    std = float(summary_metric_series.std()) if n else np.nan
+    variance = float(summary_metric_series.var()) if n else np.nan
+    if summary_metric == "logratio":
+        cv = _geometric_cv(std)
+    elif mean is not None and not np.isnan(mean) and mean != 0:
+        cv = float((std / mean) * 100) if std is not None else np.nan
+    else:
+        cv = np.nan
+
+    min_val = float(summary_metric_series.min()) if n else np.nan
+    max_val = float(summary_metric_series.max()) if n else np.nan
+
+    mean_ratio_from_log = float(np.exp(log_ratio_series.mean())) if not log_ratio_series.empty else np.nan
+    median_ratio_from_log = float(np.exp(log_ratio_series.median())) if not log_ratio_series.empty else np.nan
+    min_ratio = float(ratio_series.min()) if not ratio_series.empty else np.nan
+    max_ratio = float(ratio_series.max()) if not ratio_series.empty else np.nan
+    gcv = _geometric_cv(std if summary_metric == "logratio" else np.nan)
+    return _SummaryStats(
+        n=n,
+        mean=mean,
+        median=median,
+        std=std,
+        variance=variance,
+        cv=cv,
+        mean_ratio_from_log=mean_ratio_from_log,
+        median_ratio_from_log=median_ratio_from_log,
+        min_val=min_val,
+        max_val=max_val,
+        min_ratio=min_ratio,
+        max_ratio=max_ratio,
+        gcv=gcv,
+    )
+
+
+def _compute_trimmed_stats(log_ratio_series: pd.Series) -> tuple[_SummaryStats, int, int]:
+    if log_ratio_series.empty:
+        empty_stats = _SummaryStats(
+            n=0,
+            mean=np.nan,
+            median=np.nan,
+            std=np.nan,
+            variance=np.nan,
+            cv=np.nan,
+            mean_ratio_from_log=np.nan,
+            median_ratio_from_log=np.nan,
+            min_val=np.nan,
+            max_val=np.nan,
+            min_ratio=np.nan,
+            max_ratio=np.nan,
+            gcv=np.nan,
+        )
+        return empty_stats, 0, 0
+
+    if log_ratio_series.size < 3:
+        stats = _SummaryStats(
+            n=0,
+            mean=np.nan,
+            median=np.nan,
+            std=np.nan,
+            variance=np.nan,
+            cv=np.nan,
+            mean_ratio_from_log=np.nan,
+            median_ratio_from_log=np.nan,
+            min_val=np.nan,
+            max_val=np.nan,
+            min_ratio=np.nan,
+            max_ratio=np.nan,
+            gcv=np.nan,
+        )
+        return stats, 0, 0
+
+    sorted_vals = np.sort(log_ratio_series.to_numpy())
+    trimmed_vals = sorted_vals[1:-1]
+    trimmed_series = pd.Series(trimmed_vals)
+    n_used_trimmed = int(trimmed_series.size)
+    mean = float(trimmed_series.mean()) if n_used_trimmed else np.nan
+    median = float(trimmed_series.median()) if n_used_trimmed else np.nan
+    std = float(trimmed_series.std()) if n_used_trimmed else np.nan
+    variance = float(trimmed_series.var()) if n_used_trimmed else np.nan
+    gcv = _geometric_cv(std)
+    mean_ratio_from_log = float(np.exp(trimmed_series.mean())) if n_used_trimmed else np.nan
+    median_ratio_from_log = float(np.exp(trimmed_series.median())) if n_used_trimmed else np.nan
+    min_val = float(trimmed_series.min()) if n_used_trimmed else np.nan
+    max_val = float(trimmed_series.max()) if n_used_trimmed else np.nan
+    min_ratio = float(np.exp(trimmed_series.min())) if n_used_trimmed else np.nan
+    max_ratio = float(np.exp(trimmed_series.max())) if n_used_trimmed else np.nan
+
+    return (
+        _SummaryStats(
+            n=n_used_trimmed,
+            mean=mean,
+            median=median,
+            std=std,
+            variance=variance,
+            cv=gcv,
+            mean_ratio_from_log=mean_ratio_from_log,
+            median_ratio_from_log=median_ratio_from_log,
+            min_val=min_val,
+            max_val=max_val,
+            min_ratio=min_ratio,
+            max_ratio=max_ratio,
+            gcv=gcv,
+        ),
+        2,
+        n_used_trimmed,
+    )
+
+
+def _parse_roi_name(label: str) -> str:
+    if " - " in label:
+        return label.split(" - ", 1)[1]
+    return label
+
+
+def _build_report_tables(df: pd.DataFrame) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    summary_rows = df[df["PID"].isin(["SUMMARY", "SUMMARY_TRIMMED"])].copy()
+    summaries: list[dict[str, object]] = []
+    exclusions: list[dict[str, object]] = []
+
+    for label, group in summary_rows.groupby("Ratio Label"):
+        untrimmed = group[group["PID"] == "SUMMARY"].iloc[0] if not group[group["PID"] == "SUMMARY"].empty else None
+        trimmed = group[group["PID"] == "SUMMARY_TRIMMED"].iloc[0] if not group[group["PID"] == "SUMMARY_TRIMMED"].empty else None
+        roi_name = _parse_roi_name(label)
+        entry: dict[str, object] = {
+            "ROI": roi_name,
+            "Ratio Label": label,
+        }
+        if untrimmed is not None:
+            entry.update(
+                {
+                    "SigHarmonics_N": untrimmed.get("SigHarmonics_N"),
+                    "N_detected": untrimmed.get("N_detected"),
+                    "N_base_valid": untrimmed.get("N_base_valid"),
+                    "N_outliers_excluded": untrimmed.get("N_outliers_excluded"),
+                    "N_floor_excluded": untrimmed.get("N_floor_excluded"),
+                    "N_used_untrimmed": untrimmed.get("N_used_untrimmed"),
+                    "Mean_log": untrimmed.get("Mean"),
+                    "Median_log": untrimmed.get("Median"),
+                    "Std_log": untrimmed.get("Std"),
+                    "Variance_log": untrimmed.get("Variance"),
+                    "gCV%": untrimmed.get("CV%"),
+                    "MeanRatio_fromLog": untrimmed.get("MeanRatio_fromLog"),
+                    "MedianRatio_fromLog": untrimmed.get("MedianRatio_fromLog"),
+                    "Min_log": untrimmed.get("Min"),
+                    "Max_log": untrimmed.get("Max"),
+                    "MinRatio": untrimmed.get("MinRatio"),
+                    "MaxRatio": untrimmed.get("MaxRatio"),
+                }
+            )
+        if trimmed is not None:
+            entry.update(
+                {
+                    "N_used_trimmed": trimmed.get("N_used_trimmed"),
+                    "N_trimmed_excluded": trimmed.get("N_trimmed_excluded"),
+                    "Mean_log_trim": trimmed.get("Mean"),
+                    "Median_log_trim": trimmed.get("Median"),
+                    "Std_log_trim": trimmed.get("Std"),
+                    "Variance_log_trim": trimmed.get("Variance"),
+                    "gCV%_trim": trimmed.get("gCV%_trim", trimmed.get("CV%")),
+                    "MeanRatio_fromLog_trim": trimmed.get("MeanRatio_fromLog_trim"),
+                    "MedianRatio_fromLog_trim": trimmed.get("MedianRatio_fromLog_trim"),
+                    "MinRatio_trim": trimmed.get("MinRatio_trim"),
+                    "MaxRatio_trim": trimmed.get("MaxRatio_trim"),
+                }
+            )
+        summaries.append(entry)
+
+    participant_rows = df[df["PID"].notna() & ~df["PID"].isin(["SUMMARY", "SUMMARY_TRIMMED"])].copy()
+    for _, row in participant_rows.iterrows():
+        included = bool(row.get("IncludedInSummary"))
+        excluded_as_outlier = bool(row.get("ExcludedAsOutlier"))
+        reason = str(row.get("SkipReason") or "")
+        if included and not excluded_as_outlier:
+            continue
+        if not reason and excluded_as_outlier:
+            reason = "excluded_as_outlier"
+        if not reason and not included:
+            reason = "excluded"
+        if not reason:
+            continue
+        exclusions.append(
+            {
+                "ROI": _parse_roi_name(str(row.get("Ratio Label", ""))),
+                "PID": row.get("PID"),
+                "Reason": reason,
+            }
+        )
+
+    return summaries, exclusions
