@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -330,3 +331,70 @@ def test_compute_ratios_trimmed_summary_metric(monkeypatch, tmp_path: Path, summ
     sorted_vals = sorted(values)
     expected_trimmed = sum(sorted_vals[1:-1]) / (len(sorted_vals) - 2)
     assert trimmed_row["Mean"] == pytest.approx(expected_trimmed)
+
+
+@pytest.mark.parametrize("scope", ["per_roi", "global"])
+def test_compute_ratios_quantile_reference_group(monkeypatch, tmp_path: Path, scope: str) -> None:
+    electrodes = ["F3", "F4"]
+    freqs = ["1.2000_Hz", "2.4000_Hz"]
+    roi = ROI(name="Frontal", channels=electrodes)
+    participants = [f"P{idx:02d}" for idx in range(1, 5)]
+    ratios = [0.5, 1.0, 2.0, 4.0]
+    participants, conditions, subject_data = _build_ratio_subject_data(
+        tmp_path, participants, ratios, electrodes, freqs
+    )
+
+    def fake_scan_folder(_root: str):
+        return participants, conditions, subject_data
+
+    monkeypatch.setattr(
+        "Tools.Ratio_Calculator.PySide6.worker.scan_folder_simple",
+        fake_scan_folder,
+    )
+
+    inputs = RatioCalcInputs(
+        excel_root=tmp_path,
+        cond_a="condA",
+        cond_b="condB",
+        roi_name=None,
+        z_threshold=1.0,
+        output_path=tmp_path / f"ratio_output_{scope}.xlsx",
+        significance_mode="group",
+        rois=[roi],
+        metric="bca",
+        outlier_enabled=False,
+        outlier_method="mad",
+        outlier_threshold=3.5,
+        outlier_action="exclude",
+        bca_negative_mode="strict",
+        min_significant_harmonics=1,
+        denominator_floor_enabled=True,
+        denominator_floor_mode="quantile",
+        denominator_floor_quantile=0.25,
+        denominator_floor_scope=scope,
+        denominator_floor_reference="current_young",
+        denominator_floor_absolute=None,
+        summary_metric="ratio",
+        outlier_metric="summary",
+        require_denom_sig=False,
+    )
+
+    ref_path = tmp_path / "ratio_calculator_reference_groups.json"
+    ref_path.write_text(json.dumps({"current_young": ["P01", "P02"]}), encoding="utf-8")
+
+    result_ref = compute_ratios(inputs)
+    df_ref = result_ref.dataframe
+    ratio_label = f"{inputs.cond_a} vs {inputs.cond_b} - {roi.name}"
+    ref_summary = df_ref[(df_ref["Ratio Label"] == ratio_label) & (df_ref["PID"] == "SUMMARY")].iloc[0]
+
+    assert ref_summary["DenomFloorRefKey"] == "current_young"
+    assert ref_summary["DenomFloorRefN"] == 2
+    ref_floor = ref_summary["DenomFloor"]
+
+    ref_path.unlink()
+    result_all = compute_ratios(inputs)
+    df_all = result_all.dataframe
+    all_summary = df_all[(df_all["Ratio Label"] == ratio_label) & (df_all["PID"] == "SUMMARY")].iloc[0]
+    all_floor = all_summary["DenomFloor"]
+
+    assert ref_floor != all_floor

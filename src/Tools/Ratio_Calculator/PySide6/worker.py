@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -139,6 +140,8 @@ def compute_ratios(
             inputs.outlier_action,
             inputs.summary_metric,
             inputs.metric,
+            None,
+            {},
         )
         summary_table, exclusions = _build_report_tables(empty_df)
         return RatioCalcResult(
@@ -171,6 +174,8 @@ def compute_ratios(
             inputs.outlier_action,
             inputs.summary_metric,
             inputs.metric,
+            None,
+            {},
         )
         summary_table, exclusions = _build_report_tables(empty_df)
         return RatioCalcResult(
@@ -215,7 +220,7 @@ def compute_ratios(
         summary_counts,
     )
     _apply_outlier_detection(ratio_data, inputs, log_warning, summary_counts)
-    floor_map = _compute_denominator_floors(ratio_data, inputs, log_warning)
+    floor_map, floor_ref_n, floor_ref_key = _compute_denominator_floors(ratio_data, inputs, log_warning)
     _apply_denominator_floor(ratio_data, floor_map, summary_counts)
     summary_counts.participants_used_per_roi = _participants_used(ratio_data, inputs.summary_metric)
     _emit(progress_cb, 85)
@@ -231,6 +236,8 @@ def compute_ratios(
         inputs.outlier_action,
         inputs.summary_metric,
         inputs.metric,
+        floor_ref_key,
+        floor_ref_n,
     )
     _emit(progress_cb, 90)
     _write_excel(df, inputs.output_path, log_info)
@@ -645,49 +652,98 @@ def _apply_outlier_detection(
                     row.excluded_as_outlier = True
 
 
+def _load_reference_group_pids(
+    excel_root: Path,
+    key: str,
+    log_warning: LogCallback,
+) -> set[str] | None:
+    ref_path = excel_root / "ratio_calculator_reference_groups.json"
+    if not ref_path.exists():
+        log_warning(f"Denominator floor reference file not found at {ref_path}.")
+        return None
+    log_warning(f"Denominator floor reference file found at {ref_path}.")
+    try:
+        data = json.loads(ref_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        log_warning(f"Failed to parse denominator floor reference file: {exc}")
+        return None
+    if not isinstance(data, dict):
+        log_warning("Denominator floor reference file is not a JSON object; ignoring.")
+        return None
+    raw_pids = data.get(key)
+    if not isinstance(raw_pids, list) or not raw_pids:
+        log_warning(f"Denominator floor reference key '{key}' missing or empty; ignoring.")
+        return None
+    normalized = {str(pid).strip().upper() for pid in raw_pids if str(pid).strip()}
+    if not normalized:
+        log_warning(f"Denominator floor reference key '{key}' contained no usable PIDs; ignoring.")
+        return None
+    return normalized
+
+
 def _compute_denominator_floors(
     ratio_data: dict[str, RoiComputation],
     inputs: RatioCalcInputs,
     log_warning: LogCallback,
-) -> dict[str, float]:
+) -> tuple[dict[str, float], dict[str, int], str | None]:
     if not inputs.denominator_floor_enabled:
-        return {}
+        return {}, {}, None
     floor_map: dict[str, float] = {}
+    floor_ref_n: dict[str, int] = {}
     if inputs.denominator_floor_mode == "absolute":
         if inputs.denominator_floor_absolute is None:
-            return {}
+            return {}, {}, None
         value = float(inputs.denominator_floor_absolute)
         for roi_name in ratio_data:
             floor_map[roi_name] = value
-        return floor_map
+        return floor_map, floor_ref_n, None
 
-    def _eligible_summary_b(comp: RoiComputation) -> list[float]:
-        return [
-            float(row.summary_b)
-            for row in comp.rows
-            if row.include_in_summary and row.summary_b is not None and np.isfinite(row.summary_b)
-        ]
+    ref_key = inputs.denominator_floor_reference
+    log_warning(f"Denominator floor reference key: {ref_key}")
+    ref_pids = _load_reference_group_pids(inputs.excel_root, ref_key, log_warning)
+
+    def _eligible_summary_b(comp: RoiComputation) -> tuple[list[float], set[str]]:
+        values: list[float] = []
+        matched_pids: set[str] = set()
+        for row in comp.rows:
+            if not row.include_in_summary:
+                continue
+            if row.summary_b is None or not np.isfinite(row.summary_b):
+                continue
+            pid = row.pid.upper()
+            if ref_pids is not None and pid not in ref_pids:
+                continue
+            values.append(float(row.summary_b))
+            matched_pids.add(pid)
+        return values, matched_pids
 
     quantile = min(max(inputs.denominator_floor_quantile, 0.01), 0.25)
     if inputs.denominator_floor_scope == "global":
         values: list[float] = []
+        matched_pids: set[str] = set()
         for comp in ratio_data.values():
-            values.extend(_eligible_summary_b(comp))
+            comp_values, comp_pids = _eligible_summary_b(comp)
+            values.extend(comp_values)
+            matched_pids.update(comp_pids)
+        log_warning(f"Denominator floor reference eligible PIDs (global): {len(matched_pids)}")
         if not values:
             log_warning("Denominator floor (global) skipped: no eligible SummaryB values.")
-            return {}
+            return {}, {}, ref_key
         floor_value = float(np.nanquantile(np.array(values, dtype=float), quantile))
         for roi_name in ratio_data:
             floor_map[roi_name] = floor_value
-        return floor_map
+            floor_ref_n[roi_name] = len(matched_pids)
+        return floor_map, floor_ref_n, ref_key
 
     for roi_name, comp in ratio_data.items():
-        values = _eligible_summary_b(comp)
+        values, matched_pids = _eligible_summary_b(comp)
+        log_warning(f"Denominator floor reference eligible PIDs for ROI {roi_name}: {len(matched_pids)}")
         if not values:
             log_warning(f"Denominator floor skipped for ROI {roi_name}: no eligible SummaryB values.")
             continue
         floor_map[roi_name] = float(np.nanquantile(np.array(values, dtype=float), quantile))
-    return floor_map
+        floor_ref_n[roi_name] = len(matched_pids)
+    return floor_map, floor_ref_n, ref_key
 
 
 def _apply_denominator_floor(
@@ -738,6 +794,8 @@ def _build_output_frame(
     outlier_action: str,
     summary_metric: str,
     metric: str,
+    denom_floor_ref_key: str | None,
+    denom_floor_ref_n: dict[str, int] | None,
 ) -> pd.DataFrame:
     metric_a_col, metric_b_col = _metric_columns(metric)
     rows: list[dict[str, float | str | int | None]] = []
@@ -824,6 +882,8 @@ def _build_output_frame(
             sig_count_summary_b = roi_comp.sig_harmonics_group_b
         sig_count_summary = min(sig_count_summary_a, sig_count_summary_b)
         skip_for_summary = roi_comp.skip_reason or ""
+        denom_floor_ref_n_value = denom_floor_ref_n.get(roi) if denom_floor_ref_n else None
+        denom_floor_ref_key_value = denom_floor_ref_key if denom_floor_ref_key else None
 
         summary_row = {col: None for col in columns}
         summary_row.update(
@@ -836,6 +896,8 @@ def _build_output_frame(
                 "SigHarmonicsB_N": sig_count_summary_b,
                 "SigHarmonics_N": sig_count_summary,
                 "DenomFloor": roi_ratios[0].denom_floor if roi_ratios else None,
+                "DenomFloorRefKey": denom_floor_ref_key_value,
+                "DenomFloorRefN": denom_floor_ref_n_value,
                 "N_detected": roi_comp.n_detected,
                 "N_base_valid": n_base_valid,
                 "N_outliers_excluded": n_outlier_excluded,
@@ -871,6 +933,8 @@ def _build_output_frame(
                 "SigHarmonicsB_N": sig_count_summary_b,
                 "SigHarmonics_N": sig_count_summary,
                 "DenomFloor": roi_ratios[0].denom_floor if roi_ratios else None,
+                "DenomFloorRefKey": denom_floor_ref_key_value,
+                "DenomFloorRefN": denom_floor_ref_n_value,
                 "N_detected": roi_comp.n_detected,
                 "N_base_valid": n_base_valid,
                 "N_outliers_excluded": n_outlier_excluded,
@@ -940,6 +1004,8 @@ def _result_columns(metric_a_col: str, metric_b_col: str) -> list[str]:
         "SigHarmonicsB_N",
         "SigHarmonics_N",
         "DenomFloor",
+        "DenomFloorRefKey",
+        "DenomFloorRefN",
         "N_detected",
         "N_base_valid",
         "N_outliers_excluded",
