@@ -37,6 +37,8 @@ class RatioRow:
     log_ratio: float | None
     ratio_percent: float | None
     sig_count: int
+    sig_count_a: int
+    sig_count_b: int
     metric_used: str
     skip_reason: str | None = None
     include_in_summary: bool = False
@@ -53,7 +55,8 @@ class RatioRow:
 @dataclass
 class RoiComputation:
     rows: list[RatioRow]
-    sig_harmonics_group: int
+    sig_harmonics_group_a: int
+    sig_harmonics_group_b: int
     n_detected: int
     skip_reason: str | None = None
 
@@ -129,6 +132,7 @@ def compute_ratios(
             {},
             [],
             {},
+            {},
             inputs.cond_a,
             inputs.cond_b,
             inputs.significance_mode,
@@ -160,6 +164,7 @@ def compute_ratios(
             {},
             selected_roi_names,
             {},
+            {},
             inputs.cond_a,
             inputs.cond_b,
             inputs.significance_mode,
@@ -180,21 +185,34 @@ def compute_ratios(
             exclusions,
         )
 
-    z_scores = _load_roi_z_scores(participants_map.values(), rois, log_warning)
+    z_scores_a = _load_roi_z_scores_for_files(participants_map.values(), rois, log_warning, which="a")
+    z_scores_b = _load_roi_z_scores_for_files(participants_map.values(), rois, log_warning, which="b")
     _emit(progress_cb, 40)
-    sig_freqs_by_pid: dict[str, dict[str, list[float]]] | None = None
+    sig_freqs_by_pid_a: dict[str, dict[str, list[float]]] | None = None
+    sig_freqs_by_pid_b: dict[str, dict[str, list[float]]] | None = None
     if inputs.significance_mode == "individual":
-        sig_freqs_by_pid = _determine_significant_frequencies_individual(z_scores, inputs.z_threshold)
-        sig_freqs = _merge_individual_sig_freqs(sig_freqs_by_pid)
+        sig_freqs_by_pid_a = _determine_significant_frequencies_individual(z_scores_a, inputs.z_threshold)
+        sig_freqs_by_pid_b = _determine_significant_frequencies_individual(z_scores_b, inputs.z_threshold)
+        sig_freqs_a = _merge_individual_sig_freqs(sig_freqs_by_pid_a)
+        sig_freqs_b = _merge_individual_sig_freqs(sig_freqs_by_pid_b)
     else:
-        sig_freqs = _determine_significant_frequencies_group(z_scores, inputs.z_threshold)
-    if not any(sig_freqs.values()):
+        sig_freqs_a = _determine_significant_frequencies_group(z_scores_a, inputs.z_threshold)
+        sig_freqs_b = _determine_significant_frequencies_group(z_scores_b, inputs.z_threshold)
+    if not any(sig_freqs_a.values()) and not any(sig_freqs_b.values()):
         log_warning("No significant harmonics identified for any ROI.")
     _emit(progress_cb, 50)
 
     participants_seq = list(participants_map.values())
     ratio_data = _compute_ratio_table(
-        participants_seq, rois, sig_freqs, sig_freqs_by_pid, inputs, log_warning, summary_counts
+        participants_seq,
+        rois,
+        sig_freqs_a,
+        sig_freqs_b,
+        sig_freqs_by_pid_a,
+        sig_freqs_by_pid_b,
+        inputs,
+        log_warning,
+        summary_counts,
     )
     _apply_outlier_detection(ratio_data, inputs, log_warning, summary_counts)
     floor_map = _compute_denominator_floors(ratio_data, inputs, log_warning)
@@ -205,7 +223,8 @@ def compute_ratios(
     df = _build_output_frame(
         ratio_data,
         selected_roi_names,
-        sig_freqs,
+        sig_freqs_a,
+        sig_freqs_b,
         inputs.cond_a,
         inputs.cond_b,
         inputs.significance_mode,
@@ -228,8 +247,8 @@ def compute_ratios(
 
     return RatioCalcResult(
         df,
-        sig_freqs,
-        sig_freqs_by_pid,
+        sig_freqs_a,
+        sig_freqs_by_pid_a,
         warnings,
         asdict(summary_counts),
         inputs.output_path,
@@ -260,17 +279,21 @@ def _build_participant_files(
     return participants_map
 
 
-def _load_roi_z_scores(
+def _load_roi_z_scores_for_files(
     participants: Iterable[_ParticipantFiles],
     rois: list[ROI],
     log_warning: LogCallback,
+    which: str,
 ) -> dict[str, dict[str, pd.Series]]:
+    if which not in {"a", "b"}:
+        raise ValueError(f"Invalid condition selector: {which}")
     data: dict[str, dict[str, pd.Series]] = {roi.name: {} for roi in rois}
     for part in participants:
+        file_path = part.cond_a_file if which == "a" else part.cond_b_file
         try:
-            df = pd.read_excel(part.cond_a_file, sheet_name="Z Score")
+            df = pd.read_excel(file_path, sheet_name="Z Score")
         except FileNotFoundError:
-            log_warning(f"Missing file for participant {part.pid}: {part.cond_a_file}")
+            log_warning(f"Missing file for participant {part.pid}: {file_path}")
             continue
         except Exception as exc:  # noqa: BLE001
             log_warning(f"Failed to read Z Score sheet for {part.pid}: {exc}")
@@ -348,8 +371,10 @@ def _merge_individual_sig_freqs(sig_freqs: dict[str, dict[str, list[float]]]) ->
 def _compute_ratio_table(
     participants: Iterable[_ParticipantFiles],
     rois: list[ROI],
-    sig_freqs: dict[str, list[float]],
-    individual_sig_freqs: dict[str, dict[str, list[float]]] | None,
+    sig_freqs_a: dict[str, list[float]],
+    sig_freqs_b: dict[str, list[float]],
+    individual_sig_freqs_a: dict[str, dict[str, list[float]]] | None,
+    individual_sig_freqs_b: dict[str, dict[str, list[float]]] | None,
     inputs: RatioCalcInputs,
     log_warning: LogCallback,
     summary_counts: RatioCalcSummaryCounts,
@@ -364,21 +389,38 @@ def _compute_ratio_table(
         metric_b = _load_metric_data(part.cond_b_file, rois, log_warning, part.pid, inputs.metric)
         metrics_cache[part.pid] = (metric_a, metric_b)
     for roi in rois:
-        shared_freqs = sig_freqs.get(roi.name, [])
+        shared_freqs_a = sig_freqs_a.get(roi.name, [])
+        shared_freqs_b = sig_freqs_b.get(roi.name, [])
         roi_rows: list[RatioRow] = []
         skip_reason = None
-        if inputs.significance_mode != "individual" and len(shared_freqs) < min_k:
+        if inputs.significance_mode != "individual" and (
+            len(shared_freqs_a) < min_k or len(shared_freqs_b) < min_k
+        ):
             skip_reason = "insufficient_sig_harmonics"
-            log_warning(f"ROI {roi.name} has only {len(shared_freqs)} significant harmonics (< {min_k}); skipping ratios.")
+            log_warning(
+                f"ROI {roi.name} has only {len(shared_freqs_a)}/{len(shared_freqs_b)} "
+                f"significant harmonics (< {min_k}); skipping ratios."
+            )
         for part in participants_list:
             metric_a, metric_b = metrics_cache.get(part.pid, ({}, {}))
-            freqs = (
-                individual_sig_freqs.get(roi.name, {}).get(part.pid, [])
-                if inputs.significance_mode == "individual" and individual_sig_freqs is not None
-                else shared_freqs
-            )
-            sig_count = len(freqs)
-            if skip_reason or sig_count < min_k:
+            if inputs.significance_mode == "individual":
+                freqs_a = (
+                    individual_sig_freqs_a.get(roi.name, {}).get(part.pid, [])
+                    if individual_sig_freqs_a is not None
+                    else []
+                )
+                freqs_b = (
+                    individual_sig_freqs_b.get(roi.name, {}).get(part.pid, [])
+                    if individual_sig_freqs_b is not None
+                    else []
+                )
+            else:
+                freqs_a = shared_freqs_a
+                freqs_b = shared_freqs_b
+            sig_count_a = len(freqs_a)
+            sig_count_b = len(freqs_b)
+            sig_count = min(sig_count_a, sig_count_b)
+            if skip_reason or sig_count_a < min_k or sig_count_b < min_k:
                 roi_rows.append(
                     RatioRow(
                         pid=part.pid,
@@ -388,6 +430,8 @@ def _compute_ratio_table(
                         log_ratio=None,
                         ratio_percent=None,
                         sig_count=sig_count,
+                        sig_count_a=sig_count_a,
+                        sig_count_b=sig_count_b,
                         metric_used=metric_label,
                         skip_reason=skip_reason or "insufficient_sig_harmonics",
                         include_in_summary=False,
@@ -398,8 +442,8 @@ def _compute_ratio_table(
                 )
                 continue
 
-            summary_a = _summary_for_roi(metric_a.get(roi.name), freqs, inputs.metric, inputs.bca_negative_mode)
-            summary_b = _summary_for_roi(metric_b.get(roi.name), freqs, inputs.metric, inputs.bca_negative_mode)
+            summary_a = _summary_for_roi(metric_a.get(roi.name), freqs_a, inputs.metric, inputs.bca_negative_mode)
+            summary_b = _summary_for_roi(metric_b.get(roi.name), freqs_b, inputs.metric, inputs.bca_negative_mode)
 
             if summary_a is None or summary_b is None:
                 summary_counts.skipped_missing += 1
@@ -412,6 +456,8 @@ def _compute_ratio_table(
                         log_ratio=None,
                         ratio_percent=None,
                         sig_count=sig_count,
+                        sig_count_a=sig_count_a,
+                        sig_count_b=sig_count_b,
                         metric_used=metric_label,
                         skip_reason="missing_data",
                         include_in_summary=False,
@@ -448,6 +494,8 @@ def _compute_ratio_table(
                     log_ratio=log_ratio,
                     ratio_percent=ratio_percent,
                     sig_count=sig_count,
+                    sig_count_a=sig_count_a,
+                    sig_count_b=sig_count_b,
                     metric_used=metric_label,
                     skip_reason=base_reason or None,
                     include_in_summary=base_valid,
@@ -458,7 +506,8 @@ def _compute_ratio_table(
             )
         ratio_data[roi.name] = RoiComputation(
             rows=roi_rows,
-            sig_harmonics_group=len(shared_freqs),
+            sig_harmonics_group_a=len(shared_freqs_a),
+            sig_harmonics_group_b=len(shared_freqs_b),
             n_detected=len(participants_list),
             skip_reason=skip_reason,
         )
@@ -659,7 +708,8 @@ def _participants_used(ratios: dict[str, RoiComputation], summary_metric: str) -
 def _build_output_frame(
     ratios: dict[str, RoiComputation],
     roi_filter: list[str],
-    sig_freqs: dict[str, list[float]],
+    sig_freqs_a: dict[str, list[float]],
+    sig_freqs_b: dict[str, list[float]],
     cond_a: str,
     cond_b: str,
     significance_mode: str,
@@ -669,13 +719,23 @@ def _build_output_frame(
 ) -> pd.DataFrame:
     metric_a_col, metric_b_col = _metric_columns(metric)
     rows: list[dict[str, float | str | int | None]] = []
-    roi_names = roi_filter if roi_filter else list(ratios.keys()) or list(sig_freqs.keys())
+    roi_names = roi_filter if roi_filter else list(ratios.keys()) or list(sig_freqs_a.keys()) or list(sig_freqs_b.keys())
     columns = _result_columns(metric_a_col, metric_b_col)
 
     for roi in roi_names:
         label = f"{cond_a} vs {cond_b} - {roi}"
-        sig_count_group = len(sig_freqs.get(roi, []))
-        roi_comp = ratios.get(roi, RoiComputation(rows=[], sig_harmonics_group=sig_count_group, n_detected=0))
+        sig_count_group_a = len(sig_freqs_a.get(roi, []))
+        sig_count_group_b = len(sig_freqs_b.get(roi, []))
+        sig_count_group = min(sig_count_group_a, sig_count_group_b)
+        roi_comp = ratios.get(
+            roi,
+            RoiComputation(
+                rows=[],
+                sig_harmonics_group_a=sig_count_group_a,
+                sig_harmonics_group_b=sig_count_group_b,
+                n_detected=0,
+            ),
+        )
         roi_ratios = roi_comp.rows if sig_count_group or significance_mode == "individual" else []
 
         n_base_valid = sum(1 for entry in roi_ratios if entry.base_valid)
@@ -726,13 +786,21 @@ def _build_output_frame(
                     "OutlierMethod": entry.outlier_method or "",
                     "OutlierScore": entry.outlier_score,
                     "ExcludedAsOutlier": bool(entry.excluded_as_outlier),
+                    "SigHarmonicsA_N": entry.sig_count_a,
+                    "SigHarmonicsB_N": entry.sig_count_b,
                     "SigHarmonics_N": entry.sig_count,
                     "DenomFloor": entry.denom_floor,
                 }
             )
             rows.append(row)
 
-        sig_count_summary = sig_count_group or max((entry.sig_count for entry in roi_ratios), default=0)
+        if significance_mode == "individual":
+            sig_count_summary_a = max((entry.sig_count_a for entry in roi_ratios), default=0)
+            sig_count_summary_b = max((entry.sig_count_b for entry in roi_ratios), default=0)
+        else:
+            sig_count_summary_a = roi_comp.sig_harmonics_group_a
+            sig_count_summary_b = roi_comp.sig_harmonics_group_b
+        sig_count_summary = min(sig_count_summary_a, sig_count_summary_b)
         skip_for_summary = roi_comp.skip_reason or ""
 
         summary_row = {col: None for col in columns}
@@ -741,6 +809,8 @@ def _build_output_frame(
                 "Ratio Label": label,
                 "PID": "SUMMARY",
                 "SkipReason": skip_for_summary,
+                "SigHarmonicsA_N": sig_count_summary_a,
+                "SigHarmonicsB_N": sig_count_summary_b,
                 "SigHarmonics_N": sig_count_summary,
                 "DenomFloor": roi_ratios[0].denom_floor if roi_ratios else None,
                 "N_detected": roi_comp.n_detected,
@@ -773,6 +843,8 @@ def _build_output_frame(
                 "Ratio Label": label,
                 "PID": "SUMMARY_TRIMMED",
                 "SkipReason": skip_for_summary,
+                "SigHarmonicsA_N": sig_count_summary_a,
+                "SigHarmonicsB_N": sig_count_summary_b,
                 "SigHarmonics_N": sig_count_summary,
                 "DenomFloor": roi_ratios[0].denom_floor if roi_ratios else None,
                 "N_detected": roi_comp.n_detected,
@@ -839,6 +911,8 @@ def _result_columns(metric_a_col: str, metric_b_col: str) -> list[str]:
         "OutlierMethod",
         "OutlierScore",
         "ExcludedAsOutlier",
+        "SigHarmonicsA_N",
+        "SigHarmonicsB_N",
         "SigHarmonics_N",
         "DenomFloor",
         "N_detected",
