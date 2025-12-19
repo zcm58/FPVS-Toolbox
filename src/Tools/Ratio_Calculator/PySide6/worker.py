@@ -609,18 +609,40 @@ def _apply_outlier_detection(
                 scores = 0.6745 * (values - median) / mad
             flags = np.abs(scores) > inputs.outlier_threshold
             method_label = "MAD (robust z)"
-            for idx, score, flag in zip(valid_indices, scores, flags):
-                row = rows[idx]
-                row.outlier_method = method_label
-                row.outlier_score = float(score)
-                row.outlier_flag = bool(flag)
-                if flag:
-                    summary_counts.outliers_flagged_per_roi[roi_name] = (
-                        summary_counts.outliers_flagged_per_roi.get(roi_name, 0) + 1
-                    )
-                    if inputs.outlier_action == "exclude":
-                        row.include_in_summary = False
-                        row.excluded_as_outlier = True
+        elif inputs.outlier_method == "iqr":
+            q1 = float(np.nanquantile(values, 0.25))
+            q3 = float(np.nanquantile(values, 0.75))
+            iqr = q3 - q1
+            if iqr == 0:
+                log_warning(f"IQR is zero for ROI {roi_name}; no outliers flagged.")
+                scores = np.zeros_like(values)
+                flags = np.zeros_like(values, dtype=bool)
+            else:
+                k = float(inputs.outlier_threshold)
+                low_fence = q1 - k * iqr
+                high_fence = q3 + k * iqr
+                flags = (values < low_fence) | (values > high_fence)
+                scores = np.where(
+                    values < low_fence,
+                    low_fence - values,
+                    np.where(values > high_fence, values - high_fence, 0.0),
+                )
+            method_label = "IQR"
+        else:
+            continue
+
+        for idx, score, flag in zip(valid_indices, scores, flags):
+            row = rows[idx]
+            row.outlier_method = method_label
+            row.outlier_score = float(score)
+            row.outlier_flag = bool(flag)
+            if flag:
+                summary_counts.outliers_flagged_per_roi[roi_name] = (
+                    summary_counts.outliers_flagged_per_roi.get(roi_name, 0) + 1
+                )
+                if inputs.outlier_action == "exclude":
+                    row.include_in_summary = False
+                    row.excluded_as_outlier = True
 
 
 def _compute_denominator_floors(
@@ -764,7 +786,7 @@ def _build_output_frame(
             [entry.ratio for entry in roi_ratios if entry.include_in_summary and entry.ratio is not None and np.isfinite(entry.ratio)]
         )
         untrimmed_stats = _compute_summary_stats(summary_metric_series, log_ratio_series, ratio_used_series, summary_metric)
-        trimmed_stats, n_trimmed_excluded, n_used_trimmed = _compute_trimmed_stats(log_ratio_series)
+        trimmed_stats, n_trimmed_excluded, n_used_trimmed = _compute_trimmed_stats(summary_metric_series, summary_metric)
 
         for entry in roi_ratios:
             row = {col: None for col in columns}
@@ -809,6 +831,7 @@ def _build_output_frame(
                 "Ratio Label": label,
                 "PID": "SUMMARY",
                 "SkipReason": skip_for_summary,
+                "SummaryMetric": summary_metric,
                 "SigHarmonicsA_N": sig_count_summary_a,
                 "SigHarmonicsB_N": sig_count_summary_b,
                 "SigHarmonics_N": sig_count_summary,
@@ -843,6 +866,7 @@ def _build_output_frame(
                 "Ratio Label": label,
                 "PID": "SUMMARY_TRIMMED",
                 "SkipReason": skip_for_summary,
+                "SummaryMetric": summary_metric,
                 "SigHarmonicsA_N": sig_count_summary_a,
                 "SigHarmonicsB_N": sig_count_summary_b,
                 "SigHarmonics_N": sig_count_summary,
@@ -906,6 +930,7 @@ def _result_columns(metric_a_col: str, metric_b_col: str) -> list[str]:
         "RatioPercent",
         "MetricUsed",
         "SkipReason",
+        "SummaryMetric",
         "IncludedInSummary",
         "OutlierFlag",
         "OutlierMethod",
@@ -1016,8 +1041,8 @@ def _compute_summary_stats(
     )
 
 
-def _compute_trimmed_stats(log_ratio_series: pd.Series) -> tuple[_SummaryStats, int, int]:
-    if log_ratio_series.empty:
+def _compute_trimmed_stats(values: pd.Series, summary_metric: str) -> tuple[_SummaryStats, int, int]:
+    if values.empty or values.size < 3:
         empty_stats = _SummaryStats(
             n=0,
             mean=np.nan,
@@ -1035,25 +1060,7 @@ def _compute_trimmed_stats(log_ratio_series: pd.Series) -> tuple[_SummaryStats, 
         )
         return empty_stats, 0, 0
 
-    if log_ratio_series.size < 3:
-        stats = _SummaryStats(
-            n=0,
-            mean=np.nan,
-            median=np.nan,
-            std=np.nan,
-            variance=np.nan,
-            cv=np.nan,
-            mean_ratio_from_log=np.nan,
-            median_ratio_from_log=np.nan,
-            min_val=np.nan,
-            max_val=np.nan,
-            min_ratio=np.nan,
-            max_ratio=np.nan,
-            gcv=np.nan,
-        )
-        return stats, 0, 0
-
-    sorted_vals = np.sort(log_ratio_series.to_numpy())
+    sorted_vals = np.sort(values.to_numpy())
     trimmed_vals = sorted_vals[1:-1]
     trimmed_series = pd.Series(trimmed_vals)
     n_used_trimmed = int(trimmed_series.size)
@@ -1061,13 +1068,25 @@ def _compute_trimmed_stats(log_ratio_series: pd.Series) -> tuple[_SummaryStats, 
     median = float(trimmed_series.median()) if n_used_trimmed else np.nan
     std = float(trimmed_series.std()) if n_used_trimmed else np.nan
     variance = float(trimmed_series.var()) if n_used_trimmed else np.nan
-    gcv = _geometric_cv(std)
-    mean_ratio_from_log = float(np.exp(trimmed_series.mean())) if n_used_trimmed else np.nan
-    median_ratio_from_log = float(np.exp(trimmed_series.median())) if n_used_trimmed else np.nan
-    min_val = float(trimmed_series.min()) if n_used_trimmed else np.nan
-    max_val = float(trimmed_series.max()) if n_used_trimmed else np.nan
-    min_ratio = float(np.exp(trimmed_series.min())) if n_used_trimmed else np.nan
-    max_ratio = float(np.exp(trimmed_series.max())) if n_used_trimmed else np.nan
+
+    if summary_metric == "logratio":
+        cv = _geometric_cv(std)
+        mean_ratio_from_log = float(np.exp(trimmed_series.mean())) if n_used_trimmed else np.nan
+        median_ratio_from_log = float(np.exp(trimmed_series.median())) if n_used_trimmed else np.nan
+        min_val = float(trimmed_series.min()) if n_used_trimmed else np.nan
+        max_val = float(trimmed_series.max()) if n_used_trimmed else np.nan
+        min_ratio = float(np.exp(trimmed_series.min())) if n_used_trimmed else np.nan
+        max_ratio = float(np.exp(trimmed_series.max())) if n_used_trimmed else np.nan
+        gcv = _geometric_cv(std)
+    else:
+        cv = float((std / mean) * 100) if n_used_trimmed and np.isfinite(mean) and mean != 0 else np.nan
+        mean_ratio_from_log = np.nan
+        median_ratio_from_log = np.nan
+        min_val = float(trimmed_series.min()) if n_used_trimmed else np.nan
+        max_val = float(trimmed_series.max()) if n_used_trimmed else np.nan
+        min_ratio = min_val
+        max_ratio = max_val
+        gcv = np.nan
 
     return (
         _SummaryStats(
@@ -1076,7 +1095,7 @@ def _compute_trimmed_stats(log_ratio_series: pd.Series) -> tuple[_SummaryStats, 
             median=median,
             std=std,
             variance=variance,
-            cv=gcv,
+            cv=cv,
             mean_ratio_from_log=mean_ratio_from_log,
             median_ratio_from_log=median_ratio_from_log,
             min_val=min_val,
@@ -1105,9 +1124,16 @@ def _build_report_tables(df: pd.DataFrame) -> tuple[list[dict[str, object]], lis
         untrimmed = group[group["PID"] == "SUMMARY"].iloc[0] if not group[group["PID"] == "SUMMARY"].empty else None
         trimmed = group[group["PID"] == "SUMMARY_TRIMMED"].iloc[0] if not group[group["PID"] == "SUMMARY_TRIMMED"].empty else None
         roi_name = _parse_roi_name(label)
+        summary_metric = None
+        if untrimmed is not None:
+            summary_metric = untrimmed.get("SummaryMetric")
+        if not summary_metric and trimmed is not None:
+            summary_metric = trimmed.get("SummaryMetric")
+        scale_label = "LogRatio" if summary_metric == "logratio" else "Ratio"
         entry: dict[str, object] = {
             "ROI": roi_name,
             "Ratio Label": label,
+            "Scale": f"Scale: {scale_label}",
         }
         if untrimmed is not None:
             entry.update(
@@ -1118,15 +1144,15 @@ def _build_report_tables(df: pd.DataFrame) -> tuple[list[dict[str, object]], lis
                     "N_outliers_excluded": untrimmed.get("N_outliers_excluded"),
                     "N_floor_excluded": untrimmed.get("N_floor_excluded"),
                     "N_used_untrimmed": untrimmed.get("N_used_untrimmed"),
-                    "Mean_log": untrimmed.get("Mean"),
-                    "Median_log": untrimmed.get("Median"),
-                    "Std_log": untrimmed.get("Std"),
-                    "Variance_log": untrimmed.get("Variance"),
-                    "gCV%": untrimmed.get("CV%"),
+                    "Mean": untrimmed.get("Mean"),
+                    "Median": untrimmed.get("Median"),
+                    "Std": untrimmed.get("Std"),
+                    "Variance": untrimmed.get("Variance"),
+                    "CV%": untrimmed.get("CV%"),
                     "MeanRatio_fromLog": untrimmed.get("MeanRatio_fromLog"),
                     "MedianRatio_fromLog": untrimmed.get("MedianRatio_fromLog"),
-                    "Min_log": untrimmed.get("Min"),
-                    "Max_log": untrimmed.get("Max"),
+                    "Min": untrimmed.get("Min"),
+                    "Max": untrimmed.get("Max"),
                     "MinRatio": untrimmed.get("MinRatio"),
                     "MaxRatio": untrimmed.get("MaxRatio"),
                 }
@@ -1136,13 +1162,15 @@ def _build_report_tables(df: pd.DataFrame) -> tuple[list[dict[str, object]], lis
                 {
                     "N_used_trimmed": trimmed.get("N_used_trimmed"),
                     "N_trimmed_excluded": trimmed.get("N_trimmed_excluded"),
-                    "Mean_log_trim": trimmed.get("Mean"),
-                    "Median_log_trim": trimmed.get("Median"),
-                    "Std_log_trim": trimmed.get("Std"),
-                    "Variance_log_trim": trimmed.get("Variance"),
-                    "gCV%_trim": trimmed.get("gCV%_trim", trimmed.get("CV%")),
+                    "Mean_trim": trimmed.get("Mean"),
+                    "Median_trim": trimmed.get("Median"),
+                    "Std_trim": trimmed.get("Std"),
+                    "Variance_trim": trimmed.get("Variance"),
+                    "CV%_trim": trimmed.get("CV%"),
                     "MeanRatio_fromLog_trim": trimmed.get("MeanRatio_fromLog_trim"),
                     "MedianRatio_fromLog_trim": trimmed.get("MedianRatio_fromLog_trim"),
+                    "Min_trim": trimmed.get("Min"),
+                    "Max_trim": trimmed.get("Max"),
                     "MinRatio_trim": trimmed.get("MinRatio_trim"),
                     "MaxRatio_trim": trimmed.get("MaxRatio_trim"),
                 }
