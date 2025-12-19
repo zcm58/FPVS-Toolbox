@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
 import logging
 from dataclasses import asdict, dataclass, field
@@ -8,6 +10,7 @@ from typing import Callable, Iterable
 
 import numpy as np
 import pandas as pd
+from xlsxwriter.utility import xl_col_to_name
 from PySide6.QtCore import QObject, Signal
 
 from Tools.Ratio_Calculator.PySide6.model import RatioCalcInputs, RatioCalcResult
@@ -16,6 +19,10 @@ from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
 from Tools.Stats.roi_resolver import ROI
 
 logger = logging.getLogger(__name__)
+
+_SCIPY_STATS_SPEC = importlib.util.find_spec("scipy.stats")
+_SCIPY_STATS_MODULE = None
+_SCIPY_FALLBACK_LOGGED = False
 
 
 ProgressCallback = Callable[[int], None]
@@ -846,6 +853,12 @@ def _build_output_frame(
         )
         untrimmed_stats = _compute_summary_stats(summary_metric_series, log_ratio_series, ratio_used_series, summary_metric)
         trimmed_stats, n_trimmed_excluded, n_used_trimmed = _compute_trimmed_stats(summary_metric_series, summary_metric)
+        (
+            mean_ci_low_trim,
+            mean_ci_high_trim,
+            gmr_ci_low_trim,
+            gmr_ci_high_trim,
+        ) = _compute_trimmed_logratio_ci(log_ratio_series, log_func=logger.info)
         mean_ci_low, mean_ci_high = _bootstrap_mean_ci(summary_metric_values_array, n_boot=2000, alpha=0.05, seed=12345)
         if summary_metric == "logratio":
             gmr_ci_low = float(np.exp(mean_ci_low)) if np.isfinite(mean_ci_low) else np.nan
@@ -980,6 +993,10 @@ def _build_output_frame(
                 "MedianRatio_fromLog_trim": trimmed_stats.median_ratio_from_log,
                 "MinRatio_trim": trimmed_stats.min_ratio,
                 "MaxRatio_trim": trimmed_stats.max_ratio,
+                "Mean_CI_low_trim": mean_ci_low_trim,
+                "Mean_CI_high_trim": mean_ci_high_trim,
+                "GMR_CI_low_trim": gmr_ci_low_trim,
+                "GMR_CI_high_trim": gmr_ci_high_trim,
             }
         )
         rows.append(trimmed_row)
@@ -993,8 +1010,217 @@ def _write_excel(df: pd.DataFrame, output_path: Path, log_func: LogCallback) -> 
     try:
         with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
             _auto_format_and_write_excel(writer, df, "Ratio Calculator", log_func)
+            _apply_ratio_calculator_formatting(writer, df, "Ratio Calculator")
     except Exception as exc:  # noqa: BLE001
         log_func(f"Failed to write Excel file: {exc}")
+
+
+def _apply_ratio_calculator_formatting(writer: pd.ExcelWriter, df: pd.DataFrame, sheet_name: str) -> None:
+    workbook = writer.book
+    worksheet = writer.sheets[sheet_name]
+    total_rows = len(df)
+    total_cols = len(df.columns)
+    if total_cols == 0:
+        return
+
+    worksheet.freeze_panes(1, 2)
+    worksheet.autofilter(0, 0, 0, total_cols - 1)
+
+    formats = _ratio_calculator_formats(workbook)
+    pid_col_idx = df.columns.get_loc("PID") if "PID" in df.columns else 1
+
+    ratio_cols = {
+        "SummaryA",
+        "SummaryB",
+        "Ratio",
+        "Mean",
+        "Median",
+        "Std",
+        "Variance",
+        "MeanRatio_fromLog",
+        "MedianRatio_fromLog",
+        "Min",
+        "Max",
+        "MinRatio",
+        "MaxRatio",
+        "GMR_CI_low",
+        "GMR_CI_high",
+        "Mean_trim",
+        "Median_trim",
+        "Std_trim",
+        "Variance_trim",
+        "MeanRatio_fromLog_trim",
+        "MedianRatio_fromLog_trim",
+        "MinRatio_trim",
+        "MaxRatio_trim",
+        "Mean_CI_low",
+        "Mean_CI_high",
+        "Mean_CI_low_trim",
+        "Mean_CI_high_trim",
+        "GMR_CI_low_trim",
+        "GMR_CI_high_trim",
+        "BCA_A",
+        "BCA_B",
+        "SNR_A",
+        "SNR_B",
+    }
+    logratio_cols = {"LogRatio"}
+    percent_cols = {"RatioPercent", "CV%", "gCV%_trim"}
+    int_cols = {
+        "SigHarmonicsA_N",
+        "SigHarmonicsB_N",
+        "SigHarmonics_N",
+        "N_detected",
+        "N_base_valid",
+        "N_outliers_excluded",
+        "N_floor_excluded",
+        "N_used",
+        "N",
+        "N_used_untrimmed",
+        "N_used_trimmed",
+        "N_trimmed_excluded",
+        "DenomFloorRefN",
+    }
+
+    for col_idx, col_name in enumerate(df.columns):
+        col_series = df[col_name]
+        col_format = _ratio_calc_col_format(
+            col_name,
+            col_series,
+            formats,
+            ratio_cols,
+            logratio_cols,
+            percent_cols,
+            int_cols,
+        )
+        col_width = _ratio_calc_col_width(col_series, col_name)
+        worksheet.set_column(col_idx, col_idx, col_width, col_format)
+
+    if total_rows == 0:
+        return
+
+    first_data_row = 2
+    last_data_row = total_rows + 1
+    pid_col_letter = xl_col_to_name(pid_col_idx)
+    summary_formatters = _ratio_calc_summary_formats(workbook)
+    for col_idx, col_name in enumerate(df.columns):
+        col_key = _ratio_calc_format_key(
+            col_name,
+            df[col_name],
+            ratio_cols,
+            logratio_cols,
+            percent_cols,
+            int_cols,
+        )
+        summary_format = summary_formatters["summary"][col_key]
+        trimmed_format = summary_formatters["trimmed"][col_key]
+        data_range = (first_data_row, col_idx, last_data_row, col_idx)
+        worksheet.conditional_format(
+            *data_range,
+            {
+                "type": "formula",
+                "criteria": f'=${pid_col_letter}{first_data_row}=\"SUMMARY\"',
+                "format": summary_format,
+            },
+        )
+        worksheet.conditional_format(
+            *data_range,
+            {
+                "type": "formula",
+                "criteria": f'=${pid_col_letter}{first_data_row}=\"SUMMARY_TRIMMED\"',
+                "format": trimmed_format,
+            },
+        )
+
+
+def _ratio_calculator_formats(workbook) -> dict[str, object]:
+    return {
+        "left": workbook.add_format({"align": "left", "valign": "vcenter"}),
+        "center": workbook.add_format({"align": "center", "valign": "vcenter"}),
+        "int": workbook.add_format({"num_format": "0", "align": "center", "valign": "vcenter"}),
+        "num_3dp": workbook.add_format({"num_format": "0.000", "align": "center", "valign": "vcenter"}),
+        "num_1dp": workbook.add_format({"num_format": "0.0", "align": "center", "valign": "vcenter"}),
+    }
+
+
+def _ratio_calc_summary_formats(workbook) -> dict[str, dict[str, object]]:
+    formats: dict[str, dict[str, object]] = {"summary": {}, "trimmed": {}}
+    fill_map = {"summary": "#FFF2CC", "trimmed": "#E2F0D9"}
+    for label, fill_color in fill_map.items():
+        formats[label] = {
+            "left": workbook.add_format(
+                {"align": "left", "valign": "vcenter", "bold": True, "fg_color": fill_color}
+            ),
+            "center": workbook.add_format(
+                {"align": "center", "valign": "vcenter", "bold": True, "fg_color": fill_color}
+            ),
+            "int": workbook.add_format(
+                {"num_format": "0", "align": "center", "valign": "vcenter", "bold": True, "fg_color": fill_color}
+            ),
+            "num_3dp": workbook.add_format(
+                {
+                    "num_format": "0.000",
+                    "align": "center",
+                    "valign": "vcenter",
+                    "bold": True,
+                    "fg_color": fill_color,
+                }
+            ),
+            "num_1dp": workbook.add_format(
+                {
+                    "num_format": "0.0",
+                    "align": "center",
+                    "valign": "vcenter",
+                    "bold": True,
+                    "fg_color": fill_color,
+                }
+            ),
+        }
+    return formats
+
+
+def _ratio_calc_col_format(
+    col_name: str,
+    col_series: pd.Series,
+    formats: dict[str, object],
+    ratio_cols: set[str],
+    logratio_cols: set[str],
+    percent_cols: set[str],
+    int_cols: set[str],
+) -> object:
+    key = _ratio_calc_format_key(col_name, col_series, ratio_cols, logratio_cols, percent_cols, int_cols)
+    return formats[key]
+
+
+def _ratio_calc_format_key(
+    col_name: str,
+    col_series: pd.Series,
+    ratio_cols: set[str],
+    logratio_cols: set[str],
+    percent_cols: set[str],
+    int_cols: set[str],
+) -> str:
+    if col_name in percent_cols:
+        return "num_1dp"
+    if col_name in ratio_cols or col_name in logratio_cols:
+        return "num_3dp"
+    if col_name in int_cols:
+        return "int"
+    if pd.api.types.is_string_dtype(col_series) or pd.api.types.is_object_dtype(col_series):
+        return "left"
+    if pd.api.types.is_integer_dtype(col_series):
+        return "int"
+    if pd.api.types.is_float_dtype(col_series):
+        return "num_3dp"
+    return "center"
+
+
+def _ratio_calc_col_width(col_series: pd.Series, col_name: str, padding: int = 2) -> int:
+    try:
+        max_len = max(col_series.astype(str).map(len).max(), len(str(col_name)))
+        return min(max(int(max_len) + padding, 10), 50)
+    except Exception:
+        return 15
 
 
 def _result_columns(metric_a_col: str, metric_b_col: str) -> list[str]:
@@ -1053,6 +1279,10 @@ def _result_columns(metric_a_col: str, metric_b_col: str) -> list[str]:
         "gCV%_trim",
         "MeanRatio_fromLog_trim",
         "MedianRatio_fromLog_trim",
+        "Mean_CI_low_trim",
+        "Mean_CI_high_trim",
+        "GMR_CI_low_trim",
+        "GMR_CI_high_trim",
         "MinRatio_trim",
         "MaxRatio_trim",
     ]
@@ -1213,6 +1443,51 @@ def _bootstrap_mean_ci(
     low = float(np.quantile(boot_means, alpha / 2))
     high = float(np.quantile(boot_means, 1 - alpha / 2))
     return low, high
+
+
+def _get_scipy_stats(log_func: LogCallback | None = None):
+    global _SCIPY_STATS_MODULE
+    global _SCIPY_FALLBACK_LOGGED
+    if _SCIPY_STATS_MODULE is None and _SCIPY_STATS_SPEC is not None:
+        _SCIPY_STATS_MODULE = importlib.import_module("scipy.stats")
+    if _SCIPY_STATS_MODULE is None and log_func is not None and not _SCIPY_FALLBACK_LOGGED:
+        log_func("SciPy stats unavailable; trimmed CI will use normal approximation.")
+        _SCIPY_FALLBACK_LOGGED = True
+    return _SCIPY_STATS_MODULE
+
+
+def _compute_trimmed_logratio_ci(
+    log_ratio_series: pd.Series,
+    log_func: LogCallback | None = None,
+) -> tuple[float, float, float, float]:
+    global _SCIPY_FALLBACK_LOGGED
+    log_values = log_ratio_series.dropna().to_numpy(dtype=float)
+    log_values = log_values[np.isfinite(log_values)]
+    if log_values.size < 3:
+        return np.nan, np.nan, np.nan, np.nan
+
+    sorted_vals = np.sort(log_values)
+    trimmed_vals = sorted_vals[1:-1]
+    if trimmed_vals.size < 2:
+        return np.nan, np.nan, np.nan, np.nan
+
+    mean = float(np.mean(trimmed_vals))
+    std = float(np.std(trimmed_vals, ddof=1))
+    if not np.isfinite(std) or std == 0:
+        return np.nan, np.nan, np.nan, np.nan
+    se = std / np.sqrt(trimmed_vals.size)
+
+    stats_module = _get_scipy_stats(log_func)
+    if stats_module is not None:
+        tcrit = float(stats_module.t.ppf(0.975, df=trimmed_vals.size - 1))
+    else:
+        tcrit = 1.96
+
+    mean_ci_low = float(mean - tcrit * se)
+    mean_ci_high = float(mean + tcrit * se)
+    gmr_ci_low = float(np.exp(mean_ci_low)) if np.isfinite(mean_ci_low) else np.nan
+    gmr_ci_high = float(np.exp(mean_ci_high)) if np.isfinite(mean_ci_high) else np.nan
+    return mean_ci_low, mean_ci_high, gmr_ci_low, gmr_ci_high
 
 
 def _parse_roi_name(label: str) -> str:
