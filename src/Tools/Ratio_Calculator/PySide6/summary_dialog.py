@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
@@ -37,38 +37,46 @@ class RatioSummaryDialog(QDialog):
 
         self.summary_widget = QTableWidget(self)
         layout.addWidget(self.summary_widget)
+        summary_columns = [
+            "ROI",
+            "Scale",
+            "SigHarmonics_N",
+            "N_detected",
+            "N_base_valid",
+            "N_outliers_excluded",
+            "N_floor_excluded",
+            "N_used_untrimmed",
+            "Mean",
+            "Median",
+            "Std",
+            "Variance",
+            "CV%",
+            "MeanRatio_fromLog",
+            "MedianRatio_fromLog",
+            "Min",
+            "Max",
+            "MinRatio",
+            "MaxRatio",
+            "N_used_trimmed",
+            "N_trimmed_excluded",
+            "Mean_trim",
+            "Median_trim",
+            "Std_trim",
+            "Variance_trim",
+            "CV%_trim",
+            "MeanRatio_fromLog_trim",
+            "MedianRatio_fromLog_trim",
+            "Min_trim",
+            "Max_trim",
+            "MinRatio_trim",
+            "MaxRatio_trim",
+        ]
+        summary_labels = self._summary_header_labels(summary_columns)
         self._populate_table(
             self.summary_widget,
             self._summary_table,
-            [
-                "ROI",
-                "SigHarmonics_N",
-                "N_detected",
-                "N_base_valid",
-                "N_outliers_excluded",
-                "N_floor_excluded",
-                "N_used_untrimmed",
-                "Mean_log",
-                "Median_log",
-                "Std_log",
-                "Variance_log",
-                "gCV%",
-                "MeanRatio_fromLog",
-                "MedianRatio_fromLog",
-                "MinRatio",
-                "MaxRatio",
-                "N_used_trimmed",
-                "N_trimmed_excluded",
-                "Mean_log_trim",
-                "Median_log_trim",
-                "Std_log_trim",
-                "Variance_log_trim",
-                "gCV%_trim",
-                "MeanRatio_fromLog_trim",
-                "MedianRatio_fromLog_trim",
-                "MinRatio_trim",
-                "MaxRatio_trim",
-            ],
+            summary_columns,
+            summary_labels,
         )
 
         layout.addWidget(QLabel("Excluded participants"))
@@ -98,18 +106,28 @@ class RatioSummaryDialog(QDialog):
 
         self.resize(900, 600)
 
-    def _populate_table(self, table: QTableWidget, data: list[dict[str, object]], columns: list[str]) -> None:
+    def _populate_table(
+        self,
+        table: QTableWidget,
+        data: list[dict[str, object]],
+        columns: list[str],
+        header_labels: list[str] | None = None,
+    ) -> None:
         if not data:
             table.setRowCount(0)
             table.setColumnCount(len(columns))
-            table.setHorizontalHeaderLabels(columns)
+            table.setHorizontalHeaderLabels(header_labels or columns)
             return
         frame = pd.DataFrame(data)
         available_cols = [col for col in columns if col in frame.columns]
         remaining = [col for col in frame.columns if col not in available_cols]
         all_columns = available_cols + remaining
         table.setColumnCount(len(all_columns))
-        table.setHorizontalHeaderLabels(all_columns)
+        if header_labels:
+            labels_by_column = dict(zip(columns, header_labels))
+            table.setHorizontalHeaderLabels([labels_by_column.get(col, col) for col in all_columns])
+        else:
+            table.setHorizontalHeaderLabels(all_columns)
         table.setRowCount(len(frame))
         for row_idx, (_, series) in enumerate(frame[all_columns].iterrows()):
             for col_idx, value in enumerate(series):
@@ -123,6 +141,35 @@ class RatioSummaryDialog(QDialog):
         if isinstance(value, float):
             return f"{value:.4f}"
         return str(value)
+
+    def _summary_header_labels(self, columns: list[str]) -> list[str]:
+        scale_label = self._summary_scale_label()
+        if scale_label:
+            suffix = "log" if scale_label == "LogRatio" else "ratio"
+        else:
+            suffix = ""
+
+        def _label(col: str) -> str:
+            if col in {"Mean", "Median", "Std", "Variance", "Min", "Max"} and suffix:
+                return f"{col} ({suffix})"
+            if col in {"Mean_trim", "Median_trim", "Std_trim", "Variance_trim", "Min_trim", "Max_trim"} and suffix:
+                base = col.replace("_trim", "")
+                return f"{base} ({suffix}) trim"
+            return col
+
+        return [_label(col) for col in columns]
+
+    def _summary_scale_label(self) -> str | None:
+        scales: set[str] = set()
+        for entry in self._summary_table:
+            scale_value = entry.get("Scale")
+            if isinstance(scale_value, str):
+                normalized = scale_value.replace("Scale:", "").strip()
+                if normalized:
+                    scales.add(normalized)
+        if len(scales) == 1:
+            return next(iter(scales))
+        return None
 
     def _copy_to_clipboard(self) -> None:
         clipboard = QGuiApplication.clipboard()
