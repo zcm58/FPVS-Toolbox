@@ -2,6 +2,7 @@ import os
 from math import isclose
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -72,6 +73,56 @@ def test_trimmed_summary_with_small_sample_returns_na(tmp_path, qtbot, monkeypat
     assert trimmed_row["N_trimmed_excluded"] == 0
     assert pd.isna(trimmed_row["Mean"])
     assert pd.isna(trimmed_row["MeanRatio_fromLog_trim"])
+
+
+def test_trimmed_ci_columns_populated(tmp_path, qtbot, monkeypatch):
+    project_root, excel_root, cond_a_dir, cond_b_dir, view, controller = _setup_tool(tmp_path, qtbot, monkeypatch)
+
+    log_values = np.array([-0.3, 0.1, 0.4, 0.8, 1.2])
+    for idx, log_val in enumerate(log_values, start=1):
+        ratio = float(np.exp(log_val))
+        pid = f"P{idx:02d}"
+        cond_a_vals = [ratio] * 3
+        cond_b_vals = [1.0] * 3
+        _write_participant_file(
+            cond_a_dir / f"{pid}_A.xlsx",
+            snr_values=[cond_a_vals] * 3,
+            z_values=[[3.0, 3.0, 3.0]] * 3,
+        )
+        _write_participant_file(
+            cond_b_dir / f"{pid}_B.xlsx",
+            snr_values=[cond_b_vals] * 3,
+            z_values=[[3.0, 3.0, 3.0]] * 3,
+        )
+
+    controller.set_excel_root(excel_root)
+    view.cond_b_combo.setCurrentText("ConditionB")
+    view.roi_combo.setCurrentText("Bilateral OT")
+    inputs = _make_inputs(view, controller, excel_root, "Bilateral OT")
+    result = controller.compute_ratios_sync(inputs)
+    df = result.dataframe
+    assert "Mean_CI_low_trim" in df.columns
+    assert "Mean_CI_high_trim" in df.columns
+    assert "GMR_CI_low_trim" in df.columns
+    assert "GMR_CI_high_trim" in df.columns
+
+    trimmed_row = df[(df["PID"] == "SUMMARY_TRIMMED") & df["Ratio Label"].str.contains("Bilateral OT", na=False)].iloc[0]
+    summary_row = df[(df["PID"] == "SUMMARY") & df["Ratio Label"].str.contains("Bilateral OT", na=False)].iloc[0]
+    trimmed_vals = np.sort(log_values)[1:-1]
+    tcrit = stats.t.ppf(0.975, df=len(trimmed_vals) - 1)
+    mean = float(trimmed_vals.mean())
+    std = float(trimmed_vals.std(ddof=1))
+    se = std / np.sqrt(len(trimmed_vals))
+    expected_low = mean - tcrit * se
+    expected_high = mean + tcrit * se
+    assert isclose(float(trimmed_row["Mean_CI_low_trim"]), expected_low, rel_tol=1e-6)
+    assert isclose(float(trimmed_row["Mean_CI_high_trim"]), expected_high, rel_tol=1e-6)
+    assert isclose(float(trimmed_row["GMR_CI_low_trim"]), float(np.exp(expected_low)), rel_tol=1e-6)
+    assert isclose(float(trimmed_row["GMR_CI_high_trim"]), float(np.exp(expected_high)), rel_tol=1e-6)
+    assert pd.isna(summary_row["Mean_CI_low_trim"])
+    assert pd.isna(summary_row["Mean_CI_high_trim"])
+    assert pd.isna(summary_row["GMR_CI_low_trim"])
+    assert pd.isna(summary_row["GMR_CI_high_trim"])
 
 
 def test_metric_headers_switch_for_bca(tmp_path, qtbot, monkeypatch):
