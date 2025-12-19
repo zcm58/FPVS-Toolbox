@@ -28,7 +28,7 @@ class RatioSummaryDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Ratio Summary Report")
-        self._summary_table = summary_table or []
+        self._summary_table = self._decorate_summary_table(summary_table or [])
         self._exclusions = exclusions or []
         self._results_folder = Path(results_folder) if results_folder else None
 
@@ -47,6 +47,7 @@ class RatioSummaryDialog(QDialog):
             "N_floor_excluded",
             "N_used_untrimmed",
             "Mean",
+            "Mean_CI",
             "Median",
             "Std",
             "Variance",
@@ -57,6 +58,7 @@ class RatioSummaryDialog(QDialog):
             "Max",
             "MinRatio",
             "MaxRatio",
+            "GMR_CI",
             "N_used_trimmed",
             "N_trimmed_excluded",
             "Mean_trim",
@@ -155,6 +157,10 @@ class RatioSummaryDialog(QDialog):
             if col in {"Mean_trim", "Median_trim", "Std_trim", "Variance_trim", "Min_trim", "Max_trim"} and suffix:
                 base = col.replace("_trim", "")
                 return f"{base} ({suffix}) trim"
+            if col == "Mean_CI" and suffix:
+                return f"Mean CI ({suffix})"
+            if col == "GMR_CI":
+                return "GMR CI (ratio)"
             return col
 
         return [_label(col) for col in columns]
@@ -170,6 +176,32 @@ class RatioSummaryDialog(QDialog):
         if len(scales) == 1:
             return next(iter(scales))
         return None
+
+    def _decorate_summary_table(self, summary_table: list[dict[str, object]]) -> list[dict[str, object]]:
+        decorated: list[dict[str, object]] = []
+        for entry in summary_table:
+            entry_copy = dict(entry)
+            entry_copy["Mean_CI"] = self._format_ci_range(
+                entry.get("Mean_CI_low"),
+                entry.get("Mean_CI_high"),
+            )
+            entry_copy["GMR_CI"] = self._format_ci_range(
+                entry.get("GMR_CI_low"),
+                entry.get("GMR_CI_high"),
+            )
+            decorated.append(entry_copy)
+        return decorated
+
+    def _format_ci_range(self, low: object, high: object) -> str:
+        if low is None or high is None:
+            return ""
+        if isinstance(low, float) and pd.isna(low):
+            return ""
+        if isinstance(high, float) and pd.isna(high):
+            return ""
+        if isinstance(low, (float, int)) and isinstance(high, (float, int)):
+            return f"[{self._format_value(float(low))}, {self._format_value(float(high))}]"
+        return ""
 
     def _copy_to_clipboard(self) -> None:
         clipboard = QGuiApplication.clipboard()
