@@ -837,6 +837,7 @@ def _build_output_frame(
             if entry.include_in_summary
         ]
         summary_metric_series = pd.Series([v for v in summary_metric_values if v is not None and np.isfinite(v)])
+        summary_metric_values_array = summary_metric_series.to_numpy(dtype=float)
         log_ratio_series = pd.Series(
             [entry.log_ratio for entry in roi_ratios if entry.include_in_summary and not entry.excluded_as_outlier and entry.log_ratio is not None and np.isfinite(entry.log_ratio)]
         )
@@ -845,6 +846,13 @@ def _build_output_frame(
         )
         untrimmed_stats = _compute_summary_stats(summary_metric_series, log_ratio_series, ratio_used_series, summary_metric)
         trimmed_stats, n_trimmed_excluded, n_used_trimmed = _compute_trimmed_stats(summary_metric_series, summary_metric)
+        mean_ci_low, mean_ci_high = _bootstrap_mean_ci(summary_metric_values_array, n_boot=2000, alpha=0.05, seed=12345)
+        if summary_metric == "logratio":
+            gmr_ci_low = float(np.exp(mean_ci_low)) if np.isfinite(mean_ci_low) else np.nan
+            gmr_ci_high = float(np.exp(mean_ci_high)) if np.isfinite(mean_ci_high) else np.nan
+        else:
+            gmr_ci_low = np.nan
+            gmr_ci_high = np.nan
 
         for entry in roi_ratios:
             row = {col: None for col in columns}
@@ -908,6 +916,8 @@ def _build_output_frame(
                 "N_used_trimmed": n_used_trimmed,
                 "N_trimmed_excluded": n_trimmed_excluded,
                 "Mean": untrimmed_stats.mean,
+                "Mean_CI_low": mean_ci_low,
+                "Mean_CI_high": mean_ci_high,
                 "Median": untrimmed_stats.median,
                 "Std": untrimmed_stats.std,
                 "Variance": untrimmed_stats.variance,
@@ -918,6 +928,8 @@ def _build_output_frame(
                 "Max": untrimmed_stats.max_val,
                 "MinRatio": untrimmed_stats.min_ratio,
                 "MaxRatio": untrimmed_stats.max_ratio,
+                "GMR_CI_low": gmr_ci_low,
+                "GMR_CI_high": gmr_ci_high,
             }
         )
         rows.append(summary_row)
@@ -945,6 +957,8 @@ def _build_output_frame(
                 "N_used_trimmed": n_used_trimmed,
                 "N_trimmed_excluded": n_trimmed_excluded,
                 "Mean": trimmed_stats.mean,
+                "Mean_CI_low": np.nan,
+                "Mean_CI_high": np.nan,
                 "Median": trimmed_stats.median,
                 "Std": trimmed_stats.std,
                 "Variance": trimmed_stats.variance,
@@ -955,6 +969,8 @@ def _build_output_frame(
                 "Max": trimmed_stats.max_val,
                 "MinRatio": trimmed_stats.min_ratio,
                 "MaxRatio": trimmed_stats.max_ratio,
+                "GMR_CI_low": np.nan,
+                "GMR_CI_high": np.nan,
                 "Mean_trim": trimmed_stats.mean,
                 "Median_trim": trimmed_stats.median,
                 "Std_trim": trimmed_stats.std,
@@ -1016,6 +1032,8 @@ def _result_columns(metric_a_col: str, metric_b_col: str) -> list[str]:
         "N_used_trimmed",
         "N_trimmed_excluded",
         "Mean",
+        "Mean_CI_low",
+        "Mean_CI_high",
         "Median",
         "Std",
         "Variance",
@@ -1026,6 +1044,8 @@ def _result_columns(metric_a_col: str, metric_b_col: str) -> list[str]:
         "Max",
         "MinRatio",
         "MaxRatio",
+        "GMR_CI_low",
+        "GMR_CI_high",
         "Mean_trim",
         "Median_trim",
         "Std_trim",
@@ -1175,6 +1195,26 @@ def _compute_trimmed_stats(values: pd.Series, summary_metric: str) -> tuple[_Sum
     )
 
 
+def _bootstrap_mean_ci(
+    values: np.ndarray,
+    n_boot: int = 2000,
+    alpha: float = 0.05,
+    seed: int = 12345,
+) -> tuple[float, float]:
+    if values.size < 3:
+        return np.nan, np.nan
+    if values.ndim != 1 or not np.all(np.isfinite(values)):
+        raise ValueError("Values must be a 1D finite array.")
+    rng = np.random.default_rng(seed)
+    boot_means = np.empty(n_boot, dtype=float)
+    for idx in range(n_boot):
+        sample = rng.choice(values, size=values.size, replace=True)
+        boot_means[idx] = np.mean(sample)
+    low = float(np.quantile(boot_means, alpha / 2))
+    high = float(np.quantile(boot_means, 1 - alpha / 2))
+    return low, high
+
+
 def _parse_roi_name(label: str) -> str:
     if " - " in label:
         return label.split(" - ", 1)[1]
@@ -1211,6 +1251,8 @@ def _build_report_tables(df: pd.DataFrame) -> tuple[list[dict[str, object]], lis
                     "N_floor_excluded": untrimmed.get("N_floor_excluded"),
                     "N_used_untrimmed": untrimmed.get("N_used_untrimmed"),
                     "Mean": untrimmed.get("Mean"),
+                    "Mean_CI_low": untrimmed.get("Mean_CI_low"),
+                    "Mean_CI_high": untrimmed.get("Mean_CI_high"),
                     "Median": untrimmed.get("Median"),
                     "Std": untrimmed.get("Std"),
                     "Variance": untrimmed.get("Variance"),
@@ -1221,6 +1263,8 @@ def _build_report_tables(df: pd.DataFrame) -> tuple[list[dict[str, object]], lis
                     "Max": untrimmed.get("Max"),
                     "MinRatio": untrimmed.get("MinRatio"),
                     "MaxRatio": untrimmed.get("MaxRatio"),
+                    "GMR_CI_low": untrimmed.get("GMR_CI_low"),
+                    "GMR_CI_high": untrimmed.get("GMR_CI_high"),
                 }
             )
         if trimmed is not None:

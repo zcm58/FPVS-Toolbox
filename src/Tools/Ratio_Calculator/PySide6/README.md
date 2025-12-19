@@ -1,64 +1,104 @@
 # Ratio Calculator (PySide6)
 
-The Ratio Calculator computes ROI-level SNR ratios between two conditions from already-exported per-condition Excel workbooks.
+## Purpose
+The Ratio Calculator compares two experimental conditions (Condition A vs Condition B) for each ROI and participant. It computes summary metrics per condition and then reports a ratio:
+
+- **Ratio** = SummaryA / SummaryB
+- **LogRatio** = ln(Ratio)
+- **RatioPercent** = (exp(LogRatio) - 1) × 100
+
+A ratio above 1 (or LogRatio above 0) indicates Condition A is higher than Condition B. A ratio below 1 (or LogRatio below 0) indicates Condition A is lower than Condition B.
 
 ## Inputs
-- **Excel root folder:** Defaults to the Stats tool's project folder at `1 - Excel Data Files` (auto-detected via the project's
-  `project.json`); one subfolder per condition containing participant `.xlsx` files.
-- **Conditions:** Discovered via `scan_folder_simple` using `EXCEL_PID_REGEX` for participant IDs.
-- **ROIs:** Loaded only from ROI pairs defined in **Settings**; channel membership follows the saved Stats ROI settings. Defaults (Frontal/Parietal/Central/Occipital) are not added automatically.
-- **Sheets used:** `SNR` and `Z Score` with an `Electrode` column plus frequency columns named `{freq:.4f}_Hz`.
+The tool expects a folder containing per-participant Excel workbooks with the following sheets:
 
-## Metrics and stability rules
-1. **Significance mode (Advanced → Significance mode):**
-   - **Group-level (default/recommended):**
-     - For each ROI, compute mean Z-scores per harmonic across participants (Condition A only).
-     - Harmonics with mean Z > 1.64 (default threshold) are significant for all participants in that ROI.
-   - **Per-participant (experimental):**
-     - For each participant and ROI, compute mean Z-scores per harmonic across ROI channels (Condition A only).
-     - Each participant uses their own significant harmonics set (Z > 1.64).
-2. **Minimum significant harmonics (K):**
-   - Advanced setting default **K = 3** (range 1–50).
-   - If the significant set for an ROI/participant is smaller than K, the ROI is considered unstable: participant rows are skipped from summary stats and the SUMMARY row records the skip reason with `N_used = 0`.
-3. **Summary metric (Advanced → Summary metric):**
-   - Default: **LogRatio**. Ratio is still exported, but summary statistics (mean/median/std/variance/CV%) are computed on LogRatio for symmetry and skew reduction.
-   - Optional: **Ratio** if you prefer raw ratios for the summary calculations.
-   - Derived fields always exported when valid:
-     - **SummaryA**, **SummaryB** (metric-specific aggregates)
-     - **Ratio = SummaryA / SummaryB**
-     - **LogRatio = ln(Ratio)** when SummaryA > 0 and SummaryB > 0
-     - **RatioPercent = (exp(LogRatio) - 1) * 100**
-4. **Metric modes (SNR vs BCA):**
-   - **Default:** SNR (mean across harmonics).
-   - **BCA (uV):** Sum across harmonics; negative handling (shown only in BCA mode):
-     - **Strict (default):** If either summed BCA ≤ 0, the row is skipped.
-     - **Rectify negatives to 0:** Negative harmonic values are clamped to 0 before summing; ratios are still skipped if the denominator remains 0.
-5. **Denominator stability floor (Advanced → Denominator stability):**
-   - Optional checkbox (off by default).
-   - **Norm-referenced (quantile, default mode when enabled):**
-     - Reference group: current dataset (young controls placeholder).
-     - Quantile default **0.05** (range 0.01–0.25).
-     - Scope: **Per ROI (default)** or **Global** across ROIs.
-     - If SummaryB < floor value → Ratio/LogRatio invalid, `SkipReason = denom_below_floor`, row excluded from summaries.
-   - **Absolute value:** Uses a user-supplied floor when provided.
-6. **Outlier detection (Advanced → Outlier detection):**
-   - Disabled by default; requires ≥5 base-valid rows.
-   - **Methods:** MAD (robust z, default) or IQR; thresholds default to 3.5 (MAD) / 1.5 (IQR).
-   - **Metric:** Summary metric (default), Ratio, or LogRatio.
-   - **Actions:** Flag only (default) or **Exclude from analysis and summary**; excluded rows remain in the export with `ExcludedAsOutlier=True` and are removed from quantile floor calculations and summary stats.
+- **Z Score**
+- **SNR**
+- **BCA (uV)**
 
-## Output
-- Default output folder: `4 - Ratio Calculator Results` under the active project root (auto-created). You can override the folder and filename; `.xlsx` is appended automatically.
-- Single-sheet Excel export formatted via `_auto_format_and_write_excel(...)` in a **vertical layout**:
-  - Columns: Ratio Label, PID, **metric-specific Summary columns** (`SNR_A`/`SNR_B` or `BCA_A`/`BCA_B`), SummaryA, SummaryB, Ratio, LogRatio, RatioPercent, MetricUsed, SkipReason, IncludedInSummary, OutlierFlag, OutlierMethod, OutlierScore, ExcludedAsOutlier, SigHarmonics_N, DenomFloor, N_detected, N_base_valid, N_outliers_excluded, N_floor_excluded, N_used, N, N_used_untrimmed, N_used_trimmed, N_trimmed_excluded, Mean, Median, Std, Variance, CV%, MeanRatio_fromLog, MedianRatio_fromLog, Min, Max, MinRatio, MaxRatio, Mean_trim, Median_trim, Std_trim, Variance_trim, gCV%_trim, MeanRatio_fromLog_trim, MedianRatio_fromLog_trim, MinRatio_trim, MaxRatio_trim.
-  - Participant rows list each PID with ROI summaries for the chosen metric (`SummaryA`/`SummaryB`) alongside metric-specific columns and QC flags.
-  - SUMMARY rows appear after each ROI block with per-ROI statistics and QC counts; **SUMMARY_TRIMMED** rows follow immediately and exclude the single highest and lowest LogRatio before recomputing stats.
-  - Outliers (if enabled) are flagged per participant; exclusions are tracked separately from skip reasons and surfaced in the post-run summary dialog.
+Each sheet must include an `Electrode` column and frequency columns named like `X.XXXX_Hz` (e.g., `1.2000_Hz`).
 
-## Skip rules and warnings
-- Missing condition files for a participant.
-- Missing `SNR` or `Z Score` sheets.
-- ROI without matching channels in a file.
-- Insufficient significant harmonics (SigHarmonics_N < K) for an ROI.
-- Denominator summary equals zero or falls below the stability floor.
-- Non-positive summed BCA when using strict negative handling.
+## ROI handling
+ROIs are defined by channel lists. For each ROI, the tool:
+
+1. Selects rows in the sheet where `Electrode` matches the ROI channel list.
+2. Averages those channels per frequency to build an ROI-level spectrum.
+
+## Significant harmonics
+Significant harmonics are computed separately for Condition A and Condition B using Z-scores.
+
+- **Group mode**: the Z-score is averaged across participants per ROI. Frequencies above the Z threshold are significant.
+- **Individual mode**: significant frequencies are computed per participant and then merged for the ROI.
+- **Minimum K rule**: an ROI must have at least `K` significant harmonics **in both conditions**. If either condition fails the threshold, ratios are skipped for that ROI/participant.
+
+## SummaryA / SummaryB
+Summary values depend on the selected metric:
+
+- **SNR**: mean across the selected harmonics.
+- **BCA**: sum across the selected harmonics.
+  - **Strict** mode rejects nonpositive BCA (<= 0).
+  - **Rectify** mode clips negative values to 0 before summing.
+
+Significant harmonics are chosen separately for each condition, so SummaryA and SummaryB may use different harmonic sets.
+
+## Ratio metrics and inclusion rules
+Computed per participant/ROI when possible:
+
+- **Ratio** = SummaryA / SummaryB
+- **LogRatio** = ln(Ratio) (only if Ratio > 0 and both summaries are positive)
+- **RatioPercent** = (exp(LogRatio) - 1) × 100
+
+Exclusions occur when:
+
+- A required sheet or channel data is missing.
+- SummaryB is 0 (denominator is zero).
+- BCA is nonpositive and strict mode is selected.
+- Denominator floor excludes the participant (see below).
+- Outlier exclusion is enabled (see below).
+
+## Outlier detection
+Outlier detection can flag or exclude participants on a per-ROI basis.
+
+- **MAD**: robust z-scores using median absolute deviation.
+- **IQR**: values outside `Q1 - k*IQR` or `Q3 + k*IQR` are flagged.
+
+When `exclude` is selected, flagged participants are removed from summary statistics.
+
+## Denominator floor
+A floor can be applied to SummaryB values to prevent unstable ratios:
+
+- **Absolute**: a fixed minimum SummaryB.
+- **Quantile**: the `q` quantile of eligible SummaryB values.
+
+Scope options:
+
+- **Per-ROI**: each ROI uses its own floor.
+- **Global**: all ROIs share a floor.
+
+Reference groups:
+
+- A JSON file at `excel_root/ratio_calculator_reference_groups.json` can define PID lists for reference groups.
+- If a reference key is supplied, only those PIDs contribute to the quantile floor.
+
+## Summary statistics
+Summary rows are reported per ROI:
+
+- **Mean / Variance / Std / Median / Min / Max** are computed on the selected summary metric scale (Ratio or LogRatio).
+- **CV%** is percent coefficient of variation (geometric CV when LogRatio is selected).
+- **MeanRatio_fromLog / MedianRatio_fromLog** are exp-transformed summaries of log ratios.
+- **Trimmed** stats drop the min and max values (when at least 3 values exist).
+
+## Confidence intervals
+For each ROI summary (untrimmed only):
+
+- A bootstrap percentile 95% CI is computed for the **mean** of the selected summary metric.
+- If the summary metric is **LogRatio**, a **GMR CI** is computed by exponentiating the log-mean CI.
+- Trimmed summary rows do **not** include CIs (values are left blank).
+
+## Outputs
+The output Excel file includes participant rows plus:
+
+- **SUMMARY**: untrimmed summary statistics and confidence intervals.
+- **SUMMARY_TRIMMED**: trimmed statistics (no confidence intervals).
+
+Use the output columns `Mean_CI_low`, `Mean_CI_high`, `GMR_CI_low`, and `GMR_CI_high` to interpret the confidence intervals.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -331,6 +332,73 @@ def test_compute_ratios_trimmed_summary_metric(monkeypatch, tmp_path: Path, summ
     sorted_vals = sorted(values)
     expected_trimmed = sum(sorted_vals[1:-1]) / (len(sorted_vals) - 2)
     assert trimmed_row["Mean"] == pytest.approx(expected_trimmed)
+
+
+@pytest.mark.parametrize("summary_metric", ["logratio", "ratio"])
+def test_compute_ratios_summary_ci(monkeypatch, tmp_path: Path, summary_metric: str) -> None:
+    electrodes = ["F3", "F4"]
+    freqs = ["1.2000_Hz", "2.4000_Hz"]
+    roi = ROI(name="Frontal", channels=electrodes)
+    participants = [f"P{idx:02d}" for idx in range(1, 6)]
+    ratios = [0.9, 1.0, 1.1, 1.2, 1.3]
+    participants, conditions, subject_data = _build_ratio_subject_data(
+        tmp_path, participants, ratios, electrodes, freqs
+    )
+
+    def fake_scan_folder(_root: str):
+        return participants, conditions, subject_data
+
+    monkeypatch.setattr(
+        "Tools.Ratio_Calculator.PySide6.worker.scan_folder_simple",
+        fake_scan_folder,
+    )
+
+    inputs = RatioCalcInputs(
+        excel_root=tmp_path,
+        cond_a="condA",
+        cond_b="condB",
+        roi_name=None,
+        z_threshold=1.0,
+        output_path=tmp_path / f"ratio_output_ci_{summary_metric}.xlsx",
+        significance_mode="group",
+        rois=[roi],
+        metric="bca",
+        outlier_enabled=False,
+        outlier_method="mad",
+        outlier_threshold=3.5,
+        outlier_action="exclude",
+        bca_negative_mode="strict",
+        min_significant_harmonics=1,
+        denominator_floor_enabled=False,
+        denominator_floor_mode="absolute",
+        denominator_floor_quantile=0.1,
+        denominator_floor_scope="global",
+        denominator_floor_reference="summary_b",
+        denominator_floor_absolute=None,
+        summary_metric=summary_metric,
+        outlier_metric="summary",
+        require_denom_sig=False,
+    )
+
+    result = compute_ratios(inputs)
+    df = result.dataframe
+    ratio_label = f"{inputs.cond_a} vs {inputs.cond_b} - {roi.name}"
+    summary_row = df[(df["Ratio Label"] == ratio_label) & (df["PID"] == "SUMMARY")].iloc[0]
+
+    mean_ci_low = summary_row["Mean_CI_low"]
+    mean_ci_high = summary_row["Mean_CI_high"]
+    assert np.isfinite(mean_ci_low)
+    assert np.isfinite(mean_ci_high)
+    assert mean_ci_low < mean_ci_high
+
+    if summary_metric == "logratio":
+        assert np.isfinite(summary_row["GMR_CI_low"])
+        assert np.isfinite(summary_row["GMR_CI_high"])
+        assert summary_row["GMR_CI_low"] == pytest.approx(float(np.exp(mean_ci_low)))
+        assert summary_row["GMR_CI_high"] == pytest.approx(float(np.exp(mean_ci_high)))
+    else:
+        assert pd.isna(summary_row["GMR_CI_low"])
+        assert pd.isna(summary_row["GMR_CI_high"])
 
 
 @pytest.mark.parametrize("scope", ["per_roi", "global"])
