@@ -2,7 +2,7 @@
 
 The Fast Periodic Visual Stimulation (FPVS) Toolbox allows you to easily process
 EEG data from FPVS experiments and run statistical analyses on the resulting
-metrics. As of now, FPVS Toolbox only supports the BioSemi data format (.BDF) and FPVS experiments ran with PyschoPy. 
+metrics. As of now, FPVS Toolbox only supports the BioSemi data format (.BDF) and FPVS experiments ran with PsychoPy. 
 
 **This documentation page is a work in progress and is not yet complete.**
 
