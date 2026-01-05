@@ -14,3 +14,12 @@ def test_defaults_use_expected_bandpass():
 def test_inverted_bandpass_raises():
     with pytest.raises(ValueError):
         normalize_preprocessing_settings({"low_pass": 0.1, "high_pass": 50.0})
+
+
+def test_legacy_bandpass_can_be_interpreted():
+    normalized = normalize_preprocessing_settings(
+        {"low_pass": 0.1, "high_pass": 50.0},
+        allow_legacy_inversion=True,
+    )
+    assert normalized["high_pass"] == 0.1
+    assert normalized["low_pass"] == 50.0

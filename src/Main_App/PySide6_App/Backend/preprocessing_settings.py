@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any, Callable, Dict, Iterable, Mapping
 
 try:  # pragma: no cover - fallback for isolated usage
     import config  # type: ignore
@@ -54,6 +54,7 @@ _FIELDS: tuple[_Field, ...] = (
 
 
 PREPROCESSING_CANONICAL_KEYS: tuple[str, ...] = tuple(field.name for field in _FIELDS)
+PREPROCESSING_DEFAULTS: Dict[str, Any] = {field.name: field.default for field in _FIELDS}
 
 _ALIASES_FOR_OUTPUT: dict[str, Iterable[str]] = {
     "downsample": ("downsample_rate",),
@@ -133,7 +134,22 @@ def _validate_bandpass(low_pass: float, high_pass: float) -> None:
         )
 
 
-def normalize_preprocessing_settings(raw: Mapping[str, Any] | None) -> Dict[str, Any]:
+def _looks_like_legacy_bandpass(low_pass: float | None, high_pass: float | None) -> bool:
+    """Detect legacy-inverted bandpass values (both positive, low <= high)."""
+
+    if low_pass is None or high_pass is None:
+        return False
+    if low_pass <= 0 or high_pass <= 0:
+        return False
+    return low_pass <= high_pass
+
+
+def normalize_preprocessing_settings(
+    raw: Mapping[str, Any] | None,
+    *,
+    allow_legacy_inversion: bool = False,
+    on_legacy_inversion: Callable[[float, float], None] | None = None,
+) -> Dict[str, Any]:
     """Normalize preprocessing values into canonical keys and runtime aliases."""
 
     source: Mapping[str, Any] = raw or {}
@@ -152,10 +168,22 @@ def normalize_preprocessing_settings(raw: Mapping[str, Any] | None) -> Dict[str,
         else:  # pragma: no cover - defensive guard
             normalized[field.name] = raw_value if raw_value is not None else field.default
 
-    _validate_bandpass(
-        low_pass=float(normalized.get("low_pass")) if "low_pass" in normalized else None,
-        high_pass=float(normalized.get("high_pass")) if "high_pass" in normalized else None,
-    )
+    low_pass_val = float(normalized.get("low_pass")) if "low_pass" in normalized else None
+    high_pass_val = float(normalized.get("high_pass")) if "high_pass" in normalized else None
+
+    try:
+        _validate_bandpass(low_pass=low_pass_val, high_pass=high_pass_val)
+    except ValueError:
+        if allow_legacy_inversion and _looks_like_legacy_bandpass(low_pass_val, high_pass_val):
+            normalized["low_pass"], normalized["high_pass"] = high_pass_val, low_pass_val
+            _validate_bandpass(
+                low_pass=float(normalized.get("low_pass")),
+                high_pass=float(normalized.get("high_pass")),
+            )
+            if on_legacy_inversion is not None:
+                on_legacy_inversion(high_pass_val, low_pass_val)
+        else:
+            raise
 
     # Surface runtime aliases expected by legacy helpers without duplicating storage
     for canonical, aliases in _ALIASES_FOR_OUTPUT.items():
@@ -165,4 +193,8 @@ def normalize_preprocessing_settings(raw: Mapping[str, Any] | None) -> Dict[str,
     return normalized
 
 
-__all__ = ["normalize_preprocessing_settings", "PREPROCESSING_CANONICAL_KEYS"]
+__all__ = [
+    "normalize_preprocessing_settings",
+    "PREPROCESSING_CANONICAL_KEYS",
+    "PREPROCESSING_DEFAULTS",
+]

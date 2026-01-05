@@ -14,6 +14,7 @@ from .preprocessing_settings import (
 EXCEL_SUBFOLDER_NAME = "1 - Excel Data Files"
 SNR_SUBFOLDER_NAME = "2 - SNR Plots"
 STATS_SUBFOLDER_NAME = "3 - Statistical Analysis Results"
+_LEGACY_BANDPASS_WARNED: set[Path] = set()
 
 # Stable defaults used by GUI/processing
 DEFAULTS: Dict[str, Any] = {
@@ -115,13 +116,28 @@ class Project:
 
         # Preprocessing dict
         pp = manifest.get("preprocessing", {})
+        _bandpass_notes: list[str] = []
         try:
             self.preprocessing: Dict[str, Any] = normalize_preprocessing_settings(
-                pp if isinstance(pp, Mapping) else {}
+                pp if isinstance(pp, Mapping) else {},
+                allow_legacy_inversion=True,
+                on_legacy_inversion=lambda original_high, original_low: _bandpass_notes.append(
+                    (
+                        "Invalid preprocessing bandpass detected in manifest; "
+                        f"legacy ordering read as low_pass={original_low} Hz, high_pass={original_high} Hz. "
+                        f"Corrected to low_pass={original_high} Hz, high_pass={original_low} Hz."
+                    )
+                ),
             )
         except ValueError as exc:
             print(f"[PROJECT] Invalid preprocessing settings in manifest; using defaults: {exc}")
             self.preprocessing = normalize_preprocessing_settings({})
+        else:
+            if _bandpass_notes:
+                project_key = self.project_root.resolve()
+                if project_key not in _LEGACY_BANDPASS_WARNED:
+                    print(f"[PROJECT] {_bandpass_notes[0]}")
+                    _LEGACY_BANDPASS_WARNED.add(project_key)
         manifest["preprocessing"] = {
             key: self.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
         }
