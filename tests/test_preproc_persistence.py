@@ -97,25 +97,3 @@ def test_project_loads_legacy_inverted_bandpass(tmp_path):
     project = Project.load(tmp_path)
     assert project.preprocessing["low_pass"] == 50.0
     assert project.preprocessing["high_pass"] == 0.1
-
-
-def test_project_warns_once_for_legacy_bandpass(tmp_path, capsys):
-    manifest_path = Path(tmp_path) / "project.json"
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "preprocessing": {
-                    "low_pass": "0.1",
-                    "high_pass": "50.0",
-                }
-            }
-        )
-    )
-
-    Project.load(tmp_path)
-    first = capsys.readouterr().out
-    assert "legacy ordering read as low_pass=0.1 Hz, high_pass=50.0 Hz" in first
-
-    Project.load(tmp_path)
-    second = capsys.readouterr().out
-    assert "legacy ordering read as low_pass=0.1 Hz, high_pass=50.0 Hz" not in second

@@ -124,8 +124,7 @@ class Project:
                 on_legacy_inversion=lambda original_high, original_low: _bandpass_notes.append(
                     (
                         "Invalid preprocessing bandpass detected in manifest; "
-                        f"legacy ordering read as low_pass={original_low} Hz, high_pass={original_high} Hz. "
-                        f"Corrected to low_pass={original_high} Hz, high_pass={original_low} Hz."
+                        f"interpreting legacy ordering as low_pass={original_high} Hz, high_pass={original_low} Hz."
                     )
                 ),
             )
@@ -134,10 +133,7 @@ class Project:
             self.preprocessing = normalize_preprocessing_settings({})
         else:
             if _bandpass_notes:
-                project_key = self.project_root.resolve()
-                if project_key not in _LEGACY_BANDPASS_WARNED:
-                    print(f"[PROJECT] {_bandpass_notes[0]}")
-                    _LEGACY_BANDPASS_WARNED.add(project_key)
+                print(f"[PROJECT] {_bandpass_notes[0]}")
         manifest["preprocessing"] = {
             key: self.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
         }
