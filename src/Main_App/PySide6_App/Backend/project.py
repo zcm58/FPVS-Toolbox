@@ -14,6 +14,7 @@ from .preprocessing_settings import (
 EXCEL_SUBFOLDER_NAME = "1 - Excel Data Files"
 SNR_SUBFOLDER_NAME = "2 - SNR Plots"
 STATS_SUBFOLDER_NAME = "3 - Statistical Analysis Results"
+_LEGACY_BANDPASS_WARNED: set[Path] = set()
 
 # Stable defaults used by GUI/processing
 DEFAULTS: Dict[str, Any] = {
