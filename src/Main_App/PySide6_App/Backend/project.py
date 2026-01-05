@@ -132,8 +132,9 @@ class Project:
             print(f"[PROJECT] Invalid preprocessing settings in manifest; using defaults: {exc}")
             self.preprocessing = normalize_preprocessing_settings({})
         else:
-            if _bandpass_notes:
+            if _bandpass_notes and self.project_root not in _LEGACY_BANDPASS_WARNED:
                 print(f"[PROJECT] {_bandpass_notes[0]}")
+                _LEGACY_BANDPASS_WARNED.add(self.project_root)
         manifest["preprocessing"] = {
             key: self.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
         }
