@@ -158,8 +158,8 @@ def perform_preprocessing(
 
     # Runtime parameters (defaults are managed by Settings UI; fall back only if absent)
     downsample_rate = params.get("downsample_rate")
-    low_pass = params.get("low_pass")          # legacy mapping: low_pass -> l_freq
-    high_pass = params.get("high_pass")        # legacy mapping: high_pass -> h_freq
+    low_pass = params.get("low_pass")          # low-pass -> h_freq
+    high_pass = params.get("high_pass")        # high-pass -> l_freq
     reject_thresh = params.get("reject_thresh")
     ref1 = params.get("ref_channel1") or "EXG1"
     ref2 = params.get("ref_channel2") or "EXG2"
@@ -403,9 +403,9 @@ def perform_preprocessing(
             )
 
         # 5) FILTER at (possibly reduced) Fs
-        # LEGACY MAPPING: low_pass -> l_freq, high_pass -> h_freq (intentionally inverted names)
-        l_freq = low_pass if (low_pass and low_pass > 0) else None
-        h_freq = high_pass
+        # Mapping: high_pass -> l_freq (HPF), low_pass -> h_freq (LPF)
+        l_freq = high_pass if (high_pass and high_pass > 0) else None
+        h_freq = low_pass
         if l_freq or h_freq:
             try:
                 low_trans_bw, high_trans_bw, filter_len_points = 0.1, 0.1, 8449

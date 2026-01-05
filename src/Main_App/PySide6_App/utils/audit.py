@@ -147,7 +147,7 @@ def compare_preproc(
             )
 
     # High-pass check
-    target_hp = _to_float(params.get("low_pass"))
+    target_hp = _to_float(params.get("high_pass"))
     if target_hp and target_hp > 0:
         actual_hp = _to_float(after.get("highpass"))
         if actual_hp is None or abs(actual_hp - target_hp) > 0.1:
@@ -156,7 +156,7 @@ def compare_preproc(
             )
 
     # Low-pass check
-    target_lp = _to_float(params.get("high_pass"))
+    target_lp = _to_float(params.get("low_pass"))
     if target_lp and target_lp > 0:
         actual_lp = _to_float(after.get("lowpass"))
         if actual_lp is None or abs(actual_lp - target_lp) > 0.1:

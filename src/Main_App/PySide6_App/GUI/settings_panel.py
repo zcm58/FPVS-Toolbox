@@ -177,8 +177,8 @@ class SettingsDialog(QDialog):
             grid.addWidget(edit, row, col * 2 + 1)
 
         pre_keys = [
-            ("preprocessing", "low_pass", "0.1", "low_pass"),
-            ("preprocessing", "high_pass", "50", "high_pass"),
+            ("preprocessing", "low_pass", "50", "low_pass"),
+            ("preprocessing", "high_pass", "0.1", "high_pass"),
             ("preprocessing", "downsample", "256", "downsample"),
             ("preprocessing", "epoch_start", "-1", "epoch_start_s"),
             ("preprocessing", "reject_thresh", "5", "rejection_z"),
@@ -340,8 +340,15 @@ class SettingsDialog(QDialog):
     def _save(self) -> None:
         using_project = self.project is not None
 
+        try:
+            preproc_inputs = self._collect_project_preprocessing_inputs()
+            validated_preproc = normalize_preprocessing_settings(preproc_inputs)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Settings", str(exc))
+            return
+
         if not using_project:
-            self.manager.set("stim", "channel", self.stim_edit.text())
+            self.manager.set("stim", "channel", validated_preproc.get("stim_channel", self.stim_edit.text()))
         self.manager.set("analysis", "base_freq", self.base_freq_edit.text())
         self.manager.set("analysis", "oddball_freq", self.oddball_freq_edit.text())
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
@@ -362,13 +369,13 @@ class SettingsDialog(QDialog):
             ("preprocessing", "max_bad_chans", "max_bad_chans"),
         ]
         if not using_project:
-            for edit, (sec, opt, _canonical) in zip(self.preproc_edits, pre_keys):
-                self.manager.set(sec, opt, edit.text())
-            self.manager.set("paths", "save_fif", str(self.save_fif_check.isChecked()))
+            for _edit, (sec, opt, canonical) in zip(self.preproc_edits, pre_keys):
+                value = validated_preproc.get(canonical, "")
+                self.manager.set(sec, opt, str(value))
+            self.manager.set("paths", "save_fif", str(bool(validated_preproc.get("save_preprocessed_fif", False))))
         else:
             try:
-                updated = self._collect_project_preprocessing_inputs()
-                normalized = self.project.update_preprocessing(updated)
+                normalized = self.project.update_preprocessing(validated_preproc)
                 self._project_cache = normalized
                 self.project.save()
             except ValueError as exc:
@@ -431,7 +438,11 @@ class SettingsDialog(QDialog):
         if self.project is None:
             return {}
         if self._project_cache is None:
-            self._project_cache = normalize_preprocessing_settings(self.project.preprocessing)
+            try:
+                self._project_cache = normalize_preprocessing_settings(self.project.preprocessing)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Invalid Settings", str(exc))
+                self._project_cache = normalize_preprocessing_settings({})
         return self._project_cache
 
     def _collect_project_preprocessing_inputs(self) -> Dict[str, Any]:

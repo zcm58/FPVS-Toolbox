@@ -1,6 +1,6 @@
-import numpy as np
 import pytest
 
+np = pytest.importorskip("numpy")
 pytest.importorskip("PySide6")
 mne = pytest.importorskip("mne")
 
@@ -31,8 +31,8 @@ def test_preproc_audit_round_trip():
     params = {
         "downsample": 256,
         "downsample_rate": 256,
-        "low_pass": 0.1,
-        "high_pass": 50.0,
+        "low_pass": 50.0,
+        "high_pass": 0.1,
         "reject_thresh": 3.0,
         "ref_channel1": "EXG1",
         "ref_channel2": "EXG2",
