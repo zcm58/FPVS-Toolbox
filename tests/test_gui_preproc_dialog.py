@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 
 import pytest
@@ -6,7 +7,7 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtWidgets import QApplication, QLineEdit
+from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
 from Main_App.PySide6_App.Backend.project import Project
 from Main_App.PySide6_App.GUI.main_window import MainWindow
@@ -87,3 +88,60 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["epoch_end"] == 100.0
     assert params["stim_channel"] == "Trigger"
     assert params["save_preprocessed_fif"] is True
+
+
+def test_dialog_saves_bandpass_mapping(tmp_path, qtbot, monkeypatch):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+
+    dlg.preproc_edits[0].setText("40")
+    dlg.preproc_edits[1].setText("0.2")
+    dlg._save()
+
+    saved = json.loads((project.project_root / "project.json").read_text())
+    assert saved["preprocessing"]["low_pass"] == 40.0
+    assert saved["preprocessing"]["high_pass"] == 0.2
+
+
+def test_preproc_tab_blocks_invalid_bandpass(tmp_path, qtbot, monkeypatch):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args[2] if len(args) >= 3 else kwargs.get("text", "")),
+    )
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    dlg.show()
+    qtbot.waitExposed(dlg)
+
+    dlg.tabs.setCurrentIndex(dlg._preproc_tab_index)
+    dlg.preproc_edits[0].setText("0.1")
+    dlg.preproc_edits[1].setText("50")
+    dlg.tabs.setCurrentIndex(dlg._loreta_tab_index)
+
+    assert dlg.tabs.currentIndex() == dlg._preproc_tab_index
+    assert warnings
+
+    dlg.preproc_edits[0].setText("60")
+    dlg.preproc_edits[1].setText("0.5")
+    dlg.tabs.setCurrentIndex(dlg._loreta_tab_index)
+
+    assert dlg.tabs.currentIndex() == dlg._loreta_tab_index

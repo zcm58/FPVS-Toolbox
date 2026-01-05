@@ -79,3 +79,21 @@ def test_normalization_and_roundtrip(tmp_path):
     assert fresh.preprocessing["low_pass"] == 30.0
     assert fresh.preprocessing["max_chan_idx_keep"] == 64
     assert fresh.preprocessing["save_preprocessed_fif"] is False
+
+
+def test_project_loads_legacy_inverted_bandpass(tmp_path):
+    manifest_path = Path(tmp_path) / "project.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "preprocessing": {
+                    "low_pass": "0.1",
+                    "high_pass": "50.0",
+                }
+            }
+        )
+    )
+
+    project = Project.load(tmp_path)
+    assert project.preprocessing["low_pass"] == 50.0
+    assert project.preprocessing["high_pass"] == 0.1
