@@ -19,8 +19,8 @@ def _prep_project(root):
     project = Project.load(proj_root)
     project.update_preprocessing(
         {
-            "low_pass": 0.25,
-            "high_pass": 45.0,
+            "low_pass": 45.0,
+            "high_pass": 0.25,
             "downsample": 512,
             "rejection_z": 4.0,
             "epoch_start_s": -0.25,

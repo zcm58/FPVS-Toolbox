@@ -28,8 +28,8 @@ _BOOL = "bool"
 
 
 _FIELDS: tuple[_Field, ...] = (
-    _Field("low_pass", ("low_pass",), 0.1, _FLOAT),
-    _Field("high_pass", ("high_pass",), 50.0, _FLOAT),
+    _Field("low_pass", ("low_pass",), 50.0, _FLOAT),
+    _Field("high_pass", ("high_pass",), 0.1, _FLOAT),
     _Field("downsample", ("downsample", "downsample_rate"), 256, _INT),
     _Field("rejection_z", ("rejection_z", "reject_thresh", "rejection_thresh"), 5.0, _FLOAT),
     _Field("epoch_start_s", ("epoch_start_s", "epoch_start"), -1.0, _FLOAT),
@@ -119,6 +119,20 @@ def _coerce_bool(value: Any, *, default: bool, field: str) -> bool:
     raise ValueError(f"Invalid boolean for '{field}': {value!r}")  # pragma: no cover
 
 
+def _validate_bandpass(low_pass: float, high_pass: float) -> None:
+    """Ensure low/high cutoffs are sensible and not inverted."""
+
+    if low_pass is not None and low_pass <= 0:
+        raise ValueError("Low-pass cutoff must be positive.")
+    if high_pass is not None and high_pass < 0:
+        raise ValueError("High-pass cutoff cannot be negative.")
+    if low_pass is not None and high_pass is not None and high_pass > 0 and low_pass <= high_pass:
+        raise ValueError(
+            f"Low-pass cutoff ({low_pass} Hz) must be greater than high-pass cutoff ({high_pass} Hz). "
+            "Please swap the values."
+        )
+
+
 def normalize_preprocessing_settings(raw: Mapping[str, Any] | None) -> Dict[str, Any]:
     """Normalize preprocessing values into canonical keys and runtime aliases."""
 
@@ -137,6 +151,11 @@ def normalize_preprocessing_settings(raw: Mapping[str, Any] | None) -> Dict[str,
             normalized[field.name] = _coerce_bool(raw_value, default=field.default, field=field.name)
         else:  # pragma: no cover - defensive guard
             normalized[field.name] = raw_value if raw_value is not None else field.default
+
+    _validate_bandpass(
+        low_pass=float(normalized.get("low_pass")) if "low_pass" in normalized else None,
+        high_pass=float(normalized.get("high_pass")) if "high_pass" in normalized else None,
+    )
 
     # Surface runtime aliases expected by legacy helpers without duplicating storage
     for canonical, aliases in _ALIASES_FOR_OUTPUT.items():

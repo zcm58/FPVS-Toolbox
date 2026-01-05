@@ -18,8 +18,8 @@ def _build_worker_project(root: Path) -> Project:
     project = Project.load(root)
     project.update_preprocessing(
         {
-            "low_pass": 0.2,
-            "high_pass": 50.0,
+            "low_pass": 50.0,
+            "high_pass": 0.2,
             "downsample": 256,
             "rejection_z": 5.0,
             "epoch_start_s": -1.0,

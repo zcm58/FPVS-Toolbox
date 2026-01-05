@@ -1146,7 +1146,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         return True
 
     def _build_validated_params(self) -> dict | None:
-        normalized = normalize_preprocessing_settings(self.currentProject.preprocessing)
+        try:
+            normalized = normalize_preprocessing_settings(self.currentProject.preprocessing)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Preprocessing Settings", str(exc))
+            return None
 
         # Event map from UI rows → {label: int_id}
         event_map: dict[str, int] = {}
@@ -1499,7 +1503,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             edit = QLineEdit(str(value) if value is not None else "")
             return _QtEntryAdapter(edit)
 
-        p = normalize_preprocessing_settings(self.currentProject.preprocessing)
+        try:
+            p = normalize_preprocessing_settings(self.currentProject.preprocessing)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Preprocessing Settings", str(exc))
+            p = normalize_preprocessing_settings({})
         self.low_pass_entry = make_entry(p.get("low_pass"))
         self.high_pass_entry = make_entry(p.get("high_pass"))
         self.downsample_entry = make_entry(p.get("downsample"))

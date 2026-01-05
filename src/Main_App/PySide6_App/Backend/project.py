@@ -115,9 +115,13 @@ class Project:
 
         # Preprocessing dict
         pp = manifest.get("preprocessing", {})
-        self.preprocessing: Dict[str, Any] = normalize_preprocessing_settings(
-            pp if isinstance(pp, Mapping) else {}
-        )
+        try:
+            self.preprocessing: Dict[str, Any] = normalize_preprocessing_settings(
+                pp if isinstance(pp, Mapping) else {}
+            )
+        except ValueError as exc:
+            print(f"[PROJECT] Invalid preprocessing settings in manifest; using defaults: {exc}")
+            self.preprocessing = normalize_preprocessing_settings({})
         manifest["preprocessing"] = {
             key: self.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
         }
