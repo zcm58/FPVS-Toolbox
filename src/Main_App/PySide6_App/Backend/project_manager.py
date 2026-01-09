@@ -201,6 +201,12 @@ def new_project(self) -> None:
 
 
 def open_existing_project(self, parent: QWidget | None = None) -> None:
+    if _open_selected_project_guard.is_active():
+        logger.info(
+            "Open existing project skipped because another open is active.",
+            extra={"op": "open_existing_project", "path": None},
+        )
+        return
     if not _open_project_guard.start():
         return
 
@@ -249,6 +255,7 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
             return
         cleaned = True
         progress.close()
+        progress.deleteLater()
         self._active_scan_job = None
         _open_project_guard.end()
 
@@ -342,25 +349,16 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
         selected = label_to_metadata[choice]
         finalize_guard()
 
-        def open_selected_project() -> None:
-            if not _open_selected_project_guard.start():
-                logger.info(
-                    "Open project request skipped because another open is active.",
-                    extra={"op": "open_existing_project", "path": str(root)},
-                )
-                return
-            try:
-                project = Project.load(
-                    selected.project_root,
-                    manifest=selected.manifest,
-                    manifest_path=selected.manifest_path,
-                )
-                self.currentProject = project
-                self.loadProject(project)
-            finally:
-                _open_selected_project_guard.end()
-
-        QTimer.singleShot(0, open_selected_project)
+        _set_open_existing_action_enabled(self, False)
+        logger.info(
+            "Project selection confirmed: %s",
+            selected.project_root,
+            extra={"op": "open_existing_project", "path": str(root)},
+        )
+        QTimer.singleShot(
+            0,
+            lambda: _open_selected_project(self, selected, parent, root),
+        )
 
     job = _ProjectScanJob(root)
     job.setAutoDelete(False)
@@ -381,6 +379,62 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
     progress.canceled.connect(job.request_cancel)
     QThreadPool.globalInstance().start(job)
 
+
+def _set_open_existing_action_enabled(self, enabled: bool) -> None:
+    action = getattr(self, "actionOpenExistingProject", None)
+    if action is not None:
+        action.setEnabled(enabled)
+
+
+def _open_selected_project(
+    self,
+    selected: ProjectMetadata,
+    parent: QWidget | None,
+    root: Path,
+) -> None:
+    if __debug__:
+        app = QApplication.instance()
+        assert app is not None
+        assert QThread.currentThread() == app.thread()
+    if not _open_selected_project_guard.start():
+        logger.info(
+            "Open project request skipped because another open is active.",
+            extra={"op": "open_existing_project", "path": str(root)},
+        )
+        _set_open_existing_action_enabled(self, True)
+        return
+    logger.info(
+        "Opening project from selection: %s",
+        selected.project_root,
+        extra={"op": "open_existing_project", "path": str(root)},
+    )
+    try:
+        project = Project.load(
+            selected.project_root,
+            manifest=selected.manifest,
+            manifest_path=selected.manifest_path,
+        )
+        self.currentProject = project
+        self.loadProject(project)
+        if hasattr(self, "_on_project_ready"):
+            self._on_project_ready()
+        logger.info(
+            "Project opened successfully: %s",
+            selected.project_root,
+            extra={"op": "open_existing_project", "path": str(root)},
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to open project at %s: %s",
+            selected.project_root,
+            exc,
+            exc_info=exc,
+            extra={"op": "open_existing_project", "path": str(root)},
+        )
+        raise
+    finally:
+        _open_selected_project_guard.end()
+        _set_open_existing_action_enabled(self, True)
 
 
 def openProjectPath(self, folder: str) -> None:
