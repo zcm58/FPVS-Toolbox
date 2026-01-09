@@ -6,6 +6,7 @@ Exposes:
 - frequency helpers: update_target_frequencies(), TARGET_FREQUENCIES
 - UI sizing tokens
 - Legacy symbols: init_fonts(), FONT_MAIN/FONT_BOLD/FONT_HEADING (no-op/None)
+- Checkpoint 9 Jan 2026 before fixing IDE log error about bandpass filter values. Delete this line later.
 """
 
 from __future__ import annotations
