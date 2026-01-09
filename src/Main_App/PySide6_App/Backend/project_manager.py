@@ -5,8 +5,15 @@ import logging
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QInputDialog, QProgressDialog, QWidget
+from PySide6.QtCore import QObject, QRunnable, Qt, QThread, QThreadPool, QTimer, Signal
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QMessageBox,
+    QInputDialog,
+    QProgressDialog,
+    QWidget,
+)
 
 from .project import Project
 from .project_metadata import ProjectMetadata, read_project_metadata
@@ -18,6 +25,7 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 _open_project_guard = OpGuard()
+_open_selected_project_guard = OpGuard()
 
 
 class _ProjectScanSignals(QObject):
@@ -222,6 +230,19 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
 
     cleaned = False
 
+    def log_thread_context(label: str) -> None:
+        app = QApplication.instance()
+        gui_thread = app.thread() if app else None
+        current = QThread.currentThread()
+        logger.debug(
+            "%s thread=%s gui_thread=%s is_gui=%s",
+            label,
+            current,
+            gui_thread,
+            current == gui_thread if gui_thread else False,
+            extra={"op": "open_existing_project", "path": str(root)},
+        )
+
     def finalize_guard() -> None:
         nonlocal cleaned
         if cleaned:
@@ -232,6 +253,7 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
         _open_project_guard.end()
 
     def handle_error(message: str) -> None:
+        log_thread_context("handle_error")
         if message == CANCEL_SCAN_MESSAGE:
             logger.info(
                 "Project scan cancelled for %s.",
@@ -260,6 +282,11 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
         finalize_guard()
 
     def handle_finished(metadata: list[ProjectMetadata]) -> None:
+        log_thread_context("handle_finished")
+        if __debug__:
+            app = QApplication.instance()
+            assert app is not None
+            assert QThread.currentThread() == app.thread()
         logger.info(
             "Project scan finished for %s with %s projects.",
             root,
@@ -313,14 +340,27 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
             return
 
         selected = label_to_metadata[choice]
-        project = Project.load(
-            selected.project_root,
-            manifest=selected.manifest,
-            manifest_path=selected.manifest_path,
-        )
-        self.currentProject = project
-        self.loadProject(project)
         finalize_guard()
+
+        def open_selected_project() -> None:
+            if not _open_selected_project_guard.start():
+                logger.info(
+                    "Open project request skipped because another open is active.",
+                    extra={"op": "open_existing_project", "path": str(root)},
+                )
+                return
+            try:
+                project = Project.load(
+                    selected.project_root,
+                    manifest=selected.manifest,
+                    manifest_path=selected.manifest_path,
+                )
+                self.currentProject = project
+                self.loadProject(project)
+            finally:
+                _open_selected_project_guard.end()
+
+        QTimer.singleShot(0, open_selected_project)
 
     job = _ProjectScanJob(root)
     job.setAutoDelete(False)
@@ -330,9 +370,14 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
         root,
         extra={"op": "open_existing_project", "path": str(root)},
     )
-    job.signals.error.connect(handle_error)
-    job.signals.finished.connect(handle_finished)
-    job.signals.progress.connect(progress.setValue)
+    job.signals.error.connect(handle_error, Qt.QueuedConnection)
+    job.signals.finished.connect(handle_finished, Qt.QueuedConnection)
+
+    def handle_progress(value: int) -> None:
+        log_thread_context("handle_progress")
+        progress.setValue(value)
+
+    job.signals.progress.connect(handle_progress, Qt.QueuedConnection)
     progress.canceled.connect(job.request_cancel)
     QThreadPool.globalInstance().start(job)
 
