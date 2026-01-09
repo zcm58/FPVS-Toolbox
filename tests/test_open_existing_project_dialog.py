@@ -4,14 +4,22 @@ from pathlib import Path
 
 import pytest
 
-if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
+
+def _module_available(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+if not _module_available("PySide6") or not _module_available("pytestqt"):
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
-import Main_App.PySide6_App.Backend.project_manager as project_manager
-import Main_App.PySide6_App.config.projects_root as projects_root
-from Main_App.PySide6_App.utils import settings as settings_mod
+import Main_App.PySide6_App.Backend.project_manager as project_manager  # noqa: E402
+import Main_App.PySide6_App.config.projects_root as projects_root  # noqa: E402
+from Main_App.PySide6_App.utils import settings as settings_mod  # noqa: E402
 
 
 @pytest.fixture
