@@ -22,8 +22,11 @@ _open_project_guard = OpGuard()
 
 class _ProjectScanSignals(QObject):
     error = Signal(str)
-    finished = Signal(list)
+    finished = Signal(object)
     progress = Signal(int)
+
+
+CANCEL_SCAN_MESSAGE = "Project scan cancelled."
 
 
 class _ProjectScanJob(QRunnable):
@@ -31,6 +34,10 @@ class _ProjectScanJob(QRunnable):
         super().__init__()
         self.root = root
         self.signals = _ProjectScanSignals()
+        self._cancel_requested = False
+
+    def request_cancel(self) -> None:
+        self._cancel_requested = True
 
     def run(self) -> None:
         try:
@@ -42,6 +49,9 @@ class _ProjectScanJob(QRunnable):
         metadata: list[ProjectMetadata] = []
         total = len(entries)
         for idx, entry in enumerate(entries, start=1):
+            if self._cancel_requested:
+                self.signals.error.emit(CANCEL_SCAN_MESSAGE)
+                return
             self.signals.progress.emit(int(idx / total * 100) if total else 100)
             if not entry.is_dir():
                 continue
@@ -60,6 +70,9 @@ class _ProjectScanJob(QRunnable):
                 )
                 continue
 
+        if self._cancel_requested:
+            self.signals.error.emit(CANCEL_SCAN_MESSAGE)
+            return
         self.signals.finished.emit(metadata)
 
 
@@ -199,18 +212,40 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
 
     self.projectsRoot = root
 
-    progress = QProgressDialog("Scanning projects...", None, 0, 0, parent)
+    progress = QProgressDialog("Scanning projects...", "Cancel", 0, 100, parent)
     progress.setWindowTitle("Scanning Projects")
     progress.setWindowModality(Qt.WindowModal)
-    progress.setCancelButton(None)
+    progress.setAutoClose(False)
+    progress.setAutoReset(False)
     progress.setMinimumDuration(0)
     progress.show()
 
+    cleaned = False
+
     def finalize_guard() -> None:
+        nonlocal cleaned
+        if cleaned:
+            return
+        cleaned = True
         progress.close()
+        self._active_scan_job = None
         _open_project_guard.end()
 
     def handle_error(message: str) -> None:
+        if message == CANCEL_SCAN_MESSAGE:
+            logger.info(
+                "Project scan cancelled for %s.",
+                root,
+                extra={"op": "open_existing_project", "path": str(root)},
+            )
+            finalize_guard()
+            return
+        logger.info(
+            "Project scan error for %s: %s",
+            root,
+            message,
+            extra={"op": "open_existing_project", "path": str(root)},
+        )
         logger.error(
             "Unable to enumerate projects under %s: %s",
             root,
@@ -225,7 +260,12 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
         finalize_guard()
 
     def handle_finished(metadata: list[ProjectMetadata]) -> None:
-        progress.close()
+        logger.info(
+            "Project scan finished for %s with %s projects.",
+            root,
+            len(metadata),
+            extra={"op": "open_existing_project", "path": str(root)},
+        )
         if not metadata:
             QMessageBox.information(
                 parent,
@@ -283,9 +323,17 @@ def open_existing_project(self, parent: QWidget | None = None) -> None:
         finalize_guard()
 
     job = _ProjectScanJob(root)
+    job.setAutoDelete(False)
+    self._active_scan_job = job
+    logger.info(
+        "Starting project scan under %s.",
+        root,
+        extra={"op": "open_existing_project", "path": str(root)},
+    )
     job.signals.error.connect(handle_error)
     job.signals.finished.connect(handle_finished)
     job.signals.progress.connect(progress.setValue)
+    progress.canceled.connect(job.request_cancel)
     QThreadPool.globalInstance().start(job)
 
 
