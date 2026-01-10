@@ -17,8 +17,8 @@ def test_normalization_and_roundtrip(tmp_path):
         json.dumps(
             {
                 "preprocessing": {
-                    "low_pass": "0.25",
-                    "high_pass": "45",
+                    "low_pass": "45",
+                    "high_pass": "0.25",
                     "downsample_rate": "512",
                     "reject_thresh": "4.2",
                     "epoch_start": "-0.5",
@@ -37,6 +37,8 @@ def test_normalization_and_roundtrip(tmp_path):
     project = Project.load(tmp_path)
     normalized = project.preprocessing
 
+    assert normalized["high_pass"] == 0.25
+    assert normalized["low_pass"] == 45.0
     assert normalized["downsample"] == 512
     assert normalized["rejection_z"] == 4.2
     assert normalized["epoch_start_s"] == -0.5
@@ -50,8 +52,8 @@ def test_normalization_and_roundtrip(tmp_path):
 
     project.update_preprocessing(
         {
-            "low_pass": 0.5,
-            "high_pass": 30,
+            "low_pass": 30,
+            "high_pass": 0.5,
             "downsample": 256,
             "rejection_z": 3.0,
             "epoch_start_s": -1.0,
@@ -73,5 +75,25 @@ def test_normalization_and_roundtrip(tmp_path):
     assert "downsample_rate" not in saved["preprocessing"]
 
     fresh = Project.load(tmp_path)
+    assert fresh.preprocessing["high_pass"] == 0.5
+    assert fresh.preprocessing["low_pass"] == 30.0
     assert fresh.preprocessing["max_chan_idx_keep"] == 64
     assert fresh.preprocessing["save_preprocessed_fif"] is False
+
+
+def test_project_loads_legacy_inverted_bandpass(tmp_path):
+    manifest_path = Path(tmp_path) / "project.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "preprocessing": {
+                    "low_pass": "0.1",
+                    "high_pass": "50.0",
+                }
+            }
+        )
+    )
+
+    project = Project.load(tmp_path)
+    assert project.preprocessing["low_pass"] == 50.0
+    assert project.preprocessing["high_pass"] == 0.1

@@ -28,7 +28,7 @@ from Main_App.Legacy_App.settings_manager import SettingsManager
 from .roi_settings_editor import ROISettingsEditor
 from ..config.projects_root import changeProjectsRoot
 from ..Backend.project import Project
-from ..Backend.preprocessing_settings import normalize_preprocessing_settings
+from ..Backend.preprocessing_settings import PREPROCESSING_DEFAULTS, normalize_preprocessing_settings
 
 
 class SettingsPanel(QWidget):
@@ -112,11 +112,14 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.tabs)
 
         self._init_general_tab(self.tabs)
-        self._init_preproc_tab(self.tabs)
+        preproc_tab = self._init_preproc_tab(self.tabs)
+        self._preproc_tab_index = self.tabs.indexOf(preproc_tab)
         self._init_stats_tab(self.tabs)
         self._init_oddball_tab(self.tabs)
         self.loreta_tab = self._init_loreta_tab()
         self._loreta_tab_index = self.tabs.addTab(self.loreta_tab, "LORETA")
+        self._last_tab_index = self.tabs.currentIndex()
+        self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
         self.btn_changeRoot = QPushButton("Change Projects Root…", self)
@@ -149,7 +152,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(tab, "General")
 
     # ------------------------------------------------------------------
-    def _init_preproc_tab(self, tabs: QTabWidget) -> None:
+    def _init_preproc_tab(self, tabs: QTabWidget) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
@@ -177,16 +180,16 @@ class SettingsDialog(QDialog):
             grid.addWidget(edit, row, col * 2 + 1)
 
         pre_keys = [
-            ("preprocessing", "low_pass", "0.1", "low_pass"),
-            ("preprocessing", "high_pass", "50", "high_pass"),
-            ("preprocessing", "downsample", "256", "downsample"),
-            ("preprocessing", "epoch_start", "-1", "epoch_start_s"),
-            ("preprocessing", "reject_thresh", "5", "rejection_z"),
-            ("preprocessing", "epoch_end", "125", "epoch_end_s"),
-            ("preprocessing", "ref_chan1", "EXG1", "ref_chan1"),
-            ("preprocessing", "ref_chan2", "EXG2", "ref_chan2"),
-            ("preprocessing", "max_idx_keep", "64", "max_chan_idx_keep"),
-            ("preprocessing", "max_bad_chans", "10", "max_bad_chans"),
+            ("preprocessing", "low_pass", str(PREPROCESSING_DEFAULTS["low_pass"]), "low_pass"),
+            ("preprocessing", "high_pass", str(PREPROCESSING_DEFAULTS["high_pass"]), "high_pass"),
+            ("preprocessing", "downsample", str(PREPROCESSING_DEFAULTS["downsample"]), "downsample"),
+            ("preprocessing", "epoch_start", str(PREPROCESSING_DEFAULTS["epoch_start_s"]), "epoch_start_s"),
+            ("preprocessing", "reject_thresh", str(PREPROCESSING_DEFAULTS["rejection_z"]), "rejection_z"),
+            ("preprocessing", "epoch_end", str(PREPROCESSING_DEFAULTS["epoch_end_s"]), "epoch_end_s"),
+            ("preprocessing", "ref_chan1", str(PREPROCESSING_DEFAULTS["ref_chan1"]), "ref_chan1"),
+            ("preprocessing", "ref_chan2", str(PREPROCESSING_DEFAULTS["ref_chan2"]), "ref_chan2"),
+            ("preprocessing", "max_idx_keep", str(PREPROCESSING_DEFAULTS["max_chan_idx_keep"]), "max_chan_idx_keep"),
+            ("preprocessing", "max_bad_chans", str(PREPROCESSING_DEFAULTS["max_bad_chans"]), "max_bad_chans"),
         ]
         project_pp = self._project_preprocessing() if self.project else None
         for edit, (sec, opt, fallback, canonical) in zip(self.preproc_edits, pre_keys):
@@ -208,6 +211,24 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.group_preproc)
         layout.addStretch(1)
         tabs.addTab(tab, "Preprocessing")
+        canonical_keys = [
+            "low_pass",
+            "high_pass",
+            "downsample",
+            "epoch_start_s",
+            "rejection_z",
+            "epoch_end_s",
+            "ref_chan1",
+            "ref_chan2",
+            "max_chan_idx_keep",
+            "max_bad_chans",
+        ]
+        for edit, canonical in zip(self.preproc_edits, canonical_keys):
+            edit.editingFinished.connect(
+                lambda canon=canonical, field=edit: self._on_preproc_edit_finished(canon, field)
+            )
+
+        return tab
 
     # ------------------------------------------------------------------
     def _init_stats_tab(self, tabs: QTabWidget) -> None:
@@ -304,6 +325,21 @@ class SettingsDialog(QDialog):
         Show a one-time warning when the LORETA tab is opened.
         The user must acknowledge the dialog before interacting with that tab.
         """
+        if getattr(self, "_tab_change_guard", False):
+            return
+
+        previous = getattr(self, "_last_tab_index", 0)
+        if (
+            previous == getattr(self, "_preproc_tab_index", -1)
+            and index != getattr(self, "_preproc_tab_index", -1)
+        ):
+            if not self._validate_preproc_fields():
+                self._tab_change_guard = True
+                self.tabs.setCurrentIndex(getattr(self, "_preproc_tab_index", 0))
+                self._tab_change_guard = False
+                self._last_tab_index = getattr(self, "_preproc_tab_index", 0)
+                return
+
         if (
             index == getattr(self, "_loreta_tab_index", -1)
             and not getattr(self, "_loreta_warning_shown", False)
@@ -319,6 +355,7 @@ class SettingsDialog(QDialog):
                 ),
                 QMessageBox.Ok,
             )
+        self._last_tab_index = index
 
     # ------------------------------------------------------------------
     def _with_browse(self, edit: QLineEdit) -> QWidget:
@@ -336,12 +373,44 @@ class SettingsDialog(QDialog):
         if folder:
             edit.setText(folder)
 
+    def _focus_invalid_preproc_field(self, message: str) -> None:
+        msg_lower = message.lower()
+        target_idx = None
+        if "low-pass" in msg_lower or "'low_pass'" in msg_lower:
+            target_idx = 0
+        elif "high-pass" in msg_lower or "'high_pass'" in msg_lower:
+            target_idx = 1
+        if target_idx is not None and target_idx < len(self.preproc_edits):
+            edit = self.preproc_edits[target_idx]
+            edit.setFocus()
+            edit.selectAll()
+
+    def _validated_preproc_payload(self) -> Dict[str, Any] | None:
+        try:
+            return normalize_preprocessing_settings(self._collect_project_preprocessing_inputs())
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Settings", str(exc))
+            self._focus_invalid_preproc_field(str(exc))
+            return None
+
+    def _validate_preproc_fields(self) -> bool:
+        return self._validated_preproc_payload() is not None
+
+    def _on_preproc_edit_finished(self, canonical: str, field: QLineEdit) -> None:  # noqa: ARG002
+        if not self._validate_preproc_fields():
+            field.setFocus()
+            field.selectAll()
+
     # ------------------------------------------------------------------
     def _save(self) -> None:
         using_project = self.project is not None
 
+        validated_preproc = self._validated_preproc_payload()
+        if validated_preproc is None:
+            return
+
         if not using_project:
-            self.manager.set("stim", "channel", self.stim_edit.text())
+            self.manager.set("stim", "channel", validated_preproc.get("stim_channel", self.stim_edit.text()))
         self.manager.set("analysis", "base_freq", self.base_freq_edit.text())
         self.manager.set("analysis", "oddball_freq", self.oddball_freq_edit.text())
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
@@ -362,13 +431,13 @@ class SettingsDialog(QDialog):
             ("preprocessing", "max_bad_chans", "max_bad_chans"),
         ]
         if not using_project:
-            for edit, (sec, opt, _canonical) in zip(self.preproc_edits, pre_keys):
-                self.manager.set(sec, opt, edit.text())
-            self.manager.set("paths", "save_fif", str(self.save_fif_check.isChecked()))
+            for _edit, (sec, opt, canonical) in zip(self.preproc_edits, pre_keys):
+                value = validated_preproc.get(canonical, "")
+                self.manager.set(sec, opt, str(value))
+            self.manager.set("paths", "save_fif", str(bool(validated_preproc.get("save_preprocessed_fif", False))))
         else:
             try:
-                updated = self._collect_project_preprocessing_inputs()
-                normalized = self.project.update_preprocessing(updated)
+                normalized = self.project.update_preprocessing(validated_preproc)
                 self._project_cache = normalized
                 self.project.save()
             except ValueError as exc:
@@ -431,7 +500,11 @@ class SettingsDialog(QDialog):
         if self.project is None:
             return {}
         if self._project_cache is None:
-            self._project_cache = normalize_preprocessing_settings(self.project.preprocessing)
+            try:
+                self._project_cache = normalize_preprocessing_settings(self.project.preprocessing)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Invalid Settings", str(exc))
+                self._project_cache = normalize_preprocessing_settings({})
         return self._project_cache
 
     def _collect_project_preprocessing_inputs(self) -> Dict[str, Any]:

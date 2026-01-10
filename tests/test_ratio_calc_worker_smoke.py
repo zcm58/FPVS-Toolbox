@@ -1,0 +1,468 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from Tools.Ratio_Calculator.PySide6.model import RatioCalcInputs
+from Tools.Ratio_Calculator.PySide6.worker import compute_ratios
+from Tools.Stats.roi_resolver import ROI
+
+from tests._ratio_calc_fixtures import write_ratio_workbook
+
+
+def _build_ratio_subject_data(
+    tmp_path: Path,
+    participants: list[str],
+    ratios: list[float],
+    electrodes: list[str],
+    freqs: list[str],
+) -> tuple[list[str], list[str], dict[str, dict[str, str]]]:
+    conditions = ["condA", "condB"]
+    subject_data: dict[str, dict[str, str]] = {}
+    summary_a = 10.0
+    per_freq_a = summary_a / len(freqs)
+
+    for pid, ratio in zip(participants, ratios):
+        cond_files: dict[str, str] = {}
+        summary_b = summary_a / ratio
+        per_freq_b = summary_b / len(freqs)
+        z_values = [[5.0 for _ in freqs] for _ in electrodes]
+        snr_values = [[1.0 for _ in freqs] for _ in electrodes]
+        bca_values_a = [[per_freq_a for _ in freqs] for _ in electrodes]
+        bca_values_b = [[per_freq_b for _ in freqs] for _ in electrodes]
+        for cond in conditions:
+            file_path = tmp_path / f"{pid}_{cond}.xlsx"
+            bca_values = bca_values_a if cond == "condA" else bca_values_b
+            write_ratio_workbook(file_path, electrodes, freqs, z_values, snr_values, bca_values)
+            cond_files[cond] = str(file_path)
+        subject_data[pid] = cond_files
+
+    return participants, conditions, subject_data
+
+
+def test_compute_ratios_smoke(monkeypatch, tmp_path: Path) -> None:
+    electrodes = ["F3", "F4"]
+    freqs = ["1.2000_Hz", "2.4000_Hz"]
+    roi = ROI(name="Frontal", channels=electrodes)
+    participants = [f"P{idx:02d}" for idx in range(1, 7)]
+    conditions = ["condA", "condB"]
+    subject_data: dict[str, dict[str, str]] = {}
+
+    for idx, pid in enumerate(participants, start=1):
+        cond_files: dict[str, str] = {}
+        for cond in conditions:
+            file_path = tmp_path / f"{pid}_{cond}.xlsx"
+            base = float(idx)
+            z_values = [[5.0, 5.0], [5.0, 5.0]]
+            snr_values = [[base, base + 1], [base + 2, base + 3]]
+            if pid == "P06" and cond == "condB":
+                bca_values = [[0.0, 0.0], [0.0, 0.0]]
+            else:
+                bca_values = [[base + 1, base + 2], [base + 3, base + 4]]
+            write_ratio_workbook(file_path, electrodes, freqs, z_values, snr_values, bca_values)
+            cond_files[cond] = str(file_path)
+        subject_data[pid] = cond_files
+
+    def fake_scan_folder(_root: str):
+        return participants, conditions, subject_data
+
+    monkeypatch.setattr(
+        "Tools.Ratio_Calculator.PySide6.worker.scan_folder_simple",
+        fake_scan_folder,
+    )
+
+    inputs = RatioCalcInputs(
+        excel_root=tmp_path,
+        cond_a="condA",
+        cond_b="condB",
+        roi_name=None,
+        z_threshold=1.0,
+        output_path=tmp_path / "ratio_output.xlsx",
+        significance_mode="group",
+        rois=[roi],
+        metric="bca",
+        outlier_enabled=False,
+        outlier_method="mad",
+        outlier_threshold=3.5,
+        outlier_action="exclude",
+        bca_negative_mode="strict",
+        min_significant_harmonics=1,
+        denominator_floor_enabled=False,
+        denominator_floor_mode="absolute",
+        denominator_floor_quantile=0.1,
+        denominator_floor_scope="global",
+        denominator_floor_reference="summary_b",
+        denominator_floor_absolute=None,
+        summary_metric="ratio",
+        outlier_metric="summary",
+        require_denom_sig=False,
+    )
+
+    result = compute_ratios(inputs)
+    df = result.dataframe
+
+    ratio_label = f"{inputs.cond_a} vs {inputs.cond_b} - {roi.name}"
+    roi_rows = df[df["Ratio Label"] == ratio_label]
+    assert "SUMMARY" in roi_rows["PID"].values
+
+    summary_row = roi_rows[roi_rows["PID"] == "SUMMARY"].iloc[0]
+    detail_rows = roi_rows[roi_rows["PID"].isin(participants)].copy()
+    included_rows = detail_rows[detail_rows["IncludedInSummary"]]
+    summary_metric = pd.to_numeric(included_rows["Ratio"], errors="coerce")
+    expected_variance = float(summary_metric.var(ddof=1))
+    assert summary_row["Variance"] == pytest.approx(expected_variance)
+
+    def _is_base_valid(row: pd.Series) -> bool:
+        summary_a = row["SummaryA"]
+        summary_b = row["SummaryB"]
+        return (
+            pd.notna(summary_a)
+            and pd.notna(summary_b)
+            and summary_b != 0
+        )
+
+    base_valid_by_pid = {row["PID"]: _is_base_valid(row) for _, row in detail_rows.iterrows()}
+    included_by_pid = dict(zip(detail_rows["PID"], detail_rows["IncludedInSummary"]))
+    assert included_by_pid == base_valid_by_pid
+
+
+def test_compute_ratios_condition_specific_sig_harmonics(monkeypatch, tmp_path: Path) -> None:
+    electrodes = ["F3", "F4"]
+    freqs = ["1.2000_Hz", "2.4000_Hz", "3.6000_Hz", "4.8000_Hz"]
+    roi = ROI(name="Frontal", channels=electrodes)
+    participants = ["P01"]
+    conditions = ["condA", "condB"]
+    subject_data: dict[str, dict[str, str]] = {}
+
+    for pid in participants:
+        cond_files: dict[str, str] = {}
+        for cond in conditions:
+            file_path = tmp_path / f"{pid}_{cond}.xlsx"
+            if cond == "condA":
+                z_values = [[5.0, 5.0, 0.0, 0.0], [5.0, 5.0, 0.0, 0.0]]
+                snr_values = [[10.0, 20.0, 30.0, 40.0], [10.0, 20.0, 30.0, 40.0]]
+            else:
+                z_values = [[5.0, 0.0, 5.0, 5.0], [5.0, 0.0, 5.0, 5.0]]
+                snr_values = [[5.0, 15.0, 25.0, 35.0], [5.0, 15.0, 25.0, 35.0]]
+            bca_values = [[1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]]
+            write_ratio_workbook(file_path, electrodes, freqs, z_values, snr_values, bca_values)
+            cond_files[cond] = str(file_path)
+        subject_data[pid] = cond_files
+
+    def fake_scan_folder(_root: str):
+        return participants, conditions, subject_data
+
+    monkeypatch.setattr(
+        "Tools.Ratio_Calculator.PySide6.worker.scan_folder_simple",
+        fake_scan_folder,
+    )
+
+    inputs = RatioCalcInputs(
+        excel_root=tmp_path,
+        cond_a="condA",
+        cond_b="condB",
+        roi_name=None,
+        z_threshold=1.0,
+        output_path=tmp_path / "ratio_output.xlsx",
+        significance_mode="group",
+        rois=[roi],
+        metric="snr",
+        outlier_enabled=False,
+        outlier_method="mad",
+        outlier_threshold=3.5,
+        outlier_action="exclude",
+        bca_negative_mode="strict",
+        min_significant_harmonics=2,
+        denominator_floor_enabled=False,
+        denominator_floor_mode="absolute",
+        denominator_floor_quantile=0.1,
+        denominator_floor_scope="global",
+        denominator_floor_reference="summary_b",
+        denominator_floor_absolute=None,
+        summary_metric="ratio",
+        outlier_metric="summary",
+        require_denom_sig=False,
+    )
+
+    result = compute_ratios(inputs)
+    df = result.dataframe
+
+    ratio_label = f"{inputs.cond_a} vs {inputs.cond_b} - {roi.name}"
+    roi_rows = df[df["Ratio Label"] == ratio_label]
+    detail_row = roi_rows[roi_rows["PID"] == participants[0]].iloc[0]
+
+    assert detail_row["SigHarmonicsA_N"] != detail_row["SigHarmonicsB_N"]
+    assert detail_row["SigHarmonicsA_N"] == 2
+    assert detail_row["SigHarmonicsB_N"] == 3
+
+    summary_row = roi_rows[roi_rows["PID"] == "SUMMARY"].iloc[0]
+    assert summary_row["SigHarmonicsA_N"] == 2
+    assert summary_row["SigHarmonicsB_N"] == 3
+
+    expected_summary_a = 15.0
+    expected_summary_b = (5.0 + 25.0 + 35.0) / 3.0
+    assert detail_row["SummaryA"] == pytest.approx(expected_summary_a)
+    assert detail_row["SummaryB"] == pytest.approx(expected_summary_b)
+    assert detail_row["Ratio"] == pytest.approx(expected_summary_a / expected_summary_b)
+    assert detail_row["Ratio"] < 1.0
+
+
+def test_compute_ratios_iqr_outlier_exclusion(monkeypatch, tmp_path: Path) -> None:
+    electrodes = ["F3", "F4"]
+    freqs = ["1.2000_Hz", "2.4000_Hz"]
+    roi = ROI(name="Frontal", channels=electrodes)
+    participants = [f"P{idx:02d}" for idx in range(1, 7)]
+    ratios = [1.0, 1.0, 1.0, 1.1, 1.2, 10.0]
+    participants, conditions, subject_data = _build_ratio_subject_data(
+        tmp_path, participants, ratios, electrodes, freqs
+    )
+
+    def fake_scan_folder(_root: str):
+        return participants, conditions, subject_data
+
+    monkeypatch.setattr(
+        "Tools.Ratio_Calculator.PySide6.worker.scan_folder_simple",
+        fake_scan_folder,
+    )
+
+    inputs = RatioCalcInputs(
+        excel_root=tmp_path,
+        cond_a="condA",
+        cond_b="condB",
+        roi_name=None,
+        z_threshold=1.0,
+        output_path=tmp_path / "ratio_output.xlsx",
+        significance_mode="group",
+        rois=[roi],
+        metric="bca",
+        outlier_enabled=True,
+        outlier_method="iqr",
+        outlier_threshold=1.5,
+        outlier_action="exclude",
+        bca_negative_mode="strict",
+        min_significant_harmonics=1,
+        denominator_floor_enabled=False,
+        denominator_floor_mode="absolute",
+        denominator_floor_quantile=0.1,
+        denominator_floor_scope="global",
+        denominator_floor_reference="summary_b",
+        denominator_floor_absolute=None,
+        summary_metric="ratio",
+        outlier_metric="summary",
+        require_denom_sig=False,
+    )
+
+    result = compute_ratios(inputs)
+    df = result.dataframe
+    ratio_label = f"{inputs.cond_a} vs {inputs.cond_b} - {roi.name}"
+    roi_rows = df[df["Ratio Label"] == ratio_label]
+    outlier_row = roi_rows[roi_rows["PID"] == participants[-1]].iloc[0]
+
+    assert outlier_row["OutlierFlag"] is True
+    assert outlier_row["OutlierMethod"] == "IQR"
+    assert outlier_row["OutlierScore"] > 0
+    assert outlier_row["IncludedInSummary"] is False
+    assert outlier_row["ExcludedAsOutlier"] is True
+    assert result.summary_counts["outliers_flagged_per_roi"][roi.name] == 1
+
+
+@pytest.mark.parametrize("summary_metric", ["logratio", "ratio"])
+def test_compute_ratios_trimmed_summary_metric(monkeypatch, tmp_path: Path, summary_metric: str) -> None:
+    electrodes = ["F3", "F4"]
+    freqs = ["1.2000_Hz", "2.4000_Hz"]
+    roi = ROI(name="Frontal", channels=electrodes)
+    participants = [f"P{idx:02d}" for idx in range(1, 6)]
+    ratios = [0.8, 1.0, 1.2, 1.4, 1.6]
+    participants, conditions, subject_data = _build_ratio_subject_data(
+        tmp_path, participants, ratios, electrodes, freqs
+    )
+
+    def fake_scan_folder(_root: str):
+        return participants, conditions, subject_data
+
+    monkeypatch.setattr(
+        "Tools.Ratio_Calculator.PySide6.worker.scan_folder_simple",
+        fake_scan_folder,
+    )
+
+    inputs = RatioCalcInputs(
+        excel_root=tmp_path,
+        cond_a="condA",
+        cond_b="condB",
+        roi_name=None,
+        z_threshold=1.0,
+        output_path=tmp_path / f"ratio_output_{summary_metric}.xlsx",
+        significance_mode="group",
+        rois=[roi],
+        metric="bca",
+        outlier_enabled=False,
+        outlier_method="mad",
+        outlier_threshold=3.5,
+        outlier_action="exclude",
+        bca_negative_mode="strict",
+        min_significant_harmonics=1,
+        denominator_floor_enabled=False,
+        denominator_floor_mode="absolute",
+        denominator_floor_quantile=0.1,
+        denominator_floor_scope="global",
+        denominator_floor_reference="summary_b",
+        denominator_floor_absolute=None,
+        summary_metric=summary_metric,
+        outlier_metric="summary",
+        require_denom_sig=False,
+    )
+
+    result = compute_ratios(inputs)
+    df = result.dataframe
+    ratio_label = f"{inputs.cond_a} vs {inputs.cond_b} - {roi.name}"
+    roi_rows = df[df["Ratio Label"] == ratio_label]
+    trimmed_row = roi_rows[roi_rows["PID"] == "SUMMARY_TRIMMED"].iloc[0]
+    detail_rows = roi_rows[roi_rows["PID"].isin(participants)].copy()
+    included_rows = detail_rows[detail_rows["IncludedInSummary"]]
+
+    if summary_metric == "logratio":
+        values = pd.to_numeric(included_rows["LogRatio"], errors="coerce").dropna().to_numpy()
+    else:
+        values = pd.to_numeric(included_rows["Ratio"], errors="coerce").dropna().to_numpy()
+
+    sorted_vals = sorted(values)
+    expected_trimmed = sum(sorted_vals[1:-1]) / (len(sorted_vals) - 2)
+    assert trimmed_row["Mean"] == pytest.approx(expected_trimmed)
+
+
+@pytest.mark.parametrize("summary_metric", ["logratio", "ratio"])
+def test_compute_ratios_summary_ci(monkeypatch, tmp_path: Path, summary_metric: str) -> None:
+    electrodes = ["F3", "F4"]
+    freqs = ["1.2000_Hz", "2.4000_Hz"]
+    roi = ROI(name="Frontal", channels=electrodes)
+    participants = [f"P{idx:02d}" for idx in range(1, 6)]
+    ratios = [0.9, 1.0, 1.1, 1.2, 1.3]
+    participants, conditions, subject_data = _build_ratio_subject_data(
+        tmp_path, participants, ratios, electrodes, freqs
+    )
+
+    def fake_scan_folder(_root: str):
+        return participants, conditions, subject_data
+
+    monkeypatch.setattr(
+        "Tools.Ratio_Calculator.PySide6.worker.scan_folder_simple",
+        fake_scan_folder,
+    )
+
+    inputs = RatioCalcInputs(
+        excel_root=tmp_path,
+        cond_a="condA",
+        cond_b="condB",
+        roi_name=None,
+        z_threshold=1.0,
+        output_path=tmp_path / f"ratio_output_ci_{summary_metric}.xlsx",
+        significance_mode="group",
+        rois=[roi],
+        metric="bca",
+        outlier_enabled=False,
+        outlier_method="mad",
+        outlier_threshold=3.5,
+        outlier_action="exclude",
+        bca_negative_mode="strict",
+        min_significant_harmonics=1,
+        denominator_floor_enabled=False,
+        denominator_floor_mode="absolute",
+        denominator_floor_quantile=0.1,
+        denominator_floor_scope="global",
+        denominator_floor_reference="summary_b",
+        denominator_floor_absolute=None,
+        summary_metric=summary_metric,
+        outlier_metric="summary",
+        require_denom_sig=False,
+    )
+
+    result = compute_ratios(inputs)
+    df = result.dataframe
+    ratio_label = f"{inputs.cond_a} vs {inputs.cond_b} - {roi.name}"
+    summary_row = df[(df["Ratio Label"] == ratio_label) & (df["PID"] == "SUMMARY")].iloc[0]
+
+    mean_ci_low = summary_row["Mean_CI_low"]
+    mean_ci_high = summary_row["Mean_CI_high"]
+    assert np.isfinite(mean_ci_low)
+    assert np.isfinite(mean_ci_high)
+    assert mean_ci_low < mean_ci_high
+
+    if summary_metric == "logratio":
+        assert np.isfinite(summary_row["GMR_CI_low"])
+        assert np.isfinite(summary_row["GMR_CI_high"])
+        assert summary_row["GMR_CI_low"] == pytest.approx(float(np.exp(mean_ci_low)))
+        assert summary_row["GMR_CI_high"] == pytest.approx(float(np.exp(mean_ci_high)))
+    else:
+        assert pd.isna(summary_row["GMR_CI_low"])
+        assert pd.isna(summary_row["GMR_CI_high"])
+
+
+@pytest.mark.parametrize("scope", ["per_roi", "global"])
+def test_compute_ratios_quantile_reference_group(monkeypatch, tmp_path: Path, scope: str) -> None:
+    electrodes = ["F3", "F4"]
+    freqs = ["1.2000_Hz", "2.4000_Hz"]
+    roi = ROI(name="Frontal", channels=electrodes)
+    participants = [f"P{idx:02d}" for idx in range(1, 5)]
+    ratios = [0.5, 1.0, 2.0, 4.0]
+    participants, conditions, subject_data = _build_ratio_subject_data(
+        tmp_path, participants, ratios, electrodes, freqs
+    )
+
+    def fake_scan_folder(_root: str):
+        return participants, conditions, subject_data
+
+    monkeypatch.setattr(
+        "Tools.Ratio_Calculator.PySide6.worker.scan_folder_simple",
+        fake_scan_folder,
+    )
+
+    inputs = RatioCalcInputs(
+        excel_root=tmp_path,
+        cond_a="condA",
+        cond_b="condB",
+        roi_name=None,
+        z_threshold=1.0,
+        output_path=tmp_path / f"ratio_output_{scope}.xlsx",
+        significance_mode="group",
+        rois=[roi],
+        metric="bca",
+        outlier_enabled=False,
+        outlier_method="mad",
+        outlier_threshold=3.5,
+        outlier_action="exclude",
+        bca_negative_mode="strict",
+        min_significant_harmonics=1,
+        denominator_floor_enabled=True,
+        denominator_floor_mode="quantile",
+        denominator_floor_quantile=0.25,
+        denominator_floor_scope=scope,
+        denominator_floor_reference="current_young",
+        denominator_floor_absolute=None,
+        summary_metric="ratio",
+        outlier_metric="summary",
+        require_denom_sig=False,
+    )
+
+    ref_path = tmp_path / "ratio_calculator_reference_groups.json"
+    ref_path.write_text(json.dumps({"current_young": ["P01", "P02"]}), encoding="utf-8")
+
+    result_ref = compute_ratios(inputs)
+    df_ref = result_ref.dataframe
+    ratio_label = f"{inputs.cond_a} vs {inputs.cond_b} - {roi.name}"
+    ref_summary = df_ref[(df_ref["Ratio Label"] == ratio_label) & (df_ref["PID"] == "SUMMARY")].iloc[0]
+
+    assert ref_summary["DenomFloorRefKey"] == "current_young"
+    assert ref_summary["DenomFloorRefN"] == 2
+    ref_floor = ref_summary["DenomFloor"]
+
+    ref_path.unlink()
+    result_all = compute_ratios(inputs)
+    df_all = result_all.dataframe
+    all_summary = df_all[(df_all["Ratio Label"] == ratio_label) & (df_all["PID"] == "SUMMARY")].iloc[0]
+    all_floor = all_summary["DenomFloor"]
+
+    assert ref_floor != all_floor

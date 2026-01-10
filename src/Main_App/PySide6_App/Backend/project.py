@@ -14,6 +14,7 @@ from .preprocessing_settings import (
 EXCEL_SUBFOLDER_NAME = "1 - Excel Data Files"
 SNR_SUBFOLDER_NAME = "2 - SNR Plots"
 STATS_SUBFOLDER_NAME = "3 - Statistical Analysis Results"
+_LEGACY_BANDPASS_WARNED: set[Path] = set()
 
 # Stable defaults used by GUI/processing
 DEFAULTS: Dict[str, Any] = {
@@ -71,6 +72,26 @@ def _stable_dump(data: Dict[str, Any]) -> str:
     return json.dumps(data, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
 
 
+def _write_manifest_if_changed(manifest_path: Path, data: Dict[str, Any]) -> bool:
+    new_compact = _stable_dump(data)
+    if manifest_path.exists():
+        try:
+            current_dict = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if not isinstance(current_dict, dict):
+                current_dict = {}
+        except Exception:
+            current_dict = {}
+        current_compact = _stable_dump(current_dict)
+        if current_compact == new_compact:
+            return False
+
+    payload = json.dumps(data, indent=2, ensure_ascii=False)
+    tmp_path = manifest_path.with_name(f"{manifest_path.name}.tmp")
+    tmp_path.write_text(payload, encoding="utf-8")
+    tmp_path.replace(manifest_path)
+    return True
+
+
 class Project:
     """
     Project model for PySide6 GUI.
@@ -89,8 +110,17 @@ class Project:
       - manifest: Dict[str, Any]  (raw, for persistence)
     """
 
-    def __init__(self, project_root: Path, manifest: Dict[str, Any]) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        manifest: Dict[str, Any],
+        *,
+        manifest_path: Path | None = None,
+    ) -> None:
         self.project_root = project_root.resolve()
+        self.manifest_path = (
+            manifest_path.resolve() if manifest_path is not None else self.project_root / "project.json"
+        )
         self.manifest = manifest
 
         # Friendly name
@@ -115,9 +145,31 @@ class Project:
 
         # Preprocessing dict
         pp = manifest.get("preprocessing", {})
-        self.preprocessing: Dict[str, Any] = normalize_preprocessing_settings(
-            pp if isinstance(pp, Mapping) else {}
-        )
+        legacy_inversion: dict[str, float] = {}
+        try:
+            self.preprocessing: Dict[str, Any] = normalize_preprocessing_settings(
+                pp if isinstance(pp, Mapping) else {},
+                allow_legacy_inversion=True,
+                on_legacy_inversion=lambda original_high, original_low: legacy_inversion.update(
+                    {"original_high": float(original_high), "original_low": float(original_low)}
+                ),
+            )
+        except ValueError as exc:
+            print(f"[PROJECT] Invalid preprocessing settings in manifest; using defaults: {exc}")
+            self.preprocessing = normalize_preprocessing_settings({})
+        else:
+            if legacy_inversion and self.project_root not in _LEGACY_BANDPASS_WARNED:
+                corrected_low = float(self.preprocessing.get("low_pass", 0))
+                corrected_high = float(self.preprocessing.get("high_pass", 0))
+                message = (
+                    "Legacy preprocessing bandpass inverted in "
+                    f"{self.manifest_path}: raw low_pass={legacy_inversion['original_low']} Hz, "
+                    f"high_pass={legacy_inversion['original_high']} Hz -> corrected "
+                    f"low_pass={corrected_low} Hz, high_pass={corrected_high} Hz."
+                )
+                print(f"[PROJECT] {message}")
+                _LEGACY_BANDPASS_WARNED.add(self.project_root)
+        self._legacy_inversion = legacy_inversion if legacy_inversion else None
         manifest["preprocessing"] = {
             key: self.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
         }
@@ -183,24 +235,34 @@ class Project:
             self.subfolders[key] = abs_path
 
     @staticmethod
-    def load(path: Path) -> "Project":
+    def load(
+        path: Path,
+        *,
+        manifest: Dict[str, Any] | None = None,
+        manifest_path: Path | None = None,
+    ) -> "Project":
         """
         Load a project from folder. Accepts absolute or relative manifest paths.
         Ensures Input/Results and subfolders exist.
         """
         project_root = Path(path).resolve()
-        manifest_path = project_root / "project.json"
+        resolved_manifest_path = (
+            manifest_path.resolve() if manifest_path is not None else project_root / "project.json"
+        )
 
-        if manifest_path.exists():
-            data_raw = manifest_path.read_text(encoding="utf-8")
-            try:
-                data = json.loads(data_raw)
-            except Exception:
-                data = {}
+        data: Dict[str, Any] = {}
+        if manifest is None:
+            if resolved_manifest_path.exists():
+                data_raw = resolved_manifest_path.read_text(encoding="utf-8")
+                try:
+                    data = json.loads(data_raw)
+                except Exception:
+                    data = {}
         else:
-            data = {}
+            data = dict(manifest)
         if not isinstance(data, dict):
             data = {}
+        raw_manifest: Dict[str, Any] = dict(data)
 
         # Normalize persisted event_map back into memory as {str: int}
         raw_map = data.get("event_map", {})
@@ -224,10 +286,15 @@ class Project:
         input_dir.mkdir(parents=True, exist_ok=True)
         results_dir.mkdir(parents=True, exist_ok=True)
 
-        proj = Project(project_root, merged)
+        proj = Project(project_root, merged, manifest_path=resolved_manifest_path)
         proj.event_map = ev_map
         # Keep the merged view as the in-memory manifest so subsequent saves retain defaults
         proj.manifest = merged
+        if proj._legacy_inversion is not None:
+            raw_manifest["preprocessing"] = {
+                key: proj.preprocessing[key] for key in PREPROCESSING_CANONICAL_KEYS
+            }
+            _write_manifest_if_changed(resolved_manifest_path, raw_manifest)
         return proj
 
     def save(self) -> None:

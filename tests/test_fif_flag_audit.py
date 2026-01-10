@@ -1,6 +1,6 @@
-import numpy as np
 import pytest
 
+np = pytest.importorskip("numpy")
 pytest.importorskip("PySide6")
 mne = pytest.importorskip("mne")
 
@@ -29,8 +29,8 @@ def test_fif_flag_audit_reports_zero(tmp_path):
     params = {
         "downsample": 256,
         "downsample_rate": 256,
-        "low_pass": 0.0,
-        "high_pass": 50.0,
+        "low_pass": 50.0,
+        "high_pass": 0.1,
         "reject_thresh": 0.0,
         "ref_channel1": "EXG1",
         "ref_channel2": "EXG2",
