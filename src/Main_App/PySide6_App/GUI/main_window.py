@@ -475,17 +475,14 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self.log("Cancellation already requested; ignoring Stop click.", level=logging.INFO)
             return
 
-        if self.parallel_mode != "process":
+        mp = getattr(self, "_mp", None)
+        if mp is None:
             QMessageBox.information(
                 self,
                 "Stop Processing",
                 "Stopping an in-progress run is currently only supported in Batch/process mode.\n"
                 "This Single/legacy-mode run will finish normally.",
             )
-            return
-
-        mp = getattr(self, "_mp", None)
-        if mp is None:
             self.log("Stop requested but no MpRunnerBridge instance is active.", level=logging.WARNING)
             return
 
@@ -629,8 +626,16 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             )
             self.max_workers = effective_max_workers
 
+            is_single_ui = False
+            if hasattr(self, "file_mode"):
+                try:
+                    is_single_ui = self.file_mode.get() == "Single"
+                except Exception:
+                    is_single_ui = False
+            is_mp_run = (self.parallel_mode == "process") or is_single_ui
+
             # ---------- Process mode (multiprocessing) ----------
-            if self.parallel_mode == "process":
+            if is_mp_run:
                 # Do NOT kick legacy path. We stop the legacy poll timer here.
                 if self._processing_timer.isActive():
                     self._processing_timer.stop()
@@ -651,7 +656,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     return
 
                 self._set_controls_enabled(False)
-                self._max_progress = len(self.data_paths)
                 if hasattr(self, "progress_bar"):
                     self.progress_bar.setRange(0, 100)
                     self.progress_bar.setValue(0)
@@ -663,7 +667,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
                 project_root = Path(self.currentProject.project_root)
                 save_folder = Path(self.save_folder_path.get())
-                files = [Path(p) for p in self.data_paths]
+                if is_single_ui:
+                    files = [Path(self.data_paths[0])]
+                else:
+                    files = [Path(p) for p in self.data_paths]
+                self._max_progress = len(files)
                 settings = self.validated_params.copy()
                 event_map = settings.pop("event_id_map", {})
 
@@ -687,7 +695,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     settings=settings,
                     event_map=event_map,
                     save_folder=save_folder,
-                    max_workers=self.max_workers,
+                    max_workers=1 if is_single_ui else self.max_workers,
                 )
                 self._run_active = True
                 self._show_processing_started_notice()
