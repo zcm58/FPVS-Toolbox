@@ -1,18 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-Qt-side preprocessing that mirrors the legacy logic exactly.
+Qt-side preprocessing module for the FPVS Toolbox.
 
-Order (legacy parity):
-1) Initial reference (user-selected pair; defaults set via settings UI)
-2) Drop the selected reference pair channels
-3) Optional channel limit (max_idx_keep; keep stim if needed)
-4) Downsample (if requested)
-5) FIR filter (legacy mapping and kernel)
-6) Kurtosis-based rejection & interpolation
-7) Final average reference
+This module provides the core preprocessing pipeline designed to mirror legacy
+logic exactly. It handles data auditing, referencing, filtering, and
+automated artifact rejection via kurtosis.
 
-Returns (processed_raw_or_none, n_bad_by_kurtosis)
+Pipeline Order (Legacy Parity):
+    1. Initial reference (user-selected pair).
+    2. Drop the selected reference pair channels.
+    3. Optional channel limit (max_idx_keep; keeps stim if needed).
+    4. Downsample (if requested).
+    5. FIR filter (legacy mapping and kernel).
+    6. Kurtosis-based rejection & interpolation.
+    7. Final average reference.
 """
+
 from __future__ import annotations
 
 import logging
@@ -52,7 +55,20 @@ def begin_preproc_audit(
     params: Dict[str, Any],
     filename: str,
 ) -> Dict[str, Any]:
-    """Capture baseline audit metadata before preprocessing mutates the Raw."""
+    """
+    Capture baseline audit metadata before preprocessing mutates the Raw object.
+
+    This function records the state of the data (channel count, sampling frequency,
+    etc.) so that post-processing changes can be verified for integrity.
+
+    Args:
+        raw: The MNE Raw object to audit.
+        params: The dictionary of preprocessing parameters used for this run.
+        filename: The name of the file being processed, used for logging context.
+
+    Returns:
+        A dictionary containing the initial state 'capture' and filename.
+    """
     try:
         logger.debug(
             "begin_preproc_audit_start",
@@ -80,7 +96,26 @@ def finalize_preproc_audit(
     fif_written: int = 0,
     n_rejected: int = 0,
 ) -> Tuple[Dict[str, Any], List[str]]:
-    """Compute the post-state audit and log structured results."""
+    """
+    Compute the post-state audit and log structured results.
+
+    Compares the 'before' state with the 'after' state to identify any
+    unintended processing side effects.
+
+    Args:
+        before: The state dictionary returned by `begin_preproc_audit`.
+        raw: The MNE Raw object after preprocessing is complete.
+        params: The dictionary of preprocessing parameters used.
+        filename: The name of the file being processed.
+        events_info: Optional metadata regarding EEG events/markers.
+        fif_written: Boolean/int flag indicating if the file was saved to disk.
+        n_rejected: Number of channels rejected during the kurtosis stage.
+
+    Returns:
+        A tuple containing:
+            - after (Dict[str, Any]): The final state metadata.
+            - problems (List[str]): A list of audit mismatches or warnings found.
+    """
     try:
         logger.debug(
             "finalize_preproc_audit_start",
@@ -117,7 +152,19 @@ def finalize_preproc_audit(
 
 
 def _coerce_refs_to_eeg_if_needed(raw: mne.io.BaseRaw, pair: tuple[str, str]) -> List[str]:
-    """If selected ref channels are not typed as EEG, coerce them to EEG so MNE can reference them."""
+    """
+    Ensure selected reference channels are typed as 'eeg'.
+
+    MNE requires channels used in `set_eeg_reference` to be of type 'eeg'.
+    If they are 'misc' or 'exg', this function coerces them.
+
+    Args:
+        raw: The MNE Raw object (modified in place).
+        pair: A tuple of two channel names to check/coerce.
+
+    Returns:
+        A list of channel names whose types were actually changed.
+    """
     changed: List[str] = []
     try:
         ch_types = dict(zip(raw.ch_names, raw.get_channel_types()))
@@ -140,19 +187,31 @@ def perform_preprocessing(
     filename_for_log: str = "UnknownFile",
 ) -> Tuple[Optional[mne.io.BaseRaw], int]:
     """
-    Apply preprocessing steps to the raw MNE object (legacy parity).
+    Apply the full preprocessing pipeline to an MNE Raw object.
+
+    This function performs referencing, channel selection, resampling,
+    filtering, and artifact rejection in a fixed order to maintain
+    compatibility with legacy FPVS analysis scripts.
 
     Args:
-        raw_input: Raw MNE data to process (modified in place).
-        params: Expected keys:
-            'downsample_rate', 'low_pass', 'high_pass', 'reject_thresh',
-            'ref_channel1', 'ref_channel2', 'max_idx_keep', 'stim_channel' (optional).
-            Note: defaults for ref_channel1/ref_channel2 come from the settings UI at runtime.
-        log_func: Logger function (e.g., app.log).
-        filename_for_log: For log context.
+        raw_input: Raw MNE data to process. This object is modified in place.
+        params: Configuration dictionary. Expected keys include:
+            - 'downsample_rate' (int/float): Target Hz.
+            - 'low_pass' (float): LPF cutoff in Hz.
+            - 'high_pass' (float): HPF cutoff in Hz.
+            - 'reject_thresh' (float): Z-score threshold for kurtosis rejection.
+            - 'ref_channel1', 'ref_channel2' (str): Channels for initial reference.
+            - 'max_idx_keep' (int): Number of EEG channels to retain.
+            - 'stim_channel' (str, optional): The trigger/stim channel name.
+        log_func: A callable (typically a UI log method) that accepts a string.
+        filename_for_log: Filename string used for logging and console output.
 
     Returns:
-        (processed_raw_or_none, n_bad_by_kurtosis)
+        A tuple of (processed_raw, n_bad_channels).
+        Returns (None, 0) if a critical error occurs.
+
+    Raises:
+        ValueError: If filter cutoffs are logically invalid (HPF >= LPF).
     """
     raw = raw_input
 
