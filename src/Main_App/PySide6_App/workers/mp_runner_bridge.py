@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Qt bridge that launches process-based preprocessing and relays progress."""
+
+from __future__ import annotations
 
 import logging
 from multiprocessing import Event, Queue, get_context
@@ -15,6 +15,17 @@ from Main_App.Performance.mp_env import set_blas_threads_single_process
 from Main_App.Performance.process_runner import RunParams, run_project_parallel
 
 logger = logging.getLogger(__name__)
+
+
+def _build_preproc_fingerprint(settings: Dict[str, object]) -> str:
+    hp = settings.get("high_pass")
+    lp = settings.get("low_pass")
+    ds = settings.get("downsample_rate", settings.get("downsample"))
+    rz = settings.get("reject_thresh")
+    r1 = settings.get("ref_channel1")
+    r2 = settings.get("ref_channel2")
+    stim = settings.get("stim_channel")
+    return f"hp={hp}|lp={lp}|ds={ds}|rz={rz}|ref={r1},{r2}|stim={stim}"
 
 
 class MpRunnerBridge(QObject):
@@ -36,6 +47,7 @@ class MpRunnerBridge(QObject):
         self._results: List[Dict[str, object]] = []
         self._cancel_event: Optional[Event] = None
         self._worker_thread: Optional[Thread] = None
+        self.validated_fingerprint: Optional[str] = None
 
     def start(
         self,
@@ -76,6 +88,15 @@ class MpRunnerBridge(QObject):
         self._q = get_context("spawn").Queue()
         self._total = len(data_files)
         self._results = []
+
+        bridge_fingerprint = _build_preproc_fingerprint(settings)
+        logger.info("PREPROC_FINGERPRINT_BRIDGE %s", bridge_fingerprint)
+        if self.validated_fingerprint and self.validated_fingerprint != bridge_fingerprint:
+            logger.warning(
+                "PREPROC_FINGERPRINT_MISMATCH validated=%s bridge=%s",
+                self.validated_fingerprint,
+                bridge_fingerprint,
+            )
 
         params = RunParams(
             project_root=project_root,

@@ -128,7 +128,10 @@ from Main_App.PySide6_App.Backend.project_manager import (
     openProjectPath,
     select_projects_root,
 )
-from Main_App.PySide6_App.Backend.preprocessing_settings import normalize_preprocessing_settings
+from Main_App.PySide6_App.Backend.preprocessing_settings import (
+    normalize_preprocessing_settings,
+    PREPROCESSING_CANONICAL_KEYS,
+)
 from Main_App.Performance.mp_env import (
     compute_effective_max_workers,
     set_blas_threads_single_process,
@@ -676,6 +679,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 event_map = settings.pop("event_id_map", {})
 
                 self._mp = MpRunnerBridge(self)
+                self._mp.validated_fingerprint = getattr(
+                    self, "_preproc_fingerprint_validated", None
+                )
 
                 # Smooth progress if available
                 self._mp.progress.connect(
@@ -1136,6 +1142,84 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         if params is None:
             return False
         self.validated_params = params
+        debug_enabled = bool(self.settings.debug_enabled()) if hasattr(self, "settings") else False
+        project_preproc = getattr(self.currentProject, "preprocessing", {}) or {}
+        project_snapshot = {key: project_preproc.get(key) for key in PREPROCESSING_CANONICAL_KEYS}
+        settings_snapshot = None
+        if hasattr(self, "settings") and hasattr(self.settings, "config"):
+            settings_snapshot = {}
+            preproc_options = (
+                "low_pass",
+                "high_pass",
+                "downsample",
+                "epoch_start",
+                "reject_thresh",
+                "epoch_end",
+                "ref_chan1",
+                "ref_chan2",
+                "max_idx_keep",
+                "max_bad_chans",
+            )
+            for opt in preproc_options:
+                if self.settings.config.has_option("preprocessing", opt):
+                    settings_snapshot[opt] = self.settings.get("preprocessing", opt, "")
+            if self.settings.config.has_option("paths", "save_fif"):
+                settings_snapshot["save_preprocessed_fif"] = self.settings.get("paths", "save_fif", "")
+            if self.settings.config.has_option("stim", "channel"):
+                settings_snapshot["stim_channel"] = self.settings.get("stim", "channel", "")
+        dialog_snapshot = None
+        if getattr(self, "_settings_dialog", None):
+            try:
+                dialog_preproc_keys = (
+                    "low_pass",
+                    "high_pass",
+                    "downsample",
+                    "epoch_start",
+                    "reject_thresh",
+                    "epoch_end",
+                    "ref_chan1",
+                    "ref_chan2",
+                    "max_idx_keep",
+                    "max_bad_chans",
+                )
+                dialog_snapshot = {
+                    key: edit.text()
+                    for key, edit in zip(dialog_preproc_keys, self._settings_dialog.preproc_edits)
+                }
+                dialog_snapshot["save_preprocessed_fif"] = (
+                    self._settings_dialog.save_fif_check.isChecked()
+                    if hasattr(self._settings_dialog, "save_fif_check")
+                    else None
+                )
+            except Exception:
+                dialog_snapshot = {"error": "unavailable"}
+        if debug_enabled:
+            logger.info(
+                "PREPROC_SOURCE_SNAPSHOT project=%s settings=%s dialog=%s",
+                project_snapshot,
+                settings_snapshot,
+                dialog_snapshot,
+            )
+        else:
+            logger.info(
+                "PREPROC_SOURCE_SNAPSHOT project_keys=%s settings_keys=%s dialog_present=%s",
+                list(project_snapshot.keys()),
+                list(settings_snapshot.keys()) if settings_snapshot else [],
+                bool(dialog_snapshot),
+            )
+        fp_hp = params.get("high_pass")
+        fp_lp = params.get("low_pass")
+        fp_ds = params.get("downsample")
+        fp_rz = params.get("reject_thresh")
+        fp_r1 = params.get("ref_channel1")
+        fp_r2 = params.get("ref_channel2")
+        fp_stim = params.get("stim_channel")
+        validated_fingerprint = (
+            f"hp={fp_hp}|lp={fp_lp}|ds={fp_ds}|rz={fp_rz}|"
+            f"ref={fp_r1},{fp_r2}|stim={fp_stim}"
+        )
+        logger.info("PREPROC_FINGERPRINT_VALIDATED %s", validated_fingerprint)
+        self._preproc_fingerprint_validated = validated_fingerprint
 
         # We show a concise summary (not noisy) so users see what's about to run
         lp = params.get("low_pass")
