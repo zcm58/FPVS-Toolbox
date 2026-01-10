@@ -265,13 +265,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                             )
 
                         signal_amplitude = channel_amplitudes[target_bin_index]
-                        peak_val_slice = slice(
-                            max(0, target_bin_index - 1),
-                            min(len(fft_frequencies), target_bin_index + 2),
-                        )
-                        peak_signal_amplitude = np.max(
-                            channel_amplitudes[peak_val_slice]
-                        )
+                        peak_signal_amplitude = signal_amplitude
 
                         snr_val = (
                             signal_amplitude / noise_mean_val
