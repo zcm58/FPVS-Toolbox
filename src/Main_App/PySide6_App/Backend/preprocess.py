@@ -47,6 +47,17 @@ except Exception:  # pragma: no cover - fallback for isolated execution
     )
 
 
+def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
+    hp = params.get("high_pass")
+    lp = params.get("low_pass")
+    ds = params.get("downsample_rate", params.get("downsample"))
+    rz = params.get("reject_thresh")
+    r1 = params.get("ref_channel1")
+    r2 = params.get("ref_channel2")
+    stim = params.get("stim_channel")
+    return f"hp={hp}|lp={lp}|ds={ds}|rz={rz}|ref={r1},{r2}|stim={stim}"
+
+
 def begin_preproc_audit(
     raw: mne.io.BaseRaw,
     params: Dict[str, Any],
@@ -155,6 +166,10 @@ def perform_preprocessing(
         (processed_raw_or_none, n_bad_by_kurtosis)
     """
     raw = raw_input
+    fingerprint_in = _build_preproc_fingerprint(params)
+    fingerprint_message = f"PREPROC_FINGERPRINT_PREPROCESS_IN {fingerprint_in}"
+    log_func(fingerprint_message)
+    logger.info(fingerprint_message)
 
     # Runtime parameters (defaults are managed by Settings UI; fall back only if absent)
     downsample_rate = params.get("downsample_rate")
@@ -435,6 +450,25 @@ def perform_preprocessing(
                 log_func(snapshot_message)
                 logger.info(snapshot_message)
                 print(f"[FILTER_SNAPSHOT] {snapshot_payload}")
+                if h_freq is not None and h_freq > sf_current / 2.0:
+                    nyquist_warning = (
+                        "FILTER_NYQUIST_WARNING "
+                        f"file={filename_for_log} "
+                        f"computed_h_freq={h_freq!r} "
+                        f"sfreq={sf_current}"
+                    )
+                    log_func(nyquist_warning)
+                    logger.warning(nyquist_warning)
+                fingerprint_before_filter = _build_preproc_fingerprint(params)
+                if fingerprint_before_filter != fingerprint_in:
+                    mutation_warning = (
+                        "PREPROC_FINGERPRINT_MUTATION_WARNING "
+                        f"file={filename_for_log} "
+                        f"before={fingerprint_in} "
+                        f"current={fingerprint_before_filter}"
+                    )
+                    log_func(mutation_warning)
+                    logger.warning(mutation_warning)
                 if l_freq is not None and h_freq is not None and l_freq >= h_freq:
                     range_warning = (
                         "FILTER_RANGE_WARNING "
