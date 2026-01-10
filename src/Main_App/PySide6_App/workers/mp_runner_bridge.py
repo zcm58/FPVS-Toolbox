@@ -86,6 +86,23 @@ class MpRunnerBridge(QObject):
             max_workers=max_workers,
         )
 
+        for file_path in data_files:
+            logger.info(
+                "preproc_settings_snapshot",
+                extra={
+                    "source": "mp_runner_bridge",
+                    "file": file_path.name,
+                    "high_pass": settings.get("high_pass"),
+                    "low_pass": settings.get("low_pass"),
+                    "downsample_rate": settings.get("downsample_rate"),
+                    "downsample": settings.get("downsample"),
+                    "reject_thresh": settings.get("reject_thresh"),
+                    "ref_channel1": settings.get("ref_channel1"),
+                    "ref_channel2": settings.get("ref_channel2"),
+                    "stim_channel": settings.get("stim_channel"),
+                },
+            )
+
         logger.info(
             "MpRunnerBridge starting run_project_parallel: project_root=%s "
             "save_folder=%s n_files=%d max_workers=%s",

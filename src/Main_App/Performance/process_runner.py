@@ -238,6 +238,21 @@ def _run_full_pipeline_for_file(
         # 3) Preprocessing via PySide6 backend (handles:
         #    initial EXG ref -> drop EXGs -> channel limit keeping stim ->
         #    downsample -> filter -> kurtosis/interp -> final avg ref)
+        logger.info(
+            "preproc_settings_snapshot",
+            extra={
+                "source": "process_runner",
+                "file": file_path.name,
+                "high_pass": settings.get("high_pass"),
+                "low_pass": settings.get("low_pass"),
+                "downsample_rate": settings.get("downsample_rate"),
+                "downsample": settings.get("downsample"),
+                "reject_thresh": settings.get("reject_thresh"),
+                "ref_channel1": settings.get("ref_channel1"),
+                "ref_channel2": settings.get("ref_channel2"),
+                "stim_channel": settings.get("stim_channel"),
+            },
+        )
         raw_proc, n_rejected = backend_preprocess.perform_preprocessing(
             raw_input=raw,
             params=settings,
