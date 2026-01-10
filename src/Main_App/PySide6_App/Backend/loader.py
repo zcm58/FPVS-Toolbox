@@ -1,14 +1,19 @@
-"""Helper functions for reading EEG recordings into MNE.
-
-Supports ``.bdf`` and ``.set``. Uses disk-backed memmaps to bound RAM usage and
-applies a cached standard_1020 montage. Numerical output is unchanged.
-
-Update: preserve the user-selected EXG reference pair as EEG, demote only the
-non-selected EXG* channels to misc, and type the stim channel explicitly.
-
-This is a clone of the legacy load_utils.py file. We're cloning this file here so
-we can move away from a dependency on the Legacy_App directory and streamline development. Yay!!
+# -*- coding: utf-8 -*-
 """
+Data loading utilities for the FPVS Toolbox.
+
+This module provides helper functions for reading EEG recordings into MNE,
+specifically targeting `.bdf` (BioSemi) and `.set` (EEGLAB) formats.
+It uses disk-backed memmaps to bound RAM usage, ensuring the application
+can handle large high-density files without system instability.
+
+Channel Management Policy:
+    - Preserves user-selected EXG reference pairs as 'eeg'.
+    - Demotes non-selected EXG channels to 'misc'.
+    - Explicitly types the stimulus/trigger channel as 'stim'.
+    - Applies a cached Standard 10-20 montage.
+"""
+
 from __future__ import annotations
 
 import os
@@ -16,30 +21,51 @@ import tempfile
 from functools import lru_cache
 from pathlib import Path
 from tkinter import messagebox
-from typing import Tuple, Optional, Iterable, Dict, Set
+from typing import Tuple, Optional, Iterable, Dict, Set, Any
 
 import mne
 
 
 def _memmap_dir_for_pid() -> Path:
-    """Per-process memmap directory to avoid worker collisions."""
+    """
+    Generate a per-process directory for MNE memmap files.
+
+    This prevents collisions between different instances of the app or
+    different worker processes attempting to write to the same temporary file.
+
+    Returns:
+        Path: A platform-independent Path object pointing to the temp directory.
+    """
     d = Path(tempfile.gettempdir()) / "fpvs_memmap" / f"pid_{os.getpid()}"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 @lru_cache(maxsize=1)
-def _cached_1020():
-    """Cached once per process to avoid repeated montage builds."""
+def _cached_1020() -> mne.channels.DigMontage:
+    """
+    Generate and cache the standard 10-20 montage.
+
+    Returns:
+        mne.channels.DigMontage: The MNE montage object for 10-20 electrode placement.
+    """
     return mne.channels.make_standard_montage("standard_1020")
 
 
-def _resolve_ref_pair(app) -> Tuple[str, str]:
+def _resolve_ref_pair(app: Any) -> Tuple[str, str]:
     """
-    Resolve the desired reference pair in priority:
-      project.preprocessing.{ref_channel1|ref_chan1, ref_channel2|ref_chan2}
-      → settings['preprocessing'] → defaults ('EXG1','EXG2').
-    Returns raw channel labels as strings (case preserved from inputs).
+    Resolve the desired reference channel pair from app settings or project state.
+
+    The resolution follows this priority:
+        1. Project-specific preprocessing settings.
+        2. Global application settings.
+        3. Hardcoded defaults ('EXG1', 'EXG2').
+
+    Args:
+        app: The Main Application instance containing settings and project state.
+
+    Returns:
+        Tuple[str, str]: A pair of channel labels as strings.
     """
     try:
         p = getattr(app.currentProject, "preprocessing", {}) or {}
@@ -67,8 +93,16 @@ def _resolve_ref_pair(app) -> Tuple[str, str]:
     return str(ref1), str(ref2)
 
 
-def _resolve_stim(app) -> str:
-    """Resolve the stim channel name. Defaults to 'Status'."""
+def _resolve_stim(app: Any) -> str:
+    """
+    Resolve the stimulus/trigger channel name.
+
+    Args:
+        app: The Main Application instance.
+
+    Returns:
+        str: The name of the stimulus channel (defaults to 'Status').
+    """
     try:
         p = getattr(app.currentProject, "preprocessing", {}) or {}
     except Exception:
@@ -80,14 +114,28 @@ def _resolve_stim(app) -> str:
 
 
 def _map_present_case_insensitive(names: Iterable[str]) -> Dict[str, str]:
-    """Build a case-insensitive lookup: UPPER -> actual name present."""
+    """
+    Create a lookup dictionary for case-insensitive channel name matching.
+
+    Args:
+        names: An iterable of actual channel names present in the recording.
+
+    Returns:
+        Dict[str, str]: A mapping of UPPERCASE_NAME to actual_casing_name.
+    """
     return {n.upper(): n for n in names}
 
 
 def _canon_present(raw_names: Iterable[str], candidates: Iterable[str]) -> Set[str]:
     """
-    Return the subset of candidates that are present in raw_names,
-    matching case-insensitively but returning the actual casing from raw_names.
+    Identify which candidate channels exist in the raw data, preserving casing.
+
+    Args:
+        raw_names: All channel names found in the MNE Raw object.
+        candidates: A list of channel names to look for (e.g., ['EXG1', 'EXG2']).
+
+    Returns:
+        Set[str]: A set of correctly-cased strings for candidates found in raw_names.
     """
     lut = _map_present_case_insensitive(raw_names)
     out: Set[str] = set()
@@ -100,13 +148,27 @@ def _canon_present(raw_names: Iterable[str], candidates: Iterable[str]) -> Set[s
     return out
 
 
-def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None):
+def load_eeg_file(
+    app: Any,
+    filepath: str,
+    ref_pair: Optional[Tuple[str, str]] = None
+) -> Optional[mne.io.BaseRaw]:
     """
-    Load an EEG file with disk-backed memmap and apply montage (no resample).
+    Load an EEG file from disk with memory optimization and channel typing.
 
-    ref_pair:
-      Optional explicit pair to preserve as EEG for initial referencing.
-      If not provided, resolved from project/settings with defaults EXG1/EXG2.
+    This function is the primary entry point for file ingestion. It handles
+    loading via MNE, implements disk-backed preloading (memmap) to save RAM,
+    corrects BioSemi channel types, and applies the electrode montage.
+
+    Args:
+        app: The Main Application instance (used for logging and setting resolution).
+        filepath: Absolute path to the .bdf or .set file.
+        ref_pair: Optional explicit reference pair. If None, it is resolved
+            automatically from project settings.
+
+    Returns:
+        Optional[mne.io.BaseRaw]: The loaded MNE Raw object, or None if the
+            loading process failed or the format is unsupported.
     """
     ext = os.path.splitext(filepath)[1].lower()
     base = os.path.basename(filepath)
