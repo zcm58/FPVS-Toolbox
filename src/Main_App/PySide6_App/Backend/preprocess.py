@@ -422,7 +422,28 @@ def perform_preprocessing(
                 low_trans_bw, high_trans_bw, filter_len_points = 0.1, 0.1, 8449
                 effective_l = l_freq if l_freq is not None else "DC"
                 effective_h = h_freq if h_freq is not None else "Nyq"
-                sf_current = float(raw.info["sfreq"])
+                sf_current = float(raw.info.get("sfreq", 0.0))
+                snapshot_payload = (
+                    f"file={filename_for_log} "
+                    f"param_high_pass={high_pass!r} "
+                    f"param_low_pass={low_pass!r} "
+                    f"computed_l_freq={l_freq!r} "
+                    f"computed_h_freq={h_freq!r} "
+                    f"sfreq={sf_current}"
+                )
+                snapshot_message = f"FILTER_SNAPSHOT {snapshot_payload}"
+                log_func(snapshot_message)
+                logger.info(snapshot_message)
+                print(f"[FILTER_SNAPSHOT] {snapshot_payload}")
+                if l_freq is not None and h_freq is not None and l_freq >= h_freq:
+                    range_warning = (
+                        "FILTER_RANGE_WARNING "
+                        f"file={filename_for_log} "
+                        f"computed_l_freq={l_freq!r} "
+                        f"computed_h_freq={h_freq!r}"
+                    )
+                    log_func(range_warning)
+                    logger.warning(range_warning)
                 log_func(
                     f"Filtering {filename_for_log} "
                     f"({effective_l}-{effective_h} Hz) at sfreq={sf_current:.3f}..."
@@ -445,6 +466,44 @@ def perform_preprocessing(
                     skip_by_annotation="edge",
                     verbose=False,
                 )
+                applied_highpass = raw.info.get("highpass", None)
+                applied_lowpass = raw.info.get("lowpass", None)
+                applied_payload = (
+                    f"file={filename_for_log} "
+                    f"applied_highpass={applied_highpass!r} "
+                    f"applied_lowpass={applied_lowpass!r} "
+                    f"sfreq={sf_current}"
+                )
+                applied_message = f"FILTER_APPLIED {applied_payload}"
+                log_func(applied_message)
+                logger.info(applied_message)
+                print(f"[FILTER_APPLIED] {applied_payload}")
+                expected_highpass = l_freq if l_freq is not None else 0.0
+                expected_lowpass = (
+                    h_freq
+                    if h_freq is not None
+                    else float(raw.info.get("sfreq", 0.0)) / 2.0
+                )
+                tol = 1e-6
+                mismatch = False
+                if applied_highpass is None or applied_lowpass is None:
+                    mismatch = True
+                elif (
+                    abs(applied_highpass - expected_highpass) > tol
+                    or abs(applied_lowpass - expected_lowpass) > tol
+                ):
+                    mismatch = True
+                if mismatch:
+                    mismatch_warning = (
+                        "FILTER_MISMATCH_WARNING "
+                        f"file={filename_for_log} "
+                        f"expected_highpass={expected_highpass!r} "
+                        f"expected_lowpass={expected_lowpass!r} "
+                        f"applied_highpass={applied_highpass!r} "
+                        f"applied_lowpass={applied_lowpass!r}"
+                    )
+                    log_func(mismatch_warning)
+                    logger.warning(mismatch_warning)
                 log_func(
                     f"DEBUG [raw.info cutoffs {filename_for_log}]: "
                     f"highpass={raw.info.get('highpass')} "
