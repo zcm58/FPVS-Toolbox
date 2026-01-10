@@ -239,7 +239,16 @@ def _run_full_pipeline_for_file(
         #    initial EXG ref -> drop EXGs -> channel limit keeping stim ->
         #    downsample -> filter -> kurtosis/interp -> final avg ref)
         logger.info(
-            "preproc_settings_snapshot",
+            "RUNNER_SETTINGS_SNAPSHOT file=%s high_pass=%r low_pass=%r downsample_rate=%r "
+            "reject_thresh=%r ref=(%r,%r) stim=%r",
+            Path(file_path).name if file_path else "UNKNOWN",
+            settings.get("high_pass"),
+            settings.get("low_pass"),
+            settings.get("downsample_rate", settings.get("downsample")),
+            settings.get("reject_thresh"),
+            settings.get("ref_channel1"),
+            settings.get("ref_channel2"),
+            settings.get("stim_channel"),
             extra={
                 "source": "process_runner",
                 "file": file_path.name,

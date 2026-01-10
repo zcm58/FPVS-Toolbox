@@ -1155,6 +1155,14 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def _build_validated_params(self) -> dict | None:
         normalized = normalize_preprocessing_settings(self.currentProject.preprocessing)
+        logger.info(
+            "NORMALIZED_PREPROC_SNAPSHOT file_mode=%s normalized.high_pass=%r "
+            "normalized.low_pass=%r normalized.downsample=%r",
+            getattr(self, "file_mode", None).get() if hasattr(self, "file_mode") else "UNKNOWN",
+            normalized.get("high_pass"),
+            normalized.get("low_pass"),
+            normalized.get("downsample"),
+        )
 
         # Event map from UI rows → {label: int_id}
         event_map: dict[str, int] = {}
@@ -1197,6 +1205,17 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             "save_preprocessed_fif": bool(normalized.get("save_preprocessed_fif", False)),
             "event_id_map": event_map,
         }
+        logger.info(
+            "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "
+            "reject_thresh=%r ref=(%r,%r) stim=%r",
+            params.get("high_pass"),
+            params.get("low_pass"),
+            params.get("downsample_rate"),
+            params.get("reject_thresh"),
+            params.get("ref_channel1"),
+            params.get("ref_channel2"),
+            params.get("stim_channel"),
+        )
         return params
 
     # ------------------------- settings UI -------------------------- #

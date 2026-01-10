@@ -88,7 +88,16 @@ class MpRunnerBridge(QObject):
 
         for file_path in data_files:
             logger.info(
-                "preproc_settings_snapshot",
+                "BRIDGE_SETTINGS_SNAPSHOT n_files=%d high_pass=%r low_pass=%r "
+                "downsample_rate=%r reject_thresh=%r ref=(%r,%r) stim=%r",
+                len(data_files),
+                settings.get("high_pass"),
+                settings.get("low_pass"),
+                settings.get("downsample_rate", settings.get("downsample")),
+                settings.get("reject_thresh"),
+                settings.get("ref_channel1"),
+                settings.get("ref_channel2"),
+                settings.get("stim_channel"),
                 extra={
                     "source": "mp_runner_bridge",
                     "file": file_path.name,
