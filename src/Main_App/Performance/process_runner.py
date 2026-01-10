@@ -262,6 +262,15 @@ def _run_full_pipeline_for_file(
                 "stim_channel": settings.get("stim_channel"),
             },
         )
+        logger.info(
+            "RUNNER_PREPROC_PARAMS file=%s high_pass=%r low_pass=%r downsample_rate=%r "
+            "reject_thresh=%r",
+            Path(file_path).name,
+            settings.get("high_pass"),
+            settings.get("low_pass"),
+            settings.get("downsample_rate", settings.get("downsample")),
+            settings.get("reject_thresh"),
+        )
         raw_proc, n_rejected = backend_preprocess.perform_preprocessing(
             raw_input=raw,
             params=settings,

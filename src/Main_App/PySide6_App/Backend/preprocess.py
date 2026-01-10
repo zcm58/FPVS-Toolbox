@@ -158,8 +158,20 @@ def perform_preprocessing(
 
     # Runtime parameters (defaults are managed by Settings UI; fall back only if absent)
     downsample_rate = params.get("downsample_rate")
-    low_pass = params.get("low_pass")          # legacy mapping: low_pass -> l_freq
-    high_pass = params.get("high_pass")        # legacy mapping: high_pass -> h_freq
+    low_pass = params.get("low_pass")
+    high_pass = params.get("high_pass")
+    log_func(
+        f"DEBUG [preprocess cutoffs {filename_for_log}]: "
+        f"high_pass={high_pass!r} low_pass={low_pass!r}"
+    )
+    hp = float(high_pass) if high_pass is not None else None
+    lp = float(low_pass) if low_pass is not None else None
+    if hp is not None and lp is not None and hp >= lp:
+        raise ValueError(
+            f"Invalid filter cutoffs for {filename_for_log}: "
+            f"high_pass (HPF) must be < low_pass (LPF). Got high_pass={hp}, "
+            f"low_pass={lp}."
+        )
     reject_thresh = params.get("reject_thresh")
     ref1 = params.get("ref_channel1") or "EXG1"
     ref2 = params.get("ref_channel2") or "EXG2"
@@ -403,9 +415,8 @@ def perform_preprocessing(
             )
 
         # 5) FILTER at (possibly reduced) Fs
-        # LEGACY MAPPING: low_pass -> l_freq, high_pass -> h_freq (intentionally inverted names)
-        l_freq = low_pass if (low_pass and low_pass > 0) else None
-        h_freq = high_pass
+        l_freq = hp if (hp is not None and hp > 0) else None
+        h_freq = lp
         if l_freq or h_freq:
             try:
                 low_trans_bw, high_trans_bw, filter_len_points = 0.1, 0.1, 8449
@@ -433,6 +444,11 @@ def perform_preprocessing(
                     filter_length=filter_len_points,
                     skip_by_annotation="edge",
                     verbose=False,
+                )
+                log_func(
+                    f"DEBUG [raw.info cutoffs {filename_for_log}]: "
+                    f"highpass={raw.info.get('highpass')} "
+                    f"lowpass={raw.info.get('lowpass')}"
                 )
                 log_func(f"Filter OK for {filename_for_log}.")
             except Exception as e:
