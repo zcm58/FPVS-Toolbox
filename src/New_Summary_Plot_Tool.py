@@ -68,6 +68,10 @@ RUN_LABEL = "R21_Preliminary_Data_Run"
 ROI_DEFS = {
     "Occipital": ["O1", "O2", "Oz"],
     "LOT": ["P7", "P9", "PO7", "PO3", "O1"],
+    "Left Central": ["C1","C3","C5"],
+    "Right Central": ["C2","C4","C6"],
+    "Left Parietal": ["P1","P3","P5"],
+    "Right Parietal": ["P2","P4","P6"],
 }
 
 Z_THRESHOLD = 1.64
