@@ -4,29 +4,31 @@ ROI SNR/Z/BCA Aggregator for FPVS Excel Outputs (single-file pipeline)
 
 PURPOSE:
 Compute participant-level ROI means for Z, SNR, and BCA across significant oddball harmonics,
-summarize group statistics, compute common-harmonic-set ratios/deltas, and generate plots/logs.
+summarize group statistics, compute per-condition global-harmonic-set ratios/deltas, and generate plots/logs.
 
 PIPELINE STEPS:
 1. Batch read Excel outputs from two condition folders.
-2. Compute participant-level ROI means for Z, SNR, and BCA across selected significant harmonics.
+2. Determine PER-CONDITION global significant harmonics (fixed list per condition), using Z scores and a stop rule.
 3. Exclude base-rate harmonics (6 Hz multiples) from significance selection.
-4. Aggregate group-level metrics (Mean, SD, SEM, CV) with N_total and N_used.
-5. Compute common-set metrics per participant/ROI using intersection of significant harmonics:
-   - Z ratio = meanZ_sem_common / meanZ_col_common
-   - SNR ratio = meanSNR_sem_common / meanSNR_col_common
-   - delta_BCA = meanBCA_sem_common - meanBCA_col_common
-6. Generate plots (PDF + PNG): RAW (Z/SNR/BCA) and COMMON-SET (Z ratio / SNR ratio / delta_BCA).
-7. Diagnostic reporting:
+4. Compute participant-level ROI means for Z, SNR, and BCA across the PER-CONDITION global harmonic list.
+5. Aggregate group-level metrics (Mean, SD, SEM, CV) with N_total and N_used.
+6. Compute ratios/deltas per participant/ROI using PER-CONDITION global harmonic sets:
+   - Z ratio = meanZ_sem_global / meanZ_col_global
+   - SNR ratio = meanSNR_sem_global / meanSNR_col_global
+   - BCA ratio (policy dependent; because BCA can be negative)
+   - delta_BCA = meanBCA_sem_global - meanBCA_col_global
+7. Generate plots (PDF + PNG): RAW (Z/SNR/BCA) and RATIOS (Z ratio / SNR ratio / BCA ratio / delta_BCA).
+8. Diagnostic reporting:
    - base-rate harmonic exclusions
-   - zero-significant participants
+   - zero-global-harmonic participants
    - extremes (highest/lowest)
    - hard-threshold exclusions (auto)
    - soft QC flags (robust MAD-based) for review only (no auto exclusion)
 
 OUTLIER / EXCLUSION POLICY:
 A) HARD EXCLUSIONS (AUTO):
-   - If any participant has mean_SNR_selected > HARD_EXCLUSION_SNR_THRESH (any condition/ROI), exclude globally.
-   - If any participant has mean_BCA_selected > HARD_EXCLUSION_BCA_THRESH (any condition/ROI), exclude globally.
+   - If any participant has mean_SNR_global > HARD_EXCLUSION_SNR_THRESH (any condition/ROI), exclude globally.
+   - If any participant has mean_BCA_global > HARD_EXCLUSION_BCA_THRESH (any condition/ROI), exclude globally.
 
 B) SOFT QC FLAGS (REVIEW ONLY; NOT AUTO-EXCLUDED):
    - Robust MAD z-score flags within each (condition x ROI x metric) group.
@@ -68,10 +70,10 @@ RUN_LABEL = "R21_Preliminary_Data_Run"
 ROI_DEFS = {
     "Occipital": ["O1", "O2", "Oz"],
     "LOT": ["P7", "P9", "PO7", "PO3", "O1"],
-    "Left Central": ["C1","C3","C5"],
-    "Right Central": ["C2","C4","C6"],
-    "Left Parietal": ["P1","P3","P5"],
-    "Right Parietal": ["P2","P4","P6"],
+    "Left Central": ["C1", "C3", "C5"],
+    "Right Central": ["C2", "C4", "C6"],
+    "Left Parietal": ["P1", "P3", "P5"],
+    "Right Parietal": ["P2", "P4", "P6"],
 }
 
 Z_THRESHOLD = 1.64
@@ -85,6 +87,13 @@ PNG_DPI = 300
 # Hard auto-exclusion thresholds (requested)
 HARD_EXCLUSION_SNR_THRESH = 5.0
 HARD_EXCLUSION_BCA_THRESH = 4.0
+
+# NEW: Manual Kill List
+
+"""
+Use the list below to manually exclude outliers from the dataset and all calculations.
+"""
+MANUAL_EXCLUDE = []  # Configure study exclusions privately.
 
 # Soft QC (review-only) settings
 SOFT_QC_ENABLED = True
@@ -108,16 +117,33 @@ PALETTES = {
 
 PID_RE = re.compile(r"(P)(\d+)", re.IGNORECASE)
 
-COMMON_LABEL = "Semantic/Color (common sig intersection)"
-
 # CV can be unstable if mean is near 0. For such cases, return NaN.
 CV_EPS = 1e-9
 
+# GLOBAL HARMONIC SET (PER CONDITION; FIXED LIST)
+USE_GLOBAL_HARMONIC_SET = True
+GLOBAL_STOP_RULE = "two_consecutive_nonsig"  # "two_consecutive_nonsig" or "none"
+GLOBAL_MIN_HARMONICS = 1
+
+# CHANGE 1 (requested fix only): select per-condition harmonics once using an anchor ROI, apply to all ROIs.
+GLOBAL_SELECTION_MODE = "anchor_roi"  # "anchor_roi" or "per_roi"
+GLOBAL_SELECTION_ANCHOR_ROI = "Occipital"
+
+# CHANGE 2 (requested fix only): do not arm the stop rule until at least one sig harmonic is seen.
+STOP_RULE_ARM_AFTER_FIRST_SIG = True
+
+# BCA ratio policy (because BCA can be negative):
+#   "positive_only" -> ratio computed only if both semantic and color global-set BCA means are > 0
+#   "abs"           -> ratio computed on abs(BCA) (always >= 0, but changes meaning)
+#   "shift"         -> shift both by a constant to make them positive before ratio (constant logged)
+BCA_RATIO_POLICY = "positive_only"
+BCA_SHIFT_EPS = 1e-6  # used only for "shift"
+
 # For soft QC reporting (review only)
 SOFT_QC_METRICS_RAW = [
-    ("mean_Z_selected", "Z"),
-    ("mean_SNR_selected", "SNR"),
-    ("mean_BCA_selected", "BCA(uV)"),
+    ("mean_Z_global", "Z"),
+    ("mean_SNR_global", "SNR"),
+    ("mean_BCA_global", "BCA(uV)"),
 ]
 
 
@@ -271,8 +297,8 @@ def detect_soft_qc_flags(df_part: pd.DataFrame, log_fn) -> pd.DataFrame:
 def detect_hard_exclusions(df_part: pd.DataFrame, log_fn) -> Tuple[pd.DataFrame, Set[str]]:
     """
     Auto-exclude participants if:
-      - any mean_SNR_selected > HARD_EXCLUSION_SNR_THRESH
-      - any mean_BCA_selected > HARD_EXCLUSION_BCA_THRESH
+      - any mean_SNR_global > HARD_EXCLUSION_SNR_THRESH
+      - any mean_BCA_global > HARD_EXCLUSION_BCA_THRESH
     across any condition/ROI.
 
     Returns:
@@ -282,9 +308,8 @@ def detect_hard_exclusions(df_part: pd.DataFrame, log_fn) -> Tuple[pd.DataFrame,
     records: List[Dict[str, Any]] = []
     excluded: Set[str] = set()
 
-    # SNR triggers
-    if "mean_SNR_selected" in df_part.columns:
-        snr_vals = pd.to_numeric(df_part["mean_SNR_selected"], errors="coerce")
+    if "mean_SNR_global" in df_part.columns:
+        snr_vals = pd.to_numeric(df_part["mean_SNR_global"], errors="coerce")
         mask = snr_vals > HARD_EXCLUSION_SNR_THRESH
         for idx in df_part.index[mask.fillna(False)]:
             pid = str(df_part.loc[idx, "participant_id"])
@@ -294,15 +319,14 @@ def detect_hard_exclusions(df_part: pd.DataFrame, log_fn) -> Tuple[pd.DataFrame,
                 "participant_num": df_part.loc[idx, "participant_num"],
                 "condition_label": df_part.loc[idx, "condition_label"],
                 "ROI": df_part.loc[idx, "ROI"],
-                "metric": "SNR (sel)",
-                "value": df_part.loc[idx, "mean_SNR_selected"],
+                "metric": "SNR (global)",
+                "value": df_part.loc[idx, "mean_SNR_global"],
                 "threshold": HARD_EXCLUSION_SNR_THRESH,
                 "source_file": df_part.loc[idx, "source_file"],
             })
 
-    # BCA triggers
-    if "mean_BCA_selected" in df_part.columns:
-        bca_vals = pd.to_numeric(df_part["mean_BCA_selected"], errors="coerce")
+    if "mean_BCA_global" in df_part.columns:
+        bca_vals = pd.to_numeric(df_part["mean_BCA_global"], errors="coerce")
         mask = bca_vals > HARD_EXCLUSION_BCA_THRESH
         for idx in df_part.index[mask.fillna(False)]:
             pid = str(df_part.loc[idx, "participant_id"])
@@ -312,8 +336,8 @@ def detect_hard_exclusions(df_part: pd.DataFrame, log_fn) -> Tuple[pd.DataFrame,
                 "participant_num": df_part.loc[idx, "participant_num"],
                 "condition_label": df_part.loc[idx, "condition_label"],
                 "ROI": df_part.loc[idx, "ROI"],
-                "metric": "BCA (uV; sel)",
-                "value": df_part.loc[idx, "mean_BCA_selected"],
+                "metric": "BCA (uV; global)",
+                "value": df_part.loc[idx, "mean_BCA_global"],
                 "threshold": HARD_EXCLUSION_BCA_THRESH,
                 "source_file": df_part.loc[idx, "source_file"],
             })
@@ -327,8 +351,8 @@ def detect_hard_exclusions(df_part: pd.DataFrame, log_fn) -> Tuple[pd.DataFrame,
 
     log_fn("-" * 110)
     log_fn("HARD EXCLUSIONS (auto)")
-    log_fn(f"  Rule: exclude participant globally if any SNR(sel) > {HARD_EXCLUSION_SNR_THRESH} "
-           f"or any BCA(sel) > {HARD_EXCLUSION_BCA_THRESH}")
+    log_fn(f"  Rule: exclude participant globally if any SNR(global) > {HARD_EXCLUSION_SNR_THRESH} "
+           f"or any BCA(global) > {HARD_EXCLUSION_BCA_THRESH}")
     if df_excl.empty:
         log_fn("  No hard exclusions triggered.")
     else:
@@ -372,18 +396,6 @@ def compute_roi_harmonic_means(
     return out
 
 
-def select_significant_harmonics(z_by_hz: Dict[float, float], cfg: RunConfig) -> Tuple[List[float], List[float]]:
-    sig: List[float] = []
-    excluded: List[float] = []
-    for hz, zval in z_by_hz.items():
-        if is_base_multiple(hz, cfg.base_freq, cfg.exclude_base_up_to_hz):
-            excluded.append(hz)
-            continue
-        if hz <= cfg.max_hz and zval > cfg.z_threshold:
-            sig.append(hz)
-    return sorted(sig), sorted(list(set(excluded)))
-
-
 def read_participant_file(xlsx_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, List[str]]:
     df_snr = pd.read_excel(xlsx_path, sheet_name=SHEET_SNR)
     df_z = pd.read_excel(xlsx_path, sheet_name=SHEET_Z)
@@ -392,130 +404,319 @@ def read_participant_file(xlsx_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, 
     return df_snr, df_z, df_bca, harm_cols
 
 
-def summarize_participant_file(
+def _candidate_harmonics_from_cols(harm_cols: List[str], cfg: RunConfig) -> List[float]:
+    hz_all = []
+    for c in harm_cols:
+        try:
+            hz_all.append(harmonic_col_to_hz(c))
+        except Exception:
+            continue
+    hz_all = sorted(list(set(hz_all)))
+    cand: List[float] = []
+    for hz in hz_all:
+        if hz > cfg.max_hz:
+            continue
+        if is_base_multiple(hz, cfg.base_freq, cfg.exclude_base_up_to_hz):
+            continue
+        cand.append(hz)
+    return cand
+
+
+def _select_global_harmonics_for_condition_roi(
+    cond_label: str,
+    roi_name: str,
+    cfg: RunConfig,
+    pids_used: List[str],
+    pid_to_path: Dict[str, Path],
+    log_fn,
+) -> Tuple[List[float], List[Dict[str, Any]]]:
+    """
+    Computes group-mean ROI Z per harmonic across participants, then scans harmonics in ascending order.
+    Stops with two consecutive non-significant harmonics (if configured).
+    """
+    debug_rows: List[Dict[str, Any]] = []
+
+    any_pid = pids_used[0]
+    _, df_z_any, _, harm_cols = read_participant_file(pid_to_path[any_pid])
+    cand = _candidate_harmonics_from_cols(harm_cols, cfg)
+
+    log_fn(f"  CONDITION={cond_label} | ROI={roi_name}")
+    log_fn(f"    Threshold: Z > {cfg.z_threshold} | MAX_HZ={cfg.max_hz} | stop_rule={GLOBAL_STOP_RULE}")
+
+    selected: List[float] = []
+    nonsig_run = 0
+    seen_sig = False
+    stop_at: Optional[float] = None
+    stop_pair: Optional[Tuple[float, float]] = None
+
+    for idx, hz in enumerate(cand):
+        z_vals: List[float] = []
+        for pid in pids_used:
+            _, df_z, _, harm_cols_pid = read_participant_file(pid_to_path[pid])
+            electrodes = ROI_DEFS[roi_name]
+            z_by_hz = compute_roi_harmonic_means(df_z, electrodes, harm_cols_pid)
+            if hz in z_by_hz and np.isfinite(z_by_hz[hz]):
+                z_vals.append(float(z_by_hz[hz]))
+
+        arr = np.array(z_vals, dtype=float)
+        n_used = int(np.sum(np.isfinite(arr)))
+        mean_z = float(np.nanmean(arr)) if n_used > 0 else float("nan")
+        is_sig = bool(np.isfinite(mean_z) and (mean_z > cfg.z_threshold))
+
+        action = ""
+        if is_sig:
+            selected.append(hz)
+            nonsig_run = 0
+            seen_sig = True
+            action = "KEEP(sig)"
+        else:
+            # CHANGE 2 (requested fix only): do not arm stop rule until first sig harmonic is seen.
+            if STOP_RULE_ARM_AFTER_FIRST_SIG and not seen_sig and GLOBAL_STOP_RULE == "two_consecutive_nonsig":
+                action = "FAIL(pre-sig; stop-not-armed)"
+            else:
+                nonsig_run += 1
+                action = f"FAIL(nonsig_run={nonsig_run})"
+                if GLOBAL_STOP_RULE == "two_consecutive_nonsig" and nonsig_run >= 2:
+                    stop_at = hz
+                    stop_pair = (cand[idx - 1], cand[idx]) if idx >= 1 else (hz, hz)
+                    action = "STOP(two_consecutive_nonsig)"
+
+        debug_rows.append({
+            "condition_label": cond_label,
+            "ROI": roi_name,
+            "hz": hz,
+            "n_used": n_used,
+            "meanZ": mean_z,
+            "is_sig": int(is_sig),
+            "nonsig_run": nonsig_run,
+            "action": action,
+        })
+
+        if action.startswith("STOP("):
+            break
+
+    if stop_at is not None and stop_pair is not None:
+        log_fn(
+            f"    STOP TRIGGERED: two consecutive non-significant harmonics at {stop_pair[0]:g}Hz and {stop_pair[1]:g}Hz; "
+            f"scanning stopped at {stop_at:g}Hz."
+        )
+
+    if len(selected) < GLOBAL_MIN_HARMONICS:
+        log_fn(f"    Selected n={len(selected)} < GLOBAL_MIN_HARMONICS={GLOBAL_MIN_HARMONICS} -> forcing empty set.")
+        selected = []
+
+    log_fn(f"    Selected harmonics (n={len(selected)}): [{fmt_hz_list(selected)}]")
+
+    log_fn("    Scan table (hz | n_used | meanZ | sig | action):")
+    for r in debug_rows:
+        log_fn(
+            f"      {r['hz']:g} | n={r['n_used']} | meanZ={fmt_float(r['meanZ'])} | "
+            f"sig={r['is_sig']} | {r['action']}"
+        )
+
+    return selected, debug_rows
+
+
+def compute_global_harmonics_per_condition(
+    cond_label: str,
+    cfg: RunConfig,
+    pids_used: List[str],
+    pid_to_path: Dict[str, Path],
+    log_fn,
+) -> Tuple[Dict[str, List[float]], pd.DataFrame]:
+    global_hz_by_roi: Dict[str, List[float]] = {}
+    all_debug: List[Dict[str, Any]] = []
+
+    log_fn("-" * 110)
+    log_fn(f"GLOBAL HARMONIC SELECTION (PER CONDITION; FIXED LIST) :: {cond_label}")
+    log_fn(f"Participants used for selection: {len(pids_used)}")
+    log_fn("Stop rule: two_consecutive_nonsig (explicitly logged per ROI)")
+    log_fn("-" * 110)
+
+    # CHANGE 1 (requested fix only): anchor ROI selection applied to all ROIs within condition.
+    if GLOBAL_SELECTION_MODE == "anchor_roi":
+        anchor = GLOBAL_SELECTION_ANCHOR_ROI
+        if anchor not in ROI_DEFS:
+            raise ValueError(f"GLOBAL_SELECTION_ANCHOR_ROI='{anchor}' not in ROI_DEFS keys: {list(ROI_DEFS.keys())}")
+
+        selected, debug_rows = _select_global_harmonics_for_condition_roi(
+            cond_label=cond_label,
+            roi_name=anchor,
+            cfg=cfg,
+            pids_used=pids_used,
+            pid_to_path=pid_to_path,
+            log_fn=log_fn,
+        )
+        for roi_name in ROI_DEFS.keys():
+            global_hz_by_roi[roi_name] = list(selected)
+        all_debug.extend(debug_rows)
+
+    elif GLOBAL_SELECTION_MODE == "per_roi":
+        for roi_name in ROI_DEFS.keys():
+            selected, debug_rows = _select_global_harmonics_for_condition_roi(
+                cond_label=cond_label,
+                roi_name=roi_name,
+                cfg=cfg,
+                pids_used=pids_used,
+                pid_to_path=pid_to_path,
+                log_fn=log_fn,
+            )
+            global_hz_by_roi[roi_name] = selected
+            all_debug.extend(debug_rows)
+    else:
+        raise ValueError(f"Unknown GLOBAL_SELECTION_MODE: {GLOBAL_SELECTION_MODE}")
+
+    log_fn("-" * 110)
+
+    df_debug = pd.DataFrame(all_debug)
+    if not df_debug.empty:
+        df_debug = df_debug.sort_values(["ROI", "hz"], kind="stable").reset_index(drop=True)
+
+    return global_hz_by_roi, df_debug
+
+
+def summarize_participant_file_global(
     xlsx_path: Path,
     condition_label: str,
-    cfg: RunConfig,
-) -> Tuple[List[Dict], List[float]]:
+    global_hz_by_roi: Dict[str, List[float]],
+) -> List[Dict]:
     pid, pid_num = parse_participant_id(xlsx_path.name)
     df_snr, df_z, df_bca, harm_cols = read_participant_file(xlsx_path)
 
     rows: List[Dict] = []
-    all_excluded: List[float] = []
 
     for roi_name, electrodes in ROI_DEFS.items():
         z_by_hz = compute_roi_harmonic_means(df_z, electrodes, harm_cols)
-        sig_hz, excluded = select_significant_harmonics(z_by_hz, cfg)
-        all_excluded.extend(excluded)
-
         snr_by_hz = compute_roi_harmonic_means(df_snr, electrodes, harm_cols)
         bca_by_hz = compute_roi_harmonic_means(df_bca, electrodes, harm_cols)
 
-        mean_z = safe_mean(np.array([z_by_hz[hz] for hz in sig_hz], dtype=float))
-        mean_snr = safe_mean(np.array([snr_by_hz[hz] for hz in sig_hz], dtype=float))
-        mean_bca = safe_mean(np.array([bca_by_hz[hz] for hz in sig_hz], dtype=float))
+        use_hz = global_hz_by_roi.get(roi_name, [])
+        mean_z = safe_mean(np.array([z_by_hz[hz] for hz in use_hz if hz in z_by_hz], dtype=float))
+        mean_snr = safe_mean(np.array([snr_by_hz[hz] for hz in use_hz if hz in snr_by_hz], dtype=float))
+        mean_bca = safe_mean(np.array([bca_by_hz[hz] for hz in use_hz if hz in bca_by_hz], dtype=float))
 
         rows.append({
             "condition_label": condition_label,
             "participant_id": pid,
             "participant_num": pid_num,
             "ROI": roi_name,
-            "n_significant_harmonics": int(len(sig_hz)),
-            "significant_harmonics_hz": fmt_hz_list(sig_hz),
-            "mean_Z_selected": mean_z,
-            "mean_SNR_selected": mean_snr,
-            "mean_BCA_selected": mean_bca,
+            "n_global_harmonics": int(len(use_hz)),
+            "global_harmonics_hz": fmt_hz_list(use_hz),
+            "mean_Z_global": mean_z,
+            "mean_SNR_global": mean_snr,
+            "mean_BCA_global": mean_bca,
             "source_file": str(xlsx_path),
         })
 
-    return rows, sorted(list(set(all_excluded)))
+    return rows
 
 
-def compute_common_set_metrics_for_participant(
-    pid: str,
-    roi_name: str,
-    cfg: RunConfig,
-    path_sem: Path,
-    path_col: Path,
-) -> Dict[str, Any]:
-    df_snr_sem, df_z_sem, df_bca_sem, harm_cols = read_participant_file(path_sem)
-    df_snr_col, df_z_col, df_bca_col, harm_cols2 = read_participant_file(path_col)
+def compute_ratio_rows_global_sets(
+    pids_paired: List[str],
+    pid_map_sem: Dict[str, Path],
+    pid_map_col: Dict[str, Path],
+    global_sem: Dict[str, List[float]],
+    global_col: Dict[str, List[float]],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
 
-    electrodes = ROI_DEFS[roi_name]
+    for pid in pids_paired:
+        path_sem = pid_map_sem[pid]
+        path_col = pid_map_col[pid]
 
-    z_sem_by_hz = compute_roi_harmonic_means(df_z_sem, electrodes, harm_cols)
-    z_col_by_hz = compute_roi_harmonic_means(df_z_col, electrodes, harm_cols2)
+        df_snr_sem, df_z_sem, df_bca_sem, harm_cols_sem = read_participant_file(path_sem)
+        df_snr_col, df_z_col, df_bca_col, harm_cols_col = read_participant_file(path_col)
 
-    sig_sem, _ = select_significant_harmonics(z_sem_by_hz, cfg)
-    sig_col, _ = select_significant_harmonics(z_col_by_hz, cfg)
+        for roi_name, electrodes in ROI_DEFS.items():
+            z_sem = compute_roi_harmonic_means(df_z_sem, electrodes, harm_cols_sem)
+            z_col = compute_roi_harmonic_means(df_z_col, electrodes, harm_cols_col)
+            snr_sem = compute_roi_harmonic_means(df_snr_sem, electrodes, harm_cols_sem)
+            snr_col = compute_roi_harmonic_means(df_snr_col, electrodes, harm_cols_col)
+            bca_sem = compute_roi_harmonic_means(df_bca_sem, electrodes, harm_cols_sem)
+            bca_col = compute_roi_harmonic_means(df_bca_col, electrodes, harm_cols_col)
 
-    common = sorted(list(set(sig_sem).intersection(set(sig_col))))
+            hz_sem = global_sem.get(roi_name, [])
+            hz_col = global_col.get(roi_name, [])
 
-    snr_sem_by_hz = compute_roi_harmonic_means(df_snr_sem, electrodes, harm_cols)
-    snr_col_by_hz = compute_roi_harmonic_means(df_snr_col, electrodes, harm_cols2)
+            mean_z_sem = safe_mean(np.array([z_sem[h] for h in hz_sem if h in z_sem], dtype=float))
+            mean_z_col = safe_mean(np.array([z_col[h] for h in hz_col if h in z_col], dtype=float))
 
-    bca_sem_by_hz = compute_roi_harmonic_means(df_bca_sem, electrodes, harm_cols)
-    bca_col_by_hz = compute_roi_harmonic_means(df_bca_col, electrodes, harm_cols2)
+            mean_snr_sem = safe_mean(np.array([snr_sem[h] for h in hz_sem if h in snr_sem], dtype=float))
+            mean_snr_col = safe_mean(np.array([snr_col[h] for h in hz_col if h in snr_col], dtype=float))
 
-    mean_z_sem_common = safe_mean(np.array([z_sem_by_hz[hz] for hz in common], dtype=float))
-    mean_z_col_common = safe_mean(np.array([z_col_by_hz[hz] for hz in common], dtype=float))
+            mean_bca_sem = safe_mean(np.array([bca_sem[h] for h in hz_sem if h in bca_sem], dtype=float))
+            mean_bca_col = safe_mean(np.array([bca_col[h] for h in hz_col if h in bca_col], dtype=float))
 
-    mean_snr_sem_common = safe_mean(np.array([snr_sem_by_hz[hz] for hz in common], dtype=float))
-    mean_snr_col_common = safe_mean(np.array([snr_col_by_hz[hz] for hz in common], dtype=float))
+            notes: List[str] = []
+            ratio_z = float("nan")
+            ratio_snr = float("nan")
+            ratio_bca = float("nan")
+            delta_bca = float("nan")
 
-    mean_bca_sem_common = safe_mean(np.array([bca_sem_by_hz[hz] for hz in common], dtype=float))
-    mean_bca_col_common = safe_mean(np.array([bca_col_by_hz[hz] for hz in common], dtype=float))
+            if not (np.isfinite(mean_z_sem) and np.isfinite(mean_z_col)) or mean_z_col == 0:
+                notes.append("bad_ratio_z")
+            else:
+                ratio_z = mean_z_sem / mean_z_col
 
-    notes: List[str] = []
-    ratio_z = float("nan")
-    ratio_snr = float("nan")
-    delta_bca = float("nan")
+            if not (np.isfinite(mean_snr_sem) and np.isfinite(mean_snr_col)) or mean_snr_col == 0:
+                notes.append("bad_ratio_snr")
+            else:
+                ratio_snr = mean_snr_sem / mean_snr_col
 
-    if len(common) == 0:
-        notes.append("no_common_significant_harmonics")
-    else:
-        if not np.isfinite(mean_z_sem_common) or not np.isfinite(mean_z_col_common):
-            notes.append("nan_common_mean_z")
-        elif mean_z_col_common == 0:
-            notes.append("zero_denominator_mean_z")
-        else:
-            ratio_z = mean_z_sem_common / mean_z_col_common
+            if not (np.isfinite(mean_bca_sem) and np.isfinite(mean_bca_col)):
+                notes.append("nan_bca_ratio")
+            else:
+                if BCA_RATIO_POLICY == "positive_only":
+                    if mean_bca_sem <= 0 or mean_bca_col <= 0:
+                        notes.append("bca_nonpositive_positive_only")
+                    elif mean_bca_col == 0:
+                        notes.append("bca_zero_den")
+                    else:
+                        ratio_bca = mean_bca_sem / mean_bca_col
+                elif BCA_RATIO_POLICY == "abs":
+                    if abs(mean_bca_col) <= 0:
+                        notes.append("bca_abs_zero_den")
+                    else:
+                        ratio_bca = abs(mean_bca_sem) / abs(mean_bca_col)
+                elif BCA_RATIO_POLICY == "shift":
+                    mn = min(mean_bca_sem, mean_bca_col)
+                    shift = (-mn + BCA_SHIFT_EPS) if mn <= 0 else 0.0
+                    denom = mean_bca_col + shift
+                    if denom == 0:
+                        notes.append("bca_shift_zero_den")
+                    else:
+                        ratio_bca = (mean_bca_sem + shift) / denom
+                else:
+                    notes.append("unknown_bca_ratio_policy")
 
-        if not np.isfinite(mean_snr_sem_common) or not np.isfinite(mean_snr_col_common):
-            notes.append("nan_common_mean_snr")
-        elif mean_snr_col_common == 0:
-            notes.append("zero_denominator_mean_snr")
-        else:
-            ratio_snr = mean_snr_sem_common / mean_snr_col_common
+            if not (np.isfinite(mean_bca_sem) and np.isfinite(mean_bca_col)):
+                notes.append("nan_delta_bca")
+            else:
+                delta_bca = mean_bca_sem - mean_bca_col
 
-        if not np.isfinite(mean_bca_sem_common) or not np.isfinite(mean_bca_col_common):
-            notes.append("nan_common_mean_bca")
-        else:
-            delta_bca = mean_bca_sem_common - mean_bca_col_common
+            rows.append({
+                "participant_id": pid,
+                "ROI": roi_name,
+                "n_sem_global": int(len(hz_sem)),
+                "n_col_global": int(len(hz_col)),
+                "sem_global_hz": fmt_hz_list(hz_sem),
+                "col_global_hz": fmt_hz_list(hz_col),
+                "mean_Z_sem_global": mean_z_sem,
+                "mean_Z_col_global": mean_z_col,
+                "ratio_Z": ratio_z,
+                "mean_SNR_sem_global": mean_snr_sem,
+                "mean_SNR_col_global": mean_snr_col,
+                "ratio_SNR": ratio_snr,
+                "mean_BCA_sem_global": mean_bca_sem,
+                "mean_BCA_col_global": mean_bca_col,
+                "ratio_BCA": ratio_bca,
+                "delta_BCA": delta_bca,
+                "ratio_notes": ";".join(notes) if notes else "",
+                "source_file_semantic": str(path_sem),
+                "source_file_color": str(path_col),
+            })
 
-    return {
-        "condition_label": COMMON_LABEL,
-        "participant_id": pid,
-        "ROI": roi_name,
-        "n_sig_sem": int(len(sig_sem)),
-        "n_sig_col": int(len(sig_col)),
-        "n_common_sig": int(len(common)),
-        "sig_sem_hz": fmt_hz_list(sig_sem),
-        "sig_col_hz": fmt_hz_list(sig_col),
-        "common_sig_hz": fmt_hz_list(common),
-        "mean_Z_sem_common": mean_z_sem_common,
-        "mean_Z_col_common": mean_z_col_common,
-        "ratio_Z_common": ratio_z,
-        "mean_SNR_sem_common": mean_snr_sem_common,
-        "mean_SNR_col_common": mean_snr_col_common,
-        "ratio_SNR_common": ratio_snr,
-        "mean_BCA_sem_common": mean_bca_sem_common,
-        "mean_BCA_col_common": mean_bca_col_common,
-        "delta_BCA_common": delta_bca,
-        "common_set_notes": ";".join(notes) if notes else "",
-        "source_file_semantic": str(path_sem),
-        "source_file_color": str(path_col),
-    }
+    return rows
 
 
 # -----------------------------
@@ -539,7 +740,7 @@ def _ordered_conditions(df: pd.DataFrame) -> List[str]:
             uniq.append(x)
 
     ordered: List[str] = []
-    for pref in [CONDITION_LABEL_A, CONDITION_LABEL_B, COMMON_LABEL]:
+    for pref in [CONDITION_LABEL_A, CONDITION_LABEL_B]:
         if pref in uniq:
             ordered.append(pref)
     for x in uniq:
@@ -682,24 +883,24 @@ def log_extremes_raw(df_part_used: pd.DataFrame, log_fn) -> None:
             hi = sub.iloc[-1]
             log_fn(
                 f"  {cond} | ROI={roi} | LOW  {metric_label}: {fmt_float(lo[metric_col])} "
-                f"({lo['participant_id']}, n_sig={int(lo['n_significant_harmonics'])})"
+                f"({lo['participant_id']}, n_global={int(lo['n_global_harmonics'])})"
             )
             log_fn(
                 f"  {cond} | ROI={roi} | HIGH {metric_label}: {fmt_float(hi[metric_col])} "
-                f"({hi['participant_id']}, n_sig={int(hi['n_significant_harmonics'])})"
+                f"({hi['participant_id']}, n_global={int(hi['n_global_harmonics'])})"
             )
 
-    _log_metric("mean_Z_selected", "Z (sel)")
-    _log_metric("mean_SNR_selected", "SNR (sel)")
-    _log_metric("mean_BCA_selected", "BCA (uV; sel)")
+    _log_metric("mean_Z_global", "Z (global)")
+    _log_metric("mean_SNR_global", "SNR (global)")
+    _log_metric("mean_BCA_global", "BCA (uV; global)")
     log_fn("-" * 110)
 
 
-def log_extremes_common(df_common_used: pd.DataFrame, log_fn) -> None:
+def log_extremes_ratios(df_ratio_used: pd.DataFrame, log_fn) -> None:
     def _log_metric(metric_col: str, metric_label: str) -> None:
-        sub_all = df_common_used.dropna(subset=[metric_col]).copy()
+        sub_all = df_ratio_used.dropna(subset=[metric_col]).copy()
         log_fn("-" * 110)
-        log_fn(f"EXTREMES (COMMON-SET): {metric_label}")
+        log_fn(f"EXTREMES (RATIOS): {metric_label}")
         if sub_all.empty:
             log_fn(f"  No non-NaN values for {metric_col}.")
             return
@@ -709,16 +910,17 @@ def log_extremes_common(df_common_used: pd.DataFrame, log_fn) -> None:
             hi = sub.iloc[-1]
             log_fn(
                 f"  ROI={roi} | LOW  {metric_label}: {fmt_float(lo[metric_col])} "
-                f"({lo['participant_id']}, n_common={int(lo['n_common_sig'])}, common=[{lo['common_sig_hz']}])"
+                f"({lo['participant_id']})"
             )
             log_fn(
                 f"  ROI={roi} | HIGH {metric_label}: {fmt_float(hi[metric_col])} "
-                f"({hi['participant_id']}, n_common={int(hi['n_common_sig'])}, common=[{hi['common_sig_hz']}])"
+                f"({hi['participant_id']})"
             )
 
-    _log_metric("ratio_Z_common", "Z ratio")
-    _log_metric("ratio_SNR_common", "SNR ratio")
-    _log_metric("delta_BCA_common", "ΔBCA (uV)")
+    _log_metric("ratio_Z", "Z ratio")
+    _log_metric("ratio_SNR", "SNR ratio")
+    _log_metric("ratio_BCA", "BCA ratio")
+    _log_metric("delta_BCA", "ΔBCA (uV)")
     log_fn("-" * 110)
 
 
@@ -749,51 +951,110 @@ def main():
     log(f"  EXCLUDE_BASE_UP_TO_HZ: {EXCLUDE_BASE_UP_TO_HZ}")
     log(f"  CV_EPS: {CV_EPS} (CV = SD/Mean; NaN if |Mean|<=CV_EPS)")
     log(f"  ROIs: {list(ROI_DEFS.keys())}")
+    log("GLOBAL HARMONIC SET (PER CONDITION; FIXED LIST)")
+    log(f"  USE_GLOBAL_HARMONIC_SET: {USE_GLOBAL_HARMONIC_SET}")
+    log(f"  GLOBAL_STOP_RULE: {GLOBAL_STOP_RULE}")
+    log(f"  GLOBAL_MIN_HARMONICS: {GLOBAL_MIN_HARMONICS}")
+    log(f"  GLOBAL_SELECTION_MODE: {GLOBAL_SELECTION_MODE}")
+    log(f"  GLOBAL_SELECTION_ANCHOR_ROI: {GLOBAL_SELECTION_ANCHOR_ROI}")
+    log(f"  STOP_RULE_ARM_AFTER_FIRST_SIG: {STOP_RULE_ARM_AFTER_FIRST_SIG}")
+    log(f"  BCA_RATIO_POLICY: {BCA_RATIO_POLICY}")
     log("HARD EXCLUSION THRESHOLDS (AUTO)")
-    log(f"  HARD_EXCLUSION_SNR_THRESH: {HARD_EXCLUSION_SNR_THRESH} (mean_SNR_selected)")
-    log(f"  HARD_EXCLUSION_BCA_THRESH: {HARD_EXCLUSION_BCA_THRESH} (mean_BCA_selected; uV)")
+    log(f"  HARD_EXCLUSION_SNR_THRESH: {HARD_EXCLUSION_SNR_THRESH} (mean_SNR_global)")
+    log(f"  HARD_EXCLUSION_BCA_THRESH: {HARD_EXCLUSION_BCA_THRESH} (mean_BCA_global; uV)")
     log("SOFT QC (REVIEW ONLY)")
     log(f"  SOFT_QC_ENABLED: {SOFT_QC_ENABLED}")
     log(f"  SOFT_QC_ROBUST_Z_THRESH: {SOFT_QC_ROBUST_Z_THRESH}")
     log(f"  SOFT_QC_MIN_N: {SOFT_QC_MIN_N}")
     log("=" * 110)
 
-    def process_folder(path: str, label: str) -> Tuple[pd.DataFrame, List[float], Dict[str, Path]]:
+    def index_folder(path: str, label: str) -> Tuple[List[Path], Dict[str, Path]]:
         xlsx_files = sorted(Path(path).expanduser().glob("*.xlsx"))
         log(f"[{label}] Found {len(xlsx_files)} .xlsx files.")
-        all_rows: List[Dict] = []
-        total_excluded: List[float] = []
         pid_to_path: Dict[str, Path] = {}
-
         for f in xlsx_files:
-            rows, exc = summarize_participant_file(f, label, cfg)
-            all_rows.extend(rows)
-            total_excluded.extend(exc)
-
             pid, _ = parse_participant_id(f.name)
             pid_to_path[pid] = f
+        return xlsx_files, pid_to_path
 
-            for r in rows:
-                log(
-                    f"{pid} | {label} | ROI={r['ROI']} | n_sig={r['n_significant_harmonics']} "
-                    f"| sig=[{r['significant_harmonics_hz']}] "
-                    f"| Z={fmt_float(r['mean_Z_selected'])} "
-                    f"| SNR={fmt_float(r['mean_SNR_selected'])} "
-                    f"| BCA(uV)={fmt_float(r['mean_BCA_selected'])}"
-                )
+    files_a, pid_map_a = index_folder(INPUT_DIR_A, CONDITION_LABEL_A)
+    files_b, pid_map_b = index_folder(INPUT_DIR_B, CONDITION_LABEL_B)
 
-        return pd.DataFrame(all_rows), sorted(list(set(total_excluded))), pid_to_path
+    # --- MANUAL EXCLUSION LOGIC ---
+    if MANUAL_EXCLUDE:
+        log("-" * 110)
+        log(f"APPLYING MANUAL KILL LIST: {MANUAL_EXCLUDE}")
 
-    df_a, exc_a, pid_map_a = process_folder(INPUT_DIR_A, CONDITION_LABEL_A)
-    df_b, exc_b, pid_map_b = process_folder(INPUT_DIR_B, CONDITION_LABEL_B)
+        # Filter Map A
+        killed_a = [p for p in pid_map_a if p in MANUAL_EXCLUDE]
+        for p in killed_a:
+            del pid_map_a[p]
 
-    excluded_all = sorted(list(set(exc_a + exc_b)))
+        # Filter Map B
+        killed_b = [p for p in pid_map_b if p in MANUAL_EXCLUDE]
+        for p in killed_b:
+            del pid_map_b[p]
+
+        log(f"  Dropped from {CONDITION_LABEL_A}: {killed_a}")
+        log(f"  Dropped from {CONDITION_LABEL_B}: {killed_b}")
+        log("-" * 110)
+    # ------------------------------
+
+    pids_a = sorted(list(pid_map_a.keys()), key=lambda s: int(s[1:]) if s[1:].isdigit() else 999999)
+    pids_b = sorted(list(pid_map_b.keys()), key=lambda s: int(s[1:]) if s[1:].isdigit() else 999999)
+    pids_paired = sorted(list(set(pids_a).intersection(set(pids_b))),
+                         key=lambda s: int(s[1:]) if s[1:].isdigit() else 999999)
+
     log("-" * 110)
-    log(f"HARMONIC EXCLUSION REPORT (Base Rate: {BASE_FREQ}Hz)")
-    log(f"Excluded Frequencies (unique): {excluded_all}")
+    log(f"Participants in {CONDITION_LABEL_A}: {len(pids_a)}")
+    log(f"Participants in {CONDITION_LABEL_B}: {len(pids_b)}")
+    log(f"Participants paired (present in BOTH folders): {len(pids_paired)}")
     log("-" * 110)
 
-    df_part = pd.concat([df_a, df_b], ignore_index=True)
+    # Base-rate exclusion report (limited)
+    log("-" * 110)
+    log(f"BASE-RATE EXCLUSION REPORT (Base Rate: {BASE_FREQ}Hz; up_to={EXCLUDE_BASE_UP_TO_HZ}Hz; report limited to <=MAX_HZ)")
+    base_excluded = [BASE_FREQ, BASE_FREQ * 2]
+    base_excluded = [x for x in base_excluded if x <= MAX_HZ]
+    log(f"Excluded base-multiple frequencies (unique): {base_excluded}")
+    log("-" * 110)
+
+    if not pids_paired:
+        raise RuntimeError("No paired participants found between the two folders.")
+
+    # Global harmonic selection (per condition)
+    global_a, df_debug_a = compute_global_harmonics_per_condition(
+        cond_label=CONDITION_LABEL_A,
+        cfg=cfg,
+        pids_used=pids_paired,
+        pid_to_path=pid_map_a,
+        log_fn=log,
+    )
+    global_b, df_debug_b = compute_global_harmonics_per_condition(
+        cond_label=CONDITION_LABEL_B,
+        cfg=cfg,
+        pids_used=pids_paired,
+        pid_to_path=pid_map_b,
+        log_fn=log,
+    )
+
+    # Participant-level summaries using per-condition global sets
+    part_rows: List[Dict[str, Any]] = []
+    for pid in pids_paired:
+        part_rows.extend(summarize_participant_file_global(pid_map_a[pid], CONDITION_LABEL_A, global_a))
+        part_rows.extend(summarize_participant_file_global(pid_map_b[pid], CONDITION_LABEL_B, global_b))
+
+        # per participant logging (kept simple)
+        for r in part_rows[-(len(ROI_DEFS) * 2):]:
+            log(
+                f"{r['participant_id']} | {r['condition_label']} | ROI={r['ROI']} | n_global={r['n_global_harmonics']} "
+                f"| global=[{r['global_harmonics_hz']}] "
+                f"| Z={fmt_float(r['mean_Z_global'])} "
+                f"| SNR={fmt_float(r['mean_SNR_global'])} "
+                f"| BCA(uV)={fmt_float(r['mean_BCA_global'])}"
+            )
+
+    df_part = pd.DataFrame(part_rows)
 
     # Soft QC flags (review-only)
     df_soft_qc = detect_soft_qc_flags(df_part, log)
@@ -804,34 +1065,34 @@ def main():
     df_part["is_hard_excluded"] = df_part["participant_id"].isin(excluded_pids)
     df_part_used = df_part[~df_part["is_hard_excluded"]].copy()
 
-    log(f"Participants total (RAW rows): {df_part['participant_id'].nunique()} | "
-        f"Participants used after HARD exclusions: {df_part_used['participant_id'].nunique()}")
+    log(f"Participants paired total: {len(pids_paired)} | used after HARD exclusions: {df_part_used['participant_id'].nunique()}")
+    log("-" * 110)
 
-    # Zero-significant report (USED)
-    df_zero = df_part_used[df_part_used["n_significant_harmonics"] == 0].copy()
+    # ZERO-GLOBAL-HARMONICS REPORT (after HARD exclusions)
+    df_zero = df_part_used[df_part_used["n_global_harmonics"] == 0].copy()
     df_zero = df_zero[
         ["condition_label", "ROI", "participant_id", "participant_num", "source_file"]
     ].sort_values(["condition_label", "ROI", "participant_num"], kind="stable")
 
-    log("ZERO-SIGNIFICANT-HARMONICS REPORT (after HARD exclusions)")
+    log("ZERO-GLOBAL-HARMONICS REPORT (after HARD exclusions)")
     if df_zero.empty:
-        log("  No participants with zero significant harmonics.")
+        log("  No participants with zero global harmonics.")
     else:
-        counts = df_zero.groupby(["condition_label", "ROI"]).size().reset_index(name="n_zero_sig")
+        counts = df_zero.groupby(["condition_label", "ROI"]).size().reset_index(name="n_zero_global")
         for _, row in counts.iterrows():
-            log(f"  {row['condition_label']} | ROI={row['ROI']} | n_zero_sig={int(row['n_zero_sig'])}")
+            log(f"  {row['condition_label']} | ROI={row['ROI']} | n_zero_global={int(row['n_zero_global'])}")
         log("  Participant list (condition | ROI | participant_id):")
         for _, r in df_zero.iterrows():
             log(f"  {r['condition_label']} | {r['ROI']} | {r['participant_id']}")
 
     # Group summary (RAW; USED) + CV
-    raw_group_rows: List[Dict] = []
+    raw_group_rows: List[Dict[str, Any]] = []
     for (cond, roi), sub in df_part_used.groupby(["condition_label", "ROI"], sort=True):
         n_total = int(len(sub))
 
-        z_arr = pd.to_numeric(sub["mean_Z_selected"], errors="coerce").to_numpy(dtype=float)
-        snr_arr = pd.to_numeric(sub["mean_SNR_selected"], errors="coerce").to_numpy(dtype=float)
-        bca_arr = pd.to_numeric(sub["mean_BCA_selected"], errors="coerce").to_numpy(dtype=float)
+        z_arr = pd.to_numeric(sub["mean_Z_global"], errors="coerce").to_numpy(dtype=float)
+        snr_arr = pd.to_numeric(sub["mean_SNR_global"], errors="coerce").to_numpy(dtype=float)
+        bca_arr = pd.to_numeric(sub["mean_BCA_global"], errors="coerce").to_numpy(dtype=float)
 
         m_z, sd_z, se_z = safe_mean(z_arr), safe_sd(z_arr), safe_sem(z_arr)
         m_s, sd_s, se_s = safe_mean(snr_arr), safe_sd(snr_arr), safe_sem(snr_arr)
@@ -861,7 +1122,7 @@ def main():
     df_group_raw = pd.DataFrame(raw_group_rows).sort_values(["condition_label", "ROI"], kind="stable").reset_index(drop=True)
 
     log("-" * 110)
-    log("GROUP SUMMARY (RAW; USED; Mean / SD / SEM / CV)")
+    log("GROUP SUMMARY (RAW; USED; Mean / SD / SEM / CV) [global harmonics applied per condition]")
     log(df_group_raw.to_string(index=False))
     log("-" * 110)
     log("CV NOTE: CV = SD/Mean; CV is NaN when |Mean| is near 0 (unstable).")
@@ -870,123 +1131,128 @@ def main():
     # Extremes (RAW; USED)
     log_extremes_raw(df_part_used, log)
 
-    # Common-set computation (USED participants only)
-    log("COMMON-SET METRICS (INTERSECTION; after HARD exclusions)")
-
-    pids_paired = sorted(list(set(pid_map_a.keys()).intersection(set(pid_map_b.keys()))))
-    if excluded_pids:
-        pids_paired = [pid for pid in pids_paired if pid not in excluded_pids]
-
-    log(f"Paired participants (present in BOTH folders, used): {len(pids_paired)}")
-
-    common_rows: List[Dict[str, Any]] = []
-    for pid in pids_paired:
-        path_sem = pid_map_a[pid]
-        path_col = pid_map_b[pid]
-        for roi_name in ROI_DEFS.keys():
-            rr = compute_common_set_metrics_for_participant(pid, roi_name, cfg, path_sem, path_col)
-            common_rows.append(rr)
-            log(
-                f"{pid} | ROI={roi_name} | common(n={rr['n_common_sig']}):[{rr['common_sig_hz']}] "
-                f"| ratioZ={fmt_float(rr['ratio_Z_common'])} "
-                f"| ratioSNR={fmt_float(rr['ratio_SNR_common'])} "
-                f"| dBCA(uV)={fmt_float(rr['delta_BCA_common'])} "
-                f"| notes={rr['common_set_notes']}"
-            )
-
-    df_common_part = pd.DataFrame(common_rows)
-
-    # participant_num mapping for stable sorting (USED only)
-    pid_to_num: Dict[str, int] = {}
-    for _, r in df_part_used[["participant_id", "participant_num"]].dropna().drop_duplicates().iterrows():
-        pid_to_num[str(r["participant_id"])] = int(r["participant_num"])
-    if not df_common_part.empty:
-        df_common_part["participant_num"] = df_common_part["participant_id"].map(pid_to_num)
-
-    # Common-set group summary + CV (ratios only; delta_BCA CV suppressed)
-    common_group_rows: List[Dict[str, Any]] = []
-    if not df_common_part.empty:
-        for roi, sub in df_common_part.groupby("ROI", sort=True):
-            rz = pd.to_numeric(sub["ratio_Z_common"], errors="coerce").to_numpy(dtype=float)
-            rs = pd.to_numeric(sub["ratio_SNR_common"], errors="coerce").to_numpy(dtype=float)
-            db = pd.to_numeric(sub["delta_BCA_common"], errors="coerce").to_numpy(dtype=float)
-
-            m_rz, sd_rz, se_rz = safe_mean(rz), safe_sd(rz), safe_sem(rz)
-            m_rs, sd_rs, se_rs = safe_mean(rs), safe_sd(rs), safe_sem(rs)
-            m_db, sd_db, se_db = safe_mean(db), safe_sd(db), safe_sem(db)
-
-            common_group_rows.append({
-                "condition_label": COMMON_LABEL,
-                "ROI": roi,
-                "n_total_paired": int(len(sub)),
-                "n_with_common_sig_gt0": int(np.sum(sub["n_common_sig"].to_numpy(dtype=int) > 0)),
-                "n_used_ratio_Z": int(np.sum(np.isfinite(rz))),
-                "mean_ratio_Z": m_rz,
-                "sd_ratio_Z": sd_rz,
-                "sem_ratio_Z": se_rz,
-                "cv_ratio_Z": safe_cv(m_rz, sd_rz),
-                "n_used_ratio_SNR": int(np.sum(np.isfinite(rs))),
-                "mean_ratio_SNR": m_rs,
-                "sd_ratio_SNR": sd_rs,
-                "sem_ratio_SNR": se_rs,
-                "cv_ratio_SNR": safe_cv(m_rs, sd_rs),
-                "n_used_delta_BCA": int(np.sum(np.isfinite(db))),
-                "mean_delta_BCA_uV": m_db,
-                "sd_delta_BCA_uV": sd_db,
-                "sem_delta_BCA_uV": se_db,
-                "cv_delta_BCA": float("nan"),
-            })
-
-    df_common_group = pd.DataFrame(common_group_rows).sort_values(["ROI"], kind="stable").reset_index(drop=True)
-
+    # Ratio table (Semantic/Color) using per-condition global sets
+    pids_used_for_ratio = [pid for pid in pids_paired if pid not in excluded_pids]
     log("-" * 110)
-    log("COMMON-SET GROUP SUMMARY (USED; ratios for Z/SNR; delta for BCA; CV_delta_BCA suppressed)")
-    log(df_common_group.to_string(index=False) if not df_common_group.empty else "  (no common-set rows)")
+    log("RATIO TABLE (Semantic/Color) using PER-CONDITION global harmonic sets")
+    log(f"  Semantic condition label: {CONDITION_LABEL_A}")
+    log(f"  Color condition label:    {CONDITION_LABEL_B}")
+    log(f"  Paired participants used: {len(pids_used_for_ratio)}")
+    log(f"  BCA_RATIO_POLICY: {BCA_RATIO_POLICY}")
     log("-" * 110)
 
-    # Extremes (COMMON-SET; USED)
-    if not df_common_part.empty:
-        log_extremes_common(df_common_part, log)
+    ratio_rows = compute_ratio_rows_global_sets(
+        pids_paired=pids_used_for_ratio,
+        pid_map_sem=pid_map_a,
+        pid_map_col=pid_map_b,
+        global_sem=global_a,
+        global_col=global_b,
+    )
+    df_ratio = pd.DataFrame(ratio_rows)
 
-    # Plotting (short y-labels; separate plots; USED)
+    for _, rr in df_ratio.iterrows():
+        log(
+            f"{rr['participant_id']} | ROI={rr['ROI']} | ratioZ={fmt_float(rr['ratio_Z'])} | "
+            f"ratioSNR={fmt_float(rr['ratio_SNR'])} | ratioBCA={fmt_float(rr['ratio_BCA'])} | "
+            f"dBCA={fmt_float(rr['delta_BCA'])} | notes={rr['ratio_notes']}"
+        )
+
+    # Ratio group summary
+    ratio_group_rows: List[Dict[str, Any]] = []
+    for roi, sub in df_ratio.groupby("ROI", sort=True):
+        rz = pd.to_numeric(sub["ratio_Z"], errors="coerce").to_numpy(dtype=float)
+        rs = pd.to_numeric(sub["ratio_SNR"], errors="coerce").to_numpy(dtype=float)
+        rb = pd.to_numeric(sub["ratio_BCA"], errors="coerce").to_numpy(dtype=float)
+        db = pd.to_numeric(sub["delta_BCA"], errors="coerce").to_numpy(dtype=float)
+
+        ratio_group_rows.append({
+            "condition_label": "Semantic/Color (global per-condition harmonic sets)",
+            "ROI": roi,
+            "n_total_paired": int(len(sub)),
+            "n_used_ratio_Z": int(np.sum(np.isfinite(rz))),
+            "mean_ratio_Z": safe_mean(rz),
+            "sd_ratio_Z": safe_sd(rz),
+            "sem_ratio_Z": safe_sem(rz),
+            "cv_ratio_Z": safe_cv(safe_mean(rz), safe_sd(rz)),
+            "n_used_ratio_SNR": int(np.sum(np.isfinite(rs))),
+            "mean_ratio_SNR": safe_mean(rs),
+            "sd_ratio_SNR": safe_sd(rs),
+            "sem_ratio_SNR": safe_sem(rs),
+            "cv_ratio_SNR": safe_cv(safe_mean(rs), safe_sd(rs)),
+            "n_used_ratio_BCA": int(np.sum(np.isfinite(rb))),
+            "mean_ratio_BCA": safe_mean(rb),
+            "sd_ratio_BCA": safe_sd(rb),
+            "sem_ratio_BCA": safe_sem(rb),
+            "cv_ratio_BCA": safe_cv(safe_mean(rb), safe_sd(rb)),
+            "n_used_delta_BCA": int(np.sum(np.isfinite(db))),
+            "mean_delta_BCA_uV": safe_mean(db),
+            "sd_delta_BCA_uV": safe_sd(db),
+            "sem_delta_BCA_uV": safe_sem(db),
+            "cv_delta_BCA": float("nan"),
+        })
+
+    df_ratio_group = pd.DataFrame(ratio_group_rows).sort_values(["ROI"], kind="stable").reset_index(drop=True)
+
+    log("-" * 110)
+    log("RATIO GROUP SUMMARY (USED; Semantic/Color) [per-condition global harmonic sets]")
+    log(df_ratio_group.to_string(index=False))
+    log("-" * 110)
+
+    # Extremes (RATIOS)
+    log_extremes_ratios(df_ratio, log)
+
+    # Plotting (RAW; USED)
     make_raincloud_figure(
         df_part_used,
-        df_group_raw.rename(columns={"mean_Z": "mean_Z", "sem_Z": "sem_Z"}),
-        PlotPanel(val_col="mean_Z_selected", mean_col="mean_Z", sem_col="sem_Z", ylabel="Z (sel)", hline_y=Z_THRESHOLD),
+        df_group_raw,
+        PlotPanel(val_col="mean_Z_global", mean_col="mean_Z", sem_col="sem_Z", ylabel="Z (global)", hline_y=Z_THRESHOLD),
         out_dir / f"Plot_{RUN_LABEL}_RAW_Z",
     )
     make_raincloud_figure(
         df_part_used,
-        df_group_raw.rename(columns={"mean_SNR": "mean_SNR", "sem_SNR": "sem_SNR"}),
-        PlotPanel(val_col="mean_SNR_selected", mean_col="mean_SNR", sem_col="sem_SNR", ylabel="SNR (sel)"),
+        df_group_raw,
+        PlotPanel(val_col="mean_SNR_global", mean_col="mean_SNR", sem_col="sem_SNR", ylabel="SNR (global)"),
         out_dir / f"Plot_{RUN_LABEL}_RAW_SNR",
     )
     make_raincloud_figure(
         df_part_used,
-        df_group_raw.rename(columns={"mean_BCA_uV": "mean_BCA_uV", "sem_BCA_uV": "sem_BCA_uV"}),
-        PlotPanel(val_col="mean_BCA_selected", mean_col="mean_BCA_uV", sem_col="sem_BCA_uV", ylabel="BCA (µV; sel)"),
+        df_group_raw,
+        PlotPanel(val_col="mean_BCA_global", mean_col="mean_BCA_uV", sem_col="sem_BCA_uV", ylabel="BCA (µV; global)"),
         out_dir / f"Plot_{RUN_LABEL}_RAW_BCA",
     )
 
-    if not df_common_part.empty and not df_common_group.empty:
-        make_raincloud_figure(
-            df_common_part,
-            df_common_group,
-            PlotPanel(val_col="ratio_Z_common", mean_col="mean_ratio_Z", sem_col="sem_ratio_Z", ylabel="Z ratio"),
-            out_dir / f"Plot_{RUN_LABEL}_COMMON_ZRATIO",
-        )
-        make_raincloud_figure(
-            df_common_part,
-            df_common_group,
-            PlotPanel(val_col="ratio_SNR_common", mean_col="mean_ratio_SNR", sem_col="sem_ratio_SNR", ylabel="SNR ratio"),
-            out_dir / f"Plot_{RUN_LABEL}_COMMON_SNRRATIO",
-        )
-        make_raincloud_figure(
-            df_common_part,
-            df_common_group,
-            PlotPanel(val_col="delta_BCA_common", mean_col="mean_delta_BCA_uV", sem_col="sem_delta_BCA_uV", ylabel="ΔBCA (µV)"),
-            out_dir / f"Plot_{RUN_LABEL}_COMMON_DBCA",
-        )
+    # Plotting (RATIOS)
+    # Reuse raincloud by treating ratio as "condition_label" single group is not needed; plot as two conditions is not applicable.
+    # Keep plots simple by writing per-ROI distributions in a single "condition".
+    df_ratio_plot = df_ratio.copy()
+    df_ratio_plot["condition_label"] = "Semantic/Color"
+    df_ratio_group_plot = df_ratio_group.copy()
+    df_ratio_group_plot["condition_label"] = "Semantic/Color"
+
+    make_raincloud_figure(
+        df_ratio_plot.rename(columns={"ratio_Z": "val"}),
+        df_ratio_group_plot.rename(columns={"mean_ratio_Z": "mean", "sem_ratio_Z": "sem"}),
+        PlotPanel(val_col="val", mean_col="mean", sem_col="sem", ylabel="Z ratio"),
+        out_dir / f"Plot_{RUN_LABEL}_RATIO_Z",
+    )
+    make_raincloud_figure(
+        df_ratio_plot.rename(columns={"ratio_SNR": "val"}),
+        df_ratio_group_plot.rename(columns={"mean_ratio_SNR": "mean", "sem_ratio_SNR": "sem"}),
+        PlotPanel(val_col="val", mean_col="mean", sem_col="sem", ylabel="SNR ratio"),
+        out_dir / f"Plot_{RUN_LABEL}_RATIO_SNR",
+    )
+    make_raincloud_figure(
+        df_ratio_plot.rename(columns={"ratio_BCA": "val"}),
+        df_ratio_group_plot.rename(columns={"mean_ratio_BCA": "mean", "sem_ratio_BCA": "sem"}),
+        PlotPanel(val_col="val", mean_col="mean", sem_col="sem", ylabel="BCA ratio"),
+        out_dir / f"Plot_{RUN_LABEL}_RATIO_BCA",
+    )
+    make_raincloud_figure(
+        df_ratio_plot.rename(columns={"delta_BCA": "val"}),
+        df_ratio_group_plot.rename(columns={"mean_delta_BCA_uV": "mean", "sem_delta_BCA_uV": "sem"}),
+        PlotPanel(val_col="val", mean_col="mean", sem_col="sem", ylabel="ΔBCA (µV)"),
+        out_dir / f"Plot_{RUN_LABEL}_RATIO_DBCA",
+    )
 
     # Excel + log outputs
     out_xlsx = out_dir / f"Metrics_{RUN_LABEL}.xlsx"
@@ -996,13 +1262,11 @@ def main():
         df_hard_excl.to_excel(writer, sheet_name="Hard_Exclusions", index=False)
         df_soft_qc.to_excel(writer, sheet_name="Soft_QC_Flags", index=False)
         df_group_raw.to_excel(writer, sheet_name="Group_Summary_RAW_USED", index=False)
-        df_zero.to_excel(writer, sheet_name="Zero_Sig_USED", index=False)
-        if not df_common_part.empty:
-            df_common_part.sort_values(["ROI", "participant_num"], kind="stable").to_excel(
-                writer, sheet_name="CommonSet_Participant_USED", index=False
-            )
-        if not df_common_group.empty:
-            df_common_group.to_excel(writer, sheet_name="CommonSet_Group_USED", index=False)
+        df_zero.to_excel(writer, sheet_name="Zero_Global_USED", index=False)
+        df_debug_a.to_excel(writer, sheet_name="GlobalSelect_Debug_Sem", index=False)
+        df_debug_b.to_excel(writer, sheet_name="GlobalSelect_Debug_Col", index=False)
+        df_ratio.to_excel(writer, sheet_name="Ratios_Participant_USED", index=False)
+        df_ratio_group.to_excel(writer, sheet_name="Ratios_Group_USED", index=False)
 
     out_log = out_dir / f"Log_{RUN_LABEL}.txt"
     out_log.write_text("\n".join(log_lines) + "\n", encoding="utf-8")

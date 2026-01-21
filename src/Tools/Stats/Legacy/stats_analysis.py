@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import warnings
-import threading  # <--- Added for thread safety check
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -20,9 +20,9 @@ import scipy.stats as stats
 from statsmodels.stats.multitest import multipletests
 
 from Tools.Stats.Legacy.excel_io import safe_read_excel
-from .repeated_m_anova import run_repeated_measures_anova
-from .blas_limits import single_threaded_blas
 from Tools.Stats.roi_resolver import ROI, resolve_active_rois
+from .blas_limits import single_threaded_blas
+from .repeated_m_anova import run_repeated_measures_anova
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,10 @@ def _current_rois_map() -> Dict[str, List[str]]:
 
     # GUARD: If we are in a worker thread, we CANNOT access resolve_active_rois (QSettings)
     if threading.current_thread() is not threading.main_thread():
-        logger.warning("CRITICAL: Attempted to resolve ROIs from a background thread. "
-                       "This would cause a crash. Returning empty ROIs.")
+        logger.warning(
+            "CRITICAL: Attempted to resolve ROIs from a background thread. "
+            "This would cause a crash. Returning empty ROIs."
+        )
         return {}
 
     try:
@@ -70,12 +72,22 @@ def _current_rois_map() -> Dict[str, List[str]]:
 ALL_ROIS_OPTION = "(All ROIs)"
 HARMONIC_CHECK_ALPHA = 0.05
 
+# ---------------------------------------------------------------------
+# Summed BCA harmonic selection (ROI-mean Z gating + consecutive stop)
+# ---------------------------------------------------------------------
+SUMMED_BCA_Z_THRESHOLD_DEFAULT = 1.64
+SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT = 5
+SUMMED_BCA_STOP_AFTER_N_CONSEC_NONSIG_DEFAULT = 2
+SUMMED_BCA_ARM_STOP_AFTER_FIRST_SIG_DEFAULT = True
+SUMMED_BCA_Z_SHEET_NAME = "Z Score"
 
 # -----------------------------------------------------------------------------
 # Frequency helpers
 # -----------------------------------------------------------------------------
+
+
 def get_included_freqs(
-        base_freq: float, all_col_names, log_func, max_freq: Optional[float] = None
+    base_freq: float, all_col_names, log_func, max_freq: Optional[float] = None
 ) -> List[float]:
     """Return candidate frequency bins from column names."""
     try:
@@ -110,12 +122,12 @@ def get_included_freqs(
 
 
 def filter_to_oddball_harmonics(
-        freq_list: List[float],
-        base_freq: float,
-        every_n: int = 5,
-        tol: float = 1e-3,
-        max_k: Optional[int] = None,
-        max_freq: Optional[float] = None,
+    freq_list: List[float],
+    base_freq: float,
+    every_n: int = 5,
+    tol: float = 1e-3,
+    max_k: Optional[int] = None,
+    max_freq: Optional[float] = None,
 ) -> List[Tuple[float, int]]:
     try:
         base = float(base_freq)
@@ -163,30 +175,45 @@ def _match_freq_column(columns, freq_value: float) -> Optional[str]:
 # -----------------------------------------------------------------------------
 # BCA aggregation and ANOVA
 # -----------------------------------------------------------------------------
-def aggregate_bca_sum(
-        file_path: str,
-        roi_name: str,
-        base_freq: float,
-        log_func,
-        rois: Optional[Union[List[ROI], Dict[str, List[str]]]] = None,  # <--- Updated Type Hint
-) -> float:
-    """Return summed BCA for an ROI across included harmonics."""
-    try:
-        df = safe_read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
-        df.index = df.index.str.upper()
 
-        # -------------------------------------------------------
-        # FIX: Handle both List[ROI] and Dict[str, List[str]]
-        # to avoid calling _current_rois_map in threads.
-        # -------------------------------------------------------
-        roi_map = {}
+
+def aggregate_bca_sum(
+    file_path: str,
+    roi_name: str,
+    base_freq: float,
+    log_func,
+    rois: Optional[Union[List[ROI], Dict[str, List[str]]]] = None,
+) -> float:
+    """
+    Return summed BCA for an ROI across significant oddball harmonics.
+
+    Selection rule (within this participant/file):
+      1) Candidate freqs = all non-base-multiple freqs (via get_included_freqs)
+      2) Restrict to oddball harmonics (via filter_to_oddball_harmonics)
+      3) For each oddball harmonic in ascending order:
+           - compute ROI-mean Z at that harmonic (same channel set used for BCA)
+           - include harmonic if mean(Z_ROI) > Z_THRESHOLD
+           - apply consecutive non-significant stop rule (optionally armed only after first sig)
+      4) Sum BCA across selected harmonics per electrode (min_count=1), then mean across ROI electrodes.
+    """
+    try:
+        # --- Read required sheets ---
+        df_bca = safe_read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
+        df_z = safe_read_excel(file_path, sheet_name=SUMMED_BCA_Z_SHEET_NAME, index_col="Electrode")
+
+        # Normalize electrode labels
+        df_bca.index = df_bca.index.astype(str).str.upper().str.strip()
+        df_z.index = df_z.index.astype(str).str.upper().str.strip()
+
+        # --- Resolve ROI map safely ---
         if rois is not None:
             if isinstance(rois, dict):
-                roi_map = rois
+                roi_map: Dict[str, List[str]] = rois
             elif isinstance(rois, list):
-                roi_map = {r.name: r.channels for r in rois}
+                roi_map = {r.name: list(r.channels) for r in rois}
+            else:
+                roi_map = {}
         else:
-            # Fallback to global (unsafe in threads unless override set)
             roi_map = _current_rois_map()
 
         roi_channels = [str(ch).strip().upper() for ch in roi_map.get(roi_name, [])]
@@ -194,46 +221,103 @@ def aggregate_bca_sum(
             log_func(f"ROI {roi_name} not defined.")
             return np.nan
 
-        df_roi = df.reindex(roi_channels).dropna(how="all")
-        if df_roi.empty:
+        # Use the SAME channel set for Z gating + BCA summation: intersection of available channels
+        roi_chans = [ch for ch in roi_channels if (ch in df_bca.index and ch in df_z.index)]
+        if not roi_chans:
+            log_func(f"No overlapping BCA+Z data for ROI {roi_name} in {file_path}.")
+            return np.nan
+
+        df_bca_roi = df_bca.loc[roi_chans].dropna(how="all")
+        df_z_roi = df_z.loc[roi_chans].dropna(how="all")
+        if df_bca_roi.empty or df_z_roi.empty:
             log_func(f"No data for ROI {roi_name} in {file_path}.")
             return np.nan
 
-        included_freq_values = get_included_freqs(base_freq, df.columns, log_func)
+        # --- Candidate freqs: exclude base-rate multiples, then restrict to oddball harmonics ---
+        included_freq_values = get_included_freqs(base_freq, df_bca.columns, log_func)
         if not included_freq_values:
             log_func(f"No freqs to sum for BCA in {file_path}.")
             return np.nan
 
-        cols_to_sum: List[str] = []
-        for f_val in included_freq_values:
-            col_name = _match_freq_column(df_roi.columns, f_val)
-            if col_name:
-                cols_to_sum.append(col_name)
-        if not cols_to_sum:
-            log_func(f"No matching BCA freq columns for ROI {roi_name} in {file_path}.")
-            return np.nan
-
-        vals = df_roi[cols_to_sum].sum(axis=1)
-        if not np.isfinite(vals).all():
-            log_func(f"Warning: Infinite values detected in ROI {roi_name} for {os.path.basename(file_path)}")
-            return np.nan
-
-        return float(vals.mean())
-    except Exception as e:
-        log_func(
-            f"Error aggregating BCA for {os.path.basename(file_path)}, ROI {roi_name}: {e}"
+        oddball_list = filter_to_oddball_harmonics(
+            included_freq_values,
+            base_freq,
+            every_n=SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
+            tol=1e-3,
         )
+        if not oddball_list:
+            log_func(f"No applicable oddball harmonics for ROI {roi_name} in {file_path}.")
+            return np.nan
+
+        # --- Select significant harmonics using ROI-mean Z with consecutive stop rule ---
+        cols_to_sum: List[str] = []
+        nonsig_run = 0
+        seen_sig = False
+
+        for (freq_val, _harm_k) in oddball_list:
+            col_bca = _match_freq_column(df_bca_roi.columns, freq_val)
+            col_z = _match_freq_column(df_z_roi.columns, freq_val)
+            if not col_bca or not col_z:
+                continue
+
+            z_series = pd.to_numeric(df_z_roi[col_z], errors="coerce").replace([np.inf, -np.inf], np.nan)
+            mean_z = float(z_series.mean(skipna=True)) if z_series.notna().any() else np.nan
+            is_sig = bool(np.isfinite(mean_z) and (mean_z > SUMMED_BCA_Z_THRESHOLD_DEFAULT))
+
+            if is_sig:
+                cols_to_sum.append(col_bca)
+                nonsig_run = 0
+                seen_sig = True
+            else:
+                if SUMMED_BCA_ARM_STOP_AFTER_FIRST_SIG_DEFAULT and not seen_sig:
+                    continue
+                nonsig_run += 1
+                if nonsig_run >= SUMMED_BCA_STOP_AFTER_N_CONSEC_NONSIG_DEFAULT:
+                    break
+
+        log_func(
+            f"[DEBUG] {roi_name} {os.path.basename(file_path)}: "
+            f"selected {len(cols_to_sum)} harmonics (threshold={SUMMED_BCA_Z_THRESHOLD_DEFAULT})."
+        )
+
+        if not cols_to_sum:
+            log_func(f"No significant harmonics selected for ROI {roi_name} in {file_path}.")
+            return np.nan
+
+        # --- Sum BCA across selected harmonics per electrode, then average across electrodes ---
+        bca_block = (
+            df_bca_roi[cols_to_sum]
+            .apply(pd.to_numeric, errors="coerce")
+            .replace([np.inf, -np.inf], np.nan)
+        )
+        # min_count=1 prevents "all-NaN -> 0.0" behavior
+        bca_vals = bca_block.sum(axis=1, min_count=1)
+
+        # Mean across electrodes with at least one finite value
+        bca_vals = pd.to_numeric(bca_vals, errors="coerce").replace([np.inf, -np.inf], np.nan)
+        if not bca_vals.notna().any():
+            log_func(
+                f"Warning: All-NaN BCA values after summation for ROI {roi_name} "
+                f"({os.path.basename(file_path)})."
+            )
+            return np.nan
+
+        out = float(bca_vals.mean(skipna=True))
+        return out if np.isfinite(out) else np.nan
+
+    except Exception as e:
+        log_func(f"Error aggregating BCA for {os.path.basename(file_path)}, ROI {roi_name}: {e}")
         return np.nan
 
 
 def prepare_all_subject_summed_bca_data(
-        subjects: List[str],
-        conditions: List[str],
-        subject_data: Dict[str, Dict[str, str]],
-        base_freq: float,
-        log_func,
-        roi_filter: Optional[List[str]] = None,
-        rois: Optional[Dict[str, List[str]]] = None,  # <--- NEW ARGUMENT
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    base_freq: float,
+    log_func,
+    roi_filter: Optional[List[str]] = None,
+    rois: Optional[Dict[str, List[str]]] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Prepare summed BCA data for all subjects and conditions."""
     all_subject_data: Dict[str, Dict[str, Dict[str, float]]] = {}
@@ -241,13 +325,8 @@ def prepare_all_subject_summed_bca_data(
         log_func("No subject data. Scan folder first.")
         return None
 
-    # -------------------------------------------------------
-    # FIX: Use passed ROIs if available, avoid unsafe lookup
-    # -------------------------------------------------------
-    if rois is not None:
-        rois_map = rois
-    else:
-        rois_map = _current_rois_map()
+    # Use passed ROIs if available, avoid unsafe lookup
+    rois_map = rois if rois is not None else _current_rois_map()
 
     if roi_filter:
         rois_map = {name: chans for name, chans in rois_map.items() if name in roi_filter}
@@ -264,11 +343,7 @@ def prepare_all_subject_summed_bca_data(
         log_func("No ROIs defined or available.")
         return None
 
-    if rois_map:
-        log_func(
-            "Using "
-            f"{len(rois_map)} ROIs: {', '.join(rois_map.keys())}"
-        )
+    log_func(f"Using {len(rois_map)} ROIs: {', '.join(rois_map.keys())}")
 
     # Build the subject × condition × ROI table
     for pid in subjects:
@@ -280,12 +355,21 @@ def prepare_all_subject_summed_bca_data(
                 sum_val = np.nan
                 if file_path and os.path.exists(file_path):
                     try:
-                        # FIX: Pass the rois_map down to the aggregator!
                         sum_val = aggregate_bca_sum(file_path, roi_name, base_freq, log_func, rois=rois_map)
                     except Exception as e:
                         log_func(f"Failed to read {os.path.basename(file_path)} for {pid}: {e}")
-
                 all_subject_data[pid][cond_name][roi_name] = sum_val
+
+    # Debug summary: how much usable data did we generate?
+    total = 0
+    finite = 0
+    for pid, conds in all_subject_data.items():
+        for _cond, rois_dict in conds.items():
+            for _roi, val in rois_dict.items():
+                total += 1
+                if val is not None and np.isfinite(val):
+                    finite += 1
+    log_func(f"[DEBUG] Summed BCA finite cells: {finite}/{total}")
 
     log_func("Summed BCA data prep complete.")
     return all_subject_data
@@ -334,8 +418,10 @@ def run_rm_anova(all_subject_data, log_func):
 # -----------------------------------------------------------------------------
 # Harmonic significance check (Z/SNR)
 # -----------------------------------------------------------------------------
+
+
 def _ttest_onesample_tail(
-        x: np.ndarray, popmean: float = 0.0, tail: str = "greater", min_n: int = 3
+    x: np.ndarray, popmean: float = 0.0, tail: str = "greater", min_n: int = 3
 ):
     x = np.asarray(x, dtype=float)
     x = x[np.isfinite(x)]
@@ -394,21 +480,21 @@ def _passes_threshold(mean_val: float, threshold: float, tail: str = "greater") 
 
 
 def run_harmonic_check(
-        subject_data: Dict[str, Dict[str, str]],
-        subjects: List[str],
-        conditions: List[str],
-        selected_metric: str,
-        mean_value_threshold: float,
-        base_freq: float,
-        log_func,
-        max_freq: Optional[float] = None,
-        correction_method: str = "holm",
-        tail: str = "greater",
-        min_subjects: int = 3,
-        do_wilcoxon_sensitivity: bool = True,
-        oddball_every_n: int = 5,
-        limit_n_harmonics: Optional[int] = None,
-        rois: Optional[Dict[str, List[str]]] = None,  # <--- ADDED ARGUMENT
+    subject_data: Dict[str, Dict[str, str]],
+    subjects: List[str],
+    conditions: List[str],
+    selected_metric: str,
+    mean_value_threshold: float,
+    base_freq: float,
+    log_func,
+    max_freq: Optional[float] = None,
+    correction_method: str = "holm",
+    tail: str = "greater",
+    min_subjects: int = 3,
+    do_wilcoxon_sensitivity: bool = True,
+    oddball_every_n: int = 5,
+    limit_n_harmonics: Optional[int] = None,
+    rois: Optional[Dict[str, List[str]]] = None,
 ):
     with single_threaded_blas():
         return _run_harmonic_check_impl(
@@ -431,29 +517,26 @@ def run_harmonic_check(
 
 
 def _run_harmonic_check_impl(
-        subject_data: Dict[str, Dict[str, str]],
-        subjects: List[str],
-        conditions: List[str],
-        selected_metric: str,
-        mean_value_threshold: float,
-        base_freq: float,
-        log_func,
-        max_freq: Optional[float] = None,
-        correction_method: str = "holm",
-        tail: str = "greater",
-        min_subjects: int = 3,
-        do_wilcoxon_sensitivity: bool = True,
-        oddball_every_n: int = 5,
-        limit_n_harmonics: Optional[int] = None,
-        rois: Optional[Dict[str, List[str]]] = None,  # <--- ADDED ARGUMENT
+    subject_data: Dict[str, Dict[str, str]],
+    subjects: List[str],
+    conditions: List[str],
+    selected_metric: str,
+    mean_value_threshold: float,
+    base_freq: float,
+    log_func,
+    max_freq: Optional[float] = None,
+    correction_method: str = "holm",
+    tail: str = "greater",
+    min_subjects: int = 3,
+    do_wilcoxon_sensitivity: bool = True,
+    oddball_every_n: int = 5,
+    limit_n_harmonics: Optional[int] = None,
+    rois: Optional[Dict[str, List[str]]] = None,
 ):
     alpha = globals().get("HARMONIC_CHECK_ALPHA", 0.05)
 
     # Safe ROI resolution
-    if rois is not None:
-        rois_map = rois
-    else:
-        rois_map = _current_rois_map()
+    rois_map = rois if rois is not None else _current_rois_map()
 
     findings: List[Dict] = []
     output_lines: List[str] = [f"===== Per-Harmonic Significance Check ({selected_metric}) ====="]
@@ -485,16 +568,12 @@ def _run_harmonic_check_impl(
         for roi_name in rois_map.keys():
             if not sample_file:
                 output_lines.append(f"  --- ROI: {roi_name} ---")
-                output_lines.append(
-                    "      Could not determine checkable frequencies (no sample data file found).\n"
-                )
+                output_lines.append("      Could not determine checkable frequencies (no sample data file found).\n")
                 continue
 
             try:
                 if sample_file not in loaded_dataframes:
-                    df_tmp = safe_read_excel(
-                        sample_file, sheet_name=selected_metric, index_col="Electrode"
-                    )
+                    df_tmp = safe_read_excel(sample_file, sheet_name=selected_metric, index_col="Electrode")
                     df_tmp.index = df_tmp.index.str.upper()
                     loaded_dataframes[sample_file] = df_tmp
                 sample_df_cols = loaded_dataframes[sample_file].columns
@@ -532,9 +611,7 @@ def _run_harmonic_check_impl(
                     df_cur = loaded_dataframes.get(f_path)
                     if df_cur is None:
                         try:
-                            df_cur = safe_read_excel(
-                                f_path, sheet_name=selected_metric, index_col="Electrode"
-                            )
+                            df_cur = safe_read_excel(f_path, sheet_name=selected_metric, index_col="Electrode")
                             df_cur.index = df_cur.index.str.upper()
                             loaded_dataframes[f_path] = df_cur
                         except FileNotFoundError:
@@ -545,8 +622,9 @@ def _run_harmonic_check_impl(
                         continue
 
                     try:
-                        # Ensure channels exist in index
-                        valid_chans = [c for c in [str(ch).strip().upper() for ch in roi_channels] if c in df_cur.index]
+                        valid_chans = [
+                            c for c in [str(ch).strip().upper() for ch in roi_channels] if c in df_cur.index
+                        ]
                         if not valid_chans:
                             continue
                         vals = df_cur.loc[valid_chans, col_name]
@@ -625,15 +703,9 @@ def _run_harmonic_check_impl(
                     p_str = f"{r['p_raw']:.4f}"
                     pc_str = f"{r.get('p_corr', np.nan):.4f}"
                     output_lines.append("    -------------------------------------------")
-                    output_lines.append(
-                        f"    Harmonic: {r['Frequency']} (k={r['Harmonic_k']}) -> SIGNIFICANT RESPONSE"
-                    )
-                    output_lines.append(
-                        f"        Mean: {r['mean']:.3f} (N={r['N_Subjects']}) dz={r['cohens_dz']:.2f}"
-                    )
-                    output_lines.append(
-                        f"        p_raw = {p_str},  p_{correction_method} = {pc_str}"
-                    )
+                    output_lines.append(f"    Harmonic: {r['Frequency']} (k={r['Harmonic_k']}) -> SIGNIFICANT RESPONSE")
+                    output_lines.append(f"        Mean: {r['mean']:.3f} (N={r['N_Subjects']}) dz={r['cohens_dz']:.2f}")
+                    output_lines.append(f"        p_raw = {p_str},  p_{correction_method} = {pc_str}")
                     output_lines.append("    -------------------------------------------")
             else:
                 output_lines.append(f"  --- ROI: {roi_name} ---")
@@ -646,5 +718,6 @@ def _run_harmonic_check_impl(
         output_lines.append("Overall: No harmonics met the significance criteria.")
 
     return "\n".join(output_lines), findings
+
 
 # Lela mode is in full effect

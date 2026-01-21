@@ -1658,7 +1658,10 @@ class StatsWindow(QMainWindow):
             self.export_results("anova", self.rm_anova_results_data, out_dir)
             self._set_status(f"RM-ANOVA exported to: {out_dir}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            import traceback
+            logger.exception("RM-ANOVA export failed.")
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_mixed_model(self) -> None:
         if not isinstance(self.mixed_model_results_data, pd.DataFrame) or self.mixed_model_results_data.empty:
@@ -1669,7 +1672,10 @@ class StatsWindow(QMainWindow):
             self.export_results("lmm", self.mixed_model_results_data, out_dir)
             self._set_status(f"Mixed Model results exported to: {out_dir}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            import traceback
+            logger.exception("Mixed Model export failed.")
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_between_anova(self) -> None:
         if not isinstance(self.between_anova_results_data, pd.DataFrame) or self.between_anova_results_data.empty:
@@ -1680,10 +1686,14 @@ class StatsWindow(QMainWindow):
             self.export_results("anova_between", self.between_anova_results_data, out_dir)
             self._set_status(f"Between-group ANOVA exported to: {out_dir}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            import traceback
+            logger.exception("Between-group ANOVA export failed.")
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_between_mixed(self) -> None:
-        if not isinstance(self.between_mixed_model_results_data, pd.DataFrame) or self.between_mixed_model_results_data.empty:
+        if not isinstance(self.between_mixed_model_results_data,
+                          pd.DataFrame) or self.between_mixed_model_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Between-Group Mixed Model first.")
             return
         out_dir = self._ensure_results_dir()
@@ -1691,7 +1701,10 @@ class StatsWindow(QMainWindow):
             self.export_results("lmm_between", self.between_mixed_model_results_data, out_dir)
             self._set_status(f"Between-group Mixed Model exported to: {out_dir}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            import traceback
+            logger.exception("Between-group Mixed Model export failed.")
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_posthoc(self) -> None:
         if not isinstance(self.posthoc_results_data, pd.DataFrame) or self.posthoc_results_data.empty:
@@ -1702,7 +1715,10 @@ class StatsWindow(QMainWindow):
             self.export_results("posthoc", self.posthoc_results_data, out_dir)
             self._set_status(f"Post-hoc results exported to: {out_dir}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            import traceback
+            logger.exception("Post-hoc export failed.")
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_group_contrasts(self) -> None:
         if not isinstance(self.group_contrasts_results_data, pd.DataFrame) or self.group_contrasts_results_data.empty:
@@ -1713,7 +1729,10 @@ class StatsWindow(QMainWindow):
             self.export_results("group_contrasts", self.group_contrasts_results_data, out_dir)
             self._set_status(f"Group contrasts exported to: {out_dir}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            import traceback
+            logger.exception("Group contrasts export failed.")
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     # ---- folder & scan ----
 
