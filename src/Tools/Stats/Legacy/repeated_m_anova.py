@@ -41,22 +41,59 @@ from typing import Optional, List
 import numpy as np
 import pandas as pd
 
+DEBUG_UNBALANCED = True
+
 
 # ----------------------------- helpers --------------------------------- #
+
+def _dbg(log_func, msg: str) -> None:
+    try:
+        if log_func:
+            log_func(msg)
+        else:
+            print(msg)
+    except Exception:
+        print(msg)
+
 
 def _check_balance(
     df: pd.DataFrame,
     subject_col: str,
     within_cols: List[str],
     dv_col: Optional[str] = None,
+    raw_df: Optional[pd.DataFrame] = None,
+    log_func=None,
 ) -> None:
     """
     Validate that each subject has exactly one observation per within-factor combo.
     Raises ValueError with a detailed message if unbalanced.
     """
+    # RM_ANOVA DEBUG: unbalanced diagnostics
+    if DEBUG_UNBALANCED:
+        def _preview(values: List[object]) -> str:
+            sorted_vals = sorted(values, key=lambda v: repr(v))
+            if len(sorted_vals) <= 50:
+                return "[" + ", ".join(repr(v) for v in sorted_vals) + "]"
+            head = ", ".join(repr(v) for v in sorted_vals[:30])
+            return "[" + head + f", ... ({len(sorted_vals)} total)]"
+
+        df_source = raw_df if raw_df is not None else df
+        _dbg(log_func, f"[RM_ANOVA DEBUG] df_long shape={df.shape}")
+        if raw_df is not None:
+            _dbg(log_func, f"[RM_ANOVA DEBUG] raw_df shape={raw_df.shape}")
+        subjects = list(pd.unique(df_source[subject_col].dropna()))
+        _dbg(log_func, f"[RM_ANOVA DEBUG] subjects({len(subjects)}): {_preview(subjects)}")
+        for col in within_cols:
+            values = list(pd.unique(df_source[col].dropna()))
+            _dbg(log_func, f"[RM_ANOVA DEBUG] {col}({len(values)}): {_preview(values)}")
+
     # Enumerate all expected combinations (order-invariant for comparison)
     levels = [sorted(df[col].dropna().unique()) for col in within_cols]
     expected_combos = list(product(*levels))
+
+    if DEBUG_UNBALANCED:
+        for col, vals in zip(within_cols, levels):
+            _dbg(log_func, f"[RM_ANOVA DEBUG] expected {col}({len(vals)}): {_preview(list(vals))}")
 
     issues = []
     # Faster check using a subject × within combo count
@@ -70,6 +107,9 @@ def _check_balance(
     )
 
     # Build a lookup: for each subject, the set of combos present and any duplicates
+    debug_missing_count = 0
+    debug_missing_limit = 10
+    df_raw = raw_df if raw_df is not None else df
     for subject, grp in counts.groupby(subject_col, dropna=False):
         present = [tuple(row[within_cols].tolist()) for _, row in grp.iterrows()]
         dup_mask = grp["_one"] > 1
@@ -79,6 +119,44 @@ def _check_balance(
         for combo in expected_combos:
             if combo not in present:
                 cond_str = " ".join(f"{col} {val}" for col, val in zip(within_cols, combo))
+                if DEBUG_UNBALANCED and debug_missing_count < debug_missing_limit:
+                    debug_missing_count += 1
+                    mask_raw = df_raw[subject_col].eq(subject)
+                    for col, val in zip(within_cols, combo):
+                        mask_raw = mask_raw & df_raw[col].eq(val)
+                    raw_count = int(mask_raw.sum())
+                    valid_count = raw_count
+                    if dv_col:
+                        dv_series = df_raw[dv_col]
+                        mask_valid = mask_raw & dv_series.notna()
+                        try:
+                            dv_numeric = pd.to_numeric(dv_series, errors="coerce")
+                            mask_valid = mask_valid & np.isfinite(dv_numeric)
+                        except Exception:
+                            pass
+                        valid_count = int(mask_valid.sum())
+                    _dbg(
+                        log_func,
+                        "[RM_ANOVA DEBUG] missing cell check: "
+                        f"sid={subject!r} "
+                        + " ".join(f"{col}={val!r}" for col, val in zip(within_cols, combo))
+                        + f" raw_rows={raw_count} valid_rows={valid_count}",
+                    )
+                    if raw_count > 0 and valid_count == 0 and dv_col:
+                        dv_sample = df_raw.loc[mask_raw, dv_col].head(5).tolist()
+                        _dbg(log_func, f"[RM_ANOVA DEBUG] dv sample (first 5)={dv_sample!r}")
+                    if raw_count == 0:
+                        subj_present = subject in set(pd.unique(df_raw[subject_col]))
+                        _dbg(
+                            log_func,
+                            f"[RM_ANOVA DEBUG] hint: subject_present={subj_present}",
+                        )
+                        for col, val in zip(within_cols, combo):
+                            col_present = val in set(pd.unique(df_raw[col]))
+                            _dbg(
+                                log_func,
+                                f"[RM_ANOVA DEBUG] hint: {col}_present={col_present} value={val!r}",
+                            )
                 issues.append(f"Subject {subject} missing {cond_str}")
 
         # Duplicate combos
@@ -220,12 +298,19 @@ def run_repeated_measures_anova(
         raise ValueError(f"Missing required columns in data for ANOVA: {missing}")
 
     # Drop NAs in all required columns
+    raw_df = data
     df = data.dropna(subset=required_cols).copy()
     if df.empty:
         raise ValueError("After dropping missing values, no data remain for ANOVA.")
 
     # Ensure balanced design
-    _check_balance(df, subject_col=subject_col, within_cols=list(within_cols), dv_col=dv_col)
+    _check_balance(
+        df,
+        subject_col=subject_col,
+        within_cols=list(within_cols),
+        dv_col=dv_col,
+        raw_df=raw_df,
+    )
 
     # ----- primary path: Pingouin (if available) -----
     try:
