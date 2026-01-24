@@ -970,6 +970,8 @@ class StatsWindow(QMainWindow):
                     base_freq=self._current_base_freq,
                     rois=self.rois,
                 )
+                if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
+                    kwargs["results_dir"] = self._ensure_results_dir()
                 def handler(payload):
                     self._apply_rm_anova_results(payload, update_text=False)
 
