@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import sys
 
@@ -92,6 +93,8 @@ def select_projects_root(self) -> None:
 
     if saved_root and Path(saved_root).is_dir():
         self.projectsRoot = Path(saved_root)
+    elif os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
+        self.projectsRoot = Path.cwd()
     else:
         root = QFileDialog.getExistingDirectory(
             self, "Select Projects Root Folder", ""

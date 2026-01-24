@@ -280,7 +280,7 @@ def write_audit_json(
 
 def format_audit_summary(
     audit: Mapping[str, Any] | None,
-    problems: Sequence[str] | None,
+    problems: Sequence[str] | None = None,
 ) -> tuple[str, bool]:
     """Return the GUI log line and whether it should be treated as a warning."""
     if not audit:
@@ -290,25 +290,79 @@ def format_audit_summary(
     if problems:
         return "[AUDIT WARNING] " + "; ".join(problems), True
 
-    sfreq = _to_float(audit.get("sfreq")) or 0.0
-    hp = _to_float(audit.get("highpass"))
-    lp = _to_float(audit.get("lowpass"))
-    ref = audit.get("ref_chans")
-    stim = audit.get("stim_channel") or ""
-    hp_str = f"{hp:g}" if hp is not None else "DC"
-    lp_str = f"{lp:g}" if lp is not None else "Nyq"
+    def _fmt_int(value: Any) -> str:
+        if value is None:
+            return "NA"
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if num.is_integer():
+            return str(int(num))
+        return f"{num:g}"
 
-    line = (
-        "[AUDIT] "
-        f"DS={sfreq:.1f}Hz "
-        f"HP={hp_str} "
-        f"LP={lp_str} "
-        f"ref={tuple(ref) if ref else 'None'} "
-        f"ch={audit.get('n_channels', 'NA')} "
-        f"events={audit.get('n_events', 'NA')} "
-        f"reject={audit.get('n_rejected', 'NA')} "
-        f"stim='{stim}' "
-        f"FIF={bool(audit.get('save_preprocessed_fif'))}"
+    def _fmt_freq(value: float | None, default: str) -> str:
+        if value is None:
+            return default
+        return f"{value:.1f}"
+
+    req_ds = _to_float(audit.get("req_downsample"))
+    act_ds = _to_float(audit.get("act_sfreq")) or _to_float(audit.get("sfreq"))
+    req_hp = _to_float(audit.get("req_highpass"))
+    act_hp = _to_float(audit.get("act_highpass"))
+    req_lp = _to_float(audit.get("req_lowpass"))
+    act_lp = _to_float(audit.get("act_lowpass"))
+    req_ref = audit.get("req_ref_chans")
+    act_ref = audit.get("ref_chans")
+    req_stim = audit.get("req_stim") or ""
+    act_events = audit.get("act_events") or audit.get("n_events")
+    req_max_channels = audit.get("req_max_channels")
+    act_channels = audit.get("n_channels")
+    req_reject = audit.get("req_reject_thresh")
+    act_rejected = audit.get("n_rejected")
+    req_save_fif = audit.get("req_save_fif")
+    act_fif_written = audit.get("act_fif_written")
+
+    ds_part = "DS req=NAHz act=NAHz"
+    if req_ds is not None or act_ds is not None:
+        req_ds_str = _fmt_freq(req_ds, "NA")
+        act_ds_str = _fmt_freq(act_ds, "NA")
+        ds_part = f"DS req={req_ds_str}Hz act={act_ds_str}Hz"
+
+    hp_part = "HP req=DC act=DC"
+    if req_hp is not None or act_hp is not None:
+        req_hp_str = _fmt_freq(req_hp, "DC")
+        act_hp_str = _fmt_freq(act_hp, "DC")
+        hp_part = f"HP req={req_hp_str}Hz act={act_hp_str}Hz"
+
+    lp_part = "LP req=Nyq act=Nyq"
+    if req_lp is not None or act_lp is not None:
+        req_lp_str = _fmt_freq(req_lp, "Nyq")
+        act_lp_str = _fmt_freq(act_lp, "Nyq")
+        lp_part = f"LP req={req_lp_str}Hz act={act_lp_str}Hz"
+
+    ref_req_str = tuple(req_ref) if req_ref else "None"
+    ref_act_str = tuple(act_ref) if act_ref else "None"
+    ref_part = f"ref req={ref_req_str} act={ref_act_str}"
+
+    ch_req_str = f"≤{_fmt_int(req_max_channels)}" if req_max_channels is not None else "≤NA"
+    ch_part = f"ch req={ch_req_str} act={_fmt_int(act_channels)}"
+
+    events_part = f"events req_stim='{req_stim}' act={_fmt_int(act_events)}"
+    reject_part = f"reject req={_fmt_int(req_reject)} act={_fmt_int(act_rejected)}"
+    fif_part = f"FIF req={bool(req_save_fif)} act_written={_fmt_int(act_fif_written)}"
+
+    line = "[AUDIT] " + " ".join(
+        [
+            ds_part,
+            hp_part,
+            lp_part,
+            ref_part,
+            ch_part,
+            events_part,
+            reject_part,
+            fif_part,
+        ]
     )
     return line, False
 

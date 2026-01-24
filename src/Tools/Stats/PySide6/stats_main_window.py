@@ -21,6 +21,7 @@ from PySide6.QtCore import Qt, QTimer, QThreadPool, Slot, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QFontMetrics, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QGroupBox,
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTextEdit,
     QSizePolicy,
     QVBoxLayout,
@@ -157,6 +159,7 @@ class StatsWindow(QMainWindow):
         self.subject_groups: Dict[str, str | None] = {}
         self.subjects: List[str] = []
         self.conditions: List[str] = []
+        self.selected_conditions: List[str] = []
         self._multi_group_manifest: bool = False
         self.rm_anova_results_data: Optional[pd.DataFrame] = None
         self.mixed_model_results_data: Optional[pd.DataFrame] = None
@@ -174,6 +177,7 @@ class StatsWindow(QMainWindow):
         self._current_base_freq: float = 6.0
         self._current_alpha: float = 0.05
         self._active_pipeline: PipelineId | None = None
+        self._condition_checkboxes: dict[str, QCheckBox] = {}
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
@@ -229,6 +233,57 @@ class StatsWindow(QMainWindow):
             self._set_roi_status(txt)
         else:
             self._set_status(txt)
+
+    def _clear_conditions_layout(self) -> None:
+        layout = self.conditions_list_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _populate_conditions_panel(self, conditions: List[str]) -> None:
+        self._clear_conditions_layout()
+        self._condition_checkboxes.clear()
+        if not conditions:
+            placeholder = QLabel("No conditions detected yet.")
+            placeholder.setWordWrap(True)
+            self.conditions_list_layout.addWidget(placeholder)
+            self.selected_conditions = []
+            return
+
+        for condition in conditions:
+            checkbox = QCheckBox(condition)
+            checkbox.setChecked(True)
+            checkbox.stateChanged.connect(self._on_condition_toggled)
+            self.conditions_list_layout.addWidget(checkbox)
+            self._condition_checkboxes[condition] = checkbox
+
+        self.conditions_list_layout.addStretch(1)
+        self._sync_selected_conditions()
+
+    def _sync_selected_conditions(self) -> None:
+        self.selected_conditions = [
+            name for name, checkbox in self._condition_checkboxes.items() if checkbox.isChecked()
+        ]
+
+    def _on_condition_toggled(self, _state: int) -> None:
+        self._sync_selected_conditions()
+
+    def _select_all_conditions(self) -> None:
+        for checkbox in self._condition_checkboxes.values():
+            checkbox.setChecked(True)
+        self._sync_selected_conditions()
+
+    def _select_no_conditions(self) -> None:
+        for checkbox in self._condition_checkboxes.values():
+            checkbox.setChecked(False)
+        self._sync_selected_conditions()
+
+    def _get_selected_conditions(self) -> List[str]:
+        if self._condition_checkboxes:
+            return list(self.selected_conditions)
+        return list(self.conditions)
 
     def append_log(self, section: str, message: str, level: str = "info") -> None:
         line = format_log_line(f"[{section}] {message}", level=level)
@@ -401,6 +456,12 @@ class StatsWindow(QMainWindow):
             return False
         if not self.subject_data:
             QMessageBox.warning(self, "No Data", "Please select a valid data folder first.")
+            return False
+        selected_conditions = self._get_selected_conditions()
+        if len(selected_conditions) < 2:
+            message = "Select at least two conditions to run the analysis."
+            self._set_status(message)
+            self.append_log("General", message, level="warning")
             return False
         if require_anova and self.rm_anova_results_data is None:
             QMessageBox.warning(
@@ -796,13 +857,13 @@ class StatsWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, title, start_dir or self.project_dir)
         return folder or None
 
-    def get_analysis_settings_snapshot(self) -> tuple[float, float, dict]:
+    def get_analysis_settings_snapshot(self) -> tuple[float, float, dict, list[str]]:
         self.refresh_rois()
         got = self._get_analysis_settings()
         if not got:
             raise RuntimeError("Unable to load analysis settings.")
         self._current_base_freq, self._current_alpha = got
-        return self._current_base_freq, self._current_alpha, self.rois
+        return self._current_base_freq, self._current_alpha, self.rois, self._get_selected_conditions()
 
     def ensure_pipeline_ready(
         self, pipeline_id: PipelineId, *, require_anova: bool = False
@@ -950,7 +1011,7 @@ class StatsWindow(QMainWindow):
         return dict(
             subject_data=self.subject_data,
             subjects=self.subjects,
-            conditions=self.conditions,
+            conditions=self._get_selected_conditions(),
             selected_metric=self._harmonic_config.metric,
             mean_value_threshold=self._harmonic_config.threshold,
             base_freq=self._current_base_freq,
@@ -965,7 +1026,7 @@ class StatsWindow(QMainWindow):
             if step_id is StepId.RM_ANOVA:
                 kwargs = dict(
                     subjects=self.subjects,
-                    conditions=self.conditions,
+                    conditions=self._get_selected_conditions(),
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     rois=self.rois,
@@ -979,7 +1040,7 @@ class StatsWindow(QMainWindow):
             if step_id is StepId.MIXED_MODEL:
                 kwargs = dict(
                     subjects=self.subjects,
-                    conditions=self.conditions,
+                    conditions=self._get_selected_conditions(),
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
@@ -993,7 +1054,7 @@ class StatsWindow(QMainWindow):
             if step_id is StepId.INTERACTION_POSTHOCS:
                 kwargs = dict(
                     subjects=self.subjects,
-                    conditions=self.conditions,
+                    conditions=self._get_selected_conditions(),
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
@@ -1015,7 +1076,7 @@ class StatsWindow(QMainWindow):
             if step_id is StepId.BETWEEN_GROUP_ANOVA:
                 kwargs = dict(
                     subjects=self.subjects,
-                    conditions=self.conditions,
+                    conditions=self._get_selected_conditions(),
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     rois=self.rois,
@@ -1028,7 +1089,7 @@ class StatsWindow(QMainWindow):
             if step_id is StepId.BETWEEN_GROUP_MIXED_MODEL:
                 kwargs = dict(
                     subjects=self.subjects,
-                    conditions=self.conditions,
+                    conditions=self._get_selected_conditions(),
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
@@ -1043,7 +1104,7 @@ class StatsWindow(QMainWindow):
             if step_id is StepId.GROUP_CONTRASTS:
                 kwargs = dict(
                     subjects=self.subjects,
-                    conditions=self.conditions,
+                    conditions=self._get_selected_conditions(),
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
@@ -1356,6 +1417,34 @@ class StatsWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
 
+        # included conditions panel
+        self.conditions_group = QGroupBox("Included Conditions")
+        self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        conditions_layout = QVBoxLayout(self.conditions_group)
+        conditions_layout.setSpacing(6)
+
+        conditions_button_row = QHBoxLayout()
+        self.conditions_select_all_btn = QPushButton("Select All")
+        self.conditions_select_all_btn.clicked.connect(self._select_all_conditions)
+        conditions_button_row.addWidget(self.conditions_select_all_btn)
+        self.conditions_select_none_btn = QPushButton("Select None")
+        self.conditions_select_none_btn.clicked.connect(self._select_no_conditions)
+        conditions_button_row.addWidget(self.conditions_select_none_btn)
+        conditions_button_row.addStretch(1)
+        conditions_layout.addLayout(conditions_button_row)
+
+        self.conditions_scroll_area = QScrollArea()
+        self.conditions_scroll_area.setWidgetResizable(True)
+        self.conditions_scroll_area.setMinimumHeight(120)
+        conditions_list_widget = QWidget()
+        self.conditions_list_layout = QVBoxLayout(conditions_list_widget)
+        self.conditions_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.conditions_list_layout.setSpacing(4)
+        self.conditions_scroll_area.setWidget(conditions_list_widget)
+        conditions_layout.addWidget(self.conditions_scroll_area)
+
+        main_layout.addWidget(self.conditions_group)
+
         # folder row
         folder_row = QHBoxLayout()
         folder_row.setSpacing(5)
@@ -1461,15 +1550,17 @@ class StatsWindow(QMainWindow):
         self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_layout.addWidget(self.output_text, 1)
 
-        main_layout.setStretch(0, 0)  # folder row
-        main_layout.setStretch(1, 0)  # tools row
-        main_layout.setStretch(2, 0)  # analysis controls
-        main_layout.setStretch(3, 0)  # status row
-        main_layout.setStretch(4, 0)  # ROI label
-        main_layout.setStretch(5, 1)  # output pane
+        main_layout.setStretch(0, 0)  # conditions panel
+        main_layout.setStretch(1, 0)  # folder row
+        main_layout.setStretch(2, 0)  # tools row
+        main_layout.setStretch(3, 0)  # analysis controls
+        main_layout.setStretch(4, 0)  # status row
+        main_layout.setStretch(5, 0)  # ROI label
+        main_layout.setStretch(6, 1)  # output pane
 
         # initialize export buttons
         self._update_export_buttons()
+        self._populate_conditions_panel([])
 
     # --------------------------- actions ---------------------------
 
@@ -1777,6 +1868,7 @@ class StatsWindow(QMainWindow):
 
                 self.subjects = scan_result.subjects
                 self.conditions = scan_result.conditions
+                self._populate_conditions_panel(self.conditions)
                 self.subject_data = scan_result.subject_data
                 self.subject_groups = scan_result.subject_groups
                 self._set_status(

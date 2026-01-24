@@ -108,7 +108,7 @@ class StatsViewProtocol:
 
     def prompt_phase_folder(self, title: str, start_dir: str | None = None) -> Optional[str]: ...
 
-    def get_analysis_settings_snapshot(self) -> tuple[float, float, dict]: ...
+    def get_analysis_settings_snapshot(self) -> tuple[float, float, dict, list[str]]: ...
 
 
 @dataclass
@@ -340,7 +340,7 @@ class StatsController:
             return
 
         try:
-            base_freq, _alpha, roi_map = self._view.get_analysis_settings_snapshot()
+            base_freq, _alpha, roi_map, _selected_conditions = self._view.get_analysis_settings_snapshot()
         except Exception as exc:  # noqa: BLE001
             self._view.append_log(section, f"[Between] Unable to load analysis settings: {exc}", level="error")
             return

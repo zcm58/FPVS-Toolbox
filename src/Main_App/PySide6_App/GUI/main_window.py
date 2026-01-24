@@ -48,6 +48,8 @@ logger.addHandler(logging.NullHandler())
 # ----------------------------------------------------------------------
 
 def _qt_showerror(title, message, **options):
+    if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
+        return
     parent = QApplication.activeWindow()
     # Suppress *all* legacy error popups when the main window says
     # completion dialogs should be hidden, or when the run was cancelled.
@@ -60,11 +62,15 @@ def _qt_showerror(title, message, **options):
 
 
 def _qt_showwarning(title, message, **options):
+    if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
+        return
     parent = QApplication.activeWindow()
     QMessageBox.warning(parent, title, message)
 
 
 def _qt_showinfo(title, message, **options):
+    if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
+        return
     parent = QApplication.activeWindow()
     # Same suppression rules for info dialogs (used by legacy completion paths).
     if parent and (
@@ -106,8 +112,35 @@ _tk_msg_module.showinfo = _qt_showinfo
 _tk_msg_module.askyesno = _qt_askyesno
 _tk_module.messagebox = _tk_msg_module
 _tk_module.END = "end"
-sys.modules.setdefault("tkinter", _tk_module)
+
+_tk_filedialog = ModuleType("tkinter.filedialog")
+
+class _DummyVar:
+    def __init__(self, value=None):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+    def set(self, value):
+        self._value = value
+
+_tk_module.Variable = _DummyVar
+_tk_module.StringVar = _DummyVar
+_tk_module.IntVar = _DummyVar
+_tk_module.DoubleVar = _DummyVar
+_tk_module.BooleanVar = _DummyVar
+
+def _noop_dialog(*_args, **_kwargs):
+    return ""
+
+_tk_filedialog.askopenfilename = _noop_dialog
+_tk_filedialog.askdirectory = _noop_dialog
+_tk_filedialog.asksaveasfilename = _noop_dialog
+_tk_module.filedialog = _tk_filedialog
+sys.modules["tkinter"] = _tk_module
 sys.modules["tkinter.messagebox"] = _tk_msg_module
+sys.modules["tkinter.filedialog"] = _tk_filedialog
 
 
 # Import after stubbing tkinter to avoid loading the real toolkit
@@ -140,7 +173,11 @@ from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
 )
 from Tools.Stats import StatsWindow as PysideStatsWindow
-from Tools.Stats.Legacy.stats import StatsAnalysisWindow as launch_ctk_stats
+if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
+    def launch_ctk_stats(*_args, **_kwargs):
+        return None
+else:
+    from Tools.Stats.Legacy.stats import StatsAnalysisWindow as launch_ctk_stats
 from config import FPVS_TOOLBOX_VERSION
 from . import update_manager
 from .file_menu import init_file_menu
@@ -1028,6 +1065,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 pass
 
         # Call into the legacy finalization path, optionally suppressing its dialogs
+        test_suppress = bool(os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"))
+
         if cancelled:
             self._suppress_completion_dialogs = True
             try:
@@ -1040,8 +1079,12 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         else:
             # Normal success/error path
             try:
+                if test_suppress:
+                    self._suppress_completion_dialogs = True
                 super()._finalize_processing(success)
             finally:
+                if test_suppress:
+                    self._suppress_completion_dialogs = False
                 self._cancel_requested = False
 
     # ------------------------ Tk-style scheduling ------------------------ #
