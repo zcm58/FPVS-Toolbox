@@ -25,8 +25,7 @@ def stats_smoke_env(monkeypatch):
     dummy_df = pd.DataFrame({"Effect": ["group"], "Pr > F": [0.5]})
 
     monkeypatch.setattr(
-        stats_mod,
-        "prepare_all_subject_summed_bca_data",
+        "Tools.Stats.PySide6.stats_workers.prepare_summed_bca_data",
         lambda *a, **k: store["payload"],
         raising=False,
     )
