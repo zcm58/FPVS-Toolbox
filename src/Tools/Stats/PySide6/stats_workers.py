@@ -210,8 +210,8 @@ def run_rm_anova(progress_cb, message_cb, *, subjects, conditions, subject_data,
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
     message_cb("Running RM-ANOVA…")
-    _, anova_df_results = analysis_run_rm_anova(all_subject_bca_data, message_cb)
-    return {"anova_df_results": anova_df_results}
+    output_text, anova_df_results = analysis_run_rm_anova(all_subject_bca_data, message_cb)
+    return {"anova_df_results": anova_df_results, "output_text": output_text}
 
 
 def run_between_group_anova(
@@ -571,4 +571,3 @@ def run_between_group_process_task(
         "stdout": stdout_lines,
         "stderr": stderr_output,
     }
-

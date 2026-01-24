@@ -1096,7 +1096,7 @@ class StatsWindow(QMainWindow):
                         f"  • Skipping export for {label} (no data)",
                         level="warning",
                     )
-                    return False
+                    continue
 
                 result_paths = self.export_results(kind, data_obj, out_dir)
 
@@ -1150,7 +1150,7 @@ class StatsWindow(QMainWindow):
                         f"  • Skipping export for {label} (no data)",
                         level="warning",
                     )
-                    return False
+                    continue
 
                 result_paths = self.export_results(kind, data_obj, out_dir)
 
@@ -1210,6 +1210,19 @@ class StatsWindow(QMainWindow):
     def _apply_rm_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.rm_anova_results_data = payload.get("anova_df_results")
         alpha = getattr(self, "_current_alpha", 0.05)
+        output_text = payload.get("output_text", "")
+
+        if (
+            (self.rm_anova_results_data is None or self.rm_anova_results_data.empty)
+            and isinstance(output_text, str)
+            and output_text.strip()
+        ):
+            section = self._section_label(PipelineId.SINGLE)
+            self.append_log(
+                section,
+                f"  • RM-ANOVA note: {output_text.strip()}",
+                level="warning",
+            )
 
         output_text = build_rm_anova_output(self.rm_anova_results_data, alpha)
         if update_text:
