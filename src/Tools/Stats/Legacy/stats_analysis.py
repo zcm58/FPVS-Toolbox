@@ -22,7 +22,7 @@ from statsmodels.stats.multitest import multipletests
 from Tools.Stats.Legacy.excel_io import safe_read_excel
 from Tools.Stats.roi_resolver import ROI, resolve_active_rois
 from .blas_limits import single_threaded_blas
-from .repeated_m_anova import run_repeated_measures_anova
+from .repeated_m_anova import RM_ANOVA_DIAG, build_rm_anova_frames, run_repeated_measures_anova
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,216 @@ HARMONIC_CHECK_ALPHA = 0.05
 SUMMED_BCA_Z_THRESHOLD_DEFAULT = 1.64
 SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT = 5
 SUMMED_BCA_STOP_AFTER_N_CONSEC_NONSIG_DEFAULT = 2
+
+
+def _rm_anova_value_is_valid(value: object) -> bool:
+    if pd.isna(value):
+        return False
+    try:
+        return bool(np.isfinite(value))
+    except Exception:
+        return False
+
+
+def _preview_values(values: list[object], limit: int = 50) -> str:
+    sorted_vals = sorted(values, key=lambda v: repr(v))
+    if len(sorted_vals) <= limit:
+        return "[" + ", ".join(repr(v) for v in sorted_vals) + "]"
+    head = ", ".join(repr(v) for v in sorted_vals[:30])
+    return "[" + head + f", ... ({len(sorted_vals)} total)]"
+
+
+def _rm_anova_expected_levels(
+    all_subject_data: dict[str, dict[str, dict[str, object]]],
+    *,
+    subjects: Optional[list[str]] = None,
+    conditions: Optional[list[str]] = None,
+    rois: Optional[list[str]] = None,
+) -> tuple[list[str], list[str], list[str]]:
+    subject_list = list(subjects) if subjects else sorted(all_subject_data.keys(), key=repr)
+    if conditions:
+        condition_list = list(conditions)
+    else:
+        condition_set = {
+            cond_name
+            for cond_data in all_subject_data.values()
+            for cond_name in (cond_data or {}).keys()
+        }
+        condition_list = sorted(condition_set, key=repr)
+    if rois:
+        roi_list = list(rois)
+    else:
+        roi_set = {
+            roi_name
+            for cond_data in all_subject_data.values()
+            for roi_data in (cond_data or {}).values()
+            for roi_name in (roi_data or {}).keys()
+        }
+        roi_list = sorted(roi_set, key=repr)
+    return subject_list, condition_list, roi_list
+
+
+def _collect_rm_anova_diagnostics(
+    all_subject_data: dict[str, dict[str, dict[str, object]]],
+    df_all: pd.DataFrame,
+    df_valid: pd.DataFrame,
+    *,
+    subjects: Optional[list[str]] = None,
+    conditions: Optional[list[str]] = None,
+    rois: Optional[list[str]] = None,
+) -> dict[str, object]:
+    subject_list, condition_list, roi_list = _rm_anova_expected_levels(
+        all_subject_data,
+        subjects=subjects,
+        conditions=conditions,
+        rois=rois,
+    )
+
+    missing_in_dict: list[tuple[str, str, str]] = []
+    present_but_invalid: list[tuple[str, str, str, object]] = []
+    for subject in subject_list:
+        subject_data = all_subject_data.get(subject, {})
+        for condition in condition_list:
+            condition_data = subject_data.get(condition)
+            if condition_data is None:
+                for roi in roi_list:
+                    missing_in_dict.append((subject, condition, roi))
+                continue
+            for roi in roi_list:
+                if roi not in condition_data:
+                    missing_in_dict.append((subject, condition, roi))
+                    continue
+                value = condition_data.get(roi)
+                if not _rm_anova_value_is_valid(value):
+                    present_but_invalid.append((subject, condition, roi, value))
+
+    duplicate_cells = []
+    if not df_all.empty:
+        grouped = df_all.groupby(["subject", "condition", "roi"], dropna=False).size()
+        duplicate_cells = [
+            (subject, condition, roi, int(count))
+            for (subject, condition, roi), count in grouped.items()
+            if count > 1
+        ]
+
+    expected_rows = len(subject_list) * len(condition_list) * len(roi_list)
+    return {
+        "subjects": subject_list,
+        "conditions": condition_list,
+        "rois": roi_list,
+        "expected_rows": expected_rows,
+        "missing_in_dict": missing_in_dict,
+        "present_but_invalid": present_but_invalid,
+        "duplicate_cells": duplicate_cells,
+        "df_all_shape": df_all.shape,
+        "df_valid_shape": df_valid.shape,
+    }
+
+
+def _rm_anova_diag_summary(diag: dict[str, object]) -> str:
+    missing_count = len(diag["missing_in_dict"])
+    invalid_count = len(diag["present_but_invalid"])
+    duplicate_count = len(diag["duplicate_cells"])
+    expected_rows = diag["expected_rows"]
+    df_all_shape = diag["df_all_shape"]
+    df_valid_shape = diag["df_valid_shape"]
+    return (
+        "Unbalanced: "
+        f"missing_in_dict={missing_count}, "
+        f"present_but_invalid={invalid_count}, "
+        f"duplicates={duplicate_count}; "
+        f"expected={expected_rows}, "
+        f"df_all={df_all_shape}, "
+        f"df_valid={df_valid_shape}."
+    )
+
+
+def _log_rm_anova_diagnostics(
+    all_subject_data: dict[str, dict[str, dict[str, object]]],
+    df_all: pd.DataFrame,
+    df_valid: pd.DataFrame,
+    diag: dict[str, object],
+    log_func,
+    *,
+    force: bool = False,
+) -> None:
+    if not log_func or (not RM_ANOVA_DIAG and not force):
+        return
+
+    subjects = diag["subjects"]
+    log_func("[RM_ANOVA DIAG] RM-ANOVA imbalance diagnostics")
+    log_func(f"[RM_ANOVA DIAG] expected_rows={diag['expected_rows']}")
+    log_func(f"[RM_ANOVA DIAG] df_all shape={diag['df_all_shape']}")
+    log_func(f"[RM_ANOVA DIAG] df_valid shape={diag['df_valid_shape']}")
+    log_func(
+        "[RM_ANOVA DIAG] unique subjects: "
+        f"{_preview_values([s for s in pd.unique(df_all.get('subject', []))])}"
+    )
+    log_func(
+        "[RM_ANOVA DIAG] unique conditions: "
+        f"{_preview_values([c for c in pd.unique(df_all.get('condition', []))])}"
+    )
+    log_func(
+        "[RM_ANOVA DIAG] unique rois: "
+        f"{_preview_values([r for r in pd.unique(df_all.get('roi', []))])}"
+    )
+
+    df_all_counts = df_all.groupby("subject")["subject"].count().to_dict() if not df_all.empty else {}
+    df_valid_counts = (
+        df_valid.groupby("subject")["subject"].count().to_dict() if not df_valid.empty else {}
+    )
+    for subject in subjects:
+        log_func(
+            "[RM_ANOVA DIAG] subject count "
+            f"{subject!r}: df_all={df_all_counts.get(subject, 0)} "
+            f"df_valid={df_valid_counts.get(subject, 0)}"
+        )
+
+    log_func(
+        "[RM_ANOVA DIAG] summary: "
+        f"missing_in_dict={len(diag['missing_in_dict'])}, "
+        f"present_but_invalid={len(diag['present_but_invalid'])}, "
+        f"duplicates={len(diag['duplicate_cells'])}"
+    )
+
+    for subject, condition, roi in diag["missing_in_dict"]:
+        subject_data = all_subject_data.get(subject, {})
+        available_conditions = sorted(subject_data.keys(), key=repr)
+        roi_keys = []
+        if condition in subject_data:
+            roi_keys = sorted(subject_data.get(condition, {}).keys(), key=repr)
+        log_func(
+            "[RM_ANOVA DIAG] missing_in_dict: "
+            f"subject={subject!r} condition={condition!r} roi={roi!r} "
+            f"available_conditions={available_conditions!r} "
+            f"available_rois={roi_keys!r}"
+        )
+
+    for subject, condition, roi, value in diag["present_but_invalid"]:
+        value_type = type(value).__name__
+        finite_check = None
+        try:
+            finite_check = bool(np.isfinite(value))
+        except Exception:
+            finite_check = None
+        conversion = None
+        if isinstance(value, str):
+            try:
+                conversion = float(value)
+            except Exception:
+                conversion = None
+        log_func(
+            "[RM_ANOVA DIAG] present_but_invalid: "
+            f"subject={subject!r} condition={condition!r} roi={roi!r} "
+            f"value={value!r} type={value_type} isfinite={finite_check} "
+            f"string_float={conversion!r}"
+        )
+
+    for subject, condition, roi, count in diag["duplicate_cells"]:
+        log_func(
+            "[RM_ANOVA DIAG] duplicate_cell: "
+            f"subject={subject!r} condition={condition!r} roi={roi!r} count={count}"
+        )
 SUMMED_BCA_ARM_STOP_AFTER_FIRST_SIG_DEFAULT = True
 SUMMED_BCA_Z_SHEET_NAME = "Z Score"
 
@@ -375,23 +585,33 @@ def prepare_all_subject_summed_bca_data(
     return all_subject_data
 
 
-def run_rm_anova(all_subject_data, log_func):
+def run_rm_anova(
+    all_subject_data,
+    log_func,
+    *,
+    subjects: Optional[list[str]] = None,
+    conditions: Optional[list[str]] = None,
+    rois: Optional[list[str]] = None,
+):
     """Run RM-ANOVA on summed BCA data."""
-    long_format_data = []
-    for pid, cond_data in all_subject_data.items():
-        for cond_name, roi_data in cond_data.items():
-            for roi_name, value in roi_data.items():
-                if not pd.isna(value) and np.isfinite(value):
-                    long_format_data.append(
-                        {"subject": pid, "condition": cond_name, "roi": roi_name, "value": value}
-                    )
-
-    if not long_format_data:
+    df_all, df_long = build_rm_anova_frames(all_subject_data)
+    if df_long.empty:
         return "No valid data available for RM-ANOVA after filtering NaNs.", None
 
-    df_long = pd.DataFrame(long_format_data)
     if df_long["condition"].nunique() < 2 or df_long["roi"].nunique() < 1:
         return "RM-ANOVA requires at least two conditions and at least one ROI with valid data.", None
+
+    diag = _collect_rm_anova_diagnostics(
+        all_subject_data,
+        df_all,
+        df_long,
+        subjects=subjects,
+        conditions=conditions,
+        rois=rois,
+    )
+    diag_summary = _rm_anova_diag_summary(diag)
+    if RM_ANOVA_DIAG:
+        _log_rm_anova_diagnostics(all_subject_data, df_all, df_long, diag, log_func)
 
     try:
         with warnings.catch_warnings():
@@ -404,8 +624,13 @@ def run_rm_anova(all_subject_data, log_func):
                 dv_col="value",
                 within_cols=["condition", "roi"],
                 subject_col="subject",
+                raw_df=df_all,
+                log_func=log_func,
+                diag_summary=diag_summary,
             )
     except Exception as e:
+        if "Data is unbalanced" in str(e):
+            _log_rm_anova_diagnostics(all_subject_data, df_all, df_long, diag, log_func, force=True)
         log_func(f"!!! RM-ANOVA Error: {e}")
         return f"RM-ANOVA analysis failed unexpectedly: {e}", None
 

@@ -36,12 +36,14 @@ Dependencies
 from __future__ import annotations
 
 from itertools import product
-from typing import Optional, List
+import os
+from typing import Optional, List, Tuple
 
 import numpy as np
 import pandas as pd
 
-DEBUG_UNBALANCED = True
+RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
+DEBUG_UNBALANCED = RM_ANOVA_DIAG
 
 
 # ----------------------------- helpers --------------------------------- #
@@ -54,6 +56,49 @@ def _dbg(log_func, msg: str) -> None:
             print(msg)
     except Exception:
         print(msg)
+
+
+def build_rm_anova_frames(
+    all_subject_data: dict[str, dict[str, dict[str, object]]],
+    *,
+    subject_col: str = "subject",
+    condition_col: str = "condition",
+    roi_col: str = "roi",
+    value_col: str = "value",
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Build diagnostics-friendly DataFrames for RM-ANOVA.
+
+    Returns:
+        df_all: every subject/condition/ROI row that exists in the nested dict.
+        df_valid: rows that pass the existing validity criteria.
+    """
+    rows_all: list[dict[str, object]] = []
+    rows_valid: list[dict[str, object]] = []
+    for pid, cond_data in all_subject_data.items():
+        for cond_name, roi_data in cond_data.items():
+            for roi_name, value in roi_data.items():
+                rows_all.append(
+                    {
+                        subject_col: pid,
+                        condition_col: cond_name,
+                        roi_col: roi_name,
+                        value_col: value,
+                    }
+                )
+                if not pd.isna(value) and np.isfinite(value):
+                    rows_valid.append(
+                        {
+                            subject_col: pid,
+                            condition_col: cond_name,
+                            roi_col: roi_name,
+                            value_col: value,
+                        }
+                    )
+
+    df_all = pd.DataFrame(rows_all, columns=[subject_col, condition_col, roi_col, value_col])
+    df_valid = pd.DataFrame(rows_valid, columns=[subject_col, condition_col, roi_col, value_col])
+    return df_all, df_valid
 
 
 def _check_balance(
@@ -258,6 +303,10 @@ def run_repeated_measures_anova(
     dv_col: str,
     within_cols: List[str],
     subject_col: str,
+    *,
+    raw_df: Optional[pd.DataFrame] = None,
+    log_func=None,
+    diag_summary: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Run a repeated measures ANOVA on long-format data.
@@ -272,6 +321,12 @@ def run_repeated_measures_anova(
         Names of within-subject factor columns (e.g., ['condition', 'roi']).
     subject_col : str
         Name of the subject identifier column.
+    raw_df : pd.DataFrame, optional
+        Optional raw long-format data for diagnostics (not used for analysis).
+    log_func : callable, optional
+        Log function for diagnostics.
+    diag_summary : str, optional
+        One-line diagnostics summary to append on unbalanced errors.
 
     Returns
     -------
@@ -298,19 +353,25 @@ def run_repeated_measures_anova(
         raise ValueError(f"Missing required columns in data for ANOVA: {missing}")
 
     # Drop NAs in all required columns
-    raw_df = data
+    raw_source = raw_df if raw_df is not None else data
     df = data.dropna(subset=required_cols).copy()
     if df.empty:
         raise ValueError("After dropping missing values, no data remain for ANOVA.")
 
     # Ensure balanced design
-    _check_balance(
-        df,
-        subject_col=subject_col,
-        within_cols=list(within_cols),
-        dv_col=dv_col,
-        raw_df=raw_df,
-    )
+    try:
+        _check_balance(
+            df,
+            subject_col=subject_col,
+            within_cols=list(within_cols),
+            dv_col=dv_col,
+            raw_df=raw_source,
+            log_func=log_func,
+        )
+    except ValueError as exc:
+        if diag_summary:
+            raise ValueError(f"{exc} {diag_summary}") from exc
+        raise
 
     # ----- primary path: Pingouin (if available) -----
     try:
