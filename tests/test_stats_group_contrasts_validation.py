@@ -59,7 +59,7 @@ def test_validate_group_contrasts_happy_path(valid_df):
 def test_run_group_contrasts_blocks_invalid_data(monkeypatch):
     called = False
 
-    def fake_prepare_all_subject_summed_bca_data(**kwargs):  # noqa: ARG001
+    def fake_prepare_summed_bca_data(**kwargs):  # noqa: ARG001
         return {
             "s1": {"c1": {"r1": float("inf")}},
             "s2": {"c1": {"r1": 2.0}},
@@ -71,8 +71,8 @@ def test_run_group_contrasts_blocks_invalid_data(monkeypatch):
         raise AssertionError("Legacy compute_group_contrasts should not be called")
 
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.prepare_all_subject_summed_bca_data",
-        fake_prepare_all_subject_summed_bca_data,
+        "Tools.Stats.PySide6.stats_workers.prepare_summed_bca_data",
+        fake_prepare_summed_bca_data,
     )
     monkeypatch.setattr(
         "Tools.Stats.PySide6.stats_workers.compute_group_contrasts",

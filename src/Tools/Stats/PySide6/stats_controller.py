@@ -704,6 +704,7 @@ class StatsController:
             "roi_map": anova_kwargs.get("rois", {}),
             "base_freq": anova_kwargs.get("base_freq", 6.0),
             "alpha": mixed_kwargs.get("alpha", 0.05),
+            "dv_policy": anova_kwargs.get("dv_policy", {}),
             "harmonic_options": {
                 "metric": harmonic_kwargs.get("selected_metric", "Z Score"),
                 "mean_value_threshold": harmonic_kwargs.get("mean_value_threshold", 0.0),

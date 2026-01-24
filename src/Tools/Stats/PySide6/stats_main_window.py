@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QComboBox,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -31,6 +33,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QScrollArea,
     QTextEdit,
     QSizePolicy,
@@ -81,6 +84,10 @@ from Tools.Stats.PySide6.stats_data_loader import (
 )
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_workers import StatsWorker
+from Tools.Stats.PySide6.dv_policies import (
+    FIXED_K_POLICY_NAME,
+    LEGACY_POLICY_NAME,
+)
 from Tools.Stats.PySide6.summary_utils import (
     StatsSummaryFrames,
     SummaryConfig,
@@ -178,6 +185,13 @@ class StatsWindow(QMainWindow):
         self._current_alpha: float = 0.05
         self._active_pipeline: PipelineId | None = None
         self._condition_checkboxes: dict[str, QCheckBox] = {}
+        self._dv_policy_name: str = LEGACY_POLICY_NAME
+        self._dv_fixed_k: int = 5
+        self._dv_exclude_harmonic1: bool = True
+        self._dv_exclude_base_harmonics: bool = True
+        self._pipeline_conditions: dict[PipelineId, list[str]] = {}
+        self._pipeline_dv_policy: dict[PipelineId, dict[str, object]] = {}
+        self._pipeline_base_freq: dict[PipelineId, float] = {}
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
@@ -284,6 +298,47 @@ class StatsWindow(QMainWindow):
         if self._condition_checkboxes:
             return list(self.selected_conditions)
         return list(self.conditions)
+
+    def _get_dv_policy_payload(self) -> dict[str, object]:
+        return {
+            "name": self._dv_policy_name,
+            "fixed_k": int(self._dv_fixed_k),
+            "exclude_harmonic1": bool(self._dv_exclude_harmonic1),
+            "exclude_base_harmonics": bool(self._dv_exclude_base_harmonics),
+        }
+
+    def get_dv_policy_snapshot(self) -> dict[str, object]:
+        return dict(self._get_dv_policy_payload())
+
+    def _set_fixed_k_controls_enabled(self, enabled: bool) -> None:
+        widgets = [
+            getattr(self, "fixed_k_spinbox", None),
+            getattr(self, "fixed_k_exclude_h1", None),
+            getattr(self, "fixed_k_exclude_base", None),
+            getattr(self, "fixed_k_base_freq_value", None),
+        ]
+        for widget in widgets:
+            if widget is not None:
+                widget.setEnabled(enabled)
+
+    def _update_fixed_k_base_freq_label(self) -> None:
+        label = getattr(self, "fixed_k_base_freq_value", None)
+        if label is None:
+            return
+        label.setText(f"{self._current_base_freq:g} Hz")
+
+    def _on_dv_policy_changed(self, text: str) -> None:
+        self._dv_policy_name = text
+        self._set_fixed_k_controls_enabled(text == FIXED_K_POLICY_NAME)
+
+    def _on_fixed_k_changed(self, value: int) -> None:
+        self._dv_fixed_k = int(value)
+
+    def _on_fixed_k_exclude_h1_changed(self, state: int) -> None:
+        self._dv_exclude_harmonic1 = state == Qt.Checked
+
+    def _on_fixed_k_exclude_base_changed(self, state: int) -> None:
+        self._dv_exclude_base_harmonics = state == Qt.Checked
 
     def append_log(self, section: str, message: str, level: str = "info") -> None:
         line = format_log_line(f"[{section}] {message}", level=level)
@@ -478,6 +533,7 @@ class StatsWindow(QMainWindow):
         if not got:
             return False
         self._current_base_freq, self._current_alpha = got
+        self._update_fixed_k_base_freq_label()
         harmonic_cfg = self._get_harmonic_settings()
         if not harmonic_cfg:
             return False
@@ -541,6 +597,24 @@ class StatsWindow(QMainWindow):
             log_func=self._set_status,
         )
         return [path]
+
+    def _write_dv_metadata(self, out_dir: str, pipeline_id: PipelineId) -> None:
+        dv_policy = self._pipeline_dv_policy.get(pipeline_id, self._get_dv_policy_payload())
+        conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
+        base_freq = self._pipeline_base_freq.get(pipeline_id, self._current_base_freq)
+        payload = {
+            "policy_name": dv_policy.get("name", LEGACY_POLICY_NAME),
+            "fixed_k": dv_policy.get("fixed_k", 5),
+            "exclude_harmonic1": dv_policy.get("exclude_harmonic1", True),
+            "exclude_base_harmonics": dv_policy.get("exclude_base_harmonics", True),
+            "base_frequency_hz": base_freq,
+            "selected_conditions": list(conditions),
+        }
+        try:
+            out_path = Path(out_dir) / "dv_metadata.json"
+            out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to write DV metadata export.")
 
     def _ensure_results_dir(self) -> str:
         target = ensure_results_dir(
@@ -863,6 +937,7 @@ class StatsWindow(QMainWindow):
         if not got:
             raise RuntimeError("Unable to load analysis settings.")
         self._current_base_freq, self._current_alpha = got
+        self._update_fixed_k_base_freq_label()
         return self._current_base_freq, self._current_alpha, self.rois, self._get_selected_conditions()
 
     def ensure_pipeline_ready(
@@ -885,6 +960,9 @@ class StatsWindow(QMainWindow):
     def on_pipeline_started(self, pipeline_id: PipelineId) -> None:
         self._active_pipeline = pipeline_id
         self._harmonic_results[pipeline_id] = []
+        self._pipeline_conditions[pipeline_id] = self._get_selected_conditions()
+        self._pipeline_dv_policy[pipeline_id] = self._get_dv_policy_payload()
+        self._pipeline_base_freq[pipeline_id] = self._current_base_freq
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
             label.setText("Running…")
@@ -1030,6 +1108,7 @@ class StatsWindow(QMainWindow):
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     rois=self.rois,
+                    dv_policy=self._get_dv_policy_payload(),
                 )
                 if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
                     kwargs["results_dir"] = self._ensure_results_dir()
@@ -1046,6 +1125,7 @@ class StatsWindow(QMainWindow):
                     alpha=self._current_alpha,
                     rois=self.rois,
                     subject_groups=self.subject_groups,
+                    dv_policy=self._get_dv_policy_payload(),
                 )
                 def handler(payload):
                     self._apply_mixed_model_results(payload, update_text=False)
@@ -1060,6 +1140,7 @@ class StatsWindow(QMainWindow):
                     alpha=self._current_alpha,
                     rois=self.rois,
                     subject_groups=self.subject_groups,
+                    dv_policy=self._get_dv_policy_payload(),
                 )
                 def handler(payload):
                     self._apply_posthoc_results(payload, update_text=True)
@@ -1081,6 +1162,7 @@ class StatsWindow(QMainWindow):
                     base_freq=self._current_base_freq,
                     rois=self.rois,
                     subject_groups=self.subject_groups,
+                    dv_policy=self._get_dv_policy_payload(),
                 )
                 def handler(payload):
                     self._apply_between_anova_results(payload, update_text=False)
@@ -1096,6 +1178,7 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     subject_groups=self.subject_groups,
                     include_group=True,
+                    dv_policy=self._get_dv_policy_payload(),
                 )
                 def handler(payload):
                     self._apply_between_mixed_results(payload, update_text=False)
@@ -1110,6 +1193,7 @@ class StatsWindow(QMainWindow):
                     alpha=self._current_alpha,
                     rois=self.rois,
                     subject_groups=self.subject_groups,
+                    dv_policy=self._get_dv_policy_payload(),
                 )
                 def handler(payload):
                     self._apply_group_contrasts_results(payload, update_text=True)
@@ -1186,6 +1270,7 @@ class StatsWindow(QMainWindow):
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
                     self.append_log(section, f"      {p}")
+                self._write_dv_metadata(out_dir, PipelineId.SINGLE)
 
             return True
 
@@ -1239,6 +1324,7 @@ class StatsWindow(QMainWindow):
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
                     self.append_log(section, f"      {p}")
+                self._write_dv_metadata(out_dir, PipelineId.BETWEEN)
 
             return True
 
@@ -1445,6 +1531,52 @@ class StatsWindow(QMainWindow):
 
         main_layout.addWidget(self.conditions_group)
 
+        # summed BCA definition panel
+        self.dv_group = QGroupBox("Summed BCA definition")
+        self.dv_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        dv_layout = QVBoxLayout(self.dv_group)
+        dv_layout.setSpacing(6)
+
+        dv_method_row = QHBoxLayout()
+        dv_method_row.addWidget(QLabel("Method:"))
+        self.dv_policy_combo = QComboBox()
+        self.dv_policy_combo.addItems([LEGACY_POLICY_NAME, FIXED_K_POLICY_NAME])
+        self.dv_policy_combo.setCurrentText(self._dv_policy_name)
+        self.dv_policy_combo.currentTextChanged.connect(self._on_dv_policy_changed)
+        dv_method_row.addWidget(self.dv_policy_combo, 1)
+        dv_layout.addLayout(dv_method_row)
+
+        fixed_form = QFormLayout()
+        fixed_form.setLabelAlignment(Qt.AlignLeft)
+        fixed_form.setFormAlignment(Qt.AlignLeft)
+        fixed_form.setHorizontalSpacing(10)
+        fixed_form.setVerticalSpacing(6)
+
+        self.fixed_k_spinbox = QSpinBox()
+        self.fixed_k_spinbox.setRange(1, 50)
+        self.fixed_k_spinbox.setValue(self._dv_fixed_k)
+        self.fixed_k_spinbox.valueChanged.connect(self._on_fixed_k_changed)
+        fixed_form.addRow("K:", self.fixed_k_spinbox)
+
+        self.fixed_k_exclude_h1 = QCheckBox("Exclude harmonic 1")
+        self.fixed_k_exclude_h1.setChecked(self._dv_exclude_harmonic1)
+        self.fixed_k_exclude_h1.stateChanged.connect(self._on_fixed_k_exclude_h1_changed)
+        fixed_form.addRow("", self.fixed_k_exclude_h1)
+
+        self.fixed_k_exclude_base = QCheckBox("Exclude base-rate harmonics")
+        self.fixed_k_exclude_base.setChecked(self._dv_exclude_base_harmonics)
+        self.fixed_k_exclude_base.stateChanged.connect(self._on_fixed_k_exclude_base_changed)
+        fixed_form.addRow("", self.fixed_k_exclude_base)
+
+        self.fixed_k_base_freq_value = QLabel(f"{self._current_base_freq:g} Hz")
+        self.fixed_k_base_freq_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        fixed_form.addRow("Base frequency:", self.fixed_k_base_freq_value)
+
+        dv_layout.addLayout(fixed_form)
+        self._set_fixed_k_controls_enabled(self._dv_policy_name == FIXED_K_POLICY_NAME)
+
+        main_layout.addWidget(self.dv_group)
+
         # folder row
         folder_row = QHBoxLayout()
         folder_row.setSpacing(5)
@@ -1551,12 +1683,13 @@ class StatsWindow(QMainWindow):
         main_layout.addWidget(self.output_text, 1)
 
         main_layout.setStretch(0, 0)  # conditions panel
-        main_layout.setStretch(1, 0)  # folder row
-        main_layout.setStretch(2, 0)  # tools row
-        main_layout.setStretch(3, 0)  # analysis controls
-        main_layout.setStretch(4, 0)  # status row
-        main_layout.setStretch(5, 0)  # ROI label
-        main_layout.setStretch(6, 1)  # output pane
+        main_layout.setStretch(1, 0)  # summed BCA panel
+        main_layout.setStretch(2, 0)  # folder row
+        main_layout.setStretch(3, 0)  # tools row
+        main_layout.setStretch(4, 0)  # analysis controls
+        main_layout.setStretch(5, 0)  # status row
+        main_layout.setStretch(6, 0)  # ROI label
+        main_layout.setStretch(7, 1)  # output pane
 
         # initialize export buttons
         self._update_export_buttons()

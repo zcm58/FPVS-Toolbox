@@ -35,11 +35,11 @@ from Tools.Stats.Legacy.mixed_effects_model import run_mixed_effects_model
 from Tools.Stats.Legacy.mixed_group_anova import run_mixed_group_anova
 from Tools.Stats.Legacy.posthoc_tests import run_interaction_posthocs
 from Tools.Stats.Legacy.stats_analysis import (
-    prepare_all_subject_summed_bca_data,
     run_harmonic_check as run_harmonic_check_new,
     run_rm_anova as analysis_run_rm_anova,
     set_rois,
 )
+from Tools.Stats.PySide6.dv_policies import prepare_summed_bca_data
 
 logger = logging.getLogger("Tools.Stats")
 RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
@@ -255,18 +255,21 @@ def run_rm_anova(
     subject_data,
     base_freq,
     rois,
+    dv_policy: dict | None = None,
     results_dir: str | None = None,
 ):
     set_rois(rois)
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
     provenance_map = {} if RM_ANOVA_DIAG else None
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
+    all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
         base_freq=base_freq,
         log_func=message_cb,
+        rois=rois,
         provenance_map=provenance_map,
+        dv_policy=dv_policy,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -294,15 +297,18 @@ def run_between_group_anova(
     base_freq,
     rois,
     subject_groups: dict[str, str | None] | None = None,
+    dv_policy: dict | None = None,
 ):
     set_rois(rois)
     message_cb("Preparing data for Between-Group RM-ANOVA…")
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
+    all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
         base_freq=base_freq,
         log_func=message_cb,
+        rois=rois,
+        dv_policy=dv_policy,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -343,16 +349,19 @@ def run_lmm(
     rois,
     subject_groups: dict[str, str | None] | None = None,
     include_group: bool = False,
+    dv_policy: dict | None = None,
 ):
     set_rois(rois)
     prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
     message_cb(f"Preparing data for {prep_label}…")
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
+    all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
         base_freq=base_freq,
         log_func=message_cb,
+        rois=rois,
+        dv_policy=dv_policy,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -432,16 +441,19 @@ def run_posthoc(
     alpha,
     rois,
     subject_groups: dict[str, str | None] | None = None,
+    dv_policy: dict | None = None,
     **kwargs,
 ):
     set_rois(rois)
     message_cb("Preparing data for Interaction Post-hoc tests…")
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
+    all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
         base_freq=base_freq,
         log_func=message_cb,
+        rois=rois,
+        dv_policy=dv_policy,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -474,16 +486,19 @@ def run_group_contrasts(
     alpha,
     rois,
     subject_groups: dict[str, str | None] | None = None,
+    dv_policy: dict | None = None,
 ):
     set_rois(rois)
     _ = alpha
     message_cb("Preparing data for Between-Group Contrasts…")
-    all_subject_bca_data = prepare_all_subject_summed_bca_data(
+    all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
         base_freq=base_freq,
         log_func=message_cb,
+        rois=rois,
+        dv_policy=dv_policy,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")

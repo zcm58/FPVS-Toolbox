@@ -39,11 +39,11 @@ from Tools.Stats.Legacy.cross_phase_lmm_core import (
 from Tools.Stats.Legacy.mixed_effects_model import run_mixed_effects_model
 from Tools.Stats.Legacy.mixed_group_anova import run_mixed_group_anova
 from Tools.Stats.Legacy.stats_analysis import (
-    prepare_all_subject_summed_bca_data,
     run_harmonic_check as legacy_run_harmonic_check,
     set_rois,
 )
 from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
+from Tools.Stats.PySide6.dv_policies import prepare_summed_bca_data
 
 
 # ------------------------------ utilities -------------------------------
@@ -111,6 +111,7 @@ class JobSpec:
     roi_map: Dict[str, List[str]]
     base_freq: float
     alpha: float
+    dv_policy: Dict[str, object]
     harmonic_options: HarmonicOptions
     output_summary: Path
 
@@ -141,6 +142,7 @@ class JobSpec:
             roi_map=data.get("roi_map", {}),
             base_freq=float(data.get("base_freq", 6.0)),
             alpha=float(data.get("alpha", 0.05)),
+            dv_policy=data.get("dv_policy", {}),
             harmonic_options=harm,
             output_summary=Path(data["output"]["summary_json"]),
         )
@@ -209,12 +211,14 @@ def run_between_groups_pipeline(spec: JobSpec) -> dict:
     _stage_marker("START", "BETWEEN_GROUP_ANOVA")
     _print("Preparing summed BCA data for between-group pipeline…")
     with single_threaded_blas():
-        bca_data = prepare_all_subject_summed_bca_data(
+        bca_data = prepare_summed_bca_data(
             subjects=spec.subjects,
             conditions=spec.conditions,
             subject_data=spec.subject_data,
             base_freq=spec.base_freq,
             log_func=_print,
+            rois=spec.roi_map,
+            dv_policy=spec.dv_policy,
         )
     if not bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -352,13 +356,14 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
                 )
 
             with single_threaded_blas():
-                bca_data = prepare_all_subject_summed_bca_data(
+                bca_data = prepare_summed_bca_data(
                     subjects=subjects,
                     conditions=conditions,
                     subject_data=subject_data,
                     base_freq=base_freq,
                     rois=roi_map,
                     log_func=logger.info,
+                    dv_policy=project_spec.get("dv_policy", {}),
                 )
 
             if bca_data is None:
