@@ -14,6 +14,7 @@ StatsController.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from typing import Any, Callable, Dict
@@ -41,6 +42,7 @@ from Tools.Stats.Legacy.stats_analysis import (
 )
 
 logger = logging.getLogger("Tools.Stats")
+RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
 
 BETWEEN_STAGE_ORDER = (
     "BETWEEN_GROUP_ANOVA",
@@ -197,6 +199,53 @@ def _validate_group_contrasts_input(
             )
 
 
+def _diag_subject_data_structure(subject_data, subjects, conditions, rois, message_cb) -> None:
+    if not RM_ANOVA_DIAG or not message_cb:
+        return
+
+    subject_list = list(subjects) if subjects else sorted(subject_data.keys(), key=repr)
+    condition_list = list(conditions) if conditions else []
+    if not condition_list:
+        condition_list = sorted(
+            {cond for subj in subject_data.values() for cond in (subj or {}).keys()},
+            key=repr,
+        )
+    roi_list = []
+    if isinstance(rois, dict):
+        roi_list = sorted(rois.keys(), key=repr)
+    if not roi_list:
+        roi_list = sorted(
+            {
+                roi
+                for subj in subject_data.values()
+                for cond in (subj or {}).values()
+                for roi in (cond or {}).keys()
+            },
+            key=repr,
+        )
+
+    expected_cells = len(subject_list) * len(condition_list) * len(roi_list)
+    observed_cells = 0
+    for subj in subject_data.values():
+        for cond in (subj or {}).values():
+            observed_cells += len((cond or {}).keys())
+
+    message_cb("[RM_ANOVA DIAG] subject_data structure summary")
+    message_cb(
+        f"[RM_ANOVA DIAG] subjects={len(subject_list)} "
+        f"conditions={len(condition_list)} rois={len(roi_list)} "
+        f"expected_cells={expected_cells} observed_cells_in_dict={observed_cells}"
+    )
+    for subject in subject_list:
+        subject_conditions = sorted((subject_data.get(subject) or {}).keys(), key=repr)
+        message_cb(f"[RM_ANOVA DIAG] subject={subject!r} conditions={subject_conditions!r}")
+        for condition in subject_conditions:
+            roi_keys = sorted((subject_data.get(subject, {}).get(condition) or {}).keys(), key=repr)
+            message_cb(
+                f"[RM_ANOVA DIAG] subject={subject!r} condition={condition!r} rois={roi_keys!r}"
+            )
+
+
 def run_rm_anova(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, rois):
     set_rois(rois)
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
@@ -209,8 +258,15 @@ def run_rm_anova(progress_cb, message_cb, *, subjects, conditions, subject_data,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
+    _diag_subject_data_structure(all_subject_bca_data, subjects, conditions, rois, message_cb)
     message_cb("Running RM-ANOVA…")
-    output_text, anova_df_results = analysis_run_rm_anova(all_subject_bca_data, message_cb)
+    output_text, anova_df_results = analysis_run_rm_anova(
+        all_subject_bca_data,
+        message_cb,
+        subjects=list(subjects) if subjects else None,
+        conditions=list(conditions) if conditions else None,
+        rois=sorted(rois.keys()) if isinstance(rois, dict) else None,
+    )
     return {"anova_df_results": anova_df_results, "output_text": output_text}
 
 
