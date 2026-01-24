@@ -58,6 +58,49 @@ def _dbg(log_func, msg: str) -> None:
         print(msg)
 
 
+def classify_invalid(value: object) -> Tuple[bool, str, Optional[float]]:
+    """
+    Classify invalid RM-ANOVA cell values for diagnostics.
+
+    Returns:
+        (is_valid, reason, coerced_value)
+    """
+    if value is None:
+        return False, "none", None
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped == "":
+            return False, "empty_str", None
+        coerced_value = None
+        try:
+            coerced = pd.to_numeric(stripped, errors="coerce")
+        except Exception:
+            return False, "conversion_error", None
+        if pd.isna(coerced):
+            lower = stripped.lower()
+            if lower == "nan":
+                return False, "nan", None
+            return False, "non_numeric_str", None
+        coerced_value = float(coerced)
+        if np.isinf(coerced_value):
+            return False, "inf", coerced_value
+        return False, "non_numeric_str", coerced_value
+
+    if pd.isna(value):
+        return False, "nan", None
+
+    try:
+        if np.isfinite(value):
+            return True, "valid", None
+        if np.isinf(value):
+            return False, "inf", None
+    except Exception:
+        return False, "other_invalid", None
+
+    return False, "other_invalid", None
+
+
 def build_rm_anova_frames(
     all_subject_data: dict[str, dict[str, dict[str, object]]],
     *,

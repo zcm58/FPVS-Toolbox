@@ -246,15 +246,27 @@ def _diag_subject_data_structure(subject_data, subjects, conditions, rois, messa
             )
 
 
-def run_rm_anova(progress_cb, message_cb, *, subjects, conditions, subject_data, base_freq, rois):
+def run_rm_anova(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    subject_data,
+    base_freq,
+    rois,
+    results_dir: str | None = None,
+):
     set_rois(rois)
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
+    provenance_map = {} if RM_ANOVA_DIAG else None
     all_subject_bca_data = prepare_all_subject_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
         base_freq=base_freq,
         log_func=message_cb,
+        provenance_map=provenance_map,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -266,6 +278,8 @@ def run_rm_anova(progress_cb, message_cb, *, subjects, conditions, subject_data,
         subjects=list(subjects) if subjects else None,
         conditions=list(conditions) if conditions else None,
         rois=sorted(rois.keys()) if isinstance(rois, dict) else None,
+        provenance_map=provenance_map,
+        results_dir=results_dir,
     )
     return {"anova_df_results": anova_df_results, "output_text": output_text}
 

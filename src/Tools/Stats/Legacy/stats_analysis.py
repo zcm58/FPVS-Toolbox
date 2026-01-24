@@ -12,6 +12,7 @@ import logging
 import os
 import threading
 import warnings
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -22,7 +23,12 @@ from statsmodels.stats.multitest import multipletests
 from Tools.Stats.Legacy.excel_io import safe_read_excel
 from Tools.Stats.roi_resolver import ROI, resolve_active_rois
 from .blas_limits import single_threaded_blas
-from .repeated_m_anova import RM_ANOVA_DIAG, build_rm_anova_frames, run_repeated_measures_anova
+from .repeated_m_anova import (
+    RM_ANOVA_DIAG,
+    build_rm_anova_frames,
+    classify_invalid,
+    run_repeated_measures_anova,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +141,7 @@ def _collect_rm_anova_diagnostics(
     subjects: Optional[list[str]] = None,
     conditions: Optional[list[str]] = None,
     rois: Optional[list[str]] = None,
+    provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
 ) -> dict[str, object]:
     subject_list, condition_list, roi_list = _rm_anova_expected_levels(
         all_subject_data,
@@ -145,6 +152,7 @@ def _collect_rm_anova_diagnostics(
 
     missing_in_dict: list[tuple[str, str, str]] = []
     present_but_invalid: list[tuple[str, str, str, object]] = []
+    invalid_records: list[dict[str, object]] = []
     for subject in subject_list:
         subject_data = all_subject_data.get(subject, {})
         for condition in condition_list:
@@ -158,8 +166,28 @@ def _collect_rm_anova_diagnostics(
                     missing_in_dict.append((subject, condition, roi))
                     continue
                 value = condition_data.get(roi)
-                if not _rm_anova_value_is_valid(value):
+                is_valid, reason, coerced_value = classify_invalid(value)
+                if not is_valid:
                     present_but_invalid.append((subject, condition, roi, value))
+                    provenance = (
+                        (provenance_map or {}).get((subject, condition, roi), {}) if provenance_map else {}
+                    )
+                    invalid_records.append(
+                        {
+                            "subject": subject,
+                            "condition": condition,
+                            "roi": roi,
+                            "raw_value": value,
+                            "raw_type": type(value).__name__,
+                            "reason": reason,
+                            "coerced_value": coerced_value,
+                            "source_file": provenance.get("source_file"),
+                            "sheet": provenance.get("sheet"),
+                            "row_label": provenance.get("row_label"),
+                            "col_label": provenance.get("col_label"),
+                            "raw_cell": provenance.get("raw_cell"),
+                        }
+                    )
 
     duplicate_cells = []
     if not df_all.empty:
@@ -171,6 +199,7 @@ def _collect_rm_anova_diagnostics(
         ]
 
     expected_rows = len(subject_list) * len(condition_list) * len(roi_list)
+    invalid_df = pd.DataFrame(invalid_records)
     return {
         "subjects": subject_list,
         "conditions": condition_list,
@@ -178,6 +207,7 @@ def _collect_rm_anova_diagnostics(
         "expected_rows": expected_rows,
         "missing_in_dict": missing_in_dict,
         "present_but_invalid": present_but_invalid,
+        "invalid_df": invalid_df,
         "duplicate_cells": duplicate_cells,
         "df_all_shape": df_all.shape,
         "df_valid_shape": df_valid.shape,
@@ -210,6 +240,7 @@ def _log_rm_anova_diagnostics(
     log_func,
     *,
     force: bool = False,
+    results_dir: Optional[str] = None,
 ) -> None:
     if not log_func or (not RM_ANOVA_DIAG and not force):
         return
@@ -263,6 +294,7 @@ def _log_rm_anova_diagnostics(
             f"available_rois={roi_keys!r}"
         )
 
+    invalid_df = diag.get("invalid_df")
     for subject, condition, roi, value in diag["present_but_invalid"]:
         value_type = type(value).__name__
         finite_check = None
@@ -282,6 +314,123 @@ def _log_rm_anova_diagnostics(
             f"value={value!r} type={value_type} isfinite={finite_check} "
             f"string_float={conversion!r}"
         )
+
+    if isinstance(invalid_df, pd.DataFrame) and not invalid_df.empty:
+        total_counts = invalid_df["reason"].value_counts().to_dict()
+        log_func(f"[RM_ANOVA DIAG] invalid counts by reason (total): {total_counts}")
+        by_condition = (
+            invalid_df.groupby(["condition", "reason"])
+            .size()
+            .reset_index(name="count")
+        )
+        if not by_condition.empty:
+            log_func(
+                "[RM_ANOVA DIAG] invalid counts by condition+reason:\n"
+                + by_condition.to_string(index=False)
+            )
+        by_roi = (
+            invalid_df.groupby(["roi", "reason"])
+            .size()
+            .reset_index(name="count")
+        )
+        if not by_roi.empty:
+            log_func(
+                "[RM_ANOVA DIAG] invalid counts by roi+reason:\n"
+                + by_roi.to_string(index=False)
+            )
+        log_func("[RM_ANOVA DIAG] top invalid examples (up to 25):")
+        for _, row in invalid_df.head(25).iterrows():
+            source_bits = []
+            if row.get("source_file"):
+                source_bits.append(f"file={row.get('source_file')!r}")
+            if row.get("sheet"):
+                source_bits.append(f"sheet={row.get('sheet')!r}")
+            if row.get("row_label"):
+                source_bits.append(f"row={row.get('row_label')!r}")
+            if row.get("col_label"):
+                source_bits.append(f"col={row.get('col_label')!r}")
+            source_info = " " + " ".join(source_bits) if source_bits else ""
+            log_func(
+                "[RM_ANOVA DIAG] invalid_example: "
+                f"subject={row.get('subject')!r} condition={row.get('condition')!r} "
+                f"roi={row.get('roi')!r} raw_value={row.get('raw_value')!r} "
+                f"type={row.get('raw_type')!r} reason={row.get('reason')!r} "
+                f"coerced={row.get('coerced_value')!r}{source_info}"
+            )
+
+    if RM_ANOVA_DIAG and results_dir:
+        base_dir = Path(results_dir)
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        invalid_df = invalid_df if isinstance(invalid_df, pd.DataFrame) else pd.DataFrame()
+        invalid_cells = invalid_df.copy()
+        if not invalid_cells.empty:
+            invalid_cells["raw_value_repr"] = invalid_cells["raw_value"].apply(repr)
+            invalid_cells["coerced_value_repr"] = invalid_cells["coerced_value"].apply(repr)
+        else:
+            invalid_cells["raw_value_repr"] = []
+            invalid_cells["coerced_value_repr"] = []
+        invalid_cells["raw_type"] = invalid_cells.get("raw_type")
+        for col in ["subject", "condition", "roi", "reason", "source_file", "sheet", "row_label", "col_label"]:
+            if col not in invalid_cells.columns:
+                invalid_cells[col] = []
+        invalid_cells = invalid_cells[
+            [
+                "subject",
+                "condition",
+                "roi",
+                "raw_value_repr",
+                "raw_type",
+                "reason",
+                "coerced_value_repr",
+                "source_file",
+                "sheet",
+                "row_label",
+                "col_label",
+            ]
+        ]
+
+        invalid_cells_path = base_dir / "RM_ANOVA_DEBUG_invalid_cells.csv"
+        invalid_cells.to_csv(invalid_cells_path, index=False)
+        log_func(f"[RM_ANOVA DIAG] wrote {invalid_cells_path}")
+
+        value_records = []
+        if not df_all.empty:
+            for _, row in df_all.iterrows():
+                value = row.get("value")
+                is_valid, _reason, coerced = classify_invalid(value)
+                matrix_value = value if is_valid else (coerced if coerced is not None else value)
+                value_records.append(
+                    {
+                        "subject": row.get("subject"),
+                        "cond_roi": f"{row.get('condition')}|{row.get('roi')}",
+                        "value": matrix_value,
+                    }
+                )
+        value_matrix = pd.DataFrame(value_records)
+        if not value_matrix.empty:
+            pivot = value_matrix.pivot_table(
+                index="subject", columns="cond_roi", values="value", aggfunc="first"
+            )
+        else:
+            pivot = pd.DataFrame()
+        value_matrix_path = base_dir / "RM_ANOVA_DEBUG_value_matrix.csv"
+        pivot.to_csv(value_matrix_path)
+        log_func(f"[RM_ANOVA DIAG] wrote {value_matrix_path}")
+
+        reason_summary = (
+            invalid_df.groupby(["reason", "condition", "roi"])
+            .size()
+            .reset_index(name="count")
+            if not invalid_df.empty
+            else pd.DataFrame(columns=["reason", "condition", "roi", "count"])
+        )
+        reason_summary_path = base_dir / "RM_ANOVA_DEBUG_reason_summary.csv"
+        reason_summary.to_csv(reason_summary_path, index=False)
+        log_func(f"[RM_ANOVA DIAG] wrote {reason_summary_path}")
+
+    elif RM_ANOVA_DIAG and not results_dir:
+        log_func("[RM_ANOVA DIAG] No results_dir provided; skipping debug CSV output.")
 
     for subject, condition, roi, count in diag["duplicate_cells"]:
         log_func(
@@ -393,6 +542,7 @@ def aggregate_bca_sum(
     base_freq: float,
     log_func,
     rois: Optional[Union[List[ROI], Dict[str, List[str]]]] = None,
+    diag_meta: Optional[dict[str, object]] = None,
 ) -> float:
     """
     Return summed BCA for an ROI across significant oddball harmonics.
@@ -407,6 +557,13 @@ def aggregate_bca_sum(
       4) Sum BCA across selected harmonics per electrode (min_count=1), then mean across ROI electrodes.
     """
     try:
+        if diag_meta is not None:
+            diag_meta.setdefault("source_file", file_path)
+            diag_meta.setdefault("sheet", "BCA (uV)")
+            diag_meta.setdefault("row_label", None)
+            diag_meta.setdefault("col_label", None)
+            diag_meta.setdefault("raw_cell", None)
+
         # --- Read required sheets ---
         df_bca = safe_read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
         df_z = safe_read_excel(file_path, sheet_name=SUMMED_BCA_Z_SHEET_NAME, index_col="Electrode")
@@ -436,6 +593,8 @@ def aggregate_bca_sum(
         if not roi_chans:
             log_func(f"No overlapping BCA+Z data for ROI {roi_name} in {file_path}.")
             return np.nan
+        if diag_meta is not None:
+            diag_meta["row_label"] = roi_chans
 
         df_bca_roi = df_bca.loc[roi_chans].dropna(how="all")
         df_z_roi = df_z.loc[roi_chans].dropna(how="all")
@@ -492,7 +651,12 @@ def aggregate_bca_sum(
 
         if not cols_to_sum:
             log_func(f"No significant harmonics selected for ROI {roi_name} in {file_path}.")
+            if diag_meta is not None:
+                diag_meta["col_label"] = []
             return np.nan
+        if diag_meta is not None:
+            diag_meta["col_label"] = cols_to_sum
+            diag_meta["raw_cell"] = df_bca_roi[cols_to_sum].to_dict(orient="index")
 
         # --- Sum BCA across selected harmonics per electrode, then average across electrodes ---
         bca_block = (
@@ -528,6 +692,7 @@ def prepare_all_subject_summed_bca_data(
     log_func,
     roi_filter: Optional[List[str]] = None,
     rois: Optional[Dict[str, List[str]]] = None,
+    provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Prepare summed BCA data for all subjects and conditions."""
     all_subject_data: Dict[str, Dict[str, Dict[str, float]]] = {}
@@ -563,12 +728,33 @@ def prepare_all_subject_summed_bca_data(
             all_subject_data[pid].setdefault(cond_name, {})
             for roi_name in rois_map.keys():
                 sum_val = np.nan
+                diag_meta: Optional[dict[str, object]] = None
+                if provenance_map is not None:
+                    diag_meta = {}
                 if file_path and os.path.exists(file_path):
                     try:
-                        sum_val = aggregate_bca_sum(file_path, roi_name, base_freq, log_func, rois=rois_map)
+                        sum_val = aggregate_bca_sum(
+                            file_path,
+                            roi_name,
+                            base_freq,
+                            log_func,
+                            rois=rois_map,
+                            diag_meta=diag_meta,
+                        )
                     except Exception as e:
                         log_func(f"Failed to read {os.path.basename(file_path)} for {pid}: {e}")
                 all_subject_data[pid][cond_name][roi_name] = sum_val
+                if provenance_map is not None:
+                    provenance = {
+                        "source_file": file_path,
+                        "sheet": "BCA (uV)",
+                        "row_label": None,
+                        "col_label": None,
+                        "raw_cell": None,
+                    }
+                    if diag_meta:
+                        provenance.update(diag_meta)
+                    provenance_map[(pid, cond_name, roi_name)] = provenance
 
     # Debug summary: how much usable data did we generate?
     total = 0
@@ -592,6 +778,8 @@ def run_rm_anova(
     subjects: Optional[list[str]] = None,
     conditions: Optional[list[str]] = None,
     rois: Optional[list[str]] = None,
+    provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
+    results_dir: Optional[str] = None,
 ):
     """Run RM-ANOVA on summed BCA data."""
     df_all, df_long = build_rm_anova_frames(all_subject_data)
@@ -608,10 +796,18 @@ def run_rm_anova(
         subjects=subjects,
         conditions=conditions,
         rois=rois,
+        provenance_map=provenance_map,
     )
     diag_summary = _rm_anova_diag_summary(diag)
     if RM_ANOVA_DIAG:
-        _log_rm_anova_diagnostics(all_subject_data, df_all, df_long, diag, log_func)
+        _log_rm_anova_diagnostics(
+            all_subject_data,
+            df_all,
+            df_long,
+            diag,
+            log_func,
+            results_dir=results_dir,
+        )
 
     try:
         with warnings.catch_warnings():
@@ -630,7 +826,15 @@ def run_rm_anova(
             )
     except Exception as e:
         if "Data is unbalanced" in str(e):
-            _log_rm_anova_diagnostics(all_subject_data, df_all, df_long, diag, log_func, force=True)
+            _log_rm_anova_diagnostics(
+                all_subject_data,
+                df_all,
+                df_long,
+                diag,
+                log_func,
+                force=True,
+                results_dir=results_dir,
+            )
         log_func(f"!!! RM-ANOVA Error: {e}")
         return f"RM-ANOVA analysis failed unexpectedly: {e}", None
 
