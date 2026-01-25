@@ -1608,7 +1608,7 @@ class StatsWindow(QMainWindow):
             df = report_to_dataframe(report)
             if df.empty:
                 return
-            QGuiApplication.clipboard().setText(df.to_csv(sep="\t", index=False))
+            QGuiApplication.clipboard().setText(df.to_csv(sep=\"\\t\", index=False))
 
         copy_btn.clicked.connect(_copy_table)
         copy_btn.setEnabled(bool(report.participants))
