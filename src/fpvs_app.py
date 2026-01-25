@@ -60,7 +60,10 @@ from Main_App import post_process as _external_post_process
 
 
 # Advanced averaging UI and core function
-from Tools.Average_Preprocessing import AdvancedAnalysisWindow
+from Tools.Average_Preprocessing import (
+    LEGACY_AVERAGE_PREPROCESSING_UI_ERROR_MESSAGE,
+    get_legacy_advanced_analysis_window,
+)
 
 # Statistics toolbox
 import Tools.Stats as stats
@@ -229,8 +232,13 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         """Opens the Advanced Preprocessing Epoch Averaging window."""
         self.log("Opening Advanced Analysis (Preprocessing Epoch Averaging) tool...")
         self.debug("Advanced analysis window requested")
-        # AdvancedAnalysisWindow is imported from Tools.Average_Preprocessing
-        adv_win = AdvancedAnalysisWindow(master=self)
+        try:
+            advanced_window = get_legacy_advanced_analysis_window()
+        except RuntimeError:
+            self.log(LEGACY_AVERAGE_PREPROCESSING_UI_ERROR_MESSAGE, level=logging.ERROR)
+            self.debug("Legacy Average Preprocessing UI failed to import.")
+            return
+        adv_win = advanced_window(master=self)
         adv_win.geometry(self.settings.get('gui', 'advanced_size', '1050x850'))
 
     def _set_controls_enabled(self, enabled: bool):
