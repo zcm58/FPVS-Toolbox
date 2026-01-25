@@ -39,18 +39,21 @@ from Tools.Stats.Legacy.stats_analysis import (
     run_harmonic_check as run_harmonic_check_new,
     run_rm_anova as analysis_run_rm_anova,
     set_rois,
+    SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
 )
 from Tools.Stats.PySide6.dv_policies import (
     GROUP_MEAN_Z_POLICY_NAME,
     ROSSION_POLICY_NAME,
     build_group_mean_z_preview_payload,
     build_rossion_preview_payload,
+    normalize_dv_policy,
     prepare_summed_bca_data,
 )
 from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
 
 logger = logging.getLogger("Tools.Stats")
 RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
+DV_TRACE_ENV = "FPVS_STATS_DV_TRACE"
 
 BETWEEN_STAGE_ORDER = (
     "BETWEEN_GROUP_ANOVA",
@@ -85,6 +88,42 @@ def _variant_error_payload(
         "errors": [{"variant": "DV Variants", "error": str(exc)}],
         "selected_variants": selected_variants,
     }
+
+
+def _dv_trace_enabled() -> bool:
+    value = os.getenv(DV_TRACE_ENV, "").strip().lower()
+    return value not in ("", "0", "false", "no", "off")
+
+
+def _log_dv_trace_policy_snapshot(
+    *,
+    dv_policy: dict | None,
+    base_freq: float,
+    conditions: list[str],
+    rois: dict | None,
+    subjects: list[str],
+) -> None:
+    if not _dv_trace_enabled():
+        return
+    settings = normalize_dv_policy(dv_policy)
+    roi_list = list(rois.keys()) if isinstance(rois, dict) else []
+    logger.info(
+        "DV_TRACE policy_snapshot policy_name=%s z_threshold=%s exclude_harmonic1=%s "
+        "exclude_base_harmonics=%s base_freq=%s oddball_every_n=%s fixed_k=%s "
+        "selected_conditions=%s selected_conditions_count=%d rois=%s rois_count=%d n_subjects=%d",
+        settings.name,
+        settings.z_threshold,
+        settings.exclude_harmonic1,
+        settings.exclude_base_harmonics,
+        float(base_freq),
+        SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
+        settings.fixed_k,
+        list(conditions),
+        len(conditions),
+        roi_list,
+        len(roi_list),
+        len(subjects),
+    )
 
 
 class StatsWorker(QRunnable):
@@ -296,6 +335,13 @@ def run_rm_anova(
 ):
     set_rois(rois)
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
+    _log_dv_trace_policy_snapshot(
+        dv_policy=dv_policy,
+        base_freq=base_freq,
+        conditions=list(conditions) if conditions else [],
+        rois=rois,
+        subjects=list(subjects) if subjects else [],
+    )
     provenance_map = {} if RM_ANOVA_DIAG else None
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
@@ -439,6 +485,13 @@ def run_lmm(
     set_rois(rois)
     prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
     message_cb(f"Preparing data for {prep_label}…")
+    _log_dv_trace_policy_snapshot(
+        dv_policy=dv_policy,
+        base_freq=base_freq,
+        conditions=list(conditions) if conditions else [],
+        rois=rois,
+        subjects=list(subjects) if subjects else [],
+    )
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
@@ -556,6 +609,13 @@ def run_posthoc(
 ):
     set_rois(rois)
     message_cb("Preparing data for Interaction Post-hoc tests…")
+    _log_dv_trace_policy_snapshot(
+        dv_policy=dv_policy,
+        base_freq=base_freq,
+        conditions=list(conditions) if conditions else [],
+        rois=rois,
+        subjects=list(subjects) if subjects else [],
+    )
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
