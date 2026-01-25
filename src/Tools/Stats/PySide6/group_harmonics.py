@@ -322,6 +322,7 @@ def select_rossion_harmonics_by_roi(
     for roi_name in rois:
         selected: list[float] = []
         nonsig_run = 0
+        found_any_sig = False
         stop_reason = "end_of_domain"
         stop_fail_harmonics: list[float] = []
         scanned = 0
@@ -334,10 +335,13 @@ def select_rossion_harmonics_by_roi(
             is_sig = bool(np.isfinite(mean_z) and mean_z > z_threshold)
             if is_sig:
                 selected.append(float(freq_val))
+                found_any_sig = True
                 nonsig_run = 0
                 stop_fail_harmonics = []
                 failure_run = []
             else:
+                if not found_any_sig:
+                    continue
                 nonsig_run += 1
                 stop_fail_harmonics.append(float(freq_val))
                 failure_run.append((float(freq_val), float(mean_z)))
@@ -348,6 +352,9 @@ def select_rossion_harmonics_by_roi(
                     stop_fail_harmonics = stop_fail_harmonics[-stop_after_n:]
                     stop_at_harmonic = float(freq_val)
                     break
+
+        if not found_any_sig:
+            stop_reason = "end_of_domain_no_sig"
 
         selected_map[str(roi_name)] = selected
         meta_by_roi[str(roi_name)] = {
