@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import logging
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +29,9 @@ from Tools.Stats.PySide6.group_harmonics import (
     build_rossion_harmonics_summary,
     select_rossion_harmonics_by_roi,
 )
+
+logger = logging.getLogger("Tools.Stats")
+_DV_TRACE_ENV = "FPVS_STATS_DV_TRACE"
 
 LEGACY_POLICY_NAME = "Current (Legacy)"
 FIXED_K_POLICY_NAME = "Fixed-K harmonics"
@@ -139,6 +144,11 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
         z_threshold=z_threshold,
         empty_list_policy=empty_list_policy,
     )
+
+
+def _dv_trace_enabled() -> bool:
+    value = os.getenv(_DV_TRACE_ENV, "").strip().lower()
+    return value not in ("", "0", "false", "no", "off")
 
 
 def prepare_summed_bca_data(
@@ -511,6 +521,97 @@ def apply_empty_union_policy(
     return final_map, info
 
 
+def _log_dv_trace_empty_policy(
+    *,
+    initial_map: dict[str, list[float]],
+    final_map: dict[str, list[float]],
+    fallback_info: dict[str, dict[str, object]],
+) -> None:
+    if not _dv_trace_enabled():
+        return
+    for roi_name, initial_freqs in initial_map.items():
+        final_freqs = final_map.get(roi_name, [])
+        fallback_payload = fallback_info.get(roi_name, {})
+        fallback_used = bool(fallback_payload.get("fallback_used", False))
+        fallback_method = "Fixed-K" if fallback_used else "None"
+        fallback_harmonics = fallback_payload.get("fallback_harmonics", []) or []
+        contains_1p2hz = any(abs(float(freq) - 1.2) < 1e-6 for freq in fallback_harmonics)
+        logger.info(
+            "DV_TRACE empty_policy roi=%s initial_selected_count=%d after_policy_count=%d "
+            "used_fallback=%s fallback_method=%s fallback_harmonics=%s contains_1p2hz=%s",
+            roi_name,
+            len(initial_freqs),
+            len(final_freqs),
+            fallback_used,
+            fallback_method,
+            fallback_harmonics,
+            contains_1p2hz,
+        )
+
+
+def _log_dv_trace_dv_table_summary(
+    *,
+    subjects: list[str],
+    conditions: list[str],
+    rois_map: dict[str, list[str]],
+    all_subject_data: dict[str, dict[str, dict[str, float]]],
+) -> None:
+    if not _dv_trace_enabled():
+        return
+    expected_rows = len(subjects) * len(conditions) * len(rois_map)
+    finite_values: list[float] = []
+    valid_rows = 0
+    for pid in subjects:
+        for cond in conditions:
+            roi_vals = (all_subject_data.get(pid, {}) or {}).get(cond, {}) or {}
+            for roi_name in rois_map.keys():
+                val = roi_vals.get(roi_name, np.nan)
+                if val is not None and np.isfinite(val):
+                    valid_rows += 1
+                    finite_values.append(float(val))
+    nan_rows = expected_rows - valid_rows
+    dv_min = float(np.nanmin(finite_values)) if finite_values else np.nan
+    dv_mean = float(np.nanmean(finite_values)) if finite_values else np.nan
+    dv_max = float(np.nanmax(finite_values)) if finite_values else np.nan
+    dv_std = float(np.nanstd(finite_values)) if finite_values else np.nan
+    logger.info(
+        "DV_TRACE dv_table_summary expected_rows=%d valid_rows=%d nan_rows=%d "
+        "min=%s mean=%s max=%s std=%s",
+        expected_rows,
+        valid_rows,
+        nan_rows,
+        dv_min,
+        dv_mean,
+        dv_max,
+        dv_std,
+    )
+    if finite_values and dv_std <= 1e-9:
+        logger.warning(
+            "DV_TRACE dv_table_summary warning=degenerate_dv std=%s",
+            dv_std,
+        )
+    for roi_name in rois_map.keys():
+        roi_values = []
+        for pid in subjects:
+            for cond in conditions:
+                val = (all_subject_data.get(pid, {}) or {}).get(cond, {}).get(roi_name, np.nan)
+                if val is not None and np.isfinite(val):
+                    roi_values.append(float(val))
+        roi_min = float(np.nanmin(roi_values)) if roi_values else np.nan
+        roi_mean = float(np.nanmean(roi_values)) if roi_values else np.nan
+        roi_max = float(np.nanmax(roi_values)) if roi_values else np.nan
+        roi_std = float(np.nanstd(roi_values)) if roi_values else np.nan
+        logger.info(
+            "DV_TRACE dv_by_roi roi=%s valid_rows=%d min=%s mean=%s max=%s std=%s",
+            roi_name,
+            len(roi_values),
+            roi_min,
+            roi_mean,
+            roi_max,
+            roi_std,
+        )
+
+
 def build_group_mean_z_preview_payload(
     *,
     subjects: List[str],
@@ -604,6 +705,11 @@ def build_rossion_preview_payload(
     )
     final_map, fallback_info = apply_empty_union_policy(
         selected_map, policy=settings.empty_list_policy, fallback_freqs=fallback_freqs
+    )
+    _log_dv_trace_empty_policy(
+        initial_map=selected_map,
+        final_map=final_map,
+        fallback_info=fallback_info,
     )
 
     if settings.empty_list_policy == EMPTY_LIST_ERROR:
@@ -793,6 +899,11 @@ def _prepare_rossion_bca_data(
     final_map, fallback_info = apply_empty_union_policy(
         selected_map, policy=settings.empty_list_policy, fallback_freqs=fallback_freqs
     )
+    _log_dv_trace_empty_policy(
+        initial_map=selected_map,
+        final_map=final_map,
+        fallback_info=fallback_info,
+    )
 
     if settings.empty_list_policy == EMPTY_LIST_ERROR:
         empty_rois = [roi for roi, freqs in selected_map.items() if not freqs]
@@ -866,6 +977,12 @@ def _prepare_rossion_bca_data(
                 total += 1
                 if val is not None and np.isfinite(val):
                     finite += 1
+    _log_dv_trace_dv_table_summary(
+        subjects=subjects,
+        conditions=conditions,
+        rois_map=rois_map,
+        all_subject_data=all_subject_data,
+    )
     log_func(f"[DEBUG] Summed BCA finite cells: {finite}/{total}")
     log_func("Summed BCA data prep complete.")
     return all_subject_data
