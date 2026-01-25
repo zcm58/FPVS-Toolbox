@@ -129,10 +129,14 @@ def load_rois_from_settings(manager=None):
 
 def apply_rois_to_modules(rois_dict):
     """Update ROI dictionaries in related stats modules."""
-    import Tools.Stats.Legacy.stats as stats_mod
+    import sys
+
     import Tools.Stats.Legacy.stats_analysis as analysis_mod
     import Tools.Stats.Legacy.stats_runners as runners_mod
 
-    stats_mod.ROIS = rois_dict
     analysis_mod.set_rois(rois_dict)
     runners_mod.ROIS = rois_dict
+
+    stats_mod = sys.modules.get("Tools.Stats.Legacy.stats")
+    if stats_mod is not None:
+        setattr(stats_mod, "ROIS", rois_dict)
