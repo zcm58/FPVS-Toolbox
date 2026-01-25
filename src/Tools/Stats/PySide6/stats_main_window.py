@@ -97,6 +97,7 @@ from Tools.Stats.PySide6.dv_policies import (
     GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
 )
+from Tools.Stats.PySide6.dv_variants import export_dv_variants_workbook
 from Tools.Stats.PySide6.summary_utils import (
     StatsSummaryFrames,
     SummaryConfig,
@@ -200,10 +201,14 @@ class StatsWindow(QMainWindow):
         self._dv_exclude_base_harmonics: bool = True
         self._dv_group_mean_z_threshold: float = 1.64
         self._dv_empty_list_policy: str = EMPTY_LIST_FALLBACK_FIXED_K
+        self._dv_variant_checkboxes: dict[str, QCheckBox] = {}
+        self._dv_variants_selected: List[str] = []
         self._pipeline_conditions: dict[PipelineId, list[str]] = {}
         self._pipeline_dv_policy: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_base_freq: dict[PipelineId, float] = {}
         self._pipeline_dv_metadata: dict[PipelineId, dict[str, object]] = {}
+        self._pipeline_dv_variants: dict[PipelineId, list[str]] = {}
+        self._pipeline_dv_variant_payloads: dict[PipelineId, dict[str, object]] = {}
         self._group_mean_preview_data: dict[str, object] = {}
 
         # --- legacy UI proxies ---
@@ -297,6 +302,9 @@ class StatsWindow(QMainWindow):
     def _on_condition_toggled(self, _state: int) -> None:
         self._sync_selected_conditions()
 
+    def _on_dv_variant_toggled(self, _state: int) -> None:
+        self._sync_selected_dv_variants()
+
     def _select_all_conditions(self) -> None:
         for checkbox in self._condition_checkboxes.values():
             checkbox.setChecked(True)
@@ -324,6 +332,33 @@ class StatsWindow(QMainWindow):
 
     def get_dv_policy_snapshot(self) -> dict[str, object]:
         return dict(self._get_dv_policy_payload())
+
+    def _sync_selected_dv_variants(self) -> None:
+        self._dv_variants_selected = [
+            name
+            for name, checkbox in self._dv_variant_checkboxes.items()
+            if checkbox.isChecked()
+        ]
+
+    def _get_selected_dv_variants(self) -> List[str]:
+        if self._dv_variant_checkboxes:
+            return list(self._dv_variants_selected)
+        return []
+
+    def _get_dv_variant_payloads(self) -> list[dict[str, object]]:
+        selected = self._get_selected_dv_variants()
+        if not selected:
+            return []
+        base_payload = self._get_dv_policy_payload()
+        payloads = []
+        for name in selected:
+            variant_payload = dict(base_payload)
+            variant_payload["name"] = name
+            payloads.append(variant_payload)
+        return payloads
+
+    def get_dv_variants_snapshot(self) -> list[str]:
+        return list(self._get_selected_dv_variants())
 
     def _set_fixed_k_controls_enabled(self, enabled: bool) -> None:
         widgets = [
@@ -746,6 +781,7 @@ class StatsWindow(QMainWindow):
         conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
         base_freq = self._pipeline_base_freq.get(pipeline_id, self._current_base_freq)
         dv_meta = self._pipeline_dv_metadata.get(pipeline_id, {})
+        dv_variants = self._pipeline_dv_variants.get(pipeline_id, [])
         payload = {
             "policy_name": dv_meta.get("policy_name", dv_policy.get("name", LEGACY_POLICY_NAME)),
             "fixed_k": dv_meta.get("fixed_k", dv_policy.get("fixed_k", 5)),
@@ -759,6 +795,7 @@ class StatsWindow(QMainWindow):
             ),
             "base_frequency_hz": base_freq,
             "selected_conditions": list(conditions),
+            "variant_methods": list(dv_variants),
         }
         try:
             out_path = Path(out_dir) / "dv_metadata.json"
@@ -777,6 +814,10 @@ class StatsWindow(QMainWindow):
                 {"key": "Z threshold", "value": payload.get("z_threshold")},
                 {"key": "Empty union policy", "value": payload.get("empty_list_policy")},
                 {"key": "Selected conditions", "value": ", ".join(payload["selected_conditions"])},
+                {
+                    "key": "DV variants (exported)",
+                    "value": ", ".join(payload.get("variant_methods", [])) or "None",
+                },
             ]
             summary_df = pd.DataFrame(summary_rows)
 
@@ -1159,6 +1200,8 @@ class StatsWindow(QMainWindow):
         self._pipeline_dv_policy[pipeline_id] = self._get_dv_policy_payload()
         self._pipeline_base_freq[pipeline_id] = self._current_base_freq
         self._pipeline_dv_metadata[pipeline_id] = {}
+        self._pipeline_dv_variants[pipeline_id] = self._get_selected_dv_variants()
+        self._pipeline_dv_variant_payloads[pipeline_id] = {}
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
             label.setText("Running…")
@@ -1167,6 +1210,13 @@ class StatsWindow(QMainWindow):
             btn.setEnabled(False)
         self._focus_self()
         self._log_pipeline_event(pipeline=pipeline_id, event="started")
+
+    def store_dv_variants_payload(
+        self, pipeline_id: PipelineId, dv_variants: dict | None
+    ) -> None:
+        if not isinstance(dv_variants, dict) or not dv_variants:
+            return
+        self._store_dv_variants(pipeline_id, {"dv_variants": dv_variants})
 
     def on_analysis_finished(
         self,
@@ -1296,6 +1346,7 @@ class StatsWindow(QMainWindow):
     def get_step_config(
         self, pipeline_id: PipelineId, step_id: StepId
     ) -> tuple[dict, Callable[[dict], None]]:
+        dv_variants_payload = self._get_dv_variant_payloads()
         if pipeline_id is PipelineId.SINGLE:
             if step_id is StepId.RM_ANOVA:
                 kwargs = dict(
@@ -1305,6 +1356,7 @@ class StatsWindow(QMainWindow):
                     base_freq=self._current_base_freq,
                     rois=self.rois,
                     dv_policy=self._get_dv_policy_payload(),
+                    dv_variants=dv_variants_payload,
                 )
                 if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
                     kwargs["results_dir"] = self._ensure_results_dir()
@@ -1322,6 +1374,7 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     subject_groups=self.subject_groups,
                     dv_policy=self._get_dv_policy_payload(),
+                    dv_variants=dv_variants_payload,
                 )
                 def handler(payload):
                     self._apply_mixed_model_results(payload, update_text=False)
@@ -1337,6 +1390,7 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     subject_groups=self.subject_groups,
                     dv_policy=self._get_dv_policy_payload(),
+                    dv_variants=dv_variants_payload,
                 )
                 def handler(payload):
                     self._apply_posthoc_results(payload, update_text=True)
@@ -1359,6 +1413,7 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     subject_groups=self.subject_groups,
                     dv_policy=self._get_dv_policy_payload(),
+                    dv_variants=dv_variants_payload,
                 )
                 def handler(payload):
                     self._apply_between_anova_results(payload, update_text=False)
@@ -1375,6 +1430,7 @@ class StatsWindow(QMainWindow):
                     subject_groups=self.subject_groups,
                     include_group=True,
                     dv_policy=self._get_dv_policy_payload(),
+                    dv_variants=dv_variants_payload,
                 )
                 def handler(payload):
                     self._apply_between_mixed_results(payload, update_text=False)
@@ -1390,6 +1446,7 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     subject_groups=self.subject_groups,
                     dv_policy=self._get_dv_policy_payload(),
+                    dv_variants=dv_variants_payload,
                 )
                 def handler(payload):
                     self._apply_group_contrasts_results(payload, update_text=True)
@@ -1462,6 +1519,10 @@ class StatsWindow(QMainWindow):
 
                 paths.extend(result_paths)
 
+            dv_variant_paths = self._export_dv_variants(PipelineId.SINGLE, out_dir)
+            if dv_variant_paths:
+                paths.extend(dv_variant_paths)
+
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
@@ -1473,6 +1534,50 @@ class StatsWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self.append_log(section, f"  • Export failed: {exc}", level="error")
             return False
+
+    def _export_dv_variants(self, pipeline_id: PipelineId, out_dir: str) -> list[Path]:
+        selected = self._pipeline_dv_variants.get(pipeline_id, [])
+        if not selected:
+            return []
+
+        payload = self._pipeline_dv_variant_payloads.get(pipeline_id, {})
+        if not payload:
+            section = self._section_label(pipeline_id)
+            self.append_log(
+                section,
+                "  • Skipping DV variants export (no variant payload).",
+                level="warning",
+            )
+            return []
+
+        primary_df = payload.get("primary_df")
+        variant_dfs = payload.get("variant_dfs", {}) or {}
+        summary_df = payload.get("summary_df")
+        errors = payload.get("errors", []) or []
+        primary_name = payload.get(
+            "primary_name", self._pipeline_dv_policy.get(pipeline_id, {}).get("name", "")
+        )
+
+        if not isinstance(primary_df, pd.DataFrame):
+            section = self._section_label(pipeline_id)
+            self.append_log(
+                section,
+                "  • DV variants export skipped (primary DV table missing).",
+                level="error",
+            )
+            return []
+
+        save_path = Path(out_dir) / "DV Variants.xlsx"
+        export_dv_variants_workbook(
+            save_path=save_path,
+            primary_name=str(primary_name),
+            primary_df=primary_df,
+            variant_dfs=variant_dfs,
+            summary_df=summary_df if isinstance(summary_df, pd.DataFrame) else pd.DataFrame(),
+            errors=errors if isinstance(errors, list) else [],
+            log_func=self._set_status,
+        )
+        return [save_path]
 
     def _export_between_pipeline(self) -> bool:
         section = "Between"
@@ -1516,6 +1621,10 @@ class StatsWindow(QMainWindow):
 
                 paths.extend(result_paths)
 
+            dv_variant_paths = self._export_dv_variants(PipelineId.BETWEEN, out_dir)
+            if dv_variant_paths:
+                paths.extend(dv_variant_paths)
+
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
@@ -1556,6 +1665,27 @@ class StatsWindow(QMainWindow):
         dv_meta = payload.get("dv_metadata")
         if isinstance(dv_meta, dict) and dv_meta:
             self._pipeline_dv_metadata[pipeline_id] = dv_meta
+        self._store_dv_variants(pipeline_id, payload)
+
+    def _store_dv_variants(self, pipeline_id: PipelineId, payload: dict) -> None:
+        dv_variants = payload.get("dv_variants")
+        if not isinstance(dv_variants, dict) or not dv_variants:
+            return
+        self._pipeline_dv_variant_payloads[pipeline_id] = dv_variants
+        selected = dv_variants.get("selected_variants")
+        if isinstance(selected, list):
+            self._pipeline_dv_variants[pipeline_id] = list(selected)
+        errors = dv_variants.get("errors", [])
+        if errors:
+            section = self._section_label(pipeline_id)
+            for err in errors:
+                variant_name = err.get("variant", "Unknown")
+                message = err.get("error", "Unknown error")
+                self.append_log(
+                    section,
+                    f"DV variant {variant_name} failed: {message}",
+                    level="warning",
+                )
 
     def _apply_rm_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.rm_anova_results_data = payload.get("anova_df_results")
@@ -1850,6 +1980,26 @@ class StatsWindow(QMainWindow):
         self._set_group_mean_controls_visible(
             self._dv_policy_name == GROUP_MEAN_Z_POLICY_NAME
         )
+
+        dv_variants_group = QGroupBox("Also compute DV variants (export only)")
+        dv_variants_layout = QVBoxLayout(dv_variants_group)
+        dv_variants_layout.setSpacing(4)
+        dv_variants_note = QLabel(
+            "Statistical tests run on Primary DV only. Variants are exported for comparison "
+            "and do not affect RM-ANOVA/LMM/post-hocs."
+        )
+        dv_variants_note.setWordWrap(True)
+        dv_variants_layout.addWidget(dv_variants_note)
+
+        for policy_name in [FIXED_K_POLICY_NAME, GROUP_MEAN_Z_POLICY_NAME]:
+            checkbox = QCheckBox(policy_name)
+            checkbox.setChecked(False)
+            checkbox.stateChanged.connect(self._on_dv_variant_toggled)
+            dv_variants_layout.addWidget(checkbox)
+            self._dv_variant_checkboxes[policy_name] = checkbox
+        self._sync_selected_dv_variants()
+
+        dv_layout.addWidget(dv_variants_group)
 
         main_layout.addWidget(self.dv_group)
 

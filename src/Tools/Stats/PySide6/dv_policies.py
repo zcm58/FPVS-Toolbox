@@ -1,6 +1,8 @@
 """Summed BCA DV policies for the Stats tool."""
 from __future__ import annotations
 
+import copy
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
@@ -32,6 +34,51 @@ GROUP_MEAN_Z_POLICY_NAME = (
 EMPTY_LIST_FALLBACK_FIXED_K = "Fallback to Fixed-K"
 EMPTY_LIST_SET_ZERO = "Set DV=0"
 EMPTY_LIST_ERROR = "Error"
+
+_DV_DATA_CACHE: dict[tuple, tuple[Dict[str, Dict[str, Dict[str, float]]], dict]] = {}
+_DV_DATA_CACHE_LOCK = threading.Lock()
+_DV_DATA_CACHE_MAX = 8
+
+
+def _freeze_nested_mapping(mapping: Dict[str, Dict[str, str]]) -> tuple:
+    frozen = []
+    for key, inner in sorted(mapping.items(), key=lambda item: item[0]):
+        inner_items = tuple(sorted((inner or {}).items()))
+        frozen.append((key, inner_items))
+    return tuple(frozen)
+
+
+def _freeze_rois(rois: Optional[Dict[str, List[str]]]) -> tuple:
+    if not rois:
+        return tuple()
+    return tuple(
+        (roi, tuple(sorted(channels)))
+        for roi, channels in sorted(rois.items(), key=lambda item: item[0])
+    )
+
+
+def _build_cache_key(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    base_freq: float,
+    rois: Optional[Dict[str, List[str]]],
+    settings: DVPolicySettings,
+) -> tuple:
+    return (
+        tuple(subjects),
+        tuple(conditions),
+        _freeze_nested_mapping(subject_data),
+        float(base_freq),
+        _freeze_rois(rois),
+        settings.name,
+        settings.fixed_k,
+        settings.exclude_harmonic1,
+        settings.exclude_base_harmonics,
+        float(settings.z_threshold),
+        settings.empty_list_policy,
+    )
 
 
 @dataclass(frozen=True)
@@ -102,8 +149,26 @@ def prepare_summed_bca_data(
     dv_metadata: Optional[dict[str, object]] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     settings = normalize_dv_policy(dv_policy)
+    meta_target: dict[str, object] | None = dv_metadata if dv_metadata is not None else {}
+    cache_key = None
+    if provenance_map is None:
+        cache_key = _build_cache_key(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            rois=rois,
+            settings=settings,
+        )
+        with _DV_DATA_CACHE_LOCK:
+            cached = _DV_DATA_CACHE.get(cache_key)
+        if cached is not None:
+            cached_data, cached_meta = cached
+            if dv_metadata is not None:
+                dv_metadata.update(copy.deepcopy(cached_meta))
+            return cached_data
     if settings.name == GROUP_MEAN_Z_POLICY_NAME:
-        return _prepare_group_mean_z_union_bca_data(
+        data = _prepare_group_mean_z_union_bca_data(
             subjects=subjects,
             conditions=conditions,
             subject_data=subject_data,
@@ -112,16 +177,16 @@ def prepare_summed_bca_data(
             rois=rois,
             provenance_map=provenance_map,
             settings=settings,
-            dv_metadata=dv_metadata,
+            dv_metadata=meta_target,
         )
-    if settings.name == FIXED_K_POLICY_NAME:
-        if dv_metadata is not None:
-            dv_metadata.update(
+    elif settings.name == FIXED_K_POLICY_NAME:
+        if meta_target is not None:
+            meta_target.update(
                 settings.to_metadata(
                     base_freq=base_freq, selected_conditions=conditions
                 )
             )
-        return _prepare_fixed_k_bca_data(
+        data = _prepare_fixed_k_bca_data(
             subjects=subjects,
             conditions=conditions,
             subject_data=subject_data,
@@ -131,17 +196,28 @@ def prepare_summed_bca_data(
             provenance_map=provenance_map,
             settings=settings,
         )
-    if dv_metadata is not None:
-        dv_metadata.update(settings.to_metadata(base_freq=base_freq, selected_conditions=conditions))
-    return prepare_all_subject_summed_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        log_func=log_func,
-        rois=rois,
-        provenance_map=provenance_map,
-    )
+    else:
+        if meta_target is not None:
+            meta_target.update(
+                settings.to_metadata(base_freq=base_freq, selected_conditions=conditions)
+            )
+        data = prepare_all_subject_summed_bca_data(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            log_func=log_func,
+            rois=rois,
+            provenance_map=provenance_map,
+        )
+    if cache_key is not None and data is not None:
+        if meta_target is None:
+            meta_target = {}
+        with _DV_DATA_CACHE_LOCK:
+            if len(_DV_DATA_CACHE) >= _DV_DATA_CACHE_MAX:
+                _DV_DATA_CACHE.pop(next(iter(_DV_DATA_CACHE)))
+            _DV_DATA_CACHE[cache_key] = (data, copy.deepcopy(meta_target))
+    return data
 
 
 def _parse_freqs_from_columns(

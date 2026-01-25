@@ -17,6 +17,7 @@ import logging
 import os
 import threading
 import time
+from dataclasses import asdict
 from typing import Any, Callable, Dict
 
 import json
@@ -44,6 +45,7 @@ from Tools.Stats.PySide6.dv_policies import (
     build_group_mean_z_preview_payload,
     prepare_summed_bca_data,
 )
+from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
 
 logger = logging.getLogger("Tools.Stats")
 RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
@@ -54,6 +56,33 @@ BETWEEN_STAGE_ORDER = (
     "GROUP_CONTRASTS",
     "HARMONIC_CHECK",
 )
+
+
+def _serialize_dv_variants_payload(payload) -> dict | None:
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    return asdict(payload)
+
+
+def _variant_error_payload(
+    dv_policy: dict | None,
+    dv_variants: list[dict[str, object]] | None,
+    exc: Exception,
+) -> dict:
+    selected_variants = []
+    for item in dv_variants or []:
+        if isinstance(item, dict) and item.get("name"):
+            selected_variants.append(str(item.get("name")))
+    return {
+        "primary_name": str((dv_policy or {}).get("name", "")),
+        "primary_df": pd.DataFrame(),
+        "variant_dfs": {},
+        "summary_df": pd.DataFrame(),
+        "errors": [{"variant": "DV Variants", "error": str(exc)}],
+        "selected_variants": selected_variants,
+    }
 
 
 class StatsWorker(QRunnable):
@@ -260,6 +289,7 @@ def run_rm_anova(
     base_freq,
     rois,
     dv_policy: dict | None = None,
+    dv_variants: list[dict[str, object]] | None = None,
     results_dir: str | None = None,
 ):
     set_rois(rois)
@@ -279,6 +309,23 @@ def run_rm_anova(
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
+    dv_variants_payload = None
+    if dv_variants:
+        try:
+            dv_variants_payload = compute_dv_variants_payload(
+                subjects=subjects,
+                conditions=conditions,
+                subject_data=subject_data,
+                base_freq=base_freq,
+                rois=rois,
+                dv_policy=dv_policy,
+                variant_policies=dv_variants,
+                log_func=message_cb,
+                primary_data=all_subject_bca_data,
+            )
+        except Exception as exc:  # noqa: BLE001
+            message_cb(f"DV variants computation failed: {exc}")
+            dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
     _diag_subject_data_structure(all_subject_bca_data, subjects, conditions, rois, message_cb)
     message_cb("Running RM-ANOVA…")
     output_text, anova_df_results = analysis_run_rm_anova(
@@ -294,6 +341,7 @@ def run_rm_anova(
         "anova_df_results": anova_df_results,
         "output_text": output_text,
         "dv_metadata": dv_metadata,
+        "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
     }
 
 
@@ -308,6 +356,7 @@ def run_between_group_anova(
     rois,
     subject_groups: dict[str, str | None] | None = None,
     dv_policy: dict | None = None,
+    dv_variants: list[dict[str, object]] | None = None,
 ):
     set_rois(rois)
     message_cb("Preparing data for Between-Group RM-ANOVA…")
@@ -324,6 +373,23 @@ def run_between_group_anova(
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
+    dv_variants_payload = None
+    if dv_variants:
+        try:
+            dv_variants_payload = compute_dv_variants_payload(
+                subjects=subjects,
+                conditions=conditions,
+                subject_data=subject_data,
+                base_freq=base_freq,
+                rois=rois,
+                dv_policy=dv_policy,
+                variant_policies=dv_variants,
+                log_func=message_cb,
+                primary_data=all_subject_bca_data,
+            )
+        except Exception as exc:  # noqa: BLE001
+            message_cb(f"DV variants computation failed: {exc}")
+            dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
     df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
     before = len(df_long)
@@ -346,7 +412,11 @@ def run_between_group_anova(
         within_cols=["condition", "roi"],
         between_col="group",
     )
-    return {"anova_df_results": results, "dv_metadata": dv_metadata}
+    return {
+        "anova_df_results": results,
+        "dv_metadata": dv_metadata,
+        "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
+    }
 
 
 def run_lmm(
@@ -362,6 +432,7 @@ def run_lmm(
     subject_groups: dict[str, str | None] | None = None,
     include_group: bool = False,
     dv_policy: dict | None = None,
+    dv_variants: list[dict[str, object]] | None = None,
 ):
     set_rois(rois)
     prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
@@ -379,6 +450,23 @@ def run_lmm(
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
+    dv_variants_payload = None
+    if dv_variants:
+        try:
+            dv_variants_payload = compute_dv_variants_payload(
+                subjects=subjects,
+                conditions=conditions,
+                subject_data=subject_data,
+                base_freq=base_freq,
+                rois=rois,
+                dv_policy=dv_policy,
+                variant_policies=dv_variants,
+                log_func=message_cb,
+                primary_data=all_subject_bca_data,
+            )
+        except Exception as exc:  # noqa: BLE001
+            message_cb(f"DV variants computation failed: {exc}")
+            dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
     df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
     if df_long.empty:
@@ -445,6 +533,7 @@ def run_lmm(
         "mixed_results_df": mixed_results_df,
         "output_text": output_text,
         "dv_metadata": dv_metadata,
+        "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
     }
 
 
@@ -460,6 +549,7 @@ def run_posthoc(
     rois,
     subject_groups: dict[str, str | None] | None = None,
     dv_policy: dict | None = None,
+    dv_variants: list[dict[str, object]] | None = None,
     **kwargs,
 ):
     set_rois(rois)
@@ -477,6 +567,23 @@ def run_posthoc(
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
+    dv_variants_payload = None
+    if dv_variants:
+        try:
+            dv_variants_payload = compute_dv_variants_payload(
+                subjects=subjects,
+                conditions=conditions,
+                subject_data=subject_data,
+                base_freq=base_freq,
+                rois=rois,
+                dv_policy=dv_policy,
+                variant_policies=dv_variants,
+                log_func=message_cb,
+                primary_data=all_subject_bca_data,
+            )
+        except Exception as exc:  # noqa: BLE001
+            message_cb(f"DV variants computation failed: {exc}")
+            dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
     df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
     if df_long.empty:
@@ -496,6 +603,7 @@ def run_posthoc(
         "results_df": results_df,
         "output_text": output_text,
         "dv_metadata": dv_metadata,
+        "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
     }
 
 
@@ -511,6 +619,7 @@ def run_group_contrasts(
     rois,
     subject_groups: dict[str, str | None] | None = None,
     dv_policy: dict | None = None,
+    dv_variants: list[dict[str, object]] | None = None,
 ):
     set_rois(rois)
     _ = alpha
@@ -528,6 +637,23 @@ def run_group_contrasts(
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
+    dv_variants_payload = None
+    if dv_variants:
+        try:
+            dv_variants_payload = compute_dv_variants_payload(
+                subjects=subjects,
+                conditions=conditions,
+                subject_data=subject_data,
+                base_freq=base_freq,
+                rois=rois,
+                dv_policy=dv_policy,
+                variant_policies=dv_variants,
+                log_func=message_cb,
+                primary_data=all_subject_bca_data,
+            )
+        except Exception as exc:  # noqa: BLE001
+            message_cb(f"DV variants computation failed: {exc}")
+            dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
     df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
     df_long = df_long.dropna(subset=["group"])
@@ -558,6 +684,7 @@ def run_group_contrasts(
         "results_df": results_df,
         "output_text": "",
         "dv_metadata": dv_metadata,
+        "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
     }
 
 
@@ -656,6 +783,36 @@ def run_between_group_process_task(
     if not job_path.is_file():
         raise FileNotFoundError(f"Job spec not found: {job_spec_path}")
 
+    spec_data = json.loads(job_path.read_text())
+    dv_variants_payload = None
+    if spec_data.get("dv_variants"):
+        try:
+            dv_variants_payload = compute_dv_variants_payload(
+                subjects=list(spec_data.get("subjects", [])),
+                conditions=list(spec_data.get("conditions", [])),
+                subject_data=spec_data.get("subject_data", {}),
+                base_freq=float(spec_data.get("base_freq", 6.0)),
+                rois=spec_data.get("roi_map", {}),
+                dv_policy=spec_data.get("dv_policy", {}),
+                variant_policies=spec_data.get("dv_variants", []) or [],
+                log_func=message_cb,
+            )
+        except Exception as exc:  # noqa: BLE001
+            message_cb(f"DV variants computation failed: {exc}")
+            dv_variants_payload = {
+                "primary_name": str(spec_data.get("dv_policy", {}).get("name", "")),
+                "primary_df": pd.DataFrame(),
+                "variant_dfs": {},
+                "summary_df": pd.DataFrame(),
+                "errors": [{"variant": "DV Variants", "error": str(exc)}],
+                "selected_variants": [
+                    item.get("name")
+                    for item in spec_data.get("dv_variants", [])
+                    if isinstance(item, dict)
+                ],
+            }
+    dv_variants_payload = _serialize_dv_variants_payload(dv_variants_payload)
+
     exe = python_executable or sys.executable
     cmd = [exe, "-m", "Tools.Stats.Legacy.between_groups_cli", str(job_path)]
 
@@ -698,7 +855,6 @@ def run_between_group_process_task(
         err_msg = stderr_output.strip() or f"Between-group CLI exited with {process.returncode}"
         raise RuntimeError(err_msg)
 
-    spec_data = json.loads(job_path.read_text())
     summary_path = Path(spec_data.get("output", {}).get("summary_json", ""))
     if not summary_path.is_file():
         raise RuntimeError("Between-group CLI completed but summary file is missing.")
@@ -708,4 +864,5 @@ def run_between_group_process_task(
         "summary": summary,
         "stdout": stdout_lines,
         "stderr": stderr_output,
+        "dv_variants": dv_variants_payload,
     }
