@@ -42,7 +42,9 @@ from Tools.Stats.Legacy.stats_analysis import (
 )
 from Tools.Stats.PySide6.dv_policies import (
     GROUP_MEAN_Z_POLICY_NAME,
+    ROSSION_POLICY_NAME,
     build_group_mean_z_preview_payload,
+    build_rossion_preview_payload,
     prepare_summed_bca_data,
 )
 from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
@@ -700,18 +702,28 @@ def run_group_mean_z_preview(
     dv_policy: dict | None = None,
 ):
     settings = dv_policy or {}
-    if settings.get("name") != GROUP_MEAN_Z_POLICY_NAME:
-        raise RuntimeError("Group Mean-Z preview requires the Group Mean-Z policy.")
-
-    return build_group_mean_z_preview_payload(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        rois=rois,
-        log_func=message_cb,
-        dv_policy=dv_policy,
-    )
+    policy_name = settings.get("name")
+    if policy_name == GROUP_MEAN_Z_POLICY_NAME:
+        return build_group_mean_z_preview_payload(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            rois=rois,
+            log_func=message_cb,
+            dv_policy=dv_policy,
+        )
+    if policy_name == ROSSION_POLICY_NAME:
+        return build_rossion_preview_payload(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            rois=rois,
+            log_func=message_cb,
+            dv_policy=dv_policy,
+        )
+    raise RuntimeError("Preview requires Group Mean-Z or Rossion policy.")
 
 
 def run_harmonic_check(
