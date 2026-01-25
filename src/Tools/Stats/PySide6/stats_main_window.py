@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QComboBox,
+    QAbstractItemView,
+    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -33,10 +35,12 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QSpinBox,
     QScrollArea,
-    QTextEdit,
+    QSpinBox,
     QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -84,8 +88,13 @@ from Tools.Stats.PySide6.stats_data_loader import (
 )
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_workers import StatsWorker
+from Tools.Stats.PySide6 import stats_workers as stats_worker_funcs
 from Tools.Stats.PySide6.dv_policies import (
+    EMPTY_LIST_ERROR,
+    EMPTY_LIST_FALLBACK_FIXED_K,
+    EMPTY_LIST_SET_ZERO,
     FIXED_K_POLICY_NAME,
+    GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
 )
 from Tools.Stats.PySide6.summary_utils import (
@@ -189,9 +198,13 @@ class StatsWindow(QMainWindow):
         self._dv_fixed_k: int = 5
         self._dv_exclude_harmonic1: bool = True
         self._dv_exclude_base_harmonics: bool = True
+        self._dv_group_mean_z_threshold: float = 1.64
+        self._dv_empty_list_policy: str = EMPTY_LIST_FALLBACK_FIXED_K
         self._pipeline_conditions: dict[PipelineId, list[str]] = {}
         self._pipeline_dv_policy: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_base_freq: dict[PipelineId, float] = {}
+        self._pipeline_dv_metadata: dict[PipelineId, dict[str, object]] = {}
+        self._group_mean_preview_data: dict[str, object] = {}
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
@@ -305,6 +318,8 @@ class StatsWindow(QMainWindow):
             "fixed_k": int(self._dv_fixed_k),
             "exclude_harmonic1": bool(self._dv_exclude_harmonic1),
             "exclude_base_harmonics": bool(self._dv_exclude_base_harmonics),
+            "z_threshold": float(self._dv_group_mean_z_threshold),
+            "empty_list_policy": str(self._dv_empty_list_policy),
         }
 
     def get_dv_policy_snapshot(self) -> dict[str, object]:
@@ -321,6 +336,131 @@ class StatsWindow(QMainWindow):
             if widget is not None:
                 widget.setEnabled(enabled)
 
+    def _set_group_mean_controls_visible(self, visible: bool) -> None:
+        widget = getattr(self, "group_mean_controls", None)
+        if widget is not None:
+            widget.setVisible(visible)
+        preview_button = getattr(self, "group_mean_preview_btn", None)
+        if preview_button is not None:
+            preview_button.setVisible(visible)
+        preview_table = getattr(self, "group_mean_preview_table", None)
+        if preview_table is not None:
+            preview_table.setVisible(visible)
+
+    def _on_group_mean_z_threshold_changed(self, value: float) -> None:
+        self._dv_group_mean_z_threshold = float(value)
+
+    def _on_empty_list_policy_changed(self, text: str) -> None:
+        self._dv_empty_list_policy = text
+
+    def _clear_group_mean_preview(self) -> None:
+        table = getattr(self, "group_mean_preview_table", None)
+        if table is None:
+            return
+        table.setRowCount(0)
+        self._group_mean_preview_data = {}
+
+    def _update_group_mean_preview_table(
+        self,
+        union_map: dict[str, list[float]],
+        fallback_info: dict[str, dict[str, object]],
+    ) -> None:
+        table = getattr(self, "group_mean_preview_table", None)
+        if table is None:
+            return
+        rois = sorted(union_map.keys())
+        table.setRowCount(len(rois))
+        for row, roi_name in enumerate(rois):
+            harmonics = union_map.get(roi_name, [])
+            fallback = fallback_info.get(roi_name, {})
+            fallback_used = bool(fallback.get("fallback_used"))
+            policy = fallback.get("policy", "")
+            if fallback_used:
+                fallback_text = str(policy)
+            elif policy == EMPTY_LIST_SET_ZERO and not harmonics:
+                fallback_text = "DV=0"
+            else:
+                fallback_text = "None"
+
+            harmonic_text = ", ".join(f"{freq:g}" for freq in harmonics) or "—"
+            count_text = str(len(harmonics))
+
+            table.setItem(row, 0, QTableWidgetItem(str(roi_name)))
+            table.setItem(row, 1, QTableWidgetItem(harmonic_text))
+            table.setItem(row, 2, QTableWidgetItem(count_text))
+            table.setItem(row, 3, QTableWidgetItem(fallback_text))
+
+        table.resizeColumnsToContents()
+
+    def _on_preview_group_mean_z_clicked(self) -> None:
+        if self._dv_policy_name != GROUP_MEAN_Z_POLICY_NAME:
+            return
+        if not self.subject_data:
+            self._set_status("Load project data before previewing harmonic sets.")
+            return
+        self.refresh_rois()
+        if not self.rois:
+            self._set_status("Define at least one ROI before previewing.")
+            return
+        got = self._get_analysis_settings()
+        if not got:
+            return
+        self._current_base_freq, self._current_alpha = got
+        self._update_fixed_k_base_freq_label()
+
+        self.group_mean_preview_btn.setEnabled(False)
+        self._set_status("Previewing Group Mean-Z harmonic sets…")
+
+        worker = StatsWorker(
+            stats_worker_funcs.run_group_mean_z_preview,
+            subjects=self.subjects,
+            conditions=self._get_selected_conditions(),
+            subject_data=self.subject_data,
+            base_freq=self._current_base_freq,
+            rois=self.rois,
+            dv_policy=self._get_dv_policy_payload(),
+            _op="Group Mean-Z Preview",
+        )
+
+        try:
+            if not hasattr(self, "_active_workers"):
+                self._active_workers = []
+            self._active_workers.append(worker)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to track preview worker")
+
+        def _release():
+            try:
+                if worker in self._active_workers:
+                    self._active_workers.remove(worker)
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to release preview worker")
+
+        def _on_finished(payload: dict) -> None:
+            try:
+                self._group_mean_preview_data = payload or {}
+                union_map = payload.get("union_harmonics_by_roi", {}) if isinstance(payload, dict) else {}
+                fallback_info = payload.get("fallback_info_by_roi", {}) if isinstance(payload, dict) else {}
+                self._update_group_mean_preview_table(union_map, fallback_info)
+                self._set_status("Preview updated.")
+            finally:
+                self.group_mean_preview_btn.setEnabled(True)
+                _release()
+
+        def _on_error(message: str) -> None:
+            try:
+                self.append_log("General", f"Preview error: {message}", level="error")
+                self._set_status(message)
+            finally:
+                self.group_mean_preview_btn.setEnabled(True)
+                _release()
+
+        worker.signals.message.connect(self._on_worker_message)
+        worker.signals.error.connect(_on_error)
+        worker.signals.finished.connect(_on_finished)
+        worker.signals.progress.connect(self._on_worker_progress)
+        self.pool.start(worker)
+
     def _update_fixed_k_base_freq_label(self) -> None:
         label = getattr(self, "fixed_k_base_freq_value", None)
         if label is None:
@@ -330,6 +470,9 @@ class StatsWindow(QMainWindow):
     def _on_dv_policy_changed(self, text: str) -> None:
         self._dv_policy_name = text
         self._set_fixed_k_controls_enabled(text == FIXED_K_POLICY_NAME)
+        self._set_group_mean_controls_visible(text == GROUP_MEAN_Z_POLICY_NAME)
+        if text != GROUP_MEAN_Z_POLICY_NAME:
+            self._clear_group_mean_preview()
 
     def _on_fixed_k_changed(self, value: int) -> None:
         self._dv_fixed_k = int(value)
@@ -602,11 +745,18 @@ class StatsWindow(QMainWindow):
         dv_policy = self._pipeline_dv_policy.get(pipeline_id, self._get_dv_policy_payload())
         conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
         base_freq = self._pipeline_base_freq.get(pipeline_id, self._current_base_freq)
+        dv_meta = self._pipeline_dv_metadata.get(pipeline_id, {})
         payload = {
-            "policy_name": dv_policy.get("name", LEGACY_POLICY_NAME),
-            "fixed_k": dv_policy.get("fixed_k", 5),
-            "exclude_harmonic1": dv_policy.get("exclude_harmonic1", True),
-            "exclude_base_harmonics": dv_policy.get("exclude_base_harmonics", True),
+            "policy_name": dv_meta.get("policy_name", dv_policy.get("name", LEGACY_POLICY_NAME)),
+            "fixed_k": dv_meta.get("fixed_k", dv_policy.get("fixed_k", 5)),
+            "exclude_harmonic1": dv_meta.get("exclude_harmonic1", dv_policy.get("exclude_harmonic1", True)),
+            "exclude_base_harmonics": dv_meta.get(
+                "exclude_base_harmonics", dv_policy.get("exclude_base_harmonics", True)
+            ),
+            "z_threshold": dv_meta.get("z_threshold", dv_policy.get("z_threshold", 1.64)),
+            "empty_list_policy": dv_meta.get(
+                "empty_list_policy", dv_policy.get("empty_list_policy", EMPTY_LIST_FALLBACK_FIXED_K)
+            ),
             "base_frequency_hz": base_freq,
             "selected_conditions": list(conditions),
         }
@@ -615,6 +765,51 @@ class StatsWindow(QMainWindow):
             out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception:  # noqa: BLE001
             logger.exception("Failed to write DV metadata export.")
+
+        group_mean_meta = dv_meta.get("group_mean_z") if isinstance(dv_meta, dict) else None
+        if not isinstance(group_mean_meta, dict):
+            return
+
+        try:
+            summary_rows = [
+                {"key": "Primary DV method", "value": payload["policy_name"]},
+                {"key": "Base frequency (Hz)", "value": payload["base_frequency_hz"]},
+                {"key": "Z threshold", "value": payload.get("z_threshold")},
+                {"key": "Empty union policy", "value": payload.get("empty_list_policy")},
+                {"key": "Selected conditions", "value": ", ".join(payload["selected_conditions"])},
+            ]
+            summary_df = pd.DataFrame(summary_rows)
+
+            union_map = group_mean_meta.get("union_harmonics_by_roi", {}) or {}
+            fallback_info = group_mean_meta.get("fallback_info_by_roi", {}) or {}
+            roi_rows = []
+            for roi_name, harmonics in union_map.items():
+                fallback = fallback_info.get(roi_name, {})
+                roi_rows.append(
+                    {
+                        "roi": roi_name,
+                        "union_harmonics_hz": ", ".join(f"{freq:g}" for freq in harmonics) or "—",
+                        "harmonic_count": len(harmonics),
+                        "empty_list_policy": fallback.get("policy", payload.get("empty_list_policy")),
+                        "fallback_used": bool(fallback.get("fallback_used", False)),
+                        "fallback_harmonics_hz": ", ".join(
+                            f"{freq:g}" for freq in fallback.get("fallback_harmonics", [])
+                        )
+                        or "—",
+                    }
+                )
+            roi_df = pd.DataFrame(roi_rows)
+            mean_z_table = group_mean_meta.get("mean_z_table")
+
+            dv_path = Path(out_dir) / "Summed BCA DV Definition.xlsx"
+            with pd.ExcelWriter(dv_path, engine="openpyxl") as writer:
+                summary_df.to_excel(writer, sheet_name="DV Definition", index=False)
+                roi_df.to_excel(writer, sheet_name="ROI Harmonics", index=False)
+                if isinstance(mean_z_table, pd.DataFrame):
+                    mean_z_table.to_excel(writer, sheet_name="Mean Z Table", index=False)
+            self._set_status(f"Exported DV definition to {dv_path}")
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to write DV definition export.")
 
     def _ensure_results_dir(self) -> str:
         target = ensure_results_dir(
@@ -963,6 +1158,7 @@ class StatsWindow(QMainWindow):
         self._pipeline_conditions[pipeline_id] = self._get_selected_conditions()
         self._pipeline_dv_policy[pipeline_id] = self._get_dv_policy_payload()
         self._pipeline_base_freq[pipeline_id] = self._current_base_freq
+        self._pipeline_dv_metadata[pipeline_id] = {}
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
             label.setText("Running…")
@@ -1356,8 +1552,14 @@ class StatsWindow(QMainWindow):
         self.append_log(section, f"Worker error: {msg}", level="error")
         self._end_run()
 
+    def _store_dv_metadata(self, pipeline_id: PipelineId, payload: dict) -> None:
+        dv_meta = payload.get("dv_metadata")
+        if isinstance(dv_meta, dict) and dv_meta:
+            self._pipeline_dv_metadata[pipeline_id] = dv_meta
+
     def _apply_rm_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.rm_anova_results_data = payload.get("anova_df_results")
+        self._store_dv_metadata(PipelineId.SINGLE, payload)
         alpha = getattr(self, "_current_alpha", 0.05)
         output_text = payload.get("output_text", "")
 
@@ -1381,6 +1583,7 @@ class StatsWindow(QMainWindow):
 
     def _apply_between_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.between_anova_results_data = payload.get("anova_df_results")
+        self._store_dv_metadata(PipelineId.BETWEEN, payload)
         alpha = getattr(self, "_current_alpha", 0.05)
 
         output_text = build_between_anova_output(self.between_anova_results_data, alpha)
@@ -1391,6 +1594,7 @@ class StatsWindow(QMainWindow):
 
     def _apply_mixed_model_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.mixed_model_results_data = payload.get("mixed_results_df")
+        self._store_dv_metadata(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
         if update_text:
             self.output_text.append(output_text)
@@ -1404,6 +1608,7 @@ class StatsWindow(QMainWindow):
             raise ValueError("Mixed-model payload missing 'mixed_results_df'.")
 
         self.between_mixed_model_results_data = payload.get("mixed_results_df")
+        self._store_dv_metadata(PipelineId.BETWEEN, payload)
         output_text = payload.get("output_text", "")
         if update_text:
             self.output_text.append(output_text)
@@ -1412,6 +1617,7 @@ class StatsWindow(QMainWindow):
 
     def _apply_posthoc_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.posthoc_results_data = payload.get("results_df")
+        self._store_dv_metadata(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
         if update_text:
             self.output_text.append(output_text)
@@ -1420,6 +1626,7 @@ class StatsWindow(QMainWindow):
 
     def _apply_group_contrasts_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.group_contrasts_results_data = payload.get("results_df")
+        self._store_dv_metadata(PipelineId.BETWEEN, payload)
         output_text = payload.get("output_text", "")
         if update_text:
             self.output_text.append(output_text)
@@ -1540,7 +1747,13 @@ class StatsWindow(QMainWindow):
         dv_method_row = QHBoxLayout()
         dv_method_row.addWidget(QLabel("Method:"))
         self.dv_policy_combo = QComboBox()
-        self.dv_policy_combo.addItems([LEGACY_POLICY_NAME, FIXED_K_POLICY_NAME])
+        self.dv_policy_combo.addItems(
+            [
+                LEGACY_POLICY_NAME,
+                FIXED_K_POLICY_NAME,
+                GROUP_MEAN_Z_POLICY_NAME,
+            ]
+        )
         self.dv_policy_combo.setCurrentText(self._dv_policy_name)
         self.dv_policy_combo.currentTextChanged.connect(self._on_dv_policy_changed)
         dv_method_row.addWidget(self.dv_policy_combo, 1)
@@ -1574,6 +1787,69 @@ class StatsWindow(QMainWindow):
 
         dv_layout.addLayout(fixed_form)
         self._set_fixed_k_controls_enabled(self._dv_policy_name == FIXED_K_POLICY_NAME)
+
+        self.group_mean_controls = QWidget()
+        group_mean_layout = QVBoxLayout(self.group_mean_controls)
+        group_mean_layout.setContentsMargins(0, 0, 0, 0)
+        group_mean_layout.setSpacing(6)
+
+        group_mean_form = QFormLayout()
+        group_mean_form.setLabelAlignment(Qt.AlignLeft)
+        group_mean_form.setFormAlignment(Qt.AlignLeft)
+        group_mean_form.setHorizontalSpacing(10)
+        group_mean_form.setVerticalSpacing(6)
+
+        self.group_mean_z_threshold = QDoubleSpinBox()
+        self.group_mean_z_threshold.setRange(-10.0, 10.0)
+        self.group_mean_z_threshold.setDecimals(2)
+        self.group_mean_z_threshold.setSingleStep(0.05)
+        self.group_mean_z_threshold.setValue(self._dv_group_mean_z_threshold)
+        self.group_mean_z_threshold.valueChanged.connect(
+            self._on_group_mean_z_threshold_changed
+        )
+        group_mean_form.addRow("Z threshold:", self.group_mean_z_threshold)
+
+        self.group_mean_empty_policy_combo = QComboBox()
+        self.group_mean_empty_policy_combo.addItems(
+            [
+                EMPTY_LIST_FALLBACK_FIXED_K,
+                EMPTY_LIST_SET_ZERO,
+                EMPTY_LIST_ERROR,
+            ]
+        )
+        self.group_mean_empty_policy_combo.setCurrentText(self._dv_empty_list_policy)
+        self.group_mean_empty_policy_combo.currentTextChanged.connect(
+            self._on_empty_list_policy_changed
+        )
+        group_mean_form.addRow("Empty union policy:", self.group_mean_empty_policy_combo)
+
+        union_label = QLabel("Union across selected conditions within each ROI (standard behavior).")
+        union_label.setWordWrap(True)
+        group_mean_form.addRow("", union_label)
+
+        group_mean_layout.addLayout(group_mean_form)
+
+        self.group_mean_preview_btn = QPushButton("Preview harmonic sets")
+        self.group_mean_preview_btn.clicked.connect(self._on_preview_group_mean_z_clicked)
+        group_mean_layout.addWidget(self.group_mean_preview_btn)
+
+        self.group_mean_preview_table = QTableWidget(0, 4)
+        self.group_mean_preview_table.setHorizontalHeaderLabels(
+            ["ROI", "Harmonics (Hz)", "Count", "Fallback"]
+        )
+        self.group_mean_preview_table.verticalHeader().setVisible(False)
+        self.group_mean_preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.group_mean_preview_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.group_mean_preview_table.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        )
+        self.group_mean_preview_table.setMinimumHeight(120)
+        group_mean_layout.addWidget(self.group_mean_preview_table)
+
+        dv_layout.addWidget(self.group_mean_controls)
+        self._set_group_mean_controls_visible(
+            self._dv_policy_name == GROUP_MEAN_Z_POLICY_NAME
+        )
 
         main_layout.addWidget(self.dv_group)
 

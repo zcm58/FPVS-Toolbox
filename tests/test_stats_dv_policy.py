@@ -4,7 +4,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 from Tools.Stats.PySide6.dv_policies import (  # noqa: E402
+    EMPTY_LIST_FALLBACK_FIXED_K,
     FIXED_K_POLICY_NAME,
+    GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
 )
 from Tools.Stats.PySide6.stats_core import PipelineId, StepId  # noqa: E402
@@ -49,6 +51,20 @@ def test_stats_dv_policy_fixed_k_snapshot_and_kwargs(qtbot):
     kwargs, _handler = window.get_step_config(PipelineId.SINGLE, StepId.RM_ANOVA)
     assert kwargs["dv_policy"]["name"] == FIXED_K_POLICY_NAME
     assert kwargs["dv_policy"]["fixed_k"] == 7
+
+
+@pytest.mark.qt
+def test_stats_dv_policy_group_mean_z_defaults(qtbot):
+    window = StatsWindow(project_dir=".")
+    qtbot.addWidget(window)
+    window.show()
+
+    window.dv_policy_combo.setCurrentText(GROUP_MEAN_Z_POLICY_NAME)
+    snapshot = window.get_dv_policy_snapshot()
+
+    assert snapshot["name"] == GROUP_MEAN_Z_POLICY_NAME
+    assert snapshot["z_threshold"] == pytest.approx(1.64)
+    assert snapshot["empty_list_policy"] == EMPTY_LIST_FALLBACK_FIXED_K
 
 
 @pytest.mark.qt

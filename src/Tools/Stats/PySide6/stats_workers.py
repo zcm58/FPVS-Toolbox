@@ -39,7 +39,11 @@ from Tools.Stats.Legacy.stats_analysis import (
     run_rm_anova as analysis_run_rm_anova,
     set_rois,
 )
-from Tools.Stats.PySide6.dv_policies import prepare_summed_bca_data
+from Tools.Stats.PySide6.dv_policies import (
+    GROUP_MEAN_Z_POLICY_NAME,
+    build_group_mean_z_preview_payload,
+    prepare_summed_bca_data,
+)
 
 logger = logging.getLogger("Tools.Stats")
 RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
@@ -261,6 +265,7 @@ def run_rm_anova(
     set_rois(rois)
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
     provenance_map = {} if RM_ANOVA_DIAG else None
+    dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
@@ -270,6 +275,7 @@ def run_rm_anova(
         rois=rois,
         provenance_map=provenance_map,
         dv_policy=dv_policy,
+        dv_metadata=dv_metadata,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -284,7 +290,11 @@ def run_rm_anova(
         provenance_map=provenance_map,
         results_dir=results_dir,
     )
-    return {"anova_df_results": anova_df_results, "output_text": output_text}
+    return {
+        "anova_df_results": anova_df_results,
+        "output_text": output_text,
+        "dv_metadata": dv_metadata,
+    }
 
 
 def run_between_group_anova(
@@ -301,6 +311,7 @@ def run_between_group_anova(
 ):
     set_rois(rois)
     message_cb("Preparing data for Between-Group RM-ANOVA…")
+    dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
@@ -309,6 +320,7 @@ def run_between_group_anova(
         log_func=message_cb,
         rois=rois,
         dv_policy=dv_policy,
+        dv_metadata=dv_metadata,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -334,7 +346,7 @@ def run_between_group_anova(
         within_cols=["condition", "roi"],
         between_col="group",
     )
-    return {"anova_df_results": results}
+    return {"anova_df_results": results, "dv_metadata": dv_metadata}
 
 
 def run_lmm(
@@ -354,6 +366,7 @@ def run_lmm(
     set_rois(rois)
     prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
     message_cb(f"Preparing data for {prep_label}…")
+    dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
@@ -362,6 +375,7 @@ def run_lmm(
         log_func=message_cb,
         rois=rois,
         dv_policy=dv_policy,
+        dv_metadata=dv_metadata,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -427,7 +441,11 @@ def run_lmm(
     else:
         output_text += "Mixed effects model returned no rows.\n"
 
-    return {"mixed_results_df": mixed_results_df, "output_text": output_text}
+    return {
+        "mixed_results_df": mixed_results_df,
+        "output_text": output_text,
+        "dv_metadata": dv_metadata,
+    }
 
 
 def run_posthoc(
@@ -446,6 +464,7 @@ def run_posthoc(
 ):
     set_rois(rois)
     message_cb("Preparing data for Interaction Post-hoc tests…")
+    dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
@@ -454,6 +473,7 @@ def run_posthoc(
         log_func=message_cb,
         rois=rois,
         dv_policy=dv_policy,
+        dv_metadata=dv_metadata,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -472,7 +492,11 @@ def run_posthoc(
         alpha=alpha,
     )
     message_cb("Post-hoc interaction tests completed.")
-    return {"results_df": results_df, "output_text": output_text}
+    return {
+        "results_df": results_df,
+        "output_text": output_text,
+        "dv_metadata": dv_metadata,
+    }
 
 
 def run_group_contrasts(
@@ -491,6 +515,7 @@ def run_group_contrasts(
     set_rois(rois)
     _ = alpha
     message_cb("Preparing data for Between-Group Contrasts…")
+    dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
         conditions=conditions,
@@ -499,6 +524,7 @@ def run_group_contrasts(
         log_func=message_cb,
         rois=rois,
         dv_policy=dv_policy,
+        dv_metadata=dv_metadata,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -531,7 +557,34 @@ def run_group_contrasts(
     return {
         "results_df": results_df,
         "output_text": "",
+        "dv_metadata": dv_metadata,
     }
+
+
+def run_group_mean_z_preview(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    subject_data,
+    base_freq,
+    rois,
+    dv_policy: dict | None = None,
+):
+    settings = dv_policy or {}
+    if settings.get("name") != GROUP_MEAN_Z_POLICY_NAME:
+        raise RuntimeError("Group Mean-Z preview requires the Group Mean-Z policy.")
+
+    return build_group_mean_z_preview_payload(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_freq=base_freq,
+        rois=rois,
+        log_func=message_cb,
+        dv_policy=dv_policy,
+    )
 
 
 def run_harmonic_check(
