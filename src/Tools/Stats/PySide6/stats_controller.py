@@ -705,6 +705,7 @@ class StatsController:
             "base_freq": anova_kwargs.get("base_freq", 6.0),
             "alpha": mixed_kwargs.get("alpha", 0.05),
             "dv_policy": anova_kwargs.get("dv_policy", {}),
+            "dv_variants": anova_kwargs.get("dv_variants", []),
             "harmonic_options": {
                 "metric": harmonic_kwargs.get("selected_metric", "Z Score"),
                 "mean_value_threshold": harmonic_kwargs.get("mean_value_threshold", 0.0),
@@ -913,6 +914,10 @@ class StatsController:
                         message=f"{step.name} completed",
                     ),
                 )
+
+            dv_variants = payload.get("dv_variants") if isinstance(payload, dict) else None
+            if dv_variants:
+                self._view.store_dv_variants_payload(pipeline_id, dv_variants)
 
             state.current_step_index = len(state.steps)
             self._complete_pipeline(pipeline_id)

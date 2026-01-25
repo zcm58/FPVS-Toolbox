@@ -18,6 +18,7 @@ def test_stats_condition_selection_snapshot_and_block(qtbot, tmp_path, monkeypat
     window._populate_conditions_panel(conditions)
 
     assert window.conditions_group.title() == "Included Conditions"
+    assert window._get_selected_conditions() == conditions
 
     checkboxes = {box.text(): box for box in window.findChildren(QCheckBox)}
     for condition in conditions:
