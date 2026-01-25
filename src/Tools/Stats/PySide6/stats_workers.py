@@ -50,6 +50,11 @@ from Tools.Stats.PySide6.dv_policies import (
     prepare_summed_bca_data,
 )
 from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
+from Tools.Stats.PySide6.stats_outlier_exclusion import (
+    OutlierExclusionReport,
+    OutlierExclusionSummary,
+    apply_hard_dv_exclusion,
+)
 
 logger = logging.getLogger("Tools.Stats")
 RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
@@ -224,6 +229,68 @@ def _long_format_from_bca(
     return pd.DataFrame(rows)
 
 
+def _apply_outlier_exclusion(
+    df_long: pd.DataFrame,
+    *,
+    enabled: bool,
+    abs_limit: float,
+    message_cb,
+) -> tuple[pd.DataFrame, OutlierExclusionReport]:
+    if not enabled:
+        summary = OutlierExclusionSummary(
+            n_subjects_before=int(df_long["subject"].nunique()) if not df_long.empty else 0,
+            n_subjects_excluded=0,
+            n_subjects_after=int(df_long["subject"].nunique()) if not df_long.empty else 0,
+            abs_limit=float(abs_limit),
+        )
+        return df_long, OutlierExclusionReport(summary=summary, participants=[])
+
+    filtered_df, report = apply_hard_dv_exclusion(
+        df_long,
+        abs_limit,
+        participant_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+        value_col="value",
+    )
+
+    excluded_ids = [p.participant_id for p in report.participants]
+    message = (
+        "Outlier exclusion enabled; "
+        f"abs_limit={report.summary.abs_limit}; "
+        f"excluded_pids={excluded_ids}; "
+        f"n_before={report.summary.n_subjects_before} "
+        f"n_after={report.summary.n_subjects_after}"
+    )
+    if message_cb:
+        message_cb(message)
+    logger.info(
+        "stats_outlier_exclusion_summary",
+        extra={
+            "abs_limit": report.summary.abs_limit,
+            "excluded_pids": excluded_ids,
+            "n_before": report.summary.n_subjects_before,
+            "n_after": report.summary.n_subjects_after,
+        },
+    )
+
+    for participant in report.participants:
+        logger.info(
+            "stats_outlier_exclusion_participant",
+            extra={
+                "participant_id": participant.participant_id,
+                "reasons": participant.reasons,
+                "worst_value": participant.worst_value,
+                "worst_condition": participant.worst_condition,
+                "worst_roi": participant.worst_roi,
+                "n_violations": participant.n_violations,
+                "max_abs_dv": participant.max_abs_dv,
+            },
+        )
+
+    return filtered_df, report
+
+
 def _validate_group_contrasts_input(
     df: pd.DataFrame,
     *,
@@ -332,6 +399,8 @@ def run_rm_anova(
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
     results_dir: str | None = None,
+    outlier_exclusion_enabled: bool = True,
+    outlier_abs_limit: float = 50.0,
 ):
     set_rois(rois)
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
@@ -374,6 +443,22 @@ def run_rm_anova(
         except Exception as exc:  # noqa: BLE001
             message_cb(f"DV variants computation failed: {exc}")
             dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
+    df_long = _long_format_from_bca(all_subject_bca_data)
+    df_long, exclusion_report = _apply_outlier_exclusion(
+        df_long,
+        enabled=outlier_exclusion_enabled,
+        abs_limit=outlier_abs_limit,
+        message_cb=message_cb,
+    )
+    excluded_ids = {p.participant_id for p in exclusion_report.participants}
+    if excluded_ids:
+        all_subject_bca_data = {
+            pid: data for pid, data in all_subject_bca_data.items() if pid not in excluded_ids
+        }
+        if subjects is not None:
+            subjects = [pid for pid in subjects if pid not in excluded_ids]
+    if not all_subject_bca_data:
+        raise RuntimeError("All participants excluded by outlier exclusion.")
     _diag_subject_data_structure(all_subject_bca_data, subjects, conditions, rois, message_cb)
     message_cb("Running RM-ANOVA…")
     output_text, anova_df_results = analysis_run_rm_anova(
@@ -390,6 +475,7 @@ def run_rm_anova(
         "output_text": output_text,
         "dv_metadata": dv_metadata,
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
+        "dv_exclusion_report": exclusion_report,
     }
 
 
@@ -405,6 +491,8 @@ def run_between_group_anova(
     subject_groups: dict[str, str | None] | None = None,
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
+    outlier_exclusion_enabled: bool = True,
+    outlier_abs_limit: float = 50.0,
 ):
     set_rois(rois)
     message_cb("Preparing data for Between-Group RM-ANOVA…")
@@ -440,6 +528,12 @@ def run_between_group_anova(
             dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
     df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    df_long, exclusion_report = _apply_outlier_exclusion(
+        df_long,
+        enabled=outlier_exclusion_enabled,
+        abs_limit=outlier_abs_limit,
+        message_cb=message_cb,
+    )
     before = len(df_long)
     df_long = df_long.dropna(subset=["group"])
     dropped = before - len(df_long)
@@ -464,6 +558,7 @@ def run_between_group_anova(
         "anova_df_results": results,
         "dv_metadata": dv_metadata,
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
+        "dv_exclusion_report": exclusion_report,
     }
 
 
@@ -481,6 +576,8 @@ def run_lmm(
     include_group: bool = False,
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
+    outlier_exclusion_enabled: bool = True,
+    outlier_abs_limit: float = 50.0,
 ):
     set_rois(rois)
     prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
@@ -524,6 +621,12 @@ def run_lmm(
             dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
     df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    df_long, exclusion_report = _apply_outlier_exclusion(
+        df_long,
+        enabled=outlier_exclusion_enabled,
+        abs_limit=outlier_abs_limit,
+        message_cb=message_cb,
+    )
     if df_long.empty:
         raise RuntimeError("No valid rows for mixed model after filtering NaNs.")
 
@@ -589,6 +692,7 @@ def run_lmm(
         "output_text": output_text,
         "dv_metadata": dv_metadata,
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
+        "dv_exclusion_report": exclusion_report,
     }
 
 
@@ -605,6 +709,8 @@ def run_posthoc(
     subject_groups: dict[str, str | None] | None = None,
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
+    outlier_exclusion_enabled: bool = True,
+    outlier_abs_limit: float = 50.0,
     **kwargs,
 ):
     set_rois(rois)
@@ -648,6 +754,12 @@ def run_posthoc(
             dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
     df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    df_long, exclusion_report = _apply_outlier_exclusion(
+        df_long,
+        enabled=outlier_exclusion_enabled,
+        abs_limit=outlier_abs_limit,
+        message_cb=message_cb,
+    )
     if df_long.empty:
         raise RuntimeError("No valid rows for post-hoc tests after filtering NaNs.")
 
@@ -666,6 +778,7 @@ def run_posthoc(
         "output_text": output_text,
         "dv_metadata": dv_metadata,
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
+        "dv_exclusion_report": exclusion_report,
     }
 
 
@@ -682,6 +795,8 @@ def run_group_contrasts(
     subject_groups: dict[str, str | None] | None = None,
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
+    outlier_exclusion_enabled: bool = True,
+    outlier_abs_limit: float = 50.0,
 ):
     set_rois(rois)
     _ = alpha
@@ -718,6 +833,12 @@ def run_group_contrasts(
             dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
     df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    df_long, exclusion_report = _apply_outlier_exclusion(
+        df_long,
+        enabled=outlier_exclusion_enabled,
+        abs_limit=outlier_abs_limit,
+        message_cb=message_cb,
+    )
     df_long = df_long.dropna(subset=["group"])
     if df_long.empty:
         raise RuntimeError("No rows with group assignments to compute contrasts.")
@@ -747,6 +868,7 @@ def run_group_contrasts(
         "output_text": "",
         "dv_metadata": dv_metadata,
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
+        "dv_exclusion_report": exclusion_report,
     }
 
 
