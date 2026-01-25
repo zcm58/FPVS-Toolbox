@@ -173,11 +173,6 @@ from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
 )
 from Tools.Stats import StatsWindow as PysideStatsWindow
-if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
-    def launch_ctk_stats(*_args, **_kwargs):
-        return None
-else:
-    from Tools.Stats.Legacy.stats import StatsAnalysisWindow as launch_ctk_stats
 from config import FPVS_TOOLBOX_VERSION
 from . import update_manager
 from .file_menu import init_file_menu
@@ -1399,7 +1394,33 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 self._child_windows = []
             self._child_windows.append(window)
         else:
-            launch_ctk_stats(master=self)
+            try:
+                from Tools.Stats.Legacy.stats import StatsAnalysisWindow
+            except Exception as exc:
+                logger.warning(
+                    "Legacy stats window unavailable; skipping launch.",
+                    exc_info=exc,
+                )
+                status_bar = self.statusBar()
+                if status_bar:
+                    status_bar.showMessage(
+                        "Legacy Stats is unavailable in this environment.",
+                        5000,
+                    )
+                return
+            try:
+                StatsAnalysisWindow(master=self)
+            except Exception as exc:
+                logger.warning(
+                    "Legacy stats launch failed.",
+                    exc_info=exc,
+                )
+                status_bar = self.statusBar()
+                if status_bar:
+                    status_bar.showMessage(
+                        "Legacy Stats could not be launched.",
+                        5000,
+                    )
 
     def open_image_resizer(self) -> None:
         cmd = [sys.executable]
