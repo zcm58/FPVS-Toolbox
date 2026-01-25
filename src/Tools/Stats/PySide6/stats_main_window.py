@@ -97,6 +97,7 @@ from Tools.Stats.PySide6.dv_policies import (
     FIXED_K_POLICY_NAME,
     GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
+    ROSSION_POLICY_NAME,
 )
 from Tools.Stats.PySide6.dv_variants import export_dv_variants_workbook
 from Tools.Stats.PySide6.summary_utils import (
@@ -400,10 +401,12 @@ class StatsWindow(QMainWindow):
         self,
         union_map: dict[str, list[float]],
         fallback_info: dict[str, dict[str, object]],
+        stop_metadata: dict[str, dict[str, object]] | None = None,
     ) -> None:
         table = getattr(self, "group_mean_preview_table", None)
         if table is None:
             return
+        stop_metadata = stop_metadata or {}
         rois = sorted(union_map.keys())
         table.setRowCount(len(rois))
         for row, roi_name in enumerate(rois):
@@ -420,16 +423,23 @@ class StatsWindow(QMainWindow):
 
             harmonic_text = ", ".join(f"{freq:g}" for freq in harmonics) or "—"
             count_text = str(len(harmonics))
+            stop_meta = stop_metadata.get(roi_name, {})
+            stop_reason = stop_meta.get("stop_reason") or "—"
+            stop_fail = ", ".join(
+                f"{freq:g}" for freq in stop_meta.get("fail_harmonics", []) or []
+            ) or "—"
 
             table.setItem(row, 0, QTableWidgetItem(str(roi_name)))
             table.setItem(row, 1, QTableWidgetItem(harmonic_text))
             table.setItem(row, 2, QTableWidgetItem(count_text))
             table.setItem(row, 3, QTableWidgetItem(fallback_text))
+            table.setItem(row, 4, QTableWidgetItem(str(stop_reason)))
+            table.setItem(row, 5, QTableWidgetItem(stop_fail))
 
         table.resizeColumnsToContents()
 
     def _on_preview_group_mean_z_clicked(self) -> None:
-        if self._dv_policy_name != GROUP_MEAN_Z_POLICY_NAME:
+        if self._dv_policy_name not in (GROUP_MEAN_Z_POLICY_NAME, ROSSION_POLICY_NAME):
             return
         if not self.subject_data:
             self._set_status("Load project data before previewing harmonic sets.")
@@ -445,7 +455,7 @@ class StatsWindow(QMainWindow):
         self._update_fixed_k_base_freq_label()
 
         self.group_mean_preview_btn.setEnabled(False)
-        self._set_status("Previewing Group Mean-Z harmonic sets…")
+        self._set_status("Previewing harmonic sets…")
 
         worker = StatsWorker(
             stats_worker_funcs.run_group_mean_z_preview,
@@ -455,7 +465,7 @@ class StatsWindow(QMainWindow):
             base_freq=self._current_base_freq,
             rois=self.rois,
             dv_policy=self._get_dv_policy_payload(),
-            _op="Group Mean-Z Preview",
+            _op=f"{self._dv_policy_name} Preview",
         )
 
         try:
@@ -477,7 +487,8 @@ class StatsWindow(QMainWindow):
                 self._group_mean_preview_data = payload or {}
                 union_map = payload.get("union_harmonics_by_roi", {}) if isinstance(payload, dict) else {}
                 fallback_info = payload.get("fallback_info_by_roi", {}) if isinstance(payload, dict) else {}
-                self._update_group_mean_preview_table(union_map, fallback_info)
+                stop_meta = payload.get("stop_metadata_by_roi", {}) if isinstance(payload, dict) else {}
+                self._update_group_mean_preview_table(union_map, fallback_info, stop_meta)
                 self._set_status("Preview updated.")
             finally:
                 self.group_mean_preview_btn.setEnabled(True)
@@ -506,8 +517,10 @@ class StatsWindow(QMainWindow):
     def _on_dv_policy_changed(self, text: str) -> None:
         self._dv_policy_name = text
         self._set_fixed_k_controls_enabled(text == FIXED_K_POLICY_NAME)
-        self._set_group_mean_controls_visible(text == GROUP_MEAN_Z_POLICY_NAME)
-        if text != GROUP_MEAN_Z_POLICY_NAME:
+        self._set_group_mean_controls_visible(
+            text in (GROUP_MEAN_Z_POLICY_NAME, ROSSION_POLICY_NAME)
+        )
+        if text not in (GROUP_MEAN_Z_POLICY_NAME, ROSSION_POLICY_NAME):
             self._clear_group_mean_preview()
 
     def _on_fixed_k_changed(self, value: int) -> None:
@@ -805,7 +818,8 @@ class StatsWindow(QMainWindow):
             logger.exception("Failed to write DV metadata export.")
 
         group_mean_meta = dv_meta.get("group_mean_z") if isinstance(dv_meta, dict) else None
-        if not isinstance(group_mean_meta, dict):
+        rossion_meta = dv_meta.get("rossion_method") if isinstance(dv_meta, dict) else None
+        if not isinstance(group_mean_meta, dict) and not isinstance(rossion_meta, dict):
             return
 
         try:
@@ -820,13 +834,25 @@ class StatsWindow(QMainWindow):
                     "value": ", ".join(payload.get("variant_methods", [])) or "None",
                 },
             ]
+            if isinstance(rossion_meta, dict):
+                summary_rows.append(
+                    {
+                        "key": "Stop rule",
+                        "value": "Stop after 2 consecutive non-significant harmonics",
+                    }
+                )
             summary_df = pd.DataFrame(summary_rows)
 
-            union_map = group_mean_meta.get("union_harmonics_by_roi", {}) or {}
-            fallback_info = group_mean_meta.get("fallback_info_by_roi", {}) or {}
+            active_meta = (
+                rossion_meta if isinstance(rossion_meta, dict) else group_mean_meta
+            )
+            union_map = active_meta.get("union_harmonics_by_roi", {}) or {}
+            fallback_info = active_meta.get("fallback_info_by_roi", {}) or {}
+            stop_meta = active_meta.get("stop_metadata_by_roi", {}) or {}
             roi_rows = []
             for roi_name, harmonics in union_map.items():
                 fallback = fallback_info.get(roi_name, {})
+                stop_info = stop_meta.get(roi_name, {})
                 roi_rows.append(
                     {
                         "roi": roi_name,
@@ -838,10 +864,16 @@ class StatsWindow(QMainWindow):
                             f"{freq:g}" for freq in fallback.get("fallback_harmonics", [])
                         )
                         or "—",
+                        "stop_reason": stop_info.get("stop_reason", "—"),
+                        "stop_fail_harmonics_hz": ", ".join(
+                            f"{freq:g}" for freq in stop_info.get("fail_harmonics", []) or []
+                        )
+                        or "—",
+                        "n_scanned": stop_info.get("n_scanned", "—"),
                     }
                 )
             roi_df = pd.DataFrame(roi_rows)
-            mean_z_table = group_mean_meta.get("mean_z_table")
+            mean_z_table = active_meta.get("mean_z_table")
 
             dv_path = Path(out_dir) / "Summed BCA DV Definition.xlsx"
             with pd.ExcelWriter(dv_path, engine="openpyxl") as writer:
@@ -1883,6 +1915,7 @@ class StatsWindow(QMainWindow):
                 LEGACY_POLICY_NAME,
                 FIXED_K_POLICY_NAME,
                 GROUP_MEAN_Z_POLICY_NAME,
+                ROSSION_POLICY_NAME,
             ]
         )
         self.dv_policy_combo.setCurrentText(self._dv_policy_name)
@@ -1954,7 +1987,7 @@ class StatsWindow(QMainWindow):
         )
         group_mean_form.addRow("Empty union policy:", self.group_mean_empty_policy_combo)
 
-        union_label = QLabel("Union across selected conditions within each ROI (standard behavior).")
+        union_label = QLabel("Selected conditions are pooled within each ROI for harmonic selection.")
         union_label.setWordWrap(True)
         group_mean_form.addRow("", union_label)
 
@@ -1964,9 +1997,9 @@ class StatsWindow(QMainWindow):
         self.group_mean_preview_btn.clicked.connect(self._on_preview_group_mean_z_clicked)
         group_mean_layout.addWidget(self.group_mean_preview_btn)
 
-        self.group_mean_preview_table = QTableWidget(0, 4)
+        self.group_mean_preview_table = QTableWidget(0, 6)
         self.group_mean_preview_table.setHorizontalHeaderLabels(
-            ["ROI", "Harmonics (Hz)", "Count", "Fallback"]
+            ["ROI", "Harmonics (Hz)", "Count", "Fallback", "Stop reason", "Stop fail harmonics"]
         )
         self.group_mean_preview_table.verticalHeader().setVisible(False)
         self.group_mean_preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -1979,7 +2012,7 @@ class StatsWindow(QMainWindow):
 
         dv_layout.addWidget(self.group_mean_controls)
         self._set_group_mean_controls_visible(
-            self._dv_policy_name == GROUP_MEAN_Z_POLICY_NAME
+            self._dv_policy_name in (GROUP_MEAN_Z_POLICY_NAME, ROSSION_POLICY_NAME)
         )
 
         self.dv_variants_group = QGroupBox("Also compute DV variants (export only)")
