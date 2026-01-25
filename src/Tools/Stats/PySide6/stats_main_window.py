@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSplitter,
     QSpinBox,
     QSizePolicy,
     QTableWidget,
@@ -163,8 +164,8 @@ class StatsWindow(QMainWindow):
         # lifetime / GC edge cases that could drop Qt signals.
         self._active_workers: list[StatsWorker] = []
 
-        self.setMinimumSize(400, 600)
-        self.resize(400, 600)
+        self.setMinimumSize(900, 650)
+        self.resize(1200, 800)
 
         # re-entrancy guard for scan
         self._scan_guard = OpGuard()
@@ -1836,9 +1837,11 @@ class StatsWindow(QMainWindow):
     def _init_ui(self) -> None:
         central = QWidget(self)
         self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
+        main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
+        splitter = QSplitter(Qt.Horizontal)
+        main_layout.addWidget(splitter)
 
         # included conditions panel
         self.conditions_group = QGroupBox("Included Conditions")
@@ -1865,8 +1868,6 @@ class StatsWindow(QMainWindow):
         self.conditions_list_layout.setSpacing(4)
         self.conditions_scroll_area.setWidget(conditions_list_widget)
         conditions_layout.addWidget(self.conditions_scroll_area)
-
-        main_layout.addWidget(self.conditions_group)
 
         # summed BCA definition panel
         self.dv_group = QGroupBox("Summed BCA definition")
@@ -1981,8 +1982,9 @@ class StatsWindow(QMainWindow):
             self._dv_policy_name == GROUP_MEAN_Z_POLICY_NAME
         )
 
-        dv_variants_group = QGroupBox("Also compute DV variants (export only)")
-        dv_variants_layout = QVBoxLayout(dv_variants_group)
+        self.dv_variants_group = QGroupBox("Also compute DV variants (export only)")
+        self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        dv_variants_layout = QVBoxLayout(self.dv_variants_group)
         dv_variants_layout.setSpacing(4)
         dv_variants_note = QLabel(
             "Statistical tests run on Primary DV only. Variants are exported for comparison "
@@ -1999,39 +2001,9 @@ class StatsWindow(QMainWindow):
             self._dv_variant_checkboxes[policy_name] = checkbox
         self._sync_selected_dv_variants()
 
-        dv_layout.addWidget(dv_variants_group)
-
-        main_layout.addWidget(self.dv_group)
-
-        # folder row
-        folder_row = QHBoxLayout()
-        folder_row.setSpacing(5)
-        self.le_folder = QLineEdit()
-        self.le_folder.setReadOnly(True)
-        btn_browse = QPushButton("Browse…")
-        btn_browse.clicked.connect(self.on_browse_folder)
-        folder_row.addWidget(QLabel("Data Folder:"))
-        folder_row.addWidget(self.le_folder, 1)
-        folder_row.addWidget(btn_browse)
-        main_layout.addLayout(folder_row)
-
-        # open results (scan button removed)
-        tools_row = QHBoxLayout()
-        self.btn_open_results = QPushButton("Open Results Folder")
-        self.btn_open_results.clicked.connect(self._open_results_folder)
-        # widen a bit to pad text
-        fm = QFontMetrics(self.btn_open_results.font())
-        self.btn_open_results.setMinimumWidth(fm.horizontalAdvance(self.btn_open_results.text()) + 24)
-        tools_row.addWidget(self.btn_open_results)
-        self.info_button = QPushButton("Analysis Info")
-        self.info_button.clicked.connect(self.on_show_analysis_info)
-        tools_row.addWidget(self.info_button)
-        tools_row.addStretch(1)
-        main_layout.addLayout(tools_row)
-
         analysis_box = QGroupBox("Analysis Controls")
         analysis_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
-        analysis_layout = QVBoxLayout(analysis_box)
+        analysis_layout = QHBoxLayout(analysis_box)
         analysis_layout.setSpacing(8)
 
         # single group section
@@ -2078,7 +2050,56 @@ class StatsWindow(QMainWindow):
 
         analysis_layout.addWidget(single_group_box)
         analysis_layout.addWidget(between_box)
-        main_layout.addWidget(analysis_box)
+
+        left_scroll_area = QScrollArea()
+        left_scroll_area.setWidgetResizable(True)
+        left_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        left_scroll_area.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
+        left_contents = QWidget()
+        left_layout = QVBoxLayout(left_contents)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(10)
+        left_layout.addWidget(self.conditions_group)
+        left_layout.addWidget(self.dv_group)
+        left_layout.addWidget(self.dv_variants_group)
+        left_layout.addStretch(1)
+        left_scroll_area.setWidget(left_contents)
+
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+
+        data_actions_widget = QWidget()
+        data_actions_layout = QVBoxLayout(data_actions_widget)
+        data_actions_layout.setContentsMargins(0, 0, 0, 0)
+        data_actions_layout.setSpacing(6)
+
+        folder_row = QHBoxLayout()
+        folder_row.setSpacing(5)
+        self.le_folder = QLineEdit()
+        self.le_folder.setReadOnly(True)
+        btn_browse = QPushButton("Browse…")
+        btn_browse.clicked.connect(self.on_browse_folder)
+        folder_row.addWidget(QLabel("Data Folder:"))
+        folder_row.addWidget(self.le_folder, 1)
+        folder_row.addWidget(btn_browse)
+        data_actions_layout.addLayout(folder_row)
+
+        tools_row = QHBoxLayout()
+        self.btn_open_results = QPushButton("Open Results Folder")
+        self.btn_open_results.clicked.connect(self._open_results_folder)
+        fm = QFontMetrics(self.btn_open_results.font())
+        self.btn_open_results.setMinimumWidth(fm.horizontalAdvance(self.btn_open_results.text()) + 24)
+        tools_row.addWidget(self.btn_open_results)
+        self.info_button = QPushButton("Analysis Info")
+        self.info_button.clicked.connect(self.on_show_analysis_info)
+        tools_row.addWidget(self.info_button)
+        tools_row.addStretch(1)
+        data_actions_layout.addLayout(tools_row)
+
+        right_layout.addWidget(data_actions_widget)
+        right_layout.addWidget(analysis_box)
 
         # status + ROI labels with spinner
         status_row = QHBoxLayout()
@@ -2092,12 +2113,12 @@ class StatsWindow(QMainWindow):
         self.lbl_status.setWordWrap(True)
         self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         status_row.addWidget(self.lbl_status, 1)
-        main_layout.addLayout(status_row)
+        right_layout.addLayout(status_row)
 
         self.lbl_rois = QLabel("")
         self.lbl_rois.setWordWrap(True)
         self.lbl_rois.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        main_layout.addWidget(self.lbl_rois)
+        right_layout.addWidget(self.lbl_rois)
 
         # output pane
         self.output_text = QTextEdit()
@@ -2106,16 +2127,18 @@ class StatsWindow(QMainWindow):
         self.output_text.setPlaceholderText("Analysis output")
         self.output_text.setMinimumHeight(140)
         self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        main_layout.addWidget(self.output_text, 1)
+        right_layout.addWidget(self.output_text, 1)
 
-        main_layout.setStretch(0, 0)  # conditions panel
-        main_layout.setStretch(1, 0)  # summed BCA panel
-        main_layout.setStretch(2, 0)  # folder row
-        main_layout.setStretch(3, 0)  # tools row
-        main_layout.setStretch(4, 0)  # analysis controls
-        main_layout.setStretch(5, 0)  # status row
-        main_layout.setStretch(6, 0)  # ROI label
-        main_layout.setStretch(7, 1)  # output pane
+        right_layout.setStretch(0, 0)  # data/actions
+        right_layout.setStretch(1, 0)  # analysis controls
+        right_layout.setStretch(2, 0)  # status row
+        right_layout.setStretch(3, 0)  # ROI label
+        right_layout.setStretch(4, 1)  # output pane
+
+        splitter.addWidget(left_scroll_area)
+        splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
 
         # initialize export buttons
         self._update_export_buttons()
