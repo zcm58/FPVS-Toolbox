@@ -560,6 +560,7 @@ def _log_dv_trace_dv_table_summary(
         return
     expected_rows = len(subjects) * len(conditions) * len(rois_map)
     finite_values: list[float] = []
+    cell_values: list[tuple[float, str, str, str]] = []
     valid_rows = 0
     for pid in subjects:
         for cond in conditions:
@@ -568,7 +569,9 @@ def _log_dv_trace_dv_table_summary(
                 val = roi_vals.get(roi_name, np.nan)
                 if val is not None and np.isfinite(val):
                     valid_rows += 1
-                    finite_values.append(float(val))
+                    float_val = float(val)
+                    finite_values.append(float_val)
+                    cell_values.append((float_val, str(pid), str(cond), str(roi_name)))
     nan_rows = expected_rows - valid_rows
     dv_min = float(np.nanmin(finite_values)) if finite_values else np.nan
     dv_mean = float(np.nanmean(finite_values)) if finite_values else np.nan
@@ -610,6 +613,37 @@ def _log_dv_trace_dv_table_summary(
             roi_max,
             roi_std,
         )
+    if cell_values:
+        min_values = sorted(cell_values, key=lambda entry: entry[0])
+        max_values = sorted(cell_values, key=lambda entry: entry[0], reverse=True)
+        abs_values = sorted(cell_values, key=lambda entry: abs(entry[0]), reverse=True)
+        for rank, (dv_value, pid, cond, roi_name) in enumerate(min_values[:3], start=1):
+            logger.info(
+                "DV_TRACE dv_extreme which=min rank=%d pid=%s condition=%s roi=%s dv=%s",
+                rank,
+                pid,
+                cond,
+                roi_name,
+                dv_value,
+            )
+        for rank, (dv_value, pid, cond, roi_name) in enumerate(max_values[:3], start=1):
+            logger.info(
+                "DV_TRACE dv_extreme which=max rank=%d pid=%s condition=%s roi=%s dv=%s",
+                rank,
+                pid,
+                cond,
+                roi_name,
+                dv_value,
+            )
+        for rank, (dv_value, pid, cond, roi_name) in enumerate(abs_values[:3], start=1):
+            logger.info(
+                "DV_TRACE dv_extreme which=abs rank=%d pid=%s condition=%s roi=%s dv=%s",
+                rank,
+                pid,
+                cond,
+                roi_name,
+                dv_value,
+            )
 
 
 def build_group_mean_z_preview_payload(
