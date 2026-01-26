@@ -12,6 +12,7 @@ model/service layer and remains GUI-agnostic.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -27,6 +28,8 @@ from Tools.Stats.PySide6.stats_core import (
     POSTHOC_XLS,
     PipelineId,
 )
+
+logger = logging.getLogger("Tools.Stats")
 
 
 @dataclass
@@ -365,14 +368,30 @@ def _summarize_posthocs(
             a = str(row.get(cond_a_col, "A"))
             b = str(row.get(cond_b_col, "B"))
             diff = row.get(diff_col, np.nan) if diff_col else np.nan
-            direction = a
-            other = b
-            if pd.notna(diff) and float(diff) < 0:
-                direction, other = b, a
-            dz = float(row[eff_col]) if pd.notna(row[eff_col]) else 0.0
+            dz = float(row[eff_col]) if pd.notna(row[eff_col]) else np.nan
+            swap = False
+            if pd.notna(diff):
+                swap = float(diff) < 0
+            elif pd.notna(dz):
+                swap = dz < 0
+
+            if pd.notna(diff) and pd.notna(dz):
+                diff_val = float(diff)
+                if diff_val != 0 and dz != 0 and np.sign(diff_val) != np.sign(dz):
+                    logger.warning(
+                        "Post-hoc dz sign mismatch for %s vs %s in %s: mean_diff=%s dz=%s",
+                        a,
+                        b,
+                        roi,
+                        diff,
+                        dz,
+                    )
+
+            direction, other = (b, a) if swap else (a, b)
+            dz_display = abs(dz) if pd.notna(dz) else np.nan
             bullets.append(
                 f"- {roi}: {direction} > {other} ({a} vs {b}), "
-                f"p = {float(row[p_col]):.3f}, dz = {dz:.2f}."
+                f"p = {float(row[p_col]):.3f}, |dz| = {dz_display:.2f}."
             )
         return bullets
 
