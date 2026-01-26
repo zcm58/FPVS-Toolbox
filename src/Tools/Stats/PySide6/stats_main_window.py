@@ -95,14 +95,15 @@ from Tools.Stats.PySide6.dv_policies import (
     EMPTY_LIST_FALLBACK_FIXED_K,
     EMPTY_LIST_SET_ZERO,
     FIXED_K_POLICY_NAME,
-    GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
     ROSSION_POLICY_NAME,
 )
 from Tools.Stats.PySide6.dv_variants import export_dv_variants_workbook
 from Tools.Stats.PySide6.stats_outlier_exclusion import (
     OutlierExclusionReport,
+    build_outlier_summary_text,
     export_outlier_exclusion_report,
+    format_outlier_reason,
     report_to_dataframe,
 )
 from Tools.Stats.PySide6.summary_utils import (
@@ -202,7 +203,7 @@ class StatsWindow(QMainWindow):
         self._current_alpha: float = 0.05
         self._active_pipeline: PipelineId | None = None
         self._condition_checkboxes: dict[str, QCheckBox] = {}
-        self._dv_policy_name: str = LEGACY_POLICY_NAME
+        self._dv_policy_name: str = ROSSION_POLICY_NAME
         self._dv_fixed_k: int = 5
         self._dv_exclude_harmonic1: bool = True
         self._dv_exclude_base_harmonics: bool = True
@@ -298,6 +299,9 @@ class StatsWindow(QMainWindow):
         for condition in conditions:
             checkbox = QCheckBox(condition)
             checkbox.setChecked(True)
+            checkbox.setToolTip(
+                "Include this condition in the analysis."
+            )
             checkbox.stateChanged.connect(self._on_condition_toggled)
             self.conditions_list_layout.addWidget(checkbox)
             self._condition_checkboxes[condition] = checkbox
@@ -463,7 +467,7 @@ class StatsWindow(QMainWindow):
         table.resizeColumnsToContents()
 
     def _on_preview_group_mean_z_clicked(self) -> None:
-        if self._dv_policy_name not in (GROUP_MEAN_Z_POLICY_NAME, ROSSION_POLICY_NAME):
+        if self._dv_policy_name != ROSSION_POLICY_NAME:
             return
         if not self.subject_data:
             self._set_status("Load project data before previewing harmonic sets.")
@@ -482,7 +486,7 @@ class StatsWindow(QMainWindow):
         self._set_status("Previewing harmonic sets…")
 
         worker = StatsWorker(
-            stats_worker_funcs.run_group_mean_z_preview,
+            stats_worker_funcs.run_harmonics_preview,
             subjects=self.subjects,
             conditions=self._get_selected_conditions(),
             subject_data=self.subject_data,
@@ -541,10 +545,8 @@ class StatsWindow(QMainWindow):
     def _on_dv_policy_changed(self, text: str) -> None:
         self._dv_policy_name = text
         self._set_fixed_k_controls_enabled(text == FIXED_K_POLICY_NAME)
-        self._set_group_mean_controls_visible(
-            text in (GROUP_MEAN_Z_POLICY_NAME, ROSSION_POLICY_NAME)
-        )
-        if text not in (GROUP_MEAN_Z_POLICY_NAME, ROSSION_POLICY_NAME):
+        self._set_group_mean_controls_visible(text == ROSSION_POLICY_NAME)
+        if text != ROSSION_POLICY_NAME:
             self._clear_group_mean_preview()
 
     def _on_fixed_k_changed(self, value: int) -> None:
@@ -841,9 +843,8 @@ class StatsWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             logger.exception("Failed to write DV metadata export.")
 
-        group_mean_meta = dv_meta.get("group_mean_z") if isinstance(dv_meta, dict) else None
         rossion_meta = dv_meta.get("rossion_method") if isinstance(dv_meta, dict) else None
-        if not isinstance(group_mean_meta, dict) and not isinstance(rossion_meta, dict):
+        if not isinstance(rossion_meta, dict):
             return
 
         try:
@@ -851,7 +852,7 @@ class StatsWindow(QMainWindow):
                 {"key": "Primary DV method", "value": payload["policy_name"]},
                 {"key": "Base frequency (Hz)", "value": payload["base_frequency_hz"]},
                 {"key": "Z threshold", "value": payload.get("z_threshold")},
-                {"key": "Empty union policy", "value": payload.get("empty_list_policy")},
+                {"key": "Empty list policy", "value": payload.get("empty_list_policy")},
                 {"key": "Selected conditions", "value": ", ".join(payload["selected_conditions"])},
                 {
                     "key": "DV variants (exported)",
@@ -867,12 +868,9 @@ class StatsWindow(QMainWindow):
                 )
             summary_df = pd.DataFrame(summary_rows)
 
-            active_meta = (
-                rossion_meta if isinstance(rossion_meta, dict) else group_mean_meta
-            )
-            union_map = active_meta.get("union_harmonics_by_roi", {}) or {}
-            fallback_info = active_meta.get("fallback_info_by_roi", {}) or {}
-            stop_meta = active_meta.get("stop_metadata_by_roi", {}) or {}
+            union_map = rossion_meta.get("union_harmonics_by_roi", {}) or {}
+            fallback_info = rossion_meta.get("fallback_info_by_roi", {}) or {}
+            stop_meta = rossion_meta.get("stop_metadata_by_roi", {}) or {}
             roi_rows = []
             for roi_name, harmonics in union_map.items():
                 fallback = fallback_info.get(roi_name, {})
@@ -897,7 +895,7 @@ class StatsWindow(QMainWindow):
                     }
                 )
             roi_df = pd.DataFrame(roi_rows)
-            mean_z_table = active_meta.get("mean_z_table")
+            mean_z_table = rossion_meta.get("mean_z_table")
 
             dv_path = Path(out_dir) / "Summed BCA DV Definition.xlsx"
             with pd.ExcelWriter(dv_path, engine="openpyxl") as writer:
@@ -1562,31 +1560,38 @@ class StatsWindow(QMainWindow):
         dialog.setModal(True)
         layout = QVBoxLayout(dialog)
 
-        summary_label = QLabel(
-            f"Participants excluded: {summary.n_subjects_excluded} "
-            f"(of {summary.n_subjects_before})"
+        summary_text = build_outlier_summary_text(report)
+        summary_box = QTextEdit()
+        summary_box.setReadOnly(True)
+        summary_box.setPlainText(summary_text)
+        summary_box.setMinimumHeight(120)
+        summary_box.setToolTip(
+            "Plain-language summary of excluded participants and the worst DV value per person."
         )
-        summary_label.setWordWrap(True)
-        layout.addWidget(summary_label)
+        layout.addWidget(summary_box)
 
         if report.participants:
             table = QTableWidget(len(report.participants), 6)
             table.setHorizontalHeaderLabels(
                 [
                     "participant_id",
-                    "reasons",
+                    "exclusion_reason",
                     "worst_value",
                     "worst_condition",
                     "worst_roi",
-                    "n_violations",
+                    "violations",
                 ]
             )
             table.verticalHeader().setVisible(False)
             table.setEditTriggers(QAbstractItemView.NoEditTriggers)
             table.setSelectionMode(QAbstractItemView.NoSelection)
             for row, participant in enumerate(report.participants):
+                reasons = ", ".join(
+                    format_outlier_reason(reason, abs_limit=summary.abs_limit)
+                    for reason in participant.reasons
+                )
                 table.setItem(row, 0, QTableWidgetItem(participant.participant_id))
-                table.setItem(row, 1, QTableWidgetItem(", ".join(participant.reasons)))
+                table.setItem(row, 1, QTableWidgetItem(reasons))
                 table.setItem(row, 2, QTableWidgetItem(str(participant.worst_value)))
                 table.setItem(row, 3, QTableWidgetItem(participant.worst_condition))
                 table.setItem(row, 4, QTableWidgetItem(participant.worst_roi))
@@ -1597,12 +1602,18 @@ class StatsWindow(QMainWindow):
             layout.addWidget(QLabel("No participants excluded."))
 
         button_row = QHBoxLayout()
+        copy_summary_btn = QPushButton("Copy summary")
         copy_btn = QPushButton("Copy table")
         close_btn = QPushButton("Close")
         button_row.addStretch(1)
+        button_row.addWidget(copy_summary_btn)
         button_row.addWidget(copy_btn)
         button_row.addWidget(close_btn)
         layout.addLayout(button_row)
+
+        def _copy_summary() -> None:
+            if summary_text:
+                QGuiApplication.clipboard().setText(summary_text)
 
         def _copy_table() -> None:
             df = report_to_dataframe(report)
@@ -1610,6 +1621,7 @@ class StatsWindow(QMainWindow):
                 return
             QGuiApplication.clipboard().setText(df.to_csv(sep="\t", index=False))
 
+        copy_summary_btn.clicked.connect(_copy_summary)
         copy_btn.clicked.connect(_copy_table)
         copy_btn.setEnabled(bool(report.participants))
         close_btn.clicked.connect(dialog.accept)
@@ -2012,14 +2024,19 @@ class StatsWindow(QMainWindow):
         # included conditions panel
         self.conditions_group = QGroupBox("Included Conditions")
         self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        self.conditions_group.setToolTip(
+            "Choose which conditions to include in the analysis."
+        )
         conditions_layout = QVBoxLayout(self.conditions_group)
         conditions_layout.setSpacing(6)
 
         conditions_button_row = QHBoxLayout()
         self.conditions_select_all_btn = QPushButton("Select All")
+        self.conditions_select_all_btn.setToolTip("Include every condition in the analysis.")
         self.conditions_select_all_btn.clicked.connect(self._select_all_conditions)
         conditions_button_row.addWidget(self.conditions_select_all_btn)
         self.conditions_select_none_btn = QPushButton("Select None")
+        self.conditions_select_none_btn.setToolTip("Deselect all conditions.")
         self.conditions_select_none_btn.clicked.connect(self._select_no_conditions)
         conditions_button_row.addWidget(self.conditions_select_none_btn)
         conditions_button_row.addStretch(1)
@@ -2038,17 +2055,22 @@ class StatsWindow(QMainWindow):
         # summed BCA definition panel
         self.dv_group = QGroupBox("Summed BCA definition")
         self.dv_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        self.dv_group.setToolTip(
+            "Select how the primary Summed BCA DV is computed."
+        )
         dv_layout = QVBoxLayout(self.dv_group)
         dv_layout.setSpacing(6)
 
         dv_method_row = QHBoxLayout()
         dv_method_row.addWidget(QLabel("Method:"))
         self.dv_policy_combo = QComboBox()
+        self.dv_policy_combo.setToolTip(
+            "Choose the primary DV definition used for all statistical results."
+        )
         self.dv_policy_combo.addItems(
             [
                 LEGACY_POLICY_NAME,
                 FIXED_K_POLICY_NAME,
-                GROUP_MEAN_Z_POLICY_NAME,
                 ROSSION_POLICY_NAME,
             ]
         )
@@ -2066,21 +2088,33 @@ class StatsWindow(QMainWindow):
         self.fixed_k_spinbox = QSpinBox()
         self.fixed_k_spinbox.setRange(1, 50)
         self.fixed_k_spinbox.setValue(self._dv_fixed_k)
+        self.fixed_k_spinbox.setToolTip(
+            "Number of harmonics to include when using the Fixed-K method."
+        )
         self.fixed_k_spinbox.valueChanged.connect(self._on_fixed_k_changed)
         fixed_form.addRow("K:", self.fixed_k_spinbox)
 
         self.fixed_k_exclude_h1 = QCheckBox("Exclude harmonic 1")
         self.fixed_k_exclude_h1.setChecked(self._dv_exclude_harmonic1)
+        self.fixed_k_exclude_h1.setToolTip(
+            "Skip the first harmonic when building the Fixed-K DV."
+        )
         self.fixed_k_exclude_h1.stateChanged.connect(self._on_fixed_k_exclude_h1_changed)
         fixed_form.addRow("", self.fixed_k_exclude_h1)
 
         self.fixed_k_exclude_base = QCheckBox("Exclude base-rate harmonics")
         self.fixed_k_exclude_base.setChecked(self._dv_exclude_base_harmonics)
+        self.fixed_k_exclude_base.setToolTip(
+            "Exclude base-rate harmonics from the Fixed-K DV."
+        )
         self.fixed_k_exclude_base.stateChanged.connect(self._on_fixed_k_exclude_base_changed)
         fixed_form.addRow("", self.fixed_k_exclude_base)
 
         self.fixed_k_base_freq_value = QLabel(f"{self._current_base_freq:g} Hz")
         self.fixed_k_base_freq_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.fixed_k_base_freq_value.setToolTip(
+            "Base frequency from Settings used to identify harmonics."
+        )
         fixed_form.addRow("Base frequency:", self.fixed_k_base_freq_value)
 
         dv_layout.addLayout(fixed_form)
@@ -2105,6 +2139,9 @@ class StatsWindow(QMainWindow):
         self.group_mean_z_threshold.valueChanged.connect(
             self._on_group_mean_z_threshold_changed
         )
+        self.group_mean_z_threshold.setToolTip(
+            "Minimum group-mean Z value for a harmonic to count as significant."
+        )
         group_mean_form.addRow("Z threshold:", self.group_mean_z_threshold)
 
         self.group_mean_empty_policy_combo = QComboBox()
@@ -2119,15 +2156,23 @@ class StatsWindow(QMainWindow):
         self.group_mean_empty_policy_combo.currentTextChanged.connect(
             self._on_empty_list_policy_changed
         )
-        group_mean_form.addRow("Empty union policy:", self.group_mean_empty_policy_combo)
+        self.group_mean_empty_policy_combo.setToolTip(
+            "What to do if no significant harmonics are found for an ROI."
+        )
+        group_mean_form.addRow("Empty list policy:", self.group_mean_empty_policy_combo)
 
-        union_label = QLabel("Selected conditions are pooled within each ROI for harmonic selection.")
+        union_label = QLabel(
+            "Selected conditions are used to estimate group-mean Z values for each ROI and harmonic."
+        )
         union_label.setWordWrap(True)
         group_mean_form.addRow("", union_label)
 
         group_mean_layout.addLayout(group_mean_form)
 
         self.group_mean_preview_btn = QPushButton("Preview harmonic sets")
+        self.group_mean_preview_btn.setToolTip(
+            "Preview the harmonics that will be used by the Rossion method."
+        )
         self.group_mean_preview_btn.clicked.connect(self._on_preview_group_mean_z_clicked)
         group_mean_layout.addWidget(self.group_mean_preview_btn)
 
@@ -2146,22 +2191,31 @@ class StatsWindow(QMainWindow):
 
         dv_layout.addWidget(self.group_mean_controls)
         self._set_group_mean_controls_visible(
-            self._dv_policy_name in (GROUP_MEAN_Z_POLICY_NAME, ROSSION_POLICY_NAME)
+            self._dv_policy_name == ROSSION_POLICY_NAME
         )
 
-        self.dv_variants_group = QGroupBox("Also compute DV variants (export only)")
+        self.dv_variants_group = QGroupBox("Optional comparison exports (do not change results)")
         self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
         dv_variants_layout = QVBoxLayout(self.dv_variants_group)
         dv_variants_layout.setSpacing(4)
         dv_variants_note = QLabel(
-            "Statistical tests run on Primary DV only. Variants are exported for comparison "
-            "and do not affect RM-ANOVA/LMM/post-hocs."
+            "These exports are for consistency checks. Statistical results use the Primary DV only."
         )
         dv_variants_note.setWordWrap(True)
+        self.dv_variants_group.setToolTip(
+            "Optional exports that compare alternative DV definitions. "
+            "They do not change any statistical results."
+        )
         dv_variants_layout.addWidget(dv_variants_note)
 
-        for policy_name in [FIXED_K_POLICY_NAME, GROUP_MEAN_Z_POLICY_NAME]:
-            checkbox = QCheckBox(policy_name)
+        dv_variant_labels = {
+            FIXED_K_POLICY_NAME: "Export a comparison version using a fixed number of harmonics",
+        }
+        for policy_name in [FIXED_K_POLICY_NAME]:
+            checkbox = QCheckBox(dv_variant_labels[policy_name])
+            checkbox.setToolTip(
+                "Uses K=5 harmonics when no significant harmonics are found; exports only."
+            )
             checkbox.setChecked(False)
             checkbox.stateChanged.connect(self._on_dv_variant_toggled)
             dv_variants_layout.addWidget(checkbox)
@@ -2170,11 +2224,17 @@ class StatsWindow(QMainWindow):
 
         self.outlier_group = QGroupBox("Outlier Exclusion")
         self.outlier_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        self.outlier_group.setToolTip(
+            "Exclude participants whose DV values are outside the allowed range."
+        )
         outlier_layout = QVBoxLayout(self.outlier_group)
         outlier_layout.setSpacing(6)
 
         self.outlier_enable_checkbox = QCheckBox("Enable outlier exclusion")
         self.outlier_enable_checkbox.setChecked(self._outlier_exclusion_enabled)
+        self.outlier_enable_checkbox.setToolTip(
+            "When enabled, any participant with extreme or invalid DV values is excluded."
+        )
         self.outlier_enable_checkbox.stateChanged.connect(self._on_outlier_exclusion_toggled)
         outlier_layout.addWidget(self.outlier_enable_checkbox)
 
@@ -2189,6 +2249,9 @@ class StatsWindow(QMainWindow):
         self.outlier_abs_limit_spin.setDecimals(2)
         self.outlier_abs_limit_spin.setSingleStep(1.0)
         self.outlier_abs_limit_spin.setValue(self._outlier_abs_limit)
+        self.outlier_abs_limit_spin.setToolTip(
+            "Participants are excluded if any DV exceeds this absolute cutoff."
+        )
         self.outlier_abs_limit_spin.valueChanged.connect(self._on_outlier_abs_limit_changed)
         self.outlier_abs_limit_spin.setEnabled(self._outlier_exclusion_enabled)
         outlier_form.addRow("Hard DV limit (abs):", self.outlier_abs_limit_spin)
@@ -2199,6 +2262,9 @@ class StatsWindow(QMainWindow):
             "Exclude entire participant if any abs(DV) exceeds limit or DV is non-finite."
         )
         outlier_note.setWordWrap(True)
+        outlier_note.setToolTip(
+            "Applies to the Primary DV only; excluded participants are removed from all analyses."
+        )
         outlier_layout.addWidget(outlier_note)
 
         analysis_box = QGroupBox("Analysis Controls")
@@ -2213,10 +2279,16 @@ class StatsWindow(QMainWindow):
 
         single_action_row = QHBoxLayout()
         self.analyze_single_btn = QPushButton("Analyze Single Group")
+        self.analyze_single_btn.setToolTip(
+            "Run the full single-group analysis pipeline using the selected settings."
+        )
         self.analyze_single_btn.clicked.connect(self.on_analyze_single_group_clicked)
         single_action_row.addWidget(self.analyze_single_btn)
 
         self.single_advanced_btn = QPushButton("Advanced…")
+        self.single_advanced_btn.setToolTip(
+            "Run or export individual single-group steps."
+        )
         self.single_advanced_btn.clicked.connect(self.on_single_advanced_clicked)
         single_action_row.addWidget(self.single_advanced_btn)
         single_layout.addLayout(single_action_row)
@@ -2232,15 +2304,24 @@ class StatsWindow(QMainWindow):
 
         between_action_row = QHBoxLayout()
         self.analyze_between_btn = QPushButton("Analyze Group Differences")
+        self.analyze_between_btn.setToolTip(
+            "Run the full between-group analysis pipeline."
+        )
         self.analyze_between_btn.clicked.connect(self.on_analyze_between_groups_clicked)
         between_action_row.addWidget(self.analyze_between_btn)
 
         self.between_advanced_btn = QPushButton("Advanced…")
+        self.between_advanced_btn.setToolTip(
+            "Run or export individual between-group steps."
+        )
         self.between_advanced_btn.clicked.connect(self.on_between_advanced_clicked)
         between_action_row.addWidget(self.between_advanced_btn)
         between_layout.addLayout(between_action_row)
 
         self.lela_mode_btn = QPushButton("Lela Mode (Cross-Phase LMM)")
+        self.lela_mode_btn.setToolTip(
+            "Run the cross-phase mixed model for between-group analyses."
+        )
         self.lela_mode_btn.clicked.connect(self.on_run_lela_mode)
         between_layout.addWidget(self.lela_mode_btn)
 
@@ -2280,7 +2361,11 @@ class StatsWindow(QMainWindow):
         folder_row.setSpacing(5)
         self.le_folder = QLineEdit()
         self.le_folder.setReadOnly(True)
+        self.le_folder.setToolTip(
+            "Selected folder that contains the FPVS result spreadsheets."
+        )
         btn_browse = QPushButton("Browse…")
+        btn_browse.setToolTip("Choose the folder that contains FPVS results.")
         btn_browse.clicked.connect(self.on_browse_folder)
         folder_row.addWidget(QLabel("Data Folder:"))
         folder_row.addWidget(self.le_folder, 1)
@@ -2290,11 +2375,17 @@ class StatsWindow(QMainWindow):
         tools_row = QHBoxLayout()
         self.btn_open_results = QPushButton("Open Results Folder")
         self.btn_open_results.clicked.connect(self._open_results_folder)
+        self.btn_open_results.setToolTip(
+            "Open the folder where stats outputs are saved."
+        )
         fm = QFontMetrics(self.btn_open_results.font())
         self.btn_open_results.setMinimumWidth(fm.horizontalAdvance(self.btn_open_results.text()) + 24)
         tools_row.addWidget(self.btn_open_results)
         self.info_button = QPushButton("Analysis Info")
         self.info_button.clicked.connect(self.on_show_analysis_info)
+        self.info_button.setToolTip(
+            "Show a short description of each analysis step."
+        )
         tools_row.addWidget(self.info_button)
         tools_row.addStretch(1)
         data_actions_layout.addLayout(tools_row)
@@ -2319,6 +2410,9 @@ class StatsWindow(QMainWindow):
         self.lbl_rois = QLabel("")
         self.lbl_rois.setWordWrap(True)
         self.lbl_rois.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.lbl_rois.setToolTip(
+            "ROIs loaded from Settings. Update ROI definitions in Settings to change this list."
+        )
         right_layout.addWidget(self.lbl_rois)
 
         # output pane
@@ -2360,6 +2454,8 @@ class StatsWindow(QMainWindow):
         for text, cb, enabled in actions:
             btn = QPushButton(text)
             btn.setEnabled(enabled)
+            if text.lower().startswith("export"):
+                btn.setToolTip("Export the results for this step to Excel.")
             btn.clicked.connect(cb)
             layout.addWidget(btn)
         layout.addStretch(1)

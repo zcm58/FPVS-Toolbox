@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -12,6 +13,19 @@ from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
 
 OUTLIER_REASON_LIMIT = "HARD_DV_LIMIT"
 OUTLIER_REASON_NONFINITE = "DV_NONFINITE"
+OUTLIER_REASON_MAD = "MAD_OUTLIER"
+
+OUTLIER_REASON_FRIENDLY = {
+    OUTLIER_REASON_LIMIT: "Exceeded hard cutoff (±{abs_limit:g} DV)",
+    OUTLIER_REASON_MAD: "Unusually extreme compared to the group (robust rule)",
+    OUTLIER_REASON_NONFINITE: "Non-finite DV value",
+}
+
+OUTLIER_REASON_SENTENCE = {
+    OUTLIER_REASON_LIMIT: "a value exceeded the hard cutoff (±{abs_limit:g} DV)",
+    OUTLIER_REASON_MAD: "values were unusually extreme compared to the group (robust rule)",
+    OUTLIER_REASON_NONFINITE: "a value was non-finite",
+}
 
 
 @dataclass(frozen=True)
@@ -137,21 +151,80 @@ def apply_hard_dv_exclusion(
     return filtered_df, OutlierExclusionReport(summary=summary, participants=participants)
 
 
+def format_outlier_reason(reason: str, *, abs_limit: float | None = None) -> str:
+    if reason == OUTLIER_REASON_LIMIT:
+        limit = abs_limit if abs_limit is not None else 0.0
+        return OUTLIER_REASON_FRIENDLY[reason].format(abs_limit=limit)
+    if reason in OUTLIER_REASON_FRIENDLY:
+        return OUTLIER_REASON_FRIENDLY[reason]
+    return str(reason)
+
+
+def _format_reason_sentence(reason: str, *, abs_limit: float) -> str:
+    if reason == OUTLIER_REASON_LIMIT:
+        return OUTLIER_REASON_SENTENCE[reason].format(abs_limit=abs_limit)
+    if reason in OUTLIER_REASON_SENTENCE:
+        return OUTLIER_REASON_SENTENCE[reason]
+    return str(reason)
+
+
+def _join_reason_sentences(clauses: list[str]) -> str:
+    if not clauses:
+        return "an outlier value was detected"
+    if len(clauses) == 1:
+        return clauses[0]
+    if len(clauses) == 2:
+        return f"{clauses[0]} and {clauses[1]}"
+    return ", ".join(clauses[:-1]) + f", and {clauses[-1]}"
+
+
 def report_to_dataframe(report: OutlierExclusionReport) -> pd.DataFrame:
     rows = []
+    abs_limit = report.summary.abs_limit if report and report.summary else None
     for item in report.participants:
+        reasons = [format_outlier_reason(reason, abs_limit=abs_limit) for reason in item.reasons]
         rows.append(
             {
                 "participant_id": item.participant_id,
-                "reasons": ", ".join(item.reasons),
+                "exclusion_reason": ", ".join(reasons),
                 "worst_value": item.worst_value,
                 "worst_condition": item.worst_condition,
                 "worst_roi": item.worst_roi,
-                "n_violations": item.n_violations,
+                "violations": item.n_violations,
                 "max_abs_dv": item.max_abs_dv,
             }
         )
     return pd.DataFrame(rows)
+
+
+def build_outlier_summary_text(report: OutlierExclusionReport) -> str:
+    summary = report.summary
+    abs_limit = float(summary.abs_limit)
+    lines = [
+        "Outlier Exclusion Summary",
+        f"Participants excluded: {summary.n_subjects_excluded} (of {summary.n_subjects_before})",
+    ]
+    if not report.participants:
+        lines.append("No participants were excluded.")
+        return "\n".join(lines)
+
+    for participant in report.participants:
+        reason_clauses = [
+            _format_reason_sentence(reason, abs_limit=abs_limit)
+            for reason in participant.reasons
+        ]
+        reason_sentence = _join_reason_sentences(reason_clauses)
+        worst_value = participant.worst_value
+        if np.isfinite(worst_value):
+            worst_text = f"{worst_value:.2f}"
+        else:
+            worst_text = "non-finite"
+        lines.append(
+            f"{participant.participant_id} was excluded as an outlier because {reason_sentence}. "
+            f"Worst value: {worst_text} DV ({participant.worst_condition}, {participant.worst_roi})."
+        )
+
+    return "\n".join(lines)
 
 
 def summary_to_dataframe(report: OutlierExclusionReport) -> pd.DataFrame:

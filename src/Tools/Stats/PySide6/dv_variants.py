@@ -9,7 +9,6 @@ import pandas as pd
 
 from Tools.Stats.PySide6.dv_policies import (
     FIXED_K_POLICY_NAME,
-    GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
     ROSSION_POLICY_NAME,
     normalize_dv_policy,
@@ -20,7 +19,6 @@ from Tools.Stats.PySide6.dv_policies import (
 DV_POLICY_SHORT_NAMES = {
     LEGACY_POLICY_NAME: "Legacy",
     FIXED_K_POLICY_NAME: "FixedK",
-    GROUP_MEAN_Z_POLICY_NAME: "GroupMeanZUnion",
     ROSSION_POLICY_NAME: "Rossion",
 }
 
