@@ -35,7 +35,7 @@ from .stats_data_loader import (
 )
 from .stats_subjects import canonical_group_and_phase_from_manifest, canonical_group_label
 from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
-from .stats_outlier_exclusion import OutlierExclusionReport
+from .stats_run_report import StatsRunReport
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +105,7 @@ class StatsViewProtocol:
         self, pipeline_id: PipelineId, step_id: StepId
     ) -> tuple[dict, Callable[[dict], None]]: ...
 
-    def store_outlier_exclusion_report(
-        self, pipeline_id: PipelineId, report: OutlierExclusionReport
-    ) -> None: ...
+    def store_run_report(self, pipeline_id: PipelineId, report: StatsRunReport) -> None: ...
 
     def ensure_results_dir(self) -> str: ...
 
@@ -707,6 +705,7 @@ class StatsController:
             "conditions_all": anova_kwargs.get("conditions_all", []),
             "subject_data": anova_kwargs.get("subject_data", {}),
             "subject_groups": anova_kwargs.get("subject_groups", {}),
+            "manual_excluded_pids": anova_kwargs.get("manual_excluded_pids", []),
             "roi_map": anova_kwargs.get("rois", {}),
             "rois_all": anova_kwargs.get("rois_all", anova_kwargs.get("rois", {})),
             "base_freq": anova_kwargs.get("base_freq", 6.0),
@@ -931,9 +930,9 @@ class StatsController:
             if dv_variants:
                 self._view.store_dv_variants_payload(pipeline_id, dv_variants)
 
-            dv_exclusion_report = payload.get("dv_exclusion_report") if isinstance(payload, dict) else None
-            if isinstance(dv_exclusion_report, OutlierExclusionReport):
-                self._view.store_outlier_exclusion_report(pipeline_id, dv_exclusion_report)
+            run_report = payload.get("run_report") if isinstance(payload, dict) else None
+            if isinstance(run_report, StatsRunReport):
+                self._view.store_run_report(pipeline_id, run_report)
 
             state.current_step_index = len(state.steps)
             self._complete_pipeline(pipeline_id)

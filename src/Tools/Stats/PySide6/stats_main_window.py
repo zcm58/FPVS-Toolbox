@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -100,12 +102,20 @@ from Tools.Stats.PySide6.dv_policies import (
 )
 from Tools.Stats.PySide6.dv_variants import export_dv_variants_workbook
 from Tools.Stats.PySide6.stats_outlier_exclusion import (
-    OutlierExclusionReport,
-    build_outlier_summary_text,
-    export_outlier_exclusion_report,
-    format_outlier_reason,
-    report_to_dataframe,
+    collect_flagged_pid_map,
+    build_flagged_participants_tables,
+    export_excluded_participants_report,
+    export_flagged_participants_report,
 )
+from Tools.Stats.PySide6.stats_qc_exclusion import (
+    QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
+    QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
+    QC_DEFAULT_CRITICAL_THRESHOLD,
+    QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
+    QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
+    QC_DEFAULT_WARN_THRESHOLD,
+)
+from Tools.Stats.PySide6.stats_run_report import StatsRunReport
 from Tools.Stats.PySide6.summary_utils import (
     StatsSummaryFrames,
     SummaryConfig,
@@ -213,6 +223,8 @@ class StatsWindow(QMainWindow):
         self._dv_variants_selected: List[str] = []
         self._outlier_exclusion_enabled: bool = True
         self._outlier_abs_limit: float = 50.0
+        self._manual_excluded_pids: List[str] = []
+        self._manual_exclusion_candidates: List[str] = []
         self._pipeline_conditions: dict[PipelineId, list[str]] = {}
         self._pipeline_dv_policy: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_base_freq: dict[PipelineId, float] = {}
@@ -222,10 +234,10 @@ class StatsWindow(QMainWindow):
         self._pipeline_outlier_config: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_qc_config: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_qc_state: dict[PipelineId, dict[str, object]] = {}
-        self._pipeline_exclusion_reports: dict[PipelineId, OutlierExclusionReport | None] = {}
+        self._pipeline_run_reports: dict[PipelineId, StatsRunReport | None] = {}
         self._group_mean_preview_data: dict[str, object] = {}
-        self._qc_threshold_sumabs: float = 3.5
-        self._qc_threshold_maxabs: float = 3.5
+        self._qc_threshold_sumabs: float = QC_DEFAULT_WARN_THRESHOLD
+        self._qc_threshold_maxabs: float = QC_DEFAULT_CRITICAL_THRESHOLD
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
@@ -237,6 +249,7 @@ class StatsWindow(QMainWindow):
         # UI
         self._init_ui()
         self.results_textbox = self.output_text
+        self._update_manual_exclusion_summary()
 
         self.refresh_rois()
         QTimer.singleShot(100, self._load_default_data_folder)
@@ -381,24 +394,137 @@ class StatsWindow(QMainWindow):
 
     def _get_outlier_exclusion_payload(self) -> dict[str, object]:
         return {
-            "enabled": bool(self._outlier_exclusion_enabled),
+            "enabled": True,
             "abs_limit": float(self._outlier_abs_limit),
         }
 
     def _get_qc_exclusion_payload(self) -> dict[str, object]:
         return {
-            "threshold_sumabs": float(self._qc_threshold_sumabs),
-            "threshold_maxabs": float(self._qc_threshold_maxabs),
+            "warn_threshold": float(self._qc_threshold_sumabs),
+            "critical_threshold": float(self._qc_threshold_maxabs),
+            "warn_abs_floor_sumabs": QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
+            "critical_abs_floor_sumabs": QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
+            "warn_abs_floor_maxabs": QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
+            "critical_abs_floor_maxabs": QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
         }
 
     def _on_outlier_exclusion_toggled(self, state: int) -> None:
-        self._outlier_exclusion_enabled = state == Qt.Checked
+        self._outlier_exclusion_enabled = True
         spinbox = getattr(self, "outlier_abs_limit_spin", None)
         if spinbox is not None:
-            spinbox.setEnabled(self._outlier_exclusion_enabled)
+            spinbox.setEnabled(True)
 
     def _on_outlier_abs_limit_changed(self, value: float) -> None:
         self._outlier_abs_limit = float(value)
+
+    def _current_flagged_pid_map(self) -> dict[str, list[str]]:
+        report = None
+        if self._active_pipeline is not None:
+            report = self._pipeline_run_reports.get(self._active_pipeline)
+        if report is None:
+            for item in self._pipeline_run_reports.values():
+                if item is not None:
+                    report = item
+                    break
+        if report is None:
+            return {}
+        return collect_flagged_pid_map(report.qc_report, report.dv_report)
+
+    def _update_manual_exclusion_summary(self) -> None:
+        excluded = sorted(set(self._manual_excluded_pids))
+        self._manual_excluded_pids = excluded
+        summary_label = getattr(self, "manual_exclusion_summary_label", None)
+        if summary_label is not None:
+            summary_label.setText(f"Excluded: {len(excluded)} participant(s)")
+        list_widget = getattr(self, "manual_exclusion_list", None)
+        if list_widget is not None:
+            list_widget.setPlainText("\n".join(excluded) if excluded else "None")
+
+    def _reconcile_manual_exclusions(self, candidates: list[str]) -> None:
+        self._manual_exclusion_candidates = list(candidates)
+        self._manual_excluded_pids = [
+            pid for pid in self._manual_excluded_pids if pid in self._manual_exclusion_candidates
+        ]
+        self._update_manual_exclusion_summary()
+
+    def _clear_manual_exclusions(self) -> None:
+        self._manual_excluded_pids = []
+        self._update_manual_exclusion_summary()
+
+    def _open_manual_exclusion_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Manual Outlier Exclusion")
+        dialog.setModal(True)
+        layout = QVBoxLayout(dialog)
+
+        search_row = QHBoxLayout()
+        search_label = QLabel("Search:")
+        search_input = QLineEdit()
+        search_input.setPlaceholderText("Filter participants…")
+        search_row.addWidget(search_label)
+        search_row.addWidget(search_input, 1)
+        layout.addLayout(search_row)
+
+        list_widget = QListWidget()
+        list_widget.setSelectionMode(QAbstractItemView.NoSelection)
+        flagged_map = self._current_flagged_pid_map()
+        for pid in self._manual_exclusion_candidates:
+            flags = flagged_map.get(pid, [])
+            suffix = f" (FLAGGED: {', '.join(flags)})" if flags else ""
+            item = QListWidgetItem(f"{pid}{suffix}")
+            item.setData(Qt.UserRole, pid)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if pid in self._manual_excluded_pids else Qt.Unchecked)
+            list_widget.addItem(item)
+        layout.addWidget(list_widget)
+
+        controls_row = QHBoxLayout()
+        select_all_btn = QPushButton("Select all")
+        select_none_btn = QPushButton("Select none")
+        controls_row.addWidget(select_all_btn)
+        controls_row.addWidget(select_none_btn)
+        controls_row.addStretch(1)
+        layout.addLayout(controls_row)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
+        layout.addWidget(button_box)
+
+        def _apply_filter(text: str) -> None:
+            filter_text = text.strip().lower()
+            for idx in range(list_widget.count()):
+                item = list_widget.item(idx)
+                pid = str(item.data(Qt.UserRole)).lower()
+                item.setHidden(bool(filter_text) and filter_text not in pid)
+
+        def _select_all() -> None:
+            for idx in range(list_widget.count()):
+                item = list_widget.item(idx)
+                if not item.isHidden():
+                    item.setCheckState(Qt.Checked)
+
+        def _select_none() -> None:
+            for idx in range(list_widget.count()):
+                item = list_widget.item(idx)
+                if not item.isHidden():
+                    item.setCheckState(Qt.Unchecked)
+
+        def _apply_changes() -> None:
+            selections = []
+            for idx in range(list_widget.count()):
+                item = list_widget.item(idx)
+                if item.checkState() == Qt.Checked:
+                    selections.append(str(item.data(Qt.UserRole)))
+            self._manual_excluded_pids = sorted(selections)
+            self._update_manual_exclusion_summary()
+            dialog.accept()
+
+        search_input.textChanged.connect(_apply_filter)
+        select_all_btn.clicked.connect(_select_all)
+        select_none_btn.clicked.connect(_select_none)
+        button_box.accepted.connect(_apply_changes)
+        button_box.rejected.connect(dialog.reject)
+
+        dialog.exec()
 
     def _set_fixed_k_controls_enabled(self, enabled: bool) -> None:
         widgets = [
@@ -733,22 +859,30 @@ class StatsWindow(QMainWindow):
         return HarmonicConfig(metric_str, threshold_val)
 
     def _get_qc_settings(self) -> Optional[tuple[float, float]]:
-        ok_sumabs, sumabs = self._safe_settings_get(
-            "analysis", "qc_threshold_sumabs", self._qc_threshold_sumabs
+        ok_warn, warn = self._safe_settings_get(
+            "analysis", "qc_warn_threshold", self._qc_threshold_sumabs
         )
-        ok_maxabs, maxabs = self._safe_settings_get(
-            "analysis", "qc_threshold_maxabs", self._qc_threshold_maxabs
+        if not ok_warn:
+            ok_warn, warn = self._safe_settings_get(
+                "analysis", "qc_threshold_sumabs", self._qc_threshold_sumabs
+            )
+        ok_critical, critical = self._safe_settings_get(
+            "analysis", "qc_critical_threshold", self._qc_threshold_maxabs
         )
+        if not ok_critical:
+            ok_critical, critical = self._safe_settings_get(
+                "analysis", "qc_threshold_maxabs", self._qc_threshold_maxabs
+            )
         try:
-            sumabs_val = float(sumabs)
-            maxabs_val = float(maxabs)
+            warn_val = float(warn)
+            critical_val = float(critical)
         except Exception as exc:
             QMessageBox.critical(self, "Settings Error", f"Invalid QC thresholds: {exc}")
             return None
-        if not (ok_sumabs and ok_maxabs):
+        if not (ok_warn and ok_critical):
             QMessageBox.critical(self, "Settings Error", "Could not load QC thresholds.")
             return None
-        return sumabs_val, maxabs_val
+        return warn_val, critical_val
 
     # --------- centralized pre-run guards ---------
 
@@ -761,6 +895,11 @@ class StatsWindow(QMainWindow):
         selected_conditions = self._get_selected_conditions()
         if len(selected_conditions) < 2:
             message = "Select at least two conditions to run the analysis."
+            self._set_status(message)
+            self.append_log("General", message, level="warning")
+            return False
+        if self.subjects and set(self.subjects).issubset(set(self._manual_excluded_pids)):
+            message = "All participants are manually excluded. Clear exclusions to run analysis."
             self._set_status(message)
             self.append_log("General", message, level="warning")
             return False
@@ -1291,8 +1430,8 @@ class StatsWindow(QMainWindow):
         self._pipeline_dv_variant_payloads[pipeline_id] = {}
         self._pipeline_outlier_config[pipeline_id] = self._get_outlier_exclusion_payload()
         self._pipeline_qc_config[pipeline_id] = self._get_qc_exclusion_payload()
-        self._pipeline_qc_state[pipeline_id] = {"report": None, "excluded_pids": set()}
-        self._pipeline_exclusion_reports[pipeline_id] = None
+        self._pipeline_qc_state[pipeline_id] = {"report": None}
+        self._pipeline_run_reports[pipeline_id] = None
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
             label.setText("Running…")
@@ -1423,10 +1562,15 @@ class StatsWindow(QMainWindow):
         # [SAFETY UPDATE] Load fresh ROIs from settings to ensure thread receives
         # the most up-to-date map, preventing 0xC0000005 errors.
         fresh_rois = load_rois_from_settings() or self.rois
+        manual_excluded = set(self._manual_excluded_pids)
+        filtered_subjects = [pid for pid in self.subjects if pid not in manual_excluded]
+        filtered_subject_data = {
+            pid: data for pid, data in self.subject_data.items() if pid not in manual_excluded
+        }
 
         return dict(
-            subject_data=self.subject_data,
-            subjects=self.subjects,
+            subject_data=filtered_subject_data,
+            subjects=filtered_subjects,
             conditions=self._get_selected_conditions(),
             selected_metric=self._harmonic_config.metric,
             mean_value_threshold=self._harmonic_config.threshold,
@@ -1443,7 +1587,7 @@ class StatsWindow(QMainWindow):
             pipeline_id, self._get_outlier_exclusion_payload()
         )
         qc_payload = self._pipeline_qc_config.get(pipeline_id, self._get_qc_exclusion_payload())
-        qc_state = self._pipeline_qc_state.get(pipeline_id, {"report": None, "excluded_pids": set()})
+        qc_state = self._pipeline_qc_state.get(pipeline_id, {"report": None})
         if pipeline_id is PipelineId.SINGLE:
             if step_id is StepId.RM_ANOVA:
                 kwargs = dict(
@@ -1460,6 +1604,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
+                    manual_excluded_pids=self._manual_excluded_pids,
                 )
                 if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
                     kwargs["results_dir"] = self._ensure_results_dir()
@@ -1484,6 +1629,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
+                    manual_excluded_pids=self._manual_excluded_pids,
                 )
                 def handler(payload):
                     self._apply_mixed_model_results(payload, update_text=False)
@@ -1506,6 +1652,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
+                    manual_excluded_pids=self._manual_excluded_pids,
                 )
                 def handler(payload):
                     self._apply_posthoc_results(payload, update_text=True)
@@ -1535,6 +1682,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
+                    manual_excluded_pids=self._manual_excluded_pids,
                 )
                 def handler(payload):
                     self._apply_between_anova_results(payload, update_text=False)
@@ -1558,6 +1706,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
+                    manual_excluded_pids=self._manual_excluded_pids,
                 )
                 def handler(payload):
                     self._apply_between_mixed_results(payload, update_text=False)
@@ -1580,6 +1729,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
+                    manual_excluded_pids=self._manual_excluded_pids,
                 )
                 def handler(payload):
                     self._apply_group_contrasts_results(payload, update_text=True)
@@ -1610,77 +1760,78 @@ class StatsWindow(QMainWindow):
                 self.append_log(section, f"Stats folder not found: {stats_folder}", "error")
 
     def _show_outlier_exclusion_dialog(self, pipeline_id: PipelineId) -> None:
-        report = self._pipeline_exclusion_reports.get(pipeline_id)
-        if not isinstance(report, OutlierExclusionReport):
+        report = self._pipeline_run_reports.get(pipeline_id)
+        if not isinstance(report, StatsRunReport):
             return
 
-        summary = report.summary
+        qc_report = report.qc_report
+        dv_report = report.dv_report
+        summary_df, details_df = build_flagged_participants_tables(qc_report, dv_report)
+
         dialog = QDialog(self)
-        dialog.setWindowTitle("Outlier Exclusion Report")
+        dialog.setWindowTitle("Flagged Participants Report")
         dialog.setModal(True)
         layout = QVBoxLayout(dialog)
 
-        summary_text = build_outlier_summary_text(report)
+        summary_lines = [
+            "QC scanned all conditions/ROIs in the project, independent of selections.",
+            "Flagged Participants Summary",
+            f"Manual exclusions: {len(report.manual_excluded_pids)}",
+            f"Required exclusions (non-finite DV): {len(report.required_exclusions)}",
+            f"QC flagged: {qc_report.summary.n_subjects_flagged if qc_report else 0}",
+            f"DV flagged: {dv_report.summary.n_subjects_flagged if dv_report else 0}",
+        ]
+        if summary_df.empty:
+            summary_lines.append("No participants were flagged.")
+        summary_text = "\n".join(summary_lines)
+
         summary_box = QTextEdit()
         summary_box.setReadOnly(True)
         summary_box.setPlainText(summary_text)
-        summary_box.setMinimumHeight(120)
+        summary_box.setMinimumHeight(140)
         summary_box.setToolTip(
-            "Plain-language summary of excluded participants and the worst DV value per person."
+            "Summary of QC/DV flags and manual/required exclusions."
         )
         layout.addWidget(summary_box)
 
-        if report.participants:
-            table = QTableWidget(len(report.participants), 8)
+        if not summary_df.empty:
+            table = QTableWidget(summary_df.shape[0], 7)
             table.setHorizontalHeaderLabels(
                 [
                     "participant_id",
-                    "exclusion_reason",
+                    "flag_types",
+                    "n_flags",
                     "worst_value",
-                    "robust_score",
-                    "threshold_used",
                     "worst_condition",
                     "worst_roi",
-                    "violations",
+                    "reason_text",
                 ]
             )
             table.verticalHeader().setVisible(False)
             table.setEditTriggers(QAbstractItemView.NoEditTriggers)
             table.setSelectionMode(QAbstractItemView.NoSelection)
-            for row, participant in enumerate(report.participants):
-                reasons = ", ".join(
-                    format_outlier_reason(
-                        reason,
-                        abs_limit=summary.abs_limit,
-                        threshold_used=participant.threshold_used,
-                    )
-                    for reason in participant.reasons
-                )
-                violations = (
-                    "; ".join(participant.violations)
-                    if participant.violations
-                    else str(participant.n_violations)
-                )
-                table.setItem(row, 0, QTableWidgetItem(participant.participant_id))
-                table.setItem(row, 1, QTableWidgetItem(reasons))
-                table.setItem(row, 2, QTableWidgetItem(str(participant.worst_value)))
-                table.setItem(row, 3, QTableWidgetItem(str(participant.robust_score)))
-                table.setItem(row, 4, QTableWidgetItem(str(participant.threshold_used)))
-                table.setItem(row, 5, QTableWidgetItem(participant.worst_condition))
-                table.setItem(row, 6, QTableWidgetItem(participant.worst_roi))
-                table.setItem(row, 7, QTableWidgetItem(violations))
+            for row, (_, item) in enumerate(summary_df.iterrows()):
+                table.setItem(row, 0, QTableWidgetItem(str(item["participant_id"])))
+                table.setItem(row, 1, QTableWidgetItem(str(item["flag_types"])))
+                table.setItem(row, 2, QTableWidgetItem(str(item["n_flags"])))
+                table.setItem(row, 3, QTableWidgetItem(str(item["worst_value"])))
+                table.setItem(row, 4, QTableWidgetItem(str(item["worst_condition"])))
+                table.setItem(row, 5, QTableWidgetItem(str(item["worst_roi"])))
+                table.setItem(row, 6, QTableWidgetItem(str(item["reason_text"])))
             table.resizeColumnsToContents()
             layout.addWidget(table)
         else:
-            layout.addWidget(QLabel("No participants excluded."))
+            layout.addWidget(QLabel("No participants were flagged."))
 
         button_row = QHBoxLayout()
         copy_summary_btn = QPushButton("Copy summary")
         copy_btn = QPushButton("Copy table")
+        edit_manual_btn = QPushButton("Edit manual exclusions")
         close_btn = QPushButton("Close")
         button_row.addStretch(1)
         button_row.addWidget(copy_summary_btn)
         button_row.addWidget(copy_btn)
+        button_row.addWidget(edit_manual_btn)
         button_row.addWidget(close_btn)
         layout.addLayout(button_row)
 
@@ -1689,14 +1840,14 @@ class StatsWindow(QMainWindow):
                 QGuiApplication.clipboard().setText(summary_text)
 
         def _copy_table() -> None:
-            df = report_to_dataframe(report)
-            if df.empty:
+            if summary_df.empty:
                 return
-            QGuiApplication.clipboard().setText(df.to_csv(sep="\t", index=False))
+            QGuiApplication.clipboard().setText(summary_df.to_csv(sep="\t", index=False))
 
         copy_summary_btn.clicked.connect(_copy_summary)
         copy_btn.clicked.connect(_copy_table)
-        copy_btn.setEnabled(bool(report.participants))
+        copy_btn.setEnabled(not summary_df.empty)
+        edit_manual_btn.clicked.connect(self._open_manual_exclusion_dialog)
         close_btn.clicked.connect(dialog.accept)
 
         dialog.exec()
@@ -1809,12 +1960,25 @@ class StatsWindow(QMainWindow):
         return [save_path]
 
     def _export_outlier_exclusions(self, pipeline_id: PipelineId, out_dir: str) -> list[Path]:
-        report = self._pipeline_exclusion_reports.get(pipeline_id)
-        if not isinstance(report, OutlierExclusionReport):
+        report = self._pipeline_run_reports.get(pipeline_id)
+        if not isinstance(report, StatsRunReport):
             return []
-        save_path = Path(out_dir) / "Excluded Participants.xlsx"
-        export_outlier_exclusion_report(save_path, report, self._set_status)
-        return [save_path]
+        paths: list[Path] = []
+        flagged_path = Path(out_dir) / "Flagged Participants.xlsx"
+        export_flagged_participants_report(
+            flagged_path, report.qc_report, report.dv_report, self._set_status
+        )
+        paths.append(flagged_path)
+
+        excluded_path = Path(out_dir) / "Excluded Participants.xlsx"
+        export_excluded_participants_report(
+            excluded_path,
+            manual_excluded=report.manual_excluded_pids,
+            required_exclusions=report.required_exclusions,
+            log_func=self._set_status,
+        )
+        paths.append(excluded_path)
+        return paths
 
     def _export_between_pipeline(self) -> bool:
         section = "Between"
@@ -1928,21 +2092,19 @@ class StatsWindow(QMainWindow):
                     level="warning",
                 )
 
-    def _store_outlier_exclusion_report(self, pipeline_id: PipelineId, payload: dict) -> None:
-        report = payload.get("dv_exclusion_report")
-        if isinstance(report, OutlierExclusionReport):
-            self._pipeline_exclusion_reports[pipeline_id] = report
+    def _store_run_report(self, pipeline_id: PipelineId, payload: dict) -> None:
+        report = payload.get("run_report")
+        if isinstance(report, StatsRunReport):
+            self._pipeline_run_reports[pipeline_id] = report
 
-    def store_outlier_exclusion_report(
-        self, pipeline_id: PipelineId, report: OutlierExclusionReport
-    ) -> None:
-        if isinstance(report, OutlierExclusionReport):
-            self._pipeline_exclusion_reports[pipeline_id] = report
+    def store_run_report(self, pipeline_id: PipelineId, report: StatsRunReport) -> None:
+        if isinstance(report, StatsRunReport):
+            self._pipeline_run_reports[pipeline_id] = report
 
     def _apply_rm_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.rm_anova_results_data = payload.get("anova_df_results")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
-        self._store_outlier_exclusion_report(PipelineId.SINGLE, payload)
+        self._store_run_report(PipelineId.SINGLE, payload)
         alpha = getattr(self, "_current_alpha", 0.05)
         output_text = payload.get("output_text", "")
 
@@ -1967,7 +2129,7 @@ class StatsWindow(QMainWindow):
     def _apply_between_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.between_anova_results_data = payload.get("anova_df_results")
         self._store_dv_metadata(PipelineId.BETWEEN, payload)
-        self._store_outlier_exclusion_report(PipelineId.BETWEEN, payload)
+        self._store_run_report(PipelineId.BETWEEN, payload)
         alpha = getattr(self, "_current_alpha", 0.05)
 
         output_text = build_between_anova_output(self.between_anova_results_data, alpha)
@@ -1979,7 +2141,7 @@ class StatsWindow(QMainWindow):
     def _apply_mixed_model_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.mixed_model_results_data = payload.get("mixed_results_df")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
-        self._store_outlier_exclusion_report(PipelineId.SINGLE, payload)
+        self._store_run_report(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
         if update_text:
             self.output_text.append(output_text)
@@ -1994,7 +2156,7 @@ class StatsWindow(QMainWindow):
 
         self.between_mixed_model_results_data = payload.get("mixed_results_df")
         self._store_dv_metadata(PipelineId.BETWEEN, payload)
-        self._store_outlier_exclusion_report(PipelineId.BETWEEN, payload)
+        self._store_run_report(PipelineId.BETWEEN, payload)
         output_text = payload.get("output_text", "")
         if update_text:
             self.output_text.append(output_text)
@@ -2004,7 +2166,7 @@ class StatsWindow(QMainWindow):
     def _apply_posthoc_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.posthoc_results_data = payload.get("results_df")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
-        self._store_outlier_exclusion_report(PipelineId.SINGLE, payload)
+        self._store_run_report(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
         if update_text:
             self.output_text.append(output_text)
@@ -2014,7 +2176,7 @@ class StatsWindow(QMainWindow):
     def _apply_group_contrasts_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.group_contrasts_results_data = payload.get("results_df")
         self._store_dv_metadata(PipelineId.BETWEEN, payload)
-        self._store_outlier_exclusion_report(PipelineId.BETWEEN, payload)
+        self._store_run_report(PipelineId.BETWEEN, payload)
         output_text = payload.get("output_text", "")
         if update_text:
             self.output_text.append(output_text)
@@ -2299,20 +2461,21 @@ class StatsWindow(QMainWindow):
             self._dv_variant_checkboxes[policy_name] = checkbox
         self._sync_selected_dv_variants()
 
-        self.outlier_group = QGroupBox("Outlier Exclusion")
+        self.outlier_group = QGroupBox("Outlier Flagging")
         self.outlier_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
         self.outlier_group.setToolTip(
-            "Exclude participants whose DV values are outside the allowed range."
+            "Flag participants whose DV values are outside the allowed range."
         )
         outlier_layout = QVBoxLayout(self.outlier_group)
         outlier_layout.setSpacing(6)
 
-        self.outlier_enable_checkbox = QCheckBox("Enable outlier exclusion")
-        self.outlier_enable_checkbox.setChecked(self._outlier_exclusion_enabled)
+        self.outlier_enable_checkbox = QCheckBox("Enable DV flagging (always on)")
+        self.outlier_enable_checkbox.setChecked(True)
         self.outlier_enable_checkbox.setToolTip(
-            "When enabled, any participant with extreme or invalid DV values is excluded."
+            "Hard DV limit checks are always run to flag potential outliers."
         )
         self.outlier_enable_checkbox.stateChanged.connect(self._on_outlier_exclusion_toggled)
+        self.outlier_enable_checkbox.setEnabled(False)
         outlier_layout.addWidget(self.outlier_enable_checkbox)
 
         outlier_form = QFormLayout()
@@ -2327,22 +2490,49 @@ class StatsWindow(QMainWindow):
         self.outlier_abs_limit_spin.setSingleStep(1.0)
         self.outlier_abs_limit_spin.setValue(self._outlier_abs_limit)
         self.outlier_abs_limit_spin.setToolTip(
-            "Participants are excluded if any DV exceeds this absolute cutoff."
+            "Participants are flagged if any DV exceeds this absolute cutoff."
         )
         self.outlier_abs_limit_spin.valueChanged.connect(self._on_outlier_abs_limit_changed)
-        self.outlier_abs_limit_spin.setEnabled(self._outlier_exclusion_enabled)
+        self.outlier_abs_limit_spin.setEnabled(True)
         outlier_form.addRow("Hard DV limit (abs):", self.outlier_abs_limit_spin)
 
         outlier_layout.addLayout(outlier_form)
 
         outlier_note = QLabel(
-            "Exclude entire participant if any abs(DV) exceeds limit or DV is non-finite."
+            "Flag participants if abs(DV) exceeds the limit; non-finite DV requires exclusion."
         )
         outlier_note.setWordWrap(True)
         outlier_note.setToolTip(
-            "Applies to the Primary DV only; excluded participants are removed from all analyses."
+            "Applies to the Primary DV only; manual exclusions control modeling."
         )
         outlier_layout.addWidget(outlier_note)
+
+        self.manual_exclusion_group = QGroupBox("Manual Outlier Exclusion")
+        self.manual_exclusion_group.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        )
+        manual_layout = QVBoxLayout(self.manual_exclusion_group)
+        manual_layout.setSpacing(6)
+
+        self.manual_exclusion_summary_label = QLabel("Excluded: 0 participant(s)")
+        manual_layout.addWidget(self.manual_exclusion_summary_label)
+
+        self.manual_exclusion_list = QTextEdit()
+        self.manual_exclusion_list.setReadOnly(True)
+        self.manual_exclusion_list.setMinimumHeight(60)
+        self.manual_exclusion_list.setToolTip("Participants manually excluded from analysis.")
+        manual_layout.addWidget(self.manual_exclusion_list)
+
+        manual_buttons = QHBoxLayout()
+        self.manual_exclusion_edit_btn = QPushButton("Edit…")
+        self.manual_exclusion_clear_btn = QPushButton("Clear")
+        manual_buttons.addWidget(self.manual_exclusion_edit_btn)
+        manual_buttons.addWidget(self.manual_exclusion_clear_btn)
+        manual_buttons.addStretch(1)
+        manual_layout.addLayout(manual_buttons)
+
+        self.manual_exclusion_edit_btn.clicked.connect(self._open_manual_exclusion_dialog)
+        self.manual_exclusion_clear_btn.clicked.connect(self._clear_manual_exclusions)
 
         analysis_box = QGroupBox("Analysis Controls")
         analysis_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
@@ -2421,6 +2611,7 @@ class StatsWindow(QMainWindow):
         left_layout.addWidget(self.dv_group)
         left_layout.addWidget(self.dv_variants_group)
         left_layout.addWidget(self.outlier_group)
+        left_layout.addWidget(self.manual_exclusion_group)
         left_layout.addStretch(1)
         left_scroll_area.setWidget(left_contents)
 
@@ -2827,6 +3018,7 @@ class StatsWindow(QMainWindow):
                 self._populate_conditions_panel(self.conditions)
                 self.subject_data = scan_result.subject_data
                 self.subject_groups = scan_result.subject_groups
+                self._reconcile_manual_exclusions(self.subjects)
                 self._set_status(
                     f"Scan complete: Found {len(scan_result.subjects)} subjects and {len(scan_result.conditions)} conditions."
                 )

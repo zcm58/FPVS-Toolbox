@@ -23,8 +23,19 @@ logger = logging.getLogger("Tools.Stats")
 QC_REASON_SUMABS = "QC_SUMABS"
 QC_REASON_MAXABS = "QC_MAXABS"
 
-QC_DEFAULT_THRESHOLD_SUMABS = 3.5
-QC_DEFAULT_THRESHOLD_MAXABS = 3.5
+QC_SEVERITY_WARNING = "WARNING"
+QC_SEVERITY_CRITICAL = "CRITICAL"
+
+# Conservative defaults to reduce false positives; these values are reported in exports.
+QC_DEFAULT_WARN_THRESHOLD = 6.0
+QC_DEFAULT_CRITICAL_THRESHOLD = 10.0
+
+# Absolute floors per metric ensure very small QC metrics do not trigger flags even if robust scores spike.
+# These defaults are tuned to typical summed/peak BCA scales (µV) observed in the Stats tool.
+QC_DEFAULT_WARN_ABS_FLOOR_SUMABS = 5.0
+QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS = 10.0
+QC_DEFAULT_WARN_ABS_FLOOR_MAXABS = 1.0
+QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS = 2.0
 
 
 @dataclass(frozen=True)
@@ -32,11 +43,13 @@ class QcViolation:
     condition: str
     roi: str
     metric: str
+    severity: str
     value: float
     robust_center: float
     robust_spread: float
     robust_score: float
     threshold_used: float
+    abs_floor_used: float
     trigger_harmonic_hz: Optional[float] = None
     roi_mean_bca_at_trigger: Optional[float] = None
 
@@ -62,10 +75,14 @@ class QcParticipantReport:
 @dataclass(frozen=True)
 class QcExclusionSummary:
     n_subjects_before: int
-    n_subjects_excluded: int
+    n_subjects_flagged: int
     n_subjects_after: int
-    threshold_sumabs: float
-    threshold_maxabs: float
+    warn_threshold: float
+    critical_threshold: float
+    warn_abs_floor_sumabs: float
+    critical_abs_floor_sumabs: float
+    warn_abs_floor_maxabs: float
+    critical_abs_floor_maxabs: float
 
 
 @dataclass(frozen=True)
@@ -84,9 +101,10 @@ def format_qc_violation(violation: QcViolation) -> str:
             f"roi_mean_bca={violation.roi_mean_bca_at_trigger:.4f}"
         )
     return (
-        f"{violation.metric} condition={violation.condition} roi={violation.roi} "
-        f"value={violation.value:.4f} score={violation.robust_score:.3f} "
-        f"threshold={violation.threshold_used:.2f} center={violation.robust_center:.4f} "
+        f"{violation.metric} severity={violation.severity} condition={violation.condition} "
+        f"roi={violation.roi} value={violation.value:.4f} "
+        f"score={violation.robust_score:.3f} threshold={violation.threshold_used:.2f} "
+        f"abs_floor={violation.abs_floor_used:.2f} center={violation.robust_center:.4f} "
         f"spread={violation.robust_spread:.4f}{trigger}"
     )
 
@@ -143,6 +161,24 @@ def _robust_score(value: float, center: float, spread: float) -> float:
     return float("inf") if value > center else float("-inf")
 
 
+def _qc_severity(
+    *,
+    score: float,
+    value: float,
+    warn_threshold: float,
+    critical_threshold: float,
+    warn_abs_floor: float,
+    critical_abs_floor: float,
+) -> tuple[str | None, float | None]:
+    if not np.isfinite(score) or not np.isfinite(value):
+        return None, None
+    if score >= critical_threshold and value >= critical_abs_floor:
+        return QC_SEVERITY_CRITICAL, critical_abs_floor
+    if score >= warn_threshold and value >= warn_abs_floor:
+        return QC_SEVERITY_WARNING, warn_abs_floor
+    return None, None
+
+
 def run_qc_exclusion(
     *,
     subjects: list[str],
@@ -150,10 +186,14 @@ def run_qc_exclusion(
     conditions_all: list[str],
     rois_all: Dict[str, List[str]],
     base_freq: float,
-    threshold_sumabs: float = QC_DEFAULT_THRESHOLD_SUMABS,
-    threshold_maxabs: float = QC_DEFAULT_THRESHOLD_MAXABS,
+    warn_threshold: float = QC_DEFAULT_WARN_THRESHOLD,
+    critical_threshold: float = QC_DEFAULT_CRITICAL_THRESHOLD,
+    warn_abs_floor_sumabs: float = QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
+    critical_abs_floor_sumabs: float = QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
+    warn_abs_floor_maxabs: float = QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
+    critical_abs_floor_maxabs: float = QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
     log_func: Optional[Callable[[str], None]] = None,
-) -> tuple[set[str], QcExclusionReport]:
+) -> QcExclusionReport:
     screened_conditions = list(conditions_all or [])
     if not screened_conditions:
         screened_conditions = sorted(
@@ -262,7 +302,7 @@ def run_qc_exclusion(
                 pid_entry["maxabs_raw"] = max_abs_raw
 
     participants: list[QcParticipantReport] = []
-    excluded_ids: set[str] = set()
+    flagged_ids: set[str] = set()
 
     for (cond_name, roi_name), pid_map in qc_values.items():
         pids = sorted(pid_map.keys())
@@ -280,34 +320,58 @@ def run_qc_exclusion(
 
             sumabs_value = float(sumabs_values[idx])
             sumabs_score = _robust_score(sumabs_value, sumabs_center, sumabs_spread)
-            if np.isfinite(sumabs_score) and abs(sumabs_score) > threshold_sumabs:
+            severity, abs_floor = _qc_severity(
+                score=sumabs_score,
+                value=sumabs_value,
+                warn_threshold=warn_threshold,
+                critical_threshold=critical_threshold,
+                warn_abs_floor=warn_abs_floor_sumabs,
+                critical_abs_floor=critical_abs_floor_sumabs,
+            )
+            if severity:
                 violations.append(
                     QcViolation(
                         condition=cond_name,
                         roi=roi_name,
                         metric=QC_REASON_SUMABS,
+                        severity=severity,
                         value=sumabs_value,
                         robust_center=sumabs_center,
                         robust_spread=sumabs_spread,
                         robust_score=sumabs_score,
-                        threshold_used=threshold_sumabs,
+                        threshold_used=critical_threshold
+                        if severity == QC_SEVERITY_CRITICAL
+                        else warn_threshold,
+                        abs_floor_used=abs_floor if abs_floor is not None else 0.0,
                     )
                 )
 
             maxabs_value = float(maxabs_values[idx])
             maxabs_score = _robust_score(maxabs_value, maxabs_center, maxabs_spread)
-            if np.isfinite(maxabs_score) and abs(maxabs_score) > threshold_maxabs:
+            severity, abs_floor = _qc_severity(
+                score=maxabs_score,
+                value=maxabs_value,
+                warn_threshold=warn_threshold,
+                critical_threshold=critical_threshold,
+                warn_abs_floor=warn_abs_floor_maxabs,
+                critical_abs_floor=critical_abs_floor_maxabs,
+            )
+            if severity:
                 meta = pid_map[pid]
                 violations.append(
                     QcViolation(
                         condition=cond_name,
                         roi=roi_name,
                         metric=QC_REASON_MAXABS,
+                        severity=severity,
                         value=maxabs_value,
                         robust_center=maxabs_center,
                         robust_spread=maxabs_spread,
                         robust_score=maxabs_score,
-                        threshold_used=threshold_maxabs,
+                        threshold_used=critical_threshold
+                        if severity == QC_SEVERITY_CRITICAL
+                        else warn_threshold,
+                        abs_floor_used=abs_floor if abs_floor is not None else 0.0,
                         trigger_harmonic_hz=meta.get("maxabs_freq"),
                         roi_mean_bca_at_trigger=meta.get("maxabs_raw"),
                     )
@@ -316,7 +380,7 @@ def run_qc_exclusion(
             if not violations:
                 continue
 
-            excluded_ids.add(pid)
+            flagged_ids.add(pid)
             existing = next((p for p in participants if p.participant_id == pid), None)
             if existing:
                 combined = list(existing.violations) + violations
@@ -379,10 +443,14 @@ def run_qc_exclusion(
     participants = sorted(participants, key=lambda p: p.participant_id)
     summary = QcExclusionSummary(
         n_subjects_before=len(subjects),
-        n_subjects_excluded=len(excluded_ids),
-        n_subjects_after=max(0, len(subjects) - len(excluded_ids)),
-        threshold_sumabs=float(threshold_sumabs),
-        threshold_maxabs=float(threshold_maxabs),
+        n_subjects_flagged=len(flagged_ids),
+        n_subjects_after=len(subjects),
+        warn_threshold=float(warn_threshold),
+        critical_threshold=float(critical_threshold),
+        warn_abs_floor_sumabs=float(warn_abs_floor_sumabs),
+        critical_abs_floor_sumabs=float(critical_abs_floor_sumabs),
+        warn_abs_floor_maxabs=float(warn_abs_floor_maxabs),
+        critical_abs_floor_maxabs=float(critical_abs_floor_maxabs),
     )
     report = QcExclusionReport(
         summary=summary,
@@ -394,9 +462,9 @@ def run_qc_exclusion(
         "stats_qc_screen_complete",
         extra={
             "n_subjects": len(subjects),
-            "n_excluded": len(excluded_ids),
+            "n_flagged": len(flagged_ids),
             "n_conditions": len(screened_conditions),
             "n_rois": len(screened_rois),
         },
     )
-    return excluded_ids, report
+    return report
