@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
 
 from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
+from Tools.Stats.PySide6.stats_qc_exclusion import (
+    QC_REASON_MAXABS,
+    QC_REASON_SUMABS,
+    QcExclusionReport,
+    format_qc_violation,
+)
 
 OUTLIER_REASON_LIMIT = "HARD_DV_LIMIT"
 OUTLIER_REASON_NONFINITE = "DV_NONFINITE"
@@ -19,6 +24,8 @@ OUTLIER_REASON_FRIENDLY = {
     OUTLIER_REASON_LIMIT: "Exceeded hard cutoff (±{abs_limit:g} DV)",
     OUTLIER_REASON_MAD: "Unusually extreme compared to the group (robust rule)",
     OUTLIER_REASON_NONFINITE: "Non-finite DV value",
+    QC_REASON_SUMABS: "QC sum(|BCA|) robust outlier (threshold {threshold_used:.2f})",
+    QC_REASON_MAXABS: "QC max(|BCA|) robust outlier (threshold {threshold_used:.2f})",
 }
 
 OUTLIER_REASON_SENTENCE = {
@@ -45,6 +52,13 @@ class OutlierParticipantReport:
     worst_value: float
     worst_condition: str
     worst_roi: str
+    robust_center: float | None = None
+    robust_spread: float | None = None
+    robust_score: float | None = None
+    threshold_used: float | None = None
+    trigger_harmonic_hz: float | None = None
+    roi_mean_bca_at_trigger: float | None = None
+    violations: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -53,6 +67,7 @@ class OutlierExclusionReport:
     participants: list[
         OutlierParticipantReport
     ]
+    qc_metadata: dict[str, object] | None = None
 
 
 def _resolve_column_name(df: pd.DataFrame, candidates: Iterable[str], label: str) -> str:
@@ -138,6 +153,7 @@ def apply_hard_dv_exclusion(
                     worst_value=float(worst_row[value_col]),
                     worst_condition=str(worst_row[condition_col]),
                     worst_roi=str(worst_row[roi_col]),
+                    violations=[f"DV cells={int(pid_violations.shape[0])}"],
                 )
             )
 
@@ -151,10 +167,18 @@ def apply_hard_dv_exclusion(
     return filtered_df, OutlierExclusionReport(summary=summary, participants=participants)
 
 
-def format_outlier_reason(reason: str, *, abs_limit: float | None = None) -> str:
+def format_outlier_reason(
+    reason: str,
+    *,
+    abs_limit: float | None = None,
+    threshold_used: float | None = None,
+) -> str:
     if reason == OUTLIER_REASON_LIMIT:
         limit = abs_limit if abs_limit is not None else 0.0
         return OUTLIER_REASON_FRIENDLY[reason].format(abs_limit=limit)
+    if reason in (QC_REASON_SUMABS, QC_REASON_MAXABS):
+        threshold = threshold_used if threshold_used is not None else 0.0
+        return OUTLIER_REASON_FRIENDLY[reason].format(threshold_used=threshold)
     if reason in OUTLIER_REASON_FRIENDLY:
         return OUTLIER_REASON_FRIENDLY[reason]
     return str(reason)
@@ -180,9 +204,9 @@ def _join_reason_sentences(clauses: list[str]) -> str:
 
 def report_to_dataframe(report: OutlierExclusionReport) -> pd.DataFrame:
     rows = []
-    abs_limit = report.summary.abs_limit if report and report.summary else None
     for item in report.participants:
-        reasons = [format_outlier_reason(reason, abs_limit=abs_limit) for reason in item.reasons]
+        reasons = list(item.reasons)
+        violation_text = "; ".join(item.violations) if item.violations else ""
         rows.append(
             {
                 "participant_id": item.participant_id,
@@ -190,7 +214,13 @@ def report_to_dataframe(report: OutlierExclusionReport) -> pd.DataFrame:
                 "worst_value": item.worst_value,
                 "worst_condition": item.worst_condition,
                 "worst_roi": item.worst_roi,
-                "violations": item.n_violations,
+                "robust_center": item.robust_center,
+                "robust_spread": item.robust_spread,
+                "robust_score": item.robust_score,
+                "threshold_used": item.threshold_used,
+                "trigger_harmonic_hz": item.trigger_harmonic_hz,
+                "roi_mean_bca_at_trigger": item.roi_mean_bca_at_trigger,
+                "violations": violation_text,
                 "max_abs_dv": item.max_abs_dv,
             }
         )
@@ -201,6 +231,7 @@ def build_outlier_summary_text(report: OutlierExclusionReport) -> str:
     summary = report.summary
     abs_limit = float(summary.abs_limit)
     lines = [
+        "QC screened all conditions/ROIs in the project, independent of selections.",
         "Outlier Exclusion Summary",
         f"Participants excluded: {summary.n_subjects_excluded} (of {summary.n_subjects_before})",
     ]
@@ -209,10 +240,18 @@ def build_outlier_summary_text(report: OutlierExclusionReport) -> str:
         return "\n".join(lines)
 
     for participant in report.participants:
-        reason_clauses = [
-            _format_reason_sentence(reason, abs_limit=abs_limit)
-            for reason in participant.reasons
-        ]
+        reason_clauses = []
+        for reason in participant.reasons:
+            if reason in (QC_REASON_SUMABS, QC_REASON_MAXABS):
+                if participant.robust_score is not None and participant.threshold_used is not None:
+                    reason_clauses.append(
+                        "QC screening flagged extreme values (robust score "
+                        f"{participant.robust_score:.2f} > {participant.threshold_used:.2f})"
+                    )
+                else:
+                    reason_clauses.append("QC screening flagged extreme values")
+            else:
+                reason_clauses.append(_format_reason_sentence(reason, abs_limit=abs_limit))
         reason_sentence = _join_reason_sentences(reason_clauses)
         worst_value = participant.worst_value
         if np.isfinite(worst_value):
@@ -251,3 +290,86 @@ def export_outlier_exclusion_report(
     with pd.ExcelWriter(save_path, engine="xlsxwriter") as writer:
         _auto_format_and_write_excel(writer, summary_df, "Summary", log_func)
         _auto_format_and_write_excel(writer, participants_df, "Excluded Participants", log_func)
+
+
+def merge_exclusion_reports(
+    dv_report: OutlierExclusionReport,
+    qc_report: QcExclusionReport | None,
+) -> OutlierExclusionReport:
+    if qc_report is None:
+        return dv_report
+
+    participants_map = {p.participant_id: p for p in dv_report.participants}
+
+    for qc_participant in qc_report.participants:
+        qc_violations = [format_qc_violation(v) for v in qc_participant.violations]
+        qc_entry = OutlierParticipantReport(
+            participant_id=qc_participant.participant_id,
+            reasons=qc_participant.reasons,
+            n_violations=qc_participant.n_violations,
+            max_abs_dv=float("nan"),
+            worst_value=qc_participant.worst_value,
+            worst_condition=qc_participant.worst_condition,
+            worst_roi=qc_participant.worst_roi,
+            robust_center=qc_participant.robust_center,
+            robust_spread=qc_participant.robust_spread,
+            robust_score=qc_participant.robust_score,
+            threshold_used=qc_participant.threshold_used,
+            trigger_harmonic_hz=qc_participant.trigger_harmonic_hz,
+            roi_mean_bca_at_trigger=qc_participant.roi_mean_bca_at_trigger,
+            violations=qc_violations,
+        )
+
+        existing = participants_map.get(qc_participant.participant_id)
+        if existing is None:
+            participants_map[qc_participant.participant_id] = qc_entry
+            continue
+
+        combined_reasons = sorted(set(existing.reasons + qc_entry.reasons))
+        combined_violations = list(existing.violations) + qc_entry.violations
+        combined_n_violations = existing.n_violations + qc_entry.n_violations
+        use_qc_worst = bool(qc_entry.reasons)
+        participants_map[qc_participant.participant_id] = OutlierParticipantReport(
+            participant_id=qc_participant.participant_id,
+            reasons=combined_reasons,
+            n_violations=combined_n_violations,
+            max_abs_dv=existing.max_abs_dv,
+            worst_value=qc_entry.worst_value if use_qc_worst else existing.worst_value,
+            worst_condition=qc_entry.worst_condition if use_qc_worst else existing.worst_condition,
+            worst_roi=qc_entry.worst_roi if use_qc_worst else existing.worst_roi,
+            robust_center=qc_entry.robust_center if use_qc_worst else existing.robust_center,
+            robust_spread=qc_entry.robust_spread if use_qc_worst else existing.robust_spread,
+            robust_score=qc_entry.robust_score if use_qc_worst else existing.robust_score,
+            threshold_used=qc_entry.threshold_used if use_qc_worst else existing.threshold_used,
+            trigger_harmonic_hz=qc_entry.trigger_harmonic_hz
+            if use_qc_worst
+            else existing.trigger_harmonic_hz,
+            roi_mean_bca_at_trigger=qc_entry.roi_mean_bca_at_trigger
+            if use_qc_worst
+            else existing.roi_mean_bca_at_trigger,
+            violations=combined_violations,
+        )
+
+    combined_participants = sorted(participants_map.values(), key=lambda p: p.participant_id)
+    n_before = max(
+        dv_report.summary.n_subjects_before,
+        qc_report.summary.n_subjects_before,
+    )
+    n_excluded = len({p.participant_id for p in combined_participants})
+    summary = OutlierExclusionSummary(
+        n_subjects_before=n_before,
+        n_subjects_excluded=n_excluded,
+        n_subjects_after=max(0, n_before - n_excluded),
+        abs_limit=float(dv_report.summary.abs_limit),
+    )
+    qc_metadata = {
+        "screened_conditions": qc_report.screened_conditions,
+        "screened_rois": qc_report.screened_rois,
+        "threshold_sumabs": qc_report.summary.threshold_sumabs,
+        "threshold_maxabs": qc_report.summary.threshold_maxabs,
+    }
+    return OutlierExclusionReport(
+        summary=summary,
+        participants=combined_participants,
+        qc_metadata=qc_metadata,
+    )

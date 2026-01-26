@@ -35,6 +35,7 @@ from .stats_data_loader import (
 )
 from .stats_subjects import canonical_group_and_phase_from_manifest, canonical_group_label
 from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
+from .stats_outlier_exclusion import OutlierExclusionReport
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,10 @@ class StatsViewProtocol:
     def get_step_config(
         self, pipeline_id: PipelineId, step_id: StepId
     ) -> tuple[dict, Callable[[dict], None]]: ...
+
+    def store_outlier_exclusion_report(
+        self, pipeline_id: PipelineId, report: OutlierExclusionReport
+    ) -> None: ...
 
     def ensure_results_dir(self) -> str: ...
 
@@ -699,13 +704,20 @@ class StatsController:
         spec = {
             "subjects": anova_kwargs.get("subjects", []),
             "conditions": anova_kwargs.get("conditions", []),
+            "conditions_all": anova_kwargs.get("conditions_all", []),
             "subject_data": anova_kwargs.get("subject_data", {}),
             "subject_groups": anova_kwargs.get("subject_groups", {}),
             "roi_map": anova_kwargs.get("rois", {}),
+            "rois_all": anova_kwargs.get("rois_all", anova_kwargs.get("rois", {})),
             "base_freq": anova_kwargs.get("base_freq", 6.0),
             "alpha": mixed_kwargs.get("alpha", 0.05),
             "dv_policy": anova_kwargs.get("dv_policy", {}),
             "dv_variants": anova_kwargs.get("dv_variants", []),
+            "qc_config": anova_kwargs.get("qc_config", {}),
+            "outlier_exclusion": {
+                "enabled": bool(anova_kwargs.get("outlier_exclusion_enabled", True)),
+                "abs_limit": float(anova_kwargs.get("outlier_abs_limit", 50.0)),
+            },
             "harmonic_options": {
                 "metric": harmonic_kwargs.get("selected_metric", "Z Score"),
                 "mean_value_threshold": harmonic_kwargs.get("mean_value_threshold", 0.0),
@@ -918,6 +930,10 @@ class StatsController:
             dv_variants = payload.get("dv_variants") if isinstance(payload, dict) else None
             if dv_variants:
                 self._view.store_dv_variants_payload(pipeline_id, dv_variants)
+
+            dv_exclusion_report = payload.get("dv_exclusion_report") if isinstance(payload, dict) else None
+            if isinstance(dv_exclusion_report, OutlierExclusionReport):
+                self._view.store_outlier_exclusion_report(pipeline_id, dv_exclusion_report)
 
             state.current_step_index = len(state.steps)
             self._complete_pipeline(pipeline_id)
