@@ -1948,9 +1948,7 @@ class StatsWindow(QMainWindow):
         output_text = payload.get("output_text") or ""
         findings = payload.get("findings") or []
         if update_text:
-            self.output_text.append(
-                output_text.strip() or "(Harmonic check returned empty text. See logs for details.)"
-            )
+            self.output_text.append("Harmonic details were exported to Harmonic Results.xlsx.")
         self._harmonic_results[pipeline_id] = findings
         self.harmonic_check_results_data = findings
         self._update_export_buttons()
