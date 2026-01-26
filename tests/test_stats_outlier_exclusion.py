@@ -19,10 +19,10 @@ def test_apply_hard_dv_exclusion_filters_participants() -> None:
 
     filtered, report = apply_hard_dv_exclusion(df, 50.0)
 
-    assert set(filtered["subject"].unique()) == {"P2"}
+    assert set(filtered["subject"].unique()) == {"P1", "P2"}
     assert report.summary.n_subjects_before == 3
-    assert report.summary.n_subjects_excluded == 2
-    assert report.summary.n_subjects_after == 1
+    assert report.summary.n_subjects_excluded == 1
+    assert report.summary.n_subjects_after == 2
 
     reasons_by_pid = {item.participant_id: set(item.reasons) for item in report.participants}
     assert reasons_by_pid["P1"] == {OUTLIER_REASON_LIMIT}

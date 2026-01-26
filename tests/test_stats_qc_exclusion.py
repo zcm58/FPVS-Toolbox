@@ -39,18 +39,16 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch) -> None:
 
     monkeypatch.setattr(excel_io, "safe_read_excel", _fake_read_excel)
 
-    excluded, report = run_qc_exclusion(
+    report = run_qc_exclusion(
         subjects=list(subject_data.keys()),
         subject_data=subject_data,
         conditions_all=conditions_all,
         rois_all=rois,
         base_freq=6.0,
-        threshold_sumabs=3.5,
-        threshold_maxabs=3.5,
         log_func=None,
     )
 
-    assert "P3" in excluded
+    assert report.summary.n_subjects_flagged == 1
     assert any(
         QC_REASON_MAXABS in participant.reasons
         for participant in report.participants
