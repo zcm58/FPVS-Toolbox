@@ -42,9 +42,7 @@ from Tools.Stats.Legacy.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
 )
 from Tools.Stats.PySide6.dv_policies import (
-    GROUP_MEAN_Z_POLICY_NAME,
     ROSSION_POLICY_NAME,
-    build_group_mean_z_preview_payload,
     build_rossion_preview_payload,
     normalize_dv_policy,
     prepare_summed_bca_data,
@@ -872,7 +870,7 @@ def run_group_contrasts(
     }
 
 
-def run_group_mean_z_preview(
+def run_harmonics_preview(
     progress_cb,
     message_cb,
     *,
@@ -885,16 +883,6 @@ def run_group_mean_z_preview(
 ):
     settings = dv_policy or {}
     policy_name = settings.get("name")
-    if policy_name == GROUP_MEAN_Z_POLICY_NAME:
-        return build_group_mean_z_preview_payload(
-            subjects=subjects,
-            conditions=conditions,
-            subject_data=subject_data,
-            base_freq=base_freq,
-            rois=rois,
-            log_func=message_cb,
-            dv_policy=dv_policy,
-        )
     if policy_name == ROSSION_POLICY_NAME:
         return build_rossion_preview_payload(
             subjects=subjects,
@@ -905,7 +893,7 @@ def run_group_mean_z_preview(
             log_func=message_cb,
             dv_policy=dv_policy,
         )
-    raise RuntimeError("Preview requires Group Mean-Z or Rossion policy.")
+    raise RuntimeError("Preview requires the Rossion policy.")
 
 
 def run_harmonic_check(
