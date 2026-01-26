@@ -220,8 +220,12 @@ class StatsWindow(QMainWindow):
         self._pipeline_dv_variants: dict[PipelineId, list[str]] = {}
         self._pipeline_dv_variant_payloads: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_outlier_config: dict[PipelineId, dict[str, object]] = {}
+        self._pipeline_qc_config: dict[PipelineId, dict[str, object]] = {}
+        self._pipeline_qc_state: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_exclusion_reports: dict[PipelineId, OutlierExclusionReport | None] = {}
         self._group_mean_preview_data: dict[str, object] = {}
+        self._qc_threshold_sumabs: float = 3.5
+        self._qc_threshold_maxabs: float = 3.5
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
@@ -379,6 +383,12 @@ class StatsWindow(QMainWindow):
         return {
             "enabled": bool(self._outlier_exclusion_enabled),
             "abs_limit": float(self._outlier_abs_limit),
+        }
+
+    def _get_qc_exclusion_payload(self) -> dict[str, object]:
+        return {
+            "threshold_sumabs": float(self._qc_threshold_sumabs),
+            "threshold_maxabs": float(self._qc_threshold_maxabs),
         }
 
     def _on_outlier_exclusion_toggled(self, state: int) -> None:
@@ -722,6 +732,24 @@ class StatsWindow(QMainWindow):
         metric_str = str(metric) if metric is not None else "Z Score"
         return HarmonicConfig(metric_str, threshold_val)
 
+    def _get_qc_settings(self) -> Optional[tuple[float, float]]:
+        ok_sumabs, sumabs = self._safe_settings_get(
+            "analysis", "qc_threshold_sumabs", self._qc_threshold_sumabs
+        )
+        ok_maxabs, maxabs = self._safe_settings_get(
+            "analysis", "qc_threshold_maxabs", self._qc_threshold_maxabs
+        )
+        try:
+            sumabs_val = float(sumabs)
+            maxabs_val = float(maxabs)
+        except Exception as exc:
+            QMessageBox.critical(self, "Settings Error", f"Invalid QC thresholds: {exc}")
+            return None
+        if not (ok_sumabs and ok_maxabs):
+            QMessageBox.critical(self, "Settings Error", "Could not load QC thresholds.")
+            return None
+        return sumabs_val, maxabs_val
+
     # --------- centralized pre-run guards ---------
 
     def _precheck(self, *, require_anova: bool = False, start_guard: bool = True) -> bool:
@@ -756,6 +784,10 @@ class StatsWindow(QMainWindow):
         if not harmonic_cfg:
             return False
         self._harmonic_config = harmonic_cfg
+        qc_cfg = self._get_qc_settings()
+        if not qc_cfg:
+            return False
+        self._qc_threshold_sumabs, self._qc_threshold_maxabs = qc_cfg
         if start_guard and not self._begin_run():
             return False
         return True
@@ -1258,6 +1290,8 @@ class StatsWindow(QMainWindow):
         self._pipeline_dv_variants[pipeline_id] = self._get_selected_dv_variants()
         self._pipeline_dv_variant_payloads[pipeline_id] = {}
         self._pipeline_outlier_config[pipeline_id] = self._get_outlier_exclusion_payload()
+        self._pipeline_qc_config[pipeline_id] = self._get_qc_exclusion_payload()
+        self._pipeline_qc_state[pipeline_id] = {"report": None, "excluded_pids": set()}
         self._pipeline_exclusion_reports[pipeline_id] = None
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
@@ -1408,18 +1442,24 @@ class StatsWindow(QMainWindow):
         outlier_payload = self._pipeline_outlier_config.get(
             pipeline_id, self._get_outlier_exclusion_payload()
         )
+        qc_payload = self._pipeline_qc_config.get(pipeline_id, self._get_qc_exclusion_payload())
+        qc_state = self._pipeline_qc_state.get(pipeline_id, {"report": None, "excluded_pids": set()})
         if pipeline_id is PipelineId.SINGLE:
             if step_id is StepId.RM_ANOVA:
                 kwargs = dict(
                     subjects=self.subjects,
                     conditions=self._get_selected_conditions(),
+                    conditions_all=self.conditions,
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     rois=self.rois,
+                    rois_all=self.rois,
                     dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
+                    qc_config=qc_payload,
+                    qc_state=qc_state,
                 )
                 if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
                     kwargs["results_dir"] = self._ensure_results_dir()
@@ -1431,15 +1471,19 @@ class StatsWindow(QMainWindow):
                 kwargs = dict(
                     subjects=self.subjects,
                     conditions=self._get_selected_conditions(),
+                    conditions_all=self.conditions,
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
                     rois=self.rois,
+                    rois_all=self.rois,
                     subject_groups=self.subject_groups,
                     dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
+                    qc_config=qc_payload,
+                    qc_state=qc_state,
                 )
                 def handler(payload):
                     self._apply_mixed_model_results(payload, update_text=False)
@@ -1449,15 +1493,19 @@ class StatsWindow(QMainWindow):
                 kwargs = dict(
                     subjects=self.subjects,
                     conditions=self._get_selected_conditions(),
+                    conditions_all=self.conditions,
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
                     rois=self.rois,
+                    rois_all=self.rois,
                     subject_groups=self.subject_groups,
                     dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
+                    qc_config=qc_payload,
+                    qc_state=qc_state,
                 )
                 def handler(payload):
                     self._apply_posthoc_results(payload, update_text=True)
@@ -1475,14 +1523,18 @@ class StatsWindow(QMainWindow):
                 kwargs = dict(
                     subjects=self.subjects,
                     conditions=self._get_selected_conditions(),
+                    conditions_all=self.conditions,
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     rois=self.rois,
+                    rois_all=self.rois,
                     subject_groups=self.subject_groups,
                     dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
+                    qc_config=qc_payload,
+                    qc_state=qc_state,
                 )
                 def handler(payload):
                     self._apply_between_anova_results(payload, update_text=False)
@@ -1492,16 +1544,20 @@ class StatsWindow(QMainWindow):
                 kwargs = dict(
                     subjects=self.subjects,
                     conditions=self._get_selected_conditions(),
+                    conditions_all=self.conditions,
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
                     rois=self.rois,
+                    rois_all=self.rois,
                     subject_groups=self.subject_groups,
                     include_group=True,
                     dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
+                    qc_config=qc_payload,
+                    qc_state=qc_state,
                 )
                 def handler(payload):
                     self._apply_between_mixed_results(payload, update_text=False)
@@ -1511,15 +1567,19 @@ class StatsWindow(QMainWindow):
                 kwargs = dict(
                     subjects=self.subjects,
                     conditions=self._get_selected_conditions(),
+                    conditions_all=self.conditions,
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
                     rois=self.rois,
+                    rois_all=self.rois,
                     subject_groups=self.subject_groups,
                     dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
+                    qc_config=qc_payload,
+                    qc_state=qc_state,
                 )
                 def handler(payload):
                     self._apply_group_contrasts_results(payload, update_text=True)
@@ -1571,12 +1631,14 @@ class StatsWindow(QMainWindow):
         layout.addWidget(summary_box)
 
         if report.participants:
-            table = QTableWidget(len(report.participants), 6)
+            table = QTableWidget(len(report.participants), 8)
             table.setHorizontalHeaderLabels(
                 [
                     "participant_id",
                     "exclusion_reason",
                     "worst_value",
+                    "robust_score",
+                    "threshold_used",
                     "worst_condition",
                     "worst_roi",
                     "violations",
@@ -1587,15 +1649,26 @@ class StatsWindow(QMainWindow):
             table.setSelectionMode(QAbstractItemView.NoSelection)
             for row, participant in enumerate(report.participants):
                 reasons = ", ".join(
-                    format_outlier_reason(reason, abs_limit=summary.abs_limit)
+                    format_outlier_reason(
+                        reason,
+                        abs_limit=summary.abs_limit,
+                        threshold_used=participant.threshold_used,
+                    )
                     for reason in participant.reasons
+                )
+                violations = (
+                    "; ".join(participant.violations)
+                    if participant.violations
+                    else str(participant.n_violations)
                 )
                 table.setItem(row, 0, QTableWidgetItem(participant.participant_id))
                 table.setItem(row, 1, QTableWidgetItem(reasons))
                 table.setItem(row, 2, QTableWidgetItem(str(participant.worst_value)))
-                table.setItem(row, 3, QTableWidgetItem(participant.worst_condition))
-                table.setItem(row, 4, QTableWidgetItem(participant.worst_roi))
-                table.setItem(row, 5, QTableWidgetItem(str(participant.n_violations)))
+                table.setItem(row, 3, QTableWidgetItem(str(participant.robust_score)))
+                table.setItem(row, 4, QTableWidgetItem(str(participant.threshold_used)))
+                table.setItem(row, 5, QTableWidgetItem(participant.worst_condition))
+                table.setItem(row, 6, QTableWidgetItem(participant.worst_roi))
+                table.setItem(row, 7, QTableWidgetItem(violations))
             table.resizeColumnsToContents()
             layout.addWidget(table)
         else:
@@ -1857,6 +1930,12 @@ class StatsWindow(QMainWindow):
 
     def _store_outlier_exclusion_report(self, pipeline_id: PipelineId, payload: dict) -> None:
         report = payload.get("dv_exclusion_report")
+        if isinstance(report, OutlierExclusionReport):
+            self._pipeline_exclusion_reports[pipeline_id] = report
+
+    def store_outlier_exclusion_report(
+        self, pipeline_id: PipelineId, report: OutlierExclusionReport
+    ) -> None:
         if isinstance(report, OutlierExclusionReport):
             self._pipeline_exclusion_reports[pipeline_id] = report
 

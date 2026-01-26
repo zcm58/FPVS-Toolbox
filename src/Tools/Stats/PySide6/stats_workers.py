@@ -52,6 +52,13 @@ from Tools.Stats.PySide6.stats_outlier_exclusion import (
     OutlierExclusionReport,
     OutlierExclusionSummary,
     apply_hard_dv_exclusion,
+    merge_exclusion_reports,
+)
+from Tools.Stats.PySide6.stats_qc_exclusion import (
+    QC_DEFAULT_THRESHOLD_MAXABS,
+    QC_DEFAULT_THRESHOLD_SUMABS,
+    QcExclusionReport,
+    run_qc_exclusion,
 )
 
 logger = logging.getLogger("Tools.Stats")
@@ -289,6 +296,102 @@ def _apply_outlier_exclusion(
     return filtered_df, report
 
 
+def _apply_qc_screening(
+    *,
+    subjects: list[str],
+    subject_data: dict,
+    subject_groups: dict[str, str | None] | None,
+    conditions_all: list[str] | None,
+    rois_all: dict | None,
+    base_freq: float,
+    message_cb,
+    qc_config: dict | None,
+    qc_state: dict | None,
+) -> tuple[
+    list[str],
+    dict,
+    dict[str, str | None] | None,
+    QcExclusionReport | None,
+]:
+    if not subjects:
+        return subjects, subject_data, subject_groups, None
+
+    if qc_state is not None and isinstance(qc_state.get("report"), QcExclusionReport):
+        excluded_pids = set(qc_state.get("excluded_pids", set()))
+        qc_report = qc_state.get("report")
+    else:
+        config = qc_config or {}
+        threshold_sumabs = float(config.get("threshold_sumabs", QC_DEFAULT_THRESHOLD_SUMABS))
+        threshold_maxabs = float(config.get("threshold_maxabs", QC_DEFAULT_THRESHOLD_MAXABS))
+        excluded_pids, qc_report = run_qc_exclusion(
+            subjects=list(subjects),
+            subject_data=subject_data,
+            conditions_all=list(conditions_all or []),
+            rois_all=rois_all or {},
+            base_freq=base_freq,
+            threshold_sumabs=threshold_sumabs,
+            threshold_maxabs=threshold_maxabs,
+            log_func=message_cb,
+        )
+        if qc_state is not None:
+            qc_state["report"] = qc_report
+            qc_state["excluded_pids"] = set(excluded_pids)
+
+    excluded_ids = set(excluded_pids)
+    if excluded_ids:
+        message = (
+            "QC screening excluded participants; "
+            f"excluded_pids={sorted(excluded_ids)}; "
+            f"n_before={len(subjects)} n_after={len(subjects) - len(excluded_ids)}"
+        )
+        if message_cb:
+            message_cb(message)
+        logger.info(
+            "stats_qc_exclusion_summary",
+            extra={
+                "excluded_pids": sorted(excluded_ids),
+                "n_before": len(subjects),
+                "n_after": len(subjects) - len(excluded_ids),
+            },
+        )
+        for participant in (qc_report.participants if qc_report else []):
+            logger.info(
+                "stats_qc_exclusion_participant",
+                extra={
+                    "participant_id": participant.participant_id,
+                    "reasons": participant.reasons,
+                    "worst_value": participant.worst_value,
+                    "worst_condition": participant.worst_condition,
+                    "worst_roi": participant.worst_roi,
+                    "n_violations": participant.n_violations,
+                    "robust_score": participant.robust_score,
+                    "threshold_used": participant.threshold_used,
+                },
+            )
+
+    filtered_subject_data = {
+        pid: data for pid, data in subject_data.items() if pid not in excluded_ids
+    }
+    filtered_subjects = [pid for pid in subjects if pid not in excluded_ids]
+    filtered_groups = subject_groups
+    if isinstance(subject_groups, dict):
+        filtered_groups = {
+            pid: group for pid, group in subject_groups.items() if pid not in excluded_ids
+        }
+
+    return filtered_subjects, filtered_subject_data, filtered_groups, qc_report
+
+
+def _empty_outlier_report(subjects: list[str], *, abs_limit: float) -> OutlierExclusionReport:
+    summary = OutlierExclusionSummary(
+        n_subjects_before=len(subjects),
+        n_subjects_excluded=0,
+        n_subjects_after=len(subjects),
+        abs_limit=float(abs_limit),
+    )
+    return OutlierExclusionReport(summary=summary, participants=[])
+
+
 def _validate_group_contrasts_input(
     df: pd.DataFrame,
     *,
@@ -391,14 +494,18 @@ def run_rm_anova(
     *,
     subjects,
     conditions,
+    conditions_all=None,
     subject_data,
     base_freq,
     rois,
+    rois_all=None,
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
     results_dir: str | None = None,
     outlier_exclusion_enabled: bool = True,
     outlier_abs_limit: float = 50.0,
+    qc_config: dict | None = None,
+    qc_state: dict | None = None,
 ):
     set_rois(rois)
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
@@ -409,6 +516,19 @@ def run_rm_anova(
         rois=rois,
         subjects=list(subjects) if subjects else [],
     )
+    subjects, subject_data, _subject_groups, qc_report = _apply_qc_screening(
+        subjects=list(subjects) if subjects else [],
+        subject_data=subject_data,
+        subject_groups=None,
+        conditions_all=list(conditions_all) if conditions_all else [],
+        rois_all=rois_all or rois,
+        base_freq=base_freq,
+        message_cb=message_cb,
+        qc_config=qc_config,
+        qc_state=qc_state,
+    )
+    if not subjects:
+        raise RuntimeError("All participants excluded by QC screening.")
     provenance_map = {} if RM_ANOVA_DIAG else None
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
@@ -448,6 +568,7 @@ def run_rm_anova(
         abs_limit=outlier_abs_limit,
         message_cb=message_cb,
     )
+    exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
     excluded_ids = {p.participant_id for p in exclusion_report.participants}
     if excluded_ids:
         all_subject_bca_data = {
@@ -483,17 +604,34 @@ def run_between_group_anova(
     *,
     subjects,
     conditions,
+    conditions_all=None,
     subject_data,
     base_freq,
     rois,
+    rois_all=None,
     subject_groups: dict[str, str | None] | None = None,
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
     outlier_exclusion_enabled: bool = True,
     outlier_abs_limit: float = 50.0,
+    qc_config: dict | None = None,
+    qc_state: dict | None = None,
 ):
     set_rois(rois)
     message_cb("Preparing data for Between-Group RM-ANOVA…")
+    subjects, subject_data, subject_groups, qc_report = _apply_qc_screening(
+        subjects=list(subjects) if subjects else [],
+        subject_data=subject_data,
+        subject_groups=subject_groups,
+        conditions_all=list(conditions_all) if conditions_all else [],
+        rois_all=rois_all or rois,
+        base_freq=base_freq,
+        message_cb=message_cb,
+        qc_config=qc_config,
+        qc_state=qc_state,
+    )
+    if not subjects:
+        raise RuntimeError("All participants excluded by QC screening.")
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
@@ -532,6 +670,7 @@ def run_between_group_anova(
         abs_limit=outlier_abs_limit,
         message_cb=message_cb,
     )
+    exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
     before = len(df_long)
     df_long = df_long.dropna(subset=["group"])
     dropped = before - len(df_long)
@@ -566,16 +705,20 @@ def run_lmm(
     *,
     subjects,
     conditions,
+    conditions_all=None,
     subject_data,
     base_freq,
     alpha,
     rois,
+    rois_all=None,
     subject_groups: dict[str, str | None] | None = None,
     include_group: bool = False,
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
     outlier_exclusion_enabled: bool = True,
     outlier_abs_limit: float = 50.0,
+    qc_config: dict | None = None,
+    qc_state: dict | None = None,
 ):
     set_rois(rois)
     prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
@@ -587,6 +730,19 @@ def run_lmm(
         rois=rois,
         subjects=list(subjects) if subjects else [],
     )
+    subjects, subject_data, subject_groups, qc_report = _apply_qc_screening(
+        subjects=list(subjects) if subjects else [],
+        subject_data=subject_data,
+        subject_groups=subject_groups,
+        conditions_all=list(conditions_all) if conditions_all else [],
+        rois_all=rois_all or rois,
+        base_freq=base_freq,
+        message_cb=message_cb,
+        qc_config=qc_config,
+        qc_state=qc_state,
+    )
+    if not subjects:
+        raise RuntimeError("All participants excluded by QC screening.")
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
@@ -625,6 +781,7 @@ def run_lmm(
         abs_limit=outlier_abs_limit,
         message_cb=message_cb,
     )
+    exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
     if df_long.empty:
         raise RuntimeError("No valid rows for mixed model after filtering NaNs.")
 
@@ -700,15 +857,19 @@ def run_posthoc(
     *,
     subjects,
     conditions,
+    conditions_all=None,
     subject_data,
     base_freq,
     alpha,
     rois,
+    rois_all=None,
     subject_groups: dict[str, str | None] | None = None,
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
     outlier_exclusion_enabled: bool = True,
     outlier_abs_limit: float = 50.0,
+    qc_config: dict | None = None,
+    qc_state: dict | None = None,
     **kwargs,
 ):
     set_rois(rois)
@@ -720,6 +881,19 @@ def run_posthoc(
         rois=rois,
         subjects=list(subjects) if subjects else [],
     )
+    subjects, subject_data, subject_groups, qc_report = _apply_qc_screening(
+        subjects=list(subjects) if subjects else [],
+        subject_data=subject_data,
+        subject_groups=subject_groups,
+        conditions_all=list(conditions_all) if conditions_all else [],
+        rois_all=rois_all or rois,
+        base_freq=base_freq,
+        message_cb=message_cb,
+        qc_config=qc_config,
+        qc_state=qc_state,
+    )
+    if not subjects:
+        raise RuntimeError("All participants excluded by QC screening.")
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
@@ -758,6 +932,7 @@ def run_posthoc(
         abs_limit=outlier_abs_limit,
         message_cb=message_cb,
     )
+    exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
     if df_long.empty:
         raise RuntimeError("No valid rows for post-hoc tests after filtering NaNs.")
 
@@ -786,19 +961,36 @@ def run_group_contrasts(
     *,
     subjects,
     conditions,
+    conditions_all=None,
     subject_data,
     base_freq,
     alpha,
     rois,
+    rois_all=None,
     subject_groups: dict[str, str | None] | None = None,
     dv_policy: dict | None = None,
     dv_variants: list[dict[str, object]] | None = None,
     outlier_exclusion_enabled: bool = True,
     outlier_abs_limit: float = 50.0,
+    qc_config: dict | None = None,
+    qc_state: dict | None = None,
 ):
     set_rois(rois)
     _ = alpha
     message_cb("Preparing data for Between-Group Contrasts…")
+    subjects, subject_data, subject_groups, qc_report = _apply_qc_screening(
+        subjects=list(subjects) if subjects else [],
+        subject_data=subject_data,
+        subject_groups=subject_groups,
+        conditions_all=list(conditions_all) if conditions_all else [],
+        rois_all=rois_all or rois,
+        base_freq=base_freq,
+        message_cb=message_cb,
+        qc_config=qc_config,
+        qc_state=qc_state,
+    )
+    if not subjects:
+        raise RuntimeError("All participants excluded by QC screening.")
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = prepare_summed_bca_data(
         subjects=subjects,
@@ -837,6 +1029,7 @@ def run_group_contrasts(
         abs_limit=outlier_abs_limit,
         message_cb=message_cb,
     )
+    exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
     df_long = df_long.dropna(subset=["group"])
     if df_long.empty:
         raise RuntimeError("No rows with group assignments to compute contrasts.")
@@ -966,6 +1159,41 @@ def run_between_group_process_task(
         raise FileNotFoundError(f"Job spec not found: {job_spec_path}")
 
     spec_data = json.loads(job_path.read_text())
+    qc_report = None
+    qc_excluded = set()
+    qc_config = spec_data.get("qc_config", {}) or {}
+    original_subjects = list(spec_data.get("subjects", []))
+    subjects = list(original_subjects)
+    qc_excluded, qc_report = run_qc_exclusion(
+        subjects=subjects,
+        subject_data=spec_data.get("subject_data", {}),
+        conditions_all=list(spec_data.get("conditions_all", [])),
+        rois_all=spec_data.get("rois_all", spec_data.get("roi_map", {})),
+        base_freq=float(spec_data.get("base_freq", 6.0)),
+        threshold_sumabs=float(
+            qc_config.get("threshold_sumabs", QC_DEFAULT_THRESHOLD_SUMABS)
+        ),
+        threshold_maxabs=float(
+            qc_config.get("threshold_maxabs", QC_DEFAULT_THRESHOLD_MAXABS)
+        ),
+        log_func=message_cb,
+    )
+    if qc_excluded:
+        spec_data["subjects"] = [pid for pid in subjects if pid not in qc_excluded]
+        spec_data["subject_data"] = {
+            pid: data
+            for pid, data in spec_data.get("subject_data", {}).items()
+            if pid not in qc_excluded
+        }
+        spec_data["subject_groups"] = {
+            pid: group
+            for pid, group in spec_data.get("subject_groups", {}).items()
+            if pid not in qc_excluded
+        }
+        if not spec_data["subjects"]:
+            raise RuntimeError("All participants excluded by QC screening.")
+        job_path.write_text(json.dumps(spec_data, indent=2))
+
     dv_variants_payload = None
     if spec_data.get("dv_variants"):
         try:
@@ -1042,9 +1270,16 @@ def run_between_group_process_task(
         raise RuntimeError("Between-group CLI completed but summary file is missing.")
 
     summary = json.loads(summary_path.read_text())
+    dv_exclusion_report = None
+    if qc_report is not None:
+        outlier_cfg = spec_data.get("outlier_exclusion", {}) or {}
+        abs_limit = float(outlier_cfg.get("abs_limit", 50.0))
+        dv_report = _empty_outlier_report(original_subjects, abs_limit=abs_limit)
+        dv_exclusion_report = merge_exclusion_reports(dv_report, qc_report)
     return {
         "summary": summary,
         "stdout": stdout_lines,
         "stderr": stderr_output,
         "dv_variants": dv_variants_payload,
+        "dv_exclusion_report": dv_exclusion_report,
     }
