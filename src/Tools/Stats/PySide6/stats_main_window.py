@@ -32,8 +32,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -107,6 +105,7 @@ from Tools.Stats.PySide6.stats_outlier_exclusion import (
     export_excluded_participants_report,
     export_flagged_participants_report,
 )
+from Tools.Stats.PySide6.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
 from Tools.Stats.PySide6.stats_qc_exclusion import (
     QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
     QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
@@ -223,7 +222,7 @@ class StatsWindow(QMainWindow):
         self._dv_variants_selected: List[str] = []
         self._outlier_exclusion_enabled: bool = True
         self._outlier_abs_limit: float = 50.0
-        self._manual_excluded_pids: List[str] = []
+        self.manual_excluded_pids: set[str] = set()
         self._manual_exclusion_candidates: List[str] = []
         self._pipeline_conditions: dict[PipelineId, list[str]] = {}
         self._pipeline_dv_policy: dict[PipelineId, dict[str, object]] = {}
@@ -431,99 +430,48 @@ class StatsWindow(QMainWindow):
         return collect_flagged_pid_map(report.qc_report, report.dv_report)
 
     def _update_manual_exclusion_summary(self) -> None:
-        excluded = sorted(set(self._manual_excluded_pids))
-        self._manual_excluded_pids = excluded
+        excluded = sorted(self.manual_excluded_pids)
+        self.manual_excluded_pids = set(excluded)
         summary_label = getattr(self, "manual_exclusion_summary_label", None)
         if summary_label is not None:
-            summary_label.setText(f"Excluded: {len(excluded)} participant(s)")
+            summary_label.setText(f"Excluded: {len(excluded)}")
         list_widget = getattr(self, "manual_exclusion_list", None)
         if list_widget is not None:
-            list_widget.setPlainText("\n".join(excluded) if excluded else "None")
+            display_text = ", ".join(excluded) if excluded else "None"
+            tooltip_text = ", ".join(excluded) if excluded else "No manual exclusions."
+            width = list_widget.width() if list_widget.width() > 0 else 320
+            elided = list_widget.fontMetrics().elidedText(
+                display_text,
+                Qt.ElideRight,
+                max(width - 8, 50),
+            )
+            list_widget.setText(elided)
+            list_widget.setToolTip(tooltip_text)
 
     def _reconcile_manual_exclusions(self, candidates: list[str]) -> None:
         self._manual_exclusion_candidates = list(candidates)
-        self._manual_excluded_pids = [
-            pid for pid in self._manual_excluded_pids if pid in self._manual_exclusion_candidates
-        ]
+        self.manual_excluded_pids = {
+            pid for pid in self.manual_excluded_pids if pid in self._manual_exclusion_candidates
+        }
         self._update_manual_exclusion_summary()
 
     def _clear_manual_exclusions(self) -> None:
-        self._manual_excluded_pids = []
+        self.manual_excluded_pids.clear()
         self._update_manual_exclusion_summary()
 
     def _open_manual_exclusion_dialog(self) -> None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Manual Outlier Exclusion")
-        dialog.setModal(True)
-        layout = QVBoxLayout(dialog)
+        dialog = ManualOutlierExclusionDialog(
+            candidates=self._manual_exclusion_candidates,
+            flagged_map=self._current_flagged_pid_map(),
+            preselected=self.manual_excluded_pids,
+            parent=self,
+        )
 
-        search_row = QHBoxLayout()
-        search_label = QLabel("Search:")
-        search_input = QLineEdit()
-        search_input.setPlaceholderText("Filter participants…")
-        search_row.addWidget(search_label)
-        search_row.addWidget(search_input, 1)
-        layout.addLayout(search_row)
-
-        list_widget = QListWidget()
-        list_widget.setSelectionMode(QAbstractItemView.NoSelection)
-        flagged_map = self._current_flagged_pid_map()
-        for pid in self._manual_exclusion_candidates:
-            flags = flagged_map.get(pid, [])
-            suffix = f" (FLAGGED: {', '.join(flags)})" if flags else ""
-            item = QListWidgetItem(f"{pid}{suffix}")
-            item.setData(Qt.UserRole, pid)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if pid in self._manual_excluded_pids else Qt.Unchecked)
-            list_widget.addItem(item)
-        layout.addWidget(list_widget)
-
-        controls_row = QHBoxLayout()
-        select_all_btn = QPushButton("Select all")
-        select_none_btn = QPushButton("Select none")
-        controls_row.addWidget(select_all_btn)
-        controls_row.addWidget(select_none_btn)
-        controls_row.addStretch(1)
-        layout.addLayout(controls_row)
-
-        button_box = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
-        layout.addWidget(button_box)
-
-        def _apply_filter(text: str) -> None:
-            filter_text = text.strip().lower()
-            for idx in range(list_widget.count()):
-                item = list_widget.item(idx)
-                pid = str(item.data(Qt.UserRole)).lower()
-                item.setHidden(bool(filter_text) and filter_text not in pid)
-
-        def _select_all() -> None:
-            for idx in range(list_widget.count()):
-                item = list_widget.item(idx)
-                if not item.isHidden():
-                    item.setCheckState(Qt.Checked)
-
-        def _select_none() -> None:
-            for idx in range(list_widget.count()):
-                item = list_widget.item(idx)
-                if not item.isHidden():
-                    item.setCheckState(Qt.Unchecked)
-
-        def _apply_changes() -> None:
-            selections = []
-            for idx in range(list_widget.count()):
-                item = list_widget.item(idx)
-                if item.checkState() == Qt.Checked:
-                    selections.append(str(item.data(Qt.UserRole)))
-            self._manual_excluded_pids = sorted(selections)
+        def _apply_changes(selections: set[str]) -> None:
+            self.manual_excluded_pids = set(selections)
             self._update_manual_exclusion_summary()
-            dialog.accept()
 
-        search_input.textChanged.connect(_apply_filter)
-        select_all_btn.clicked.connect(_select_all)
-        select_none_btn.clicked.connect(_select_none)
-        button_box.accepted.connect(_apply_changes)
-        button_box.rejected.connect(dialog.reject)
-
+        dialog.manualExclusionsApplied.connect(_apply_changes)
         dialog.exec()
 
     def _set_fixed_k_controls_enabled(self, enabled: bool) -> None:
@@ -898,7 +846,7 @@ class StatsWindow(QMainWindow):
             self._set_status(message)
             self.append_log("General", message, level="warning")
             return False
-        if self.subjects and set(self.subjects).issubset(set(self._manual_excluded_pids)):
+        if self.subjects and set(self.subjects).issubset(self.manual_excluded_pids):
             message = "All participants are manually excluded. Clear exclusions to run analysis."
             self._set_status(message)
             self.append_log("General", message, level="warning")
@@ -1562,7 +1510,7 @@ class StatsWindow(QMainWindow):
         # [SAFETY UPDATE] Load fresh ROIs from settings to ensure thread receives
         # the most up-to-date map, preventing 0xC0000005 errors.
         fresh_rois = load_rois_from_settings() or self.rois
-        manual_excluded = set(self._manual_excluded_pids)
+        manual_excluded = set(self.manual_excluded_pids)
         filtered_subjects = [pid for pid in self.subjects if pid not in manual_excluded]
         filtered_subject_data = {
             pid: data for pid, data in self.subject_data.items() if pid not in manual_excluded
@@ -1604,7 +1552,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
-                    manual_excluded_pids=self._manual_excluded_pids,
+                    manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
                     kwargs["results_dir"] = self._ensure_results_dir()
@@ -1629,7 +1577,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
-                    manual_excluded_pids=self._manual_excluded_pids,
+                    manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
                     self._apply_mixed_model_results(payload, update_text=False)
@@ -1652,7 +1600,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
-                    manual_excluded_pids=self._manual_excluded_pids,
+                    manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
                     self._apply_posthoc_results(payload, update_text=True)
@@ -1682,7 +1630,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
-                    manual_excluded_pids=self._manual_excluded_pids,
+                    manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
                     self._apply_between_anova_results(payload, update_text=False)
@@ -1706,7 +1654,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
-                    manual_excluded_pids=self._manual_excluded_pids,
+                    manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
                     self._apply_between_mixed_results(payload, update_text=False)
@@ -1729,7 +1677,7 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
-                    manual_excluded_pids=self._manual_excluded_pids,
+                    manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
                     self._apply_group_contrasts_results(payload, update_text=True)
@@ -1776,7 +1724,7 @@ class StatsWindow(QMainWindow):
         summary_lines = [
             "QC scanned all conditions/ROIs in the project, independent of selections.",
             "Flagged Participants Summary",
-            f"Manual exclusions: {len(report.manual_excluded_pids)}",
+            f"Manual exclusions: {len(self.manual_excluded_pids)}",
             f"Required exclusions (non-finite DV): {len(report.required_exclusions)}",
             f"QC flagged: {qc_report.summary.n_subjects_flagged if qc_report else 0}",
             f"DV flagged: {dv_report.summary.n_subjects_flagged if dv_report else 0}",
@@ -2509,17 +2457,18 @@ class StatsWindow(QMainWindow):
 
         self.manual_exclusion_group = QGroupBox("Manual Outlier Exclusion")
         self.manual_exclusion_group.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         )
+        self.manual_exclusion_group.setMinimumHeight(120)
         manual_layout = QVBoxLayout(self.manual_exclusion_group)
         manual_layout.setSpacing(6)
 
-        self.manual_exclusion_summary_label = QLabel("Excluded: 0 participant(s)")
+        self.manual_exclusion_summary_label = QLabel("Excluded: 0")
         manual_layout.addWidget(self.manual_exclusion_summary_label)
 
-        self.manual_exclusion_list = QTextEdit()
-        self.manual_exclusion_list.setReadOnly(True)
-        self.manual_exclusion_list.setMinimumHeight(60)
+        self.manual_exclusion_list = QLabel("None")
+        self.manual_exclusion_list.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.manual_exclusion_list.setMinimumHeight(24)
         self.manual_exclusion_list.setToolTip("Participants manually excluded from analysis.")
         manual_layout.addWidget(self.manual_exclusion_list)
 
@@ -2611,7 +2560,6 @@ class StatsWindow(QMainWindow):
         left_layout.addWidget(self.dv_group)
         left_layout.addWidget(self.dv_variants_group)
         left_layout.addWidget(self.outlier_group)
-        left_layout.addWidget(self.manual_exclusion_group)
         left_layout.addStretch(1)
         left_scroll_area.setWidget(left_contents)
 
@@ -2690,13 +2638,19 @@ class StatsWindow(QMainWindow):
         self.output_text.setPlaceholderText("Analysis output")
         self.output_text.setMinimumHeight(140)
         self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        right_layout.addWidget(self.output_text, 1)
+
+        manual_log_splitter = QSplitter(Qt.Vertical)
+        manual_log_splitter.setChildrenCollapsible(False)
+        manual_log_splitter.addWidget(self.manual_exclusion_group)
+        manual_log_splitter.addWidget(self.output_text)
+        manual_log_splitter.setSizes([140, 320])
+        right_layout.addWidget(manual_log_splitter, 1)
 
         right_layout.setStretch(0, 0)  # data/actions
         right_layout.setStretch(1, 0)  # analysis controls
         right_layout.setStretch(2, 0)  # status row
         right_layout.setStretch(3, 0)  # ROI label
-        right_layout.setStretch(4, 1)  # output pane
+        right_layout.setStretch(4, 1)  # manual exclusions + output pane
 
         splitter.addWidget(left_scroll_area)
         splitter.addWidget(right_widget)
