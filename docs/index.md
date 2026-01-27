@@ -12,7 +12,7 @@ metrics. As of now, FPVS Toolbox only supports the BioSemi data format (.BDF) an
 
 ## Quick start
 
-1. **Install FPVS Toolbox**  
+**Install FPVS Toolbox**  
    Download the latest installer from the GitHub Releases page and run it
    on Windows. You may have to bypass Windows Defender if prompted. When you run FPVS Toolbox for the first time, you
    will be asked to select a "Project Root". This is where all the different results from various projects you create
@@ -21,7 +21,7 @@ metrics. As of now, FPVS Toolbox only supports the BioSemi data format (.BDF) an
 
 --- 
 
-2. **Create or open a project**  
+**Create or open a project**  
 
 From the main window, choose "Create New Project". You will be prompted to title your project, select the number
 of experimental groups, and to name each group. Next, you will select the input folder for each group (wherever you
