@@ -5,6 +5,12 @@ theme:
 nav:
   - Home: index.md
   - Processing Pipeline: processing-pipeline.md
-  - Statistical Analysis: statistical-analysis.md
+  - Statistical Analysis:
+      - Overview: statistical-analysis.md
+      - Rossion harmonic selection: statistics/rossion-harmonic-selection.md
+      - RM-ANOVA: statistics/rm-anova.md
+      - Post-hoc tests: statistics/posthoc-tests.md
+      - Mixed model: statistics/mixed-model.md
+      - Outliers and QC: statistics/outliers-and-qc.md
   - Relevant Publications: relevant-publications.md
   - Tutorials: tutorials.md
