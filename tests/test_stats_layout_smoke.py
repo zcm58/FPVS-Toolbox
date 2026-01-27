@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QPushButton, QSplitter, QTextEdit  # noqa: E402
+from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QPushButton, QSplitter, QTabWidget  # noqa: E402
 
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow  # noqa: E402
 
@@ -39,9 +39,9 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert "Analyze Single Group" in texts
     assert "Analyze Group Differences" in texts
 
-    log_widget = window.findChild(QTextEdit)
-    assert log_widget is not None
-    assert log_widget.isVisible()
+    tab_widget = window.findChild(QTabWidget)
+    assert tab_widget is not None
+    assert tab_widget.isVisible()
 
     left_pane = splitter.widget(0)
     right_pane = splitter.widget(1)
