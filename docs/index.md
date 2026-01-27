@@ -6,7 +6,7 @@ metrics. As of now, FPVS Toolbox only supports the BioSemi data format (.BDF) an
 
 **This documentation page is a work in progress and is not yet complete.**
 
-> Current app version: **v1.5.0**
+> Current app version: **v1.6.0**
 
 ---
 
