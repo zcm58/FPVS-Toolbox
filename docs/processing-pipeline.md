@@ -7,23 +7,21 @@ implementation details.
 ---
 
 ## Manuscript-ready summary (copy/paste)
-
-FPVS Toolbox (Windows desktop app) processes EEG recordings stored as BioSemi .bdf
-or EEGLAB .set files using MNE-Python for loading, channel typing, and preprocessing.
+The FPVS Toolbox processes EEG recordings stored as BioSemi .bdf
+files using MNE-Python for loading, channel typing, and preprocessing.
 For each recording, the toolbox loads data with disk-backed memory mapping when
 available, assigns channel types (including a configured stimulus/trigger channel),
-and applies a standard 10–20 montage. Preprocessing follows a fixed sequence:
-initial re-reference to a user-specified EXG pair, removal of those EXG channels,
-optional channel-count limiting, optional downsampling, zero-phase FIR bandpass
-filtering, kurtosis-based bad-channel detection with interpolation, and a final
-average reference. Events are extracted from the stim channel (or annotations if
-stim extraction fails), then epochs are created for each user-defined condition
-label using a configured time window without baseline correction. The time-domain
-data are averaged across epochs per condition, transformed with an FFT, and
-frequency-domain metrics are computed at the target oddball harmonics (SNR,
-baseline-corrected amplitude, and Z-score). Results are exported to per-condition
-Excel files (electrode-level metrics and a full-spectrum SNR sheet), which serve
-as inputs for ROI aggregation and statistical analyses in the Stats tool.
+and applies a standard 10–10 montage. Preprocessing follows a fixed sequence:
+initial re-reference to a user-specified pair of electrodes (default EXG1 and EXG2), 
+removal of those EXG channels, optional channel-count limiting, optional downsampling, 
+zero-phase FIR bandpass filtering, kurtosis-based bad-channel detection with interpolation, 
+and a final average re-reference. Events are extracted from the stim channel then epochs are created 
+for each user-defined condition label using a configured time window without baseline 
+correction. The time-domain data are averaged across epochs per condition, 
+transformed with an FFT, and  frequency-domain metrics are computed at the target oddball 
+harmonics (SNR, baseline-corrected amplitude, and Z-score). Results are exported to 
+per-condition Excel files (electrode-level metrics and a full-spectrum SNR sheet), which 
+serve as inputs for ROI aggregation and statistical analyses in the Stats tool.
 
 **Parameter placeholders:** Use the processing log and project settings/manifest
 (exported from the UI) to fill in your actual values for reference channels,
@@ -41,7 +39,7 @@ you to the exact modules that define each step.
 
 **What happens**
 
-- **Supported input types:** `.bdf` (BioSemi) and `.set` (EEGLAB). Other formats
+- **Supported input types:** `.bdf` (BioSemi). Other formats
   are rejected. (Implementation verified in: `src/Main_App/PySide6_App/Backend/loader.py`.)
 - **Disk-backed memory mapping:** the loader requests a disk-backed `preload` path
   for `.bdf` and (when supported) `.set` files, then materializes the memmap with
