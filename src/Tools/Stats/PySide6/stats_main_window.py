@@ -31,16 +31,17 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QPlainTextEdit,
     QScrollArea,
     QSplitter,
     QSpinBox,
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -123,6 +124,7 @@ from Tools.Stats.PySide6.summary_utils import (
     build_summary_from_frames,
     build_summary_frames_from_results,
 )
+from Tools.Stats.PySide6.widgets.elided_label import ElidedPathLabel
 
 logger = logging.getLogger(__name__)
 _unused_qaction = QAction  # keep import alive for Qt resource checkers
@@ -237,17 +239,20 @@ class StatsWindow(QMainWindow):
         self._group_mean_preview_data: dict[str, object] = {}
         self._qc_threshold_sumabs: float = QC_DEFAULT_WARN_THRESHOLD
         self._qc_threshold_maxabs: float = QC_DEFAULT_CRITICAL_THRESHOLD
+        self._last_export_path: str | None = None
 
         # --- legacy UI proxies ---
-        self.stats_data_folder_var = SimpleNamespace(get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
-                                                     set=lambda v: self.le_folder.setText(v) if hasattr(self, "le_folder") else None)
+        self.stats_data_folder_var = SimpleNamespace(
+            get=lambda: self.le_folder.text() if hasattr(self, "le_folder") else "",
+            set=lambda v: self._set_data_folder_path(v) if hasattr(self, "le_folder") else None,
+        )
         self.detected_info_var = SimpleNamespace(set=lambda t: self._set_status(t))
         self.roi_var = SimpleNamespace(get=lambda: ALL_ROIS_OPTION, set=lambda v: None)
         self.alpha_var = SimpleNamespace(get=lambda: "0.05", set=lambda v: None)
 
         # UI
         self._init_ui()
-        self.results_textbox = self.output_text
+        self.results_textbox = self.summary_text
         self._update_manual_exclusion_summary()
 
         self.refresh_rois()
@@ -285,6 +290,80 @@ class StatsWindow(QMainWindow):
     def _set_roi_status(self, txt: str) -> None:
         if hasattr(self, "lbl_rois"):
             self.lbl_rois.setText(txt)
+
+    def _set_data_folder_path(self, path: str) -> None:
+        if hasattr(self, "le_folder"):
+            self.le_folder.setText(path or "")
+            if not path:
+                self.le_folder.setToolTip(
+                    "Selected folder that contains the FPVS result spreadsheets."
+                )
+        if hasattr(self, "btn_copy_folder"):
+            self.btn_copy_folder.setEnabled(bool(path))
+
+    def _set_last_export_path(self, path: str | None) -> None:
+        self._last_export_path = path or ""
+        if hasattr(self, "export_path_label"):
+            self.export_path_label.set_full_text(self._last_export_path)
+        exists = bool(self._last_export_path and Path(self._last_export_path).exists())
+        if hasattr(self, "export_open_btn"):
+            self.export_open_btn.setEnabled(exists)
+        if hasattr(self, "export_copy_btn"):
+            self.export_copy_btn.setEnabled(bool(self._last_export_path))
+
+    def _copy_text_to_clipboard(self, text: str, *, context: str) -> None:
+        try:
+            QGuiApplication.clipboard().setText(text or "")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_clipboard_copy_failed",
+                exc_info=True,
+                extra={"context": context, "error": str(exc)},
+            )
+            self._set_status(f"Copy failed ({context}).")
+
+    def _copy_summary_text(self) -> None:
+        text = self.summary_text.toPlainText()
+        self._copy_text_to_clipboard(text, context="summary")
+
+    def _copy_log_text(self) -> None:
+        text = self.log_text.toPlainText()
+        self._copy_text_to_clipboard(text, context="log")
+
+    def _copy_data_folder_path(self) -> None:
+        path = self.le_folder.text()
+        if not path:
+            return
+        self._copy_text_to_clipboard(path, context="data_folder")
+
+    def _open_export_path(self) -> None:
+        path = self._last_export_path or ""
+        if not path:
+            self._set_status("No export path available yet.")
+            return
+        if not Path(path).exists():
+            self._set_status(f"Export path not found: {path}")
+            logger.error("stats_export_open_missing", extra={"path": path})
+            return
+        try:
+            os.startfile(path)  # noqa: S606
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_export_open_failed",
+                exc_info=True,
+                extra={"path": path, "error": str(exc)},
+            )
+            self._set_status(f"Failed to open export path: {path}")
+
+    def _copy_export_path(self) -> None:
+        path = self._last_export_path or ""
+        if not path:
+            return
+        self._copy_text_to_clipboard(path, context="export_path")
+
+    def _clear_output_views(self) -> None:
+        self.summary_text.clear()
+        self.output_text.clear()
 
     def _set_detected_info(self, txt: str) -> None:
         """Route unknown worker messages to proper label."""
@@ -437,15 +516,16 @@ class StatsWindow(QMainWindow):
             summary_label.setText(f"Excluded: {len(excluded)}")
         list_widget = getattr(self, "manual_exclusion_list", None)
         if list_widget is not None:
-            display_text = ", ".join(excluded) if excluded else "None"
-            tooltip_text = ", ".join(excluded) if excluded else "No manual exclusions."
-            width = list_widget.width() if list_widget.width() > 0 else 320
-            elided = list_widget.fontMetrics().elidedText(
-                display_text,
-                Qt.ElideRight,
-                max(width - 8, 50),
-            )
-            list_widget.setText(elided)
+            if not excluded:
+                display_text = "None"
+                tooltip_text = "None"
+            elif len(excluded) <= 3:
+                display_text = ", ".join(excluded)
+                tooltip_text = display_text
+            else:
+                display_text = ", ".join(excluded[:3]) + f" (+{len(excluded) - 3})"
+                tooltip_text = ", ".join(excluded)
+            list_widget.set_full_text(display_text)
             list_widget.setToolTip(tooltip_text)
 
     def _reconcile_manual_exclusions(self, candidates: list[str]) -> None:
@@ -645,7 +725,7 @@ class StatsWindow(QMainWindow):
     def append_log(self, section: str, message: str, level: str = "info") -> None:
         line = format_log_line(f"[{section}] {message}", level=level)
         if hasattr(self, "output_text") and self.output_text is not None:
-            self.output_text.append(line)
+            self.output_text.appendPlainText(line)
             self.output_text.ensureCursorVisible()
         level_lower = (level or "info").lower()
         log_func = getattr(logger, level_lower, logger.info)
@@ -1023,6 +1103,7 @@ class StatsWindow(QMainWindow):
                 if isinstance(mean_z_table, pd.DataFrame):
                     mean_z_table.to_excel(writer, sheet_name="Mean Z Table", index=False)
             self._set_status(f"Exported DV definition to {dv_path}")
+            self._set_last_export_path(str(dv_path))
         except Exception:  # noqa: BLE001
             logger.exception("Failed to write DV definition export.")
 
@@ -1091,26 +1172,26 @@ class StatsWindow(QMainWindow):
     def _render_summary(self, summary_text: str) -> None:
         lines = (summary_text or "").splitlines()
         if not lines:
-            self.output_text.append("(No summary generated.)")
-            self.output_text.append("")
+            self.summary_text.append("(No summary generated.)")
+            self.summary_text.append("")
             return
         header = lines[0].strip()
         try:
-            cursor = self.output_text.textCursor()
+            cursor = self.summary_text.textCursor()
             cursor.movePosition(QTextCursor.End)
-            self.output_text.setTextCursor(cursor)
+            self.summary_text.setTextCursor(cursor)
             if header:
-                self.output_text.insertHtml(f"<b>{header}</b><br>")
+                self.summary_text.insertHtml(f"<b>{header}</b><br>")
             for line in lines[1:]:
-                self.output_text.append(line)
-            self.output_text.append("")
+                self.summary_text.append(line)
+            self.summary_text.append("")
         except Exception:  # noqa: BLE001
             logger.exception("Failed to render summary text", exc_info=True)
             if header:
-                self.output_text.append(header)
+                self.summary_text.append(header)
             for line in lines[1:]:
-                self.output_text.append(line)
-            self.output_text.append("")
+                self.summary_text.append(line)
+            self.summary_text.append("")
 
     # --------- worker signal wiring ---------
 
@@ -2002,7 +2083,7 @@ class StatsWindow(QMainWindow):
 
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
-        self.output_text.append(f"Error: {msg}")
+        self.output_text.appendPlainText(f"Error: {msg}")
         section = "General"
         try:
             if self._controller.is_running(PipelineId.SINGLE):
@@ -2070,7 +2151,7 @@ class StatsWindow(QMainWindow):
 
         output_text = build_rm_anova_output(self.rm_anova_results_data, alpha)
         if update_text:
-            self.output_text.append(output_text)
+            self.summary_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -2082,7 +2163,7 @@ class StatsWindow(QMainWindow):
 
         output_text = build_between_anova_output(self.between_anova_results_data, alpha)
         if update_text:
-            self.output_text.append(output_text)
+            self.summary_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -2092,7 +2173,7 @@ class StatsWindow(QMainWindow):
         self._store_run_report(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
         if update_text:
-            self.output_text.append(output_text)
+            self.summary_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -2107,7 +2188,7 @@ class StatsWindow(QMainWindow):
         self._store_run_report(PipelineId.BETWEEN, payload)
         output_text = payload.get("output_text", "")
         if update_text:
-            self.output_text.append(output_text)
+            self.summary_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -2117,7 +2198,7 @@ class StatsWindow(QMainWindow):
         self._store_run_report(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
         if update_text:
-            self.output_text.append(output_text)
+            self.summary_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -2127,7 +2208,7 @@ class StatsWindow(QMainWindow):
         self._store_run_report(PipelineId.BETWEEN, payload)
         output_text = payload.get("output_text", "")
         if update_text:
-            self.output_text.append(output_text)
+            self.summary_text.append(output_text)
         self._update_export_buttons()
         return output_text
 
@@ -2137,7 +2218,7 @@ class StatsWindow(QMainWindow):
         output_text = payload.get("output_text") or ""
         findings = payload.get("findings") or []
         if update_text:
-            self.output_text.append("Harmonic details were exported to Harmonic Results.xlsx.")
+            self.summary_text.append("Harmonic details were exported to Harmonic Results.xlsx.")
         self._harmonic_results[pipeline_id] = findings
         self.harmonic_check_results_data = findings
         self._update_export_buttons()
@@ -2455,30 +2536,27 @@ class StatsWindow(QMainWindow):
         )
         outlier_layout.addWidget(outlier_note)
 
-        self.manual_exclusion_group = QGroupBox("Manual Outlier Exclusion")
+        self.manual_exclusion_group = QGroupBox("Manual Exclusions")
         self.manual_exclusion_group.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         )
-        self.manual_exclusion_group.setMinimumHeight(120)
-        manual_layout = QVBoxLayout(self.manual_exclusion_group)
-        manual_layout.setSpacing(6)
+        manual_layout = QHBoxLayout(self.manual_exclusion_group)
+        manual_layout.setSpacing(8)
 
         self.manual_exclusion_summary_label = QLabel("Excluded: 0")
         manual_layout.addWidget(self.manual_exclusion_summary_label)
 
-        self.manual_exclusion_list = QLabel("None")
+        self.manual_exclusion_list = ElidedPathLabel("None")
         self.manual_exclusion_list.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.manual_exclusion_list.setMinimumHeight(24)
-        self.manual_exclusion_list.setToolTip("Participants manually excluded from analysis.")
-        manual_layout.addWidget(self.manual_exclusion_list)
+        self.manual_exclusion_list.setMinimumHeight(22)
+        self.manual_exclusion_list.setToolTip("None")
+        manual_layout.addWidget(self.manual_exclusion_list, 1)
 
-        manual_buttons = QHBoxLayout()
+        manual_layout.addStretch(1)
         self.manual_exclusion_edit_btn = QPushButton("Edit…")
         self.manual_exclusion_clear_btn = QPushButton("Clear")
-        manual_buttons.addWidget(self.manual_exclusion_edit_btn)
-        manual_buttons.addWidget(self.manual_exclusion_clear_btn)
-        manual_buttons.addStretch(1)
-        manual_layout.addLayout(manual_buttons)
+        manual_layout.addWidget(self.manual_exclusion_edit_btn)
+        manual_layout.addWidget(self.manual_exclusion_clear_btn)
 
         self.manual_exclusion_edit_btn.clicked.connect(self._open_manual_exclusion_dialog)
         self.manual_exclusion_clear_btn.clicked.connect(self._clear_manual_exclusions)
@@ -2575,17 +2653,22 @@ class StatsWindow(QMainWindow):
 
         folder_row = QHBoxLayout()
         folder_row.setSpacing(5)
-        self.le_folder = QLineEdit()
-        self.le_folder.setReadOnly(True)
+        self.le_folder = ElidedPathLabel()
         self.le_folder.setToolTip(
             "Selected folder that contains the FPVS result spreadsheets."
         )
+        self.le_folder.setMinimumHeight(24)
         btn_browse = QPushButton("Browse…")
         btn_browse.setToolTip("Choose the folder that contains FPVS results.")
         btn_browse.clicked.connect(self.on_browse_folder)
+        self.btn_copy_folder = QPushButton("Copy")
+        self.btn_copy_folder.setToolTip("Copy the data folder path.")
+        self.btn_copy_folder.setEnabled(False)
+        self.btn_copy_folder.clicked.connect(self._copy_data_folder_path)
         folder_row.addWidget(QLabel("Data Folder:"))
         folder_row.addWidget(self.le_folder, 1)
         folder_row.addWidget(btn_browse)
+        folder_row.addWidget(self.btn_copy_folder)
         data_actions_layout.addLayout(folder_row)
 
         tools_row = QHBoxLayout()
@@ -2623,6 +2706,24 @@ class StatsWindow(QMainWindow):
         status_row.addWidget(self.lbl_status, 1)
         right_layout.addLayout(status_row)
 
+        export_row = QHBoxLayout()
+        export_row.setSpacing(6)
+        export_row.addWidget(QLabel("Last Export:"))
+        self.export_path_label = ElidedPathLabel()
+        self.export_path_label.setMinimumHeight(22)
+        export_row.addWidget(self.export_path_label, 1)
+        self.export_open_btn = QPushButton("Open")
+        self.export_open_btn.setToolTip("Open the most recent export file or folder.")
+        self.export_open_btn.setEnabled(False)
+        self.export_open_btn.clicked.connect(self._open_export_path)
+        self.export_copy_btn = QPushButton("Copy")
+        self.export_copy_btn.setToolTip("Copy the most recent export path.")
+        self.export_copy_btn.setEnabled(False)
+        self.export_copy_btn.clicked.connect(self._copy_export_path)
+        export_row.addWidget(self.export_open_btn)
+        export_row.addWidget(self.export_copy_btn)
+        right_layout.addLayout(export_row)
+
         self.lbl_rois = QLabel("")
         self.lbl_rois.setWordWrap(True)
         self.lbl_rois.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -2632,25 +2733,54 @@ class StatsWindow(QMainWindow):
         right_layout.addWidget(self.lbl_rois)
 
         # output pane
-        self.output_text = QTextEdit()
-        self.output_text.setReadOnly(True)
-        self.output_text.setAcceptRichText(True)
-        self.output_text.setPlaceholderText("Analysis output")
-        self.output_text.setMinimumHeight(140)
-        self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.summary_text = QTextEdit()
+        self.summary_text.setReadOnly(True)
+        self.summary_text.setAcceptRichText(True)
+        self.summary_text.setPlaceholderText("Summary output")
+        self.summary_text.setMinimumHeight(140)
+        self.summary_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.log_text = QPlainTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setPlaceholderText("Log output")
+        self.log_text.setMinimumHeight(140)
+        self.log_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.output_tabs = QTabWidget()
+        self.output_tabs.addTab(self.summary_text, "Summary")
+        self.output_tabs.addTab(self.log_text, "Log")
+
+        self.copy_summary_btn = QPushButton("Copy summary")
+        self.copy_summary_btn.clicked.connect(self._copy_summary_text)
+        self.copy_log_btn = QPushButton("Copy log")
+        self.copy_log_btn.clicked.connect(self._copy_log_text)
+        output_header = QHBoxLayout()
+        output_header.addStretch(1)
+        output_header.addWidget(self.copy_summary_btn)
+        output_header.addWidget(self.copy_log_btn)
+
+        output_container = QWidget()
+        output_layout = QVBoxLayout(output_container)
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.setSpacing(6)
+        output_layout.addLayout(output_header)
+        output_layout.addWidget(self.output_tabs)
+
+        self.output_text = self.log_text
 
         manual_log_splitter = QSplitter(Qt.Vertical)
         manual_log_splitter.setChildrenCollapsible(False)
         manual_log_splitter.addWidget(self.manual_exclusion_group)
-        manual_log_splitter.addWidget(self.output_text)
-        manual_log_splitter.setSizes([140, 320])
+        manual_log_splitter.addWidget(output_container)
+        manual_log_splitter.setSizes([120, 340])
         right_layout.addWidget(manual_log_splitter, 1)
 
         right_layout.setStretch(0, 0)  # data/actions
         right_layout.setStretch(1, 0)  # analysis controls
         right_layout.setStretch(2, 0)  # status row
-        right_layout.setStretch(3, 0)  # ROI label
-        right_layout.setStretch(4, 1)  # manual exclusions + output pane
+        right_layout.setStretch(3, 0)  # export row
+        right_layout.setStretch(4, 0)  # ROI label
+        right_layout.setStretch(5, 1)  # manual exclusions + output pane
 
         splitter.addWidget(left_scroll_area)
         splitter.addWidget(right_widget)
@@ -2797,25 +2927,25 @@ class StatsWindow(QMainWindow):
     # ---- run buttons ----
 
     def on_run_rm_anova(self) -> None:
-        self.output_text.clear()
+        self._clear_output_views()
         self.rm_anova_results_data = None
         self._update_export_buttons()
         self._controller.run_single_group_rm_anova_only()
 
     def on_run_mixed_model(self) -> None:
-        self.output_text.clear()
+        self._clear_output_views()
         self.mixed_model_results_data = None
         self._update_export_buttons()
         self._controller.run_single_group_mixed_model_only()
 
     def on_run_between_anova(self) -> None:
-        self.output_text.clear()
+        self._clear_output_views()
         self.between_anova_results_data = None
         self._update_export_buttons()
         self._controller.run_between_group_anova_only()
 
     def on_run_between_mixed_model(self) -> None:
-        self.output_text.clear()
+        self._clear_output_views()
         self.between_mixed_model_results_data = None
         self._update_export_buttons()
         self._controller.run_between_group_mixed_only()
@@ -2842,13 +2972,13 @@ class StatsWindow(QMainWindow):
             raise
 
     def on_run_group_contrasts(self) -> None:
-        self.output_text.clear()
+        self._clear_output_views()
         self.group_contrasts_results_data = None
         self._update_export_buttons()
         self._controller.run_between_group_contrasts_only()
 
     def on_run_interaction_posthocs(self) -> None:
-        self.output_text.clear()
+        self._clear_output_views()
         self.posthoc_results_data = None
         our = self._update_export_buttons  # keep line short
         our()
@@ -2864,6 +2994,7 @@ class StatsWindow(QMainWindow):
         try:
             self.export_results("anova", self.rm_anova_results_data, out_dir)
             self._set_status(f"RM-ANOVA exported to: {out_dir}")
+            self._set_last_export_path(out_dir)
         except Exception as e:
             import traceback
             logger.exception("RM-ANOVA export failed.")
@@ -2878,6 +3009,7 @@ class StatsWindow(QMainWindow):
         try:
             self.export_results("lmm", self.mixed_model_results_data, out_dir)
             self._set_status(f"Mixed Model results exported to: {out_dir}")
+            self._set_last_export_path(out_dir)
         except Exception as e:
             import traceback
             logger.exception("Mixed Model export failed.")
@@ -2892,6 +3024,7 @@ class StatsWindow(QMainWindow):
         try:
             self.export_results("anova_between", self.between_anova_results_data, out_dir)
             self._set_status(f"Between-group ANOVA exported to: {out_dir}")
+            self._set_last_export_path(out_dir)
         except Exception as e:
             import traceback
             logger.exception("Between-group ANOVA export failed.")
@@ -2907,6 +3040,7 @@ class StatsWindow(QMainWindow):
         try:
             self.export_results("lmm_between", self.between_mixed_model_results_data, out_dir)
             self._set_status(f"Between-group Mixed Model exported to: {out_dir}")
+            self._set_last_export_path(out_dir)
         except Exception as e:
             import traceback
             logger.exception("Between-group Mixed Model export failed.")
@@ -2921,6 +3055,7 @@ class StatsWindow(QMainWindow):
         try:
             self.export_results("posthoc", self.posthoc_results_data, out_dir)
             self._set_status(f"Post-hoc results exported to: {out_dir}")
+            self._set_last_export_path(out_dir)
         except Exception as e:
             import traceback
             logger.exception("Post-hoc export failed.")
@@ -2935,6 +3070,7 @@ class StatsWindow(QMainWindow):
         try:
             self.export_results("group_contrasts", self.group_contrasts_results_data, out_dir)
             self._set_status(f"Group contrasts exported to: {out_dir}")
+            self._set_last_export_path(out_dir)
         except Exception as e:
             import traceback
             logger.exception("Group contrasts export failed.")
@@ -2947,7 +3083,7 @@ class StatsWindow(QMainWindow):
         start_dir = self.le_folder.text() or self.project_dir
         folder = QFileDialog.getExistingDirectory(self, "Select Data Folder", start_dir)
         if folder:
-            self.le_folder.setText(folder)
+            self._set_data_folder_path(folder)
             self._scan_button_clicked()
 
     def _scan_button_clicked(self) -> None:
@@ -3001,7 +3137,7 @@ class StatsWindow(QMainWindow):
         """
         target = self._preferred_stats_folder()
         if target.exists() and target.is_dir():
-            self.le_folder.setText(str(target))
+            self._set_data_folder_path(str(target))
             self._scan_button_clicked()
         else:
             # Leave UI as-is; user will browse. Status hint only.
