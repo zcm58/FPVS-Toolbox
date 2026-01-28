@@ -1355,7 +1355,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def check_for_updates(self) -> None:
         update_manager.check_for_updates_async(
-            self, silent=False, notify_if_no_update=True
+            self, silent=False, notify_if_no_update=True, force=True
         )
 
     def quit(self) -> None:
