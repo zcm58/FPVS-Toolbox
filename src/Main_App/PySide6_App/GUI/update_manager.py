@@ -40,9 +40,10 @@ def check_for_updates_async(
     app: QWidget,
     silent: bool = True,
     notify_if_no_update: bool = True,
+    force: bool = False,
 ) -> None:
     """Menu action: check in background. Popups only if silent=False."""
-    if _should_skip_update_check():
+    if not force and _should_skip_update_check():
         _log(app, "Skipping update check (checked recently).")
         return
     job = _CheckJob()
