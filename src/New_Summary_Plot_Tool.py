@@ -29,7 +29,7 @@ PIPELINE STEPS:
    - Log file with parameters and key counts
    - Plots (PDF + PNG):
        RAW:   SUM_Z, SUM_SNR, SUM_BCA (A vs B), ROI-colored, manual-excluded shown distinct
-       RATIO: ratio_Z, ratio_SNR, ratio_BCA (A/B), ROI-colored, manual-excluded shown distinct,
+       RATIO: ratio_Z, ratio_SNR, ratio_BCA (A/B), x-axis = ROI, manual-excluded shown distinct,
               reference line at y=1.0 for easy interpretation
 8. Completion dialog (PySide6) offering to open the output folder (Windows).
 
@@ -42,7 +42,6 @@ import os
 import math
 import re
 import datetime as dt
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any, Set
@@ -51,6 +50,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from matplotlib import colors as mcolors
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -88,19 +88,20 @@ PNG_DPI = 300
 Use the list below to manually exclude outliers from group summary calculations.
 Format must be "P##" (e.g., "P17").
 """
-MANUAL_EXCLUDE = []  # Configure study exclusions privately.
+MANUAL_EXCLUDE = []
 
 # Plot denotation for manual exclusions
 MANUAL_EXCLUDED_POINT_COLOR = "#4D4D4D"  # gray
 MANUAL_EXCLUDED_POINT_MARKER = "x"
 
-# Stable y-limits (set per metric; set to None for auto)
-# RAW SUM plots
+# Stable y-axis per metric
+# If True, compute one y-lim per plot panel (using USED participants) and apply consistently.
+USE_STABLE_YLIMS = True
+
+# Optional manual overrides (set to None to use auto if USE_STABLE_YLIMS=True)
 YLIM_RAW_SUM_Z: Optional[Tuple[float, float]] = None
 YLIM_RAW_SUM_SNR: Optional[Tuple[float, float]] = None
 YLIM_RAW_SUM_BCA: Optional[Tuple[float, float]] = None
-
-# RATIO plots
 YLIM_RATIO_Z: Optional[Tuple[float, float]] = None
 YLIM_RATIO_SNR: Optional[Tuple[float, float]] = None
 YLIM_RATIO_BCA: Optional[Tuple[float, float]] = None
@@ -115,6 +116,7 @@ SHEET_Z = "Z Score"
 SHEET_BCA = "BCA (uV)"
 ELECTRODE_COL = "Electrode"
 
+# Keep your named palettes as a starting point, but auto-fill missing ROI colors
 PALETTES = {
     "vibrant": {"Occipital": "#2E86FF", "LOT": "#FF6B2E", "Default": "#7F8C8D"},
     "muted": {"Occipital": "#4C78A8", "LOT": "#F58518", "Default": "#95A5A6"},
@@ -159,14 +161,6 @@ def fmt_hz_list(hz_list: List[float]) -> str:
     if not hz_list:
         return ""
     return ", ".join([f"{float(hz):g}" for hz in hz_list])
-
-
-def fmt_float(x: Any, ndigits: int = 4) -> str:
-    try:
-        v = float(x)
-    except Exception:
-        return "nan"
-    return f"{v:.{ndigits}g}" if np.isfinite(v) else "nan"
 
 
 def safe_sum(x: np.ndarray) -> float:
@@ -238,35 +232,70 @@ def build_hz_to_col_map(harm_cols: List[str]) -> Dict[float, str]:
     return out
 
 
-def _deterministic_hex_color(name: str) -> str:
-    """
-    Deterministic color generator from a string, mapped into Matplotlib's tab20 palette
-    (20 distinct, colorblind-ish friendly hues). This ensures new ROIs get non-gray colors
-    without manual palette edits.
-    """
-    # Hash -> stable int -> index in [0, 19]
-    h = hashlib.md5(name.encode("utf-8")).hexdigest()
-    idx = int(h[:8], 16) % 20
-    cmap = plt.get_cmap("tab20")
-    r, g, b, _ = cmap(idx)
-    return "#{:02X}{:02X}{:02X}".format(int(r * 255), int(g * 255), int(b * 255))
+def _is_excel_temp_lock_file(p: Path) -> bool:
+    # Excel lock files are typically like "~$Something.xlsx" and can cause PermissionError.
+    return p.name.startswith("~$")
 
 
-def get_roi_palette(rois: List[str], palette_choice: str) -> Dict[str, str]:
+def build_roi_palette(palette_choice: str, rois: List[str]) -> Dict[str, str]:
     """
-    Returns a ROI->color mapping.
-    - Starts with the chosen base palette for known ROIs.
-    - Adds deterministic colors for any ROI not explicitly defined in that palette.
+    Ensure every ROI has a non-gray distinct color.
+    - Start from the chosen base palette.
+    - For ROIs not explicitly listed, assign colors from a categorical colormap.
     """
-    base = dict(PALETTES.get(palette_choice, PALETTES["vibrant"]))
+    base = PALETTES.get(palette_choice, PALETTES["vibrant"]).copy()
+    default_color = base.get("Default", "#7F8C8D")
+
     out: Dict[str, str] = {}
-    for r in rois:
-        if r in base:
-            out[r] = base[r]
-        else:
-            out[r] = _deterministic_hex_color(r)
-    out["Default"] = base.get("Default", "#7F8C8D")
+    for k, v in base.items():
+        if k != "Default":
+            out[k] = v
+
+    cmap = plt.get_cmap("tab20")  # plenty of distinct colors
+    cmap_n = getattr(cmap, "N", 20)
+    idx = 0
+
+    for roi in rois:
+        if roi in out:
+            continue
+        out[roi] = mcolors.to_hex(cmap(idx % cmap_n))
+        idx += 1
+
+    out["Default"] = default_color
     return out
+
+
+def compute_stable_ylim(
+    values: np.ndarray,
+    pad_frac: float = 0.08,
+    q_low: float = 2.0,
+    q_high: float = 98.0,
+    force_include: Optional[float] = None,
+) -> Optional[Tuple[float, float]]:
+    """
+    Robust y-limits from quantiles with padding. Values outside will be clipped by axes limits.
+    """
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return None
+
+    lo = float(np.nanpercentile(v, q_low))
+    hi = float(np.nanpercentile(v, q_high))
+
+    if not (np.isfinite(lo) and np.isfinite(hi)):
+        return None
+
+    if force_include is not None and np.isfinite(force_include):
+        lo = min(lo, float(force_include))
+        hi = max(hi, float(force_include))
+
+    if abs(hi - lo) <= EPS:
+        lo -= 1.0
+        hi += 1.0
+
+    pad = (hi - lo) * pad_frac
+    return (lo - pad, hi + pad)
 
 
 # -----------------------------
@@ -493,7 +522,6 @@ class PlotPanel:
     title: Optional[str] = None
 
 
-
 def _ordered_conditions(df: pd.DataFrame) -> List[str]:
     present = df["condition_label"].dropna().tolist()
     uniq: List[str] = []
@@ -519,20 +547,22 @@ def make_raincloud_figure(
     excluded_col: str = "is_manual_excluded",
 ):
     """
-    Raincloud plot:
+    Raincloud plot (RAW SUMS):
+      - x-axis = condition_label (A vs B)
+      - ROIs are offset within each condition cluster
       - Violin/box/scatter computed from INCLUDED participants only (excluded_col == False)
       - Manual-excluded participants are still shown as distinct scatter points
       - Group mean/SEM from df_group_used (included only)
     """
     rois = list(ROI_DEFS.keys())
-    palette = get_roi_palette(rois, PALETTE_CHOICE)
+    palette = build_roi_palette(PALETTE_CHOICE, rois)
     conds = _ordered_conditions(df_part_all)
 
     seed = abs(hash(RUN_LABEL)) % (2**32)
     rng = np.random.default_rng(seed)
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
-    plt.subplots_adjust(bottom=0.18)
+    plt.subplots_adjust(left=0.12, bottom=0.18, top=0.90)
 
     n_rois = max(len(rois), 1)
     cluster_width = 0.70
@@ -558,14 +588,12 @@ def make_raincloud_figure(
             data_in = pd.to_numeric(sub_in[panel.val_col], errors="coerce").dropna().to_numpy(dtype=float)
             data_ex = pd.to_numeric(sub_ex[panel.val_col], errors="coerce").dropna().to_numpy(dtype=float)
 
-            # Included distribution: violin + points + box
             if data_in.size > 0:
                 v = ax.violinplot(data_in, positions=[pos], showextrema=False, widths=violin_width)
                 for pc in v["bodies"]:
                     pc.set_facecolor(roi_color)
                     pc.set_edgecolor("none")
                     pc.set_alpha(0.30)
-                    # Half-violin clip (left side)
                     clip_rect = Rectangle((-1e9, -1e9), 1e9 + pos, 2e9, transform=ax.transData)
                     pc.set_clip_path(clip_rect)
 
@@ -605,7 +633,6 @@ def make_raincloud_figure(
                         else:
                             ax.plot([pos], [m], marker="o", color=roi_color, markersize=7, zorder=6)
 
-            # Manual-excluded points (shown, but not included in violin/box/means)
             if data_ex.size > 0:
                 jitter_ex = (rng.random(len(data_ex)) - 0.5) * (step * 0.30)
                 x_ex = np.full(len(data_ex), pos + (violin_width * 0.22)) + jitter_ex
@@ -623,9 +650,12 @@ def make_raincloud_figure(
         ax.axhline(panel.hline_y, color="red", linestyle=":", linewidth=2, alpha=0.8)
 
     if panel.ylim is not None:
-        ax.set_ylim(panel.ylim[0], panel.ylim[1])
+        ax.set_ylim(panel.ylim)
 
     ax.set_ylabel(panel.ylabel, fontsize=12, fontweight="bold")
+    if panel.title:
+        ax.set_title(panel.title, fontsize=14, fontweight="bold", pad=10)
+
     ax.grid(axis="y", linestyle="--", alpha=0.4)
 
     ax.set_xticks(np.arange(len(conds)))
@@ -633,7 +663,7 @@ def make_raincloud_figure(
 
     roi_handles = [
         plt.Line2D([0], [0], marker="o", color="w",
-                   markerfacecolor=palette.get(r, "#777"), markersize=10, label=r)
+                   markerfacecolor=palette.get(r, palette["Default"]), markersize=10, label=r)
         for r in rois
     ]
     excl_handle = plt.Line2D(
@@ -656,31 +686,40 @@ def make_raincloud_figure_roi_x(
     df_group_used: pd.DataFrame,
     panel: PlotPanel,
     out_path_no_ext: Path,
-    excluded_col: str = "is_manual_excluded",
     xlabel: str = "ROI",
+    excluded_col: str = "is_manual_excluded",
 ):
     """
-    Ratio plots with ROI on the x-axis:
-      - One distribution per ROI (violin + scatter + box), computed from INCLUDED participants only
+    Raincloud plot (RATIOS):
+      - x-axis = ROI (categorical)
+      - Violin/box/scatter computed from INCLUDED participants only (excluded_col == False)
       - Manual-excluded participants are still shown as distinct scatter points
       - Group mean/SEM from df_group_used (included only)
+
+    Expected columns in df_part_all:
+      ROI, panel.val_col, excluded_col
+
+    Expected columns in df_group_used:
+      ROI, panel.mean_col, panel.sem_col
     """
-    rois = list(ROI_DEFS.keys())
-    palette = get_roi_palette(rois, PALETTE_CHOICE)
+    rois_all = list(ROI_DEFS.keys())
+    palette = build_roi_palette(PALETTE_CHOICE, rois_all)
+
+    rois_present = [r for r in rois_all if r in set(df_part_all["ROI"].dropna().astype(str).tolist())]
+    if not rois_present:
+        raise ValueError("No ROI entries found for ROI-x ratio plot.")
 
     seed = abs(hash(RUN_LABEL)) % (2**32)
     rng = np.random.default_rng(seed)
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
-    plt.subplots_adjust(bottom=0.25, left=0.18)
+    plt.subplots_adjust(left=0.12, bottom=0.18, top=0.88)
 
+    violin_width = 0.65
+    jitter_scale = 0.18
 
-    # Per-ROI spacing settings (no condition clusters here)
-    step = 1.0
-    violin_width = 0.70
-
-    for i, roi in enumerate(rois):
-        pos = float(i)
+    for j, roi in enumerate(rois_present):
+        pos = float(j)
         roi_color = palette.get(roi, palette["Default"])
 
         sub = df_part_all[df_part_all["ROI"] == roi].copy()
@@ -699,12 +738,9 @@ def make_raincloud_figure_roi_x(
                 pc.set_facecolor(roi_color)
                 pc.set_edgecolor("none")
                 pc.set_alpha(0.30)
-                # Half-violin clip (left side)
-                clip_rect = Rectangle((-1e9, -1e9), 1e9 + pos, 2e9, transform=ax.transData)
-                pc.set_clip_path(clip_rect)
 
-            jitter = (rng.random(len(data_in)) - 0.5) * 0.18
-            x_pts = np.full(len(data_in), pos + (violin_width * 0.22)) + jitter
+            jitter = (rng.random(len(data_in)) - 0.5) * jitter_scale
+            x_pts = np.full(len(data_in), pos) + jitter
             ax.scatter(x_pts, data_in, color=roi_color, alpha=0.60, s=20, zorder=3)
 
             ax.boxplot(
@@ -740,8 +776,8 @@ def make_raincloud_figure_roi_x(
                         ax.plot([pos], [m], marker="o", color=roi_color, markersize=7, zorder=6)
 
         if data_ex.size > 0:
-            jitter_ex = (rng.random(len(data_ex)) - 0.5) * 0.18
-            x_ex = np.full(len(data_ex), pos + (violin_width * 0.22)) + jitter_ex
+            jitter_ex = (rng.random(len(data_ex)) - 0.5) * jitter_scale
+            x_ex = np.full(len(data_ex), pos) + jitter_ex
             ax.scatter(
                 x_ex,
                 data_ex,
@@ -756,24 +792,24 @@ def make_raincloud_figure_roi_x(
         ax.axhline(panel.hline_y, color="red", linestyle=":", linewidth=2, alpha=0.8)
 
     if panel.ylim is not None:
-        ax.set_ylim(panel.ylim[0], panel.ylim[1])
+        ax.set_ylim(panel.ylim)
 
-    # Ratio plots: keep y-axis label short so it never clips
-    ax.set_ylabel(panel.ylabel, fontsize=12, fontweight="bold")  # should be "Ratio"
     ax.set_xlabel(xlabel, fontsize=12, fontweight="bold")
+    ax.set_ylabel(panel.ylabel, fontsize=12, fontweight="bold")
 
     if panel.title:
-        ax.set_title(panel.title, fontsize=13, fontweight="bold", pad=12)
+        ax.set_title(panel.title, fontsize=14, fontweight="bold", pad=10)
 
     ax.grid(axis="y", linestyle="--", alpha=0.4)
 
-    ax.set_xticks(np.arange(len(rois)))
-    ax.set_xticklabels(rois, rotation=25, ha="right", fontsize=11, fontweight="bold")
+    ax.set_xticks(np.arange(len(rois_present)))
+    ax.set_xticklabels(rois_present, fontsize=11, fontweight="bold")
 
     roi_handles = [
         plt.Line2D([0], [0], marker="o", color="w",
-                   markerfacecolor=palette.get(r, "#777"), markersize=10, label=r)
-        for r in rois
+                   markerfacecolor=palette.get(r, palette["Default"]),
+                   markersize=10, label=r)
+        for r in rois_present
     ]
     excl_handle = plt.Line2D(
         [0], [0],
@@ -819,12 +855,10 @@ def _apply_excel_qol(writer: pd.ExcelWriter) -> None:
       2) Apply auto-filters to every column on every sheet.
     """
     wb = writer.book
-    for sheet_name, ws in writer.sheets.items():
-        # Apply filters (header row assumed at row 1)
+    for _, ws in writer.sheets.items():
         if ws.max_row >= 1 and ws.max_column >= 1:
             ws.auto_filter.ref = ws.dimensions
 
-        # Auto width with padding
         for col_idx in range(1, ws.max_column + 1):
             col_letter = get_column_letter(col_idx)
             max_len = 0
@@ -842,8 +876,7 @@ def _apply_excel_qol(writer: pd.ExcelWriter) -> None:
             )
             ws.column_dimensions[col_letter].width = width
 
-    # wb is saved when the ExcelWriter context exits
-    _ = wb
+    _ = wb  # saved when ExcelWriter context exits
 
 
 # -----------------------------
@@ -885,7 +918,8 @@ def main():
     log("=" * 110)
 
     def index_folder(path: str, label: str) -> Tuple[List[Path], Dict[str, Path]]:
-        xlsx_files = sorted(Path(path).expanduser().glob("*.xlsx"))
+        all_files = sorted(Path(path).expanduser().glob("*.xlsx"))
+        xlsx_files = [p for p in all_files if not _is_excel_temp_lock_file(p)]
         log(f"[{label}] Found {len(xlsx_files)} .xlsx files.")
         pid_to_path: Dict[str, Path] = {}
         for f in xlsx_files:
@@ -910,7 +944,6 @@ def main():
     if not pids_paired:
         raise RuntimeError("No paired participants found between the two folders.")
 
-    # Manual exclusion report
     manual_set = set(MANUAL_EXCLUDE)
     manual_in_paired = sorted([p for p in pids_paired if p in manual_set],
                               key=lambda s: int(s[1:]) if s[1:].isdigit() else 999999)
@@ -962,47 +995,73 @@ def main():
         log(df_group_ratios_used.to_string(index=False))
     log("-" * 110)
 
-    # Plots (RAW SUMS): A vs B
-    df_group_sums_plot = df_group_sums_used.rename(columns={
-        "mean_sum_Z": "mean",
-        "sem_sum_Z": "sem",
-    }).copy()
+    # -----------------------------
+    # Stable y-lims (per plot panel)
+    # -----------------------------
+    y_raw_z = YLIM_RAW_SUM_Z
+    y_raw_snr = YLIM_RAW_SUM_SNR
+    y_raw_bca = YLIM_RAW_SUM_BCA
+    y_ratio_z = YLIM_RATIO_Z
+    y_ratio_snr = YLIM_RATIO_SNR
+    y_ratio_bca = YLIM_RATIO_BCA
 
+    if USE_STABLE_YLIMS:
+        if y_raw_z is None:
+            y_raw_z = compute_stable_ylim(pd.to_numeric(df_part_used["sum_Z"], errors="coerce").to_numpy(dtype=float))
+        if y_raw_snr is None:
+            y_raw_snr = compute_stable_ylim(pd.to_numeric(df_part_used["sum_SNR"], errors="coerce").to_numpy(dtype=float))
+        if y_raw_bca is None:
+            y_raw_bca = compute_stable_ylim(pd.to_numeric(df_part_used["sum_BCA_uV"], errors="coerce").to_numpy(dtype=float))
+
+        if y_ratio_z is None:
+            y_ratio_z = compute_stable_ylim(
+                pd.to_numeric(df_ratio_used["ratio_Z"], errors="coerce").to_numpy(dtype=float),
+                force_include=1.0,
+            )
+        if y_ratio_snr is None:
+            y_ratio_snr = compute_stable_ylim(
+                pd.to_numeric(df_ratio_used["ratio_SNR"], errors="coerce").to_numpy(dtype=float),
+                force_include=1.0,
+            )
+        if y_ratio_bca is None:
+            y_ratio_bca = compute_stable_ylim(
+                pd.to_numeric(df_ratio_used["ratio_BCA"], errors="coerce").to_numpy(dtype=float),
+                force_include=1.0,
+            )
+
+    # -----------------------------
+    # Plots (RAW SUMS): A vs B
+    # -----------------------------
+    df_group_sums_plot = df_group_sums_used.rename(columns={"mean_sum_Z": "mean", "sem_sum_Z": "sem"}).copy()
     make_raincloud_figure(
         df_part_all.rename(columns={"sum_Z": "val"}).copy(),
         df_group_sums_plot,
         PlotPanel(val_col="val", mean_col="mean", sem_col="sem",
-                  ylabel="SUM(Z) across oddball harmonics", ylim=YLIM_RAW_SUM_Z),
+                  ylabel="SUM(Z) across oddball harmonics", ylim=y_raw_z),
         out_dir / f"Plot_{RUN_LABEL}_RAW_SUM_Z",
     )
 
-    df_group_sums_plot = df_group_sums_used.rename(columns={
-        "mean_sum_SNR": "mean",
-        "sem_sum_SNR": "sem",
-    }).copy()
-
+    df_group_sums_plot = df_group_sums_used.rename(columns={"mean_sum_SNR": "mean", "sem_sum_SNR": "sem"}).copy()
     make_raincloud_figure(
         df_part_all.rename(columns={"sum_SNR": "val"}).copy(),
         df_group_sums_plot,
         PlotPanel(val_col="val", mean_col="mean", sem_col="sem",
-                  ylabel="SUM(SNR) across oddball harmonics", ylim=YLIM_RAW_SUM_SNR),
+                  ylabel="SUM(SNR) across oddball harmonics", ylim=y_raw_snr),
         out_dir / f"Plot_{RUN_LABEL}_RAW_SUM_SNR",
     )
 
-    df_group_sums_plot = df_group_sums_used.rename(columns={
-        "mean_sum_BCA_uV": "mean",
-        "sem_sum_BCA_uV": "sem",
-    }).copy()
-
+    df_group_sums_plot = df_group_sums_used.rename(columns={"mean_sum_BCA_uV": "mean", "sem_sum_BCA_uV": "sem"}).copy()
     make_raincloud_figure(
         df_part_all.rename(columns={"sum_BCA_uV": "val"}).copy(),
         df_group_sums_plot,
         PlotPanel(val_col="val", mean_col="mean", sem_col="sem",
-                  ylabel="SUM(BCA) (µV) across oddball harmonics", ylim=YLIM_RAW_SUM_BCA),
+                  ylabel="SUM(BCA) (µV) across oddball harmonics", ylim=y_raw_bca),
         out_dir / f"Plot_{RUN_LABEL}_RAW_SUM_BCA",
     )
 
-    # Plots (RATIOS): ROI on x-axis, reference line at 1.0
+    # -----------------------------
+    # Plots (RATIOS): x-axis = ROI
+    # -----------------------------
     ratio_label = f"{CONDITION_LABEL_A} / {CONDITION_LABEL_B}"
 
     df_ratio_plot = df_ratio_all.copy()
@@ -1012,15 +1071,12 @@ def main():
         df_ratio_plot.rename(columns={"ratio_Z": "val"}).copy(),
         df_group_ratio_plot.rename(columns={"mean_ratio_Z": "mean", "sem_ratio_Z": "sem"}).copy(),
         PlotPanel(
-            val_col="val",
-            mean_col="mean",
-            sem_col="sem",
+            val_col="val", mean_col="mean", sem_col="sem",
             ylabel="Ratio",
             hline_y=1.0,
-            ylim=YLIM_RATIO_Z,
-            title="High-Level:Low-Level Ratio using Z-Scores",
+            ylim=y_ratio_z,
+            title=f"High-Level to Low-Level Ratio using Summed Z ({ratio_label})",
         ),
-
         out_dir / f"Plot_{RUN_LABEL}_RATIO_Z",
         xlabel="ROI",
     )
@@ -1029,15 +1085,12 @@ def main():
         df_ratio_plot.rename(columns={"ratio_SNR": "val"}).copy(),
         df_group_ratio_plot.rename(columns={"mean_ratio_SNR": "mean", "sem_ratio_SNR": "sem"}).copy(),
         PlotPanel(
-            val_col="val",
-            mean_col="mean",
-            sem_col="sem",
+            val_col="val", mean_col="mean", sem_col="sem",
             ylabel="Ratio",
             hline_y=1.0,
-            ylim=YLIM_RATIO_SNR,
-            title="High-Level:Low-Level Ratio using SNR",
+            ylim=y_ratio_snr,
+            title=f"High-Level to Low-Level Ratio using Summed SNR ({ratio_label})",
         ),
-
         out_dir / f"Plot_{RUN_LABEL}_RATIO_SNR",
         xlabel="ROI",
     )
@@ -1046,20 +1099,19 @@ def main():
         df_ratio_plot.rename(columns={"ratio_BCA": "val"}).copy(),
         df_group_ratio_plot.rename(columns={"mean_ratio_BCA": "mean", "sem_ratio_BCA": "sem"}).copy(),
         PlotPanel(
-            val_col="val",
-            mean_col="mean",
-            sem_col="sem",
+            val_col="val", mean_col="mean", sem_col="sem",
             ylabel="Ratio",
             hline_y=1.0,
-            ylim=YLIM_RATIO_BCA,
-            title="High-Level:Low-Level Ratio using Summed BCA",
+            ylim=y_ratio_bca,
+            title=f"High-Level to Low-Level Ratio using Summed BCA ({ratio_label})",
         ),
-
         out_dir / f"Plot_{RUN_LABEL}_RATIO_BCA",
         xlabel="ROI",
     )
 
+    # -----------------------------
     # Excel + log outputs
+    # -----------------------------
     out_xlsx = out_dir / f"Metrics_{RUN_LABEL}.xlsx"
 
     params_df = pd.DataFrame([
@@ -1074,6 +1126,13 @@ def main():
         {"key": "MANUAL_EXCLUDE", "value": str(MANUAL_EXCLUDE)},
         {"key": "MANUAL_FOUND_IN_PAIRED", "value": str(manual_in_paired)},
         {"key": "MANUAL_NOT_FOUND_IN_PAIRED", "value": str(manual_not_found)},
+        {"key": "USE_STABLE_YLIMS", "value": str(USE_STABLE_YLIMS)},
+        {"key": "YLIM_RAW_SUM_Z", "value": str(y_raw_z)},
+        {"key": "YLIM_RAW_SUM_SNR", "value": str(y_raw_snr)},
+        {"key": "YLIM_RAW_SUM_BCA", "value": str(y_raw_bca)},
+        {"key": "YLIM_RATIO_Z", "value": str(y_ratio_z)},
+        {"key": "YLIM_RATIO_SNR", "value": str(y_ratio_snr)},
+        {"key": "YLIM_RATIO_BCA", "value": str(y_ratio_bca)},
     ])
 
     manual_excl_df = pd.DataFrame([
