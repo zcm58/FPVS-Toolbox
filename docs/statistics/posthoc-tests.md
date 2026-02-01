@@ -1,52 +1,54 @@
 # Post-hoc tests (interaction breakdown)
 
-Post-hoc tests are run **after** an interaction is found in RM-ANOVA.
-They explain **which condition pairs** differ **within each ROI**.
+## Plain-language overview
+
+Sometimes the main statistics tell you that an effect exists, but not
+**where** it comes from.
+
+If the repeated-measures ANOVA finds a **Condition × ROI interaction**,
+that means the size (or even the direction) of condition differences
+depends on which ROI you’re looking at.
+
+This post-hoc module answers the practical follow-up question:
+
+- “Within a given ROI, **which specific condition pairs** are different?”
+
+It does this in a way that matches the repeated-measures structure of
+FPVS data (the same participants contribute all conditions).
+
+Why this is useful in FPVS-EEG research:
+
+- It turns an interaction result into an interpretable set of
+  ROI-specific comparisons you can report in Results.
+- It keeps the comparisons **within-subject**, which is usually the
+  appropriate design for FPVS condition contrasts.
+- It produces a standardized export so post-hoc reporting is consistent
+  across projects.
 
 ---
 
-## What is tested
+## Manuscript-ready description
 
-- **Within each ROI**, the tool runs **paired t-tests** for every pair of
-  conditions.
-- The analysis is **within-subject**, so each test uses subject-wise
-  differences between the two conditions.
+Following detection of a significant Condition × ROI interaction in the
+repeated-measures ANOVA, ROI-stratified post-hoc testing was performed to
+identify which condition pairs differed within each ROI. For each ROI,
+all pairwise comparisons between conditions were evaluated using
+**paired-samples t-tests**, computed on subject-wise differences so that
+each participant served as their own control. Multiple comparisons were
+controlled using the **Benjamini–Hochberg false discovery rate (FDR)**
+procedure (`fdr_bh`), applied **separately within each ROI** such that
+the family of tests consisted of all condition-pair comparisons for that
+ROI.
 
----
+For each condition pair, results included the t statistic and associated
+p-value (both raw and FDR-adjusted), the mean paired difference
+(Condition A − Condition B) with a 95% confidence interval, and the
+paired-samples effect size **Cohen’s dz**, computed as the mean of the
+paired differences divided by the standard deviation of the paired
+differences. As an informational diagnostic, a Shapiro–Wilk normality
+test was applied to the paired differences; this value was reported but
+did not alter the inferential procedure. Positive mean differences
+indicate larger Summed BCA values in Condition A than Condition B within
+the ROI, and larger absolute dz values indicate stronger condition
+separation.
 
-## Multiple-comparison correction
-
-- **Correction method:** Benjamini–Hochberg FDR (`fdr_bh`).
-- **Correction family:** applied **within each ROI** (all condition-pair
-  tests for that ROI are corrected together).
-
----
-
-## Effect sizes and outputs
-
-Each pairwise result includes:
-
-- **t statistic** and **p-value** (raw and FDR-adjusted).
-- **Cohen’s dz** (paired-samples effect size), computed as mean difference
-  divided by the standard deviation of paired differences.
-- **Mean difference** (Condition A − Condition B) and 95% CI.
-- **Shapiro p-value** for paired differences (informational only).
-
-Interpretation tips:
-
-- **Direction:** a positive mean difference means Condition A > Condition
-  B for Summed BCA.
-- **Effect size (dz):** larger absolute values indicate stronger
-  condition differences within the ROI.
-
----
-
-## Not found in code (documentation transparency)
-
-The following details were **not found in code** while preparing this
-page:
-
-- A user-facing setting to change the post-hoc correction method from
-  Benjamini–Hochberg FDR to another option. (Searched in
-  `src/Tools/Stats/Legacy/posthoc_tests.py` and
-  `src/Tools/Stats/PySide6/stats_workers.py`.)
