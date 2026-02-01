@@ -71,8 +71,10 @@ OUTPUT_DIR = r"C:\Users\zackm\OneDrive - Mississippi State University\NERD\2 - R
 RUN_LABEL = "R21_Preliminary_Data_Run"
 
 ROI_DEFS = {
-    "Occipital": ["O1", "O2", "Oz"],
+    "Bilateral OT": ["P7", "P9", "PO7", "PO3", "O1","Oz","O2","P8", "P10", "PO8", "PO4"],
     "LOT": ["P7", "P9", "PO7", "PO3", "O1"],
+    "ROT": ["P8", "P10", "PO8", "02", "PO4"],
+    "Right Inferior Parietal": ["P4","P6","P8","CP4","CP6"]
 }
 
 # Oddball harmonic summation definition
