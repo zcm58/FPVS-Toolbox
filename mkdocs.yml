@@ -13,4 +13,6 @@ nav:
       - Mixed model: statistics/mixed-model.md
       - Outliers and QC: statistics/outliers-and-qc.md
   - Relevant Publications: relevant-publications.md
+  - Tools:
+      - Individual-level Detectability: tools/individual-level-detectability.md
   - Tutorials: tutorials.md
