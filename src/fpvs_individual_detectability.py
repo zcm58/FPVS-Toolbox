@@ -20,6 +20,9 @@ Key behaviors:
   - Output location: user selects an output folder; condition subfolders are created.
   - QOL: at completion, attempts to open the output folder in the OS file explorer.
   - UI: folder selection uses PySide6 only (no tkinter) to support later toolbox integration.
+  - UI: after conditions are selected, a PySide6 popup lets you set per-condition:
+        (a) the figure title (rendered in Times New Roman), and
+        (b) the output filename stem (Windows-safe). This is intended for manuscripts/thesis use.
 
 -------------------------------------------------------------------------------
 CRITICAL NOTE ABOUT TOPO MAP PLOTTING (DO NOT MODIFY WITHOUT TESTING)
@@ -89,6 +92,7 @@ SNR_REF_LINE: float = 1.0
 
 # FIXED SNR Y-AXIS (requested)
 SNR_YMAX_FIXED: float = 2.0  # always set ylim to [0, 2]
+SNR_YMIN_FIXED: float = 0.0  # set to 0.4 if you want the paper-like baseline
 
 # Excel sheet + column names (must match your exports)
 SHEET_Z: str = "Z Score"
@@ -105,9 +109,13 @@ CELL_H_IN: float = 2.35
 WSPACE: float = 0.25
 HSPACE: float = 0.70  # increased vertical spacing (requested)
 
-# Title spacing (requested)
-SUPTITLE_Y: float = 0.985
-SUBPLOTS_TOP: float = 0.90  # more space between title and top row
+# Letter portrait layout (Word-friendly)
+USE_LETTER_PORTRAIT: bool = True
+LETTER_W_IN: float = 8.5
+LETTER_H_IN: float = 11.0
+PAGE_MARGIN_IN: float = 0.35
+TITLE_BAND_IN: float = 0.55        # reserved space above grid
+COLORBAR_BAND_IN: float = 0.75     # reserved space below grid (bar + labels)
 
 # Colorbar (centered, not full-width)
 COLORBAR_WIDTH_FRAC: float = 0.55
@@ -498,6 +506,14 @@ def _plot_topomap_compat(
     """MNE topomap wrapper compatible with multiple MNE versions."""
     import mne
 
+    # Show faint sensor dots when supported (paper-like appearance).
+    sensor_kwargs = {
+        "marker": ".",
+        "markersize": 2,
+        "markerfacecolor": "0.75",
+        "markeredgecolor": "0.75",
+    }
+
     try:
         mne.viz.plot_topomap(
             data,
@@ -505,24 +521,62 @@ def _plot_topomap_compat(
             axes=ax,
             show=False,
             contours=0,
-            sensors=False,
+            sensors=True,
+            sensor_kwargs=sensor_kwargs,
             cmap=cmap,
             vlim=(vmin, vmax),
             outlines="head",
         )
+        return
     except TypeError:
+        pass
+
+    try:
         mne.viz.plot_topomap(
             data,
             info,
             axes=ax,
             show=False,
             contours=0,
-            sensors=False,
+            sensors=True,
+            cmap=cmap,
+            vlim=(vmin, vmax),
+            outlines="head",
+        )
+        return
+    except TypeError:
+        pass
+
+    try:
+        mne.viz.plot_topomap(
+            data,
+            info,
+            axes=ax,
+            show=False,
+            contours=0,
+            sensors=True,
+            sensor_kwargs=sensor_kwargs,
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,
             outlines="head",
         )
+        return
+    except TypeError:
+        pass
+
+    mne.viz.plot_topomap(
+        data,
+        info,
+        axes=ax,
+        show=False,
+        contours=0,
+        sensors=True,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        outlines="head",
+    )
 
 
 def plot_condition_grid(
@@ -530,8 +584,17 @@ def plot_condition_grid(
     results: List["ParticipantResult"],
     info: "mne.io.Info",
     out_file: Path,
+    *,
+    fig_title: Optional[str] = None,
 ) -> None:
-    """Save a landscape grid figure for one condition."""
+    """
+    Save a landscape grid figure for one condition.
+
+    fig_title behavior:
+      - None: use legacy default "{condition}: Individual-level detectability"
+      - "" (or whitespace): omit the suptitle entirely (useful for manuscripts)
+      - otherwise: use provided title (rendered in Times New Roman)
+    """
     if not results:
         return
 
@@ -545,7 +608,9 @@ def plot_condition_grid(
 
     plt.rcParams.update(
         {
+            # Manuscript-friendly typography on Windows (fallbacks included).
             "font.family": "serif",
+            "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
             "font.size": 10,
             "axes.linewidth": 1.0,
             "xtick.major.size": 4,
@@ -553,10 +618,33 @@ def plot_condition_grid(
         }
     )
 
-    fig_w = ncols * CELL_W_IN
-    fig_h = nrows * CELL_H_IN
-    fig = plt.figure(figsize=(fig_w, fig_h))
-    gs = fig.add_gridspec(nrows=2 * nrows, ncols=ncols, hspace=HSPACE, wspace=WSPACE)
+    if USE_LETTER_PORTRAIT:
+        fig_w = float(LETTER_W_IN)
+        fig_h = float(LETTER_H_IN)
+        fig = plt.figure(figsize=(fig_w, fig_h))
+
+        left = float(PAGE_MARGIN_IN) / fig_w
+        right = 1.0 - (float(PAGE_MARGIN_IN) / fig_w)
+        bottom = (float(PAGE_MARGIN_IN) + float(COLORBAR_BAND_IN)) / fig_h
+        top = 1.0 - ((float(PAGE_MARGIN_IN) + float(TITLE_BAND_IN)) / fig_h)
+
+        gs = fig.add_gridspec(
+            nrows=2 * nrows,
+            ncols=ncols,
+            left=left,
+            right=right,
+            bottom=bottom,
+            top=top,
+            hspace=HSPACE,
+            wspace=WSPACE,
+        )
+        suptitle_y = top + (1.0 - top) * 0.72
+    else:
+        fig_w = ncols * CELL_W_IN
+        fig_h = nrows * CELL_H_IN
+        fig = plt.figure(figsize=(fig_w, fig_h))
+        gs = fig.add_gridspec(nrows=2 * nrows, ncols=ncols, hspace=HSPACE, wspace=WSPACE)
+        suptitle_y = 0.985
 
     # Thresholded colormap so vmin renders as white (robust to clipping)
     cmap = _make_thresholded_cmap("YlOrRd", white_frac=0.08)
@@ -568,6 +656,9 @@ def plot_condition_grid(
         vmax = vmin + 1.0
 
     snr_ymax = float(SNR_YMAX_FIXED)
+
+    # Place the "SNR" ylabel on the first visible SNR axis per row (even if col 0 is n=0)
+    row_ylabel_set: List[bool] = [False for _ in range(nrows)]
 
     for i in range(nrows * ncols):
         rr = i // ncols
@@ -584,24 +675,47 @@ def plot_condition_grid(
         r = results_sorted[i]
 
         _plot_topomap_compat(r.z_topo, info, ax_topo, cmap, vmin=vmin, vmax=vmax)
-        ax_topo.set_title(f"{r.pid}\n n={r.n_sig}", fontsize=PANEL_TITLE_FONTSIZE, pad=2)
 
-        ax_snr.axvline(0.0, linewidth=1.0, color="0.35")
-        ax_snr.axhline(SNR_REF_LINE, linewidth=1.0, linestyle="--", color="0.6")
+        # Paper-like labeling: subject above head; n below head
+        ax_topo.set_title(f"{r.pid}", fontsize=PANEL_TITLE_FONTSIZE, pad=2)
+        ax_topo.text(
+            0.5,
+            -0.10,
+            f"n={r.n_sig}",
+            transform=ax_topo.transAxes,
+            ha="center",
+            va="top",
+            fontsize=PANEL_TITLE_FONTSIZE,
+        )
 
-        if r.snr_rel_x is not None and r.snr_rel_y is not None:
-            ax_snr.plot(r.snr_rel_x, r.snr_rel_y, linewidth=1.0, color="0.15")
+        # Hide the entire SNR panel when no significant electrodes (matches published style)
+        if r.n_sig <= 0 or r.snr_rel_x is None or r.snr_rel_y is None:
+            ax_snr.axis("off")
+            continue
+
+        ax_snr.axvline(0.0, linewidth=0.9, color="0.55")
+        ax_snr.axhline(SNR_REF_LINE, linewidth=0.9, linestyle="--", color="0.70")
+        ax_snr.plot(r.snr_rel_x, r.snr_rel_y, linewidth=0.9, color="0.35")
 
         ax_snr.set_xlim(-HALF_WINDOW_HZ, HALF_WINDOW_HZ)
-        ax_snr.set_ylim(0.0, snr_ymax)
-        ax_snr.set_xticks([-HALF_WINDOW_HZ, 0.0, HALF_WINDOW_HZ])
+        ax_snr.set_ylim(float(SNR_YMIN_FIXED), snr_ymax)
+        ax_snr.set_xticks(
+            [
+                -HALF_WINDOW_HZ,
+                -HALF_WINDOW_HZ / 2.0,
+                0.0,
+                HALF_WINDOW_HZ / 2.0,
+                HALF_WINDOW_HZ,
+            ]
+        )
         ax_snr.tick_params(labelsize=TICK_FONTSIZE)
 
         for spine in ["top", "right"]:
             ax_snr.spines[spine].set_visible(False)
 
-        if cc == 0:
+        if not row_ylabel_set[rr]:
             ax_snr.set_ylabel("SNR", fontsize=AXIS_LABEL_FONTSIZE)
+            row_ylabel_set[rr] = True
         else:
             ax_snr.set_ylabel("")
             ax_snr.set_yticklabels([])
@@ -612,14 +726,35 @@ def plot_condition_grid(
             ax_snr.set_xlabel("")
             ax_snr.set_xticklabels([])
 
-    fig.suptitle(f"{condition}: Individual-level detectability", fontsize=TITLE_FONTSIZE, y=SUPTITLE_Y)
-    fig.subplots_adjust(left=0.04, right=0.99, top=SUBPLOTS_TOP, bottom=0.18)
+    # Figure title (Times New Roman)
+    if fig_title is None:
+        title_text = f"{condition}: Individual-level detectability"
+    else:
+        title_text = str(fig_title)
+
+    if title_text.strip():
+        fig.suptitle(
+            title_text,
+            fontsize=TITLE_FONTSIZE,
+            y=float(suptitle_y),
+            fontname="Times New Roman",
+        )
+
+    # NOTE: In Letter mode we use gridspec bounds (left/right/top/bottom).
+    # In non-letter mode we keep the legacy layout.
+    if not USE_LETTER_PORTRAIT:
+        fig.subplots_adjust(left=0.04, right=0.99, top=0.90, bottom=0.18)
 
     # Centered colorbar
     cbar_w = float(COLORBAR_WIDTH_FRAC)
     cbar_h = float(COLORBAR_HEIGHT_FRAC)
     cbar_left = (1.0 - cbar_w) / 2.0
-    cbar_bottom = float(COLORBAR_BOTTOM_FRAC)
+    if USE_LETTER_PORTRAIT:
+        band_bottom = float(PAGE_MARGIN_IN) / float(LETTER_H_IN)
+        band_top = (float(PAGE_MARGIN_IN) + float(COLORBAR_BAND_IN)) / float(LETTER_H_IN)
+        cbar_bottom = band_bottom + (band_top - band_bottom - cbar_h) / 2.0
+    else:
+        cbar_bottom = float(COLORBAR_BOTTOM_FRAC)
 
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_w, cbar_h])
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=mpl.colors.Normalize(vmin=vmin, vmax=vmax))
@@ -633,7 +768,12 @@ def plot_condition_grid(
     )
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_file, dpi=FIG_DPI, format=FIG_FORMAT, bbox_inches="tight", pad_inches=0.04)
+
+    # In Letter mode, avoid bbox_inches="tight" so the physical size remains 8.5x11 inches at save time.
+    if USE_LETTER_PORTRAIT:
+        fig.savefig(out_file, dpi=FIG_DPI, format=FIG_FORMAT)
+    else:
+        fig.savefig(out_file, dpi=FIG_DPI, format=FIG_FORMAT, bbox_inches="tight", pad_inches=0.04)
     plt.close(fig)
 
 
@@ -656,6 +796,102 @@ def _select_directory_pyside6(title: str) -> Optional[Path]:
     if not directory:
         return None
     return Path(directory)
+
+
+def _collect_figure_naming_pyside6(
+    cond_names: Sequence[str],
+) -> Optional[Dict[str, Tuple[str, str]]]:
+    """
+    Show a PySide6 dialog to set per-condition:
+      - figure title (printed on the figure in Times New Roman)
+      - output filename stem (extension added later; sanitized for Windows)
+
+    Returns:
+      dict: condition -> (fig_title, file_stem)
+      None if cancelled.
+    """
+    _ensure_qapplication()
+
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
+        QAbstractItemView,
+        QDialog,
+        QDialogButtonBox,
+        QHeaderView,
+        QLabel,
+        QTableWidget,
+        QTableWidgetItem,
+        QVBoxLayout,
+    )
+
+    class _Dlg(QDialog):
+        def __init__(self, names: Sequence[str]) -> None:
+            super().__init__(None)
+            self.setWindowTitle("Figure titles & filenames")
+
+            lay = QVBoxLayout(self)
+            msg = QLabel(
+                "Set the title and output filename for each condition.\n"
+                "• Title renders in Times New Roman on the exported figure.\n"
+                "• Leave Title blank to omit a title (useful for manuscripts).\n"
+                "• Filename is sanitized for Windows; extension is added automatically."
+            )
+            msg.setWordWrap(True)
+            lay.addWidget(msg)
+
+            self.table = QTableWidget(len(names), 3, self)
+            self.table.setHorizontalHeaderLabels(["Condition", "Figure title", "Output filename (no extension)"])
+            self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+            self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            self.table.setEditTriggers(
+                QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed
+            )
+
+            hdr = self.table.horizontalHeader()
+            hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+
+            for r, c in enumerate(names):
+                it0 = QTableWidgetItem(str(c))
+                it0.setFlags(it0.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(r, 0, it0)
+
+                default_title = f"{c}: Individual-level detectability"
+                self.table.setItem(r, 1, QTableWidgetItem(default_title))
+
+                default_stem = f"{_sanitize_filename(str(c))}_individual_detectability_grid"
+                self.table.setItem(r, 2, QTableWidgetItem(default_stem))
+
+            lay.addWidget(self.table)
+
+            bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+            bb.accepted.connect(self.accept)
+            bb.rejected.connect(self.reject)
+            lay.addWidget(bb)
+
+        def values(self) -> Dict[str, Tuple[str, str]]:
+            out: Dict[str, Tuple[str, str]] = {}
+            for r in range(self.table.rowCount()):
+                cond = (self.table.item(r, 0).text() if self.table.item(r, 0) else "").strip()
+                title = (self.table.item(r, 1).text() if self.table.item(r, 1) else "").strip()
+                stem = (self.table.item(r, 2).text() if self.table.item(r, 2) else "").strip()
+
+                # Allow blank title to mean "no suptitle".
+                # If stem is blank, fall back to a stable default.
+                if stem.strip():
+                    stem_clean = _sanitize_filename(stem)
+                else:
+                    stem_clean = f"{_sanitize_filename(cond)}_individual_detectability_grid"
+
+                out[cond] = (title, stem_clean)
+            return out
+
+    names_list = [str(x) for x in cond_names]
+    dlg = _Dlg(names_list)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return dlg.values()
 
 
 def _open_folder_in_explorer(folder: Path) -> None:
@@ -778,17 +1014,24 @@ def main() -> None:
         print("No .xlsx files found in the selected folder (or its immediate subfolders).")
         return
 
-    cond_names = sorted(cond_map.keys())
+    cond_names_all = sorted(cond_map.keys())
     print("Detected conditions:")
-    for c in cond_names:
+    for c in cond_names_all:
         print(f"  - {c}  ({len(cond_map[c])} files)")
     subset = input("\nEnter comma-separated condition names to run (or press Enter for ALL): ").strip()
     if subset:
         chosen = {s.strip() for s in subset.split(",") if s.strip()}
-        cond_map = {c: cond_map[c] for c in cond_names if c in chosen}
+        cond_map = {c: cond_map[c] for c in cond_names_all if c in chosen}
         if not cond_map:
             print("None of the entered condition names matched. Exiting.")
             return
+
+    # Per-condition figure naming (PySide6)
+    chosen_names = list(cond_map.keys())
+    naming = _collect_figure_naming_pyside6(chosen_names)
+    if naming is None:
+        print("Figure naming cancelled. Exiting.")
+        return
 
     with open(log_path, "w", encoding="utf-8") as log:
         log.write("FPVS Individual Detectability Log\n")
@@ -800,11 +1043,13 @@ def main() -> None:
         log.write(f"SNR_YMAX_FIXED: {SNR_YMAX_FIXED}\n")
         log.write(f"Statsmodels available: {HAVE_STATSMODELS}\n")
         log.write(f"Output: {FIG_FORMAT.upper()} @ {FIG_DPI} dpi\n")
+        log.write("Figure naming: PySide6 per-condition titles + filenames\n")
+        for cond in chosen_names:
+            title, stem = naming.get(cond, ("", ""))
+            log.write(f"  - {cond} | title='{title}' | stem='{stem}'\n")
         log.write(f"DEBUG: {DEBUG}\n\n")
 
-        with ProcessPoolExecutor(
-            initializer=_init_worker, initargs=(name_to_idx, len(info.ch_names))
-        ) as ex:
+        with ProcessPoolExecutor(initializer=_init_worker, initargs=(name_to_idx, len(info.ch_names))) as ex:
             for condition, files in cond_map.items():
                 print(f"\nProcessing condition: {condition} ({len(files)} files)")
 
@@ -865,9 +1110,16 @@ def main() -> None:
                         cond_log_lines.append(f"FAIL: {xlsx.name} | {err}\n{tb}\n")
 
                 if cond_results:
-                    out_name = f"{_sanitize_filename(condition)}_individual_detectability_grid.{FIG_FORMAT}"
+                    fig_title, stem = naming.get(
+                        condition,
+                        ("", f"{_sanitize_filename(condition)}_individual_detectability_grid"),
+                    )
+                    if not stem.strip():
+                        stem = f"{_sanitize_filename(condition)}_individual_detectability_grid"
+
+                    out_name = f"{_sanitize_filename(stem)}.{FIG_FORMAT}"
                     out_file = cond_out_dir / out_name
-                    plot_condition_grid(condition, cond_results, info, out_file)
+                    plot_condition_grid(condition, cond_results, info, out_file, fig_title=fig_title)
                     print(f"  Saved: {out_file}")
                 else:
                     print("  No usable files for this condition.")
