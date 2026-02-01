@@ -19,6 +19,9 @@ This page lists key articles and books that informed the design of the FPVS Tool
 
 - Rossion B, Retter TL, Liu-Shuang J. Understanding human individuation of unfamiliar faces with oddball fast periodic visual stimulation and electroencephalography. Eur J Neurosci. 2020;52(10):4283-4344. doi:10.1111/ejn.14865
 
+
+- David, J., Quenon, L., Hanseeuw, B., Ivanoiu, A., Volfart, A., Koessler, L., & Rossion, B. (2025). **An objective and sensitive electrophysiological marker of word semantic categorization impairment in Alzheimer's disease.** *Clinical Neurophysiology*, 170, 98–109. https://doi.org/10.1016/j.clinph.2024.12.018
+
 These papers provide the main conceptual and analytical background for FPVS paradigms, oddball designs, and harmonic-based frequency-tagging analyses used in the Toolbox.
 
 ---
