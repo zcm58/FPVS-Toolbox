@@ -67,14 +67,15 @@ CONDITION_LABEL_A = "Semantic Response"
 INPUT_DIR_B = r"C:\Users\zackm\OneDrive - Mississippi State University\NERD\2 - Results\1 - FPVS Toolbox Projects\Semantic Categories\1 - Excel Data Files\Green Veg vs Red Veg"
 CONDITION_LABEL_B = "Color Response"
 
-OUTPUT_DIR = r"C:\Users\zcm58\OneDrive - Mississippi State University\Office Desktop\FPVS Toolbox Project Root\Semantic Categories 3\4 - Ratio Calculator Results (new tool)"
+OUTPUT_DIR = r"C:\Users\zackm\OneDrive - Mississippi State University\NERD\2 - Results\1 - FPVS Toolbox Projects\Semantic Categories\5 - Ratio Summaries"
 RUN_LABEL = "High to Low Ratio Calculations"
 
 ROI_DEFS = {
     "Bilateral OT": ["P7", "P9", "PO7", "PO3", "O1","Oz","O2","P8", "P10", "PO8", "PO4"],
     "LOT": ["P7", "P9", "PO7", "PO3", "O1"],
     "ROT": ["P8", "P10", "PO8", "02", "PO4"],
-
+    "Left Parietal": ["P3", "P5", "CP3", "CP5", "CP1"],
+    "Right Parietal": ["P4", "P6", "CP4", "CP6", "CP2"],
 }
 
 # Oddball harmonic summation definition
