@@ -370,3 +370,31 @@ def select_rossion_harmonics_by_roi(
                 failure_run,
             )
     return selected_map, meta_by_roi
+
+
+def compute_union_harmonics_by_roi(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    base_freq: float,
+    rois: Dict[str, List[str]],
+    log_func: Callable[[str], None],
+    dv_policy: dict[str, object] | None = None,
+) -> Dict[str, List[float]]:
+    """Compatibility alias."""
+    from Tools.Stats.PySide6 import dv_policies
+
+    payload = dv_policies.build_rossion_preview_payload(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_freq=base_freq,
+        rois=rois,
+        log_func=log_func,
+        dv_policy=dv_policy,
+    )
+    union_harmonics = payload.get("union_harmonics_by_roi", {})
+    if isinstance(union_harmonics, dict):
+        return union_harmonics
+    return {}

@@ -33,6 +33,7 @@ _DV_TRACE_ENV = "FPVS_STATS_DV_TRACE"
 LEGACY_POLICY_NAME = "Current (Legacy)"
 FIXED_K_POLICY_NAME = "Fixed-K harmonics"
 ROSSION_POLICY_NAME = "Rossion Method (Significant-only; stop after 2 failures)"
+GROUP_MEAN_Z_POLICY_NAME = ROSSION_POLICY_NAME
 
 EMPTY_LIST_FALLBACK_FIXED_K = "Fallback to Fixed-K"
 EMPTY_LIST_SET_ZERO = "Set DV=0"
