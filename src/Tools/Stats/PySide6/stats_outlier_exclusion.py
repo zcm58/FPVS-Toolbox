@@ -268,6 +268,21 @@ def format_flag_types_display(flag_types: Iterable[str]) -> str:
     return ", ".join(labels)
 
 
+def build_flagged_participant_summary(
+    *,
+    severity: str,
+    flag_type: str | None,
+    worst_text: str,
+    n_flags: int,
+) -> str:
+    safe_severity = str(severity).strip() or "FLAG"
+    friendly_flag = format_flag_type_display(flag_type) if flag_type else "Unknown flag"
+    summary = f"{safe_severity}: {friendly_flag}. Worst: {worst_text}"
+    if n_flags > 1:
+        summary += f". +{n_flags - 1} more flags"
+    return summary.replace("\n", " ")
+
+
 def format_worst_value_display(
     flag_type: str | None,
     value: float,

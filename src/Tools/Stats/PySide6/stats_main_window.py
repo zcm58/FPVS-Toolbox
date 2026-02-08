@@ -103,6 +103,7 @@ from Tools.Stats.PySide6.dv_policies import (
 from Tools.Stats.PySide6.dv_variants import export_dv_variants_workbook
 from Tools.Stats.PySide6.stats_outlier_exclusion import (
     build_flagged_details_map,
+    build_flagged_participant_summary,
     collect_flagged_pid_map,
     build_flagged_participants_tables,
     export_excluded_participants_report,
@@ -1857,6 +1858,7 @@ class StatsWindow(QMainWindow):
 
         display_rows: list[dict[str, object]] = []
         details_map: dict[str, str] = {}
+        table: QTableWidget | None = None
         if not summary_df.empty:
             table = QTableWidget(summary_df.shape[0], 7)
             table.setHorizontalHeaderLabels(
@@ -1883,8 +1885,12 @@ class StatsWindow(QMainWindow):
             table.setEditTriggers(QAbstractItemView.NoEditTriggers)
             table.setSelectionMode(QAbstractItemView.SingleSelection)
             table.setSelectionBehavior(QAbstractItemView.SelectRows)
-            table.setWordWrap(True)
-            table.setTextElideMode(Qt.ElideNone)
+            table.setWordWrap(False)
+            table.setTextElideMode(Qt.ElideRight)
+            table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            row_height = int(table.fontMetrics().height() * 1.6)
+            table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+            table.verticalHeader().setDefaultSectionSize(row_height)
 
             details_map = {
                 str(pid): "\n".join(
@@ -1908,6 +1914,7 @@ class StatsWindow(QMainWindow):
                 flag_types_display = format_flag_types_display(raw_flag_types)
                 group = details_df[details_df["participant_id"] == participant_id]
                 worst_flag_type = raw_flag_types[0] if raw_flag_types else None
+                severity = "FLAG"
                 if not group.empty:
                     match = group[
                         (group["condition"] == item["worst_condition"])
@@ -1917,6 +1924,7 @@ class StatsWindow(QMainWindow):
                     if match.empty:
                         match = group
                     worst_flag_type = str(match.iloc[0]["flag_type"])
+                    severity = str(match.iloc[0]["severity"])
 
                 worst_value = item["worst_value"]
                 worst_value_float = float(worst_value) if pd.notna(worst_value) else float("nan")
@@ -1926,7 +1934,13 @@ class StatsWindow(QMainWindow):
                     dv_display_name=dv_display_name if isinstance(dv_display_name, str) else None,
                     dv_unit=dv_unit if isinstance(dv_unit, str) else None,
                 )
-                reason_text = str(item["reason_text"])
+                summary_text = build_flagged_participant_summary(
+                    severity=severity,
+                    flag_type=worst_flag_type,
+                    worst_text=worst_text,
+                    n_flags=int(item["n_flags"]),
+                )
+                details_text = details_map.get(participant_id, str(item["reason_text"]))
                 row_items = [
                     QTableWidgetItem(participant_id),
                     QTableWidgetItem(flag_types_display),
@@ -1934,12 +1948,13 @@ class StatsWindow(QMainWindow):
                     QTableWidgetItem(worst_text),
                     QTableWidgetItem(str(item["worst_condition"])),
                     QTableWidgetItem(str(item["worst_roi"])),
-                    QTableWidgetItem(reason_text),
+                    QTableWidgetItem(summary_text),
                 ]
                 row_items[1].setToolTip(flag_types_display)
                 if worst_tooltip:
                     row_items[3].setToolTip(worst_tooltip)
-                row_items[6].setToolTip(reason_text)
+                if details_text:
+                    row_items[6].setToolTip(details_text)
                 for col, cell in enumerate(row_items):
                     table.setItem(row, col, cell)
 
@@ -1951,11 +1966,10 @@ class StatsWindow(QMainWindow):
                         "Worst value": worst_text,
                         "Condition": str(item["worst_condition"]),
                         "ROI": str(item["worst_roi"]),
-                        "Explanation": reason_text,
+                        "Explanation": summary_text,
                     }
                 )
 
-            table.resizeRowsToContents()
             layout.addWidget(table)
 
             details_panel = QTextEdit()
@@ -1983,11 +1997,13 @@ class StatsWindow(QMainWindow):
         button_row = QHBoxLayout()
         copy_summary_btn = QPushButton("Copy summary")
         copy_btn = QPushButton("Copy table")
+        copy_details_btn = QPushButton("Copy details")
         edit_manual_btn = QPushButton("Edit manual exclusions")
         close_btn = QPushButton("Close")
         button_row.addStretch(1)
         button_row.addWidget(copy_summary_btn)
         button_row.addWidget(copy_btn)
+        button_row.addWidget(copy_details_btn)
         button_row.addWidget(edit_manual_btn)
         button_row.addWidget(close_btn)
         layout.addLayout(button_row)
@@ -2013,9 +2029,25 @@ class StatsWindow(QMainWindow):
             )
             QGuiApplication.clipboard().setText(display_df.to_csv(sep="\t", index=False))
 
+        def _copy_details() -> None:
+            if not details_map or table is None:
+                return
+            current = table.currentRow()
+            if current < 0:
+                return
+            pid_item = table.item(current, 0)
+            if pid_item is None:
+                return
+            pid = str(pid_item.text())
+            details_text = details_map.get(pid, "")
+            if details_text:
+                QGuiApplication.clipboard().setText(details_text)
+
         copy_summary_btn.clicked.connect(_copy_summary)
         copy_btn.clicked.connect(_copy_table)
+        copy_details_btn.clicked.connect(_copy_details)
         copy_btn.setEnabled(bool(display_rows))
+        copy_details_btn.setEnabled(bool(display_rows))
         edit_manual_btn.clicked.connect(self._open_manual_exclusion_dialog)
         close_btn.clicked.connect(dialog.accept)
 
