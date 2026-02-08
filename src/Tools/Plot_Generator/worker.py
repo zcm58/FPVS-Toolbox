@@ -1,6 +1,7 @@
 """Worker classes for the plot generator."""
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -29,6 +30,9 @@ from Tools.Plot_Generator.scalp_utils import (
 
 
 _PID_PATTERN = re.compile(r"(?:[A-Za-z]*)?(P\d+)", re.IGNORECASE)
+logger = logging.getLogger(__name__)
+_DEFAULT_A_PEAKS = "A-Peaks"
+_DEFAULT_B_PEAKS = "B-Peaks"
 
 
 def _infer_subject_id_from_path(excel_path: Path) -> str | None:
@@ -95,6 +99,12 @@ class _Worker(QObject):
         scalp_vmax: float = 1.0,
         scalp_title_a_template: str = "{condition} {roi} scalp map",
         scalp_title_b_template: str = "{condition} {roi} scalp map",
+        legend_custom_enabled: bool = False,
+        legend_condition_a: str | None = None,
+        legend_condition_b: str | None = None,
+        legend_a_peaks: str | None = None,
+        legend_b_peaks: str | None = None,
+        project_root: str | None = None,
     ) -> None:
         super().__init__()
         self.folder = folder
@@ -137,10 +147,28 @@ class _Worker(QObject):
         self.scalp_title_a_template = scalp_title_a_template
         self.scalp_title_b_template = scalp_title_b_template
         self._scalp_title_warned = False
+        self.legend_custom_enabled = legend_custom_enabled
+        self.legend_condition_a = legend_condition_a
+        self.legend_condition_b = legend_condition_b
+        self.legend_a_peaks = legend_a_peaks
+        self.legend_b_peaks = legend_b_peaks
+        self.project_root = project_root
 
     def run(self) -> None:
         try:
             self._run()
+        except Exception as exc:
+            logger.error(
+                "SNR plot generation failed.",
+                exc_info=exc,
+                extra={
+                    "operation": "snr_plot_generate",
+                    "project_root": self.project_root,
+                    "compare_two_conditions": self.overlay,
+                    "custom_labels_enabled": self.legend_custom_enabled,
+                },
+            )
+            self._emit("SNR plot generation failed. See logs for details.", 0, 0)
         finally:
             self.finished.emit()
 
@@ -149,6 +177,11 @@ class _Worker(QObject):
 
     def _emit(self, msg: str, processed: int = 0, total: int = 0) -> None:
         self.progress.emit(msg, processed, total)
+
+    def _resolve_legend_label(self, custom: str | None, default: str) -> str:
+        if self.legend_custom_enabled and custom is not None and custom.strip():
+            return custom.strip()
+        return default
 
     def _selected_roi_names(self) -> List[str]:
         return list(self.roi_map.keys()) if self.selected_roi == ALL_ROIS_OPTION else [self.selected_roi]
@@ -864,12 +897,19 @@ class _Worker(QObject):
                 scalp_axes = []
 
             # --- SNR overlay curves ---
-            ax.plot(freqs, data_a[roi], color=self.stem_color, label=self.condition)
+            ax.plot(
+                freqs,
+                data_a[roi],
+                color=self.stem_color,
+                label=self._resolve_legend_label(self.legend_condition_a, self.condition),
+            )
             ax.plot(
                 freqs,
                 data_b.get(roi, []),
                 color=self.stem_color_b,
-                label=self.condition_b,
+                label=self._resolve_legend_label(
+                    self.legend_condition_b, self.condition_b or ""
+                ),
             )
 
             if odd_freqs:
@@ -879,7 +919,13 @@ class _Worker(QObject):
                     val_a = data_a[roi][closest]
                     val_b = data_b[roi][closest] if roi in data_b and data_b[roi] else None
 
-                    label_a = "A-Peaks" if idx == 0 else "_nolegend_"
+                    label_a = (
+                        self._resolve_legend_label(
+                            self.legend_a_peaks, _DEFAULT_A_PEAKS
+                        )
+                        if idx == 0
+                        else "_nolegend_"
+                    )
                     ax.scatter(
                         freq_array[closest],
                         val_a,
@@ -890,7 +936,13 @@ class _Worker(QObject):
                         label=label_a,
                     )
                     if val_b is not None:
-                        label_b = "B-Peaks" if idx == 0 else "_nolegend_"
+                        label_b = (
+                            self._resolve_legend_label(
+                                self.legend_b_peaks, _DEFAULT_B_PEAKS
+                            )
+                            if idx == 0
+                            else "_nolegend_"
+                        )
                         ax.scatter(
                             freq_array[closest],
                             val_b,
@@ -963,5 +1015,3 @@ class _Worker(QObject):
             )
             plt.close(fig)
             self._emit(f"Saved {fname}")
-
-

@@ -15,6 +15,7 @@ class ProjectMetadata:
     input_folder: str | None
     groups_count: int
     last_modified: float
+    parse_error: bool = False
 
 
 def read_project_metadata(project_root: Path) -> ProjectMetadata:
@@ -27,9 +28,11 @@ def read_project_metadata(project_root: Path) -> ProjectMetadata:
     except OSError:
         raise
 
+    parse_error = False
     try:
         parsed = json.loads(raw)
     except Exception:
+        parse_error = True
         parsed = {}
 
     if isinstance(parsed, dict):
@@ -57,6 +60,7 @@ def read_project_metadata(project_root: Path) -> ProjectMetadata:
         input_folder=str(input_folder) if input_folder is not None else None,
         groups_count=groups_count,
         last_modified=last_modified,
+        parse_error=parse_error,
     )
 
 
