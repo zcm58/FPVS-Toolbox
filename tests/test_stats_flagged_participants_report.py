@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableWidget
 
 from Tools.Stats.PySide6.stats_core import PipelineId
 from Tools.Stats.PySide6.stats_outlier_exclusion import (
     OUTLIER_REASON_LIMIT,
+    build_flagged_participant_summary,
     format_worst_value_display,
 )
 from Tools.Stats.PySide6.stats_qc_exclusion import (
     QC_REASON_MAXABS,
     QC_REASON_SUMABS,
     QC_SEVERITY_WARNING,
+    QC_SEVERITY_CRITICAL,
     QcExclusionReport,
     QcExclusionSummary,
     QcParticipantReport,
@@ -99,6 +102,150 @@ def test_flagged_participants_report_dialog_labels(qtbot, monkeypatch) -> None:
     worst_value_text = table.item(0, 3).text()
     assert "Max |ROI mean BCA|" in worst_value_text
     assert "µV" in worst_value_text
+
+
+def test_flagged_participants_report_dialog_summary_rows(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(StatsWindow, "_load_default_data_folder", lambda self: None, raising=False)
+    window = StatsWindow(project_dir=".")
+    qtbot.addWidget(window)
+
+    def make_violation(
+        *,
+        condition: str,
+        roi: str,
+        metric: str,
+        severity: str,
+        value: float,
+    ) -> QcViolation:
+        return QcViolation(
+            condition=condition,
+            roi=roi,
+            metric=metric,
+            severity=severity,
+            value=value,
+            robust_center=0.0,
+            robust_spread=1.0,
+            robust_score=2.0,
+            threshold_used=1.5,
+            abs_floor_used=0.5,
+            trigger_harmonic_hz=None,
+            roi_mean_bca_at_trigger=None,
+        )
+
+    violations_p12 = [
+        make_violation(
+            condition="CondA",
+            roi="ROI1",
+            metric=QC_REASON_MAXABS,
+            severity=QC_SEVERITY_WARNING,
+            value=12.3456,
+        ),
+        make_violation(
+            condition="CondB",
+            roi="ROI2",
+            metric=QC_REASON_SUMABS,
+            severity=QC_SEVERITY_CRITICAL,
+            value=22.2222,
+        ),
+    ]
+    violations_p17 = [
+        make_violation(
+            condition="CondA",
+            roi="ROI1",
+            metric=QC_REASON_SUMABS,
+            severity=QC_SEVERITY_WARNING,
+            value=8.7654,
+        )
+    ]
+    violations_p22 = [
+        make_violation(
+            condition="CondC",
+            roi="ROI3",
+            metric=QC_REASON_MAXABS,
+            severity=QC_SEVERITY_WARNING,
+            value=9.8765,
+        )
+    ]
+
+    participants = []
+    for pid, violations in [
+        ("P12", violations_p12),
+        ("P17", violations_p17),
+        ("P22", violations_p22),
+    ]:
+        worst_violation = max(violations, key=lambda v: abs(v.value))
+        participants.append(
+            QcParticipantReport(
+                participant_id=pid,
+                reasons=[v.metric for v in violations],
+                n_violations=len(violations),
+                worst_value=worst_violation.value,
+                worst_condition=worst_violation.condition,
+                worst_roi=worst_violation.roi,
+                worst_metric=worst_violation.metric,
+                robust_center=worst_violation.robust_center,
+                robust_spread=worst_violation.robust_spread,
+                robust_score=worst_violation.robust_score,
+                threshold_used=worst_violation.threshold_used,
+                trigger_harmonic_hz=worst_violation.trigger_harmonic_hz,
+                roi_mean_bca_at_trigger=worst_violation.roi_mean_bca_at_trigger,
+                violations=violations,
+            )
+        )
+
+    qc_summary = QcExclusionSummary(
+        n_subjects_before=3,
+        n_subjects_flagged=3,
+        n_subjects_after=3,
+        warn_threshold=6.0,
+        critical_threshold=10.0,
+        warn_abs_floor_sumabs=5.0,
+        critical_abs_floor_sumabs=10.0,
+        warn_abs_floor_maxabs=1.0,
+        critical_abs_floor_maxabs=2.0,
+    )
+    qc_report = QcExclusionReport(
+        summary=qc_summary,
+        participants=participants,
+        screened_conditions=["CondA", "CondB", "CondC"],
+        screened_rois=["ROI1", "ROI2", "ROI3"],
+    )
+    report = StatsRunReport(
+        manual_excluded_pids=[],
+        qc_report=qc_report,
+        dv_report=None,
+        required_exclusions=[],
+        final_modeled_pids=[],
+    )
+    window._pipeline_run_reports[PipelineId.SINGLE] = report
+
+    dialog = window._build_flagged_participants_dialog(PipelineId.SINGLE)
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+
+    table = dialog.findChild(QTableWidget)
+    assert table is not None
+
+    participant_ids = {table.item(row, 0).text() for row in range(table.rowCount())}
+    assert {"P12", "P17", "P22"}.issubset(participant_ids)
+
+    explanation_texts = [table.item(row, 6).text() for row in range(table.rowCount())]
+    assert all("\n" not in text for text in explanation_texts)
+
+    assert table.wordWrap() is False
+    assert table.verticalScrollBarPolicy() != Qt.ScrollBarAlwaysOff
+    assert table.rowHeight(0) <= table.fontMetrics().height() * 2
+
+
+def test_build_flagged_participant_summary_single_line() -> None:
+    summary = build_flagged_participant_summary(
+        severity="CRITICAL",
+        flag_type=QC_REASON_SUMABS,
+        worst_text="Max |ROI mean BCA|: 2.3456 µV",
+        n_flags=3,
+    )
+    assert "+2 more flags" in summary
+    assert "\n" not in summary
 
 
 def test_format_worst_value_display_qc_and_dv() -> None:
