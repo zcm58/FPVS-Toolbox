@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from Tools.Stats.PySide6 import stats_workers
 from Tools.Stats.PySide6.stats_core import PipelineId, StepId
 from Tools.Stats.PySide6.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
+from Tools.Stats.PySide6.stats_qc_exclusion import QC_REASON_SUMABS
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
 
 
@@ -23,6 +24,21 @@ def test_manual_exclusion_dialog_apply_emits_and_closes(qtbot) -> None:
 
     assert blocker.args[0] == {"P1"}
     assert dialog.result() == dialog.Accepted
+
+
+def test_manual_exclusion_dialog_flag_labels_and_tooltips(qtbot) -> None:
+    dialog = ManualOutlierExclusionDialog(
+        candidates=["P1"],
+        flagged_map={"P1": [QC_REASON_SUMABS]},
+        flagged_details_map={"P1": "Flag details for P1"},
+        preselected=set(),
+    )
+    qtbot.addWidget(dialog)
+
+    item = dialog.list_widget.item(0)
+    assert "QC_SUMABS" not in item.text()
+    assert "Unusually large total response" in item.text()
+    assert item.toolTip() == "Flag details for P1"
 
 
 def test_manual_exclusion_state_in_payload(qtbot, monkeypatch) -> None:

@@ -26,6 +26,11 @@ QC_REASON_MAXABS = "QC_MAXABS"
 QC_SEVERITY_WARNING = "WARNING"
 QC_SEVERITY_CRITICAL = "CRITICAL"
 
+QC_METRIC_LABELS = {
+    QC_REASON_SUMABS: "Unusually large total response",
+    QC_REASON_MAXABS: "Unusually large peak response",
+}
+
 # Conservative defaults to reduce false positives; these values are reported in exports.
 QC_DEFAULT_WARN_THRESHOLD = 6.0
 QC_DEFAULT_CRITICAL_THRESHOLD = 10.0
@@ -94,19 +99,30 @@ class QcExclusionReport:
 
 
 def format_qc_violation(violation: QcViolation) -> str:
-    trigger = ""
+    label = QC_METRIC_LABELS.get(violation.metric, str(violation.metric))
+    lines = [
+        f"{label} — {violation.severity}",
+        f"Condition: {violation.condition}, ROI: {violation.roi}, value: {violation.value:.4f}",
+        (
+            f"Robust score: {violation.robust_score:.3f} "
+            f"(threshold {violation.threshold_used:.2f}, abs floor {violation.abs_floor_used:.2f})"
+        ),
+        (
+            f"Robust center: {violation.robust_center:.4f}, "
+            f"robust spread: {violation.robust_spread:.4f}"
+        ),
+    ]
     if violation.trigger_harmonic_hz is not None:
-        trigger = (
-            f", trigger_hz={violation.trigger_harmonic_hz:.3f}, "
-            f"roi_mean_bca={violation.roi_mean_bca_at_trigger:.4f}"
+        lines.append(
+            "Trigger harmonic: "
+            f"{violation.trigger_harmonic_hz:.3f} Hz, "
+            f"mean BCA at trigger: {violation.roi_mean_bca_at_trigger:.4f}"
         )
-    return (
-        f"{violation.metric} severity={violation.severity} condition={violation.condition} "
-        f"roi={violation.roi} value={violation.value:.4f} "
-        f"score={violation.robust_score:.3f} threshold={violation.threshold_used:.2f} "
-        f"abs_floor={violation.abs_floor_used:.2f} center={violation.robust_center:.4f} "
-        f"spread={violation.robust_spread:.4f}{trigger}"
-    )
+    return "\n".join(lines)
+
+
+def qc_metric_label(metric: str) -> str:
+    return QC_METRIC_LABELS.get(metric, str(metric))
 
 
 def _log_message(log_func: Optional[Callable[[str], None]], message: str) -> None:

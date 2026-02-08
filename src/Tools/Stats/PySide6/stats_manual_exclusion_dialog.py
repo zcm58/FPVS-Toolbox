@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from Tools.Stats.PySide6.stats_outlier_exclusion import outlier_reason_label
+
 
 class ManualOutlierExclusionDialog(QDialog):
     manualExclusionsApplied = Signal(set)
@@ -26,6 +28,7 @@ class ManualOutlierExclusionDialog(QDialog):
         *,
         candidates: Iterable[str],
         flagged_map: dict[str, list[str]] | None = None,
+        flagged_details_map: dict[str, str] | None = None,
         preselected: Iterable[str] | None = None,
         parent=None,
     ) -> None:
@@ -35,8 +38,16 @@ class ManualOutlierExclusionDialog(QDialog):
 
         self.selected_pids: set[str] = set(preselected or [])
         self._flagged_map = flagged_map or {}
+        self._flagged_details_map = flagged_details_map or {}
 
         layout = QVBoxLayout(self)
+
+        summary_label = QLabel(
+            "Flagged entries are suggestions for review and are not automatically excluded. "
+            "Only non-finite DV values (NaN/Inf) are required exclusions."
+        )
+        summary_label.setWordWrap(True)
+        layout.addWidget(summary_label)
 
         search_row = QHBoxLayout()
         search_label = QLabel("Search:")
@@ -52,11 +63,15 @@ class ManualOutlierExclusionDialog(QDialog):
 
         for pid in candidates:
             flags = self._flagged_map.get(pid, [])
-            suffix = f" (FLAGGED: {', '.join(flags)})" if flags else ""
+            label_flags = [outlier_reason_label(flag) for flag in flags]
+            suffix = f" (FLAGGED: {', '.join(label_flags)})" if label_flags else ""
             item = QListWidgetItem(f"{pid}{suffix}")
             item.setData(Qt.UserRole, pid)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked if pid in self.selected_pids else Qt.Unchecked)
+            tooltip = self._flagged_details_map.get(pid)
+            if tooltip:
+                item.setToolTip(tooltip)
             self.list_widget.addItem(item)
 
         controls_row = QHBoxLayout()
