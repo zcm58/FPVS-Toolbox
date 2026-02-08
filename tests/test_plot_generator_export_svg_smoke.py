@@ -46,5 +46,10 @@ def test_snr_export_svg_smoke(qtbot, tmp_path, monkeypatch):
 
     worker._run()
 
-    assert list(out_dir.rglob("*.svg"))
-    assert not list(out_dir.rglob("*.png"))
+    svg_files = list(out_dir.rglob("*.svg"))
+    assert svg_files
+    png_files = list(out_dir.rglob("*.png"))
+    assert png_files
+    svg_stems = {path.with_suffix("").name for path in svg_files}
+    png_stems = {path.with_suffix("").name for path in png_files}
+    assert svg_stems == png_stems
