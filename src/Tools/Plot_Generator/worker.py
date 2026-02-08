@@ -1,9 +1,11 @@
 """Worker classes for the plot generator."""
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
+import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
@@ -29,6 +31,7 @@ from Tools.Plot_Generator.scalp_utils import (
 
 
 _PID_PATTERN = re.compile(r"(?:[A-Za-z]*)?(P\d+)", re.IGNORECASE)
+_LOGGER = logging.getLogger(__name__)
 
 
 def _infer_subject_id_from_path(excel_path: Path) -> str | None:
@@ -149,6 +152,31 @@ class _Worker(QObject):
 
     def _emit(self, msg: str, processed: int = 0, total: int = 0) -> None:
         self.progress.emit(msg, processed, total)
+
+    def _save_figure(
+        self,
+        fig: plt.Figure,
+        out_path: Path,
+        save_kwargs: dict[str, float | str],
+    ) -> None:
+        start = time.perf_counter()
+        try:
+            fig.savefig(out_path, **save_kwargs)
+        except (OSError, ValueError, RuntimeError) as exc:
+            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            self._emit(f"Failed saving {out_path.name}: {exc}")
+            _LOGGER.exception(
+                "SNR plot export failed (operation=%s project_root=%s output_path=%s "
+                "exception_type=%s error=%s elapsed_ms=%s)",
+                "snr_plot_export",
+                self.out_dir.resolve(),
+                out_path,
+                type(exc).__name__,
+                exc,
+                elapsed_ms,
+            )
+            return
+        self._emit(f"Saved {out_path.name}")
 
     def _selected_roi_names(self) -> List[str]:
         return list(self.roi_map.keys()) if self.selected_roi == ALL_ROIS_OPTION else [self.selected_roi]
@@ -778,13 +806,12 @@ class _Worker(QObject):
 
             if not has_scalp:
                 fig.tight_layout(rect=[0, 0, 1, 0.93])
-            fname = f"{self.condition}_{roi}_{self.metric}.png"
+            fname = f"{self.condition}_{roi}_{self.metric}.svg"
             save_kwargs = {"dpi": 300, "pad_inches": 0.05}
             if not has_scalp:
                 save_kwargs["bbox_inches"] = "tight"
-            fig.savefig(self.out_dir / fname, **save_kwargs)
+            self._save_figure(fig, self.out_dir / fname, save_kwargs)
             plt.close(fig)
-            self._emit(f"Saved {fname}")
 
     def _plot_overlay(
             self,
@@ -955,13 +982,8 @@ class _Worker(QObject):
                 # Keep a little room for suptitle, avoid tight_layout warnings with MNE axes.
                 fig.subplots_adjust(top=0.90)
 
-            fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
-            fig.savefig(
-                self.out_dir / fname,
-                dpi=300,
-                pad_inches=0.05,
-            )
+            fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.svg"
+            save_kwargs = {"dpi": 300, "pad_inches": 0.05}
+            self._save_figure(fig, self.out_dir / fname, save_kwargs)
             plt.close(fig)
-            self._emit(f"Saved {fname}")
-
 
