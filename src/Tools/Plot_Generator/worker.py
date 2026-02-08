@@ -177,6 +177,30 @@ class _Worker(QObject):
             )
             return
         self._emit(f"Saved {out_path.name}")
+        if out_path.suffix.lower() != ".svg":
+            return
+        png_path = out_path.with_suffix(".png")
+        start_png = time.perf_counter()
+        png_kwargs = dict(save_kwargs)
+        png_kwargs["format"] = "png"
+        try:
+            fig.savefig(png_path, **png_kwargs)
+        except (OSError, ValueError, RuntimeError) as exc:
+            elapsed_ms = int((time.perf_counter() - start_png) * 1000)
+            self._emit(f"PNG export failed for {out_path.stem}: {exc}")
+            _LOGGER.exception(
+                "SNR plot export failed (operation=%s svg_path=%s png_path=%s "
+                "project_root=%s exception_type=%s error=%s elapsed_ms=%s)",
+                "snr_plot_export_png",
+                out_path,
+                png_path,
+                self.out_dir.resolve(),
+                type(exc).__name__,
+                exc,
+                elapsed_ms,
+            )
+            return
+        self._emit(f"Saved {png_path.name}")
 
     def _selected_roi_names(self) -> List[str]:
         return list(self.roi_map.keys()) if self.selected_roi == ALL_ROIS_OPTION else [self.selected_roi]
@@ -986,4 +1010,3 @@ class _Worker(QObject):
             save_kwargs = {"dpi": 300, "pad_inches": 0.05}
             self._save_figure(fig, self.out_dir / fname, save_kwargs)
             plt.close(fig)
-
