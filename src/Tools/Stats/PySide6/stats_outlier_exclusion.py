@@ -31,6 +31,14 @@ OUTLIER_REASON_LABELS = {
     QC_REASON_MAXABS: "Unusually large peak response",
 }
 
+DISPLAY_FLAG_TYPE_LABELS = {
+    QC_REASON_MAXABS: "Large single-harmonic peak",
+    QC_REASON_SUMABS: "Large total response",
+    OUTLIER_REASON_LIMIT: "Exceeded DV hard cutoff",
+    OUTLIER_REASON_NONFINITE: "Invalid DV (NaN/Inf)",
+    OUTLIER_REASON_MANUAL: "Manually excluded",
+}
+
 OUTLIER_REASON_SENTENCE = {
     OUTLIER_REASON_LIMIT: "a DV value exceeded the hard cutoff (±{abs_limit:g})",
     OUTLIER_REASON_MAD: "DV values were unusually extreme compared to the group (robust rule)",
@@ -240,9 +248,43 @@ def _format_reason_sentence(reason: str, *, abs_limit: float) -> str:
 
 
 def outlier_reason_label(reason: str) -> str:
+    label = DISPLAY_FLAG_TYPE_LABELS.get(reason)
+    if label:
+        return label
     if reason in (QC_REASON_SUMABS, QC_REASON_MAXABS):
         return qc_metric_label(reason)
     return OUTLIER_REASON_LABELS.get(reason, str(reason))
+
+
+def format_flag_type_display(flag_type: str) -> str:
+    label = DISPLAY_FLAG_TYPE_LABELS.get(flag_type)
+    if label:
+        return label
+    return str(flag_type).replace("_", " ").title()
+
+
+def format_flag_types_display(flag_types: Iterable[str]) -> str:
+    labels = [format_flag_type_display(flag) for flag in flag_types if flag]
+    return ", ".join(labels)
+
+
+def format_worst_value_display(
+    flag_type: str | None,
+    value: float,
+    *,
+    dv_display_name: str | None = None,
+    dv_unit: str | None = None,
+) -> tuple[str, str | None]:
+    value_text = f"{value:.4f}" if np.isfinite(value) else "non-finite"
+    if flag_type in (QC_REASON_MAXABS, QC_REASON_SUMABS):
+        metric_label = (
+            "Max |ROI mean BCA|" if flag_type == QC_REASON_MAXABS else "Sum |ROI mean BCA|"
+        )
+        return f"{metric_label}: {value_text} µV", None
+    if dv_display_name:
+        unit_suffix = f" {dv_unit}" if dv_unit else ""
+        return f"DV ({dv_display_name}): {value_text}{unit_suffix}", None
+    return "DV: " + value_text, "DV type not provided by the analysis context."
 
 
 def format_dv_violation_detail(violation: DvViolation, *, abs_limit: float) -> str:

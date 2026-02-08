@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -106,6 +107,8 @@ from Tools.Stats.PySide6.stats_outlier_exclusion import (
     build_flagged_participants_tables,
     export_excluded_participants_report,
     export_flagged_participants_report,
+    format_flag_types_display,
+    format_worst_value_display,
 )
 from Tools.Stats.PySide6.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
 from Tools.Stats.PySide6.stats_qc_exclusion import (
@@ -1804,22 +1807,36 @@ class StatsWindow(QMainWindow):
                 self.append_log(section, f"Stats folder not found: {stats_folder}", "error")
 
     def _show_outlier_exclusion_dialog(self, pipeline_id: PipelineId) -> None:
+        dialog = self._build_flagged_participants_dialog(pipeline_id)
+        if dialog is None:
+            return
+        dialog.exec()
+
+    def _build_flagged_participants_dialog(self, pipeline_id: PipelineId) -> QDialog | None:
         report = self._pipeline_run_reports.get(pipeline_id)
         if not isinstance(report, StatsRunReport):
-            return
+            return None
 
         qc_report = report.qc_report
         dv_report = report.dv_report
         summary_df, details_df = build_flagged_participants_tables(qc_report, dv_report)
+        dv_meta = self._pipeline_dv_metadata.get(pipeline_id, {})
+        dv_display_name = dv_meta.get("dv_display_name") if isinstance(dv_meta, dict) else None
+        dv_unit = dv_meta.get("dv_unit") if isinstance(dv_meta, dict) else None
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Flagged Participants Report")
         dialog.setModal(True)
         layout = QVBoxLayout(dialog)
 
+        flag_count_definition = (
+            "Flag count = number of individual condition×ROI QC checks "
+            "(and/or DV cells) that triggered for this participant."
+        )
         summary_lines = [
             "QC scanned all conditions/ROIs in the project, independent of selections.",
             "Flagged Participants Summary",
+            flag_count_definition,
             f"Manual exclusions: {len(self.manual_excluded_pids)}",
             f"Required exclusions (non-finite DV): {len(report.required_exclusions)}",
             f"QC flagged: {qc_report.summary.n_subjects_flagged if qc_report else 0}",
@@ -1832,38 +1849,134 @@ class StatsWindow(QMainWindow):
         summary_box = QTextEdit()
         summary_box.setReadOnly(True)
         summary_box.setPlainText(summary_text)
-        summary_box.setMinimumHeight(140)
+        summary_box.setMinimumHeight(160)
         summary_box.setToolTip(
             "Summary of QC/DV flags and manual/required exclusions."
         )
         layout.addWidget(summary_box)
 
+        display_rows: list[dict[str, object]] = []
+        details_map: dict[str, str] = {}
         if not summary_df.empty:
             table = QTableWidget(summary_df.shape[0], 7)
             table.setHorizontalHeaderLabels(
                 [
-                    "participant_id",
-                    "flag_types",
-                    "n_flags",
-                    "worst_value",
-                    "worst_condition",
-                    "worst_roi",
-                    "reason_text",
+                    "Participant",
+                    "Flag types",
+                    "Flag count",
+                    "Worst value",
+                    "Condition",
+                    "ROI",
+                    "Explanation",
                 ]
             )
+            header = table.horizontalHeader()
+            for idx in range(6):
+                header.setSectionResizeMode(idx, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(6, QHeaderView.Stretch)
+            header.setStretchLastSection(True)
+            flag_count_header = table.horizontalHeaderItem(2)
+            if flag_count_header is not None:
+                flag_count_header.setToolTip(flag_count_definition)
+
             table.verticalHeader().setVisible(False)
             table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            table.setSelectionMode(QAbstractItemView.NoSelection)
+            table.setSelectionMode(QAbstractItemView.SingleSelection)
+            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setWordWrap(True)
+            table.setTextElideMode(Qt.ElideNone)
+
+            details_map = {
+                str(pid): "\n".join(
+                    [
+                        f"Flag types: {format_flag_types_display(group['flag_type'].tolist())}",
+                        "",
+                        "Violations:",
+                        *[
+                            f"- {format_flag_types_display([str(row['flag_type'])])}: "
+                            f"{row['reason_text']}"
+                            for _, row in group.iterrows()
+                        ],
+                    ]
+                )
+                for pid, group in details_df.groupby("participant_id", sort=True)
+            }
+
             for row, (_, item) in enumerate(summary_df.iterrows()):
-                table.setItem(row, 0, QTableWidgetItem(str(item["participant_id"])))
-                table.setItem(row, 1, QTableWidgetItem(str(item["flag_types"])))
-                table.setItem(row, 2, QTableWidgetItem(str(item["n_flags"])))
-                table.setItem(row, 3, QTableWidgetItem(str(item["worst_value"])))
-                table.setItem(row, 4, QTableWidgetItem(str(item["worst_condition"])))
-                table.setItem(row, 5, QTableWidgetItem(str(item["worst_roi"])))
-                table.setItem(row, 6, QTableWidgetItem(str(item["reason_text"])))
-            table.resizeColumnsToContents()
+                participant_id = str(item["participant_id"])
+                raw_flag_types = [flag.strip() for flag in str(item["flag_types"]).split(",") if flag]
+                flag_types_display = format_flag_types_display(raw_flag_types)
+                group = details_df[details_df["participant_id"] == participant_id]
+                worst_flag_type = raw_flag_types[0] if raw_flag_types else None
+                if not group.empty:
+                    match = group[
+                        (group["condition"] == item["worst_condition"])
+                        & (group["roi"] == item["worst_roi"])
+                        & (group["metric_value"] == item["worst_value"])
+                    ]
+                    if match.empty:
+                        match = group
+                    worst_flag_type = str(match.iloc[0]["flag_type"])
+
+                worst_value = item["worst_value"]
+                worst_value_float = float(worst_value) if pd.notna(worst_value) else float("nan")
+                worst_text, worst_tooltip = format_worst_value_display(
+                    worst_flag_type,
+                    worst_value_float,
+                    dv_display_name=dv_display_name if isinstance(dv_display_name, str) else None,
+                    dv_unit=dv_unit if isinstance(dv_unit, str) else None,
+                )
+                reason_text = str(item["reason_text"])
+                row_items = [
+                    QTableWidgetItem(participant_id),
+                    QTableWidgetItem(flag_types_display),
+                    QTableWidgetItem(str(item["n_flags"])),
+                    QTableWidgetItem(worst_text),
+                    QTableWidgetItem(str(item["worst_condition"])),
+                    QTableWidgetItem(str(item["worst_roi"])),
+                    QTableWidgetItem(reason_text),
+                ]
+                row_items[1].setToolTip(flag_types_display)
+                if worst_tooltip:
+                    row_items[3].setToolTip(worst_tooltip)
+                row_items[6].setToolTip(reason_text)
+                for col, cell in enumerate(row_items):
+                    table.setItem(row, col, cell)
+
+                display_rows.append(
+                    {
+                        "Participant": participant_id,
+                        "Flag types": flag_types_display,
+                        "Flag count": int(item["n_flags"]),
+                        "Worst value": worst_text,
+                        "Condition": str(item["worst_condition"]),
+                        "ROI": str(item["worst_roi"]),
+                        "Explanation": reason_text,
+                    }
+                )
+
+            table.resizeRowsToContents()
             layout.addWidget(table)
+
+            details_panel = QTextEdit()
+            details_panel.setReadOnly(True)
+            details_panel.setPlaceholderText("Select a participant to view full details.")
+            details_panel.setMinimumHeight(140)
+            layout.addWidget(details_panel)
+
+            def _update_details() -> None:
+                current = table.currentRow()
+                if current < 0:
+                    details_panel.clear()
+                    details_panel.setPlaceholderText("Select a participant to view full details.")
+                    return
+                pid_item = table.item(current, 0)
+                if pid_item is None:
+                    return
+                pid = str(pid_item.text())
+                details_panel.setPlainText(details_map.get(pid, ""))
+
+            table.itemSelectionChanged.connect(_update_details)
         else:
             layout.addWidget(QLabel("No participants were flagged."))
 
@@ -1884,17 +1997,29 @@ class StatsWindow(QMainWindow):
                 QGuiApplication.clipboard().setText(summary_text)
 
         def _copy_table() -> None:
-            if summary_df.empty:
+            if not display_rows:
                 return
-            QGuiApplication.clipboard().setText(summary_df.to_csv(sep="\t", index=False))
+            display_df = pd.DataFrame(
+                display_rows,
+                columns=[
+                    "Participant",
+                    "Flag types",
+                    "Flag count",
+                    "Worst value",
+                    "Condition",
+                    "ROI",
+                    "Explanation",
+                ],
+            )
+            QGuiApplication.clipboard().setText(display_df.to_csv(sep="\t", index=False))
 
         copy_summary_btn.clicked.connect(_copy_summary)
         copy_btn.clicked.connect(_copy_table)
-        copy_btn.setEnabled(not summary_df.empty)
+        copy_btn.setEnabled(bool(display_rows))
         edit_manual_btn.clicked.connect(self._open_manual_exclusion_dialog)
         close_btn.clicked.connect(dialog.accept)
 
-        dialog.exec()
+        return dialog
 
     def _export_single_pipeline(self) -> bool:
         section = "Single"

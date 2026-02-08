@@ -37,7 +37,7 @@ def test_manual_exclusion_dialog_flag_labels_and_tooltips(qtbot) -> None:
 
     item = dialog.list_widget.item(0)
     assert "QC_SUMABS" not in item.text()
-    assert "Unusually large total response" in item.text()
+    assert "Large total response" in item.text()
     assert item.toolTip() == "Flag details for P1"
 
 
