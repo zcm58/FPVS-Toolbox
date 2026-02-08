@@ -101,6 +101,7 @@ from Tools.Stats.PySide6.dv_policies import (
 )
 from Tools.Stats.PySide6.dv_variants import export_dv_variants_workbook
 from Tools.Stats.PySide6.stats_outlier_exclusion import (
+    build_flagged_details_map,
     collect_flagged_pid_map,
     build_flagged_participants_tables,
     export_excluded_participants_report,
@@ -508,6 +509,19 @@ class StatsWindow(QMainWindow):
             return {}
         return collect_flagged_pid_map(report.qc_report, report.dv_report)
 
+    def _current_flagged_details_map(self) -> dict[str, str]:
+        report = None
+        if self._active_pipeline is not None:
+            report = self._pipeline_run_reports.get(self._active_pipeline)
+        if report is None:
+            for item in self._pipeline_run_reports.values():
+                if item is not None:
+                    report = item
+                    break
+        if report is None:
+            return {}
+        return build_flagged_details_map(report.qc_report, report.dv_report)
+
     def _update_manual_exclusion_summary(self) -> None:
         excluded = sorted(self.manual_excluded_pids)
         self.manual_excluded_pids = set(excluded)
@@ -543,6 +557,7 @@ class StatsWindow(QMainWindow):
         dialog = ManualOutlierExclusionDialog(
             candidates=self._manual_exclusion_candidates,
             flagged_map=self._current_flagged_pid_map(),
+            flagged_details_map=self._current_flagged_details_map(),
             preselected=self.manual_excluded_pids,
             parent=self,
         )

@@ -13,6 +13,7 @@ from Tools.Stats.PySide6.stats_qc_exclusion import (
     QC_REASON_MAXABS,
     QC_REASON_SUMABS,
     QcExclusionReport,
+    qc_metric_label,
     format_qc_violation,
 )
 
@@ -21,19 +22,19 @@ OUTLIER_REASON_NONFINITE = "REQUIRED_EXCLUSION_NONFINITE"
 OUTLIER_REASON_MAD = "MAD_OUTLIER"
 OUTLIER_REASON_MANUAL = "MANUAL"
 
-OUTLIER_REASON_FRIENDLY = {
-    OUTLIER_REASON_LIMIT: "Exceeded hard cutoff (±{abs_limit:g} DV)",
-    OUTLIER_REASON_MAD: "Unusually extreme compared to the group (robust rule)",
-    OUTLIER_REASON_NONFINITE: "Required exclusion: non-finite DV value",
+OUTLIER_REASON_LABELS = {
+    OUTLIER_REASON_LIMIT: "DV exceeds hard limit",
+    OUTLIER_REASON_MAD: "Unusually extreme DV",
+    OUTLIER_REASON_NONFINITE: "Non-finite DV (required)",
     OUTLIER_REASON_MANUAL: "Manually excluded",
-    QC_REASON_SUMABS: "QC sum(|BCA|) robust outlier (threshold {threshold_used:.2f})",
-    QC_REASON_MAXABS: "QC max(|BCA|) robust outlier (threshold {threshold_used:.2f})",
+    QC_REASON_SUMABS: "Unusually large total response",
+    QC_REASON_MAXABS: "Unusually large peak response",
 }
 
 OUTLIER_REASON_SENTENCE = {
-    OUTLIER_REASON_LIMIT: "a value exceeded the hard cutoff (±{abs_limit:g} DV)",
-    OUTLIER_REASON_MAD: "values were unusually extreme compared to the group (robust rule)",
-    OUTLIER_REASON_NONFINITE: "a value was non-finite",
+    OUTLIER_REASON_LIMIT: "a DV value exceeded the hard cutoff (±{abs_limit:g})",
+    OUTLIER_REASON_MAD: "DV values were unusually extreme compared to the group (robust rule)",
+    OUTLIER_REASON_NONFINITE: "a DV value was non-finite (NaN/Inf)",
 }
 
 
@@ -65,6 +66,8 @@ class OutlierParticipantReport:
     worst_value: float
     worst_condition: str
     worst_roi: str
+    worst_metric: str | None = None
+    worst_severity: str | None = None
     robust_center: float | None = None
     robust_spread: float | None = None
     robust_score: float | None = None
@@ -183,6 +186,11 @@ def apply_hard_dv_exclusion(
                     worst_value=float(worst_row[value_col]),
                     worst_condition=str(worst_row[condition_col]),
                     worst_roi=str(worst_row[roi_col]),
+                    worst_metric=(
+                        OUTLIER_REASON_NONFINITE
+                        if not np.isfinite(float(worst_row[value_col]))
+                        else OUTLIER_REASON_LIMIT
+                    ),
                     violations=[f"DV cells={int(pid_violations.shape[0])}"],
                     dv_violations=dv_violations,
                     required_exclusion=str(pid) in required_exclusions,
@@ -209,12 +217,15 @@ def format_outlier_reason(
 ) -> str:
     if reason == OUTLIER_REASON_LIMIT:
         limit = abs_limit if abs_limit is not None else 0.0
-        return OUTLIER_REASON_FRIENDLY[reason].format(abs_limit=limit)
+        return f"DV exceeded the hard cutoff (±{limit:g})."
     if reason in (QC_REASON_SUMABS, QC_REASON_MAXABS):
         threshold = threshold_used if threshold_used is not None else 0.0
-        return OUTLIER_REASON_FRIENDLY[reason].format(threshold_used=threshold)
-    if reason in OUTLIER_REASON_FRIENDLY:
-        return OUTLIER_REASON_FRIENDLY[reason]
+        return (
+            f"{qc_metric_label(reason)} based on robust QC screening "
+            f"(threshold {threshold:.2f})."
+        )
+    if reason in OUTLIER_REASON_LABELS:
+        return f"{OUTLIER_REASON_LABELS[reason]}."
     return str(reason)
 
 
@@ -223,7 +234,26 @@ def _format_reason_sentence(reason: str, *, abs_limit: float) -> str:
         return OUTLIER_REASON_SENTENCE[reason].format(abs_limit=abs_limit)
     if reason in OUTLIER_REASON_SENTENCE:
         return OUTLIER_REASON_SENTENCE[reason]
+    if reason in (QC_REASON_SUMABS, QC_REASON_MAXABS):
+        return f"QC screening flagged {qc_metric_label(reason).lower()}"
     return str(reason)
+
+
+def outlier_reason_label(reason: str) -> str:
+    if reason in (QC_REASON_SUMABS, QC_REASON_MAXABS):
+        return qc_metric_label(reason)
+    return OUTLIER_REASON_LABELS.get(reason, str(reason))
+
+
+def format_dv_violation_detail(violation: DvViolation, *, abs_limit: float) -> str:
+    value = violation.value
+    value_text = f"{value:.2f}" if np.isfinite(value) else "non-finite"
+    reason_text = format_outlier_reason(violation.reason, abs_limit=abs_limit)
+    return (
+        f"{outlier_reason_label(violation.reason)}\n"
+        f"Condition: {violation.condition}, ROI: {violation.roi}, value: {value_text}\n"
+        f"{reason_text}"
+    )
 
 
 def _join_reason_sentences(clauses: list[str]) -> str:
@@ -267,6 +297,8 @@ def build_outlier_summary_text(report: OutlierExclusionReport) -> str:
     abs_limit = float(summary.abs_limit)
     lines = [
         "QC screened all conditions/ROIs in the project, independent of selections.",
+        "Flagged for review does not automatically exclude participants.",
+        "Only non-finite DV values (NaN/Inf) are automatically excluded.",
         "Outlier Flag Summary",
         f"Participants flagged: {summary.n_subjects_flagged} (of {summary.n_subjects_before})",
         f"Required exclusions (non-finite DV): {summary.n_subjects_required_excluded}",
@@ -289,14 +321,17 @@ def build_outlier_summary_text(report: OutlierExclusionReport) -> str:
             else:
                 reason_clauses.append(_format_reason_sentence(reason, abs_limit=abs_limit))
         reason_sentence = _join_reason_sentences(reason_clauses)
+        worst_metric = participant.worst_metric
+        metric_label = outlier_reason_label(worst_metric) if worst_metric else "DV value"
+        severity_text = (
+            f" ({participant.worst_severity})" if participant.worst_severity else ""
+        )
         worst_value = participant.worst_value
-        if np.isfinite(worst_value):
-            worst_text = f"{worst_value:.2f}"
-        else:
-            worst_text = "non-finite"
+        worst_text = f"{worst_value:.2f}" if np.isfinite(worst_value) else "non-finite"
         lines.append(
             f"{participant.participant_id} was flagged because {reason_sentence}. "
-            f"Worst value: {worst_text} DV ({participant.worst_condition}, {participant.worst_roi})."
+            f"Worst metric: {metric_label}{severity_text}. "
+            f"Worst value: {worst_text} ({participant.worst_condition}, {participant.worst_roi})."
         )
 
     return "\n".join(lines)
@@ -341,6 +376,7 @@ def merge_exclusion_reports(
 
     for qc_participant in qc_report.participants:
         qc_violations = [format_qc_violation(v) for v in qc_participant.violations]
+        worst_violation = max(qc_participant.violations, key=lambda v: abs(v.value))
         qc_entry = OutlierParticipantReport(
             participant_id=qc_participant.participant_id,
             reasons=qc_participant.reasons,
@@ -349,6 +385,8 @@ def merge_exclusion_reports(
             worst_value=qc_participant.worst_value,
             worst_condition=qc_participant.worst_condition,
             worst_roi=qc_participant.worst_roi,
+            worst_metric=worst_violation.metric,
+            worst_severity=worst_violation.severity,
             robust_center=qc_participant.robust_center,
             robust_spread=qc_participant.robust_spread,
             robust_score=qc_participant.robust_score,
@@ -375,6 +413,8 @@ def merge_exclusion_reports(
             worst_value=qc_entry.worst_value if use_qc_worst else existing.worst_value,
             worst_condition=qc_entry.worst_condition if use_qc_worst else existing.worst_condition,
             worst_roi=qc_entry.worst_roi if use_qc_worst else existing.worst_roi,
+            worst_metric=qc_entry.worst_metric if use_qc_worst else existing.worst_metric,
+            worst_severity=qc_entry.worst_severity if use_qc_worst else existing.worst_severity,
             robust_center=qc_entry.robust_center if use_qc_worst else existing.robust_center,
             robust_spread=qc_entry.robust_spread if use_qc_worst else existing.robust_spread,
             robust_score=qc_entry.robust_score if use_qc_worst else existing.robust_score,
@@ -432,6 +472,27 @@ def collect_flagged_pid_map(
         for participant in dv_report.participants:
             flagged.setdefault(participant.participant_id, set()).update(participant.reasons)
     return {pid: sorted(reasons) for pid, reasons in flagged.items()}
+
+
+def build_flagged_details_map(
+    qc_report: QcExclusionReport | None,
+    dv_report: OutlierExclusionReport | None,
+) -> dict[str, str]:
+    details: dict[str, list[str]] = {}
+    if qc_report:
+        for participant in qc_report.participants:
+            for violation in participant.violations:
+                details.setdefault(participant.participant_id, []).append(
+                    format_qc_violation(violation)
+                )
+    if dv_report:
+        abs_limit = float(dv_report.summary.abs_limit)
+        for participant in dv_report.participants:
+            for violation in participant.dv_violations:
+                details.setdefault(participant.participant_id, []).append(
+                    format_dv_violation_detail(violation, abs_limit=abs_limit)
+                )
+    return {pid: "\n\n".join(lines) for pid, lines in details.items()}
 
 
 def _qc_threshold_metadata(qc_report: QcExclusionReport | None) -> dict[str, float]:

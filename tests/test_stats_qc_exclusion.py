@@ -4,7 +4,13 @@ import pandas as pd
 
 from Tools.Stats.Legacy import excel_io
 from Tools.Stats.PySide6.dv_policies import prepare_summed_bca_data
-from Tools.Stats.PySide6.stats_qc_exclusion import QC_REASON_MAXABS, run_qc_exclusion
+from Tools.Stats.PySide6.stats_qc_exclusion import (
+    QC_REASON_MAXABS,
+    QC_REASON_SUMABS,
+    QcViolation,
+    format_qc_violation,
+    run_qc_exclusion,
+)
 
 
 def _make_bca_df(max_value: float) -> pd.DataFrame:
@@ -68,3 +74,29 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch) -> None:
     assert dv_data is not None
     assert set(dv_data.keys()) == set(subject_data.keys())
     assert set(dv_data["P1"].keys()) == {"A"}
+
+
+def test_format_qc_violation_is_human_readable() -> None:
+    violation = QcViolation(
+        condition="CondA",
+        roi="ROI1",
+        metric=QC_REASON_SUMABS,
+        severity="WARNING",
+        value=12.34,
+        robust_center=1.23,
+        robust_spread=0.45,
+        robust_score=7.89,
+        threshold_used=6.0,
+        abs_floor_used=5.0,
+        trigger_harmonic_hz=12.0,
+        roi_mean_bca_at_trigger=0.1234,
+    )
+
+    text = format_qc_violation(violation)
+
+    assert "Unusually large total response" in text
+    assert "Condition: CondA" in text
+    assert "ROI: ROI1" in text
+    assert "value: 12.3400" in text
+    assert "Robust score: 7.890" in text
+    assert "threshold 6.00" in text
