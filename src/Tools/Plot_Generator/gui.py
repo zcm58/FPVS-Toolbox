@@ -1208,9 +1208,9 @@ class PlotGeneratorWindow(QWidget):
         images = []
         try:
             if self._all_conditions:
-                images = list(Path(out_dir).rglob("*.png"))
+                images = list(Path(out_dir).rglob("*.svg"))
             else:
-                images = list(Path(out_dir).glob("*.png"))
+                images = list(Path(out_dir).glob("*.svg"))
         except Exception:
             pass
         if images:
