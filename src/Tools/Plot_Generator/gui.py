@@ -1,6 +1,7 @@
 """GUI elements for the plot generator."""
 from __future__ import annotations
 
+import logging
 import os
 import json
 import subprocess
@@ -41,7 +42,9 @@ from Main_App import SettingsManager
 from Main_App.PySide6_App.Backend.project import (
     EXCEL_SUBFOLDER_NAME,
     SNR_SUBFOLDER_NAME,
+    Project,
 )
+from Main_App.PySide6_App.Backend.project_metadata import read_project_metadata
 from Tools.Stats.Legacy.stats_helpers import load_rois_from_settings
 from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION
 from Tools.Plot_Generator.manifest_utils import (
@@ -54,6 +57,11 @@ from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from .worker import _Worker
 
 ALL_CONDITIONS_OPTION = "All Conditions"
+_LEGEND_LABELS_KEY_PATH = ("tools", "snr_plot", "legend_labels")
+_LEGEND_DEFAULT_A_PEAKS = "A-Peaks"
+_LEGEND_DEFAULT_B_PEAKS = "B-Peaks"
+
+logger = logging.getLogger(__name__)
 
 
 def _auto_detect_project_dir() -> Path:
@@ -205,6 +213,8 @@ class PlotGeneratorWindow(QWidget):
         self.include_scalp_maps = self.plot_mgr.include_scalp_maps()
         self.scalp_title_a_template = self.plot_mgr.get_scalp_title_a_template()
         self.scalp_title_b_template = self.plot_mgr.get_scalp_title_b_template()
+        self._project_root: Path | None = None
+        self._project: Project | None = None
 
 
         project_dir_path: Path | None = None
@@ -219,8 +229,12 @@ class PlotGeneratorWindow(QWidget):
                 cand = _auto_detect_project_dir()
                 if (cand / "project.json").is_file():
                     project_dir_path = cand
+        if proj and hasattr(proj, "project_root"):
+            self._project = proj
+            self._project_root = Path(proj.project_root)
 
         if project_dir_path is not None:
+            self._project_root = project_dir_path
             try:
                 results_folder, subfolders = _load_manifest(project_dir_path)
                 default_in = str(
@@ -283,6 +297,8 @@ class PlotGeneratorWindow(QWidget):
 
         self._build_ui()
         self._update_selector_columns(self.overlay_check.isChecked())
+        self._load_legend_settings()
+        self._update_legend_group_visibility()
         # Prepare animation for smooth progress updates
         self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
         self._progress_anim.setDuration(200)
@@ -321,6 +337,166 @@ class PlotGeneratorWindow(QWidget):
         font.setBold(True)
         label.setFont(font)
         return label
+
+    def _legend_default_values(self) -> dict[str, str]:
+        return {
+            "condition_a_label": self.condition_combo.currentText().strip(),
+            "condition_b_label": self.condition_b_combo.currentText().strip(),
+            "a_peaks_label": _LEGEND_DEFAULT_A_PEAKS,
+            "b_peaks_label": _LEGEND_DEFAULT_B_PEAKS,
+        }
+
+    def _legend_settings_payload(self) -> dict[str, object]:
+        return {
+            "custom_labels_enabled": self.legend_custom_check.isChecked(),
+            "condition_a_label": self.legend_condition_a_edit.text(),
+            "condition_b_label": self.legend_condition_b_edit.text(),
+            "a_peaks_label": self.legend_a_peaks_edit.text(),
+            "b_peaks_label": self.legend_b_peaks_edit.text(),
+        }
+
+    def _update_legend_group_visibility(self) -> None:
+        show = self.overlay_check.isChecked()
+        self.legend_group.setVisible(show)
+        if show and self.legend_custom_check.isChecked():
+            self._prefill_legend_defaults_if_empty()
+
+    def _prefill_legend_defaults_if_empty(self) -> None:
+        defaults = self._legend_default_values()
+        if not self.legend_condition_a_edit.text().strip():
+            self.legend_condition_a_edit.setText(defaults["condition_a_label"])
+        if not self.legend_condition_b_edit.text().strip():
+            self.legend_condition_b_edit.setText(defaults["condition_b_label"])
+        if not self.legend_a_peaks_edit.text().strip():
+            self.legend_a_peaks_edit.setText(defaults["a_peaks_label"])
+        if not self.legend_b_peaks_edit.text().strip():
+            self.legend_b_peaks_edit.setText(defaults["b_peaks_label"])
+
+    def _toggle_custom_legend_labels(self, checked: bool) -> None:
+        self.legend_condition_a_edit.setEnabled(checked)
+        self.legend_condition_b_edit.setEnabled(checked)
+        self.legend_a_peaks_edit.setEnabled(checked)
+        self.legend_b_peaks_edit.setEnabled(checked)
+        if checked:
+            self._prefill_legend_defaults_if_empty()
+        if not self._ui_initializing:
+            self._persist_legend_settings()
+
+    def _reset_legend_defaults(self) -> None:
+        defaults = self._legend_default_values()
+        self.legend_custom_check.setChecked(False)
+        self.legend_condition_a_edit.setText(defaults["condition_a_label"])
+        self.legend_condition_b_edit.setText(defaults["condition_b_label"])
+        self.legend_a_peaks_edit.setText(defaults["a_peaks_label"])
+        self.legend_b_peaks_edit.setText(defaults["b_peaks_label"])
+        self.legend_condition_a_edit.setEnabled(False)
+        self.legend_condition_b_edit.setEnabled(False)
+        self.legend_a_peaks_edit.setEnabled(False)
+        self.legend_b_peaks_edit.setEnabled(False)
+        if not self._ui_initializing:
+            self._persist_legend_settings()
+
+    def _load_legend_settings(self) -> None:
+        if self._project is None and self._project_root:
+            try:
+                metadata = read_project_metadata(self._project_root)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to read project metadata for legend settings.",
+                    exc_info=exc,
+                    extra={
+                        "operation": "snr_plot_project_metadata",
+                        "project_root": str(self._project_root),
+                    },
+                )
+            else:
+                if metadata.parse_error:
+                    self._append_log(
+                        "Project settings could not be read (invalid JSON). Using defaults."
+                    )
+                    logger.warning(
+                        "Invalid project.json detected; using defaults.",
+                        extra={
+                            "operation": "snr_plot_project_metadata",
+                            "project_root": str(self._project_root),
+                        },
+                    )
+            try:
+                self._project = Project.load(self._project_root)
+            except Exception as exc:
+                self._append_log(
+                    "Unable to load project settings. Legend label settings will not persist."
+                )
+                logger.warning(
+                    "Failed to load project for legend settings.",
+                    exc_info=exc,
+                    extra={
+                        "operation": "snr_plot_project_load",
+                        "project_root": str(self._project_root),
+                    },
+                )
+                self._project = None
+
+        defaults = self._legend_default_values()
+        labels: dict[str, object] = {}
+        if self._project is not None:
+            tools_section = self._project.manifest.get("tools", {})
+            if isinstance(tools_section, dict):
+                snr_section = tools_section.get("snr_plot", {})
+                if isinstance(snr_section, dict):
+                    labels = snr_section.get("legend_labels", {})
+        if not isinstance(labels, dict):
+            labels = {}
+        self.legend_custom_check.setChecked(bool(labels.get("custom_labels_enabled", False)))
+        self.legend_condition_a_edit.setText(
+            str(labels.get("condition_a_label", defaults["condition_a_label"]))
+        )
+        self.legend_condition_b_edit.setText(
+            str(labels.get("condition_b_label", defaults["condition_b_label"]))
+        )
+        self.legend_a_peaks_edit.setText(
+            str(labels.get("a_peaks_label", defaults["a_peaks_label"]))
+        )
+        self.legend_b_peaks_edit.setText(
+            str(labels.get("b_peaks_label", defaults["b_peaks_label"]))
+        )
+        self._toggle_custom_legend_labels(self.legend_custom_check.isChecked())
+
+    def _persist_legend_settings(self) -> None:
+        if self._ui_initializing:
+            return
+        if self._project is None:
+            logger.info(
+                "Legend label settings changed without active project; skipping persistence.",
+                extra={
+                    "operation": "snr_plot_legend_persist",
+                    "project_root": str(self._project_root) if self._project_root else None,
+                },
+            )
+            return
+        data = self._legend_settings_payload()
+        manifest = self._project.manifest
+        cursor = manifest
+        for key in _LEGEND_LABELS_KEY_PATH:
+            if key not in cursor or not isinstance(cursor.get(key), dict):
+                cursor[key] = {}
+            cursor = cursor[key]
+        cursor.clear()
+        cursor.update(data)
+        try:
+            self._project.save()
+        except Exception as exc:
+            self._append_log(
+                "Failed to save legend label settings to project.json."
+            )
+            logger.warning(
+                "Failed to persist legend label settings.",
+                exc_info=exc,
+                extra={
+                    "operation": "snr_plot_legend_persist",
+                    "project_root": str(self._project.project_root),
+                },
+            )
 
     def _toggle_scalp_controls(self, checked: bool) -> None:
         if not hasattr(self, "scalp_min_spin"):
@@ -615,6 +791,51 @@ class PlotGeneratorWindow(QWidget):
 
         params_form.addRow("", overlay_row)
 
+        self.legend_group = QGroupBox("Legend labels (optional)")
+        self._style_box(self.legend_group)
+        legend_layout = QVBoxLayout(self.legend_group)
+        legend_layout.setContentsMargins(6, 6, 6, 6)
+        legend_layout.setSpacing(6)
+        self.legend_custom_check = QCheckBox("Custom legend labels")
+        self.legend_custom_check.toggled.connect(self._toggle_custom_legend_labels)
+        legend_layout.addWidget(self.legend_custom_check)
+
+        legend_form = QFormLayout()
+        legend_form.setContentsMargins(0, 0, 0, 0)
+        legend_form.setSpacing(6)
+        legend_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        legend_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.legend_condition_a_edit = QLineEdit()
+        self.legend_condition_a_edit.setPlaceholderText("Condition A label")
+        self.legend_condition_a_edit.setEnabled(False)
+        self.legend_condition_a_edit.textChanged.connect(self._persist_legend_settings)
+        legend_form.addRow(QLabel("Condition A label:"), self.legend_condition_a_edit)
+
+        self.legend_condition_b_edit = QLineEdit()
+        self.legend_condition_b_edit.setPlaceholderText("Condition B label")
+        self.legend_condition_b_edit.setEnabled(False)
+        self.legend_condition_b_edit.textChanged.connect(self._persist_legend_settings)
+        legend_form.addRow(QLabel("Condition B label:"), self.legend_condition_b_edit)
+
+        self.legend_a_peaks_edit = QLineEdit()
+        self.legend_a_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_A_PEAKS)
+        self.legend_a_peaks_edit.setEnabled(False)
+        self.legend_a_peaks_edit.textChanged.connect(self._persist_legend_settings)
+        legend_form.addRow(QLabel("A-Peaks label:"), self.legend_a_peaks_edit)
+
+        self.legend_b_peaks_edit = QLineEdit()
+        self.legend_b_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_B_PEAKS)
+        self.legend_b_peaks_edit.setEnabled(False)
+        self.legend_b_peaks_edit.textChanged.connect(self._persist_legend_settings)
+        legend_form.addRow(QLabel("B-Peaks label:"), self.legend_b_peaks_edit)
+
+        legend_layout.addLayout(legend_form)
+        self.legend_reset_btn = QPushButton("Reset to defaults")
+        self.legend_reset_btn.clicked.connect(self._reset_legend_defaults)
+        legend_layout.addWidget(self.legend_reset_btn, alignment=Qt.AlignRight)
+        params_form.addRow(self.legend_group)
+
         self.group_box = QGroupBox("Group Options")
         self._style_box(self.group_box)
         group_layout = QVBoxLayout(self.group_box)
@@ -902,6 +1123,7 @@ class PlotGeneratorWindow(QWidget):
                 self.group_list.setEnabled(self.group_overlay_check.isChecked())
         self._update_scalp_title_b_visibility()
         self._update_scalp_title_warnings()
+        self._update_legend_group_visibility()
 
     def _on_group_overlay_toggled(self, checked: bool) -> None:
         self.group_list.setEnabled(checked)
@@ -947,6 +1169,8 @@ class PlotGeneratorWindow(QWidget):
         self._update_chart_title_state(condition)
         if not (self._ui_initializing or self._populating_conditions):
             self.scalp_title_a_edit.clear()
+        if self.legend_custom_check.isChecked() and self.overlay_check.isChecked():
+            self._prefill_legend_defaults_if_empty()
         self._update_scalp_title_warnings()
         self._check_required()
 
@@ -954,6 +1178,8 @@ class PlotGeneratorWindow(QWidget):
         _ = condition  # unused value required by signal signature
         if not (self._ui_initializing or self._populating_conditions):
             self.scalp_title_b_edit.clear()
+        if self.legend_custom_check.isChecked() and self.overlay_check.isChecked():
+            self._prefill_legend_defaults_if_empty()
         self._update_scalp_title_warnings()
         self._check_required()
 
@@ -1230,135 +1456,165 @@ class PlotGeneratorWindow(QWidget):
             )
 
     def _generate(self) -> None:
-        folder = self.folder_edit.text()
-        if not folder:
-            QMessageBox.critical(self, "Error", "Select a folder first.")
-            return
-
-        out_dir = self.out_edit.text()
-        if not out_dir:
-            QMessageBox.critical(self, "Error", "Select an output folder first.")
-            return
-
-        if not self.condition_combo.currentText():
-            QMessageBox.critical(self, "Error", "No condition selected.")
-            return
+        log_context = {
+            "operation": "snr_plot_generate",
+            "project_root": str(self._project_root) if self._project_root else None,
+            "compare_two_conditions": self.overlay_check.isChecked(),
+            "custom_labels_enabled": self.legend_custom_check.isChecked(),
+        }
+        logger.info("SNR plot generation started.", extra=log_context)
         try:
-            x_min = self.xmin_spin.value()
-            x_max = self.xmax_spin.value()
-            y_min = self.ymin_spin.value()
-            y_max = self.ymax_spin.value()
-        except ValueError:
-            QMessageBox.critical(self, "Error", "Invalid axis limits.")
-            return
-
-        include_scalp = self.scalp_check.isChecked()
-        scalp_min = self.scalp_min_spin.value()
-        scalp_max = self.scalp_max_spin.value()
-
-        if include_scalp:
-            if not self.scalp_title_a_edit.text().strip():
-                QMessageBox.warning(
-                    self,
-                    "Scalp Title",
-                    "Please enter a scalp title for Condition A.",
-                )
-                return
-            if self.overlay_check.isChecked() and not self.scalp_title_b_edit.text().strip():
-                QMessageBox.warning(
-                    self,
-                    "Scalp Title",
-                    "Please enter a scalp title for Condition B.",
-                )
+            folder = self.folder_edit.text()
+            if not folder:
+                QMessageBox.critical(self, "Error", "Select a folder first.")
                 return
 
-        overlay_groups = self._group_overlay_enabled()
-        selected_groups = self._selected_groups() if overlay_groups else []
-        if overlay_groups and not selected_groups:
-            QMessageBox.warning(
-                self,
-                "Group Overlay",
-                "Select at least one group before plotting.",
+            out_dir = self.out_edit.text()
+            if not out_dir:
+                QMessageBox.critical(self, "Error", "Select an output folder first.")
+                return
+
+            if not self.condition_combo.currentText():
+                QMessageBox.critical(self, "Error", "No condition selected.")
+                return
+            try:
+                x_min = self.xmin_spin.value()
+                x_max = self.xmax_spin.value()
+                y_min = self.ymin_spin.value()
+                y_max = self.ymax_spin.value()
+            except ValueError:
+                QMessageBox.critical(self, "Error", "Invalid axis limits.")
+                return
+
+            include_scalp = self.scalp_check.isChecked()
+            scalp_min = self.scalp_min_spin.value()
+            scalp_max = self.scalp_max_spin.value()
+
+            if include_scalp:
+                if not self.scalp_title_a_edit.text().strip():
+                    QMessageBox.warning(
+                        self,
+                        "Scalp Title",
+                        "Please enter a scalp title for Condition A.",
+                    )
+                    return
+                if (
+                    self.overlay_check.isChecked()
+                    and not self.scalp_title_b_edit.text().strip()
+                ):
+                    QMessageBox.warning(
+                        self,
+                        "Scalp Title",
+                        "Please enter a scalp title for Condition B.",
+                    )
+                    return
+
+            overlay_groups = self._group_overlay_enabled()
+            selected_groups = self._selected_groups() if overlay_groups else []
+            if overlay_groups and not selected_groups:
+                QMessageBox.warning(
+                    self,
+                    "Group Overlay",
+                    "Select at least one group before plotting.",
+                )
+                self.gen_btn.setEnabled(True)
+                self.cancel_btn.setEnabled(False)
+                return
+            group_kwargs = self._group_worker_kwargs(overlay_groups, selected_groups)
+            self._persist_scalp_settings(save=True)
+
+            self.gen_btn.setEnabled(False)
+            self.cancel_btn.setEnabled(True)
+            self.log.clear()
+            self._animate_progress_to(0)
+            if self.overlay_check.isChecked():
+                cond_a = self.condition_combo.currentText()
+                cond_b = self.condition_b_combo.currentText()
+                if cond_a == cond_b:
+                    QMessageBox.critical(self, "Error", "Select two different conditions.")
+                    self.gen_btn.setEnabled(True)
+                    self.cancel_btn.setEnabled(False)
+                    return
+                legend_payload = self._legend_settings_payload()
+                self._thread = QThread()
+                self._worker = _Worker(
+                    folder,
+                    cond_a,
+                    self.roi_map,
+                    self.roi_combo.currentText(),
+                    self.title_edit.text(),
+                    self.xlabel_edit.text(),
+                    self.ylabel_edit.text(),
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
+                    out_dir,
+                    self.stem_color,
+                    condition_b=cond_b,
+                    stem_color_b=self.stem_color_b,
+                    overlay=True,
+                    include_scalp_maps=include_scalp,
+                    scalp_vmin=scalp_min,
+                    scalp_vmax=scalp_max,
+                    scalp_title_a_template=self.scalp_title_a_edit.text(),
+                    scalp_title_b_template=self.scalp_title_b_edit.text(),
+                    legend_custom_enabled=bool(legend_payload["custom_labels_enabled"]),
+                    legend_condition_a=str(legend_payload["condition_a_label"]),
+                    legend_condition_b=str(legend_payload["condition_b_label"]),
+                    legend_a_peaks=str(legend_payload["a_peaks_label"]),
+                    legend_b_peaks=str(legend_payload["b_peaks_label"]),
+                    project_root=(
+                        str(self._project_root) if self._project_root else None
+                    ),
+                    **group_kwargs,
+                )
+                self._worker.moveToThread(self._thread)
+                self._thread.started.connect(self._worker.run)
+                self._worker.progress.connect(self._on_progress)
+                self._worker.finished.connect(self._thread.quit)
+                self._worker.finished.connect(self._worker.deleteLater)
+                self._thread.finished.connect(self._thread.deleteLater)
+                self._thread.finished.connect(self._finish_all)
+                self._thread.start()
+            else:
+                self._all_conditions = (
+                    self.condition_combo.currentText() == ALL_CONDITIONS_OPTION
+                )
+                if self._all_conditions:
+                    self._conditions_queue = [
+                        self.condition_combo.itemText(i)
+                        for i in range(1, self.condition_combo.count())
+                    ]
+                else:
+                    self._conditions_queue = [self.condition_combo.currentText()]
+                self._total_conditions = len(self._conditions_queue)
+                self._current_condition = 0
+                self._gen_params = (
+                    folder,
+                    out_dir,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
+                    group_kwargs.copy(),
+                    include_scalp,
+                    scalp_min,
+                    scalp_max,
+                    self.scalp_title_a_edit.text(),
+                    self.scalp_title_b_edit.text(),
+                )
+                self._start_next_condition()
+        except Exception as exc:
+            self._append_log("SNR plot generation failed. See logs for details.")
+            logger.error(
+                "SNR plot generation failed.",
+                exc_info=exc,
+                extra=log_context,
             )
             self.gen_btn.setEnabled(True)
             self.cancel_btn.setEnabled(False)
             return
-        group_kwargs = self._group_worker_kwargs(overlay_groups, selected_groups)
-        self._persist_scalp_settings(save=True)
-
-        self.gen_btn.setEnabled(False)
-        self.cancel_btn.setEnabled(True)
-        self.log.clear()
-        self._animate_progress_to(0)
-        if self.overlay_check.isChecked():
-            cond_a = self.condition_combo.currentText()
-            cond_b = self.condition_b_combo.currentText()
-            if cond_a == cond_b:
-                QMessageBox.critical(self, "Error", "Select two different conditions.")
-                self.gen_btn.setEnabled(True)
-                self.cancel_btn.setEnabled(False)
-                return
-            self._thread = QThread()
-            self._worker = _Worker(
-                folder,
-                cond_a,
-                self.roi_map,
-                self.roi_combo.currentText(),
-                self.title_edit.text(),
-                self.xlabel_edit.text(),
-                self.ylabel_edit.text(),
-                x_min,
-                x_max,
-                y_min,
-                y_max,
-                out_dir,
-                self.stem_color,
-                condition_b=cond_b,
-                stem_color_b=self.stem_color_b,
-                overlay=True,
-                include_scalp_maps=include_scalp,
-                scalp_vmin=scalp_min,
-                scalp_vmax=scalp_max,
-                scalp_title_a_template=self.scalp_title_a_edit.text(),
-                scalp_title_b_template=self.scalp_title_b_edit.text(),
-                **group_kwargs,
-            )
-            self._worker.moveToThread(self._thread)
-            self._thread.started.connect(self._worker.run)
-            self._worker.progress.connect(self._on_progress)
-            self._worker.finished.connect(self._thread.quit)
-            self._worker.finished.connect(self._worker.deleteLater)
-            self._thread.finished.connect(self._thread.deleteLater)
-            self._thread.finished.connect(self._finish_all)
-            self._thread.start()
-        else:
-            self._all_conditions = (
-                self.condition_combo.currentText() == ALL_CONDITIONS_OPTION
-            )
-            if self._all_conditions:
-                self._conditions_queue = [
-                    self.condition_combo.itemText(i)
-                    for i in range(1, self.condition_combo.count())
-                ]
-            else:
-                self._conditions_queue = [self.condition_combo.currentText()]
-            self._total_conditions = len(self._conditions_queue)
-            self._current_condition = 0
-            self._gen_params = (
-                folder,
-                out_dir,
-                x_min,
-                x_max,
-                y_min,
-                y_max,
-                group_kwargs.copy(),
-                include_scalp,
-                scalp_min,
-                scalp_max,
-                self.scalp_title_a_edit.text(),
-                self.scalp_title_b_edit.text(),
-            )
-            self._start_next_condition()
 
     def _open_settings(self) -> None:
         dlg = _SettingsDialog(self, self.stem_color, self.stem_color_b)

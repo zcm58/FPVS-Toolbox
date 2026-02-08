@@ -16,13 +16,12 @@ Key behaviors:
   - Grid is flexible: fixed number of columns, rows added as needed.
   - SNR y-axis is fixed to [0, 2] for interpretability across all figures.
   - Reference lines: vertical at 0 Hz and horizontal at SNR=1.
-  - Output: 600 DPI PNG, landscape-style figure sizing.
+  - Output: SVG (vector) for publication-quality figures.
   - Output location: user selects an output folder; condition subfolders are created.
   - QOL: at completion, attempts to open the output folder in the OS file explorer.
   - UI: folder selection uses PySide6 only (no tkinter) to support later toolbox integration.
-  - UI: after conditions are selected, a PySide6 popup lets you set per-condition:
-        (a) the figure title (rendered in Times New Roman), and
-        (b) the output filename stem (Windows-safe). This is intended for manuscripts/thesis use.
+  - UI: after conditions are selected, a PySide6 popup lets you set per-condition output
+        filename stems (Windows-safe). Captions/titles are added in the document, not here.
 
 -------------------------------------------------------------------------------
 CRITICAL NOTE ABOUT TOPO MAP PLOTTING (DO NOT MODIFY WITHOUT TESTING)
@@ -58,14 +57,11 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
 
-try:
-    from statsmodels.stats.multitest import multipletests  # type: ignore
+# NOTE: SciPy is intentionally NOT imported in this script.
+# The normal CDF is computed via erf to avoid heavy SciPy DLL loads in ProcessPool workers.
 
-    HAVE_STATSMODELS = True
-except Exception:
-    HAVE_STATSMODELS = False
+HAVE_STATSMODELS = False  # intentionally disabled (use internal BH-FDR implementation)
 
 if TYPE_CHECKING:
     import matplotlib as mpl
@@ -90,9 +86,13 @@ FDR_ALPHA: float = 0.05
 HALF_WINDOW_HZ: float = 0.2
 SNR_REF_LINE: float = 1.0
 
-# FIXED SNR Y-AXIS (requested)
+# FIXED SNR Y-AXIS
 SNR_YMAX_FIXED: float = 2.0  # always set ylim to [0, 2]
 SNR_YMIN_FIXED: float = 0.0  # set to 0.4 if you want the paper-like baseline
+
+# Reduce clutter for dense grids (helps avoid label overlap at high column counts)
+SNR_SHOW_MID_XTICK: bool = False  # if True: [-w, -w/2, 0, w/2, w]; else: [-w, 0, w]
+SNR_XLABEL: str = "Rel. freq (Hz)"  # shortened to avoid overlap in tight grids
 
 # Excel sheet + column names (must match your exports)
 SHEET_Z: str = "Z Score"
@@ -103,19 +103,19 @@ ELECTRODE_COL: str = "Electrode"
 MONTAGE_NAME: str = "biosemi64"
 
 # Grid layout
-GRID_NCOLS: int = 5
+GRID_NCOLS: int = 8
 CELL_W_IN: float = 2.8
 CELL_H_IN: float = 2.35
 WSPACE: float = 0.25
-HSPACE: float = 0.70  # increased vertical spacing (requested)
+HSPACE: float = 0.70  # vertical spacing
 
 # Letter portrait layout (Word-friendly)
 USE_LETTER_PORTRAIT: bool = True
 LETTER_W_IN: float = 8.5
 LETTER_H_IN: float = 11.0
 PAGE_MARGIN_IN: float = 0.35
-TITLE_BAND_IN: float = 0.55        # reserved space above grid
-COLORBAR_BAND_IN: float = 0.75     # reserved space below grid (bar + labels)
+TITLE_BAND_IN: float = 0.55        # reserved space above grid (kept for stable layout)
+COLORBAR_BAND_IN: float = 0.75     # reserved space below grid (bar + label)
 
 # Colorbar (centered, not full-width)
 COLORBAR_WIDTH_FRAC: float = 0.55
@@ -124,7 +124,7 @@ COLORBAR_BOTTOM_FRAC: float = 0.06
 
 # Output format
 FIG_DPI: int = 600
-FIG_FORMAT: str = "png"
+FIG_FORMAT: str = "svg"
 
 # Styling
 TITLE_FONTSIZE: int = 14
@@ -149,6 +149,14 @@ _SNR_WINDOWS = [(h - HALF_WINDOW_HZ - 1e-12, h + HALF_WINDOW_HZ + 1e-12) for h i
 
 _WORKER_NAME_TO_IDX: Optional[Dict[str, int]] = None
 _WORKER_N_CHANNELS: Optional[int] = None
+
+_ERF_VEC = np.vectorize(math.erf, otypes=[float])
+
+
+def _norm_cdf(x: np.ndarray) -> np.ndarray:
+    """Normal(0,1) CDF computed via erf (SciPy-free)."""
+    x_arr = np.asarray(x, dtype=float)
+    return 0.5 * (1.0 + _ERF_VEC(x_arr / math.sqrt(2.0)))
 
 
 def _sanitize_filename(name: str) -> str:
@@ -313,13 +321,9 @@ def _compute_electrode_zcomb_and_mask(df_z: pd.DataFrame) -> Tuple[List[str], np
     sig = z_comb >= Z_THRESHOLD
 
     if USE_BH_FDR:
-        p_one = 1.0 - norm.cdf(z_comb)  # one-tailed positive direction
-        if HAVE_STATSMODELS:
-            reject, _, _, _ = multipletests(p_one, alpha=FDR_ALPHA, method="fdr_bh")
-            sig = sig & reject.astype(bool)
-        else:
-            reject = _bh_fdr_reject(p_one, alpha=FDR_ALPHA)
-            sig = sig & reject.astype(bool)
+        p_one = 1.0 - _norm_cdf(z_comb)  # one-tailed positive direction
+        reject = _bh_fdr_reject(p_one, alpha=FDR_ALPHA)
+        sig = sig & reject.astype(bool)
 
     return electrodes_raw, z_comb.astype(float), sig.astype(bool)
 
@@ -350,7 +354,6 @@ def _build_topomap_vector_finite(
     """
     vec = np.full((n_channels,), float(Z_THRESHOLD), dtype=float)
 
-    mapped_total = 0
     mapped_sig = 0
     missing_labels: List[str] = []
 
@@ -360,7 +363,6 @@ def _build_topomap_vector_finite(
         if idx is None:
             missing_labels.append(el)
             continue
-        mapped_total += 1
         if bool(ok):
             vec[idx] = float(zc)
             mapped_sig += 1
@@ -377,7 +379,6 @@ def _build_topomap_vector_finite(
                 f"  examples: {prev}\n"
             )
 
-        # If you have sig electrodes but none mapped (shouldn't happen if labels match)
         if int(np.sum(sig_mask)) > 0 and mapped_sig == 0:
             raise RuntimeError(
                 "Topomap mapping failure: n_sig > 0 but mapped_sig == 0.\n"
@@ -430,7 +431,6 @@ def _compute_centered_snr_curve(
         rel = in_win - f
         rel_round = np.round(rel, 4)
 
-        # Match pandas behavior: duplicate index would later fail during reindex.
         if rel_round.size != np.unique(rel_round).size:
             raise ValueError("Duplicate relative-frequency bins after rounding; cannot reindex reliably.")
 
@@ -506,7 +506,6 @@ def _plot_topomap_compat(
     """MNE topomap wrapper compatible with multiple MNE versions."""
     import mne
 
-    # Show faint sensor dots when supported (paper-like appearance).
     sensor_kwargs = {
         "marker": ".",
         "markersize": 2,
@@ -584,17 +583,8 @@ def plot_condition_grid(
     results: List["ParticipantResult"],
     info: "mne.io.Info",
     out_file: Path,
-    *,
-    fig_title: Optional[str] = None,
 ) -> None:
-    """
-    Save a landscape grid figure for one condition.
-
-    fig_title behavior:
-      - None: use legacy default "{condition}: Individual-level detectability"
-      - "" (or whitespace): omit the suptitle entirely (useful for manuscripts)
-      - otherwise: use provided title (rendered in Times New Roman)
-    """
+    """Save a grid figure for one condition (no figure title; captions handled in the document)."""
     if not results:
         return
 
@@ -608,7 +598,6 @@ def plot_condition_grid(
 
     plt.rcParams.update(
         {
-            # Manuscript-friendly typography on Windows (fallbacks included).
             "font.family": "serif",
             "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
             "font.size": 10,
@@ -638,18 +627,14 @@ def plot_condition_grid(
             hspace=HSPACE,
             wspace=WSPACE,
         )
-        suptitle_y = top + (1.0 - top) * 0.72
     else:
         fig_w = ncols * CELL_W_IN
         fig_h = nrows * CELL_H_IN
         fig = plt.figure(figsize=(fig_w, fig_h))
         gs = fig.add_gridspec(nrows=2 * nrows, ncols=ncols, hspace=HSPACE, wspace=WSPACE)
-        suptitle_y = 0.985
 
-    # Thresholded colormap so vmin renders as white (robust to clipping)
     cmap = _make_thresholded_cmap("YlOrRd", white_frac=0.08)
 
-    # Shared topomap scale
     vmax = float(max(np.max(r.z_topo) for r in results_sorted))
     vmin = float(Z_THRESHOLD)
     if not np.isfinite(vmax) or vmax <= vmin:
@@ -657,7 +642,6 @@ def plot_condition_grid(
 
     snr_ymax = float(SNR_YMAX_FIXED)
 
-    # Place the "SNR" ylabel on the first visible SNR axis per row (even if col 0 is n=0)
     row_ylabel_set: List[bool] = [False for _ in range(nrows)]
 
     for i in range(nrows * ncols):
@@ -676,7 +660,6 @@ def plot_condition_grid(
 
         _plot_topomap_compat(r.z_topo, info, ax_topo, cmap, vmin=vmin, vmax=vmax)
 
-        # Paper-like labeling: subject above head; n below head
         ax_topo.set_title(f"{r.pid}", fontsize=PANEL_TITLE_FONTSIZE, pad=2)
         ax_topo.text(
             0.5,
@@ -688,7 +671,6 @@ def plot_condition_grid(
             fontsize=PANEL_TITLE_FONTSIZE,
         )
 
-        # Hide the entire SNR panel when no significant electrodes (matches published style)
         if r.n_sig <= 0 or r.snr_rel_x is None or r.snr_rel_y is None:
             ax_snr.axis("off")
             continue
@@ -699,15 +681,21 @@ def plot_condition_grid(
 
         ax_snr.set_xlim(-HALF_WINDOW_HZ, HALF_WINDOW_HZ)
         ax_snr.set_ylim(float(SNR_YMIN_FIXED), snr_ymax)
-        ax_snr.set_xticks(
-            [
-                -HALF_WINDOW_HZ,
-                -HALF_WINDOW_HZ / 2.0,
-                0.0,
-                HALF_WINDOW_HZ / 2.0,
-                HALF_WINDOW_HZ,
-            ]
-        )
+
+        if SNR_SHOW_MID_XTICK:
+            ax_snr.set_xticks(
+                [
+                    -HALF_WINDOW_HZ,
+                    -HALF_WINDOW_HZ / 2.0,
+                    0.0,
+                    HALF_WINDOW_HZ / 2.0,
+                    HALF_WINDOW_HZ,
+                ]
+            )
+        else:
+            ax_snr.set_xticks([-HALF_WINDOW_HZ, 0.0, HALF_WINDOW_HZ])
+            ax_snr.set_xticklabels([f"{-HALF_WINDOW_HZ:.1f}", "0", f"{HALF_WINDOW_HZ:.1f}"])
+
         ax_snr.tick_params(labelsize=TICK_FONTSIZE)
 
         for spine in ["top", "right"]:
@@ -721,31 +709,15 @@ def plot_condition_grid(
             ax_snr.set_yticklabels([])
 
         if rr == nrows - 1:
-            ax_snr.set_xlabel("Relative frequency (Hz)", fontsize=AXIS_LABEL_FONTSIZE)
+            ax_snr.set_xlabel(SNR_XLABEL, fontsize=AXIS_LABEL_FONTSIZE, labelpad=1)
         else:
             ax_snr.set_xlabel("")
             ax_snr.set_xticklabels([])
 
-    # Figure title (Times New Roman)
-    if fig_title is None:
-        title_text = f"{condition}: Individual-level detectability"
-    else:
-        title_text = str(fig_title)
-
-    if title_text.strip():
-        fig.suptitle(
-            title_text,
-            fontsize=TITLE_FONTSIZE,
-            y=float(suptitle_y),
-            fontname="Times New Roman",
-        )
-
-    # NOTE: In Letter mode we use gridspec bounds (left/right/top/bottom).
-    # In non-letter mode we keep the legacy layout.
     if not USE_LETTER_PORTRAIT:
         fig.subplots_adjust(left=0.04, right=0.99, top=0.90, bottom=0.18)
 
-    # Centered colorbar
+    # Centered colorbar (no numeric ticks; label is "Z-Score")
     cbar_w = float(COLORBAR_WIDTH_FRAC)
     cbar_h = float(COLORBAR_HEIGHT_FRAC)
     cbar_left = (1.0 - cbar_w) / 2.0
@@ -760,16 +732,12 @@ def plot_condition_grid(
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=mpl.colors.Normalize(vmin=vmin, vmax=vmax))
     sm.set_array([])
     cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
-    cb.ax.tick_params(labelsize=TICK_FONTSIZE)
-    cb.set_label(
-        f"Z_comb (Stouffer); white: Z < {Z_THRESHOLD:.2f}",
-        fontsize=AXIS_LABEL_FONTSIZE,
-        labelpad=4,
-    )
+    cb.set_ticks([])
+    cb.ax.tick_params(length=0)
+    cb.set_label("Z-Score", fontsize=AXIS_LABEL_FONTSIZE, labelpad=4)
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # In Letter mode, avoid bbox_inches="tight" so the physical size remains 8.5x11 inches at save time.
     if USE_LETTER_PORTRAIT:
         fig.savefig(out_file, dpi=FIG_DPI, format=FIG_FORMAT)
     else:
@@ -798,16 +766,13 @@ def _select_directory_pyside6(title: str) -> Optional[Path]:
     return Path(directory)
 
 
-def _collect_figure_naming_pyside6(
-    cond_names: Sequence[str],
-) -> Optional[Dict[str, Tuple[str, str]]]:
+def _collect_filename_stems_pyside6(cond_names: Sequence[str]) -> Optional[Dict[str, str]]:
     """
     Show a PySide6 dialog to set per-condition:
-      - figure title (printed on the figure in Times New Roman)
       - output filename stem (extension added later; sanitized for Windows)
 
     Returns:
-      dict: condition -> (fig_title, file_stem)
+      dict: condition -> stem
       None if cancelled.
     """
     _ensure_qapplication()
@@ -827,20 +792,19 @@ def _collect_figure_naming_pyside6(
     class _Dlg(QDialog):
         def __init__(self, names: Sequence[str]) -> None:
             super().__init__(None)
-            self.setWindowTitle("Figure titles & filenames")
+            self.setWindowTitle("Output filenames")
 
             lay = QVBoxLayout(self)
             msg = QLabel(
-                "Set the title and output filename for each condition.\n"
-                "• Title renders in Times New Roman on the exported figure.\n"
-                "• Leave Title blank to omit a title (useful for manuscripts).\n"
-                "• Filename is sanitized for Windows; extension is added automatically."
+                "Set the output filename (no extension) for each condition.\n"
+                "• Filename is sanitized for Windows; extension is added automatically.\n"
+                "• Figure titles/captions should be added in the document (not in the exported figure)."
             )
             msg.setWordWrap(True)
             lay.addWidget(msg)
 
-            self.table = QTableWidget(len(names), 3, self)
-            self.table.setHorizontalHeaderLabels(["Condition", "Figure title", "Output filename (no extension)"])
+            self.table = QTableWidget(len(names), 2, self)
+            self.table.setHorizontalHeaderLabels(["Condition", "Output filename (no extension)"])
             self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
             self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             self.table.setEditTriggers(
@@ -850,18 +814,14 @@ def _collect_figure_naming_pyside6(
             hdr = self.table.horizontalHeader()
             hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
             hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
 
             for r, c in enumerate(names):
                 it0 = QTableWidgetItem(str(c))
                 it0.setFlags(it0.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, 0, it0)
 
-                default_title = f"{c}: Individual-level detectability"
-                self.table.setItem(r, 1, QTableWidgetItem(default_title))
-
                 default_stem = f"{_sanitize_filename(str(c))}_individual_detectability_grid"
-                self.table.setItem(r, 2, QTableWidgetItem(default_stem))
+                self.table.setItem(r, 1, QTableWidgetItem(default_stem))
 
             lay.addWidget(self.table)
 
@@ -870,21 +830,18 @@ def _collect_figure_naming_pyside6(
             bb.rejected.connect(self.reject)
             lay.addWidget(bb)
 
-        def values(self) -> Dict[str, Tuple[str, str]]:
-            out: Dict[str, Tuple[str, str]] = {}
+        def values(self) -> Dict[str, str]:
+            out: Dict[str, str] = {}
             for r in range(self.table.rowCount()):
                 cond = (self.table.item(r, 0).text() if self.table.item(r, 0) else "").strip()
-                title = (self.table.item(r, 1).text() if self.table.item(r, 1) else "").strip()
-                stem = (self.table.item(r, 2).text() if self.table.item(r, 2) else "").strip()
+                stem = (self.table.item(r, 1).text() if self.table.item(r, 1) else "").strip()
 
-                # Allow blank title to mean "no suptitle".
-                # If stem is blank, fall back to a stable default.
                 if stem.strip():
                     stem_clean = _sanitize_filename(stem)
                 else:
                     stem_clean = f"{_sanitize_filename(cond)}_individual_detectability_grid"
 
-                out[cond] = (title, stem_clean)
+                out[cond] = stem_clean
             return out
 
     names_list = [str(x) for x in cond_names]
@@ -906,7 +863,6 @@ def _open_folder_in_explorer(folder: Path) -> None:
     except Exception:
         pass
 
-    # fallback (no tkinter; acceptable OS-level behavior)
     try:
         if sys.platform.startswith("win"):
             os.startfile(str(folder))  # type: ignore[attr-defined]
@@ -1026,11 +982,10 @@ def main() -> None:
             print("None of the entered condition names matched. Exiting.")
             return
 
-    # Per-condition figure naming (PySide6)
     chosen_names = list(cond_map.keys())
-    naming = _collect_figure_naming_pyside6(chosen_names)
-    if naming is None:
-        print("Figure naming cancelled. Exiting.")
+    stems = _collect_filename_stems_pyside6(chosen_names)
+    if stems is None:
+        print("Filename selection cancelled. Exiting.")
         return
 
     with open(log_path, "w", encoding="utf-8") as log:
@@ -1043,10 +998,14 @@ def main() -> None:
         log.write(f"SNR_YMAX_FIXED: {SNR_YMAX_FIXED}\n")
         log.write(f"Statsmodels available: {HAVE_STATSMODELS}\n")
         log.write(f"Output: {FIG_FORMAT.upper()} @ {FIG_DPI} dpi\n")
-        log.write("Figure naming: PySide6 per-condition titles + filenames\n")
+        log.write("Figure titles: disabled (captions/titles added in document)\n")
+        log.write("Filename stems: PySide6 per-condition\n")
         for cond in chosen_names:
-            title, stem = naming.get(cond, ("", ""))
-            log.write(f"  - {cond} | title='{title}' | stem='{stem}'\n")
+            stem = stems.get(cond, "")
+            log.write(f"  - {cond} | stem='{stem}'\n")
+        log.write(f"GRID_NCOLS: {GRID_NCOLS}\n")
+        log.write(f"SNR_XLABEL: {SNR_XLABEL}\n")
+        log.write(f"SNR_SHOW_MID_XTICK: {SNR_SHOW_MID_XTICK}\n")
         log.write(f"DEBUG: {DEBUG}\n\n")
 
         with ProcessPoolExecutor(initializer=_init_worker, initargs=(name_to_idx, len(info.ch_names))) as ex:
@@ -1076,7 +1035,6 @@ def main() -> None:
                             tb=traceback.format_exc(),
                         )
 
-                # Preserve existing behavior: handle in filename-sorted order
                 for xlsx in files:
                     outcome = outcomes_by_name.get(xlsx.name)
                     if outcome is None:
@@ -1110,16 +1068,13 @@ def main() -> None:
                         cond_log_lines.append(f"FAIL: {xlsx.name} | {err}\n{tb}\n")
 
                 if cond_results:
-                    fig_title, stem = naming.get(
-                        condition,
-                        ("", f"{_sanitize_filename(condition)}_individual_detectability_grid"),
-                    )
+                    stem = stems.get(condition, f"{_sanitize_filename(condition)}_individual_detectability_grid")
                     if not stem.strip():
                         stem = f"{_sanitize_filename(condition)}_individual_detectability_grid"
 
                     out_name = f"{_sanitize_filename(stem)}.{FIG_FORMAT}"
                     out_file = cond_out_dir / out_name
-                    plot_condition_grid(condition, cond_results, info, out_file, fig_title=fig_title)
+                    plot_condition_grid(condition, cond_results, info, out_file)
                     print(f"  Saved: {out_file}")
                 else:
                     print("  No usable files for this condition.")
