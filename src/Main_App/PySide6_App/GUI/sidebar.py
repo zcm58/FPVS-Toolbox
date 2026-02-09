@@ -17,8 +17,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
 )
 
-from Main_App.PySide6_App.GUI.ratio_calculator_launcher import open_ratio_calculator
-
 # ---- Tunables -------------------------------------------------------------
 ICON_PX = 20          # normalize all icons to the same visual size
 ROW_MIN_HEIGHT = 40   # total button height (card)
@@ -207,14 +205,6 @@ def init_sidebar(self) -> None:
 
     make_button(lay, "btn_image", "Image Resizer", "camera-photo", self.open_image_resizer)
     make_button(lay, "btn_epoch", "Epoch Averaging", "view-refresh", self.open_epoch_averaging)
-    make_button(
-        lay,
-        "btn_ratio",
-        "Ratio Calculator",
-        chart_icon(),
-        lambda: open_ratio_calculator(self),
-    )
-
     # Divider
     divider = QFrame()
     divider.setFrameShape(QFrame.HLine)
