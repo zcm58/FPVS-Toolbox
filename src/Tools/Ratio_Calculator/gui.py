@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QThread, Qt
+from PySide6.QtCore import QSignalBlocker, QThread, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -38,6 +38,7 @@ from .worker import RatioCalculatorWorker
 from .utils import parse_participant_id
 
 PID_PATTERN = re.compile(r"^P\d+$", re.IGNORECASE)
+CUSTOM_CONDITION_OPTION = "Custom path"
 
 
 class RatioCalculatorWindow(QWidget):
@@ -52,6 +53,11 @@ class RatioCalculatorWindow(QWidget):
         self._thread: Optional[QThread] = None
         self._worker: Optional[RatioCalculatorWorker] = None
         self._output_dir: Optional[Path] = None
+        self._condition_paths: dict[str, Path] = {}
+        self._label_a_dirty = False
+        self._label_b_dirty = False
+        self._run_label_dirty = False
+        self._loading_participants = False
 
         main_layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -66,6 +72,8 @@ class RatioCalculatorWindow(QWidget):
         main_layout.addWidget(self.tabs)
         main_layout.addWidget(self._build_bottom_panel())
 
+        self._refresh_conditions()
+        self._set_default_output()
         self._update_run_state()
 
     def _resolve_project_root(self, provided_root: str | None) -> Optional[Path]:
@@ -91,47 +99,108 @@ class RatioCalculatorWindow(QWidget):
         cond_group = QGroupBox("Conditions")
         cond_layout = QGridLayout(cond_group)
 
+        action_row = QHBoxLayout()
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self._refresh_conditions)
+        self.swap_btn = QPushButton("Swap A/B")
+        self.swap_btn.clicked.connect(self._swap_conditions)
+        action_row.addWidget(self.refresh_btn)
+        action_row.addWidget(self.swap_btn)
+        action_row.addStretch(1)
+
+        self.condition_a_combo = QComboBox()
+        self.condition_a_combo.currentTextChanged.connect(self._on_condition_a_selected)
+
         self.input_a_edit = QLineEdit()
+        self.input_a_edit.setReadOnly(True)
         self.input_a_edit.setPlaceholderText("Select condition A folder")
+        self.input_a_open_btn = QPushButton("Open")
+        self.input_a_open_btn.clicked.connect(lambda: self._open_folder_from_edit(self.input_a_edit))
         self.input_a_btn = QPushButton("Browse…")
-        self.input_a_btn.clicked.connect(lambda: self._browse_folder(self.input_a_edit, is_output=False))
+        self.input_a_btn.clicked.connect(
+            lambda: self._browse_folder(self.input_a_edit, is_output=False, condition_key="a")
+        )
 
         self.label_a_edit = QLineEdit()
         self.label_a_edit.setPlaceholderText("Condition A label")
+        self.label_a_edit.textEdited.connect(self._mark_label_a_dirty)
+        self.label_a_edit.textChanged.connect(self._on_label_text_changed)
+
+        self.condition_b_combo = QComboBox()
+        self.condition_b_combo.currentTextChanged.connect(self._on_condition_b_selected)
 
         self.input_b_edit = QLineEdit()
+        self.input_b_edit.setReadOnly(True)
         self.input_b_edit.setPlaceholderText("Select condition B folder")
+        self.input_b_open_btn = QPushButton("Open")
+        self.input_b_open_btn.clicked.connect(lambda: self._open_folder_from_edit(self.input_b_edit))
         self.input_b_btn = QPushButton("Browse…")
-        self.input_b_btn.clicked.connect(lambda: self._browse_folder(self.input_b_edit, is_output=False))
+        self.input_b_btn.clicked.connect(
+            lambda: self._browse_folder(self.input_b_edit, is_output=False, condition_key="b")
+        )
 
         self.label_b_edit = QLineEdit()
         self.label_b_edit.setPlaceholderText("Condition B label")
+        self.label_b_edit.textEdited.connect(self._mark_label_b_dirty)
+        self.label_b_edit.textChanged.connect(self._on_label_text_changed)
 
         self.output_edit = QLineEdit()
+        self.output_edit.setReadOnly(True)
         self.output_edit.setPlaceholderText("Select output folder")
+        self.output_open_btn = QPushButton("Open")
+        self.output_open_btn.clicked.connect(lambda: self._open_folder_from_edit(self.output_edit))
         self.output_btn = QPushButton("Browse…")
         self.output_btn.clicked.connect(lambda: self._browse_folder(self.output_edit, is_output=True))
 
         self.run_label_edit = QLineEdit()
         self.run_label_edit.setPlaceholderText("Run label")
+        self.run_label_edit.textEdited.connect(self._mark_run_label_dirty)
 
-        cond_layout.addWidget(QLabel("Condition A Folder"), 0, 0)
-        cond_layout.addWidget(self.input_a_edit, 0, 1)
-        cond_layout.addWidget(self.input_a_btn, 0, 2)
-        cond_layout.addWidget(QLabel("Condition A Label"), 1, 0)
-        cond_layout.addWidget(self.label_a_edit, 1, 1, 1, 2)
+        a_path_btns = QWidget()
+        a_path_layout = QHBoxLayout(a_path_btns)
+        a_path_layout.setContentsMargins(0, 0, 0, 0)
+        a_path_layout.addWidget(self.input_a_open_btn)
+        a_path_layout.addWidget(self.input_a_btn)
 
-        cond_layout.addWidget(QLabel("Condition B Folder"), 2, 0)
-        cond_layout.addWidget(self.input_b_edit, 2, 1)
-        cond_layout.addWidget(self.input_b_btn, 2, 2)
-        cond_layout.addWidget(QLabel("Condition B Label"), 3, 0)
-        cond_layout.addWidget(self.label_b_edit, 3, 1, 1, 2)
+        b_path_btns = QWidget()
+        b_path_layout = QHBoxLayout(b_path_btns)
+        b_path_layout.setContentsMargins(0, 0, 0, 0)
+        b_path_layout.addWidget(self.input_b_open_btn)
+        b_path_layout.addWidget(self.input_b_btn)
 
-        cond_layout.addWidget(QLabel("Output Folder"), 4, 0)
-        cond_layout.addWidget(self.output_edit, 4, 1)
-        cond_layout.addWidget(self.output_btn, 4, 2)
-        cond_layout.addWidget(QLabel("Run Label"), 5, 0)
-        cond_layout.addWidget(self.run_label_edit, 5, 1, 1, 2)
+        out_path_btns = QWidget()
+        out_path_layout = QHBoxLayout(out_path_btns)
+        out_path_layout.setContentsMargins(0, 0, 0, 0)
+        out_path_layout.addWidget(self.output_open_btn)
+        out_path_layout.addWidget(self.output_btn)
+
+        self.validation_label = QLabel("")
+        self.validation_label.setWordWrap(True)
+        self.validation_label.setStyleSheet("color: #b00020;")
+
+        cond_layout.addWidget(QLabel("Condition A"), 0, 0)
+        cond_layout.addWidget(self.condition_a_combo, 0, 1)
+        cond_layout.addLayout(action_row, 0, 2)
+        cond_layout.addWidget(QLabel("Condition A Folder"), 1, 0)
+        cond_layout.addWidget(self.input_a_edit, 1, 1)
+        cond_layout.addWidget(a_path_btns, 1, 2)
+        cond_layout.addWidget(QLabel("Condition A Label"), 2, 0)
+        cond_layout.addWidget(self.label_a_edit, 2, 1, 1, 2)
+
+        cond_layout.addWidget(QLabel("Condition B"), 3, 0)
+        cond_layout.addWidget(self.condition_b_combo, 3, 1)
+        cond_layout.addWidget(QLabel("Condition B Folder"), 4, 0)
+        cond_layout.addWidget(self.input_b_edit, 4, 1)
+        cond_layout.addWidget(b_path_btns, 4, 2)
+        cond_layout.addWidget(QLabel("Condition B Label"), 5, 0)
+        cond_layout.addWidget(self.label_b_edit, 5, 1, 1, 2)
+
+        cond_layout.addWidget(QLabel("Output Folder"), 6, 0)
+        cond_layout.addWidget(self.output_edit, 6, 1)
+        cond_layout.addWidget(out_path_btns, 6, 2)
+        cond_layout.addWidget(QLabel("Run Label"), 7, 0)
+        cond_layout.addWidget(self.run_label_edit, 7, 1, 1, 2)
+        cond_layout.addWidget(self.validation_label, 8, 0, 1, 3)
 
         layout.addWidget(cond_group)
 
@@ -146,12 +215,26 @@ class RatioCalculatorWindow(QWidget):
         load_row.addStretch(1)
         participants_layout.addLayout(load_row)
 
+        filter_row = QHBoxLayout()
+        self.participant_filter_edit = QLineEdit()
+        self.participant_filter_edit.setPlaceholderText("Search participants...")
+        self.participant_filter_edit.textChanged.connect(self._apply_participant_filter)
+        self.show_excluded_check = QCheckBox("Show only excluded")
+        self.show_excluded_check.toggled.connect(self._apply_participant_filter)
+        filter_row.addWidget(self.participant_filter_edit)
+        filter_row.addWidget(self.show_excluded_check)
+        filter_row.addStretch(1)
+        participants_layout.addLayout(filter_row)
+
         self.exclude_list = QListWidget()
         self.exclude_list.setSelectionMode(QListWidget.NoSelection)
         self.exclude_list.itemChanged.connect(self._update_exclusion_status)
         participants_layout.addWidget(self.exclude_list)
 
         self.exclusion_status = QLabel("Excluded: 0 / Paired: 0 \u2192 Used: 0")
+        exclusion_font = self.exclusion_status.font()
+        exclusion_font.setBold(True)
+        self.exclusion_status.setFont(exclusion_font)
         participants_layout.addWidget(self.exclusion_status)
 
         button_row = QHBoxLayout()
@@ -200,6 +283,159 @@ class RatioCalculatorWindow(QWidget):
             self.run_label_edit,
         ]:
             widget.textChanged.connect(self._update_run_state)
+
+    def _mark_label_a_dirty(self) -> None:
+        self._label_a_dirty = True
+
+    def _mark_label_b_dirty(self) -> None:
+        self._label_b_dirty = True
+
+    def _mark_run_label_dirty(self) -> None:
+        self._run_label_dirty = True
+
+    def _on_label_text_changed(self) -> None:
+        self._update_run_label_default()
+
+    def _update_run_label_default(self) -> None:
+        if self._run_label_dirty:
+            return
+        label_a = self.label_a_edit.text().strip()
+        label_b = self.label_b_edit.text().strip()
+        if label_a and label_b:
+            with QSignalBlocker(self.run_label_edit):
+                self.run_label_edit.setText(f"{label_a} vs {label_b}")
+
+    def _excel_root(self) -> Optional[Path]:
+        if not self._project_root:
+            return None
+        return self._project_root / "1 - Excel Data Files"
+
+    def _set_default_output(self) -> None:
+        if self.output_edit.text().strip():
+            return
+        if self._project_root:
+            default_out = self._project_root / "5 - Ratio Summaries"
+            self._set_path_display(self.output_edit, str(default_out))
+
+    def _set_path_display(self, edit: QLineEdit, path: str) -> None:
+        edit.setText(path)
+        edit.setToolTip(path)
+
+    def _scan_condition_folders(self, excel_root: Path) -> list[Path]:
+        if not excel_root.exists():
+            return []
+        folders: list[Path] = []
+        for child in sorted(excel_root.iterdir(), key=lambda p: p.name.lower()):
+            if not child.is_dir():
+                continue
+            if any(
+                fp.suffix.lower() == ".xlsx" and not fp.name.startswith("~$")
+                for fp in child.glob("*.xlsx")
+            ):
+                folders.append(child)
+        return folders
+
+    def _refresh_conditions(self) -> None:
+        excel_root = self._excel_root()
+        condition_paths: dict[str, Path] = {}
+        if excel_root:
+            for folder in self._scan_condition_folders(excel_root):
+                condition_paths[folder.name] = folder
+        self._condition_paths = condition_paths
+
+        self._populate_condition_combo(self.condition_a_combo, self.input_a_edit)
+        self._populate_condition_combo(self.condition_b_combo, self.input_b_edit)
+        if (
+            len(self._condition_paths) > 1
+            and self.condition_a_combo.currentText() == self.condition_b_combo.currentText()
+        ):
+            second = list(self._condition_paths.keys())[1]
+            with QSignalBlocker(self.condition_b_combo):
+                self.condition_b_combo.setCurrentText(second)
+            self._apply_condition_selection(second, is_a=False)
+        self._update_run_state()
+
+    def _populate_condition_combo(self, combo: QComboBox, edit: QLineEdit) -> None:
+        current_path = edit.text().strip()
+        current_match = None
+        if current_path:
+            for name, folder in self._condition_paths.items():
+                if folder.resolve() == Path(current_path).resolve():
+                    current_match = name
+                    break
+
+        with QSignalBlocker(combo):
+            combo.clear()
+            combo.addItems(self._condition_paths.keys())
+            combo.addItem(CUSTOM_CONDITION_OPTION)
+            if current_match:
+                combo.setCurrentText(current_match)
+            elif self._condition_paths:
+                combo.setCurrentText(next(iter(self._condition_paths.keys())))
+            else:
+                combo.setCurrentText(CUSTOM_CONDITION_OPTION)
+
+        selected = combo.currentText()
+        if selected in self._condition_paths:
+            self._set_path_display(edit, str(self._condition_paths[selected]))
+            self._set_condition_labels_from_folder(selected, combo is self.condition_a_combo)
+
+    def _set_condition_labels_from_folder(self, folder_name: str, is_a: bool) -> None:
+        if is_a:
+            if not self._label_a_dirty:
+                with QSignalBlocker(self.label_a_edit):
+                    self.label_a_edit.setText(folder_name)
+        else:
+            if not self._label_b_dirty:
+                with QSignalBlocker(self.label_b_edit):
+                    self.label_b_edit.setText(folder_name)
+        self._update_run_label_default()
+
+    def _on_condition_a_selected(self, condition: str) -> None:
+        self._apply_condition_selection(condition, is_a=True)
+
+    def _on_condition_b_selected(self, condition: str) -> None:
+        self._apply_condition_selection(condition, is_a=False)
+
+    def _apply_condition_selection(self, condition: str, is_a: bool) -> None:
+        if condition == CUSTOM_CONDITION_OPTION:
+            self._update_run_state()
+            return
+
+        target_edit = self.input_a_edit if is_a else self.input_b_edit
+        selected_path = self._condition_paths.get(condition)
+        if selected_path:
+            self._set_path_display(target_edit, str(selected_path))
+            self._set_condition_labels_from_folder(condition, is_a)
+            self._last_dir = selected_path
+        self._maybe_autoload_participants()
+        self._update_run_state()
+
+    def _swap_conditions(self) -> None:
+        a_path = self.input_a_edit.text()
+        b_path = self.input_b_edit.text()
+        a_label = self.label_a_edit.text()
+        b_label = self.label_b_edit.text()
+        a_combo = self.condition_a_combo.currentText()
+        b_combo = self.condition_b_combo.currentText()
+        a_dirty = self._label_a_dirty
+        b_dirty = self._label_b_dirty
+
+        with QSignalBlocker(self.condition_a_combo), QSignalBlocker(self.condition_b_combo):
+            self.condition_a_combo.setCurrentText(b_combo)
+            self.condition_b_combo.setCurrentText(a_combo)
+
+        self._set_path_display(self.input_a_edit, b_path)
+        self._set_path_display(self.input_b_edit, a_path)
+        with QSignalBlocker(self.label_a_edit), QSignalBlocker(self.label_b_edit):
+            self.label_a_edit.setText(b_label)
+            self.label_b_edit.setText(a_label)
+
+        self._label_a_dirty = b_dirty
+        self._label_b_dirty = a_dirty
+        self._update_run_label_default()
+        self._maybe_autoload_participants()
+        self._update_run_state()
 
     def _build_advanced_tab(self) -> None:
         layout = QVBoxLayout(self.advanced_tab)
@@ -294,12 +530,19 @@ class RatioCalculatorWindow(QWidget):
 
         return panel
 
-    def _browse_folder(self, target_edit: QLineEdit, is_output: bool) -> None:
+    def _browse_folder(self, target_edit: QLineEdit, is_output: bool, condition_key: str | None = None) -> None:
         start_dir = self._initial_dialog_dir(is_output)
         folder = QFileDialog.getExistingDirectory(self, "Select Folder", str(start_dir))
         if folder:
-            target_edit.setText(folder)
+            self._set_path_display(target_edit, folder)
             self._last_dir = Path(folder)
+            if condition_key:
+                combo = self.condition_a_combo if condition_key == "a" else self.condition_b_combo
+                if combo.findText(CUSTOM_CONDITION_OPTION) == -1:
+                    combo.addItem(CUSTOM_CONDITION_OPTION)
+                with QSignalBlocker(combo):
+                    combo.setCurrentText(CUSTOM_CONDITION_OPTION)
+                self._set_condition_labels_from_folder(Path(folder).name, condition_key == "a")
             self._update_run_state()
 
     def _initial_dialog_dir(self, is_output: bool) -> Path:
@@ -315,41 +558,56 @@ class RatioCalculatorWindow(QWidget):
             return self._last_dir
         return Path.cwd()
 
-    def _load_participants(self) -> None:
-        self.exclude_list.clear()
-        self._paired_participants = []
-        input_a = self.input_a_edit.text().strip()
-        input_b = self.input_b_edit.text().strip()
-        if not input_a or not input_b:
-            QMessageBox.warning(self, "Missing folders", "Select both condition folders first.")
-            return
-
+    def _load_participants(self, silent: bool = False) -> bool:
+        if self._loading_participants:
+            return False
+        self._loading_participants = True
         try:
-            map_a = self._index_folder(Path(input_a))
-            map_b = self._index_folder(Path(input_b))
-        except Exception as exc:
-            QMessageBox.critical(self, "Error", str(exc))
-            return
+            self.exclude_list.clear()
+            self._paired_participants = []
+            input_a = self.input_a_edit.text().strip()
+            input_b = self.input_b_edit.text().strip()
+            if not input_a or not input_b:
+                if not silent:
+                    QMessageBox.warning(self, "Missing folders", "Select both condition folders first.")
+                return False
 
-        pids_a = sorted(map_a.keys())
-        pids_b = sorted(map_b.keys())
-        paired = sorted(set(pids_a).intersection(set(pids_b)))
-        self._paired_participants = paired
-        self.participant_counts.setText(f"A: {len(pids_a)} | B: {len(pids_b)} | Paired: {len(paired)}")
+            try:
+                map_a = self._index_folder(Path(input_a))
+                map_b = self._index_folder(Path(input_b))
+            except Exception as exc:
+                if not silent:
+                    QMessageBox.critical(self, "Error", str(exc))
+                else:
+                    self._append_log(str(exc))
+                return False
 
-        if not paired:
-            QMessageBox.warning(self, "No pairs", "No paired participants found between the folders.")
+            pids_a = sorted(map_a.keys())
+            pids_b = sorted(map_b.keys())
+            paired = sorted(set(pids_a).intersection(set(pids_b)))
+            self._paired_participants = paired
+            self.participant_counts.setText(f"A: {len(pids_a)} | B: {len(pids_b)} | Paired: {len(paired)}")
 
-        self.exclude_list.blockSignals(True)
-        for pid in paired:
-            item = QListWidgetItem(pid)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Unchecked)
-            self.exclude_list.addItem(item)
-        self.exclude_list.blockSignals(False)
+            if not paired:
+                if not silent:
+                    QMessageBox.warning(self, "No pairs", "No paired participants found between the folders.")
+                self._update_exclusion_status()
+                return False
 
-        self._update_exclusion_status()
-        self._update_run_state()
+            self.exclude_list.blockSignals(True)
+            for pid in paired:
+                item = QListWidgetItem(pid)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                self.exclude_list.addItem(item)
+            self.exclude_list.blockSignals(False)
+
+            self._apply_participant_filter()
+            self._update_exclusion_status()
+            self._update_run_state()
+            return True
+        finally:
+            self._loading_participants = False
 
     def _index_folder(self, folder: Path) -> dict[str, Path]:
         if not folder.exists():
@@ -365,8 +623,21 @@ class RatioCalculatorWindow(QWidget):
     def _set_all_exclusions(self, checked: bool) -> None:
         for idx in range(self.exclude_list.count()):
             item = self.exclude_list.item(idx)
+            if item.isHidden():
+                continue
             item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         self._update_exclusion_status()
+
+    def _apply_participant_filter(self) -> None:
+        query = self.participant_filter_edit.text().strip().lower()
+        only_excluded = self.show_excluded_check.isChecked()
+        for idx in range(self.exclude_list.count()):
+            item = self.exclude_list.item(idx)
+            text = item.text().lower()
+            matches_query = query in text
+            matches_excluded = item.checkState() == Qt.Checked
+            show = matches_query and (matches_excluded if only_excluded else True)
+            item.setHidden(not show)
 
     def _collect_manual_exclusions(self) -> list[str]:
         manual_list: list[str] = []
@@ -397,6 +668,8 @@ class RatioCalculatorWindow(QWidget):
         self.exclusion_status.setText(
             f"Excluded: {excluded_count} / Paired: {paired_count} \u2192 Used: {used_count}"
         )
+        if self.show_excluded_check.isChecked():
+            self._apply_participant_filter()
 
     def _settings_from_ui(self) -> RatioCalculatorSettings:
         excluded = self._parse_excluded_freqs()
@@ -447,6 +720,87 @@ class RatioCalculatorWindow(QWidget):
             return None
         return (low, high)
 
+    def _open_folder_from_edit(self, edit: QLineEdit) -> None:
+        path_str = edit.text().strip()
+        if not path_str:
+            QMessageBox.information(self, "Missing folder", "No folder has been set yet.")
+            return
+        path = Path(path_str)
+        if not path.exists():
+            QMessageBox.warning(self, "Folder not found", f"Folder does not exist:\n{path}")
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(path))
+            else:
+                from PySide6.QtGui import QDesktopServices
+                from PySide6.QtCore import QUrl
+
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        except Exception as exc:
+            QMessageBox.warning(self, "Open failed", f"Failed to open folder:\n{exc}")
+
+    def _ensure_output_dir(self, output_dir: str) -> tuple[bool, str | None]:
+        if not output_dir:
+            return False, "Select an output folder."
+        out_path = Path(output_dir)
+        try:
+            out_path.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            return False, f"Unable to create output folder: {exc}"
+        if not out_path.is_dir():
+            return False, "Output folder path is not a directory."
+        return True, None
+
+    def _validate_inputs(self) -> list[str]:
+        errors: list[str] = []
+        input_a = self.input_a_edit.text().strip()
+        input_b = self.input_b_edit.text().strip()
+        output_dir = self.output_edit.text().strip()
+
+        folder_a_valid = bool(input_a) and Path(input_a).is_dir()
+        folder_b_valid = bool(input_b) and Path(input_b).is_dir()
+
+        if not input_a:
+            errors.append("Select a Condition A folder.")
+        elif not folder_a_valid:
+            errors.append("Condition A folder does not exist.")
+
+        if not input_b:
+            errors.append("Select a Condition B folder.")
+        elif not folder_b_valid:
+            errors.append("Condition B folder does not exist.")
+
+        if folder_a_valid and folder_b_valid and Path(input_a).resolve() == Path(input_b).resolve():
+            errors.append("Condition A and B folders must be different.")
+
+        ok_out, out_err = self._ensure_output_dir(output_dir)
+        if not ok_out and out_err:
+            errors.append(out_err)
+
+        folders_ready = folder_a_valid and folder_b_valid and Path(input_a).resolve() != Path(input_b).resolve()
+        if folders_ready and not self._paired_participants:
+            errors.append("Participants are not loaded.")
+
+        return errors
+
+    def _set_validation_errors(self, errors: list[str]) -> None:
+        if errors:
+            self.validation_label.setText("\n".join(f"• {err}" for err in errors))
+        else:
+            self.validation_label.setText("")
+
+    def _maybe_autoload_participants(self) -> None:
+        if self._paired_participants:
+            return
+        input_a = self.input_a_edit.text().strip()
+        input_b = self.input_b_edit.text().strip()
+        if not input_a or not input_b:
+            return
+        if not Path(input_a).is_dir() or not Path(input_b).is_dir():
+            return
+        self._load_participants(silent=True)
+
     def _start_run(self) -> None:
         if self._thread and self._thread.isRunning():
             QMessageBox.information(self, "Running", "Ratio calculations are already running.")
@@ -461,6 +815,11 @@ class RatioCalculatorWindow(QWidget):
 
         if not all([input_a, input_b, output_dir, label_a, label_b, run_label]):
             QMessageBox.warning(self, "Missing fields", "Fill out all required fields before running.")
+            return
+
+        ok_out, out_err = self._ensure_output_dir(output_dir)
+        if not ok_out:
+            QMessageBox.warning(self, "Output folder error", out_err or "Output folder is not usable.")
             return
 
         if not self._paired_participants:
@@ -578,6 +937,8 @@ class RatioCalculatorWindow(QWidget):
         self.log_box.append(message)
 
     def _update_run_state(self) -> None:
+        errors = self._validate_inputs()
+        self._set_validation_errors(errors)
         required_fields = all(
             [
                 self.input_a_edit.text().strip(),
@@ -588,4 +949,11 @@ class RatioCalculatorWindow(QWidget):
                 self.run_label_edit.text().strip(),
             ]
         )
-        self.run_btn.setEnabled(required_fields and bool(self._paired_participants))
+        if required_fields and not self._paired_participants:
+            self._maybe_autoload_participants()
+            errors = self._validate_inputs()
+            self._set_validation_errors(errors)
+        self.run_btn.setEnabled(required_fields and not errors)
+        self.input_a_open_btn.setEnabled(bool(self.input_a_edit.text().strip()))
+        self.input_b_open_btn.setEnabled(bool(self.input_b_edit.text().strip()))
+        self.output_open_btn.setEnabled(bool(self.output_edit.text().strip()))
