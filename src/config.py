@@ -6,7 +6,7 @@ Exposes:
 - frequency helpers: update_target_frequencies(), TARGET_FREQUENCIES
 - UI sizing tokens
 - Legacy symbols: init_fonts(), FONT_MAIN/FONT_BOLD/FONT_HEADING (no-op/None)
-- Jan 10 Checkpoint: Save before merging low pass filter fix into Fix Single File Mode
+- 2/8/26 Checkpoint before removing ratio tool in a merge
 
 """
 
