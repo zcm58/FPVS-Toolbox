@@ -99,7 +99,6 @@ def test_cross_phase_lmm_contrasts_and_meta():
     effects_of_interest = result["effects_of_interest"]
     assert effects_of_interest is not None
     contrasts = effects_of_interest.get("contrasts") or []
-    groups = sorted(df_long["group"].unique().tolist())
     phases = tuple(sorted(df_long["phase"].unique().tolist()))
     expected_labels = {
         f"group_effect_phase={phases[0]}",

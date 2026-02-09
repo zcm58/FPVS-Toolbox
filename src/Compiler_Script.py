@@ -5,6 +5,7 @@
 
 # 12/3/25 at 3:32PM: Adding a checkpoint prior to implementing any LMM reference selection in stats tool.
 
+PYINSTALLER_COMMAND = r"""
 pyinstaller `
   --clean `
   --noconfirm `
@@ -24,3 +25,4 @@ pyinstaller `
   --hidden-import=statsmodels `
     --hidden-import=patsy `
   -D src/main.py
+"""

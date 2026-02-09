@@ -1,6 +1,8 @@
-import sys, pytest
-from PySide6.QtWidgets import QApplication, QPushButton
+import sys
+
+import pytest
 from PySide6.QtCore import Qt, QThread
+from PySide6.QtWidgets import QApplication, QPushButton
 
 
 @pytest.fixture(scope="session")
