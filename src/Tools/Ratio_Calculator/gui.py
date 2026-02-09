@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -24,12 +23,14 @@ from PySide6.QtWidgets import (
     QPushButton,
     QProgressBar,
     QSpinBox,
+    QSplitter,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
     QFileDialog,
 )
 
@@ -95,9 +96,18 @@ class RatioCalculatorWindow(QWidget):
 
     def _build_basic_tab(self) -> None:
         layout = QVBoxLayout(self.basic_tab)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
 
         cond_group = QGroupBox("Conditions")
-        cond_layout = QGridLayout(cond_group)
+        cond_group_layout = QVBoxLayout(cond_group)
+        cond_group_layout.setContentsMargins(8, 8, 8, 8)
+        cond_group_layout.setSpacing(6)
+        cond_layout = QFormLayout()
+        cond_layout.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        cond_layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+        cond_layout.setHorizontalSpacing(10)
+        cond_layout.setVerticalSpacing(6)
 
         action_row = QHBoxLayout()
         self.refresh_btn = QPushButton("Refresh")
@@ -156,56 +166,59 @@ class RatioCalculatorWindow(QWidget):
         self.run_label_edit.setPlaceholderText("Run label")
         self.run_label_edit.textEdited.connect(self._mark_run_label_dirty)
 
-        a_path_btns = QWidget()
-        a_path_layout = QHBoxLayout(a_path_btns)
-        a_path_layout.setContentsMargins(0, 0, 0, 0)
-        a_path_layout.addWidget(self.input_a_open_btn)
-        a_path_layout.addWidget(self.input_a_btn)
-
-        b_path_btns = QWidget()
-        b_path_layout = QHBoxLayout(b_path_btns)
-        b_path_layout.setContentsMargins(0, 0, 0, 0)
-        b_path_layout.addWidget(self.input_b_open_btn)
-        b_path_layout.addWidget(self.input_b_btn)
-
-        out_path_btns = QWidget()
-        out_path_layout = QHBoxLayout(out_path_btns)
-        out_path_layout.setContentsMargins(0, 0, 0, 0)
-        out_path_layout.addWidget(self.output_open_btn)
-        out_path_layout.addWidget(self.output_btn)
-
         self.validation_label = QLabel("")
         self.validation_label.setWordWrap(True)
         self.validation_label.setStyleSheet("color: #b00020;")
 
-        cond_layout.addWidget(QLabel("Condition A"), 0, 0)
-        cond_layout.addWidget(self.condition_a_combo, 0, 1)
-        cond_layout.addLayout(action_row, 0, 2)
-        cond_layout.addWidget(QLabel("Condition A Folder"), 1, 0)
-        cond_layout.addWidget(self.input_a_edit, 1, 1)
-        cond_layout.addWidget(a_path_btns, 1, 2)
-        cond_layout.addWidget(QLabel("Condition A Label"), 2, 0)
-        cond_layout.addWidget(self.label_a_edit, 2, 1, 1, 2)
+        a_path_row = QWidget()
+        a_path_layout = QHBoxLayout(a_path_row)
+        a_path_layout.setContentsMargins(0, 0, 0, 0)
+        a_path_layout.setSpacing(6)
+        a_path_layout.addWidget(self.input_a_edit, 1)
+        a_path_layout.addWidget(self.input_a_open_btn)
+        a_path_layout.addWidget(self.input_a_btn)
 
-        cond_layout.addWidget(QLabel("Condition B"), 3, 0)
-        cond_layout.addWidget(self.condition_b_combo, 3, 1)
-        cond_layout.addWidget(QLabel("Condition B Folder"), 4, 0)
-        cond_layout.addWidget(self.input_b_edit, 4, 1)
-        cond_layout.addWidget(b_path_btns, 4, 2)
-        cond_layout.addWidget(QLabel("Condition B Label"), 5, 0)
-        cond_layout.addWidget(self.label_b_edit, 5, 1, 1, 2)
+        b_path_row = QWidget()
+        b_path_layout = QHBoxLayout(b_path_row)
+        b_path_layout.setContentsMargins(0, 0, 0, 0)
+        b_path_layout.setSpacing(6)
+        b_path_layout.addWidget(self.input_b_edit, 1)
+        b_path_layout.addWidget(self.input_b_open_btn)
+        b_path_layout.addWidget(self.input_b_btn)
 
-        cond_layout.addWidget(QLabel("Output Folder"), 6, 0)
-        cond_layout.addWidget(self.output_edit, 6, 1)
-        cond_layout.addWidget(out_path_btns, 6, 2)
-        cond_layout.addWidget(QLabel("Run Label"), 7, 0)
-        cond_layout.addWidget(self.run_label_edit, 7, 1, 1, 2)
-        cond_layout.addWidget(self.validation_label, 8, 0, 1, 3)
+        out_path_row = QWidget()
+        out_path_layout = QHBoxLayout(out_path_row)
+        out_path_layout.setContentsMargins(0, 0, 0, 0)
+        out_path_layout.setSpacing(6)
+        out_path_layout.addWidget(self.output_edit, 1)
+        out_path_layout.addWidget(self.output_open_btn)
+        out_path_layout.addWidget(self.output_btn)
+
+        cond_group_layout.addLayout(action_row)
+        cond_layout.addRow("Condition A", self.condition_a_combo)
+        cond_layout.addRow("Condition A Folder", a_path_row)
+        cond_layout.addRow("Condition A Label", self.label_a_edit)
+        cond_layout.addRow("Condition B", self.condition_b_combo)
+        cond_layout.addRow("Condition B Folder", b_path_row)
+        cond_layout.addRow("Condition B Label", self.label_b_edit)
+        cond_layout.addRow("Output Folder", out_path_row)
+        cond_layout.addRow("Run Label", self.run_label_edit)
+        cond_layout.addRow(self.validation_label)
+        cond_group_layout.addLayout(cond_layout)
 
         layout.addWidget(cond_group)
 
-        participants_group = QGroupBox("Participants")
+        participants_group = QGroupBox("Participant exclusions (optional)")
+        participants_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         participants_layout = QVBoxLayout(participants_group)
+        participants_layout.setContentsMargins(8, 8, 8, 8)
+        participants_layout.setSpacing(6)
+        participants_help = QLabel(
+            "Checked participants are excluded from group summaries and distribution overlays. "
+            "They still appear in *_ALL* sheets and keep the excluded marker in plots."
+        )
+        participants_help.setWordWrap(True)
+        participants_layout.addWidget(participants_help)
         load_row = QHBoxLayout()
         self.load_btn = QPushButton("Load participants")
         self.load_btn.clicked.connect(self._load_participants)
@@ -217,7 +230,7 @@ class RatioCalculatorWindow(QWidget):
 
         filter_row = QHBoxLayout()
         self.participant_filter_edit = QLineEdit()
-        self.participant_filter_edit.setPlaceholderText("Search participants...")
+        self.participant_filter_edit.setPlaceholderText("Search participant IDs...")
         self.participant_filter_edit.textChanged.connect(self._apply_participant_filter)
         self.show_excluded_check = QCheckBox("Show only excluded")
         self.show_excluded_check.toggled.connect(self._apply_participant_filter)
@@ -225,6 +238,19 @@ class RatioCalculatorWindow(QWidget):
         filter_row.addWidget(self.show_excluded_check)
         filter_row.addStretch(1)
         participants_layout.addLayout(filter_row)
+
+        header_row = QHBoxLayout()
+        exclude_header = QLabel("Exclude")
+        exclude_font = exclude_header.font()
+        exclude_font.setBold(True)
+        exclude_header.setFont(exclude_font)
+        id_header = QLabel("Participant ID")
+        id_header.setFont(exclude_font)
+        header_row.addWidget(exclude_header)
+        header_row.addSpacing(18)
+        header_row.addWidget(id_header)
+        header_row.addStretch(1)
+        participants_layout.addLayout(header_row)
 
         self.exclude_list = QListWidget()
         self.exclude_list.setSelectionMode(QListWidget.NoSelection)
@@ -250,10 +276,11 @@ class RatioCalculatorWindow(QWidget):
         button_row.addStretch(1)
         participants_layout.addLayout(button_row)
 
-        layout.addWidget(participants_group)
-
         roi_group = QGroupBox("ROIs (read-only)")
+        roi_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         roi_layout = QVBoxLayout(roi_group)
+        roi_layout.setContentsMargins(8, 8, 8, 8)
+        roi_layout.setSpacing(6)
         self.roi_table = QTableWidget()
         self.roi_table.setColumnCount(2)
         self.roi_table.setHorizontalHeaderLabels(["ROI", "Electrodes"])
@@ -272,7 +299,14 @@ class RatioCalculatorWindow(QWidget):
 
         self.roi_table.resizeColumnsToContents()
         roi_layout.addWidget(self.roi_table)
-        layout.addWidget(roi_group)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(participants_group)
+        splitter.addWidget(roi_group)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([640, 320])
+        layout.addWidget(splitter)
 
         for widget in [
             self.input_a_edit,
