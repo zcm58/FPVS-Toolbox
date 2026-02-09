@@ -263,6 +263,7 @@ def make_raincloud_figure(
 
     fig.savefig(out_path_no_ext.with_suffix(".pdf"), bbox_inches="tight")
     fig.savefig(out_path_no_ext.with_suffix(".png"), dpi=png_dpi, bbox_inches="tight")
+    fig.savefig(out_path_no_ext.with_suffix(".svg"), bbox_inches="tight")
 
 
 def make_raincloud_figure_roi_x(
@@ -423,3 +424,4 @@ def make_raincloud_figure_roi_x(
 
     fig.savefig(out_path_no_ext.with_suffix(".pdf"), bbox_inches="tight")
     fig.savefig(out_path_no_ext.with_suffix(".png"), dpi=png_dpi, bbox_inches="tight")
+    fig.savefig(out_path_no_ext.with_suffix(".svg"), bbox_inches="tight")
