@@ -148,15 +148,22 @@ class RatioCalculatorWindow(QWidget):
 
         self.exclude_list = QListWidget()
         self.exclude_list.setSelectionMode(QListWidget.NoSelection)
+        self.exclude_list.itemChanged.connect(self._update_exclusion_status)
         participants_layout.addWidget(self.exclude_list)
+
+        self.exclusion_status = QLabel("Excluded: 0 / Paired: 0 \u2192 Used: 0")
+        participants_layout.addWidget(self.exclusion_status)
 
         button_row = QHBoxLayout()
         self.select_all_btn = QPushButton("Select All")
         self.select_all_btn.clicked.connect(lambda: self._set_all_exclusions(True))
         self.select_none_btn = QPushButton("Select None")
         self.select_none_btn.clicked.connect(lambda: self._set_all_exclusions(False))
+        self.clear_exclusions_btn = QPushButton("Clear exclusions")
+        self.clear_exclusions_btn.clicked.connect(lambda: self._set_all_exclusions(False))
         button_row.addWidget(self.select_all_btn)
         button_row.addWidget(self.select_none_btn)
+        button_row.addWidget(self.clear_exclusions_btn)
         button_row.addStretch(1)
         participants_layout.addLayout(button_row)
 
@@ -333,12 +340,15 @@ class RatioCalculatorWindow(QWidget):
         if not paired:
             QMessageBox.warning(self, "No pairs", "No paired participants found between the folders.")
 
+        self.exclude_list.blockSignals(True)
         for pid in paired:
             item = QListWidgetItem(pid)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Unchecked)
             self.exclude_list.addItem(item)
+        self.exclude_list.blockSignals(False)
 
+        self._update_exclusion_status()
         self._update_run_state()
 
     def _index_folder(self, folder: Path) -> dict[str, Path]:
@@ -356,6 +366,7 @@ class RatioCalculatorWindow(QWidget):
         for idx in range(self.exclude_list.count()):
             item = self.exclude_list.item(idx)
             item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        self._update_exclusion_status()
 
     def _collect_manual_exclusions(self) -> list[str]:
         manual_list: list[str] = []
@@ -376,6 +387,16 @@ class RatioCalculatorWindow(QWidget):
                 f"Ignored invalid manual exclusion entries: {', '.join(invalid)}",
             )
         return manual_list
+
+    def _update_exclusion_status(self) -> None:
+        paired_count = len(self._paired_participants)
+        excluded_count = sum(
+            1 for idx in range(self.exclude_list.count()) if self.exclude_list.item(idx).checkState() == Qt.Checked
+        )
+        used_count = max(paired_count - excluded_count, 0)
+        self.exclusion_status.setText(
+            f"Excluded: {excluded_count} / Paired: {paired_count} \u2192 Used: {used_count}"
+        )
 
     def _settings_from_ui(self) -> RatioCalculatorSettings:
         excluded = self._parse_excluded_freqs()
@@ -453,6 +474,28 @@ class RatioCalculatorWindow(QWidget):
 
         settings = self._settings_from_ui()
         manual_list = self._collect_manual_exclusions()
+        manual_set = set(manual_list)
+        paired_set = set(self._paired_participants)
+        assert manual_set.issubset(paired_set)
+
+        n_paired = len(self._paired_participants)
+        n_excl = len(manual_set.intersection(paired_set))
+        n_used = n_paired - n_excl
+        if n_used == 0:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("All participants excluded")
+            msg.setText(
+                "You excluded all paired participants. Group summaries and violin/box/mean overlays will be empty."
+            )
+            go_back_btn = msg.addButton("Go Back", QMessageBox.RejectRole)
+            msg.addButton("Continue Anyway", QMessageBox.AcceptRole)
+            msg.setDefaultButton(go_back_btn)
+            msg.setIcon(QMessageBox.Warning)
+            msg.exec()
+            if msg.clickedButton() == go_back_btn:
+                self.progress.setValue(0)
+                self.status_label.setText("Ready")
+                return
 
         self._thread = QThread()
         self._worker = RatioCalculatorWorker(
