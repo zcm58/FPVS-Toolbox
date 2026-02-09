@@ -107,13 +107,16 @@ def run_ratio_calculator(
         raise RuntimeError("No paired participants found between the two folders.")
 
     manual_set = set(manual_list)
+    paired_set = set(pids_paired)
+    assert manual_set.issubset(paired_set)
     manual_in_paired = _sorted_pids([p for p in pids_paired if p in manual_set])
-    manual_not_found = _sorted_pids([p for p in manual_list if p not in set(pids_paired)])
+    manual_not_found = _sorted_pids([p for p in manual_list if p not in paired_set])
 
     _log("MANUAL EXCLUSION REPORT")
     _log(f"  Manual exclude list: {manual_list}")
     _log(f"  Found among paired:  {manual_in_paired}")
     _log(f"  Not found in paired: {manual_not_found}")
+    _log(f"  Counts: excluded {len(manual_in_paired)} / paired {len(pids_paired)} -> used {len(pids_paired) - len(manual_in_paired)}")
     _log("-" * 110)
 
     part_rows: list[dict[str, object]] = []
