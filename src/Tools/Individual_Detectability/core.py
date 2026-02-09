@@ -87,7 +87,6 @@ def render_topomap_svg(
     import matplotlib.pyplot as plt
     from matplotlib.colors import LinearSegmentedColormap
     import numpy as np
-    import mne
 
     z_array = np.asarray(z_values, dtype=float)
     z_display = np.where(z_array >= z_threshold, z_array, z_threshold)
@@ -98,11 +97,10 @@ def render_topomap_svg(
     )
     vmax = float(max(float(z_display.max()), z_threshold + 1e-6))
     fig, ax = plt.subplots(figsize=(2.4, 2.2))
-    mne.viz.plot_topomap(
+    _plot_topomap_compat(
         z_display,
         pos,
         axes=ax,
-        show=False,
         vmin=z_threshold,
         vmax=vmax,
         contours=0,
@@ -126,7 +124,6 @@ def generate_condition_figure(
 
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
-    import mne
 
     output_dir.mkdir(parents=True, exist_ok=True)
     participants: list[str] = []
@@ -176,18 +173,19 @@ def generate_condition_figure(
         ax_topo = fig.add_subplot(gs[row, col])
         ax_snr = fig.add_subplot(gs[row + 1, col])
 
-        z_display = np.where(topo_values[idx] >= settings.z_threshold,
-                             topo_values[idx],
-                             settings.z_threshold)
+        z_display = np.where(
+            topo_values[idx] >= settings.z_threshold,
+            topo_values[idx],
+            settings.z_threshold,
+        )
         _ensure_no_nan(z_display)
         pos = _resolve_biosemi_positions(electrodes)
         cmap = _detectability_cmap()
         vmax = float(max(float(z_display.max()), settings.z_threshold + 1e-6))
-        mne.viz.plot_topomap(
+        _plot_topomap_compat(
             z_display,
             pos,
             axes=ax_topo,
-            show=False,
             vmin=settings.z_threshold,
             vmax=vmax,
             contours=0,
@@ -244,6 +242,64 @@ def _detectability_cmap():
         "detectability_z",
         ["#ffffff", "#2166ac", "#b2182b"],
     )
+
+
+def _plot_topomap_compat(
+    z_values,
+    pos,
+    axes,
+    vmin: float,
+    vmax: float,
+    contours: int,
+    cmap,
+    sensor_kwargs: dict | None = None,
+) -> None:
+    import mne
+
+    base_kwargs = {
+        "axes": axes,
+        "show": False,
+        "contours": contours,
+        "cmap": cmap,
+    }
+    if sensor_kwargs is not None:
+        base_kwargs["sensor_kwargs"] = sensor_kwargs
+
+    try:
+        mne.viz.plot_topomap(z_values, pos, vlim=(vmin, vmax), **base_kwargs)
+        return
+    except TypeError:
+        pass
+
+    if sensor_kwargs is not None:
+        kwargs_no_sensors = base_kwargs.copy()
+        kwargs_no_sensors.pop("sensor_kwargs", None)
+        try:
+            mne.viz.plot_topomap(z_values, pos, vlim=(vmin, vmax), **kwargs_no_sensors)
+            return
+        except TypeError:
+            pass
+
+    try:
+        mne.viz.plot_topomap(
+            z_values,
+            pos,
+            vmin=vmin,
+            vmax=vmax,
+            **base_kwargs,
+        )
+    except TypeError:
+        if sensor_kwargs is None:
+            raise
+        kwargs_no_sensors = base_kwargs.copy()
+        kwargs_no_sensors.pop("sensor_kwargs", None)
+        mne.viz.plot_topomap(
+            z_values,
+            pos,
+            vmin=vmin,
+            vmax=vmax,
+            **kwargs_no_sensors,
+        )
 
 
 def _resolve_biosemi_positions(electrodes: Sequence[str]):

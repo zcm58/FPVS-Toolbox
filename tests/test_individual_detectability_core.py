@@ -4,6 +4,7 @@ from pathlib import Path
 
 from Tools.Individual_Detectability.core import (
     discover_conditions,
+    _plot_topomap_compat,
     parse_participant_id,
     render_topomap_svg,
 )
@@ -54,3 +55,39 @@ def test_topomap_svg_nonblank(tmp_path: Path) -> None:
     assert output.stat().st_size > 200
     assert "<svg" in contents
     assert "path" in contents
+
+
+def test_topomap_wrapper_saves_svg(tmp_path: Path) -> None:
+    import pytest
+
+    np = pytest.importorskip("numpy")
+    mne = pytest.importorskip("mne")
+    matplotlib = pytest.importorskip("matplotlib")
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    montage = mne.channels.make_standard_montage("biosemi64")
+    electrodes = montage.ch_names
+    z_threshold = 1.64
+    z_values = np.full(len(electrodes), z_threshold)
+    z_values[0] = z_threshold + 0.9
+    z_values[10] = z_threshold + 0.4
+    pos = np.array([montage.get_positions()["ch_pos"][name] for name in electrodes])
+
+    fig, ax = plt.subplots(figsize=(2.4, 2.2))
+    _plot_topomap_compat(
+        z_values,
+        pos,
+        axes=ax,
+        vmin=z_threshold,
+        vmax=float(z_values.max()),
+        contours=0,
+        cmap="RdBu_r",
+    )
+    output = tmp_path / "compat_topomap.svg"
+    fig.savefig(output, format="svg")
+    plt.close(fig)
+
+    assert output.exists()
+    assert output.stat().st_size > 100

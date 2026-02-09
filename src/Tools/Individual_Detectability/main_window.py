@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPlainTextEdit,
     QSizePolicy,
+    QSplitter,
     QSpinBox,
     QDoubleSpinBox,
     QStyle,
@@ -49,7 +50,8 @@ class IndividualDetectabilityWindow(QWidget):
     def __init__(self, parent: QWidget | None = None, project_root: str | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Individual Detectability")
-        self.resize(1040, 820)
+        self.resize(1200, 780)
+        self.setMinimumWidth(1050)
 
         self._project_root = self._resolve_project_root(project_root)
         self._last_dir: Optional[Path] = None
@@ -67,7 +69,6 @@ class IndividualDetectabilityWindow(QWidget):
 
         self._build_basic_tab()
         self._build_advanced_tab()
-        self._build_bottom_panel(layout)
         self._apply_button_styling()
         self._apply_button_icons()
 
@@ -103,13 +104,32 @@ class IndividualDetectabilityWindow(QWidget):
     def _build_basic_tab(self) -> None:
         layout = QVBoxLayout(self.basic_tab)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
 
-        self._build_input_group(layout)
-        self._build_conditions_group(layout)
-        self._build_output_group(layout)
-        self._build_participant_group(layout)
-        layout.addStretch(1)
+        splitter = QSplitter(Qt.Horizontal, self.basic_tab)
+        splitter.setChildrenCollapsible(False)
+
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(6)
+        self._build_input_group(left_layout)
+        self._build_conditions_group(left_layout)
+        self._build_participant_group(left_layout)
+        left_layout.addStretch(1)
+
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(6)
+        self._build_output_group(right_layout)
+        self._build_bottom_panel(right_layout)
+
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 4)
+        layout.addWidget(splitter, 1)
 
     def _build_input_group(self, parent_layout: QVBoxLayout) -> None:
         group = QGroupBox("Input data")
@@ -147,6 +167,8 @@ class IndividualDetectabilityWindow(QWidget):
         layout.setSpacing(6)
 
         self.conditions_list = QListWidget()
+        self.conditions_list.setMaximumHeight(200)
+        self.conditions_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.conditions_list.itemChanged.connect(self._on_condition_check_changed)
 
         button_row = QWidget()
@@ -207,6 +229,7 @@ class IndividualDetectabilityWindow(QWidget):
         self.output_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.output_table.verticalHeader().setVisible(False)
         self.output_table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed)
+        self.output_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.autofill_btn = QPushButton("Auto-fill stems")
         self.autofill_btn.clicked.connect(self._autofill_stems)
@@ -266,6 +289,7 @@ class IndividualDetectabilityWindow(QWidget):
         )
         self.participant_table.verticalHeader().setVisible(False)
         self.participant_table.itemChanged.connect(self._apply_participant_filter)
+        self.participant_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.participant_summary = QLabel("Excluded: 0 | Included: 0 | Total detected: 0")
         self.participant_summary.setStyleSheet("color: #666;")
