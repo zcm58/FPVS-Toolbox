@@ -1,0 +1,1 @@
+"""Ratio Calculator tool package."""

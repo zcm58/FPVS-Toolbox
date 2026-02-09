@@ -2,6 +2,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QMenuBar, QMainWindow
 from PySide6.QtGui import QAction
 from Main_App.Legacy_App.eloreta_launcher import open_eloreta_tool
+from Tools.Ratio_Calculator.launcher import open_ratio_calculator_tool
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow  # noqa: F401
 
 def build_menu_bar(parent: QMainWindow) -> QMenuBar:
@@ -31,6 +32,7 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
         ("Source Localization (eLORETA/sLORETA)",      lambda: open_eloreta_tool(parent)),
         ("Image Resizer",                              parent.open_image_resizer),
         ("Generate SNR Plots",                         parent.open_plot_generator),
+        ("Ratio Calculator",                           lambda: open_ratio_calculator_tool(parent)),
         ("Average Epochs in Pre-Processing Phase",     parent.open_epoch_averaging),
     ]
     for text, slot in items:

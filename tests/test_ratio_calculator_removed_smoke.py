@@ -22,7 +22,7 @@ def _tools_menu_titles(window) -> list[str]:
     return [action.text() for action in tools_menu.actions() if action.text()]
 
 
-def test_ratio_calculator_removed_from_ui(qtbot):
+def test_ratio_calculator_present_in_ui(qtbot):
     if not _module_available("PySide6") or not _module_available("pytestqt"):
         pytest.skip("PySide6 or pytest-qt not available")
 
@@ -36,7 +36,21 @@ def test_ratio_calculator_removed_from_ui(qtbot):
     qtbot.addWidget(window)
 
     sidebar_labels = [btn.text_lbl.text() for btn in window.sidebar.findChildren(SidebarButton)]
-    assert "Ratio Calculator" not in sidebar_labels
+    assert "Ratio Calculator" in sidebar_labels
 
     tools_menu_actions = _tools_menu_titles(window)
-    assert "Ratio Calculator" not in tools_menu_actions
+    assert "Ratio Calculator" in tools_menu_actions
+
+
+def test_ratio_calculator_window_smoke(qtbot):
+    if not _module_available("PySide6") or not _module_available("pytestqt"):
+        pytest.skip("PySide6 or pytest-qt not available")
+
+    from PySide6.QtWidgets import QApplication
+
+    from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
+
+    QApplication.instance() or QApplication([])
+    window = RatioCalculatorWindow()
+    qtbot.addWidget(window)
+    window.show()

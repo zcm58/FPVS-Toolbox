@@ -43,6 +43,11 @@ def _maybe_run_cli_tool() -> bool:
 
         plot_generator.main()
         return True
+    if "--run-ratio-calculator" in sys.argv:
+        from Tools.Ratio_Calculator import ratio_calculator
+
+        ratio_calculator.main()
+        return True
     return False
 
 
