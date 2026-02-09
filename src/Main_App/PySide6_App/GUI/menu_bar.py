@@ -2,8 +2,9 @@ from __future__ import annotations
 from PySide6.QtWidgets import QMenuBar, QMainWindow
 from PySide6.QtGui import QAction
 from Main_App.Legacy_App.eloreta_launcher import open_eloreta_tool
-from Main_App.PySide6_App.GUI.icons import division_icon
+from Main_App.PySide6_App.GUI.icons import division_icon, individual_detectability_icon
 from Tools.Ratio_Calculator.launcher import open_ratio_calculator_tool
+from Tools.Individual_Detectability.launcher import open_individual_detectability_tool
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow  # noqa: F401
 
 def build_menu_bar(parent: QMainWindow) -> QMenuBar:
@@ -34,6 +35,8 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
         ("Image Resizer",                              parent.open_image_resizer, None),
         ("Generate SNR Plots",                         parent.open_plot_generator, None),
         ("Ratio Calculator",                           lambda: open_ratio_calculator_tool(parent), division_icon()),
+        ("Individual Detectability",                   lambda: open_individual_detectability_tool(parent),
+         individual_detectability_icon()),
         ("Average Epochs in Pre-Processing Phase",     parent.open_epoch_averaging, None),
     ]
     for text, slot, icon in items:

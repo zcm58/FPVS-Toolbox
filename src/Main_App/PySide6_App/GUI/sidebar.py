@@ -16,8 +16,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QHBoxLayout,
 )
-from Main_App.PySide6_App.GUI.icons import division_icon
+from Main_App.PySide6_App.GUI.icons import division_icon, individual_detectability_icon
 from Tools.Ratio_Calculator.launcher import open_ratio_calculator_tool
+from Tools.Individual_Detectability.launcher import open_individual_detectability_tool
 
 # ---- Tunables -------------------------------------------------------------
 ICON_PX = 20          # normalize all icons to the same visual size
@@ -210,6 +211,13 @@ def init_sidebar(self) -> None:
         "Ratio Calculator",
         division_icon(ICON_PX),
         lambda: open_ratio_calculator_tool(self),
+    )
+    make_button(
+        lay,
+        "btn_individual_detectability",
+        "Individual Detectability",
+        individual_detectability_icon(ICON_PX),
+        lambda: open_individual_detectability_tool(self),
     )
 
     make_button(lay, "btn_image", "Image Resizer", "camera-photo", self.open_image_resizer)
