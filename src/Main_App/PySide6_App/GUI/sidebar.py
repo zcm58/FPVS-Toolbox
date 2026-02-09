@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QHBoxLayout,
 )
+from Main_App.PySide6_App.GUI.icons import division_icon
 from Tools.Ratio_Calculator.launcher import open_ratio_calculator_tool
 
 # ---- Tunables -------------------------------------------------------------
@@ -203,7 +204,13 @@ def init_sidebar(self) -> None:
 
     # SNR Plots: theme icon or drawn bar chart (no external files)
     make_button(lay, "btn_graphs", "SNR Plots", chart_icon(), self.open_plot_generator)
-    make_button(lay, "btn_ratio", "Ratio Calculator", "view-statistics", lambda: open_ratio_calculator_tool(self))
+    make_button(
+        lay,
+        "btn_ratio",
+        "Ratio Calculator",
+        division_icon(ICON_PX),
+        lambda: open_ratio_calculator_tool(self),
+    )
 
     make_button(lay, "btn_image", "Image Resizer", "camera-photo", self.open_image_resizer)
     make_button(lay, "btn_epoch", "Epoch Averaging", "view-refresh", self.open_epoch_averaging)

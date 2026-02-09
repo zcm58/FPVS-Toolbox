@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QSignalBlocker, QThread, Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -18,8 +17,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QProgressBar,
@@ -108,7 +105,7 @@ class RatioCalculatorWindow(QWidget):
         layout.setSpacing(8)
 
         cond_group = QGroupBox("Conditions")
-        cond_group.setFont(self._section_header_font(cond_group))
+        self._apply_groupbox_title_style(cond_group)
         cond_group_layout = QVBoxLayout(cond_group)
         cond_group_layout.setContentsMargins(6, 8, 6, 6)
         cond_group_layout.setSpacing(6)
@@ -205,14 +202,14 @@ class RatioCalculatorWindow(QWidget):
         condition_header_layout.addWidget(self.condition_a_combo, 1)
         condition_header_layout.addWidget(self.refresh_btn)
         condition_header_layout.addWidget(self.swap_btn)
-        cond_layout.addRow("Condition A", condition_header)
-        cond_layout.addRow("Condition A Folder", a_path_row)
-        cond_layout.addRow("Condition A Label", self.label_a_edit)
-        cond_layout.addRow("Condition B", self.condition_b_combo)
-        cond_layout.addRow("Condition B Folder", b_path_row)
-        cond_layout.addRow("Condition B Label", self.label_b_edit)
-        cond_layout.addRow("Output Folder", out_path_row)
-        cond_layout.addRow("Run Label", self.run_label_edit)
+        cond_layout.addRow(self._make_caption_label("Condition A"), condition_header)
+        cond_layout.addRow(self._make_caption_label("Condition A Folder"), a_path_row)
+        cond_layout.addRow(self._make_caption_label("Condition A Label"), self.label_a_edit)
+        cond_layout.addRow(self._make_caption_label("Condition B"), self.condition_b_combo)
+        cond_layout.addRow(self._make_caption_label("Condition B Folder"), b_path_row)
+        cond_layout.addRow(self._make_caption_label("Condition B Label"), self.label_b_edit)
+        cond_layout.addRow(self._make_caption_label("Output Folder"), out_path_row)
+        cond_layout.addRow(self._make_caption_label("Run Label"), self.run_label_edit)
         cond_layout.addRow(self.validation_label)
         cond_group_layout.addLayout(cond_layout)
 
@@ -220,7 +217,7 @@ class RatioCalculatorWindow(QWidget):
 
         participants_group = QGroupBox("Participant exclusions (optional)")
         participants_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        participants_group.setFont(self._section_header_font(participants_group))
+        self._apply_groupbox_title_style(participants_group)
         participants_layout = QVBoxLayout(participants_group)
         participants_layout.setContentsMargins(6, 8, 6, 6)
         participants_layout.setSpacing(6)
@@ -230,14 +227,14 @@ class RatioCalculatorWindow(QWidget):
         )
         participants_help.setWordWrap(True)
         participants_layout.addWidget(participants_help)
-        load_row = QHBoxLayout()
-        self.load_btn = QPushButton("Load participants")
-        self.load_btn.clicked.connect(self._load_participants)
+        counts_row = QHBoxLayout()
         self.participant_counts = QLabel("A: 0 | B: 0 | Paired: 0")
-        load_row.addWidget(self.load_btn)
-        load_row.addWidget(self.participant_counts)
-        load_row.addStretch(1)
-        participants_layout.addLayout(load_row)
+        self.exclusion_status = QLabel("Excluded: 0 / Paired: 0 \u2192 Used: 0")
+        self.exclusion_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        counts_row.addWidget(self.participant_counts)
+        counts_row.addStretch(1)
+        counts_row.addWidget(self.exclusion_status)
+        participants_layout.addLayout(counts_row)
 
         filter_row = QHBoxLayout()
         self.participant_filter_edit = QLineEdit()
@@ -250,29 +247,22 @@ class RatioCalculatorWindow(QWidget):
         filter_row.addStretch(1)
         participants_layout.addLayout(filter_row)
 
-        header_row = QHBoxLayout()
-        exclude_header = QLabel("Exclude")
-        exclude_font = exclude_header.font()
-        exclude_font.setBold(True)
-        exclude_header.setFont(exclude_font)
-        id_header = QLabel("Participant ID")
-        id_header.setFont(exclude_font)
-        header_row.addWidget(exclude_header)
-        header_row.addSpacing(18)
-        header_row.addWidget(id_header)
-        header_row.addStretch(1)
-        self.exclusion_status = QLabel("Excluded: 0 / Paired: 0 \u2192 Used: 0")
-        exclusion_font = self.exclusion_status.font()
-        exclusion_font.setBold(True)
-        self.exclusion_status.setFont(exclusion_font)
-        self.exclusion_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        header_row.addWidget(self.exclusion_status)
-        participants_layout.addLayout(header_row)
-
-        self.exclude_list = QListWidget()
-        self.exclude_list.setSelectionMode(QListWidget.NoSelection)
-        self.exclude_list.itemChanged.connect(self._update_exclusion_status)
-        participants_layout.addWidget(self.exclude_list)
+        self.exclude_table = QTableWidget()
+        self.exclude_table.setColumnCount(2)
+        self.exclude_table.setHorizontalHeaderLabels(["Exclude", "Participant ID"])
+        self.exclude_table.verticalHeader().setVisible(False)
+        self.exclude_table.setSelectionMode(QTableWidget.NoSelection)
+        self.exclude_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.exclude_table.setAlternatingRowColors(True)
+        header = self.exclude_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        self.exclude_table.setColumnWidth(0, 70)
+        header_font = header.font()
+        header_font.setBold(False)
+        header.setFont(header_font)
+        self.exclude_table.itemChanged.connect(self._on_exclusion_item_changed)
+        participants_layout.addWidget(self.exclude_table)
 
         button_row = QHBoxLayout()
         self.select_all_btn = QPushButton("Exclude all")
@@ -289,7 +279,7 @@ class RatioCalculatorWindow(QWidget):
 
         roi_group = QGroupBox("ROIs (read-only)")
         roi_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        roi_group.setFont(self._section_header_font(roi_group))
+        self._apply_groupbox_title_style(roi_group)
         roi_layout = QVBoxLayout(roi_group)
         roi_layout.setContentsMargins(6, 8, 6, 6)
         roi_layout.setSpacing(6)
@@ -378,11 +368,16 @@ class RatioCalculatorWindow(QWidget):
         edit.setToolTip(path)
 
     @staticmethod
-    def _section_header_font(widget: QWidget) -> QFont:
-        header_font = widget.font()
-        header_font.setBold(True)
-        header_font.setPointSize(header_font.pointSize() + 1)
-        return header_font
+    def _apply_groupbox_title_style(group: QGroupBox) -> None:
+        group.setStyleSheet("QGroupBox::title { font-weight: 600; }")
+
+    @staticmethod
+    def _make_caption_label(text: str) -> QLabel:
+        label = QLabel(text)
+        font = label.font()
+        font.setBold(True)
+        label.setFont(font)
+        return label
 
     def _apply_button_styling(self) -> None:
         buttons = [
@@ -394,7 +389,6 @@ class RatioCalculatorWindow(QWidget):
             self.input_b_btn,
             self.output_open_btn,
             self.output_btn,
-            self.load_btn,
             self.select_all_btn,
             self.select_none_btn,
             self.clear_exclusions_btn,
@@ -405,6 +399,9 @@ class RatioCalculatorWindow(QWidget):
         ]
         for button in buttons:
             button.setMinimumHeight(28)
+            font = button.font()
+            font.setBold(True)
+            button.setFont(font)
         self.run_btn.setMinimumWidth(90)
 
     def _scan_condition_folders(self, excel_root: Path) -> list[Path]:
@@ -439,6 +436,7 @@ class RatioCalculatorWindow(QWidget):
             with QSignalBlocker(self.condition_b_combo):
                 self.condition_b_combo.setCurrentText(second)
             self._apply_condition_selection(second, is_a=False)
+        self._maybe_autoload_participants(force=True)
         self._update_run_state()
 
     def _populate_condition_combo(self, combo: QComboBox, edit: QLineEdit) -> None:
@@ -485,6 +483,7 @@ class RatioCalculatorWindow(QWidget):
 
     def _apply_condition_selection(self, condition: str, is_a: bool) -> None:
         if condition == CUSTOM_CONDITION_OPTION:
+            self._maybe_autoload_participants(force=True)
             self._update_run_state()
             return
 
@@ -494,7 +493,7 @@ class RatioCalculatorWindow(QWidget):
             self._set_path_lineedit(target_edit, str(selected_path))
             self._set_condition_labels_from_folder(condition, is_a)
             self._last_dir = selected_path
-        self._maybe_autoload_participants()
+        self._maybe_autoload_participants(force=True)
         self._update_run_state()
 
     def _swap_conditions(self) -> None:
@@ -520,13 +519,13 @@ class RatioCalculatorWindow(QWidget):
         self._label_a_dirty = b_dirty
         self._label_b_dirty = a_dirty
         self._update_run_label_default()
-        self._maybe_autoload_participants()
+        self._maybe_autoload_participants(force=True)
         self._update_run_state()
 
     def _build_advanced_tab(self) -> None:
         layout = QVBoxLayout(self.advanced_tab)
         settings_group = QGroupBox("Harmonic settings")
-        settings_group.setFont(self._section_header_font(settings_group))
+        self._apply_groupbox_title_style(settings_group)
         form = QFormLayout(settings_group)
 
         self.oddball_spin = QDoubleSpinBox()
@@ -569,18 +568,18 @@ class RatioCalculatorWindow(QWidget):
         ]:
             edit.setPlaceholderText("auto or min,max")
 
-        form.addRow("Oddball base (Hz)", self.oddball_spin)
-        form.addRow("Sum up to (Hz)", self.sum_up_spin)
-        form.addRow("Excluded freqs (Hz)", self.excluded_edit)
-        form.addRow("Palette", self.palette_combo)
-        form.addRow("PNG DPI", self.png_dpi_spin)
+        form.addRow(self._make_caption_label("Oddball base (Hz)"), self.oddball_spin)
+        form.addRow(self._make_caption_label("Sum up to (Hz)"), self.sum_up_spin)
+        form.addRow(self._make_caption_label("Excluded freqs (Hz)"), self.excluded_edit)
+        form.addRow(self._make_caption_label("Palette"), self.palette_combo)
+        form.addRow(self._make_caption_label("PNG DPI"), self.png_dpi_spin)
         form.addRow(self.use_stable_ylims_check)
-        form.addRow("YLIM raw Z", self.ylim_raw_z_edit)
-        form.addRow("YLIM raw SNR", self.ylim_raw_snr_edit)
-        form.addRow("YLIM raw BCA", self.ylim_raw_bca_edit)
-        form.addRow("YLIM ratio Z", self.ylim_ratio_z_edit)
-        form.addRow("YLIM ratio SNR", self.ylim_ratio_snr_edit)
-        form.addRow("YLIM ratio BCA", self.ylim_ratio_bca_edit)
+        form.addRow(self._make_caption_label("YLIM raw Z"), self.ylim_raw_z_edit)
+        form.addRow(self._make_caption_label("YLIM raw SNR"), self.ylim_raw_snr_edit)
+        form.addRow(self._make_caption_label("YLIM raw BCA"), self.ylim_raw_bca_edit)
+        form.addRow(self._make_caption_label("YLIM ratio Z"), self.ylim_ratio_z_edit)
+        form.addRow(self._make_caption_label("YLIM ratio SNR"), self.ylim_ratio_snr_edit)
+        form.addRow(self._make_caption_label("YLIM ratio BCA"), self.ylim_ratio_bca_edit)
 
         layout.addWidget(settings_group)
         layout.addStretch(1)
@@ -640,6 +639,7 @@ class RatioCalculatorWindow(QWidget):
                 with QSignalBlocker(combo):
                     combo.setCurrentText(CUSTOM_CONDITION_OPTION)
                 self._set_condition_labels_from_folder(Path(folder).name, condition_key == "a")
+            self._maybe_autoload_participants(force=True)
             self._update_run_state()
 
     def _initial_dialog_dir(self, is_output: bool) -> Path:
@@ -660,48 +660,61 @@ class RatioCalculatorWindow(QWidget):
             return False
         self._loading_participants = True
         try:
-            self.exclude_list.clear()
-            self._paired_participants = []
+            self._clear_participants()
             input_a = self.input_a_edit.text().strip()
             input_b = self.input_b_edit.text().strip()
             if not input_a or not input_b:
                 if not silent:
-                    QMessageBox.warning(self, "Missing folders", "Select both condition folders first.")
+                    self._set_status_message("Select both condition folders to load participants.")
+                return False
+            if not Path(input_a).is_dir() or not Path(input_b).is_dir():
+                if not silent:
+                    self._set_status_message("Select valid condition folders to load participants.")
                 return False
 
             try:
                 map_a = self._index_folder(Path(input_a))
                 map_b = self._index_folder(Path(input_b))
             except Exception as exc:
+                message = f"Unable to load participants: {exc}"
                 if not silent:
-                    QMessageBox.critical(self, "Error", str(exc))
+                    self._set_status_message(message)
                 else:
-                    self._append_log(str(exc))
+                    self._append_log(message)
                 return False
 
             pids_a = sorted(map_a.keys())
             pids_b = sorted(map_b.keys())
             paired = sorted(set(pids_a).intersection(set(pids_b)))
             self._paired_participants = paired
-            self.participant_counts.setText(f"A: {len(pids_a)} | B: {len(pids_b)} | Paired: {len(paired)}")
+            self._update_participant_counts(len(pids_a), len(pids_b), len(paired))
 
             if not paired:
+                message = "No paired participants found between the folders."
                 if not silent:
-                    QMessageBox.warning(self, "No pairs", "No paired participants found between the folders.")
+                    self._set_status_message(message)
+                else:
+                    self._append_log(message)
                 self._update_exclusion_status()
                 return False
 
-            self.exclude_list.blockSignals(True)
-            for pid in paired:
-                item = QListWidgetItem(pid)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Unchecked)
-                self.exclude_list.addItem(item)
-            self.exclude_list.blockSignals(False)
+            with QSignalBlocker(self.exclude_table):
+                self.exclude_table.setRowCount(len(paired))
+                for row, pid in enumerate(paired):
+                    exclude_item = QTableWidgetItem()
+                    exclude_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                    exclude_item.setCheckState(Qt.Unchecked)
+                    exclude_item.setTextAlignment(Qt.AlignCenter)
+                    pid_item = QTableWidgetItem(pid)
+                    pid_item.setFlags(Qt.ItemIsEnabled)
+                    self.exclude_table.setItem(row, 0, exclude_item)
+                    self.exclude_table.setItem(row, 1, pid_item)
 
             self._apply_participant_filter()
             self._update_exclusion_status()
             self._update_run_state()
+            if not (self._thread and self._thread.isRunning()):
+                self.status_label.setText("Ready")
             return True
         finally:
             self._loading_participants = False
@@ -718,11 +731,14 @@ class RatioCalculatorWindow(QWidget):
         return mapping
 
     def _set_all_exclusions(self, checked: bool) -> None:
-        for idx in range(self.exclude_list.count()):
-            item = self.exclude_list.item(idx)
-            if item.isHidden():
-                continue
-            item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        with QSignalBlocker(self.exclude_table):
+            for row in range(self.exclude_table.rowCount()):
+                if self.exclude_table.isRowHidden(row):
+                    continue
+                item = self.exclude_table.item(row, 0)
+                if item is None:
+                    continue
+                item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         self._update_exclusion_status()
 
     def _confirm_exclude_all(self) -> None:
@@ -740,21 +756,27 @@ class RatioCalculatorWindow(QWidget):
     def _apply_participant_filter(self) -> None:
         query = self.participant_filter_edit.text().strip().lower()
         only_excluded = self.show_excluded_check.isChecked()
-        for idx in range(self.exclude_list.count()):
-            item = self.exclude_list.item(idx)
-            text = item.text().lower()
+        for row in range(self.exclude_table.rowCount()):
+            pid_item = self.exclude_table.item(row, 1)
+            exclude_item = self.exclude_table.item(row, 0)
+            if pid_item is None or exclude_item is None:
+                continue
+            text = pid_item.text().lower()
             matches_query = query in text
-            matches_excluded = item.checkState() == Qt.Checked
+            matches_excluded = exclude_item.checkState() == Qt.Checked
             show = matches_query and (matches_excluded if only_excluded else True)
-            item.setHidden(not show)
+            self.exclude_table.setRowHidden(row, not show)
 
     def _collect_manual_exclusions(self) -> list[str]:
         manual_list: list[str] = []
         invalid: list[str] = []
-        for idx in range(self.exclude_list.count()):
-            item = self.exclude_list.item(idx)
-            if item.checkState() == Qt.Checked:
-                pid = item.text().strip()
+        for row in range(self.exclude_table.rowCount()):
+            exclude_item = self.exclude_table.item(row, 0)
+            pid_item = self.exclude_table.item(row, 1)
+            if exclude_item is None or pid_item is None:
+                continue
+            if exclude_item.checkState() == Qt.Checked:
+                pid = pid_item.text().strip()
                 if PID_PATTERN.match(pid):
                     manual_list.append(pid)
                 else:
@@ -771,7 +793,10 @@ class RatioCalculatorWindow(QWidget):
     def _update_exclusion_status(self) -> None:
         paired_count = len(self._paired_participants)
         excluded_count = sum(
-            1 for idx in range(self.exclude_list.count()) if self.exclude_list.item(idx).checkState() == Qt.Checked
+            1
+            for row in range(self.exclude_table.rowCount())
+            if self.exclude_table.item(row, 0)
+            and self.exclude_table.item(row, 0).checkState() == Qt.Checked
         )
         used_count = max(paired_count - excluded_count, 0)
         self.exclusion_status.setText(
@@ -899,16 +924,43 @@ class RatioCalculatorWindow(QWidget):
         else:
             self.validation_label.setText("")
 
-    def _maybe_autoload_participants(self) -> None:
+    def _maybe_autoload_participants(self, force: bool = False) -> None:
+        if force:
+            self._paired_participants = []
         if self._paired_participants:
             return
         input_a = self.input_a_edit.text().strip()
         input_b = self.input_b_edit.text().strip()
         if not input_a or not input_b:
+            self._clear_participants("Select both condition folders to load participants.")
             return
         if not Path(input_a).is_dir() or not Path(input_b).is_dir():
+            self._clear_participants("Select valid condition folders to load participants.")
             return
         self._load_participants(silent=True)
+
+    def _on_exclusion_item_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() != 0:
+            return
+        self._update_exclusion_status()
+
+    def _update_participant_counts(self, count_a: int, count_b: int, count_paired: int) -> None:
+        self.participant_counts.setText(f"A: {count_a} | B: {count_b} | Paired: {count_paired}")
+
+    def _clear_participants(self, status_message: str | None = None) -> None:
+        with QSignalBlocker(self.exclude_table):
+            self.exclude_table.setRowCount(0)
+        self._paired_participants = []
+        self._update_participant_counts(0, 0, 0)
+        self._update_exclusion_status()
+        if status_message:
+            self._set_status_message(status_message)
+
+    def _set_status_message(self, message: str) -> None:
+        if self._thread and self._thread.isRunning():
+            return
+        self.status_label.setText(message)
+        self._append_log(message)
 
     def _start_run(self) -> None:
         if self._thread and self._thread.isRunning():
@@ -932,7 +984,11 @@ class RatioCalculatorWindow(QWidget):
             return
 
         if not self._paired_participants:
-            QMessageBox.warning(self, "Participants not loaded", "Load participants before running.")
+            QMessageBox.warning(
+                self,
+                "Participants not loaded",
+                "Participants are not loaded yet. Check the condition folders and try again.",
+            )
             return
 
         self.progress.setValue(0)
