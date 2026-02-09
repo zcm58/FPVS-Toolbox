@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
+import matplotlib
+
+matplotlib.use("Agg")
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+from matplotlib import cm, colors as mcolors
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
-from matplotlib import colors as mcolors
 
 from .constants import EPS, MANUAL_EXCLUDED_POINT_COLOR, MANUAL_EXCLUDED_POINT_MARKER, PALETTES
 
@@ -33,7 +39,7 @@ def build_roi_palette(palette_choice: str, rois: list[str]) -> dict[str, str]:
         if key != "Default":
             out[key] = value
 
-    cmap = plt.get_cmap("tab20")
+    cmap = cm.get_cmap("tab20")
     cmap_n = getattr(cmap, "N", 20)
     idx = 0
 
@@ -106,7 +112,12 @@ def make_raincloud_figure(
     cond_a: str,
     cond_b: str,
     excluded_col: str = "is_manual_excluded",
+    log_func: Callable[[str], None] | None = None,
 ) -> None:
+    if excluded_col in df_part_all.columns:
+        df_part_all = df_part_all.copy()
+        df_part_all[excluded_col] = df_part_all[excluded_col].fillna(False).astype(bool)
+
     rois = list(roi_defs.keys())
     palette = build_roi_palette(palette_choice, rois)
     conds = ordered_conditions(df_part_all, cond_a, cond_b)
@@ -114,8 +125,10 @@ def make_raincloud_figure(
     seed = abs(hash(run_label)) % (2**32)
     rng = np.random.default_rng(seed)
 
-    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
-    plt.subplots_adjust(left=0.12, bottom=0.18, top=0.90)
+    fig = Figure(figsize=(10, 6))
+    FigureCanvas(fig)
+    ax = fig.add_subplot(111)
+    fig.subplots_adjust(left=0.12, bottom=0.18, top=0.90)
 
     n_rois = max(len(rois), 1)
     cluster_width = 0.70
@@ -140,6 +153,18 @@ def make_raincloud_figure(
 
             data_in = pd.to_numeric(sub_in[panel.val_col], errors="coerce").dropna().to_numpy(dtype=float)
             data_ex = pd.to_numeric(sub_ex[panel.val_col], errors="coerce").dropna().to_numpy(dtype=float)
+            if log_func:
+                log_func(
+                    "Ratio plot counts: "
+                    f"ROI={roi} condition={cond} metric={panel.val_col} "
+                    f"included_n={len(sub_in)} excluded_n={len(sub_ex)} "
+                    f"included_finite={data_in.size} excluded_finite={data_ex.size}"
+                )
+                if len(sub_in) == 0 and len(sub_ex) > 0:
+                    log_func(
+                        "Warning: All participants are marked manual-excluded (or included filter failed). "
+                        "Plot will omit violin/box/mean overlays."
+                    )
 
             if data_in.size > 0:
                 v = ax.violinplot(data_in, positions=[pos], showextrema=False, widths=violin_width)
@@ -215,11 +240,18 @@ def make_raincloud_figure(
     ax.set_xticklabels(conds, fontsize=11, fontweight="bold")
 
     roi_handles = [
-        plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=palette.get(r, palette["Default"]),
-                   markersize=10, label=r)
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor=palette.get(r, palette["Default"]),
+            markersize=10,
+            label=r,
+        )
         for r in rois
     ]
-    excl_handle = plt.Line2D(
+    excl_handle = Line2D(
         [0], [0],
         marker=MANUAL_EXCLUDED_POINT_MARKER,
         color=MANUAL_EXCLUDED_POINT_COLOR,
@@ -231,7 +263,6 @@ def make_raincloud_figure(
 
     fig.savefig(out_path_no_ext.with_suffix(".pdf"), bbox_inches="tight")
     fig.savefig(out_path_no_ext.with_suffix(".png"), dpi=png_dpi, bbox_inches="tight")
-    plt.close(fig)
 
 
 def make_raincloud_figure_roi_x(
@@ -245,7 +276,12 @@ def make_raincloud_figure_roi_x(
     png_dpi: int,
     xlabel: str = "ROI",
     excluded_col: str = "is_manual_excluded",
+    log_func: Callable[[str], None] | None = None,
 ) -> None:
+    if excluded_col in df_part_all.columns:
+        df_part_all = df_part_all.copy()
+        df_part_all[excluded_col] = df_part_all[excluded_col].fillna(False).astype(bool)
+
     rois_all = list(roi_defs.keys())
     palette = build_roi_palette(palette_choice, rois_all)
 
@@ -256,8 +292,10 @@ def make_raincloud_figure_roi_x(
     seed = abs(hash(run_label)) % (2**32)
     rng = np.random.default_rng(seed)
 
-    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
-    plt.subplots_adjust(left=0.12, bottom=0.18, top=0.88)
+    fig = Figure(figsize=(10, 6))
+    FigureCanvas(fig)
+    ax = fig.add_subplot(111)
+    fig.subplots_adjust(left=0.12, bottom=0.18, top=0.88)
 
     violin_width = 0.65
     jitter_scale = 0.18
@@ -275,6 +313,18 @@ def make_raincloud_figure_roi_x(
 
         data_in = pd.to_numeric(sub_in[panel.val_col], errors="coerce").dropna().to_numpy(dtype=float)
         data_ex = pd.to_numeric(sub_ex[panel.val_col], errors="coerce").dropna().to_numpy(dtype=float)
+        if log_func:
+            log_func(
+                "Ratio plot counts: "
+                f"ROI={roi} metric={panel.val_col} "
+                f"included_n={len(sub_in)} excluded_n={len(sub_ex)} "
+                f"included_finite={data_in.size} excluded_finite={data_ex.size}"
+            )
+            if len(sub_in) == 0 and len(sub_ex) > 0:
+                log_func(
+                    "Warning: All participants are marked manual-excluded (or included filter failed). "
+                    "Plot will omit violin/box/mean overlays."
+                )
 
         if data_in.size > 0:
             v = ax.violinplot(data_in, positions=[pos], showextrema=False, widths=violin_width)
@@ -350,11 +400,18 @@ def make_raincloud_figure_roi_x(
     ax.set_xticklabels(rois_present, fontsize=11, fontweight="bold")
 
     roi_handles = [
-        plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=palette.get(r, palette["Default"]),
-                   markersize=10, label=r)
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor=palette.get(r, palette["Default"]),
+            markersize=10,
+            label=r,
+        )
         for r in rois_present
     ]
-    excl_handle = plt.Line2D(
+    excl_handle = Line2D(
         [0], [0],
         marker=MANUAL_EXCLUDED_POINT_MARKER,
         color=MANUAL_EXCLUDED_POINT_COLOR,
@@ -366,4 +423,3 @@ def make_raincloud_figure_roi_x(
 
     fig.savefig(out_path_no_ext.with_suffix(".pdf"), bbox_inches="tight")
     fig.savefig(out_path_no_ext.with_suffix(".png"), dpi=png_dpi, bbox_inches="tight")
-    plt.close(fig)

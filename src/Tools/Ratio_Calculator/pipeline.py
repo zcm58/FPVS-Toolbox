@@ -205,6 +205,7 @@ def run_ratio_calculator(
         settings.png_dpi,
         condition_label_a,
         condition_label_b,
+        log_func=_log,
     )
 
     df_group_sums_plot = df_group_sums_used.rename(columns={"mean_sum_SNR": "mean", "sem_sum_SNR": "sem"}).copy()
@@ -221,6 +222,7 @@ def run_ratio_calculator(
         settings.png_dpi,
         condition_label_a,
         condition_label_b,
+        log_func=_log,
     )
 
     df_group_sums_plot = df_group_sums_used.rename(columns={"mean_sum_BCA_uV": "mean", "sem_sum_BCA_uV": "sem"}).copy()
@@ -241,6 +243,7 @@ def run_ratio_calculator(
         settings.png_dpi,
         condition_label_a,
         condition_label_b,
+        log_func=_log,
     )
 
     ratio_label = f"{condition_label_a} / {condition_label_b}"
@@ -266,6 +269,7 @@ def run_ratio_calculator(
         run_label,
         settings.png_dpi,
         xlabel="ROI",
+        log_func=_log,
     )
 
     make_raincloud_figure_roi_x(
@@ -286,6 +290,7 @@ def run_ratio_calculator(
         run_label,
         settings.png_dpi,
         xlabel="ROI",
+        log_func=_log,
     )
 
     make_raincloud_figure_roi_x(
@@ -306,6 +311,7 @@ def run_ratio_calculator(
         run_label,
         settings.png_dpi,
         xlabel="ROI",
+        log_func=_log,
     )
 
     out_xlsx = out_dir / f"Metrics_{run_label}.xlsx"
