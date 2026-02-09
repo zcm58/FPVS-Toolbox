@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QSignalBlocker, QThread, Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -28,10 +29,13 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
     QSizePolicy,
     QFileDialog,
+    QHeaderView,
+    QStyle,
 )
 
 from .constants import RatioCalculatorSettings, ROI_DEFS_DEFAULT
@@ -73,6 +77,10 @@ class RatioCalculatorWindow(QWidget):
         main_layout.addWidget(self.tabs)
         main_layout.addWidget(self._build_bottom_panel())
 
+        self._apply_button_styling()
+        self._apply_button_tooltips()
+        self._apply_button_icons()
+
         self._refresh_conditions()
         self._set_default_output()
         self._update_run_state()
@@ -100,8 +108,9 @@ class RatioCalculatorWindow(QWidget):
         layout.setSpacing(8)
 
         cond_group = QGroupBox("Conditions")
+        cond_group.setFont(self._section_header_font(cond_group))
         cond_group_layout = QVBoxLayout(cond_group)
-        cond_group_layout.setContentsMargins(8, 8, 8, 8)
+        cond_group_layout.setContentsMargins(6, 8, 6, 6)
         cond_group_layout.setSpacing(6)
         cond_layout = QFormLayout()
         cond_layout.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -109,17 +118,12 @@ class RatioCalculatorWindow(QWidget):
         cond_layout.setHorizontalSpacing(10)
         cond_layout.setVerticalSpacing(6)
 
-        action_row = QHBoxLayout()
+        self.condition_a_combo = QComboBox()
+        self.condition_a_combo.currentTextChanged.connect(self._on_condition_a_selected)
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self._refresh_conditions)
         self.swap_btn = QPushButton("Swap A/B")
         self.swap_btn.clicked.connect(self._swap_conditions)
-        action_row.addWidget(self.refresh_btn)
-        action_row.addWidget(self.swap_btn)
-        action_row.addStretch(1)
-
-        self.condition_a_combo = QComboBox()
-        self.condition_a_combo.currentTextChanged.connect(self._on_condition_a_selected)
 
         self.input_a_edit = QLineEdit()
         self.input_a_edit.setReadOnly(True)
@@ -194,8 +198,14 @@ class RatioCalculatorWindow(QWidget):
         out_path_layout.addWidget(self.output_open_btn)
         out_path_layout.addWidget(self.output_btn)
 
-        cond_group_layout.addLayout(action_row)
-        cond_layout.addRow("Condition A", self.condition_a_combo)
+        condition_header = QWidget()
+        condition_header_layout = QHBoxLayout(condition_header)
+        condition_header_layout.setContentsMargins(0, 0, 0, 0)
+        condition_header_layout.setSpacing(6)
+        condition_header_layout.addWidget(self.condition_a_combo, 1)
+        condition_header_layout.addWidget(self.refresh_btn)
+        condition_header_layout.addWidget(self.swap_btn)
+        cond_layout.addRow("Condition A", condition_header)
         cond_layout.addRow("Condition A Folder", a_path_row)
         cond_layout.addRow("Condition A Label", self.label_a_edit)
         cond_layout.addRow("Condition B", self.condition_b_combo)
@@ -210,8 +220,9 @@ class RatioCalculatorWindow(QWidget):
 
         participants_group = QGroupBox("Participant exclusions (optional)")
         participants_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        participants_group.setFont(self._section_header_font(participants_group))
         participants_layout = QVBoxLayout(participants_group)
-        participants_layout.setContentsMargins(8, 8, 8, 8)
+        participants_layout.setContentsMargins(6, 8, 6, 6)
         participants_layout.setSpacing(6)
         participants_help = QLabel(
             "Checked participants are excluded from group summaries and distribution overlays. "
@@ -250,6 +261,12 @@ class RatioCalculatorWindow(QWidget):
         header_row.addSpacing(18)
         header_row.addWidget(id_header)
         header_row.addStretch(1)
+        self.exclusion_status = QLabel("Excluded: 0 / Paired: 0 \u2192 Used: 0")
+        exclusion_font = self.exclusion_status.font()
+        exclusion_font.setBold(True)
+        self.exclusion_status.setFont(exclusion_font)
+        self.exclusion_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        header_row.addWidget(self.exclusion_status)
         participants_layout.addLayout(header_row)
 
         self.exclude_list = QListWidget()
@@ -257,16 +274,10 @@ class RatioCalculatorWindow(QWidget):
         self.exclude_list.itemChanged.connect(self._update_exclusion_status)
         participants_layout.addWidget(self.exclude_list)
 
-        self.exclusion_status = QLabel("Excluded: 0 / Paired: 0 \u2192 Used: 0")
-        exclusion_font = self.exclusion_status.font()
-        exclusion_font.setBold(True)
-        self.exclusion_status.setFont(exclusion_font)
-        participants_layout.addWidget(self.exclusion_status)
-
         button_row = QHBoxLayout()
-        self.select_all_btn = QPushButton("Select All")
-        self.select_all_btn.clicked.connect(lambda: self._set_all_exclusions(True))
-        self.select_none_btn = QPushButton("Select None")
+        self.select_all_btn = QPushButton("Exclude all")
+        self.select_all_btn.clicked.connect(self._confirm_exclude_all)
+        self.select_none_btn = QPushButton("Exclude none")
         self.select_none_btn.clicked.connect(lambda: self._set_all_exclusions(False))
         self.clear_exclusions_btn = QPushButton("Clear exclusions")
         self.clear_exclusions_btn.clicked.connect(lambda: self._set_all_exclusions(False))
@@ -278,8 +289,9 @@ class RatioCalculatorWindow(QWidget):
 
         roi_group = QGroupBox("ROIs (read-only)")
         roi_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        roi_group.setFont(self._section_header_font(roi_group))
         roi_layout = QVBoxLayout(roi_group)
-        roi_layout.setContentsMargins(8, 8, 8, 8)
+        roi_layout.setContentsMargins(6, 8, 6, 6)
         roi_layout.setSpacing(6)
         self.roi_table = QTableWidget()
         self.roi_table.setColumnCount(2)
@@ -288,16 +300,23 @@ class RatioCalculatorWindow(QWidget):
         self.roi_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.roi_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.roi_table.setRowCount(len(ROI_DEFS_DEFAULT))
+        self.roi_table.setAlternatingRowColors(True)
+        self.roi_table.setWordWrap(True)
+        self.roi_table.setTextElideMode(Qt.ElideRight)
+        header = self.roi_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
 
         for row, (roi, electrodes) in enumerate(ROI_DEFS_DEFAULT.items()):
             roi_item = QTableWidgetItem(roi)
             roi_item.setFlags(roi_item.flags() & ~Qt.ItemIsEditable)
-            elec_item = QTableWidgetItem(", ".join(electrodes))
+            electrodes_text = ", ".join(electrodes)
+            elec_item = QTableWidgetItem(electrodes_text)
+            elec_item.setToolTip(electrodes_text)
             elec_item.setFlags(elec_item.flags() & ~Qt.ItemIsEditable)
             self.roi_table.setItem(row, 0, roi_item)
             self.roi_table.setItem(row, 1, elec_item)
 
-        self.roi_table.resizeColumnsToContents()
         roi_layout.addWidget(self.roi_table)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -349,11 +368,44 @@ class RatioCalculatorWindow(QWidget):
             return
         if self._project_root:
             default_out = self._project_root / "5 - Ratio Summaries"
-            self._set_path_display(self.output_edit, str(default_out))
+            self._set_path_lineedit(self.output_edit, str(default_out))
 
-    def _set_path_display(self, edit: QLineEdit, path: str) -> None:
+    @staticmethod
+    def _set_path_lineedit(edit: QLineEdit, path: str) -> None:
         edit.setText(path)
+        edit.setCursorPosition(0)
+        edit.deselect()
         edit.setToolTip(path)
+
+    @staticmethod
+    def _section_header_font(widget: QWidget) -> QFont:
+        header_font = widget.font()
+        header_font.setBold(True)
+        header_font.setPointSize(header_font.pointSize() + 1)
+        return header_font
+
+    def _apply_button_styling(self) -> None:
+        buttons = [
+            self.refresh_btn,
+            self.swap_btn,
+            self.input_a_open_btn,
+            self.input_a_btn,
+            self.input_b_open_btn,
+            self.input_b_btn,
+            self.output_open_btn,
+            self.output_btn,
+            self.load_btn,
+            self.select_all_btn,
+            self.select_none_btn,
+            self.clear_exclusions_btn,
+            self.run_btn,
+            self.open_output_btn,
+            self.copy_log_btn,
+            self.log_toggle_btn,
+        ]
+        for button in buttons:
+            button.setMinimumHeight(28)
+        self.run_btn.setMinimumWidth(90)
 
     def _scan_condition_folders(self, excel_root: Path) -> list[Path]:
         if not excel_root.exists():
@@ -411,7 +463,7 @@ class RatioCalculatorWindow(QWidget):
 
         selected = combo.currentText()
         if selected in self._condition_paths:
-            self._set_path_display(edit, str(self._condition_paths[selected]))
+            self._set_path_lineedit(edit, str(self._condition_paths[selected]))
             self._set_condition_labels_from_folder(selected, combo is self.condition_a_combo)
 
     def _set_condition_labels_from_folder(self, folder_name: str, is_a: bool) -> None:
@@ -439,7 +491,7 @@ class RatioCalculatorWindow(QWidget):
         target_edit = self.input_a_edit if is_a else self.input_b_edit
         selected_path = self._condition_paths.get(condition)
         if selected_path:
-            self._set_path_display(target_edit, str(selected_path))
+            self._set_path_lineedit(target_edit, str(selected_path))
             self._set_condition_labels_from_folder(condition, is_a)
             self._last_dir = selected_path
         self._maybe_autoload_participants()
@@ -459,8 +511,8 @@ class RatioCalculatorWindow(QWidget):
             self.condition_a_combo.setCurrentText(b_combo)
             self.condition_b_combo.setCurrentText(a_combo)
 
-        self._set_path_display(self.input_a_edit, b_path)
-        self._set_path_display(self.input_b_edit, a_path)
+        self._set_path_lineedit(self.input_a_edit, b_path)
+        self._set_path_lineedit(self.input_b_edit, a_path)
         with QSignalBlocker(self.label_a_edit), QSignalBlocker(self.label_b_edit):
             self.label_a_edit.setText(b_label)
             self.label_b_edit.setText(a_label)
@@ -474,6 +526,7 @@ class RatioCalculatorWindow(QWidget):
     def _build_advanced_tab(self) -> None:
         layout = QVBoxLayout(self.advanced_tab)
         settings_group = QGroupBox("Harmonic settings")
+        settings_group.setFont(self._section_header_font(settings_group))
         form = QFormLayout(settings_group)
 
         self.oddball_spin = QDoubleSpinBox()
@@ -535,6 +588,8 @@ class RatioCalculatorWindow(QWidget):
     def _build_bottom_panel(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
 
         run_row = QHBoxLayout()
         self.run_btn = QPushButton("Run")
@@ -542,14 +597,11 @@ class RatioCalculatorWindow(QWidget):
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.status_label = QLabel("Ready")
+        self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         run_row.addWidget(self.run_btn)
-        run_row.addWidget(self.progress)
+        run_row.addWidget(self.progress, 1)
         run_row.addWidget(self.status_label)
         layout.addLayout(run_row)
-
-        self.log_box = QTextEdit()
-        self.log_box.setReadOnly(True)
-        layout.addWidget(self.log_box)
 
         action_row = QHBoxLayout()
         self.open_output_btn = QPushButton("Open output folder")
@@ -557,10 +609,21 @@ class RatioCalculatorWindow(QWidget):
         self.open_output_btn.clicked.connect(self._open_output_folder)
         self.copy_log_btn = QPushButton("Copy log")
         self.copy_log_btn.clicked.connect(self._copy_log)
+        self.log_toggle_btn = QToolButton()
+        self.log_toggle_btn.setCheckable(True)
+        self.log_toggle_btn.setChecked(False)
+        self.log_toggle_btn.setText("Show log")
+        self.log_toggle_btn.clicked.connect(self._toggle_log_panel)
         action_row.addWidget(self.open_output_btn)
         action_row.addWidget(self.copy_log_btn)
+        action_row.addWidget(self.log_toggle_btn)
         action_row.addStretch(1)
         layout.addLayout(action_row)
+
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setVisible(False)
+        layout.addWidget(self.log_box)
 
         return panel
 
@@ -568,7 +631,7 @@ class RatioCalculatorWindow(QWidget):
         start_dir = self._initial_dialog_dir(is_output)
         folder = QFileDialog.getExistingDirectory(self, "Select Folder", str(start_dir))
         if folder:
-            self._set_path_display(target_edit, folder)
+            self._set_path_lineedit(target_edit, folder)
             self._last_dir = Path(folder)
             if condition_key:
                 combo = self.condition_a_combo if condition_key == "a" else self.condition_b_combo
@@ -661,6 +724,18 @@ class RatioCalculatorWindow(QWidget):
                 continue
             item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         self._update_exclusion_status()
+
+    def _confirm_exclude_all(self) -> None:
+        message = "Exclude all participants from group summaries? This will set Used = 0."
+        reply = QMessageBox.question(
+            self,
+            "Confirm exclusion",
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self._set_all_exclusions(True)
 
     def _apply_participant_filter(self) -> None:
         query = self.participant_filter_edit.text().strip().lower()
@@ -991,3 +1066,39 @@ class RatioCalculatorWindow(QWidget):
         self.input_a_open_btn.setEnabled(bool(self.input_a_edit.text().strip()))
         self.input_b_open_btn.setEnabled(bool(self.input_b_edit.text().strip()))
         self.output_open_btn.setEnabled(bool(self.output_edit.text().strip()))
+
+    def _toggle_log_panel(self) -> None:
+        is_visible = self.log_toggle_btn.isChecked()
+        self.log_box.setVisible(is_visible)
+        self.log_toggle_btn.setText("Hide log" if is_visible else "Show log")
+
+    def _apply_button_tooltips(self) -> None:
+        self.refresh_btn.setToolTip("Refresh conditions list from the project folder.")
+        self.swap_btn.setToolTip("Swap condition A and B selections.")
+        self.input_a_open_btn.setToolTip("Open Condition A folder.")
+        self.input_b_open_btn.setToolTip("Open Condition B folder.")
+        self.output_open_btn.setToolTip("Open output folder.")
+        self.input_a_btn.setToolTip("Browse for Condition A folder.")
+        self.input_b_btn.setToolTip("Browse for Condition B folder.")
+        self.output_btn.setToolTip("Browse for output folder.")
+        self.select_all_btn.setToolTip("Exclude all paired participants.")
+        self.select_none_btn.setToolTip("Clear all exclusions.")
+        self.clear_exclusions_btn.setToolTip("Clear all exclusions.")
+        self.run_btn.setToolTip("Run ratio calculations.")
+        self.open_output_btn.setToolTip("Open the output folder.")
+        self.copy_log_btn.setToolTip("Copy log text to the clipboard.")
+        self.log_toggle_btn.setToolTip("Show or hide the run log.")
+
+    def _apply_button_icons(self) -> None:
+        style = self.style()
+        self.refresh_btn.setIcon(style.standardIcon(QStyle.SP_BrowserReload))
+        self.swap_btn.setIcon(style.standardIcon(QStyle.SP_ArrowLeft))
+        self.input_a_open_btn.setIcon(style.standardIcon(QStyle.SP_DirOpenIcon))
+        self.input_b_open_btn.setIcon(style.standardIcon(QStyle.SP_DirOpenIcon))
+        self.output_open_btn.setIcon(style.standardIcon(QStyle.SP_DirOpenIcon))
+        self.input_a_btn.setIcon(style.standardIcon(QStyle.SP_DialogOpenButton))
+        self.input_b_btn.setIcon(style.standardIcon(QStyle.SP_DialogOpenButton))
+        self.output_btn.setIcon(style.standardIcon(QStyle.SP_DialogOpenButton))
+        self.run_btn.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
+        self.open_output_btn.setIcon(style.standardIcon(QStyle.SP_DirOpenIcon))
+        self.copy_log_btn.setIcon(style.standardIcon(QStyle.SP_FileDialogDetailedView))
