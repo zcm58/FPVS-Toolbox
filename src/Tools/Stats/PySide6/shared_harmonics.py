@@ -112,6 +112,79 @@ def _select_two_consecutive_significant(
     return sorted(set(selected))
 
 
+def _select_after_first_sig_until_two_nonsig(
+    harmonic_freqs: list[float],
+    mean_z_lookup: dict[float, float],
+    *,
+    z_threshold: float,
+    stop_after_n_nonsig: int = 2,
+) -> tuple[list[float], dict[str, object]]:
+    """
+    Audited alignment note:
+    - Stats tool selector source of truth is `select_rossion_harmonics_by_roi`
+      in `group_harmonics.py`.
+    - Significance uses `np.isfinite(mean_z) and mean_z > z_threshold` (strictly `>`).
+    - The scan ignores leading non-significant harmonics until the first significant
+      harmonic is found.
+    - After first significant harmonic, stop is triggered by two consecutive
+      non-significant harmonics.
+    - Non-finite values are treated as non-significant.
+
+    This helper applies those same start/stop semantics for the between-group pooled
+    ROI-Z path, while returning the full inclusion window (both significant and
+    non-significant harmonics) and structured diagnostics.
+    """
+    selected: list[float] = []
+    first_sig_index: int | None = None
+    nonsig_run = 0
+    stop_index: int | None = None
+
+    max_z = float("nan")
+    max_z_harmonic: float | None = None
+    count_sig = 0
+
+    for idx, freq in enumerate(harmonic_freqs):
+        mean_z = float(mean_z_lookup.get(float(freq), np.nan))
+        is_sig = bool(np.isfinite(mean_z) and mean_z > z_threshold)
+
+        if np.isfinite(mean_z) and (not np.isfinite(max_z) or mean_z > max_z):
+            max_z = mean_z
+            max_z_harmonic = float(freq)
+
+        if is_sig:
+            count_sig += 1
+
+        if first_sig_index is None:
+            if not is_sig:
+                continue
+            first_sig_index = idx
+            nonsig_run = 0
+            selected.append(float(freq))
+            continue
+
+        selected.append(float(freq))
+        if is_sig:
+            nonsig_run = 0
+        else:
+            nonsig_run += 1
+            if nonsig_run >= stop_after_n_nonsig:
+                stop_index = idx
+                break
+
+    diagnostics = {
+        "first_sig_index": (int(first_sig_index + 1) if first_sig_index is not None else "none"),
+        "first_sig_harmonic": (
+            float(harmonic_freqs[first_sig_index]) if first_sig_index is not None else None
+        ),
+        "maxZ": (float(max_z) if np.isfinite(max_z) else np.nan),
+        "maxZ_harmonic": max_z_harmonic,
+        "count_sig": int(count_sig),
+        "stop_index": (int(stop_index + 1) if stop_index is not None else None),
+        "stop_harmonic": (float(harmonic_freqs[stop_index]) if stop_index is not None else None),
+    }
+    return selected, diagnostics
+
+
 def compute_shared_harmonics(
     *,
     subjects: list[str],
@@ -148,6 +221,7 @@ def compute_shared_harmonics(
         "z_sheet_used": z_sheet_used,
         "roi_condition_coverage": {},
         "empty_reasons": [],
+        "roi_selection_diagnostics": {},
     }
 
     for condition in conditions:
@@ -247,12 +321,18 @@ def compute_shared_harmonics(
             float(freq): float(pooled_lookup.get((str(roi_name), float(freq)), np.nan))
             for freq in harmonic_freqs
         }
-        harmonics_by_roi[str(roi_name)] = _select_two_consecutive_significant(
+        selected, roi_diag = _select_after_first_sig_until_two_nonsig(
             harmonic_freqs,
             z_lookup,
             z_threshold=z_threshold,
             stop_after_n_nonsig=2,
         )
+        harmonics_by_roi[str(roi_name)] = selected
+        diagnostics["roi_selection_diagnostics"][str(roi_name)] = roi_diag
+        if roi_diag["first_sig_index"] == "none":
+            diagnostics["empty_reasons"].append(
+                f"No significant pooled ROI Z harmonics for ROI={roi_name}; selection window is empty."
+            )
 
     condition_harmonics_by_roi: dict[str, dict[str, list[float]]] = {}
     for condition in conditions:
