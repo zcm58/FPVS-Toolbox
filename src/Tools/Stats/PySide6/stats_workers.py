@@ -41,6 +41,7 @@ from Tools.Stats.Legacy.stats_analysis import (
     set_rois,
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
 )
+from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
 from Tools.Stats.PySide6.dv_policies import (
     FIXED_SHARED_POLICY_NAME,
     ROSSION_POLICY_NAME,
@@ -87,6 +88,106 @@ BETWEEN_STAGE_ORDER = (
     "GROUP_CONTRASTS",
     "HARMONIC_CHECK",
 )
+
+LMM_DIAGNOSTIC_WORKBOOK = "BetweenGroup_ModelInput_Diagnostics.xlsx"
+
+
+def _lmm_stage_snapshot(stage: str, df: pd.DataFrame) -> dict[str, object]:
+    if not isinstance(df, pd.DataFrame):
+        return {
+            "stage": stage,
+            "rows": 0,
+            "n_subjects": 0,
+            "n_groups": 0,
+            "n_conditions": 0,
+            "n_rois": 0,
+            "groups": [],
+            "conditions": [],
+            "rois": [],
+        }
+    return {
+        "stage": stage,
+        "rows": int(len(df)),
+        "n_subjects": int(df["subject"].nunique()) if "subject" in df.columns else 0,
+        "n_groups": int(df["group"].dropna().nunique()) if "group" in df.columns else 0,
+        "n_conditions": int(df["condition"].dropna().nunique()) if "condition" in df.columns else 0,
+        "n_rois": int(df["roi"].dropna().nunique()) if "roi" in df.columns else 0,
+        "groups": sorted(df["group"].dropna().astype(str).unique().tolist()) if "group" in df.columns else [],
+        "conditions": sorted(df["condition"].dropna().astype(str).unique().tolist()) if "condition" in df.columns else [],
+        "rois": sorted(df["roi"].dropna().astype(str).unique().tolist()) if "roi" in df.columns else [],
+    }
+
+
+def _emit_lmm_stage_diag(message_cb, snapshot: dict[str, object], *, dv_col: str) -> None:
+    message_cb(
+        "[LMM DIAG] "
+        f"stage={snapshot.get('stage')} dv_col={dv_col} rows={snapshot.get('rows', 0)} "
+        f"subjects={snapshot.get('n_subjects', 0)} groups={snapshot.get('n_groups', 0)} "
+        f"conditions={snapshot.get('n_conditions', 0)} rois={snapshot.get('n_rois', 0)}"
+    )
+    message_cb(
+        "[LMM DIAG] "
+        f"stage={snapshot.get('stage')} unique_groups={snapshot.get('groups', [])} "
+        f"unique_conditions={snapshot.get('conditions', [])} unique_rois={snapshot.get('rois', [])}"
+    )
+
+
+def _build_lmm_blocked_payload(
+    *,
+    stage: str,
+    include_group: bool,
+    stage_counts: list[dict[str, object]],
+    exclusion_rows: list[dict[str, str]],
+    final_df: pd.DataFrame,
+    results_dir: str | None,
+    message_cb,
+) -> dict[str, object]:
+    message = (
+        f"Between-group mixed model blocked: 0 rows after {stage}. "
+        "See Missingness & Exclusions report / diagnostics."
+        if include_group
+        else f"Mixed model blocked: 0 rows after {stage}."
+    )
+    diagnostics_path = None
+    if include_group and results_dir:
+        try:
+            out_dir = Path(results_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            diagnostics_path = out_dir / LMM_DIAGNOSTIC_WORKBOOK
+            counts_df = pd.DataFrame(
+                {
+                    "stage": [row.get("stage", "") for row in stage_counts],
+                    "rows": [row.get("rows", 0) for row in stage_counts],
+                    "n_subjects": [row.get("n_subjects", 0) for row in stage_counts],
+                    "n_groups": [row.get("n_groups", 0) for row in stage_counts],
+                    "n_conditions": [row.get("n_conditions", 0) for row in stage_counts],
+                    "n_rois": [row.get("n_rois", 0) for row in stage_counts],
+                }
+            )
+            excluded_df = pd.DataFrame(exclusion_rows)
+            if excluded_df.empty:
+                excluded_df = pd.DataFrame(columns=["subject", "group", "reason"])
+            sample_df = final_df.head(200).copy() if isinstance(final_df, pd.DataFrame) else pd.DataFrame()
+            with pd.ExcelWriter(diagnostics_path) as writer:
+                _auto_format_and_write_excel(writer, counts_df, "CountsByStage", message_cb)
+                _auto_format_and_write_excel(writer, excluded_df, "ExcludedParticipants", message_cb)
+                _auto_format_and_write_excel(writer, sample_df, "RemainingRows_Sample", message_cb)
+            message_cb(f"Blocked model diagnostics exported to {diagnostics_path}")
+        except Exception as exc:  # noqa: BLE001
+            message_cb(f"Failed to export blocked diagnostics workbook: {exc}")
+            diagnostics_path = None
+
+    return {
+        "status": "blocked",
+        "blocked_stage": stage,
+        "message": message,
+        "stage_counts": stage_counts,
+        "excluded_participants": exclusion_rows,
+        "mixed_results_df": pd.DataFrame(),
+        "output_text": message,
+        "diagnostics_workbook": str(diagnostics_path) if diagnostics_path else None,
+        "missingness": {},
+    }
 
 
 def _serialize_dv_variants_payload(payload) -> dict | None:
@@ -858,6 +959,7 @@ def run_lmm(
     fixed_harmonic_dv_table: pd.DataFrame | None = None,
     required_conditions: list[str] | None = None,
     subject_to_group: dict[str, str | None] | None = None,
+    results_dir: str | None = None,
 ):
     set_rois(rois)
     prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
@@ -870,6 +972,7 @@ def run_lmm(
         subjects=list(subjects) if subjects else [],
     )
     all_subjects = list(subjects) if subjects else []
+    exclusion_rows: list[dict[str, str]] = []
     subjects, subject_data, subject_groups, qc_report = _apply_qc_screening(
         subjects=all_subjects,
         subject_data=subject_data,
@@ -881,12 +984,27 @@ def run_lmm(
         qc_config=qc_config,
         qc_state=qc_state,
     )
+    message_cb(
+        f"[LMM DIAG] participants_after_qc={len(subjects)} excluded_by_qc="
+        f"{len(getattr(qc_report, 'excluded_pids', set()) if qc_report else set())}"
+    )
     subjects, subject_data, subject_groups, manual_excluded = _apply_manual_exclusions(
         subjects=list(subjects) if subjects else [],
         subject_data=subject_data,
         subject_groups=subject_groups,
         manual_excluded_pids=manual_excluded_pids,
         message_cb=message_cb,
+    )
+    for pid in manual_excluded:
+        exclusion_rows.append(
+            {
+                "subject": str(pid),
+                "group": str((subject_to_group or subject_groups or {}).get(pid) or ""),
+                "reason": "manual",
+            }
+        )
+    message_cb(
+        f"[LMM DIAG] participants_after_manual={len(subjects)} manually_excluded={len(manual_excluded)}"
     )
     if not subjects:
         raise RuntimeError("All participants excluded by manual exclusions.")
@@ -895,7 +1013,7 @@ def run_lmm(
     if isinstance(fixed_harmonic_dv_table, pd.DataFrame) and not fixed_harmonic_dv_table.empty:
         message_cb("Using fixed-harmonic DV table for mixed model.")
         df_long = fixed_harmonic_dv_table.copy()
-        if "dv_value" in df_long.columns and "value" not in df_long.columns:
+        if "value" not in df_long.columns and "dv_value" in df_long.columns:
             df_long = df_long.rename(columns={"dv_value": "value"})
     else:
         all_subject_bca_data = prepare_summed_bca_data(
@@ -932,6 +1050,31 @@ def run_lmm(
     if "group" not in df_long.columns:
         map_groups = subject_to_group or subject_groups or {}
         df_long["group"] = df_long["subject"].astype(str).map(map_groups)
+
+    dv_col = "value" if "value" in df_long.columns else "dv_value"
+    if dv_col not in df_long.columns:
+        raise RuntimeError("Mixed model input is missing dependent variable column ('value'/'dv_value').")
+    message_cb(f"[LMM DIAG] dependent_variable_column={dv_col}")
+
+    stage_counts: list[dict[str, object]] = []
+
+    def _record_stage(stage: str) -> dict[str, object]:
+        snapshot = _lmm_stage_snapshot(stage, df_long)
+        stage_counts.append(snapshot)
+        _emit_lmm_stage_diag(message_cb, snapshot, dv_col=dv_col)
+        return snapshot
+
+    _record_stage("initial_dv_rows")
+
+    if include_group:
+        before_merge = len(df_long)
+        keep_subjects = set(subjects or [])
+        df_long = df_long.loc[df_long["subject"].astype(str).isin(keep_subjects)].copy()
+        removed_merge = before_merge - len(df_long)
+        if removed_merge:
+            message_cb(f"[LMM DIAG] merge/filter removed_rows={removed_merge}")
+    _record_stage("after_group_condition_roi_filters")
+    _record_stage("after_manual_exclusions")
     df_long, exclusion_report = _apply_outlier_exclusion(
         df_long,
         enabled=outlier_exclusion_enabled,
@@ -939,12 +1082,54 @@ def run_lmm(
         message_cb=message_cb,
     )
     exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
+    _record_stage("after_qc_screen")
+
+    if isinstance(qc_report, QcExclusionReport):
+        for pid in sorted(qc_report.excluded_pids):
+            exclusion_rows.append(
+                {
+                    "subject": str(pid),
+                    "group": str((subject_to_group or subject_groups or {}).get(pid) or ""),
+                    "reason": "QC",
+                }
+            )
+
     required_exclusions = _extract_required_exclusions(exclusion_report)
     required_pids = {violation.participant_id for violation in required_exclusions}
     if required_pids:
+        for pid in sorted(required_pids):
+            exclusion_rows.append(
+                {
+                    "subject": str(pid),
+                    "group": str((subject_to_group or subject_groups or {}).get(pid) or ""),
+                    "reason": "outlier_or_nonfinite",
+                }
+            )
         df_long = df_long.loc[~df_long["subject"].isin(required_pids)].copy()
+    _record_stage("after_outlier_exclusions")
+    message_cb(
+        f"[LMM DIAG] participants_after_outlier={int(df_long['subject'].nunique()) if 'subject' in df_long.columns else 0}"
+    )
+
+    before_na = len(df_long)
+    df_long = df_long.dropna(subset=[dv_col]).copy()
+    na_removed = before_na - len(df_long)
+    if na_removed:
+        missing_subjects = sorted(set(df_long["subject"].astype(str).unique().tolist())) if not df_long.empty else []
+        message_cb(
+            f"[LMM DIAG] dropna_removed_rows={na_removed} participants_remaining_after_missingness={len(missing_subjects)}"
+        )
+    _record_stage("after_dropna_dependent_variable")
     if df_long.empty:
-        raise RuntimeError("No valid rows for mixed model after filtering NaNs.")
+        return _build_lmm_blocked_payload(
+            stage="dropna_dependent_variable",
+            include_group=include_group,
+            stage_counts=stage_counts,
+            exclusion_rows=exclusion_rows,
+            final_df=df_long,
+            results_dir=results_dir,
+            message_cb=message_cb,
+        )
 
     dropped = 0
     group_levels: list[str] = []
@@ -957,6 +1142,17 @@ def run_lmm(
         if dropped:
             message_cb(
                 f"Dropped {dropped} rows without group assignments for between-group model."
+            )
+        _record_stage("after_dropna_group")
+        if df_long.empty:
+            return _build_lmm_blocked_payload(
+                stage="dropna_group",
+                include_group=include_group,
+                stage_counts=stage_counts,
+                exclusion_rows=exclusion_rows,
+                final_df=df_long,
+                results_dir=results_dir,
+                message_cb=message_cb,
             )
         if len(group_levels) < 2:
             raise RuntimeError(
@@ -990,7 +1186,7 @@ def run_lmm(
 
     mixed_results_df = run_mixed_effects_model(
         data=df_long,
-        dv_col="value",
+        dv_col=dv_col,
         group_col="subject",
         fixed_effects=fixed_effects,
     )
