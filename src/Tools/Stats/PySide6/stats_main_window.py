@@ -92,6 +92,7 @@ from Tools.Stats.PySide6.stats_data_loader import (
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_missingness import export_missingness_workbook
 from Tools.Stats.PySide6.stats_group_contrasts import export_group_contrasts_workbook
+from Tools.Stats.PySide6.stats_qc_reports import export_qc_context_workbook
 from Tools.Stats.PySide6.stats_workers import StatsWorker
 from Tools.Stats.PySide6 import stats_workers as stats_worker_funcs
 from Tools.Stats.PySide6.dv_policies import (
@@ -1518,6 +1519,12 @@ class StatsWindow(QMainWindow):
             isinstance(self.group_contrasts_results_data, pd.DataFrame)
             and not self.group_contrasts_results_data.empty,
         )
+        fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
+        fixed_table = fixed_payload.get("dv_table")
+        _maybe_enable(
+            "export_qc_context_btn",
+            isinstance(fixed_table, pd.DataFrame) and not fixed_table.empty,
+        )
 
     def _build_summary_frames(self, pipeline_id: PipelineId) -> StatsSummaryFrames:
         return build_summary_frames_from_results(
@@ -2621,6 +2628,10 @@ class StatsWindow(QMainWindow):
             if missing_export is not None:
                 paths.append(missing_export)
 
+            qc_context_export = self._export_qc_context_by_group(out_dir)
+            if qc_context_export is not None:
+                paths.append(qc_context_export)
+
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
@@ -2656,6 +2667,29 @@ class StatsWindow(QMainWindow):
             log_func=self._set_status,
         )
         self._between_missingness_payload["export_path"] = str(export_path)
+        return export_path
+
+    def _export_qc_context_by_group(self, out_dir: str) -> Path | None:
+        fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
+        dv_table = fixed_payload.get("dv_table")
+        if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
+            return None
+
+        run_report = self._pipeline_run_reports.get(PipelineId.BETWEEN)
+        flagged_map: dict[str, list[str]] = {}
+        if isinstance(run_report, StatsRunReport):
+            flagged_map = collect_flagged_pid_map(run_report.qc_report, run_report.dv_report)
+
+        save_path = Path(out_dir) / "QC_Context_ByGroup.xlsx"
+        export_path = export_qc_context_workbook(
+            save_path=save_path,
+            dv_table=dv_table,
+            subject_to_group=self.subject_groups,
+            missing_harmonics_rows=fixed_payload.get("missing_harmonics", []),
+            flagged_pid_map=flagged_map,
+            log_func=self._set_status,
+        )
+        fixed_payload["qc_context_export_path"] = str(export_path)
         return export_path
 
     # --------- worker signal handlers ---------
@@ -3545,6 +3579,12 @@ class StatsWindow(QMainWindow):
                 isinstance(self.group_contrasts_results_data, pd.DataFrame)
                 and not self.group_contrasts_results_data.empty,
             ),
+            (
+                "Export QC Context (By Group)",
+                self.on_export_qc_context_by_group,
+                isinstance(self._fixed_harmonic_dv_payload.get("dv_table"), pd.DataFrame)
+                and not self._fixed_harmonic_dv_payload.get("dv_table").empty,
+            ),
         ]
         self._open_advanced_dialog("Between-Group – Advanced", actions)
 
@@ -3757,6 +3797,28 @@ class StatsWindow(QMainWindow):
         except Exception as e:
             import traceback
             logger.exception("Group contrasts export failed.")
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
+
+    def on_export_qc_context_by_group(self) -> None:
+        fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
+        dv_table = fixed_payload.get("dv_table")
+        if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
+            QMessageBox.information(self, "No Results", "Compute Fixed-harmonic DV first.")
+            return
+
+        out_dir = self._ensure_results_dir()
+        try:
+            export_path = self._export_qc_context_by_group(out_dir)
+            if export_path is None:
+                QMessageBox.information(self, "No Results", "No fixed-harmonic DV rows available for QC export.")
+                return
+            self._set_status(f"QC/context workbook exported to: {export_path}")
+            self._set_last_export_path(export_path)
+        except Exception as e:
+            import traceback
+
+            logger.exception("QC/context export failed.")
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
