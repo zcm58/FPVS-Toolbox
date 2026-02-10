@@ -129,6 +129,11 @@ from Tools.Stats.PySide6.summary_utils import (
     build_summary_from_frames,
     build_summary_frames_from_results,
 )
+from Tools.Stats.PySide6.stats_multigroup_scan import (
+    MultiGroupScanResult,
+    ScanIssue,
+    run_multigroup_scan_worker,
+)
 from Tools.Stats.PySide6.widgets.elided_label import ElidedPathLabel
 
 logger = logging.getLogger(__name__)
@@ -194,6 +199,9 @@ class StatsWindow(QMainWindow):
         self._scan_guard = OpGuard()
         if not hasattr(self._scan_guard, "done"):
             self._scan_guard.done = self._scan_guard.end  # type: ignore[attr-defined]
+        self._multigroup_scan_guard = OpGuard()
+        if not hasattr(self._multigroup_scan_guard, "done"):
+            self._multigroup_scan_guard.done = self._multigroup_scan_guard.end  # type: ignore[attr-defined]
 
         # --- state ---
         self.subject_data: Dict = {}
@@ -245,6 +253,9 @@ class StatsWindow(QMainWindow):
         self._qc_threshold_sumabs: float = QC_DEFAULT_WARN_THRESHOLD
         self._qc_threshold_maxabs: float = QC_DEFAULT_CRITICAL_THRESHOLD
         self._last_export_path: str | None = None
+        self._multigroup_scan_result: MultiGroupScanResult | None = None
+        self._multigroup_issue_expanded = False
+        self._multigroup_issue_preview_limit = 5
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(
@@ -800,6 +811,140 @@ class StatsWindow(QMainWindow):
                 "Please remove these files from the folder or update the project metadata."
             ),
         )
+
+    def _start_multigroup_scan(self, excel_root: Path | None = None) -> None:
+        if not self._multigroup_scan_guard.start():
+            return
+        excel_root = excel_root or Path(self.le_folder.text() or self._preferred_stats_folder())
+        project_root = self._project_path
+
+        self._set_status("Scanning multi-group readiness…")
+
+        worker = StatsWorker(
+            run_multigroup_scan_worker,
+            project_root=project_root,
+            excel_root=excel_root,
+            _op="multigroup_scan",
+        )
+
+        try:
+            if not hasattr(self, "_active_workers"):
+                self._active_workers = []
+            self._active_workers.append(worker)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to track multigroup scan worker")
+
+        def _release() -> None:
+            try:
+                if worker in self._active_workers:
+                    self._active_workers.remove(worker)
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to release multigroup scan worker")
+            finally:
+                self._multigroup_scan_guard.done()
+
+        def _on_finished(payload: dict) -> None:
+            try:
+                result = payload.get("result") if isinstance(payload, dict) else None
+                if isinstance(result, MultiGroupScanResult):
+                    self._multigroup_scan_result = result
+                    self._update_multigroup_summary(result)
+                else:
+                    self._set_status("Multi-group scan failed to return results.")
+                    self.append_log("General", "Multi-group scan failed to return results.", level="error")
+            finally:
+                _release()
+
+        def _on_error(message: str) -> None:
+            try:
+                self._set_status(f"Multi-group scan error: {message}")
+                self.append_log("General", f"Multi-group scan error: {message}", level="error")
+            finally:
+                _release()
+
+        worker.signals.message.connect(self._on_worker_message)
+        worker.signals.error.connect(_on_error)
+        worker.signals.finished.connect(_on_finished)
+        worker.signals.progress.connect(self._on_worker_progress)
+        self.pool.start(worker)
+
+    def _format_multigroup_issue(self, issue: ScanIssue) -> str:
+        context_bits = []
+        context = issue.context or {}
+        for key in ("pid", "group", "path"):
+            value = context.get(key)
+            if value:
+                context_bits.append(f"{key}={value}")
+        extra = f" ({', '.join(context_bits)})" if context_bits else ""
+        return f"[{issue.severity.upper()}] {issue.message}{extra}"
+
+    def _render_multigroup_issues(self, issues: list[ScanIssue]) -> None:
+        if not hasattr(self, "multi_group_issue_text"):
+            return
+        if not issues:
+            self.multi_group_issue_text.setPlainText("No issues detected.")
+            self.multi_group_issue_toggle_btn.setEnabled(False)
+            return
+        self.multi_group_issue_toggle_btn.setEnabled(len(issues) > self._multigroup_issue_preview_limit)
+        if self._multigroup_issue_expanded or len(issues) <= self._multigroup_issue_preview_limit:
+            visible_issues = issues
+            self.multi_group_issue_toggle_btn.setText("Hide details")
+        else:
+            visible_issues = issues[: self._multigroup_issue_preview_limit]
+            remaining = len(issues) - len(visible_issues)
+            if remaining > 0:
+                visible_issues = visible_issues + [
+                    ScanIssue(
+                        severity="warning",
+                        message=f"... {remaining} more issue(s).",
+                        context={},
+                    )
+                ]
+            self.multi_group_issue_toggle_btn.setText("Show details")
+        lines = [self._format_multigroup_issue(issue) for issue in visible_issues]
+        self.multi_group_issue_text.setPlainText("\n".join(lines))
+
+    def _toggle_multigroup_issue_details(self) -> None:
+        self._multigroup_issue_expanded = not self._multigroup_issue_expanded
+        if self._multigroup_scan_result:
+            self._render_multigroup_issues(self._multigroup_scan_result.issues)
+
+    def _update_multigroup_summary(self, result: MultiGroupScanResult) -> None:
+        if hasattr(self, "multi_group_ready_value"):
+            status_text = "Ready" if result.multi_group_ready else "Not ready"
+            self.multi_group_ready_value.setText(status_text)
+            self.multi_group_ready_value.setStyleSheet(
+                "color: #1b8a2f;" if result.multi_group_ready else "color: #b02a37;"
+            )
+        if hasattr(self, "multi_group_discovered_value"):
+            self.multi_group_discovered_value.setText(str(len(result.discovered_subjects)))
+        if hasattr(self, "multi_group_assigned_value"):
+            self.multi_group_assigned_value.setText(str(len(result.assigned_subjects)))
+        if hasattr(self, "multi_group_groups_value"):
+            self.multi_group_groups_value.setText(str(len(result.subject_groups)))
+        if hasattr(self, "multi_group_unassigned_value"):
+            self.multi_group_unassigned_value.setText(str(len(result.unassigned_subjects)))
+
+        self._render_multigroup_issues(result.issues)
+
+        blocking = [issue for issue in result.issues if issue.severity == "blocking"]
+        if blocking:
+            message = f"Multi-group scan found {len(blocking)} blocking issue(s)."
+            self._set_status(message)
+            self.append_log("General", message, level="warning")
+        else:
+            self._set_status("Multi-group scan complete.")
+        for issue in result.issues:
+            log_level = "error" if issue.severity == "blocking" else "warning"
+            logger.log(
+                logging.ERROR if log_level == "error" else logging.WARNING,
+                "stats_multigroup_issue",
+                extra={
+                    "severity": issue.severity,
+                    "message": issue.message,
+                    **(issue.context or {}),
+                },
+            )
 
     def _known_group_labels(self) -> list[str]:
         return sorted({g for g in (self.subject_groups or {}).values() if g})
@@ -2861,7 +3006,48 @@ class StatsWindow(QMainWindow):
         tools_row.addStretch(1)
         data_actions_layout.addLayout(tools_row)
 
+        multigroup_box = QGroupBox("Multi-Group Scan Summary")
+        multigroup_layout = QVBoxLayout(multigroup_box)
+        multigroup_layout.setContentsMargins(8, 8, 8, 8)
+        multigroup_layout.setSpacing(6)
+
+        multigroup_status_row = QHBoxLayout()
+        multigroup_status_row.addWidget(QLabel("Status:"))
+        self.multi_group_ready_value = QLabel("Not ready")
+        self.multi_group_ready_value.setStyleSheet("color: #b02a37;")
+        multigroup_status_row.addWidget(self.multi_group_ready_value)
+        multigroup_status_row.addStretch(1)
+        multigroup_layout.addLayout(multigroup_status_row)
+
+        multigroup_counts = QFormLayout()
+        self.multi_group_discovered_value = QLabel("0")
+        self.multi_group_assigned_value = QLabel("0")
+        self.multi_group_groups_value = QLabel("0")
+        self.multi_group_unassigned_value = QLabel("0")
+        multigroup_counts.addRow("Discovered subjects:", self.multi_group_discovered_value)
+        multigroup_counts.addRow("Assigned subjects:", self.multi_group_assigned_value)
+        multigroup_counts.addRow("Groups with subjects:", self.multi_group_groups_value)
+        multigroup_counts.addRow("Unassigned subjects:", self.multi_group_unassigned_value)
+        multigroup_layout.addLayout(multigroup_counts)
+
+        issues_header = QHBoxLayout()
+        issues_header.addWidget(QLabel("Issues:"))
+        issues_header.addStretch(1)
+        self.multi_group_issue_toggle_btn = QPushButton("Show details")
+        self.multi_group_issue_toggle_btn.setEnabled(False)
+        self.multi_group_issue_toggle_btn.clicked.connect(self._toggle_multigroup_issue_details)
+        issues_header.addWidget(self.multi_group_issue_toggle_btn)
+        multigroup_layout.addLayout(issues_header)
+
+        self.multi_group_issue_text = QPlainTextEdit()
+        self.multi_group_issue_text.setReadOnly(True)
+        self.multi_group_issue_text.setPlaceholderText("Issues will appear here after scan.")
+        self.multi_group_issue_text.setMinimumHeight(90)
+        self.multi_group_issue_text.setMaximumHeight(150)
+        multigroup_layout.addWidget(self.multi_group_issue_text)
+
         right_layout.addWidget(data_actions_widget)
+        right_layout.addWidget(multigroup_box)
         right_layout.addWidget(analysis_box)
 
         # status + ROI labels with spinner
@@ -3284,6 +3470,7 @@ class StatsWindow(QMainWindow):
                 self._set_status(
                     f"Scan complete: Found {len(scan_result.subjects)} subjects and {len(scan_result.conditions)} conditions."
                 )
+                self._start_multigroup_scan(Path(folder))
             except ScanError as e:
                 self._set_status(f"Scan failed: {e}")
                 QMessageBox.critical(self, "Scan Error", str(e))
@@ -3308,6 +3495,7 @@ class StatsWindow(QMainWindow):
         do nothing (user can Browse).
         """
         target = self._preferred_stats_folder()
+        self._start_multigroup_scan(target)
         if target.exists() and target.is_dir():
             self._set_data_folder_path(str(target))
             self._scan_button_clicked()
