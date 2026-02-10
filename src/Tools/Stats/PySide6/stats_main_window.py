@@ -90,6 +90,7 @@ from Tools.Stats.PySide6.stats_data_loader import (
     resolve_project_subfolder,
 )
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
+from Tools.Stats.PySide6.stats_missingness import export_missingness_workbook
 from Tools.Stats.PySide6.stats_workers import StatsWorker
 from Tools.Stats.PySide6 import stats_workers as stats_worker_funcs
 from Tools.Stats.PySide6.dv_policies import (
@@ -257,6 +258,7 @@ class StatsWindow(QMainWindow):
         self._multigroup_scan_result: MultiGroupScanResult | None = None
         self._shared_harmonics_payload: dict[str, object] = {}
         self._fixed_harmonic_dv_payload: dict[str, object] = {}
+        self._between_missingness_payload: dict[str, object] = {}
         self._multigroup_issue_expanded = False
         self._multigroup_issue_preview_limit = 5
 
@@ -958,6 +960,7 @@ class StatsWindow(QMainWindow):
         if not result.multi_group_ready:
             self._shared_harmonics_payload = {}
             self._fixed_harmonic_dv_payload = {}
+            self._between_missingness_payload = {}
         self._refresh_fixed_harmonic_ui_state()
 
         self._render_multigroup_issues(result.issues)
@@ -1803,6 +1806,27 @@ class StatsWindow(QMainWindow):
                 pipeline=pipeline_id, event="end", extra={"reason": "between_not_ready"}
             )
             return False
+        if pipeline_id is PipelineId.BETWEEN:
+            if not (self._multigroup_scan_result and self._multigroup_scan_result.multi_group_ready):
+                message = "Between-group analysis is blocked: multi-group readiness is not satisfied."
+                self._set_status(message)
+                self.append_log("Between", message, level="warning")
+                return False
+            harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
+            has_shared = isinstance(harmonics_by_roi, dict) and any(
+                (harmonics_by_roi.get(key) or []) for key in harmonics_by_roi
+            )
+            if not has_shared:
+                message = "Between-group analysis is blocked: compute shared harmonics first."
+                self._set_status(message)
+                self.append_log("Between", message, level="warning")
+                return False
+            dv_table = self._fixed_harmonic_dv_payload.get("dv_table")
+            if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
+                message = "Between-group analysis is blocked: compute fixed-harmonic DV first."
+                self._set_status(message)
+                self.append_log("Between", message, level="warning")
+                return False
         self._log_pipeline_event(pipeline=pipeline_id, event="end")
         return True
 
@@ -1819,6 +1843,8 @@ class StatsWindow(QMainWindow):
         self._pipeline_qc_config[pipeline_id] = self._get_qc_exclusion_payload()
         self._pipeline_qc_state[pipeline_id] = {"report": None}
         self._pipeline_run_reports[pipeline_id] = None
+        if pipeline_id is PipelineId.BETWEEN:
+            self._between_missingness_payload = {}
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
             label.setText("Running…")
@@ -1869,6 +1895,18 @@ class StatsWindow(QMainWindow):
                         self.append_log(section, "  • Results exported for Single Group Analysis")
                     elif pipeline_id is PipelineId.BETWEEN:
                         self.append_log(section, "  • Results exported for Between-Group Analysis")
+                        summary = self._between_missingness_payload.get("summary") if isinstance(self._between_missingness_payload, dict) else None
+                        export_path = self._between_missingness_payload.get("export_path") if isinstance(self._between_missingness_payload, dict) else None
+                        if isinstance(summary, dict):
+                            line = (
+                                "Between-group complete: "
+                                f"groups={summary.get('n_groups', 0)}, "
+                                f"mixed subjects={summary.get('n_mixed_subjects', 0)}, "
+                                f"ANOVA complete-case={summary.get('n_anova_complete_case', 0)}, "
+                                f"missingness export={export_path or 'pending export'}"
+                            )
+                            self._set_status(line)
+                            self.append_log(section, line, level="info")
                     stats_folder = Path(self._ensure_results_dir())
                     self._prompt_view_results(self._section_label(pipeline_id), stats_folder)
                 else:
@@ -2053,10 +2091,12 @@ class StatsWindow(QMainWindow):
 
                 return kwargs, handler
         if pipeline_id is PipelineId.BETWEEN:
+            fixed_dv_table = self._fixed_harmonic_dv_payload.get("dv_table")
+            selected_conditions = self._get_selected_conditions()
             if step_id is StepId.BETWEEN_GROUP_ANOVA:
                 kwargs = dict(
                     subjects=self.subjects,
-                    conditions=self._get_selected_conditions(),
+                    conditions=selected_conditions,
                     conditions_all=self.conditions,
                     subject_data=self.subject_data,
                     base_freq=self._current_base_freq,
@@ -2070,6 +2110,9 @@ class StatsWindow(QMainWindow):
                     qc_config=qc_payload,
                     qc_state=qc_state,
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
+                    fixed_harmonic_dv_table=fixed_dv_table,
+                    required_conditions=selected_conditions,
+                    subject_to_group=self.subject_groups,
                 )
                 def handler(payload):
                     self._apply_between_anova_results(payload, update_text=False)
@@ -2094,6 +2137,9 @@ class StatsWindow(QMainWindow):
                     qc_config=qc_payload,
                     qc_state=qc_state,
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
+                    fixed_harmonic_dv_table=fixed_dv_table,
+                    required_conditions=selected_conditions,
+                    subject_to_group=self.subject_groups,
                 )
                 def handler(payload):
                     self._apply_between_mixed_results(payload, update_text=False)
@@ -2570,6 +2616,10 @@ class StatsWindow(QMainWindow):
             if exclusion_paths:
                 paths.extend(exclusion_paths)
 
+            missing_export = self._export_between_missingness(out_dir)
+            if missing_export is not None:
+                paths.append(missing_export)
+
             if paths:
                 self.append_log(section, "  • Results exported to:")
                 for p in paths:
@@ -2581,6 +2631,31 @@ class StatsWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self.append_log(section, f"  • Export failed: {exc}", level="error")
             return False
+
+    def _export_between_missingness(self, out_dir: str) -> Path | None:
+        payload = self._between_missingness_payload if isinstance(self._between_missingness_payload, dict) else {}
+        mixed_rows = payload.get("mixed_model_missing_cells", [])
+        anova_rows = payload.get("anova_excluded_subjects", [])
+        summary = payload.get("summary", {})
+        summary_rows = [
+            {"Metric": "N groups", "Value": summary.get("n_groups", 0)},
+            {"Metric": "N subjects mixed model", "Value": summary.get("n_mixed_subjects", 0)},
+            {"Metric": "N complete-case ANOVA", "Value": summary.get("n_anova_complete_case", 0)},
+            {"Metric": "N ANOVA excluded", "Value": len(anova_rows)},
+            {"Metric": "N mixed-model missing cells", "Value": len(mixed_rows)},
+            {"Metric": "N discovered", "Value": summary.get("n_discovered_subjects", 0)},
+            {"Metric": "N assigned", "Value": summary.get("n_assigned_subjects", 0)},
+        ]
+        save_path = Path(out_dir) / "Missingness and Exclusions.xlsx"
+        export_path = export_missingness_workbook(
+            save_path=save_path,
+            mixed_missing_rows=mixed_rows if isinstance(mixed_rows, list) else [],
+            anova_excluded_rows=anova_rows if isinstance(anova_rows, list) else [],
+            summary_rows=summary_rows,
+            log_func=self._set_status,
+        )
+        self._between_missingness_payload["export_path"] = str(export_path)
+        return export_path
 
     # --------- worker signal handlers ---------
 
@@ -2641,6 +2716,27 @@ class StatsWindow(QMainWindow):
         if isinstance(report, StatsRunReport):
             self._pipeline_run_reports[pipeline_id] = report
 
+    def _refresh_between_missingness_summary(self) -> None:
+        payload = self._between_missingness_payload
+        if not isinstance(payload, dict):
+            return
+        mixed_subjects = 0
+        if isinstance(self.between_mixed_model_results_data, pd.DataFrame) and not self.between_mixed_model_results_data.empty:
+            subjects = payload.get("mixed_model_subjects")
+            if isinstance(subjects, list):
+                mixed_subjects = len(subjects)
+        anova_subjects = payload.get("anova_complete_case_subjects", [])
+        if not isinstance(anova_subjects, list):
+            anova_subjects = []
+        scan = self._multigroup_scan_result
+        payload["summary"] = {
+            "n_groups": len(self._known_group_labels()),
+            "n_mixed_subjects": mixed_subjects or len(set(payload.get("mixed_model_subjects", []))),
+            "n_anova_complete_case": len(anova_subjects),
+            "n_discovered_subjects": len(scan.discovered_subjects) if scan else 0,
+            "n_assigned_subjects": len(scan.assigned_subjects) if scan else 0,
+        }
+
     def _apply_rm_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
         self.rm_anova_results_data = payload.get("anova_df_results")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
@@ -2670,9 +2766,13 @@ class StatsWindow(QMainWindow):
         self.between_anova_results_data = payload.get("anova_df_results")
         self._store_dv_metadata(PipelineId.BETWEEN, payload)
         self._store_run_report(PipelineId.BETWEEN, payload)
+        missingness = payload.get("missingness", {}) if isinstance(payload, dict) else {}
+        if isinstance(missingness, dict):
+            self._between_missingness_payload.update(missingness)
         alpha = getattr(self, "_current_alpha", 0.05)
 
         output_text = build_between_anova_output(self.between_anova_results_data, alpha)
+        self._refresh_between_missingness_summary()
         if update_text:
             self.summary_text.append(output_text)
         self._update_export_buttons()
@@ -2697,7 +2797,11 @@ class StatsWindow(QMainWindow):
         self.between_mixed_model_results_data = payload.get("mixed_results_df")
         self._store_dv_metadata(PipelineId.BETWEEN, payload)
         self._store_run_report(PipelineId.BETWEEN, payload)
+        missingness = payload.get("missingness", {}) if isinstance(payload, dict) else {}
+        if isinstance(missingness, dict):
+            self._between_missingness_payload.update(missingness)
         output_text = payload.get("output_text", "")
+        self._refresh_between_missingness_summary()
         if update_text:
             self.summary_text.append(output_text)
         self._update_export_buttons()
