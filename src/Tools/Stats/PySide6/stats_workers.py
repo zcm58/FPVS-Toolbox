@@ -42,8 +42,10 @@ from Tools.Stats.Legacy.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
 )
 from Tools.Stats.PySide6.dv_policies import (
+    FIXED_SHARED_POLICY_NAME,
     ROSSION_POLICY_NAME,
     build_rossion_preview_payload,
+    compute_fixed_harmonic_dv_table,
     normalize_dv_policy,
     prepare_summed_bca_data,
 )
@@ -1293,6 +1295,40 @@ def run_shared_harmonics_worker(
         "selection_rule": "two_consecutive_z_gt_thresh",
     }
 
+
+
+def run_fixed_harmonic_dv_worker(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    subject_data,
+    rois,
+    harmonics_by_roi,
+):
+    message_cb("Computing fixed-harmonic DV table from shared harmonics…")
+    progress_cb(10)
+
+    payload = compute_fixed_harmonic_dv_table(
+        subjects=list(subjects),
+        conditions=list(conditions),
+        subject_data=subject_data,
+        rois=rois,
+        harmonics_by_roi=harmonics_by_roi,
+        log_func=message_cb,
+    )
+    progress_cb(100)
+    message_cb("Fixed-harmonic DV table ready.")
+    return {
+        "dv_table": payload["dv_df"],
+        "harmonics_by_roi": payload["harmonics_by_roi"],
+        "missing_harmonics": payload["missing_harmonics"],
+        "dv_policy": {
+            "name": FIXED_SHARED_POLICY_NAME,
+            "harmonics_by_roi": payload["harmonics_by_roi"],
+        },
+    }
 
 def run_harmonic_check(
     progress_cb,

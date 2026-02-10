@@ -97,6 +97,7 @@ from Tools.Stats.PySide6.dv_policies import (
     EMPTY_LIST_FALLBACK_FIXED_K,
     EMPTY_LIST_SET_ZERO,
     FIXED_K_POLICY_NAME,
+    FIXED_SHARED_POLICY_NAME,
     LEGACY_POLICY_NAME,
     ROSSION_POLICY_NAME,
 )
@@ -255,6 +256,7 @@ class StatsWindow(QMainWindow):
         self._last_export_path: str | None = None
         self._multigroup_scan_result: MultiGroupScanResult | None = None
         self._shared_harmonics_payload: dict[str, object] = {}
+        self._fixed_harmonic_dv_payload: dict[str, object] = {}
         self._multigroup_issue_expanded = False
         self._multigroup_issue_preview_limit = 5
 
@@ -279,6 +281,7 @@ class StatsWindow(QMainWindow):
 
         # controller
         self._controller = StatsController(view=self)
+        self._refresh_fixed_harmonic_ui_state()
 
     # --------- ROI + status helpers ---------
 
@@ -456,6 +459,31 @@ class StatsWindow(QMainWindow):
             "z_threshold": float(self._dv_group_mean_z_threshold),
             "empty_list_policy": str(self._dv_empty_list_policy),
         }
+
+    def _get_between_group_dv_policy_payload(self) -> dict[str, object]:
+        payload = self._get_dv_policy_payload()
+        harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
+        if isinstance(harmonics_by_roi, dict) and any((harmonics_by_roi.get(k) or []) for k in harmonics_by_roi):
+            payload["name"] = FIXED_SHARED_POLICY_NAME
+            payload["harmonics_by_roi"] = harmonics_by_roi
+        return payload
+
+    def _refresh_fixed_harmonic_ui_state(self) -> None:
+        harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
+        has_shared_harmonics = isinstance(harmonics_by_roi, dict) and any(
+            (harmonics_by_roi.get(k) or []) for k in harmonics_by_roi
+        )
+        button = getattr(self, "compute_fixed_harmonic_dv_btn", None)
+        if button is not None:
+            button.setEnabled(has_shared_harmonics)
+        summary_label = getattr(self, "fixed_harmonic_dv_summary_value", None)
+        if summary_label is not None:
+            if self._fixed_harmonic_dv_payload:
+                summary_label.setText(str(self._fixed_harmonic_dv_payload.get("summary", "Ready")))
+            elif has_shared_harmonics:
+                summary_label.setText("Shared harmonics ready; DV not computed.")
+            else:
+                summary_label.setText("Waiting for shared harmonics.")
 
     def get_dv_policy_snapshot(self) -> dict[str, object]:
         return dict(self._get_dv_policy_payload())
@@ -927,6 +955,10 @@ class StatsWindow(QMainWindow):
             self.multi_group_unassigned_value.setText(str(len(result.unassigned_subjects)))
         if hasattr(self, "compute_shared_harmonics_btn"):
             self.compute_shared_harmonics_btn.setEnabled(bool(result.multi_group_ready))
+        if not result.multi_group_ready:
+            self._shared_harmonics_payload = {}
+            self._fixed_harmonic_dv_payload = {}
+        self._refresh_fixed_harmonic_ui_state()
 
         self._render_multigroup_issues(result.issues)
 
@@ -999,6 +1031,7 @@ class StatsWindow(QMainWindow):
             try:
                 result = payload if isinstance(payload, dict) else {}
                 self._shared_harmonics_payload = result
+                self._fixed_harmonic_dv_payload = {}
                 harmonics_by_roi = result.get("harmonics_by_roi", {}) if isinstance(result, dict) else {}
                 roi_count = len(harmonics_by_roi) if isinstance(harmonics_by_roi, dict) else 0
                 total_harmonics = 0
@@ -1017,6 +1050,7 @@ class StatsWindow(QMainWindow):
                 self._set_status(summary)
                 self.append_log("General", summary, level="info")
                 self._set_last_export_path(export_target)
+                self._refresh_fixed_harmonic_ui_state()
             finally:
                 _release()
 
@@ -1024,6 +1058,7 @@ class StatsWindow(QMainWindow):
             try:
                 self._set_status(f"Shared harmonics error: {message}")
                 self.append_log("General", f"Shared harmonics error: {message}", level="error")
+                self._refresh_fixed_harmonic_ui_state()
             finally:
                 _release()
 
@@ -1032,6 +1067,71 @@ class StatsWindow(QMainWindow):
         worker.signals.finished.connect(_on_finished)
         worker.signals.progress.connect(self._on_worker_progress)
         self.pool.start(worker)
+
+    def _on_compute_fixed_harmonic_dv_clicked(self) -> None:
+        harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
+        if not isinstance(harmonics_by_roi, dict) or not any((harmonics_by_roi.get(k) or []) for k in harmonics_by_roi):
+            self._set_status("Compute shared harmonics before fixed-harmonic DV.")
+            self._refresh_fixed_harmonic_ui_state()
+            return
+
+        selected_conditions = self._get_selected_conditions()
+        if not selected_conditions:
+            self._set_status("Select at least one condition before computing fixed-harmonic DV.")
+            return
+
+        self.compute_fixed_harmonic_dv_btn.setEnabled(False)
+        worker = StatsWorker(
+            stats_worker_funcs.run_fixed_harmonic_dv_worker,
+            subjects=self.subjects,
+            conditions=selected_conditions,
+            subject_data=self.subject_data,
+            rois=self.rois,
+            harmonics_by_roi=harmonics_by_roi,
+            _op="fixed_harmonic_dv",
+        )
+
+        self._active_workers.append(worker)
+
+        def _release() -> None:
+            if worker in self._active_workers:
+                self._active_workers.remove(worker)
+            self._refresh_fixed_harmonic_ui_state()
+
+        def _on_finished(payload: dict) -> None:
+            try:
+                result = payload if isinstance(payload, dict) else {}
+                dv_table = result.get("dv_table")
+                missing_rows = result.get("missing_harmonics", [])
+                row_count = int(len(dv_table.index)) if isinstance(dv_table, pd.DataFrame) else 0
+                summary = (
+                    "Fixed-harmonic DV ready: "
+                    f"rows={row_count}, missing entries={len(missing_rows)}, cache=self._fixed_harmonic_dv_payload"
+                )
+                self._fixed_harmonic_dv_payload = {
+                    "summary": summary,
+                    "dv_table": dv_table,
+                    "missing_harmonics": missing_rows,
+                    "dv_policy": result.get("dv_policy", {}),
+                }
+                self._set_status(summary)
+                self.append_log("General", summary, level="info")
+            finally:
+                _release()
+
+        def _on_error(message: str) -> None:
+            try:
+                self._set_status(f"Fixed-harmonic DV error: {message}")
+                self.append_log("General", f"Fixed-harmonic DV error: {message}", level="error")
+            finally:
+                _release()
+
+        worker.signals.message.connect(self._on_worker_message)
+        worker.signals.error.connect(_on_error)
+        worker.signals.finished.connect(_on_finished)
+        worker.signals.progress.connect(self._on_worker_progress)
+        self.pool.start(worker)
+
 
     def _known_group_labels(self) -> list[str]:
         return sorted({g for g in (self.subject_groups or {}).values() if g})
@@ -1072,6 +1172,7 @@ class StatsWindow(QMainWindow):
             getattr(self, "lela_mode_btn", None),
             getattr(self, "btn_open_results", None),
             getattr(self, "compute_shared_harmonics_btn", None),
+            getattr(self, "compute_fixed_harmonic_dv_btn", None),
         ]
         for b in buttons:
             if b:
@@ -1080,6 +1181,7 @@ class StatsWindow(QMainWindow):
             self.compute_shared_harmonics_btn.setEnabled(
                 bool(self._multigroup_scan_result and self._multigroup_scan_result.multi_group_ready)
             )
+            self._refresh_fixed_harmonic_ui_state()
         spinner = getattr(self, "spinner", None)
         if spinner:
             if running:
@@ -1883,7 +1985,7 @@ class StatsWindow(QMainWindow):
                     base_freq=self._current_base_freq,
                     rois=self.rois,
                     rois_all=self.rois,
-                    dv_policy=self._get_dv_policy_payload(),
+                    dv_policy=self._get_between_group_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -1908,7 +2010,7 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     rois_all=self.rois,
                     subject_groups=self.subject_groups,
-                    dv_policy=self._get_dv_policy_payload(),
+                    dv_policy=self._get_between_group_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -1931,7 +2033,7 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     rois_all=self.rois,
                     subject_groups=self.subject_groups,
-                    dv_policy=self._get_dv_policy_payload(),
+                    dv_policy=self._get_between_group_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -1961,7 +2063,7 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     rois_all=self.rois,
                     subject_groups=self.subject_groups,
-                    dv_policy=self._get_dv_policy_payload(),
+                    dv_policy=self._get_between_group_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -1985,7 +2087,7 @@ class StatsWindow(QMainWindow):
                     rois_all=self.rois,
                     subject_groups=self.subject_groups,
                     include_group=True,
-                    dv_policy=self._get_dv_policy_payload(),
+                    dv_policy=self._get_between_group_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -2008,7 +2110,7 @@ class StatsWindow(QMainWindow):
                     rois=self.rois,
                     rois_all=self.rois,
                     subject_groups=self.subject_groups,
-                    dv_policy=self._get_dv_policy_payload(),
+                    dv_policy=self._get_between_group_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -3130,8 +3232,23 @@ class StatsWindow(QMainWindow):
         self.compute_shared_harmonics_btn.setEnabled(False)
         self.compute_shared_harmonics_btn.clicked.connect(self._on_compute_shared_harmonics_clicked)
         shared_action_row.addWidget(self.compute_shared_harmonics_btn)
+
+        self.compute_fixed_harmonic_dv_btn = QPushButton("Compute Fixed-harmonic DV")
+        self.compute_fixed_harmonic_dv_btn.setToolTip(
+            "Compute Summed BCA DV values using the cached shared-harmonics-by-ROI mapping."
+        )
+        self.compute_fixed_harmonic_dv_btn.setEnabled(False)
+        self.compute_fixed_harmonic_dv_btn.clicked.connect(self._on_compute_fixed_harmonic_dv_clicked)
+        shared_action_row.addWidget(self.compute_fixed_harmonic_dv_btn)
         shared_action_row.addStretch(1)
         multigroup_layout.addLayout(shared_action_row)
+
+        fixed_status_row = QHBoxLayout()
+        fixed_status_row.addWidget(QLabel("Fixed-harmonic DV:"))
+        self.fixed_harmonic_dv_summary_value = QLabel("Waiting for shared harmonics.")
+        self.fixed_harmonic_dv_summary_value.setWordWrap(True)
+        fixed_status_row.addWidget(self.fixed_harmonic_dv_summary_value, 1)
+        multigroup_layout.addLayout(fixed_status_row)
 
         issues_header = QHBoxLayout()
         issues_header.addWidget(QLabel("Issues:"))
