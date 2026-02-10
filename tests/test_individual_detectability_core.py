@@ -6,13 +6,22 @@ from Tools.Individual_Detectability.core import (
     discover_conditions,
     _plot_topomap_compat,
     parse_participant_id,
-    render_topomap_svg,
 )
 
 
 def test_parse_participant_id_scp_variants() -> None:
     assert parse_participant_id("SCP7_condition_Results.xlsx") == "P7"
     assert parse_participant_id("SCP07_condition_Results.xlsx") == "P7"
+
+
+def test_parse_participant_id_p_variants() -> None:
+    assert parse_participant_id("P1_Angry Neutral_Results.xlsx") == "P1"
+    assert parse_participant_id("P11_Angry Neutral_Results.xlsx") == "P11"
+
+
+def test_parse_participant_id_detects_with_underscores() -> None:
+    assert parse_participant_id("P1_Angry_Neutral_Results") == "P1"
+    assert parse_participant_id("p001_Happy_Neutral_Results") == "P1"
 
 
 def test_discover_conditions_with_subfolders(tmp_path: Path) -> None:
@@ -36,25 +45,26 @@ def test_discover_conditions_single_root(tmp_path: Path) -> None:
     assert conditions[0].path == tmp_path
 
 
-def test_topomap_svg_nonblank(tmp_path: Path) -> None:
-    import pytest
+def test_missingness_across_conditions_keeps_union_of_participants(tmp_path: Path) -> None:
+    excel_root = tmp_path / "1 - Excel Data Files"
+    cond_a = excel_root / "AngryNeutral"
+    cond_b = excel_root / "HappyNeutral"
+    cond_a.mkdir(parents=True)
+    cond_b.mkdir(parents=True)
+    (cond_a / "P1_Angry Neutral_Results.xlsx").write_text("data")
+    (cond_a / "P11_Angry Neutral_Results.xlsx").write_text("data")
+    (cond_b / "P11_Happy Neutral_Results.xlsx").write_text("data")
 
-    np = pytest.importorskip("numpy")
-    mne = pytest.importorskip("mne")
+    conditions = discover_conditions(excel_root)
+    participants = {
+        pid
+        for condition in conditions
+        for file in condition.files
+        for pid in [parse_participant_id(file.stem)]
+        if pid is not None
+    }
 
-    montage = mne.channels.make_standard_montage("biosemi64")
-    electrodes = montage.ch_names
-    z_threshold = 1.64
-    z_values = np.full(len(electrodes), z_threshold)
-    z_values[0] = z_threshold + 1.2
-    z_values[5] = z_threshold + 0.5
-
-    output = tmp_path / "topomap.svg"
-    render_topomap_svg(z_values, electrodes, z_threshold, output)
-    contents = output.read_text(encoding="utf-8")
-    assert output.stat().st_size > 200
-    assert "<svg" in contents
-    assert "path" in contents
+    assert participants == {"P1", "P11"}
 
 
 def test_topomap_wrapper_saves_svg(tmp_path: Path) -> None:
