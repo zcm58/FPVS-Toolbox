@@ -48,6 +48,11 @@ from Tools.Stats.PySide6.dv_policies import (
     prepare_summed_bca_data,
 )
 from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
+from Tools.Stats.PySide6.shared_harmonics import (
+    DEFAULT_Z_THRESH,
+    compute_shared_harmonics,
+    export_shared_harmonics_summary,
+)
 from Tools.Stats.PySide6.stats_outlier_exclusion import (
     DvViolation,
     OutlierExclusionReport,
@@ -1238,6 +1243,55 @@ def run_harmonics_preview(
             dv_policy=dv_policy,
         )
     raise RuntimeError("Preview requires the Rossion policy.")
+
+
+def run_shared_harmonics_worker(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    subject_data,
+    base_freq,
+    rois,
+    exclude_harmonic1,
+    project_path,
+    export_path,
+    z_threshold: float = DEFAULT_Z_THRESH,
+):
+    message_cb("Computing shared harmonics (pooled across groups)…")
+    progress_cb(10)
+
+    result = compute_shared_harmonics(
+        subjects=list(subjects),
+        conditions=list(conditions),
+        subject_data=subject_data,
+        base_freq=float(base_freq),
+        rois=rois,
+        exclude_harmonic1=bool(exclude_harmonic1),
+        z_threshold=float(z_threshold),
+        log_func=message_cb,
+    )
+
+    progress_cb(75)
+    exported_path = export_shared_harmonics_summary(
+        export_path=Path(export_path),
+        result=result,
+        project_path=Path(project_path),
+    )
+    progress_cb(100)
+    message_cb(f"Shared harmonics export complete: {exported_path}")
+
+    return {
+        "harmonics_by_roi": result.harmonics_by_roi,
+        "exclude_harmonic1_applied": result.exclude_harmonic1_applied,
+        "z_thresh": result.z_thresh,
+        "conditions_used": result.conditions_used,
+        "condition_harmonics_by_roi": result.condition_harmonics_by_roi,
+        "mean_z_by_condition": result.mean_z_by_condition,
+        "export_path": str(exported_path),
+        "selection_rule": "two_consecutive_z_gt_thresh",
+    }
 
 
 def run_harmonic_check(

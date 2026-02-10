@@ -254,6 +254,7 @@ class StatsWindow(QMainWindow):
         self._qc_threshold_maxabs: float = QC_DEFAULT_CRITICAL_THRESHOLD
         self._last_export_path: str | None = None
         self._multigroup_scan_result: MultiGroupScanResult | None = None
+        self._shared_harmonics_payload: dict[str, object] = {}
         self._multigroup_issue_expanded = False
         self._multigroup_issue_preview_limit = 5
 
@@ -924,6 +925,8 @@ class StatsWindow(QMainWindow):
             self.multi_group_groups_value.setText(str(len(result.subject_groups)))
         if hasattr(self, "multi_group_unassigned_value"):
             self.multi_group_unassigned_value.setText(str(len(result.unassigned_subjects)))
+        if hasattr(self, "compute_shared_harmonics_btn"):
+            self.compute_shared_harmonics_btn.setEnabled(bool(result.multi_group_ready))
 
         self._render_multigroup_issues(result.issues)
 
@@ -945,6 +948,90 @@ class StatsWindow(QMainWindow):
                     **(issue.context or {}),
                 },
             )
+
+    def _on_compute_shared_harmonics_clicked(self) -> None:
+        if not self.subject_data or not self.subjects:
+            self._set_status("Load project data before computing shared harmonics.")
+            return
+        selected_conditions = self._get_selected_conditions()
+        if not selected_conditions:
+            self._set_status("Select at least one condition before computing shared harmonics.")
+            return
+        if not self.rois:
+            self._set_status("Define at least one ROI before computing shared harmonics.")
+            return
+        if not self._multigroup_scan_result or not self._multigroup_scan_result.multi_group_ready:
+            message = (
+                "Shared harmonics are available only when multi-group scan status is Ready. "
+                "Fix scan issues and rescan."
+            )
+            self._set_status(message)
+            self.append_log("General", message, level="warning")
+            return
+
+        out_dir = self._ensure_results_dir()
+        export_path = Path(out_dir) / "Shared Harmonics Summary.xlsx"
+        self.compute_shared_harmonics_btn.setEnabled(False)
+
+        worker = StatsWorker(
+            stats_worker_funcs.run_shared_harmonics_worker,
+            subjects=self.subjects,
+            conditions=selected_conditions,
+            subject_data=self.subject_data,
+            base_freq=self._current_base_freq,
+            rois=self.rois,
+            exclude_harmonic1=self._dv_exclude_harmonic1,
+            project_path=self._project_path,
+            export_path=export_path,
+            _op="shared_harmonics",
+        )
+
+        self._active_workers.append(worker)
+
+        def _release() -> None:
+            if worker in self._active_workers:
+                self._active_workers.remove(worker)
+            self.compute_shared_harmonics_btn.setEnabled(
+                bool(self._multigroup_scan_result and self._multigroup_scan_result.multi_group_ready)
+            )
+
+        def _on_finished(payload: dict) -> None:
+            try:
+                result = payload if isinstance(payload, dict) else {}
+                self._shared_harmonics_payload = result
+                harmonics_by_roi = result.get("harmonics_by_roi", {}) if isinstance(result, dict) else {}
+                roi_count = len(harmonics_by_roi) if isinstance(harmonics_by_roi, dict) else 0
+                total_harmonics = 0
+                if isinstance(harmonics_by_roi, dict):
+                    total_harmonics = sum(len(v or []) for v in harmonics_by_roi.values())
+                conditions_used = result.get("conditions_used", []) if isinstance(result, dict) else []
+                exclude_h1 = bool(result.get("exclude_harmonic1_applied", False))
+                export_target = str(result.get("export_path", export_path))
+                summary = (
+                    "Shared harmonics complete: "
+                    f"ROIs={roi_count}, total harmonics={total_harmonics}, "
+                    f"exclude harmonic 1={exclude_h1}, "
+                    f"conditions={', '.join(conditions_used) if conditions_used else 'None'}, "
+                    f"export={export_target}"
+                )
+                self._set_status(summary)
+                self.append_log("General", summary, level="info")
+                self._set_last_export_path(export_target)
+            finally:
+                _release()
+
+        def _on_error(message: str) -> None:
+            try:
+                self._set_status(f"Shared harmonics error: {message}")
+                self.append_log("General", f"Shared harmonics error: {message}", level="error")
+            finally:
+                _release()
+
+        worker.signals.message.connect(self._on_worker_message)
+        worker.signals.error.connect(_on_error)
+        worker.signals.finished.connect(_on_finished)
+        worker.signals.progress.connect(self._on_worker_progress)
+        self.pool.start(worker)
 
     def _known_group_labels(self) -> list[str]:
         return sorted({g for g in (self.subject_groups or {}).values() if g})
@@ -984,10 +1071,15 @@ class StatsWindow(QMainWindow):
             getattr(self, "between_advanced_btn", None),
             getattr(self, "lela_mode_btn", None),
             getattr(self, "btn_open_results", None),
+            getattr(self, "compute_shared_harmonics_btn", None),
         ]
         for b in buttons:
             if b:
                 b.setEnabled(not running)
+        if not running and hasattr(self, "compute_shared_harmonics_btn"):
+            self.compute_shared_harmonics_btn.setEnabled(
+                bool(self._multigroup_scan_result and self._multigroup_scan_result.multi_group_ready)
+            )
         spinner = getattr(self, "spinner", None)
         if spinner:
             if running:
@@ -3029,6 +3121,17 @@ class StatsWindow(QMainWindow):
         multigroup_counts.addRow("Groups with subjects:", self.multi_group_groups_value)
         multigroup_counts.addRow("Unassigned subjects:", self.multi_group_unassigned_value)
         multigroup_layout.addLayout(multigroup_counts)
+
+        shared_action_row = QHBoxLayout()
+        self.compute_shared_harmonics_btn = QPushButton("Compute Shared Harmonics")
+        self.compute_shared_harmonics_btn.setToolTip(
+            "Compute shared harmonic sets pooled across groups and intersected across selected conditions."
+        )
+        self.compute_shared_harmonics_btn.setEnabled(False)
+        self.compute_shared_harmonics_btn.clicked.connect(self._on_compute_shared_harmonics_clicked)
+        shared_action_row.addWidget(self.compute_shared_harmonics_btn)
+        shared_action_row.addStretch(1)
+        multigroup_layout.addLayout(shared_action_row)
 
         issues_header = QHBoxLayout()
         issues_header.addWidget(QLabel("Issues:"))
