@@ -312,6 +312,8 @@ class PlotGeneratorWindow(QWidget):
 
         self._thread: QThread | None = None
         self._worker: _Worker | None = None
+        self._generated_paths: list[str] = []
+        self._failed_items: list[dict[str, str]] = []
         self._gen_params: (
             tuple[
                 str,
@@ -1418,11 +1420,34 @@ class PlotGeneratorWindow(QWidget):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._on_worker_finished)
         self._worker.finished.connect(self._thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(self._generation_finished)
         self._thread.start()
+
+    def _on_worker_finished(self, payload: dict) -> None:
+        generated = payload.get("generated_paths", [])
+        failed = payload.get("failed_items", [])
+        generated_paths = [str(path) for path in generated if isinstance(path, str) and path]
+        failed_items = [
+            {"item": str(item.get("item", "")), "error": str(item.get("error", ""))}
+            for item in failed
+            if isinstance(item, dict)
+        ]
+        self._generated_paths.extend(generated_paths)
+        self._failed_items.extend(failed_items)
+        logger.info(
+            "SNR worker finished.",
+            extra={
+                "operation": "snr_plot_generate",
+                "project_root": str(self._project_root) if self._project_root else None,
+                "condition": payload.get("condition"),
+                "generated_count": len(generated_paths),
+                "failed_count": len(failed_items),
+            },
+        )
 
     def _finish_all(self) -> None:
         self.gen_btn.setEnabled(True)
@@ -1430,16 +1455,23 @@ class PlotGeneratorWindow(QWidget):
         self._animate_progress_to(100)
         self._total_conditions = 0
         self._current_condition = 0
-        out_dir = self.out_edit.text()
-        images = []
-        try:
-            if self._all_conditions:
-                images = list(Path(out_dir).rglob("*.svg"))
-            else:
-                images = list(Path(out_dir).glob("*.svg"))
-        except Exception:
-            pass
-        if images:
+
+        generated_count = len(self._generated_paths)
+        failed_count = len(self._failed_items)
+
+        if generated_count > 0:
+            if failed_count > 0:
+                msg = f"Generated {generated_count} plots; {failed_count} failed. See logs for details."
+                self._append_log(msg)
+                logger.warning(
+                    "SNR plot generation completed with partial failures.",
+                    extra={
+                        "operation": "snr_plot_generate",
+                        "project_root": str(self._project_root) if self._project_root else None,
+                        "generated_count": generated_count,
+                        "failed_count": failed_count,
+                    },
+                )
             resp = QMessageBox.question(
                 self,
                 "Finished",
@@ -1449,11 +1481,19 @@ class PlotGeneratorWindow(QWidget):
             if resp == QMessageBox.Yes:
                 self._open_output_folder()
         else:
-            QMessageBox.warning(
-                self,
-                "Finished",
-                "No plots were generated. Please check the log for errors.",
+            self._append_log("No plots were generated. Please check the log for errors.")
+            logger.warning(
+                "SNR plot generation produced no plot files.",
+                extra={
+                    "operation": "snr_plot_generate",
+                    "project_root": str(self._project_root) if self._project_root else None,
+                    "failed_count": failed_count,
+                },
             )
+
+        self._generated_paths.clear()
+        self._failed_items.clear()
+
 
     def _generate(self) -> None:
         log_context = {
@@ -1526,6 +1566,8 @@ class PlotGeneratorWindow(QWidget):
             self.gen_btn.setEnabled(False)
             self.cancel_btn.setEnabled(True)
             self.log.clear()
+            self._generated_paths.clear()
+            self._failed_items.clear()
             self._animate_progress_to(0)
             if self.overlay_check.isChecked():
                 cond_a = self.condition_combo.currentText()
@@ -1572,6 +1614,7 @@ class PlotGeneratorWindow(QWidget):
                 self._worker.moveToThread(self._thread)
                 self._thread.started.connect(self._worker.run)
                 self._worker.progress.connect(self._on_progress)
+                self._worker.finished.connect(self._on_worker_finished)
                 self._worker.finished.connect(self._thread.quit)
                 self._worker.finished.connect(self._worker.deleteLater)
                 self._thread.finished.connect(self._thread.deleteLater)
