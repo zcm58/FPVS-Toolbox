@@ -43,6 +43,21 @@ logger = logging.getLogger(__name__)
 # Keep this module quiet unless the app configures handlers; avoids accidental console output.
 logger.addHandler(logging.NullHandler())
 
+
+def _excel_paths_in_output_root(output_root: Path | str | None) -> list[Path]:
+    if not output_root:
+        return []
+    root = Path(output_root)
+    if not root.is_dir():
+        return []
+    return sorted(p.resolve() for p in root.rglob("*.xls*"))
+
+
+def _should_show_no_excel_popup(generated_excel_paths: list[str], output_root: Path | str | None) -> bool:
+    if generated_excel_paths:
+        return False
+    return len(_excel_paths_in_output_root(output_root)) == 0
+
 # ----------------------------------------------------------------------
 # Canonical Qt messagebox adapters (used for both tk and legacy debug utils)
 # ----------------------------------------------------------------------
@@ -982,6 +997,38 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         if payload:
             for msg in payload.get("logs", []):
                 self.log(msg)
+
+            output_root = payload.get("output_root", "")
+            generated_excel_paths = payload.get("generated_excel_paths", []) or []
+            existing_excel_paths = payload.get("existing_excel_paths", []) or []
+
+            logger.info(
+                "pipeline_excel_export",
+                extra={
+                    "operation": "pipeline_excel_export",
+                    "project_root": str(getattr(getattr(self, "currentProject", None), "project_root", "")),
+                    "expected_output_dir": output_root,
+                    "export_reported_success": not bool(payload.get("error")),
+                    "generated_excel_count": len(generated_excel_paths),
+                    "glob_result_count": len(existing_excel_paths),
+                    "elapsed_ms": payload.get("elapsed_ms", 0),
+                },
+            )
+
+            show_no_excel_popup = _should_show_no_excel_popup(generated_excel_paths, output_root)
+            self._last_job_success = not show_no_excel_popup and not bool(payload.get("error"))
+
+            if not generated_excel_paths and not show_no_excel_popup:
+                self.log(
+                    "Excel outputs already existed; no new files were written during this run.",
+                    level=logging.INFO,
+                )
+
+            if payload.get("error") and existing_excel_paths:
+                self.log(
+                    "Excel export reported an error, but Excel outputs were found on disk.",
+                    level=logging.WARNING,
+                )
 
         # Clear current worker
         self._post_worker = None
