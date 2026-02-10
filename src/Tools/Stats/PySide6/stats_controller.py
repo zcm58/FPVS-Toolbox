@@ -33,7 +33,7 @@ from .stats_data_loader import (
     scan_lela_phase_folder,
     ScanError,
 )
-from .stats_subjects import canonical_group_and_phase_from_manifest, canonical_group_label
+from .stats_subjects import canonical_group_label
 from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
 from .stats_run_report import StatsRunReport
 
@@ -139,8 +139,8 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
 """Default ordered steps for the Single pipeline."""
 
 BETWEEN_PIPELINE_STEPS: Sequence[StepId] = (
-    StepId.BETWEEN_GROUP_ANOVA,
     StepId.BETWEEN_GROUP_MIXED_MODEL,
+    StepId.BETWEEN_GROUP_ANOVA,
     StepId.GROUP_CONTRASTS,
     StepId.HARMONIC_CHECK,
 )
@@ -590,26 +590,6 @@ class StatsController:
             },
         )
         self._view.append_log(self._section_label(pipeline_id), summary)
-
-        if (
-            pipeline_id is PipelineId.BETWEEN
-            and tuple(step_ids) == tuple(BETWEEN_PIPELINE_STEPS)
-        ):
-            try:
-                self._start_between_process_pipeline()
-            except Exception as exc:  # noqa: BLE001
-                logger.exception(
-                    "stats_between_process_start_failed",
-                    exc_info=True,
-                    extra={"pipeline": pipeline_id.name},
-                )
-                self._finalize_pipeline(
-                    pipeline_id,
-                    success=False,
-                    error_message=str(exc),
-                    exports_ran=False,
-                )
-            return
 
         try:
             self._run_next_step(pipeline_id)

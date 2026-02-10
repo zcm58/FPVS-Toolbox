@@ -50,6 +50,7 @@ from Tools.Stats.PySide6.dv_policies import (
     prepare_summed_bca_data,
 )
 from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
+from Tools.Stats.PySide6.stats_missingness import compute_complete_case_subjects, compute_missingness
 from Tools.Stats.PySide6.shared_harmonics import (
     DEFAULT_Z_THRESH,
     compute_shared_harmonics,
@@ -620,7 +621,7 @@ def run_rm_anova(
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
     dv_variants_payload = None
-    if dv_variants:
+    if dv_variants and all_subject_bca_data is not None:
         try:
             dv_variants_payload = compute_dv_variants_payload(
                 subjects=subjects,
@@ -699,6 +700,9 @@ def run_between_group_anova(
     qc_config: dict | None = None,
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
+    fixed_harmonic_dv_table: pd.DataFrame | None = None,
+    required_conditions: list[str] | None = None,
+    subject_to_group: dict[str, str | None] | None = None,
 ):
     set_rois(rois)
     message_cb("Preparing data for Between-Group RM-ANOVA…")
@@ -724,20 +728,28 @@ def run_between_group_anova(
     if not subjects:
         raise RuntimeError("All participants excluded by manual exclusions.")
     dv_metadata: dict[str, object] = {}
-    all_subject_bca_data = prepare_summed_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        log_func=message_cb,
-        rois=rois,
-        dv_policy=dv_policy,
-        dv_metadata=dv_metadata,
-    )
-    if not all_subject_bca_data:
-        raise RuntimeError("Data preparation failed (empty).")
+    all_subject_bca_data = None
+    if isinstance(fixed_harmonic_dv_table, pd.DataFrame) and not fixed_harmonic_dv_table.empty:
+        message_cb("Using fixed-harmonic DV table for between-group ANOVA.")
+        df_long = fixed_harmonic_dv_table.copy()
+        if "dv_value" in df_long.columns and "value" not in df_long.columns:
+            df_long = df_long.rename(columns={"dv_value": "value"})
+    else:
+        all_subject_bca_data = prepare_summed_bca_data(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            log_func=message_cb,
+            rois=rois,
+            dv_policy=dv_policy,
+            dv_metadata=dv_metadata,
+        )
+        if not all_subject_bca_data:
+            raise RuntimeError("Data preparation failed (empty).")
+        df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
     dv_variants_payload = None
-    if dv_variants:
+    if dv_variants and all_subject_bca_data is not None:
         try:
             dv_variants_payload = compute_dv_variants_payload(
                 subjects=subjects,
@@ -754,7 +766,9 @@ def run_between_group_anova(
             message_cb(f"DV variants computation failed: {exc}")
             dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
-    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    if "group" not in df_long.columns:
+        map_groups = subject_to_group or subject_groups or {}
+        df_long["group"] = df_long["subject"].astype(str).map(map_groups)
     df_long, exclusion_report = _apply_outlier_exclusion(
         df_long,
         enabled=outlier_exclusion_enabled,
@@ -778,6 +792,21 @@ def run_between_group_anova(
     if df_long["group"].nunique() < 2:
         raise RuntimeError("Mixed ANOVA requires at least two groups with valid data.")
 
+    required = list(required_conditions) if required_conditions else list(conditions)
+    group_map = subject_to_group or subject_groups or {}
+    included_subjects, excluded_subjects = compute_complete_case_subjects(
+        dv_table=df_long,
+        required_conditions=required,
+        subject_to_group=group_map,
+    )
+    if excluded_subjects:
+        message_cb(
+            f"ANOVA complete-case rule excluded {len(excluded_subjects)} subject(s) with missing required condition cells."
+        )
+    df_long = df_long.loc[df_long["subject"].astype(str).isin(included_subjects)].copy()
+    if df_long.empty:
+        raise RuntimeError("No complete-case subjects available for between-group ANOVA.")
+
     message_cb("Running Between-Group RM-ANOVA…")
     results = run_mixed_group_anova(
         df_long,
@@ -789,6 +818,10 @@ def run_between_group_anova(
     return {
         "anova_df_results": results,
         "dv_metadata": dv_metadata,
+        "missingness": {
+            "anova_excluded_subjects": excluded_subjects,
+            "anova_complete_case_subjects": included_subjects,
+        },
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
         "run_report": StatsRunReport(
             manual_excluded_pids=manual_excluded,
@@ -821,6 +854,9 @@ def run_lmm(
     qc_config: dict | None = None,
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
+    fixed_harmonic_dv_table: pd.DataFrame | None = None,
+    required_conditions: list[str] | None = None,
+    subject_to_group: dict[str, str | None] | None = None,
 ):
     set_rois(rois)
     prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
@@ -854,18 +890,26 @@ def run_lmm(
     if not subjects:
         raise RuntimeError("All participants excluded by manual exclusions.")
     dv_metadata: dict[str, object] = {}
-    all_subject_bca_data = prepare_summed_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        log_func=message_cb,
-        rois=rois,
-        dv_policy=dv_policy,
-        dv_metadata=dv_metadata,
-    )
-    if not all_subject_bca_data:
-        raise RuntimeError("Data preparation failed (empty).")
+    all_subject_bca_data = None
+    if isinstance(fixed_harmonic_dv_table, pd.DataFrame) and not fixed_harmonic_dv_table.empty:
+        message_cb("Using fixed-harmonic DV table for mixed model.")
+        df_long = fixed_harmonic_dv_table.copy()
+        if "dv_value" in df_long.columns and "value" not in df_long.columns:
+            df_long = df_long.rename(columns={"dv_value": "value"})
+    else:
+        all_subject_bca_data = prepare_summed_bca_data(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            log_func=message_cb,
+            rois=rois,
+            dv_policy=dv_policy,
+            dv_metadata=dv_metadata,
+        )
+        if not all_subject_bca_data:
+            raise RuntimeError("Data preparation failed (empty).")
+        df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
     dv_variants_payload = None
     if dv_variants:
         try:
@@ -884,7 +928,9 @@ def run_lmm(
             message_cb(f"DV variants computation failed: {exc}")
             dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
-    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
+    if "group" not in df_long.columns:
+        map_groups = subject_to_group or subject_groups or {}
+        df_long["group"] = df_long["subject"].astype(str).map(map_groups)
     df_long, exclusion_report = _apply_outlier_exclusion(
         df_long,
         enabled=outlier_exclusion_enabled,
@@ -915,6 +961,25 @@ def run_lmm(
             raise RuntimeError(
                 "Between-group mixed model requires at least two groups with valid data."
             )
+
+    missingness_payload = None
+    if include_group:
+        required = list(required_conditions) if required_conditions else list(conditions)
+        group_map = subject_to_group or subject_groups or {}
+        mixed_missing_rows = compute_missingness(
+            dv_table=df_long,
+            required_conditions=required,
+            subject_to_group=group_map,
+        )
+        if mixed_missing_rows:
+            message_cb(
+                f"Mixed model retained incomplete cells; recorded {len(mixed_missing_rows)} missing required condition cell(s)."
+            )
+        missingness_payload = {
+            "mixed_model_missing_cells": mixed_missing_rows,
+            "mixed_model_subject_count": int(df_long["subject"].nunique()),
+            "mixed_model_subjects": sorted(df_long["subject"].astype(str).unique().tolist()),
+        }
 
     message_cb("Running Mixed Effects Model…")
 
@@ -960,6 +1025,7 @@ def run_lmm(
         "mixed_results_df": mixed_results_df,
         "output_text": output_text,
         "dv_metadata": dv_metadata,
+        "missingness": missingness_payload or {},
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
         "run_report": StatsRunReport(
             manual_excluded_pids=manual_excluded,
