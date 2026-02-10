@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -96,6 +96,43 @@ class QcExclusionReport:
     participants: list[QcParticipantReport]
     screened_conditions: list[str]
     screened_rois: list[str]
+
+    @property
+    def excluded_pids(self) -> set[str]:
+        """Backward-compatible accessor for excluded participant IDs."""
+        for attr_name in ("excluded_subjects", "excluded_participants", "excluded_ids"):
+            attr_value = getattr(self, attr_name, None)
+            if isinstance(attr_value, (set, list, tuple)):
+                return {str(pid) for pid in attr_value}
+
+        exclusions = getattr(self, "exclusions", None)
+        if isinstance(exclusions, dict):
+            return {str(pid) for pid in exclusions.keys()}
+        if isinstance(exclusions, list):
+            extracted: set[str] = set()
+            for item in exclusions:
+                if isinstance(item, (list, tuple)) and item:
+                    extracted.add(str(item[0]))
+                    continue
+                pid_value = getattr(item, "pid", None)
+                if pid_value is None:
+                    pid_value = getattr(item, "participant_id", None)
+                if pid_value is not None:
+                    extracted.add(str(pid_value))
+            if extracted:
+                return extracted
+
+        participants = getattr(self, "participants", None)
+        if isinstance(participants, list):
+            return {
+                str(pid)
+                for pid in (
+                    getattr(participant, "participant_id", None) for participant in participants
+                )
+                if pid is not None
+            }
+
+        return set()
 
 
 def format_qc_violation(violation: QcViolation) -> str:
