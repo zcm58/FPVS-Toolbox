@@ -67,7 +67,7 @@ class _Worker(QObject):
     """Worker to process Excel files and generate plots."""
 
     progress = Signal(str, int, int)
-    finished = Signal()
+    finished = Signal(dict)
 
     def __init__(
         self,
@@ -153,11 +153,17 @@ class _Worker(QObject):
         self.legend_a_peaks = legend_a_peaks
         self.legend_b_peaks = legend_b_peaks
         self.project_root = project_root
+        self.generated_paths: list[str] = []
+        self.failed_items: list[dict[str, str]] = []
 
     def run(self) -> None:
         try:
             self._run()
         except Exception as exc:
+            self._record_failure(
+                item=self.condition,
+                error=f"Unhandled worker exception: {exc}",
+            )
             logger.error(
                 "SNR plot generation failed.",
                 exc_info=exc,
@@ -170,7 +176,14 @@ class _Worker(QObject):
             )
             self._emit("SNR plot generation failed. See logs for details.", 0, 0)
         finally:
-            self.finished.emit()
+            self.finished.emit(
+                {
+                    "condition": self.condition,
+                    "overlay": self.overlay,
+                    "generated_paths": list(self.generated_paths),
+                    "failed_items": list(self.failed_items),
+                }
+            )
 
     def stop(self) -> None:
         self._stop_requested = True
@@ -182,6 +195,12 @@ class _Worker(QObject):
         if self.legend_custom_enabled and custom is not None and custom.strip():
             return custom.strip()
         return default
+
+    def _record_generated_path(self, path: Path) -> None:
+        self.generated_paths.append(str(path))
+
+    def _record_failure(self, *, item: str, error: str) -> None:
+        self.failed_items.append({"item": item, "error": error})
 
     def _selected_roi_names(self) -> List[str]:
         return list(self.roi_map.keys()) if self.selected_roi == ALL_ROIS_OPTION else [self.selected_roi]
@@ -500,6 +519,7 @@ class _Worker(QObject):
                     df = snr_vals
             except Exception as e:  # pragma: no cover - simple logging
                 self._emit(f"Failed reading {excel_path.name}: {e}")
+                self._record_failure(item=excel_path.name, error=f"Failed reading Excel: {e}")
                 continue
             freq_cols = [c for c in df.columns if isinstance(c, str) and c.endswith("_Hz")]
             if not freq_cols:
@@ -508,6 +528,7 @@ class _Worker(QObject):
                     offset + processed_files,
                     overall_total,
                 )
+                self._record_failure(item=excel_path.name, error="No frequency columns found")
                 processed_files += 1
                 continue
             self._emit(
@@ -523,6 +544,7 @@ class _Worker(QObject):
                     offset + processed_files,
                     overall_total,
                 )
+                self._record_failure(item=excel_path.name, error="Unable to determine subject ID")
                 processed_files += 1
                 continue
             if (
@@ -562,6 +584,10 @@ class _Worker(QObject):
                         )
                     except Exception as e:  # pragma: no cover - logged to UI
                         self._emit(f"Failed reading scalp data in {excel_path.name}: {e}")
+                        self._record_failure(
+                            item=excel_path.name,
+                            error=f"Failed reading scalp data: {e}",
+                        )
 
             freq_pairs: List[tuple[float, str]] = []
             for col in freq_cols:
@@ -582,6 +608,10 @@ class _Worker(QObject):
                 df_roi = df[df["Electrode"].str.upper().isin(chans)]
                 if df_roi.empty:
                     self._emit(f"No electrodes for ROI {roi} in {excel_path.name}")
+                    self._record_failure(
+                        item=f"{excel_path.name}:{roi}",
+                        error="No electrodes for ROI",
+                    )
                     continue
 
                 means = df_roi[ordered_cols].mean().tolist()
@@ -815,8 +845,10 @@ class _Worker(QObject):
             save_kwargs = {"dpi": 300, "pad_inches": 0.05}
             if not has_scalp:
                 save_kwargs["bbox_inches"] = "tight"
-            fig.savefig(self.out_dir / fname, **save_kwargs)
+            out_path = self.out_dir / fname
+            fig.savefig(out_path, **save_kwargs)
             plt.close(fig)
+            self._record_generated_path(out_path)
             self._emit(f"Saved {fname}")
 
     def _plot_overlay(
@@ -1008,10 +1040,12 @@ class _Worker(QObject):
                 fig.subplots_adjust(top=0.90)
 
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
+            out_path = self.out_dir / fname
             fig.savefig(
-                self.out_dir / fname,
+                out_path,
                 dpi=300,
                 pad_inches=0.05,
             )
             plt.close(fig)
+            self._record_generated_path(out_path)
             self._emit(f"Saved {fname}")
