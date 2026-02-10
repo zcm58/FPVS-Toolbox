@@ -1736,7 +1736,7 @@ class StatsWindow(QMainWindow):
                 extra={
                     "pipeline": getattr(pid, "name", str(pid)),
                     "step": getattr(sid, "name", str(sid)),
-                    "message": message,
+                    "error_message": message,
                 },
             )
             try:
@@ -1920,10 +1920,14 @@ class StatsWindow(QMainWindow):
                 else:
                     self.append_log(section, "  • Analysis completed", level="info")
             elif error_message:
-                try:
-                    QMessageBox.critical(self, "Analysis Error", error_message)
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to display error dialog", exc_info=True)
+                if "blocked" in error_message.lower():
+                    self._set_status(error_message)
+                    self.append_log(self._section_label(pipeline_id), error_message, level="warning")
+                else:
+                    try:
+                        QMessageBox.critical(self, "Analysis Error", error_message)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("Failed to display error dialog", exc_info=True)
             self._show_outlier_exclusion_dialog(pipeline_id)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
@@ -2127,6 +2131,7 @@ class StatsWindow(QMainWindow):
 
                 return kwargs, handler
             if step_id is StepId.BETWEEN_GROUP_MIXED_MODEL:
+                results_dir = self._ensure_results_dir()
                 kwargs = dict(
                     subjects=self.subjects,
                     conditions=self._get_selected_conditions(),
@@ -2148,6 +2153,7 @@ class StatsWindow(QMainWindow):
                     fixed_harmonic_dv_table=fixed_dv_table,
                     required_conditions=selected_conditions,
                     subject_to_group=self.subject_groups,
+                    results_dir=results_dir,
                 )
                 def handler(payload):
                     self._apply_between_mixed_results(payload, update_text=False)

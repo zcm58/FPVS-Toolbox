@@ -1060,6 +1060,27 @@ class StatsController:
                 },
             )
 
+            if isinstance(payload, dict) and str(payload.get("status", "")).lower() == "blocked":
+                blocked_message = str(payload.get("message") or "Analysis blocked.")
+                self._view.append_log(
+                    self._section_label(pipeline_id),
+                    format_step_event(
+                        pipeline_id,
+                        step_id,
+                        event="blocked",
+                        message=blocked_message,
+                    ),
+                    level="warning",
+                )
+                state.results[step_id] = payload
+                self._finalize_pipeline(
+                    pipeline_id,
+                    success=False,
+                    error_message=blocked_message,
+                    exports_ran=False,
+                )
+                return
+
             try:
                 handler(payload)
                 state.results[step_id] = payload if isinstance(payload, dict) else {"result": payload}
