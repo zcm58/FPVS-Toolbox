@@ -11,10 +11,50 @@ import numpy as np
 import pandas as pd
 from openpyxl.styles import Alignment
 
-from Tools.Stats.PySide6.group_harmonics import build_rossion_harmonics_summary
+from Tools.Stats.Legacy.excel_io import safe_read_excel
+from Tools.Stats.Legacy.stats_analysis import (
+    SUMMED_BCA_Z_SHEET_NAME,
+    _match_freq_column,
+)
+from Tools.Stats.PySide6.group_harmonics import _build_harmonic_domain
 
 SELECTION_RULE = "two_consecutive_z_gt_thresh"
 DEFAULT_Z_THRESH = 1.64
+POLICY_NAME = "VANDER_DONCK_POOLED_ROI_Z"
+CONDITION_COMBINATION_RULE = "mean_across_conditions_then_two_consecutive"
+_ALT_Z_SHEET_NAME = "Z Scores"
+
+
+def _resolve_z_sheet_name(file_path: str) -> str | None:
+    for candidate in (SUMMED_BCA_Z_SHEET_NAME, _ALT_Z_SHEET_NAME):
+        try:
+            safe_read_excel(file_path, sheet_name=candidate, index_col="Electrode")
+            return candidate
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def _find_first_z_columns_with_fallback(
+    subjects: list[str],
+    conditions: list[str],
+    subject_data: dict[str, dict[str, str]],
+    log_func: Callable[[str], None],
+) -> tuple[pd.Index, str]:
+    for pid in subjects:
+        for condition in conditions:
+            file_path = subject_data.get(pid, {}).get(condition)
+            if not file_path:
+                continue
+            chosen_sheet = _resolve_z_sheet_name(file_path)
+            if chosen_sheet is None:
+                continue
+            try:
+                df_z = safe_read_excel(file_path, sheet_name=chosen_sheet, index_col="Electrode")
+                return df_z.columns, chosen_sheet
+            except Exception as exc:  # noqa: BLE001
+                log_func(f"Failed to read Z columns from {file_path}: {exc}")
+    return pd.Index([]), SUMMED_BCA_Z_SHEET_NAME
 
 
 @dataclass(frozen=True)
@@ -24,7 +64,12 @@ class SharedHarmonicsResult:
     z_thresh: float
     conditions_used: list[str]
     condition_harmonics_by_roi: dict[str, dict[str, list[float]]]
+    strict_intersection_harmonics_by_roi: dict[str, list[float]]
     mean_z_by_condition: dict[str, pd.DataFrame]
+    pooled_mean_z_table: pd.DataFrame
+    z_sheet_used: str
+    condition_combination_rule_used: str
+    diagnostics: dict[str, object]
 
 
 def _select_two_consecutive_significant(
@@ -81,46 +126,164 @@ def compute_shared_harmonics(
     if not conditions:
         raise RuntimeError("No selected conditions were provided.")
 
-    condition_harmonics_by_roi: dict[str, dict[str, list[float]]] = {}
-    mean_z_by_condition: dict[str, pd.DataFrame] = {}
+    columns, z_sheet_used = _find_first_z_columns_with_fallback(subjects, conditions, subject_data, log_func)
+    harmonic_freqs = _build_harmonic_domain(
+        columns,
+        base_freq,
+        log_func,
+        exclude_harmonic1=exclude_harmonic1,
+        trace_label="shared",
+    )
+    if not harmonic_freqs:
+        raise RuntimeError(
+            "Shared harmonics selection produced an empty harmonic domain. "
+            "Verify Z-score sheets and base frequency."
+        )
+
+    condition_rows: list[dict[str, object]] = []
+    diagnostics: dict[str, object] = {
+        "candidate_harmonic_domain": [float(v) for v in harmonic_freqs],
+        "exclude_harmonic1_applied": bool(exclude_harmonic1),
+        "z_sheet_preference": SUMMED_BCA_Z_SHEET_NAME,
+        "z_sheet_used": z_sheet_used,
+        "roi_condition_coverage": {},
+        "empty_reasons": [],
+    }
 
     for condition in conditions:
-        summary = build_rossion_harmonics_summary(
-            subjects=subjects,
-            conditions=[condition],
-            subject_data=subject_data,
-            base_freq=base_freq,
-            rois=rois,
-            z_threshold=z_threshold,
-            exclude_harmonic1=exclude_harmonic1,
-            log_func=log_func,
-        )
-        mean_z_by_condition[condition] = summary.mean_z_table.copy()
-
-        mean_lookup: dict[tuple[str, float], float] = {}
-        if not summary.mean_z_table.empty:
-            for _, row in summary.mean_z_table.iterrows():
-                mean_lookup[(str(row["roi"]), float(row["harmonic_hz"]))] = float(row["mean_z"])
-
-        roi_harmonics: dict[str, list[float]] = {}
         for roi_name in rois.keys():
-            z_lookup = {
-                float(freq): float(mean_lookup.get((str(roi_name), float(freq)), np.nan))
-                for freq in summary.harmonic_freqs
+            diagnostics["roi_condition_coverage"].setdefault(str(roi_name), {})[str(condition)] = {
+                "n_total_participants": 0,
+                "n_with_any_finite": 0,
             }
-            roi_harmonics[str(roi_name)] = _select_two_consecutive_significant(
-                summary.harmonic_freqs,
-                z_lookup,
+
+    for condition in conditions:
+        for roi_name, roi_channels in rois.items():
+            per_harmonic_values: dict[float, list[float]] = {float(freq): [] for freq in harmonic_freqs}
+            finite_participants = 0
+            total_participants = 0
+
+            for pid in subjects:
+                file_path = subject_data.get(pid, {}).get(condition)
+                if not file_path:
+                    continue
+                try:
+                    try:
+                        df_z = safe_read_excel(file_path, sheet_name=z_sheet_used, index_col="Electrode")
+                    except Exception:
+                        fallback = _resolve_z_sheet_name(file_path)
+                        if fallback is None:
+                            raise RuntimeError("No compatible Z sheet found")
+                        df_z = safe_read_excel(file_path, sheet_name=fallback, index_col="Electrode")
+                except Exception as exc:  # noqa: BLE001
+                    log_func(f"Failed to read Z sheet from {file_path}: {exc}")
+                    continue
+
+                total_participants += 1
+                df_z.index = df_z.index.astype(str).str.upper().str.strip()
+                roi_chans = [
+                    str(ch).strip().upper()
+                    for ch in (roi_channels or [])
+                    if str(ch).strip().upper() in df_z.index
+                ]
+                if not roi_chans:
+                    continue
+
+                has_any_finite = False
+                for freq in harmonic_freqs:
+                    col = _match_freq_column(df_z.columns, float(freq))
+                    if not col:
+                        continue
+                    vals = pd.to_numeric(df_z.loc[roi_chans, col], errors="coerce")
+                    mean_val = float(np.nanmean(vals.values)) if np.isfinite(vals.values).any() else np.nan
+                    if np.isfinite(mean_val):
+                        per_harmonic_values[float(freq)].append(mean_val)
+                        has_any_finite = True
+                if has_any_finite:
+                    finite_participants += 1
+
+            diagnostics["roi_condition_coverage"][str(roi_name)][str(condition)] = {
+                "n_total_participants": int(total_participants),
+                "n_with_any_finite": int(finite_participants),
+            }
+            if finite_participants == 0:
+                diagnostics["empty_reasons"].append(
+                    f"No finite pooled ROI Z values for ROI={roi_name}, condition={condition}."
+                )
+
+            for freq in harmonic_freqs:
+                participants = per_harmonic_values[float(freq)]
+                mean_val = float(np.nanmean(participants)) if participants else np.nan
+                condition_rows.append(
+                    {
+                        "condition": str(condition),
+                        "roi": str(roi_name),
+                        "harmonic_hz": float(freq),
+                        "mean_z": mean_val,
+                        "n_participants": int(len(participants)),
+                        "significant": bool(np.isfinite(mean_val) and mean_val > z_threshold),
+                    }
+                )
+
+    mean_z_all = pd.DataFrame(condition_rows)
+    mean_z_by_condition: dict[str, pd.DataFrame] = {}
+    for condition in conditions:
+        mean_z_by_condition[str(condition)] = mean_z_all[mean_z_all["condition"] == str(condition)].copy()
+
+    pooled_mean_z_table = (
+        mean_z_all.groupby(["roi", "harmonic_hz"], as_index=False)["mean_z"].mean()
+        if not mean_z_all.empty
+        else pd.DataFrame(columns=["roi", "harmonic_hz", "mean_z"])
+    )
+
+    pooled_lookup: dict[tuple[str, float], float] = {}
+    if not pooled_mean_z_table.empty:
+        for _, row in pooled_mean_z_table.iterrows():
+            pooled_lookup[(str(row["roi"]), float(row["harmonic_hz"]))] = float(row["mean_z"])
+
+    harmonics_by_roi: dict[str, list[float]] = {}
+    for roi_name in rois.keys():
+        z_lookup = {
+            float(freq): float(pooled_lookup.get((str(roi_name), float(freq)), np.nan))
+            for freq in harmonic_freqs
+        }
+        harmonics_by_roi[str(roi_name)] = _select_two_consecutive_significant(
+            harmonic_freqs,
+            z_lookup,
+            z_threshold=z_threshold,
+            stop_after_n_nonsig=2,
+        )
+
+    condition_harmonics_by_roi: dict[str, dict[str, list[float]]] = {}
+    for condition in conditions:
+        cond_lookup: dict[tuple[str, float], float] = {}
+        condition_df = mean_z_by_condition[str(condition)]
+        for _, row in condition_df.iterrows():
+            cond_lookup[(str(row["roi"]), float(row["harmonic_hz"]))] = float(row["mean_z"])
+        condition_harmonics_by_roi[str(condition)] = {
+            str(roi_name): _select_two_consecutive_significant(
+                harmonic_freqs,
+                {
+                    float(freq): float(cond_lookup.get((str(roi_name), float(freq)), np.nan))
+                    for freq in harmonic_freqs
+                },
                 z_threshold=z_threshold,
                 stop_after_n_nonsig=2,
             )
-        condition_harmonics_by_roi[condition] = roi_harmonics
+            for roi_name in rois.keys()
+        }
 
-    harmonics_by_roi = intersect_condition_harmonics(
+    strict_intersection_harmonics_by_roi = intersect_condition_harmonics(
         condition_harmonics_by_roi=condition_harmonics_by_roi,
         conditions=conditions,
         rois=rois.keys(),
     )
+
+    for roi_name in rois.keys():
+        if not harmonics_by_roi.get(str(roi_name), []):
+            diagnostics["empty_reasons"].append(
+                f"No harmonics selected for ROI={roi_name} using pooled condition mean rule."
+            )
 
     return SharedHarmonicsResult(
         harmonics_by_roi=harmonics_by_roi,
@@ -128,7 +291,12 @@ def compute_shared_harmonics(
         z_thresh=float(z_threshold),
         conditions_used=list(conditions),
         condition_harmonics_by_roi=condition_harmonics_by_roi,
+        strict_intersection_harmonics_by_roi=strict_intersection_harmonics_by_roi,
         mean_z_by_condition=mean_z_by_condition,
+        pooled_mean_z_table=pooled_mean_z_table,
+        z_sheet_used=z_sheet_used,
+        condition_combination_rule_used=CONDITION_COMBINATION_RULE,
+        diagnostics=diagnostics,
     )
 
 
@@ -166,6 +334,10 @@ def export_shared_harmonics_summary(
                 "exclude_harmonic1_applied": result.exclude_harmonic1_applied,
                 "z_thresh": result.z_thresh,
                 "selection_rule": SELECTION_RULE,
+                "policy_name": POLICY_NAME,
+                "z_sheet_used": result.z_sheet_used,
+                "condition_combination_rule_used": result.condition_combination_rule_used,
+                "pooling": "across groups",
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "project_path": str(project_path),
                 "conditions_used": ", ".join(result.conditions_used),
@@ -200,6 +372,7 @@ def export_shared_harmonics_summary(
 __all__ = [
     "DEFAULT_Z_THRESH",
     "SELECTION_RULE",
+    "CONDITION_COMBINATION_RULE",
     "SharedHarmonicsResult",
     "compute_shared_harmonics",
     "export_shared_harmonics_summary",
