@@ -50,6 +50,7 @@ from Tools.Stats.PySide6.dv_policies import (
     prepare_summed_bca_data,
 )
 from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
+from Tools.Stats.PySide6.stats_group_contrasts import normalize_group_contrasts_table
 from Tools.Stats.PySide6.stats_missingness import compute_complete_case_subjects, compute_missingness
 from Tools.Stats.PySide6.shared_harmonics import (
     DEFAULT_Z_THRESH,
@@ -1272,6 +1273,7 @@ def run_group_contrasts(
         roi_col="roi",
         dv_col="value",
     )
+    results_df = normalize_group_contrasts_table(results_df)
     return {
         "results_df": results_df,
         "output_text": "",
