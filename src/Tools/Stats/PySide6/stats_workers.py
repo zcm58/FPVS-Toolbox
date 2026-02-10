@@ -1354,11 +1354,16 @@ def run_shared_harmonics_worker(
 
     return {
         "harmonics_by_roi": result.harmonics_by_roi,
+        "strict_intersection_harmonics_by_roi": result.strict_intersection_harmonics_by_roi,
         "exclude_harmonic1_applied": result.exclude_harmonic1_applied,
         "z_thresh": result.z_thresh,
         "conditions_used": result.conditions_used,
         "condition_harmonics_by_roi": result.condition_harmonics_by_roi,
         "mean_z_by_condition": result.mean_z_by_condition,
+        "pooled_mean_z_table": result.pooled_mean_z_table,
+        "z_sheet_used": result.z_sheet_used,
+        "condition_combination_rule_used": result.condition_combination_rule_used,
+        "diagnostics": result.diagnostics,
         "export_path": str(exported_path),
         "selection_rule": "two_consecutive_z_gt_thresh",
     }
