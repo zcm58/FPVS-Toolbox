@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
@@ -44,6 +45,9 @@ from .core import (
     sanitize_filename_stem,
 )
 from .worker import IndividualDetectabilityWorker, RunRequest
+
+
+logger = logging.getLogger(__name__)
 
 
 class IndividualDetectabilityWindow(QWidget):
@@ -503,6 +507,28 @@ class IndividualDetectabilityWindow(QWidget):
     def _refresh_conditions(self) -> None:
         root_text = self.input_root_edit.text().strip()
         self._conditions = discover_conditions(Path(root_text)) if root_text else []
+        logger.info(
+            "individual_detectability_scan_start",
+            extra={
+                "project_root": str(self._project_root) if self._project_root else "",
+                "excel_root": root_text,
+            },
+        )
+        logger.info(
+            "individual_detectability_conditions_discovered",
+            extra={
+                "count": len(self._conditions),
+                "conditions": [
+                    {
+                        "name": cond.name,
+                        "path": str(cond.path),
+                        "file_count": len(cond.files),
+                        "sample_files": [p.name for p in cond.files[:5]],
+                    }
+                    for cond in self._conditions
+                ],
+            },
+        )
         with self._block_signals(self.conditions_list):
             self.conditions_list.clear()
             for cond in self._conditions:
@@ -568,12 +594,49 @@ class IndividualDetectabilityWindow(QWidget):
     def _populate_participants(self) -> None:
         selected = self._selected_conditions()
         files = [f for cond in selected for f in cond.files]
-        participants: list[str] = []
-        for path in files:
-            pid = parse_participant_id(path.stem)
-            if pid and pid not in participants:
-                participants.append(pid)
-        participants.sort(key=lambda p: int(p[1:]) if p[1:].isdigit() else p)
+        participants_set: set[str] = set()
+        per_condition_parsed: dict[str, list[str]] = {}
+        for cond in selected:
+            cond_participants: set[str] = set()
+            for path in cond.files:
+                pid = parse_participant_id(path.stem)
+                if pid:
+                    cond_participants.add(pid)
+                    participants_set.add(pid)
+            sorted_cond_participants = sorted(
+                cond_participants,
+                key=lambda p: int(p[1:]) if p[1:].isdigit() else p,
+            )
+            per_condition_parsed[cond.name] = sorted_cond_participants
+
+        participants = sorted(
+            participants_set,
+            key=lambda p: int(p[1:]) if p[1:].isdigit() else p,
+        )
+        logger.info(
+            "individual_detectability_participants_discovered",
+            extra={
+                "selected_conditions": [cond.name for cond in selected],
+                "per_condition": {
+                    cond.name: {
+                        "file_count": len(cond.files),
+                        "participant_count": len(per_condition_parsed.get(cond.name, [])),
+                        "participants_sample": per_condition_parsed.get(cond.name, [])[:20],
+                    }
+                    for cond in selected
+                },
+                "final_count": len(participants),
+                "final_participants_sample": participants[:20],
+            },
+        )
+        if files and not participants:
+            logger.warning(
+                "individual_detectability_participants_empty",
+                extra={
+                    "reason": "excel_files_found_but_no_participant_ids_parsed",
+                    "sample_files": [p.name for p in files[:5]],
+                },
+            )
 
         with self._block_signals(self.participant_table):
             self.participant_table.setRowCount(len(participants))
