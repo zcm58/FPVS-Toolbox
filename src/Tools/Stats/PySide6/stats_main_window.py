@@ -91,6 +91,7 @@ from Tools.Stats.PySide6.stats_data_loader import (
 )
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_missingness import export_missingness_workbook
+from Tools.Stats.PySide6.stats_group_contrasts import export_group_contrasts_workbook
 from Tools.Stats.PySide6.stats_workers import StatsWorker
 from Tools.Stats.PySide6 import stats_workers as stats_worker_funcs
 from Tools.Stats.PySide6.dv_policies import (
@@ -1330,7 +1331,7 @@ class StatsWindow(QMainWindow):
             "harmonic": (export_harmonic_results_to_excel, HARMONIC_XLS),
             "anova_between": (export_rm_anova_results_to_excel, ANOVA_BETWEEN_XLS),
             "lmm_between": (export_mixed_model_results_to_excel, LMM_BETWEEN_XLS),
-            "group_contrasts": (export_posthoc_results_to_excel, GROUP_CONTRAST_XLS),
+            "group_contrasts": (export_group_contrasts_workbook, GROUP_CONTRAST_XLS),
         }
         func, fname = mapping[kind]
 
