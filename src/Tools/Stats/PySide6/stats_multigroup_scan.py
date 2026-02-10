@@ -16,6 +16,13 @@ logger = logging.getLogger("Tools.Stats")
 PID_REGEX = re.compile(r"(?i)p0*(\d+)(?!\d)")
 
 
+def _pid_sort_key(pid: str) -> tuple[int, str]:
+    match = PID_REGEX.search(pid or "")
+    if match:
+        return int(match.group(1)), str(pid)
+    return 10**9, str(pid)
+
+
 @dataclass(frozen=True)
 class ScanIssue:
     severity: str
@@ -207,7 +214,7 @@ def _scan_excel_folder(excel_root: Path) -> tuple[list[str], list[ScanIssue]]:
             )
         )
 
-    return sorted(discovered), issues
+    return sorted(discovered, key=_pid_sort_key), issues
 
 
 def _sorted_groups_from_mapping(group_map: dict[str, list[str]]) -> list[str]:
@@ -226,7 +233,7 @@ def _build_group_to_subjects(
         group_to_subjects.setdefault(group, []).append(pid)
 
     for group, subjects in group_to_subjects.items():
-        group_to_subjects[group] = sorted(set(subjects))
+        group_to_subjects[group] = sorted(set(subjects), key=_pid_sort_key)
     return group_to_subjects
 
 
@@ -246,11 +253,13 @@ def scan_multigroup_readiness(project_root: Path, excel_root: Path) -> MultiGrou
     subject_groups = _sorted_groups_from_mapping(group_to_subjects)
 
     assigned_subjects = sorted(
-        {pid for subjects in group_to_subjects.values() for pid in subjects}
+        {pid for subjects in group_to_subjects.values() for pid in subjects},
+        key=_pid_sort_key,
     )
 
     unassigned_subjects = sorted(
-        pid for pid in discovered_subjects if pid not in participants_map
+        (pid for pid in discovered_subjects if pid not in participants_map),
+        key=_pid_sort_key,
     )
     for pid in unassigned_subjects:
         issues.append(
@@ -261,7 +270,10 @@ def scan_multigroup_readiness(project_root: Path, excel_root: Path) -> MultiGrou
             )
         )
 
-    manifest_only = sorted(pid for pid in participants_map if pid not in discovered_subjects)
+    manifest_only = sorted(
+        (pid for pid in participants_map if pid not in discovered_subjects),
+        key=_pid_sort_key,
+    )
     for pid in manifest_only:
         issues.append(
             _build_issue(
@@ -280,7 +292,7 @@ def scan_multigroup_readiness(project_root: Path, excel_root: Path) -> MultiGrou
         unassigned_subjects=unassigned_subjects,
         issues=issues,
         multi_group_ready=multi_group_ready,
-        discovered_subjects=sorted(discovered_subjects),
+        discovered_subjects=sorted(discovered_subjects, key=_pid_sort_key),
         assigned_subjects=assigned_subjects,
     )
 
