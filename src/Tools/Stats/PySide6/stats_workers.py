@@ -77,6 +77,7 @@ from Tools.Stats.PySide6.stats_qc_exclusion import (
     run_qc_exclusion,
 )
 from Tools.Stats.PySide6.stats_run_report import StatsRunReport
+from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
 
 logger = logging.getLogger("Tools.Stats")
 RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
@@ -145,6 +146,7 @@ def _build_lmm_blocked_payload(
     model_input_columns_df: pd.DataFrame | None = None,
     condition_sets_df: pd.DataFrame | None = None,
     key_match_stats_df: pd.DataFrame | None = None,
+    dv_column_audit_df: pd.DataFrame | None = None,
     final_before_dropna_df: pd.DataFrame | None = None,
     merge_match_stats: dict[str, object] | None = None,
 ) -> dict[str, object]:
@@ -191,6 +193,11 @@ def _build_lmm_blocked_payload(
                 if isinstance(key_match_stats_df, pd.DataFrame)
                 else pd.DataFrame()
             )
+            dv_column_audit_export_df = (
+                dv_column_audit_df.copy()
+                if isinstance(dv_column_audit_df, pd.DataFrame)
+                else pd.DataFrame(columns=["column", "dtype", "non_nan_count", "is_selected_dv_col"])
+            )
             final_before_dropna_export_df = (
                 final_before_dropna_df.head(200).copy()
                 if isinstance(final_before_dropna_df, pd.DataFrame)
@@ -202,6 +209,7 @@ def _build_lmm_blocked_payload(
                 _auto_format_and_write_excel(writer, model_columns_df, "ModelInput_Columns", message_cb)
                 _auto_format_and_write_excel(writer, condition_sets_export_df, "ConditionSets", message_cb)
                 _auto_format_and_write_excel(writer, key_match_export_df, "KeyMatchStats", message_cb)
+                _auto_format_and_write_excel(writer, dv_column_audit_export_df, "DVColumnAudit", message_cb)
                 _auto_format_and_write_excel(writer, final_before_dropna_export_df, "FinalBeforeDropna", message_cb)
                 _auto_format_and_write_excel(writer, sample_df, "RemainingRows_Sample", message_cb)
             message_cb(f"Blocked model diagnostics exported to {diagnostics_path}")
@@ -255,6 +263,9 @@ def _compute_merge_key_stats(
     selected_conditions = sorted(model_df["condition"].dropna().astype(str).unique().tolist()) if "condition" in model_df.columns else []
     dv_conditions = sorted(dv_df["condition"].dropna().astype(str).unique().tolist()) if "condition" in dv_df.columns else []
     condition_intersection = sorted(set(selected_conditions) & set(dv_conditions))
+    model_rois = sorted(model_df["roi"].dropna().astype(str).unique().tolist()) if "roi" in model_df.columns else []
+    dv_rois = sorted(dv_df["roi"].dropna().astype(str).unique().tolist()) if "roi" in dv_df.columns else []
+    roi_intersection = sorted(set(model_rois) & set(dv_rois))
     stats = {
         "model_key_count": int(len(model_key_set)),
         "dv_key_count": int(len(dv_key_set)),
@@ -265,6 +276,9 @@ def _compute_merge_key_stats(
         "dv_pid_sample": dv_pids[:10],
         "pid_intersection_count": int(len(pid_intersection)),
         "condition_intersection_count": int(len(condition_intersection)),
+        "roi_intersection_count": int(len(roi_intersection)),
+        "model_roi_sample": model_rois[:10],
+        "dv_roi_sample": dv_rois[:10],
         "selected_conditions": selected_conditions,
         "dv_conditions": dv_conditions,
     }
@@ -272,7 +286,8 @@ def _compute_merge_key_stats(
         "[LMM DIAG] merge_match_stats "
         f"model_key_count={stats['model_key_count']} dv_key_count={stats['dv_key_count']} "
         f"intersection_count={stats['intersection_count']} pid_intersection_count={stats['pid_intersection_count']} "
-        f"condition_intersection_count={stats['condition_intersection_count']}"
+        f"condition_intersection_count={stats['condition_intersection_count']} "
+        f"roi_intersection_count={stats['roi_intersection_count']}"
     )
     message_cb(
         "[LMM DIAG] merge_match_stats "
@@ -282,6 +297,10 @@ def _compute_merge_key_stats(
         "[LMM DIAG] merge_match_stats "
         f"model_pid_sample={stats['model_pid_sample']} dv_pid_sample={stats['dv_pid_sample']}"
     )
+    message_cb(
+        "[LMM DIAG] merge_match_stats "
+        f"model_roi_sample={stats['model_roi_sample']} dv_roi_sample={stats['dv_roi_sample']}"
+    )
     key_match_stats_df = pd.DataFrame(
         {
             "metric": [
@@ -290,10 +309,13 @@ def _compute_merge_key_stats(
                 "intersection_count",
                 "pid_intersection_count",
                 "condition_intersection_count",
+                "roi_intersection_count",
                 "model_only_sample",
                 "dv_only_sample",
                 "model_pid_sample",
                 "dv_pid_sample",
+                "model_roi_sample",
+                "dv_roi_sample",
             ],
             "value": [
                 stats["model_key_count"],
@@ -301,14 +323,44 @@ def _compute_merge_key_stats(
                 stats["intersection_count"],
                 stats["pid_intersection_count"],
                 stats["condition_intersection_count"],
+                stats["roi_intersection_count"],
                 " | ".join(stats["model_only_sample"]),
                 " | ".join(stats["dv_only_sample"]),
                 " | ".join(stats["model_pid_sample"]),
                 " | ".join(stats["dv_pid_sample"]),
+                " | ".join(stats["model_roi_sample"]),
+                " | ".join(stats["dv_roi_sample"]),
             ],
         }
     )
     return stats, key_match_stats_df
+
+
+def _build_dv_column_audit_df(df: pd.DataFrame, *, dv_col: str) -> pd.DataFrame:
+    candidate_order = ["dv_value", "value", "dv", "SummedBCA", "bca_sum"]
+    rows: list[dict[str, object]] = []
+    for col in candidate_order:
+        if col in df.columns:
+            rows.append(
+                {
+                    "column": col,
+                    "dtype": str(df[col].dtype),
+                    "non_nan_count": int(df[col].notna().sum()),
+                    "is_selected_dv_col": bool(col == dv_col),
+                }
+            )
+    return pd.DataFrame(rows, columns=["column", "dtype", "non_nan_count", "is_selected_dv_col"])
+
+
+def _normalize_between_group_merge_keys(df: pd.DataFrame) -> pd.DataFrame:
+    normalized = df.copy()
+    if "subject" in normalized.columns:
+        normalized["subject"] = normalized["subject"].map(lambda v: canonical_subject_id(str(v)) if pd.notna(v) else v)
+    if "condition" in normalized.columns:
+        normalized["condition"] = normalized["condition"].map(lambda v: str(v).strip().casefold() if pd.notna(v) else v)
+    if "roi" in normalized.columns:
+        normalized["roi"] = normalized["roi"].map(lambda v: str(v).strip() if pd.notna(v) else v)
+    return normalized
 
 
 def _serialize_dv_variants_payload(payload) -> dict | None:
@@ -1177,6 +1229,7 @@ def run_lmm(
     model_input_columns_df = pd.DataFrame()
     condition_sets_df = pd.DataFrame(columns=["selected_conditions", "dv_conditions"])
     key_match_stats_df = pd.DataFrame(columns=["metric", "value"])
+    dv_column_audit_df = pd.DataFrame(columns=["column", "dtype", "non_nan_count", "is_selected_dv_col"])
     merge_match_stats: dict[str, object] = {}
     final_before_dropna_df = pd.DataFrame()
     if isinstance(fixed_harmonic_dv_table, pd.DataFrame) and not fixed_harmonic_dv_table.empty:
@@ -1241,6 +1294,7 @@ def run_lmm(
             preview = df_long.loc[:, dv_related_cols].head(3).to_dict(orient="records")
             message_cb(f"[LMM DIAG] between_group_model_input dv_preview={preview}")
         if df_long[dv_col].notna().sum() == 0:
+            dv_column_audit_df = _build_dv_column_audit_df(df_long, dv_col=dv_col)
             return _build_lmm_blocked_payload(
                 stage="between_group_dv_mapping",
                 include_group=include_group,
@@ -1254,6 +1308,7 @@ def run_lmm(
                     f"after mapping; tried columns: {tried_columns}"
                 ),
                 model_input_columns_df=model_input_columns_df,
+                dv_column_audit_df=dv_column_audit_df,
             )
 
     stage_counts: list[dict[str, object]] = []
@@ -1280,6 +1335,16 @@ def run_lmm(
         model_snapshot = _lmm_stage_snapshot("before_dv_merge", model_df)
         stage_counts.append(model_snapshot)
         _emit_lmm_stage_diag(message_cb, model_snapshot, dv_col=dv_col)
+        message_cb(
+            "[LMM DIAG] stage=before_dv_merge "
+            f"model_df_shape={model_df.shape} n_unique_pid={model_snapshot.get('n_subjects', 0)} "
+            f"n_unique_group={model_snapshot.get('n_groups', 0)} "
+            f"n_unique_condition={model_snapshot.get('n_conditions', 0)} n_unique_roi={model_snapshot.get('n_rois', 0)}"
+        )
+        message_cb(
+            "[LMM DIAG] stage=before_dv_merge "
+            f"sample_pid={selected_subjects[:5]} sample_condition={selected_conditions[:5]} sample_roi={selected_rois[:5]}"
+        )
 
         dv_df = df_long.copy()
         dv_snapshot = _lmm_stage_snapshot("dv_table_overview", dv_df)
@@ -1291,15 +1356,25 @@ def run_lmm(
             else []
         )
         message_cb(f"[LMM DIAG] stage=dv_table_overview dv_conditions={dv_conditions[:50]}")
+        dv_candidate_cols = [col for col in ["dv_value", "value", "dv", "SummedBCA", "bca_sum"] if col in dv_df.columns]
+        message_cb(
+            "[LMM DIAG] stage=dv_df_overview "
+            f"dv_df_shape={dv_df.shape} n_unique_pid={dv_snapshot.get('n_subjects', 0)} "
+            f"n_unique_condition={dv_snapshot.get('n_conditions', 0)} n_unique_roi={dv_snapshot.get('n_rois', 0)} "
+            f"dv_candidate_columns={dv_candidate_cols}"
+        )
         condition_sets_df = _build_condition_sets_df(selected_conditions, dv_conditions)
+        dv_column_audit_df = _build_dv_column_audit_df(dv_df, dv_col=dv_col)
 
         dv_merge_cols = ["subject", "condition", "roi", dv_col]
+        model_merge_df = _normalize_between_group_merge_keys(model_df)
+        dv_merge_df = _normalize_between_group_merge_keys(dv_df)
         dv_lookup = (
-            dv_df.loc[:, [col for col in dv_merge_cols if col in dv_df.columns]]
+            dv_merge_df.loc[:, [col for col in dv_merge_cols if col in dv_merge_df.columns]]
             .drop_duplicates(subset=["subject", "condition", "roi"], keep="first")
             .copy()
         )
-        merged_df = model_df.merge(
+        merged_df = model_merge_df.merge(
             dv_lookup,
             on=["subject", "condition", "roi"],
             how="left",
@@ -1310,20 +1385,41 @@ def run_lmm(
         stage_counts.append(merged_snapshot)
         _emit_lmm_stage_diag(message_cb, merged_snapshot, dv_col=dv_col)
         dv_non_nan_count = int(merged_df[dv_col].notna().sum()) if dv_col in merged_df.columns else 0
+        dv_dtype = str(merged_df[dv_col].dtype) if dv_col in merged_df.columns else "missing"
+        dv_non_null_sample = (
+            merged_df.loc[merged_df[dv_col].notna(), dv_col].head(5).tolist() if dv_col in merged_df.columns else []
+        )
         message_cb(
-            f"[LMM DIAG] stage=after_dv_merge_before_dropna dv_col={dv_col} non_nan_count={dv_non_nan_count}"
+            "[LMM DIAG] stage=after_merge_before_dropna "
+            f"merged_df_shape={merged_df.shape} dv_col={dv_col} non_nan_count={dv_non_nan_count} "
+            f"dv_dtype={dv_dtype} dv_non_null_sample={dv_non_null_sample}"
         )
         if dv_non_nan_count == 0:
+            final_before_dropna_export_df = merged_df.copy()
+            candidate_dv_cols = [col for col in ["dv_value", "value", "dv", "SummedBCA", "bca_sum"] if col in dv_merge_df.columns]
+            for candidate_col in candidate_dv_cols:
+                if candidate_col in final_before_dropna_export_df.columns:
+                    continue
+                candidate_lookup = dv_merge_df.loc[:, ["subject", "condition", "roi", candidate_col]].drop_duplicates(
+                    subset=["subject", "condition", "roi"], keep="first"
+                )
+                final_before_dropna_export_df = final_before_dropna_export_df.merge(
+                    candidate_lookup,
+                    on=["subject", "condition", "roi"],
+                    how="left",
+                )
             merge_match_stats, key_match_stats_df = _compute_merge_key_stats(
-                model_df=model_df,
+                model_df=model_merge_df,
                 dv_df=dv_lookup,
                 message_cb=message_cb,
             )
-            blocked_reason = "Between-group mixed model blocked: 0 DV matches after merge"
-            if int(merge_match_stats.get("condition_intersection_count", 0)) == 0:
-                blocked_reason = "Between-group mixed model blocked: Selected conditions not found in DV table"
-            elif int(merge_match_stats.get("pid_intersection_count", 0)) == 0:
-                blocked_reason = "Between-group mixed model blocked: PID mismatch between manifest and DV table"
+            blocked_reason = "DV merge produced 0 matches: composite key mismatch"
+            if int(merge_match_stats.get("pid_intersection_count", 0)) == 0:
+                blocked_reason = "DV merge produced 0 matches: PID mismatch"
+            elif int(merge_match_stats.get("condition_intersection_count", 0)) == 0:
+                blocked_reason = "DV merge produced 0 matches: condition mismatch"
+            elif int(merge_match_stats.get("roi_intersection_count", 0)) == 0:
+                blocked_reason = "DV merge produced 0 matches: ROI mismatch"
             return _build_lmm_blocked_payload(
                 stage="dropna_dependent_variable",
                 include_group=include_group,
@@ -1336,15 +1432,18 @@ def run_lmm(
                 model_input_columns_df=model_input_columns_df,
                 condition_sets_df=condition_sets_df,
                 key_match_stats_df=key_match_stats_df,
-                final_before_dropna_df=merged_df,
+                dv_column_audit_df=dv_column_audit_df,
+                final_before_dropna_df=final_before_dropna_export_df,
                 merge_match_stats=merge_match_stats,
             )
         df_long = merged_df
 
     if include_group:
         before_merge = len(df_long)
-        keep_subjects = set(subjects or [])
-        df_long = df_long.loc[df_long["subject"].astype(str).isin(keep_subjects)].copy()
+        keep_subjects = {canonical_subject_id(str(pid)) for pid in (subjects or [])}
+        df_long = df_long.loc[
+            df_long["subject"].astype(str).map(canonical_subject_id).isin(keep_subjects)
+        ].copy()
         removed_merge = before_merge - len(df_long)
         if removed_merge:
             message_cb(f"[LMM DIAG] merge/filter removed_rows={removed_merge}")
