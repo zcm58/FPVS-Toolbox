@@ -141,6 +141,8 @@ def _build_lmm_blocked_payload(
     final_df: pd.DataFrame,
     results_dir: str | None,
     message_cb,
+    blocked_reason: str | None = None,
+    model_input_columns_df: pd.DataFrame | None = None,
 ) -> dict[str, object]:
     message = (
         f"Between-group mixed model blocked: 0 rows after {stage}. "
@@ -148,6 +150,8 @@ def _build_lmm_blocked_payload(
         if include_group
         else f"Mixed model blocked: 0 rows after {stage}."
     )
+    if blocked_reason:
+        message = blocked_reason
     diagnostics_path = None
     if include_group and results_dir:
         try:
@@ -168,9 +172,15 @@ def _build_lmm_blocked_payload(
             if excluded_df.empty:
                 excluded_df = pd.DataFrame(columns=["subject", "group", "reason"])
             sample_df = final_df.head(200).copy() if isinstance(final_df, pd.DataFrame) else pd.DataFrame()
+            model_columns_df = (
+                model_input_columns_df.copy()
+                if isinstance(model_input_columns_df, pd.DataFrame)
+                else pd.DataFrame()
+            )
             with pd.ExcelWriter(diagnostics_path) as writer:
                 _auto_format_and_write_excel(writer, counts_df, "CountsByStage", message_cb)
                 _auto_format_and_write_excel(writer, excluded_df, "ExcludedParticipants", message_cb)
+                _auto_format_and_write_excel(writer, model_columns_df, "ModelInput_Columns", message_cb)
                 _auto_format_and_write_excel(writer, sample_df, "RemainingRows_Sample", message_cb)
             message_cb(f"Blocked model diagnostics exported to {diagnostics_path}")
         except Exception as exc:  # noqa: BLE001
@@ -181,6 +191,7 @@ def _build_lmm_blocked_payload(
         "status": "blocked",
         "blocked_stage": stage,
         "message": message,
+        "blocked_reason": blocked_reason or "",
         "stage_counts": stage_counts,
         "excluded_participants": exclusion_rows,
         "mixed_results_df": pd.DataFrame(),
@@ -215,6 +226,49 @@ def _variant_error_payload(
         "errors": [{"variant": "DV Variants", "error": str(exc)}],
         "selected_variants": selected_variants,
     }
+
+
+def _map_between_group_model_dv_column(
+    df_long: pd.DataFrame,
+) -> tuple[pd.DataFrame, str, list[str], pd.DataFrame]:
+    """Map known between-group DV sources onto canonical model column 'value'."""
+    model_dv_col = "value"
+    candidate_order = ["dv_value", "value", "dv", "SummedBCA", "bca_sum"]
+    tried = [col for col in candidate_order if col in df_long.columns]
+    if not tried:
+        tried = candidate_order.copy()
+
+    normalized = df_long.copy()
+    source_col = model_dv_col
+    if model_dv_col in normalized.columns:
+        existing_non_na = int(normalized[model_dv_col].notna().sum())
+    else:
+        existing_non_na = 0
+
+    if existing_non_na <= 0:
+        non_na_counts = {col: int(normalized[col].notna().sum()) for col in tried if col in normalized.columns}
+        if non_na_counts:
+            source_col = max(
+                non_na_counts,
+                key=lambda col: (non_na_counts[col], -candidate_order.index(col)),
+            )
+        if source_col in normalized.columns:
+            normalized[model_dv_col] = pd.to_numeric(normalized[source_col], errors="coerce").astype(float)
+    else:
+        normalized[model_dv_col] = pd.to_numeric(normalized[model_dv_col], errors="coerce").astype(float)
+
+    non_na_fraction = {
+        "column": [],
+        "non_na_fraction": [],
+        "non_na_count": [],
+    }
+    for col in sorted(normalized.columns):
+        series = normalized[col]
+        non_na_fraction["column"].append(str(col))
+        non_na_fraction["non_na_fraction"].append(float(series.notna().mean()) if len(series) else 0.0)
+        non_na_fraction["non_na_count"].append(int(series.notna().sum()))
+    model_input_columns_df = pd.DataFrame(non_na_fraction)
+    return normalized, source_col, tried, model_input_columns_df
 
 
 def _dv_trace_enabled() -> bool:
@@ -1010,11 +1064,10 @@ def run_lmm(
         raise RuntimeError("All participants excluded by manual exclusions.")
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = None
+    model_input_columns_df = pd.DataFrame()
     if isinstance(fixed_harmonic_dv_table, pd.DataFrame) and not fixed_harmonic_dv_table.empty:
         message_cb("Using fixed-harmonic DV table for mixed model.")
         df_long = fixed_harmonic_dv_table.copy()
-        if "value" not in df_long.columns and "dv_value" in df_long.columns:
-            df_long = df_long.rename(columns={"dv_value": "value"})
     else:
         all_subject_bca_data = prepare_summed_bca_data(
             subjects=subjects,
@@ -1052,9 +1105,42 @@ def run_lmm(
         df_long["group"] = df_long["subject"].astype(str).map(map_groups)
 
     dv_col = "value" if "value" in df_long.columns else "dv_value"
+    mapped_source_col = dv_col
+    tried_columns: list[str] = []
+    if include_group:
+        df_long, mapped_source_col, tried_columns, model_input_columns_df = _map_between_group_model_dv_column(
+            df_long
+        )
+        dv_col = "value"
     if dv_col not in df_long.columns:
         raise RuntimeError("Mixed model input is missing dependent variable column ('value'/'dv_value').")
     message_cb(f"[LMM DIAG] dependent_variable_column={dv_col}")
+    if include_group:
+        dv_na_fraction = float(df_long[dv_col].isna().mean()) if len(df_long) else 0.0
+        message_cb(
+            "[LMM DIAG] between_group_model_input "
+            f"source_column={mapped_source_col} tried_columns={tried_columns} dv_na_fraction={dv_na_fraction:.4f}"
+        )
+        message_cb(f"[LMM DIAG] between_group_model_input columns={sorted(df_long.columns.tolist())}")
+        dv_related_cols = [col for col in ["value", "dv_value", "dv", "SummedBCA", "bca_sum"] if col in df_long.columns]
+        if dv_related_cols:
+            preview = df_long.loc[:, dv_related_cols].head(3).to_dict(orient="records")
+            message_cb(f"[LMM DIAG] between_group_model_input dv_preview={preview}")
+        if df_long[dv_col].notna().sum() == 0:
+            return _build_lmm_blocked_payload(
+                stage="between_group_dv_mapping",
+                include_group=include_group,
+                stage_counts=[],
+                exclusion_rows=exclusion_rows,
+                final_df=df_long,
+                results_dir=results_dir,
+                message_cb=message_cb,
+                blocked_reason=(
+                    "Between-group mixed model blocked: dependent variable column is all-NaN "
+                    f"after mapping; tried columns: {tried_columns}"
+                ),
+                model_input_columns_df=model_input_columns_df,
+            )
 
     stage_counts: list[dict[str, object]] = []
 
@@ -1129,6 +1215,7 @@ def run_lmm(
             final_df=df_long,
             results_dir=results_dir,
             message_cb=message_cb,
+            model_input_columns_df=model_input_columns_df,
         )
 
     dropped = 0
@@ -1153,6 +1240,7 @@ def run_lmm(
                 final_df=df_long,
                 results_dir=results_dir,
                 message_cb=message_cb,
+                model_input_columns_df=model_input_columns_df,
             )
         if len(group_levels) < 2:
             raise RuntimeError(
