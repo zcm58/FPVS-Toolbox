@@ -143,6 +143,10 @@ def _build_lmm_blocked_payload(
     message_cb,
     blocked_reason: str | None = None,
     model_input_columns_df: pd.DataFrame | None = None,
+    condition_sets_df: pd.DataFrame | None = None,
+    key_match_stats_df: pd.DataFrame | None = None,
+    final_before_dropna_df: pd.DataFrame | None = None,
+    merge_match_stats: dict[str, object] | None = None,
 ) -> dict[str, object]:
     message = (
         f"Between-group mixed model blocked: 0 rows after {stage}. "
@@ -177,10 +181,28 @@ def _build_lmm_blocked_payload(
                 if isinstance(model_input_columns_df, pd.DataFrame)
                 else pd.DataFrame()
             )
+            condition_sets_export_df = (
+                condition_sets_df.copy()
+                if isinstance(condition_sets_df, pd.DataFrame)
+                else pd.DataFrame(columns=["selected_conditions", "dv_conditions"])
+            )
+            key_match_export_df = (
+                key_match_stats_df.copy()
+                if isinstance(key_match_stats_df, pd.DataFrame)
+                else pd.DataFrame()
+            )
+            final_before_dropna_export_df = (
+                final_before_dropna_df.head(200).copy()
+                if isinstance(final_before_dropna_df, pd.DataFrame)
+                else pd.DataFrame()
+            )
             with pd.ExcelWriter(diagnostics_path) as writer:
-                _auto_format_and_write_excel(writer, counts_df, "CountsByStage", message_cb)
+                _auto_format_and_write_excel(writer, counts_df, "StageCounts", message_cb)
                 _auto_format_and_write_excel(writer, excluded_df, "ExcludedParticipants", message_cb)
                 _auto_format_and_write_excel(writer, model_columns_df, "ModelInput_Columns", message_cb)
+                _auto_format_and_write_excel(writer, condition_sets_export_df, "ConditionSets", message_cb)
+                _auto_format_and_write_excel(writer, key_match_export_df, "KeyMatchStats", message_cb)
+                _auto_format_and_write_excel(writer, final_before_dropna_export_df, "FinalBeforeDropna", message_cb)
                 _auto_format_and_write_excel(writer, sample_df, "RemainingRows_Sample", message_cb)
             message_cb(f"Blocked model diagnostics exported to {diagnostics_path}")
         except Exception as exc:  # noqa: BLE001
@@ -198,7 +220,95 @@ def _build_lmm_blocked_payload(
         "output_text": message,
         "diagnostics_workbook": str(diagnostics_path) if diagnostics_path else None,
         "missingness": {},
+        "merge_match_stats": merge_match_stats or {},
     }
+
+
+def _build_condition_sets_df(selected_conditions: list[str], dv_conditions: list[str]) -> pd.DataFrame:
+    max_len = max(len(selected_conditions), len(dv_conditions), 1)
+    selected = selected_conditions + [""] * (max_len - len(selected_conditions))
+    dv_vals = dv_conditions + [""] * (max_len - len(dv_conditions))
+    return pd.DataFrame({"selected_conditions": selected, "dv_conditions": dv_vals})
+
+
+def _compute_merge_key_stats(
+    *,
+    model_df: pd.DataFrame,
+    dv_df: pd.DataFrame,
+    message_cb,
+) -> tuple[dict[str, object], pd.DataFrame]:
+    key_cols = ["subject", "condition", "roi"]
+    model_key_set = {
+        tuple(row)
+        for row in model_df.loc[:, key_cols].astype(str).itertuples(index=False, name=None)
+    }
+    dv_key_set = {
+        tuple(row)
+        for row in dv_df.loc[:, key_cols].astype(str).itertuples(index=False, name=None)
+    }
+    intersect_keys = model_key_set & dv_key_set
+    model_only = sorted(model_key_set - dv_key_set)
+    dv_only = sorted(dv_key_set - model_key_set)
+    model_pids = sorted(model_df["subject"].dropna().astype(str).unique().tolist()) if "subject" in model_df.columns else []
+    dv_pids = sorted(dv_df["subject"].dropna().astype(str).unique().tolist()) if "subject" in dv_df.columns else []
+    pid_intersection = sorted(set(model_pids) & set(dv_pids))
+    selected_conditions = sorted(model_df["condition"].dropna().astype(str).unique().tolist()) if "condition" in model_df.columns else []
+    dv_conditions = sorted(dv_df["condition"].dropna().astype(str).unique().tolist()) if "condition" in dv_df.columns else []
+    condition_intersection = sorted(set(selected_conditions) & set(dv_conditions))
+    stats = {
+        "model_key_count": int(len(model_key_set)),
+        "dv_key_count": int(len(dv_key_set)),
+        "intersection_count": int(len(intersect_keys)),
+        "model_only_sample": [str(item) for item in model_only[:10]],
+        "dv_only_sample": [str(item) for item in dv_only[:10]],
+        "model_pid_sample": model_pids[:10],
+        "dv_pid_sample": dv_pids[:10],
+        "pid_intersection_count": int(len(pid_intersection)),
+        "condition_intersection_count": int(len(condition_intersection)),
+        "selected_conditions": selected_conditions,
+        "dv_conditions": dv_conditions,
+    }
+    message_cb(
+        "[LMM DIAG] merge_match_stats "
+        f"model_key_count={stats['model_key_count']} dv_key_count={stats['dv_key_count']} "
+        f"intersection_count={stats['intersection_count']} pid_intersection_count={stats['pid_intersection_count']} "
+        f"condition_intersection_count={stats['condition_intersection_count']}"
+    )
+    message_cb(
+        "[LMM DIAG] merge_match_stats "
+        f"model_only_sample={stats['model_only_sample']} dv_only_sample={stats['dv_only_sample']}"
+    )
+    message_cb(
+        "[LMM DIAG] merge_match_stats "
+        f"model_pid_sample={stats['model_pid_sample']} dv_pid_sample={stats['dv_pid_sample']}"
+    )
+    key_match_stats_df = pd.DataFrame(
+        {
+            "metric": [
+                "model_key_count",
+                "dv_key_count",
+                "intersection_count",
+                "pid_intersection_count",
+                "condition_intersection_count",
+                "model_only_sample",
+                "dv_only_sample",
+                "model_pid_sample",
+                "dv_pid_sample",
+            ],
+            "value": [
+                stats["model_key_count"],
+                stats["dv_key_count"],
+                stats["intersection_count"],
+                stats["pid_intersection_count"],
+                stats["condition_intersection_count"],
+                " | ".join(stats["model_only_sample"]),
+                " | ".join(stats["dv_only_sample"]),
+                " | ".join(stats["model_pid_sample"]),
+                " | ".join(stats["dv_pid_sample"]),
+            ],
+        }
+    )
+    return stats, key_match_stats_df
 
 
 def _serialize_dv_variants_payload(payload) -> dict | None:
@@ -1065,6 +1175,10 @@ def run_lmm(
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = None
     model_input_columns_df = pd.DataFrame()
+    condition_sets_df = pd.DataFrame(columns=["selected_conditions", "dv_conditions"])
+    key_match_stats_df = pd.DataFrame(columns=["metric", "value"])
+    merge_match_stats: dict[str, object] = {}
+    final_before_dropna_df = pd.DataFrame()
     if isinstance(fixed_harmonic_dv_table, pd.DataFrame) and not fixed_harmonic_dv_table.empty:
         message_cb("Using fixed-harmonic DV table for mixed model.")
         df_long = fixed_harmonic_dv_table.copy()
@@ -1153,6 +1267,81 @@ def run_lmm(
     _record_stage("initial_dv_rows")
 
     if include_group:
+        _record_stage("before_any_filters")
+        selected_subjects = [str(pid) for pid in (subjects or [])]
+        selected_conditions = [str(cond) for cond in (conditions or [])]
+        selected_rois = [str(roi_name) for roi_name in (rois or {}).keys()]
+        map_groups = subject_to_group or subject_groups or {}
+        model_df = pd.MultiIndex.from_product(
+            [selected_subjects, selected_conditions, selected_rois],
+            names=["subject", "condition", "roi"],
+        ).to_frame(index=False)
+        model_df["group"] = model_df["subject"].map(lambda pid: map_groups.get(str(pid)))
+        model_snapshot = _lmm_stage_snapshot("before_dv_merge", model_df)
+        stage_counts.append(model_snapshot)
+        _emit_lmm_stage_diag(message_cb, model_snapshot, dv_col=dv_col)
+
+        dv_df = df_long.copy()
+        dv_snapshot = _lmm_stage_snapshot("dv_table_overview", dv_df)
+        stage_counts.append(dv_snapshot)
+        _emit_lmm_stage_diag(message_cb, dv_snapshot, dv_col=dv_col)
+        dv_conditions = (
+            sorted(dv_df["condition"].dropna().astype(str).unique().tolist())
+            if "condition" in dv_df.columns
+            else []
+        )
+        message_cb(f"[LMM DIAG] stage=dv_table_overview dv_conditions={dv_conditions[:50]}")
+        condition_sets_df = _build_condition_sets_df(selected_conditions, dv_conditions)
+
+        dv_merge_cols = ["subject", "condition", "roi", dv_col]
+        dv_lookup = (
+            dv_df.loc[:, [col for col in dv_merge_cols if col in dv_df.columns]]
+            .drop_duplicates(subset=["subject", "condition", "roi"], keep="first")
+            .copy()
+        )
+        merged_df = model_df.merge(
+            dv_lookup,
+            on=["subject", "condition", "roi"],
+            how="left",
+        )
+        if "group" not in merged_df.columns or merged_df["group"].isna().all():
+            merged_df["group"] = merged_df["subject"].map(lambda pid: map_groups.get(str(pid)))
+        merged_snapshot = _lmm_stage_snapshot("after_dv_merge_before_dropna", merged_df)
+        stage_counts.append(merged_snapshot)
+        _emit_lmm_stage_diag(message_cb, merged_snapshot, dv_col=dv_col)
+        dv_non_nan_count = int(merged_df[dv_col].notna().sum()) if dv_col in merged_df.columns else 0
+        message_cb(
+            f"[LMM DIAG] stage=after_dv_merge_before_dropna dv_col={dv_col} non_nan_count={dv_non_nan_count}"
+        )
+        if dv_non_nan_count == 0:
+            merge_match_stats, key_match_stats_df = _compute_merge_key_stats(
+                model_df=model_df,
+                dv_df=dv_lookup,
+                message_cb=message_cb,
+            )
+            blocked_reason = "Between-group mixed model blocked: 0 DV matches after merge"
+            if int(merge_match_stats.get("condition_intersection_count", 0)) == 0:
+                blocked_reason = "Between-group mixed model blocked: Selected conditions not found in DV table"
+            elif int(merge_match_stats.get("pid_intersection_count", 0)) == 0:
+                blocked_reason = "Between-group mixed model blocked: PID mismatch between manifest and DV table"
+            return _build_lmm_blocked_payload(
+                stage="dropna_dependent_variable",
+                include_group=include_group,
+                stage_counts=stage_counts,
+                exclusion_rows=exclusion_rows,
+                final_df=merged_df,
+                results_dir=results_dir,
+                message_cb=message_cb,
+                blocked_reason=blocked_reason,
+                model_input_columns_df=model_input_columns_df,
+                condition_sets_df=condition_sets_df,
+                key_match_stats_df=key_match_stats_df,
+                final_before_dropna_df=merged_df,
+                merge_match_stats=merge_match_stats,
+            )
+        df_long = merged_df
+
+    if include_group:
         before_merge = len(df_long)
         keep_subjects = set(subjects or [])
         df_long = df_long.loc[df_long["subject"].astype(str).isin(keep_subjects)].copy()
@@ -1197,6 +1386,7 @@ def run_lmm(
         f"[LMM DIAG] participants_after_outlier={int(df_long['subject'].nunique()) if 'subject' in df_long.columns else 0}"
     )
 
+    final_before_dropna_df = df_long.copy()
     before_na = len(df_long)
     df_long = df_long.dropna(subset=[dv_col]).copy()
     na_removed = before_na - len(df_long)
@@ -1216,6 +1406,10 @@ def run_lmm(
             results_dir=results_dir,
             message_cb=message_cb,
             model_input_columns_df=model_input_columns_df,
+            condition_sets_df=condition_sets_df,
+            key_match_stats_df=key_match_stats_df,
+            final_before_dropna_df=final_before_dropna_df,
+            merge_match_stats=merge_match_stats,
         )
 
     dropped = 0
@@ -1241,6 +1435,10 @@ def run_lmm(
                 results_dir=results_dir,
                 message_cb=message_cb,
                 model_input_columns_df=model_input_columns_df,
+                condition_sets_df=condition_sets_df,
+                key_match_stats_df=key_match_stats_df,
+                final_before_dropna_df=final_before_dropna_df,
+                merge_match_stats=merge_match_stats,
             )
         if len(group_levels) < 2:
             raise RuntimeError(

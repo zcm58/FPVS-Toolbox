@@ -110,6 +110,6 @@ def test_blocked_lmm_exports_diagnostics_workbook(tmp_path: Path) -> None:
     assert workbook_path.is_file()
 
     with pd.ExcelFile(workbook_path) as workbook:
-        assert {"CountsByStage", "ExcludedParticipants", "ModelInput_Columns", "RemainingRows_Sample"}.issubset(
+        assert {"StageCounts", "ExcludedParticipants", "ModelInput_Columns", "ConditionSets", "KeyMatchStats", "FinalBeforeDropna", "RemainingRows_Sample"}.issubset(
             set(workbook.sheet_names)
         )
