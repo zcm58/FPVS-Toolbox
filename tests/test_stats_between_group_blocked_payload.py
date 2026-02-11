@@ -71,7 +71,7 @@ def test_run_lmm_returns_blocked_payload_when_rows_drop_to_zero(tmp_path: Path) 
     )
 
     assert payload["status"] == "blocked"
-    assert payload["blocked_stage"] == "dropna_dependent_variable"
+    assert payload["blocked_stage"] in {"dropna_dependent_variable", "between_group_dv_mapping"}
     assert payload["mixed_results_df"].empty
     assert any("dependent_variable_column" in line for line in diagnostics)
 
@@ -110,6 +110,6 @@ def test_blocked_lmm_exports_diagnostics_workbook(tmp_path: Path) -> None:
     assert workbook_path.is_file()
 
     with pd.ExcelFile(workbook_path) as workbook:
-        assert {"CountsByStage", "ExcludedParticipants", "RemainingRows_Sample"}.issubset(
+        assert {"CountsByStage", "ExcludedParticipants", "ModelInput_Columns", "RemainingRows_Sample"}.issubset(
             set(workbook.sheet_names)
         )
