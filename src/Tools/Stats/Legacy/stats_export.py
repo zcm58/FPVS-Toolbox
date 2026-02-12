@@ -92,8 +92,8 @@ def export_posthoc_results_to_excel(results_df, save_path, log_func, factor=""):
             if direction_col:
                 cond_df = results_df[results_df[direction_col] == "condition_within_roi"].copy()
                 roi_df = results_df[results_df[direction_col] == "roi_within_condition"].copy()
-                _auto_format_and_write_excel(writer, cond_df, 'CondWithinROI', log_func)
-                _auto_format_and_write_excel(writer, roi_df, 'ROIWithinCond', log_func)
+                _auto_format_and_write_excel(writer, cond_df, 'Posthoc_ConditionWithinROI', log_func)
+                _auto_format_and_write_excel(writer, roi_df, 'Posthoc_ROIWithinCondition', log_func)
                 _auto_format_and_write_excel(writer, results_df, 'Combined', log_func)
                 # Backward-compatible sheet name used by summary readers.
                 _auto_format_and_write_excel(writer, results_df, 'Post-hoc Results', log_func)

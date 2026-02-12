@@ -220,14 +220,14 @@ def _append_posthoc(lines: list[str], posthoc_df: pd.DataFrame | None) -> None:
     p_raw_col = _find_col(posthoc_df, ["p_raw", "p_value", "p"])
     p_adj_col = _find_col(posthoc_df, ["p_fdr_bh", "p_corr", "p_adj"])
     direction_col = _find_col(posthoc_df, ["Direction", "direction"])
-    slice_col = _find_col(posthoc_df, ["Slice", "slice"])
-    factor_col = _find_col(posthoc_df, ["Factor", "factor"])
+    slice_col = _find_col(posthoc_df, ["Stratum", "Slice", "stratum", "slice"])
+    factor_col = _find_col(posthoc_df, ["FactorAnalyzed", "Factor", "factor_analyzed", "factor"])
     for _, row in posthoc_df.iterrows():
         direction = _fmt(row.get(direction_col)) if direction_col else "condition_within_roi"
         slice_val = _fmt(row.get(slice_col)) if slice_col else NOT_AVAILABLE
         factor = _fmt(row.get(factor_col)) if factor_col else NOT_AVAILABLE
         lines.append(
-            f"- [{direction}] slice={slice_val} factor={factor} {_fmt(row.get(label_col or 'Comparison'))}: estimate={_fmt(row.get(estimate_col))}  "
+            f"- [{direction}] stratum={slice_val} factor={factor} {_fmt(row.get(label_col or 'Comparison'))}: estimate={_fmt(row.get(estimate_col))}  "
             f"SE={_fmt(row.get(se_col))}  stat={_fmt(row.get(stat_col))}  "
             f"df={_fmt(row.get(df_col))}  p_raw={_fmt(row.get(p_raw_col))}  p_adj={_fmt(row.get(p_adj_col))}"
         )
