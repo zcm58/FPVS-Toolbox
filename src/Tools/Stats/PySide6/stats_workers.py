@@ -1013,7 +1013,16 @@ def run_rm_anova(
                 )
         except Exception as exc:  # noqa: BLE001
             message_cb(f"RM-ANOVA text report export failed (non-blocking): {exc}")
-            logger.exception("rm_anova_text_export_failed", exc_info=True)
+            logger.exception(
+                "rm_anova_text_export_failed",
+                exc_info=True,
+                extra={
+                    "operation": "export_rm_anova_text_report",
+                    "project": "unknown",
+                    "path": str(results_dir or ""),
+                    "exception": str(exc),
+                },
+            )
 
     return {
         "anova_df_results": anova_df_results,
