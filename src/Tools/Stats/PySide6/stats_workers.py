@@ -1721,6 +1721,7 @@ def run_posthoc(
     if df_long.empty:
         raise RuntimeError("No valid rows for post-hoc tests after filtering NaNs.")
 
+    requested_direction = kwargs.get("direction", kwargs.get("posthoc_direction", "both"))
     message_cb("Running post-hoc tests…")
     output_text, results_df = run_interaction_posthocs(
         data=df_long,
@@ -1729,7 +1730,7 @@ def run_posthoc(
         condition_col="condition",
         subject_col="subject",
         alpha=alpha,
-        direction="both",
+        direction=requested_direction,
     )
     message_cb("Post-hoc interaction tests completed.")
     return {

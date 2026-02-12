@@ -185,7 +185,8 @@ def run_interaction_posthocs(
         return "\n".join(header + lines), pd.DataFrame()
 
     conditions = list(data[condition_col].dropna().unique())
-    summary: list[str] = []
+    summary_cond_within_roi: list[str] = []
+    summary_roi_within_cond: list[str] = []
 
     if direction in ("condition_within_roi", "both"):
         lines.extend([
@@ -208,6 +209,8 @@ def run_interaction_posthocs(
             if df_res is not None and not df_res.empty:
                 df_res = df_res.assign(
                     Direction="condition_within_roi",
+                    Stratum=roi,
+                    FactorAnalyzed="condition",
                     Slice=roi,
                     Factor=condition_col,
                     ROI=roi,
@@ -215,7 +218,7 @@ def run_interaction_posthocs(
                 )
                 results_list.append(df_res)
                 for _, row in df_res[df_res["Significant"]].iterrows():
-                    summary.append(
+                    summary_cond_within_roi.append(
                         "[Conditions within ROI] "
                         f"ROI {roi}: {row['Level_A']} vs {row['Level_B']} "
                         f"(t={row['t_statistic']:.3f}, p={row['p_fdr_bh']:.4f}, dz={row['cohens_dz']:.2f})"
@@ -242,6 +245,8 @@ def run_interaction_posthocs(
             if df_res is not None and not df_res.empty:
                 df_res = df_res.assign(
                     Direction="roi_within_condition",
+                    Stratum=cond,
+                    FactorAnalyzed="roi",
                     Slice=cond,
                     Factor=roi_col,
                     ROI=np.nan,
@@ -249,7 +254,7 @@ def run_interaction_posthocs(
                 )
                 results_list.append(df_res)
                 for _, row in df_res[df_res["Significant"]].iterrows():
-                    summary.append(
+                    summary_roi_within_cond.append(
                         "[ROIs within condition] "
                         f"Condition {cond}: {row['Level_A']} vs {row['Level_B']} "
                         f"(t={row['t_statistic']:.3f}, p={row['p_fdr_bh']:.4f}, dz={row['cohens_dz']:.2f})"
@@ -265,7 +270,22 @@ def run_interaction_posthocs(
         "        SUMMARY OF SIGNIFICANT FINDINGS",
         "============================================================",
     ]
-    summary_block.extend(summary if summary else ["No significant differences found.", ""])
+    if direction in ("condition_within_roi", "both"):
+        summary_block.extend([
+            "Simple effects: Condition within ROI",
+            "------------------------------------------------------------",
+        ])
+        summary_block.extend(summary_cond_within_roi if summary_cond_within_roi else ["No significant differences found."])
+        summary_block.append("")
+
+    if direction in ("roi_within_condition", "both"):
+        summary_block.extend([
+            "Simple effects: ROI within Condition",
+            "------------------------------------------------------------",
+        ])
+        summary_block.extend(summary_roi_within_cond if summary_roi_within_cond else ["No significant differences found."])
+        summary_block.append("")
+
     report = "\n".join(summary_block + header + lines)
     return report, results_df
 

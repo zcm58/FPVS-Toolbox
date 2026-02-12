@@ -40,8 +40,8 @@ def test_reporting_summary_includes_posthoc_direction_and_slice_labels():
         [
             {
                 "Direction": "condition_within_roi",
-                "Slice": "R1",
-                "Factor": "condition",
+                "Stratum": "R1",
+                "FactorAnalyzed": "condition",
                 "Level_A": "C1",
                 "Level_B": "C2",
                 "mean_diff": 1.2,
@@ -51,8 +51,8 @@ def test_reporting_summary_includes_posthoc_direction_and_slice_labels():
             },
             {
                 "Direction": "roi_within_condition",
-                "Slice": "C1",
-                "Factor": "roi",
+                "Stratum": "C1",
+                "FactorAnalyzed": "roi",
                 "Level_A": "R1",
                 "Level_B": "R2",
                 "mean_diff": -0.8,
@@ -72,5 +72,5 @@ def test_reporting_summary_includes_posthoc_direction_and_slice_labels():
 
     assert "Conditions within ROI rows: 1" in summary
     assert "ROIs within condition rows: 1" in summary
-    assert "[condition_within_roi] slice=R1 factor=condition" in summary
-    assert "[roi_within_condition] slice=C1 factor=roi" in summary
+    assert "[condition_within_roi] stratum=R1 factor=condition" in summary
+    assert "[roi_within_condition] stratum=C1 factor=roi" in summary

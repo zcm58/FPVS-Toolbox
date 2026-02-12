@@ -51,14 +51,46 @@ def test_interaction_posthoc_default_runs_both_directions():
     )
 
     assert not results_df.empty
-    assert {"Direction", "Slice", "Factor", "ROI", "Condition"}.issubset(results_df.columns)
+    assert {"Direction", "Stratum", "FactorAnalyzed"}.issubset(results_df.columns)
     assert {"condition_within_roi", "roi_within_condition"}.issubset(set(results_df["Direction"].dropna().unique()))
     assert not results_df.loc[results_df["Direction"] == "condition_within_roi"].empty
     assert not results_df.loc[results_df["Direction"] == "roi_within_condition"].empty
 
-    assert "Conditions within each ROI" in output_text
-    assert "ROIs within each condition" in output_text
+    assert "Simple effects: Condition within ROI" in output_text
+    assert "Simple effects: ROI within Condition" in output_text
     assert "SUMMARY OF SIGNIFICANT FINDINGS" in output_text
+
+
+def test_interaction_posthoc_single_direction_only_condition_within_roi():
+    df = _synthetic_posthoc_df()
+    _text, results_df = run_interaction_posthocs(
+        data=df,
+        dv_col="value",
+        roi_col="roi",
+        condition_col="condition",
+        subject_col="subject",
+        alpha=0.05,
+        direction="condition_within_roi",
+    )
+
+    assert not results_df.empty
+    assert set(results_df["Direction"].dropna().unique()) == {"condition_within_roi"}
+
+
+def test_interaction_posthoc_single_direction_only_roi_within_condition():
+    df = _synthetic_posthoc_df()
+    _text, results_df = run_interaction_posthocs(
+        data=df,
+        dv_col="value",
+        roi_col="roi",
+        condition_col="condition",
+        subject_col="subject",
+        alpha=0.05,
+        direction="roi_within_condition",
+    )
+
+    assert not results_df.empty
+    assert set(results_df["Direction"].dropna().unique()) == {"roi_within_condition"}
 
 
 def test_posthoc_export_writes_directional_and_combined_sheets(tmp_path):
@@ -77,8 +109,12 @@ def test_posthoc_export_writes_directional_and_combined_sheets(tmp_path):
     export_posthoc_results_to_excel(results_df, save_path, logs.append)
 
     workbook = pd.ExcelFile(save_path)
-    assert {"CondWithinROI", "ROIWithinCond", "Combined"}.issubset(set(workbook.sheet_names))
+    assert {
+        "Posthoc_ConditionWithinROI",
+        "Posthoc_ROIWithinCondition",
+        "Combined",
+    }.issubset(set(workbook.sheet_names))
 
     combined_df = pd.read_excel(save_path, sheet_name="Combined")
-    assert {"Direction", "Slice", "Factor"}.issubset(combined_df.columns)
+    assert {"Direction", "Stratum", "FactorAnalyzed"}.issubset(combined_df.columns)
     assert np.isin(["condition_within_roi", "roi_within_condition"], combined_df["Direction"].dropna().unique()).all()
