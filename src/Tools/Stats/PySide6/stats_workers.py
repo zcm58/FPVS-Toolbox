@@ -1729,6 +1729,7 @@ def run_posthoc(
         condition_col="condition",
         subject_col="subject",
         alpha=alpha,
+        direction="both",
     )
     message_cb("Post-hoc interaction tests completed.")
     return {

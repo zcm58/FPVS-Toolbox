@@ -17,7 +17,7 @@ run_planned_contrasts_category_vs_color(...)
 """
 
 from itertools import combinations
-from typing import Iterable, Tuple, Optional, List
+from typing import Iterable, Tuple, Optional, Literal
 
 import numpy as np
 import pandas as pd
@@ -154,8 +154,18 @@ def run_interaction_posthocs(
     subject_col: str,
     correction: str = "fdr_bh",
     alpha: float = 0.05,
+    direction: Literal["condition_within_roi", "roi_within_condition", "both"] = "both",
 ):
-    """Within each ROI, run pairwise condition comparisons (paired t with BH-FDR)."""
+    """
+    Run simple-effects post-hocs for a Condition×ROI interaction.
+
+    Direction modes:
+      - condition_within_roi: pairwise condition comparisons within each ROI
+      - roi_within_condition: pairwise ROI comparisons within each condition
+      - both (default): run and concatenate both directions
+
+    Benjamini–Hochberg FDR correction is applied within each slice family.
+    """
     header = [
         "============================================================",
         "         Post-hoc Comparisons: Condition by ROI",
@@ -170,24 +180,80 @@ def run_interaction_posthocs(
             return "\n".join(header + lines), pd.DataFrame()
 
     rois = list(data[roi_col].dropna().unique())
-    summary = []
+    if direction not in {"condition_within_roi", "roi_within_condition", "both"}:
+        lines.append(f"Invalid direction '{direction}'.")
+        return "\n".join(header + lines), pd.DataFrame()
 
-    for roi in rois:
-        lines.append(f"=== ROI: {roi} ===")
-        roi_subset = data[data[roi_col] == roi]
-        txt, df_res = run_posthoc_pairwise_tests(
-            data=roi_subset, dv_col=dv_col, factor_col=condition_col,
-            subject_col=subject_col, correction=correction, alpha=alpha
-        )
-        lines.extend(["  " + ln for ln in txt.splitlines()])
-        if df_res is not None and not df_res.empty:
-            df_res = df_res.assign(ROI=roi)
-            results_list.append(df_res)
-            for _, row in df_res[df_res["Significant"]].iterrows():
-                summary.append(
-                    f"ROI {roi}: {row['Level_A']} vs {row['Level_B']} "
-                    f"(t={row['t_statistic']:.3f}, p={row['p_fdr_bh']:.4f}, dz={row['cohens_dz']:.2f})"
+    conditions = list(data[condition_col].dropna().unique())
+    summary: list[str] = []
+
+    if direction in ("condition_within_roi", "both"):
+        lines.extend([
+            "",
+            "Conditions within each ROI",
+            "------------------------------------------------------------",
+        ])
+        for roi in rois:
+            lines.append(f"=== ROI: {roi} ===")
+            roi_subset = data[data[roi_col] == roi]
+            txt, df_res = run_posthoc_pairwise_tests(
+                data=roi_subset,
+                dv_col=dv_col,
+                factor_col=condition_col,
+                subject_col=subject_col,
+                correction=correction,
+                alpha=alpha,
+            )
+            lines.extend(["  " + ln for ln in txt.splitlines()])
+            if df_res is not None and not df_res.empty:
+                df_res = df_res.assign(
+                    Direction="condition_within_roi",
+                    Slice=roi,
+                    Factor=condition_col,
+                    ROI=roi,
+                    Condition=np.nan,
                 )
+                results_list.append(df_res)
+                for _, row in df_res[df_res["Significant"]].iterrows():
+                    summary.append(
+                        "[Conditions within ROI] "
+                        f"ROI {roi}: {row['Level_A']} vs {row['Level_B']} "
+                        f"(t={row['t_statistic']:.3f}, p={row['p_fdr_bh']:.4f}, dz={row['cohens_dz']:.2f})"
+                    )
+
+    if direction in ("roi_within_condition", "both"):
+        lines.extend([
+            "",
+            "ROIs within each condition",
+            "------------------------------------------------------------",
+        ])
+        for cond in conditions:
+            lines.append(f"=== Condition: {cond} ===")
+            cond_subset = data[data[condition_col] == cond]
+            txt, df_res = run_posthoc_pairwise_tests(
+                data=cond_subset,
+                dv_col=dv_col,
+                factor_col=roi_col,
+                subject_col=subject_col,
+                correction=correction,
+                alpha=alpha,
+            )
+            lines.extend(["  " + ln for ln in txt.splitlines()])
+            if df_res is not None and not df_res.empty:
+                df_res = df_res.assign(
+                    Direction="roi_within_condition",
+                    Slice=cond,
+                    Factor=roi_col,
+                    ROI=np.nan,
+                    Condition=cond,
+                )
+                results_list.append(df_res)
+                for _, row in df_res[df_res["Significant"]].iterrows():
+                    summary.append(
+                        "[ROIs within condition] "
+                        f"Condition {cond}: {row['Level_A']} vs {row['Level_B']} "
+                        f"(t={row['t_statistic']:.3f}, p={row['p_fdr_bh']:.4f}, dz={row['cohens_dz']:.2f})"
+                    )
 
     # Build final outputs
     results_df = pd.concat(results_list, ignore_index=True) if results_list else pd.DataFrame()

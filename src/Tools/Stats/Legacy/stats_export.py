@@ -88,7 +88,17 @@ def export_posthoc_results_to_excel(results_df, save_path, log_func, factor=""):
         raise ValueError("No Post-hoc results data available to export.")
     try:
         with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
-            _auto_format_and_write_excel(writer, results_df, 'Post-hoc Results', log_func)
+            direction_col = "Direction" if "Direction" in results_df.columns else None
+            if direction_col:
+                cond_df = results_df[results_df[direction_col] == "condition_within_roi"].copy()
+                roi_df = results_df[results_df[direction_col] == "roi_within_condition"].copy()
+                _auto_format_and_write_excel(writer, cond_df, 'CondWithinROI', log_func)
+                _auto_format_and_write_excel(writer, roi_df, 'ROIWithinCond', log_func)
+                _auto_format_and_write_excel(writer, results_df, 'Combined', log_func)
+                # Backward-compatible sheet name used by summary readers.
+                _auto_format_and_write_excel(writer, results_df, 'Post-hoc Results', log_func)
+            else:
+                _auto_format_and_write_excel(writer, results_df, 'Post-hoc Results', log_func)
         return True
     except Exception as e:
         log_func(f"!!! Post-hoc Export Failed: {e}\n{traceback.format_exc()}")

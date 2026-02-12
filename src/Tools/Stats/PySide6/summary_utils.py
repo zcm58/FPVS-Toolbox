@@ -67,8 +67,15 @@ def build_summary_from_files(stats_folder: Path, config: SummaryConfig) -> str:
         except Exception:
             return None
 
+    def _safe_read_any(path: Path, sheets: list[str]) -> Optional[pd.DataFrame]:
+        for sheet in sheets:
+            df = _safe_read(path, sheet)
+            if df is not None:
+                return df
+        return None
+
     frames = StatsSummaryFrames(
-        single_posthoc=_safe_read(stats_folder / POSTHOC_XLS, "Post-hoc Results"),
+        single_posthoc=_safe_read_any(stats_folder / POSTHOC_XLS, ["Combined", "Post-hoc Results"]),
         between_contrasts=_safe_read(stats_folder / GROUP_CONTRAST_XLS, "Post-hoc Results"),
         mixed_model_terms=_safe_read(stats_folder / LMM_XLS, "Mixed Model"),
     )
@@ -353,6 +360,9 @@ def _summarize_posthocs(
         cond_a_col = _pick_column(df, "Level_A", ["condition_a"])
         cond_b_col = _pick_column(df, "Level_B", ["condition_b"])
         roi_col = _pick_column(df, "ROI", ["roi"])
+        direction_col = _pick_column(df, "Direction", ["direction"])
+        condition_col = _pick_column(df, "Condition", ["condition"])
+        slice_col = _pick_column(df, "Slice", ["slice"])
         required = [p_col, eff_col, cond_a_col, cond_b_col]
         if any(col is None for col in required):
             return ["- No post-hoc results are available for summary."]
@@ -364,7 +374,11 @@ def _summarize_posthocs(
             return ["- No significant post-hoc comparisons after correction."]
         bullets = []
         for _, row in sig.head(cfg.max_bullets).iterrows():
-            roi = row.get(roi_col, "ROI")
+            row_direction = str(row.get(direction_col, "")) if direction_col else ""
+            if row_direction == "roi_within_condition":
+                context_label = f"Condition {row.get(condition_col, row.get(slice_col, 'Condition'))}"
+            else:
+                context_label = f"ROI {row.get(roi_col, row.get(slice_col, 'ROI'))}"
             a = str(row.get(cond_a_col, "A"))
             b = str(row.get(cond_b_col, "B"))
             diff = row.get(diff_col, np.nan) if diff_col else np.nan
@@ -382,7 +396,7 @@ def _summarize_posthocs(
                         "Post-hoc dz sign mismatch for %s vs %s in %s: mean_diff=%s dz=%s",
                         a,
                         b,
-                        roi,
+                        context_label,
                         diff,
                         dz,
                     )
@@ -390,7 +404,7 @@ def _summarize_posthocs(
             direction, other = (b, a) if swap else (a, b)
             dz_display = abs(dz) if pd.notna(dz) else np.nan
             bullets.append(
-                f"- {roi}: {direction} > {other} ({a} vs {b}), "
+                f"- {context_label} [{row_direction or 'condition_within_roi'}]: {direction} > {other} ({a} vs {b}), "
                 f"p = {float(row[p_col]):.3f}, |dz| = {dz_display:.2f}."
             )
         return bullets
