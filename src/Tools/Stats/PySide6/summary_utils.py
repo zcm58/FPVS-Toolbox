@@ -201,6 +201,12 @@ def build_summary_frames_from_results(
     return frames
 
 
+def _fmt_p(value: float) -> str:
+    if value != 0.0 and abs(value) < 0.001:
+        return f"{value:.3e}"
+    return f"{value:.6g}"
+
+
 def format_rm_anova_summary(df: pd.DataFrame, alpha: float) -> str:
     out = []
     p_candidates = ["Pr > F", "p-value", "p_value", "p", "P", "pvalue"]
@@ -252,9 +258,9 @@ def format_rm_anova_summary(df: pd.DataFrame, alpha: float) -> str:
             continue
 
         if np.isfinite(p_val) and p_val < alpha:
-            out.append(f"  - Significant {tag} (p = {p_val:.4g}).")
+            out.append(f"  - Significant {tag} (p = {_fmt_p(p_val)}).")
         elif np.isfinite(p_val):
-            out.append(f"  - No significant {tag} (p = {p_val:.4g}).")
+            out.append(f"  - No significant {tag} (p = {_fmt_p(p_val)}).")
         else:
             out.append(f"  - {tag.capitalize()}: p-value unavailable.")
     if not out:
@@ -362,7 +368,7 @@ def _summarize_rm_anova(anova_terms: Optional[pd.DataFrame], cfg: SummaryConfig)
             continue
         p_value, p_label = selected
         if p_value < cfg.alpha:
-            bullets.append(f"- Significant effect of {effect} (p = {p_value:.4g}, {p_label}).")
+            bullets.append(f"- Significant effect of {effect} (p = {_fmt_p(p_value)}, {p_label}).")
     return bullets
 
 

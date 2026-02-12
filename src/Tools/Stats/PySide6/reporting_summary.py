@@ -183,14 +183,14 @@ def build_rm_anova_text_report(
             [
                 f"Effect: {_fmt(row.get('Effect'))}",
                 f"  F={_fmt(row.get('F Value'))} df1={_fmt(row.get('Num DF'))} df2={_fmt(row.get('Den DF'))}",
-                f"  p_uncorrected={_fmt(p_unc)}",
+                f"  p_uncorrected={fmt_p(p_unc)}",
                 f"  epsilon (GG)={_fmt(eps)}",
                 f"  W (Mauchly)={_fmt(w)}",
-                f"  p (Mauchly)={_fmt(p_spher)}",
+                f"  p (Mauchly)={fmt_p(p_spher)}",
                 f"  Sphericity (bool)={_fmt(s_bool)}",
-                f"  Pr > F (GG)={_fmt(p_gg_val)}",
-                f"  Pr > F (HF)={_fmt(p_hf_val)}",
-                f"  p_reported={_fmt(p_reported)} ({p_label})",
+                f"  Pr > F (GG)={fmt_p(p_gg_val)}",
+                f"  Pr > F (HF)={fmt_p(p_hf_val)}",
+                f"  p_reported={fmt_p(p_reported)} ({p_label})",
                 "",
             ]
         )
@@ -227,6 +227,20 @@ def _fmt(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:.6g}"
     return str(value)
+
+
+def fmt_p(value: Any) -> str:
+    if value is None:
+        return NOT_AVAILABLE
+    try:
+        numeric = float(value)
+    except Exception:
+        return str(value)
+    if not math.isfinite(numeric):
+        return NOT_AVAILABLE
+    if numeric != 0.0 and abs(numeric) < 0.001:
+        return f"{numeric:.3e}"
+    return f"{numeric:.6g}"
 
 
 def _finite_value(row: pd.Series, col: str) -> float | None:
@@ -301,11 +315,11 @@ def _append_anova(lines: list[str], context: ReportingSummaryContext, anova_df: 
                 f"- {effect}:",
                 f"  - df1 (uncorrected): {_fmt(row.get('Num DF'))}   df2 (uncorrected): {_fmt(row.get('Den DF'))}",
                 f"  - F: {_fmt(row.get('F Value'))}",
-                f"  - p_reported: {_fmt(p_reported)} ({p_label})",
-                f"  - p_uncorrected: {_fmt(p_uncorrected)}",
+                f"  - p_reported: {fmt_p(p_reported)} ({p_label})",
+                f"  - p_uncorrected: {fmt_p(p_uncorrected)}",
                 f"  - epsilon (GG): {_fmt(epsilon_gg)}",
                 f"  - W (Mauchly): {_fmt(mauchly_w)}",
-                f"  - p (Mauchly): {_fmt(mauchly_p)}",
+                f"  - p (Mauchly): {fmt_p(mauchly_p)}",
                 f"  - Sphericity (bool): {_fmt(sphericity_bool)}",
                 f"  - effect size (if already computed): {_fmt(row.get('partial eta squared'))}",
             ]
