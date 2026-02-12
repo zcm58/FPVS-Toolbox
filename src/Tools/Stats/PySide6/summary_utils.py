@@ -116,7 +116,7 @@ def build_summary_from_frames(frames: StatsSummaryFrames, config: SummaryConfig)
     try:
         mixed_lines = _summarize_mixed_model(frames.mixed_model_terms, config)
     except Exception:
-        mixed_lines = ["- Mixed model: no summary is available."]
+        mixed_lines = ["- Mixed model: NOT AVAILABLE (not computed by this run)."]
 
     try:
         interaction_lines = _summarize_interactions(frames.anova_terms, config)
@@ -133,7 +133,7 @@ def build_summary_from_frames(frames: StatsSummaryFrames, config: SummaryConfig)
         *(posthoc_lines or ["- No significant post-hoc comparisons after correction."]),
         "",
         "Mixed model:",
-        *(mixed_lines or ["- Mixed model: no summary is available."]),
+        *(mixed_lines or ["- Mixed model: NOT AVAILABLE (not computed by this run)."]),
         "",
         *(
             ["Interactions:", *interaction_lines, ""]
@@ -518,8 +518,8 @@ def _summarize_between(between_contrasts: Optional[pd.DataFrame], cfg: SummaryCo
 
 
 def _summarize_mixed_model(mixed_model_terms: Optional[pd.DataFrame], cfg: SummaryConfig) -> list[str]:
-    if mixed_model_terms is None or not isinstance(mixed_model_terms, pd.DataFrame):
-        return ["- Mixed model: no summary is available."]
+    if mixed_model_terms is None or not isinstance(mixed_model_terms, pd.DataFrame) or mixed_model_terms.empty:
+        return ["- Mixed model: NOT AVAILABLE (not computed by this run)."]
 
     return format_mixed_model_plain_language(mixed_model_terms, cfg.alpha)
 
@@ -532,8 +532,8 @@ def _format_p_value(p_value: float) -> str:
     if np.isnan(value):
         return "n/a"
     if value < 0.001:
-        return "< 0.001"
-    return f"{value:.3f}"
+        return f"{value:.2e}"
+    return f"{value:.4f}"
 
 
 def _extract_sum_coded_label(term: str) -> str:
@@ -582,11 +582,11 @@ def format_mixed_model_plain_language(
         "p",
         ["P>|z|", "P>|t|", "p_value", "p-value", "pvalue", "p_fdr", "p_fdr_bh"]
     )
-    term_col = _pick_column(mixed_model_terms, "term", ["Effect", "Term", "Name", "fixed_effect"])
+    term_col = _pick_column(mixed_model_terms, "term", ["Effect (readable)", "Effect", "Effect (raw)", "Term", "Name", "fixed_effect"])
     estimate_col = _pick_column(mixed_model_terms, "Estimate", ["Coef.", "coef", "beta"])
 
     if p_col is None or term_col is None:
-        return ["- Mixed model: no summary is available."]
+        return ["- Mixed model: NOT AVAILABLE (not computed by this run)."]
 
     df = mixed_model_terms.copy()
     df["_term_str"] = df[term_col].astype(str)
@@ -597,7 +597,7 @@ def format_mixed_model_plain_language(
     if sig.empty:
         return ["- No significant mixed-model fixed effects."]
 
-    bullets: list[str] = []
+    bullets: list[str] = ["- Inference for fixed effects: Wald z-tests (normal approximation)."]
 
     intercept_rows = sig[sig["_term_str"].apply(_is_intercept)]
     if not intercept_rows.empty:
@@ -616,13 +616,10 @@ def format_mixed_model_plain_language(
         direction = ""
         if pd.notna(row["_estimate"]) and row["_estimate"] != 0:
             direction_word = "higher" if row["_estimate"] > 0 else "lower"
-            direction = (
-                " Direction: "
-                f"{label} is {direction_word} than the average of the other condition(s)."
-            )
+            direction = f" is {direction_word} than the average of the other condition(s)."
         bullets.append(
             "- Condition difference (p = "
-            f"{p_text}): Averaged across ROIs, the {dv_label} differs between conditions.{direction}"
+            f"{p_text}): {label}{direction}"
         )
 
     roi_rows = sig[sig["_term_str"].apply(_is_roi_main_effect)]
@@ -632,13 +629,10 @@ def format_mixed_model_plain_language(
         direction = ""
         if pd.notna(row["_estimate"]) and row["_estimate"] != 0:
             direction_word = "higher" if row["_estimate"] > 0 else "lower"
-            direction = (
-                " Direction: "
-                f"{label} is {direction_word} than the average of the other ROIs."
-            )
+            direction = f" is {direction_word} than the average of the other ROIs."
         bullets.append(
             "- ROI difference (p = "
-            f"{p_text}): Averaged across conditions, the {dv_label} differs across ROIs.{direction}"
+            f"{p_text}): {label}{direction}"
         )
 
     interaction_rows = sig[sig["_term_str"].apply(_is_interaction_term)]
@@ -646,9 +640,8 @@ def format_mixed_model_plain_language(
         min_p = interaction_rows["_p_val"].min()
         p_text = _format_p_value(min_p)
         bullets.append(
-            "- Condition-by-ROI interaction (p = "
-            f"{p_text}): The condition difference is not the same in every ROI "
-            "(some ROIs show a larger condition gap than others)."
+            "- Condition-by-ROI interaction (min p = "
+            f"{p_text}): at least one interaction term differs from 0, consistent with condition effects varying by ROI."
         )
 
     return bullets or ["- No significant mixed-model fixed effects."]

@@ -128,6 +128,7 @@ def apply_lmm_number_formats_and_metadata(
                         continue
                     if not math.isfinite(numeric):
                         continue
+                    cell.value = numeric
                     cell.number_format = SCIENTIFIC_FMT if (numeric != 0.0 and abs(numeric) < SCIENTIFIC_P_THRESHOLD) else DEFAULT_P_FMT
 
         attrs = lmm_df.attrs if isinstance(lmm_df, pd.DataFrame) else {}
@@ -151,7 +152,10 @@ def apply_lmm_number_formats_and_metadata(
                         numeric = float(cell.value)
                     except Exception:
                         continue
-                    if math.isfinite(numeric) and numeric != 0.0 and abs(numeric) < SCIENTIFIC_P_THRESHOLD:
+                    if not math.isfinite(numeric):
+                        continue
+                    cell.value = numeric
+                    if numeric != 0.0 and abs(numeric) < SCIENTIFIC_P_THRESHOLD:
                         cell.number_format = SCIENTIFIC_FMT
                     else:
                         cell.number_format = DEFAULT_P_FMT
