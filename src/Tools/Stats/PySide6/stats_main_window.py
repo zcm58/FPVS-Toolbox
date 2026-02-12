@@ -13,6 +13,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
+import time
 from types import SimpleNamespace
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
@@ -132,6 +133,12 @@ from Tools.Stats.PySide6.summary_utils import (
     build_rm_anova_output,
     build_summary_from_frames,
     build_summary_frames_from_results,
+)
+from Tools.Stats.PySide6.reporting_summary import (
+    ReportingSummaryContext,
+    build_default_report_path,
+    build_reporting_summary,
+    safe_project_path_join,
 )
 from Tools.Stats.PySide6.stats_multigroup_scan import (
     MultiGroupScanResult,
@@ -263,6 +270,8 @@ class StatsWindow(QMainWindow):
         self._between_missingness_payload: dict[str, object] = {}
         self._multigroup_issue_expanded = False
         self._multigroup_issue_preview_limit = 5
+        self._reporting_summary_text: str = ""
+        self._pipeline_start_perf: dict[PipelineId, float] = {}
 
         # --- legacy UI proxies ---
         self.stats_data_folder_var = SimpleNamespace(
@@ -349,6 +358,50 @@ class StatsWindow(QMainWindow):
     def _copy_summary_text(self) -> None:
         text = self.summary_text.toPlainText()
         self._copy_text_to_clipboard(text, context="summary")
+
+    def _copy_reporting_summary_text(self) -> None:
+        text = self.reporting_summary_text.toPlainText() if hasattr(self, "reporting_summary_text") else ""
+        self._copy_text_to_clipboard(text, context="reporting_summary")
+
+    def _save_reporting_summary_text(self) -> None:
+        report_text = self.reporting_summary_text.toPlainText() if hasattr(self, "reporting_summary_text") else ""
+        if not report_text.strip():
+            self._set_status("No reporting summary available to save yet.")
+            return
+        default_path = build_default_report_path(self._project_path, datetime.now())
+        default_path.parent.mkdir(parents=True, exist_ok=True)
+        target, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Reporting Summary",
+            str(default_path),
+            "Text Files (*.txt)",
+        )
+        if not target:
+            self._set_status("Reporting summary save canceled.")
+            return
+        try:
+            target_path = safe_project_path_join(self._project_path, Path(target).relative_to(self._project_path).as_posix())
+        except Exception:
+            self._set_status("Save canceled: selected path must be under the active project root.")
+            return
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(report_text, encoding="utf-8")
+            self._set_status(f"Reporting summary saved: {target_path}")
+            self._set_last_export_path(str(target_path))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stats_reporting_summary_save_failed",
+                exc_info=True,
+                extra={
+                    "operation": "save_reporting_summary_dialog",
+                    "project": self.project_title,
+                    "path": str(target_path),
+                    "elapsed_ms": 0,
+                    "exception": str(exc),
+                },
+            )
+            self._set_status("Failed to save reporting summary text.")
 
     def _copy_log_text(self) -> None:
         text = self.log_text.toPlainText()
@@ -1562,6 +1615,102 @@ class StatsWindow(QMainWindow):
                 self.summary_text.append(line)
             self.summary_text.append("")
 
+    def _collect_excluded_reasons(self, pipeline_id: PipelineId) -> dict[str, str]:
+        report = self._pipeline_run_reports.get(pipeline_id)
+        if not isinstance(report, StatsRunReport):
+            return {}
+        reasons: dict[str, str] = {}
+        for pid in report.manual_excluded_pids:
+            reasons[str(pid)] = "manual exclusion"
+        if report.qc_report:
+            for participant in report.qc_report.participants:
+                reasons[str(participant.participant_id)] = "QC exclusion"
+        if report.required_exclusions:
+            for violation in report.required_exclusions:
+                reasons[str(violation.participant_id)] = f"required DV exclusion ({violation.reason})"
+        return reasons
+
+    def _build_reporting_summary_payload(self, pipeline_id: PipelineId, elapsed_ms: int) -> dict[str, object]:
+        selected_conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
+        selected_rois = sorted((self.rois or {}).keys())
+        report = self._pipeline_run_reports.get(pipeline_id)
+        included = report.final_modeled_pids if isinstance(report, StatsRunReport) else []
+        context = ReportingSummaryContext(
+            project_name=self.project_title,
+            project_root=self._project_path,
+            pipeline_name=pipeline_id.name,
+            generated_local=datetime.now().astimezone(),
+            elapsed_ms=int(elapsed_ms),
+            timezone_label=str(datetime.now().astimezone().tzinfo or "Local"),
+            total_participants=len(self.subjects),
+            included_participants=list(included),
+            excluded_reasons=self._collect_excluded_reasons(pipeline_id),
+            selected_conditions=list(selected_conditions),
+            selected_rois=selected_rois,
+        )
+        anova_df = self.rm_anova_results_data if pipeline_id is PipelineId.SINGLE else self.between_anova_results_data
+        lmm_df = self.mixed_model_results_data if pipeline_id is PipelineId.SINGLE else self.between_mixed_model_results_data
+        posthoc_df = self.posthoc_results_data if pipeline_id is PipelineId.SINGLE else self.group_contrasts_results_data
+        auto_export = bool(getattr(self, "reporting_summary_export_checkbox", None) and self.reporting_summary_export_checkbox.isChecked())
+        return {
+            "context": context,
+            "anova_df": anova_df,
+            "lmm_df": lmm_df,
+            "posthoc_df": posthoc_df,
+            "auto_export": auto_export,
+        }
+
+    def _start_reporting_summary_worker(self, pipeline_id: PipelineId, elapsed_ms: int) -> None:
+        payload = self._build_reporting_summary_payload(pipeline_id, elapsed_ms)
+
+        def _worker_fn(progress_emit, message_emit, *, worker_payload):
+            del progress_emit, message_emit
+            context = worker_payload["context"]
+            text = build_reporting_summary(
+                context,
+                anova_df=worker_payload.get("anova_df"),
+                lmm_df=worker_payload.get("lmm_df"),
+                posthoc_df=worker_payload.get("posthoc_df"),
+            )
+            result = {"report_text": text}
+            if worker_payload.get("auto_export"):
+                target = build_default_report_path(context.project_root, context.generated_local)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+                result["report_path"] = str(target)
+            return result
+
+        worker = StatsWorker(_worker_fn, worker_payload=payload, _op="reporting_summary")
+
+        def _on_finished(worker_result: dict) -> None:
+            report_path = worker_result.get("report_path") if isinstance(worker_result, dict) else None
+            if report_path:
+                self._set_last_export_path(str(report_path))
+                self._set_status(f"Reporting summary exported: {report_path}")
+
+        def _on_error(message: str) -> None:
+            logger.error(
+                "stats_reporting_summary_failed",
+                extra={
+                    "operation": "build_reporting_summary",
+                    "project": self.project_title,
+                    "path": "",
+                    "elapsed_ms": int(elapsed_ms),
+                    "exception": message,
+                },
+            )
+            self._set_status("Reporting summary generation failed; statistics exports are still complete.")
+
+        worker.signals.report_ready.connect(self._on_report_ready)
+        worker.signals.finished.connect(_on_finished)
+        worker.signals.error.connect(_on_error)
+        self.pool.start(worker)
+
+    @Slot(str)
+    def _on_report_ready(self, report_text: str) -> None:
+        self._reporting_summary_text = report_text or ""
+        self.reporting_summary_text.setPlainText(self._reporting_summary_text)
+
     # --------- worker signal wiring ---------
 
     def _wire_and_start(self, worker: StatsWorker, finished_slot) -> None:
@@ -1839,6 +1988,7 @@ class StatsWindow(QMainWindow):
         return True
 
     def on_pipeline_started(self, pipeline_id: PipelineId) -> None:
+        self._pipeline_start_perf[pipeline_id] = time.perf_counter()
         self._active_pipeline = pipeline_id
         self._harmonic_results[pipeline_id] = []
         self._pipeline_conditions[pipeline_id] = self._get_selected_conditions()
@@ -1897,6 +2047,7 @@ class StatsWindow(QMainWindow):
                     label.setText("Last run error (see log)")
             self._active_pipeline = None
             if success:
+                elapsed_ms = int((time.perf_counter() - self._pipeline_start_perf.get(pipeline_id, time.perf_counter())) * 1000)
                 section = self._section_label(pipeline_id)
                 if exports_ran:
                     if pipeline_id is PipelineId.SINGLE:
@@ -1919,6 +2070,7 @@ class StatsWindow(QMainWindow):
                     self._prompt_view_results(self._section_label(pipeline_id), stats_folder)
                 else:
                     self.append_log(section, "  • Analysis completed", level="info")
+                self._start_reporting_summary_worker(pipeline_id, elapsed_ms)
             elif error_message:
                 if "blocked" in error_message.lower():
                     self._set_status(error_message)
@@ -3454,6 +3606,13 @@ class StatsWindow(QMainWindow):
         export_row.addWidget(self.export_copy_btn)
         right_layout.addLayout(export_row)
 
+        self.reporting_summary_export_checkbox = QCheckBox("Reporting Summary (.txt)")
+        self.reporting_summary_export_checkbox.setChecked(True)
+        self.reporting_summary_export_checkbox.setToolTip(
+            "When checked, write a plain-text Reporting Summary at end-of-run."
+        )
+        right_layout.addWidget(self.reporting_summary_export_checkbox)
+
         self.lbl_rois = QLabel("")
         self.lbl_rois.setWordWrap(True)
         self.lbl_rois.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -3480,6 +3639,28 @@ class StatsWindow(QMainWindow):
         self.output_tabs = QTabWidget()
         self.output_tabs.addTab(self.summary_text, "Summary")
         self.output_tabs.addTab(self.log_text, "Log")
+
+        reporting_tab = QWidget()
+        reporting_layout = QVBoxLayout(reporting_tab)
+        reporting_layout.setContentsMargins(0, 0, 0, 0)
+        reporting_layout.setSpacing(6)
+        self.reporting_summary_text = QPlainTextEdit()
+        self.reporting_summary_text.setReadOnly(True)
+        self.reporting_summary_text.setPlaceholderText("Reporting Summary output")
+        mono = self.reporting_summary_text.font()
+        mono.setFamilies(["Consolas", "Menlo", "Courier New", "monospace"])
+        self.reporting_summary_text.setFont(mono)
+        reporting_layout.addWidget(self.reporting_summary_text)
+        reporting_btn_row = QHBoxLayout()
+        reporting_btn_row.addStretch(1)
+        self.reporting_summary_copy_btn = QPushButton("Copy to Clipboard")
+        self.reporting_summary_copy_btn.clicked.connect(self._copy_reporting_summary_text)
+        self.reporting_summary_save_btn = QPushButton("Save .txt…")
+        self.reporting_summary_save_btn.clicked.connect(self._save_reporting_summary_text)
+        reporting_btn_row.addWidget(self.reporting_summary_copy_btn)
+        reporting_btn_row.addWidget(self.reporting_summary_save_btn)
+        reporting_layout.addLayout(reporting_btn_row)
+        self.output_tabs.addTab(reporting_tab, "Reporting Summary")
 
         self.copy_summary_btn = QPushButton("Copy summary")
         self.copy_summary_btn.clicked.connect(self._copy_summary_text)

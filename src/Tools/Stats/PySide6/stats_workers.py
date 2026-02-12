@@ -479,6 +479,7 @@ class StatsWorker(QRunnable):
         progress = Signal(int)
         message = Signal(str)
         error = Signal(str)
+        report_ready = Signal(str)
         finished = Signal(object)
 
     def __init__(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
@@ -512,6 +513,9 @@ class StatsWorker(QRunnable):
                     },
                 )
                 self.signals.finished.emit(payload)
+                report_text = payload.get("report_text") if isinstance(payload, dict) else None
+                if isinstance(report_text, str):
+                    self.signals.report_ready.emit(report_text)
                 logger.info(
                     "stats_worker_emit_finished_exit",
                     extra={
