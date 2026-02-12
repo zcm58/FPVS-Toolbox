@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 from pathlib import Path
+import re
 from typing import Iterable, Optional
 
 import numpy as np
@@ -528,12 +529,22 @@ def _format_p_value(p_value: float) -> str:
     try:
         value = float(p_value)
     except Exception:
-        return "n/a"
+        return "NOT AVAILABLE"
     if np.isnan(value):
-        return "n/a"
-    if value < 0.001:
-        return f"{value:.2e}"
+        return "NOT AVAILABLE"
+    if 0 < value < 0.001:
+        return f"{value:.3e}"
     return f"{value:.4f}"
+
+
+def _direction_word(coef: float) -> str:
+    if pd.isna(coef):
+        return "equal"
+    if coef < 0:
+        return "lower"
+    if coef > 0:
+        return "higher"
+    return "equal"
 
 
 def _extract_sum_coded_label(term: str) -> str:
@@ -575,76 +586,89 @@ def _is_intercept(term: str) -> bool:
 def format_mixed_model_plain_language(
     mixed_model_terms: pd.DataFrame,
     alpha: float,
-    dv_label: str = "summed BCA (DV; summed across selected significant harmonics)",
 ) -> list[str]:
-    p_col = _pick_column(
-        mixed_model_terms,
-        "p",
-        ["P>|z|", "P>|t|", "p_value", "p-value", "pvalue", "p_fdr", "p_fdr_bh"]
-    )
-    term_col = _pick_column(mixed_model_terms, "term", ["Effect (readable)", "Effect", "Effect (raw)", "Term", "Name", "fixed_effect"])
-    estimate_col = _pick_column(mixed_model_terms, "Estimate", ["Coef.", "coef", "beta"])
+    p_col = _pick_column(mixed_model_terms, "p", ["P>|z|", "p", "pvalue", "p_value"])
+    raw_term_col = _pick_column(mixed_model_terms, "term", ["Effect (raw)", "Effect", "Term"])
+    readable_term_col = _pick_column(mixed_model_terms, "readable_term", ["Effect (readable)"])
+    estimate_col = _pick_column(mixed_model_terms, "Estimate", ["Coef.", "Estimate", "coef"])
 
-    if p_col is None or term_col is None:
+    if p_col is None or raw_term_col is None:
         return ["- Mixed model: NOT AVAILABLE (not computed by this run)."]
 
     df = mixed_model_terms.copy()
-    df["_term_str"] = df[term_col].astype(str)
+    df["_term_raw"] = df[raw_term_col].astype(str)
+    if readable_term_col is not None:
+        df["_term_readable"] = df[readable_term_col].astype(str)
+    else:
+        df["_term_readable"] = df["_term_raw"]
     df["_p_val"] = pd.to_numeric(df[p_col], errors="coerce")
     df["_estimate"] = pd.to_numeric(df[estimate_col], errors="coerce") if estimate_col else np.nan
 
+    bullets: list[str] = ["- Inference for fixed effects: Wald z-tests (normal approximation)."]
     sig = df[df["_p_val"] < alpha]
     if sig.empty:
-        return ["- No significant mixed-model fixed effects."]
+        return bullets
 
-    bullets: list[str] = ["- Inference for fixed effects: Wald z-tests (normal approximation)."]
+    condition_pattern = re.compile(r"^C\(condition\s*,\s*Sum\)\[S\.(?P<level>.+)\]$")
+    roi_pattern = re.compile(r"^C\(roi\s*,\s*Sum\)\[S\.(?P<level>.+)\]$")
 
-    intercept_rows = sig[sig["_term_str"].apply(_is_intercept)]
+    def _extract_level(row: pd.Series, match_obj: re.Match[str] | None) -> str:
+        if readable_term_col is not None:
+            readable = str(row.get("_term_readable", "")).strip()
+            if readable and readable.lower() != str(row.get("_term_raw", "")).strip().lower():
+                return readable
+        if match_obj is not None:
+            return match_obj.group("level").strip()
+        return _extract_sum_coded_label(str(row.get("_term_raw", "")))
+
+    intercept_rows = sig[sig["_term_raw"].astype(str).str.strip().str.lower() == "intercept"]
     if not intercept_rows.empty:
         row = intercept_rows.iloc[0]
         p_text = _format_p_value(row["_p_val"])
         bullets.append(
             "- Overall response present (p = "
-            f"{p_text}): Across all selected conditions and ROIs, the average {dv_label} "
-            "is reliably different from zero."
+            f"{p_text}): Across all selected conditions and ROIs, the grand-mean DV differs from zero."
         )
 
-    condition_rows = sig[sig["_term_str"].apply(_is_condition_main_effect)]
+    condition_rows = sig[sig["_term_raw"].astype(str).str.match(condition_pattern, na=False)]
     for _, row in condition_rows.iterrows():
         p_text = _format_p_value(row["_p_val"])
-        label = _extract_sum_coded_label(str(row["_term_str"]))
-        direction = ""
-        if pd.notna(row["_estimate"]) and row["_estimate"] != 0:
-            direction_word = "higher" if row["_estimate"] > 0 else "lower"
-            direction = f" is {direction_word} than the average of the other condition(s)."
+        raw_term = str(row["_term_raw"])
+        match = condition_pattern.match(raw_term)
+        label = _extract_level(row, match)
+        direction_word = _direction_word(row["_estimate"])
         bullets.append(
             "- Condition difference (p = "
-            f"{p_text}): {label}{direction}"
+            f"{p_text}): {label} is {direction_word} than the average of the other condition(s)."
         )
 
-    roi_rows = sig[sig["_term_str"].apply(_is_roi_main_effect)]
+    roi_rows = sig[sig["_term_raw"].astype(str).str.match(roi_pattern, na=False)]
     for _, row in roi_rows.iterrows():
         p_text = _format_p_value(row["_p_val"])
-        label = _extract_sum_coded_label(str(row["_term_str"]))
-        direction = ""
-        if pd.notna(row["_estimate"]) and row["_estimate"] != 0:
-            direction_word = "higher" if row["_estimate"] > 0 else "lower"
-            direction = f" is {direction_word} than the average of the other ROIs."
+        raw_term = str(row["_term_raw"])
+        match = roi_pattern.match(raw_term)
+        label = _extract_level(row, match)
+        direction_word = _direction_word(row["_estimate"])
         bullets.append(
             "- ROI difference (p = "
-            f"{p_text}): {label}{direction}"
+            f"{p_text}): {label} is {direction_word} than the average of the other ROIs."
         )
 
-    interaction_rows = sig[sig["_term_str"].apply(_is_interaction_term)]
-    if not interaction_rows.empty:
-        min_p = interaction_rows["_p_val"].min()
+    all_interaction_rows = df[
+        df["_term_raw"].astype(str).str.contains(":", regex=False)
+        & df["_term_raw"].astype(str).str.contains("C(condition", regex=False)
+        & df["_term_raw"].astype(str).str.contains("C(roi", regex=False)
+    ]
+    interaction_sig = all_interaction_rows[all_interaction_rows["_p_val"] < alpha]
+    if not interaction_sig.empty:
+        min_p = all_interaction_rows["_p_val"].min()
         p_text = _format_p_value(min_p)
         bullets.append(
-            "- Condition-by-ROI interaction (min p = "
+            "- Condition-by-ROI interaction (min coefficient p = "
             f"{p_text}): at least one interaction term differs from 0, consistent with condition effects varying by ROI."
         )
 
-    return bullets or ["- No significant mixed-model fixed effects."]
+    return bullets
 
 
 def _summarize_interactions(interaction_anova: Optional[pd.DataFrame], cfg: SummaryConfig) -> list[str]:
