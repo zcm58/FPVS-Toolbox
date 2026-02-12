@@ -327,20 +327,26 @@ def _append_anova(lines: list[str], context: ReportingSummaryContext, anova_df: 
 
 
 def _append_lmm(lines: list[str], lmm_df: pd.DataFrame | None) -> None:
+    attrs = lmm_df.attrs if isinstance(lmm_df, pd.DataFrame) else {}
+    contrast_map = attrs.get("lmm_contrast_map") if isinstance(attrs.get("lmm_contrast_map"), dict) else {}
+    contrast_text = "; ".join(f"{k}: {v}" for k, v in contrast_map.items()) if contrast_map else NOT_AVAILABLE
+    warnings = attrs.get("lmm_fit_warnings") if isinstance(attrs.get("lmm_fit_warnings"), list) else []
     lines.extend([
         "",
         "LINEAR MIXED MODEL (LMM)",
-        "- Model formula: NOT AVAILABLE (not computed by this run)",
+        f"- Model formula: {attrs.get('lmm_formula', NOT_AVAILABLE)}",
         "- DV: Summed BCA",
-        "- Fixed effects: condition, ROI, and interaction",
-        "- Random effects: (1|subject)",
-        "- Estimation: NOT AVAILABLE (not computed by this run)",
-        "- Contrast coding: NOT AVAILABLE (not computed by this run)",
-        "- Inference framework for fixed effects:",
-        "  - Wald z/t from model coefficient table",
-        "- Optimizer: NOT AVAILABLE (not computed by this run)",
-        "- Converged: NOT AVAILABLE",
-        "- Warnings (if any): NONE",
+        f"- Fixed effects terms: {', '.join(attrs.get('lmm_processed_terms', [])) if attrs.get('lmm_processed_terms') else NOT_AVAILABLE}",
+        f"- Random effects: (1|subject), re_formula used={attrs.get('lmm_re_formula_used', NOT_AVAILABLE)}",
+        f"- Estimation: {attrs.get('lmm_method_used', NOT_AVAILABLE)}",
+        f"- Contrast coding: {contrast_text}",
+        "- Inference for fixed effects: Wald z-tests (normal approximation)",
+        f"- LRTs computed under ML for interaction/main effects: {'YES' if attrs.get('lmm_lrt_computed') else 'NO'}",
+        f"- Optimizer: {attrs.get('lmm_optimizer_used', NOT_AVAILABLE)}",
+        f"- Converged: {attrs.get('lmm_converged', NOT_AVAILABLE)}",
+        f"- Singularity: {attrs.get('lmm_singular', NOT_AVAILABLE)}; backed-off random slopes: {attrs.get('lmm_backed_off_random_slopes', NOT_AVAILABLE)}",
+        f"- Warnings (if any): {', '.join(warnings) if warnings else 'NONE'}",
+        f"- Data used: input_rows={attrs.get('lmm_rows_input', NOT_AVAILABLE)}, dropped_rows={attrs.get('lmm_rows_dropped', NOT_AVAILABLE)}, used_rows={attrs.get('lmm_rows_used', NOT_AVAILABLE)}, subjects={attrs.get('lmm_subjects_used', NOT_AVAILABLE)}",
         "",
         "LMM FIXED EFFECTS (COEFFICIENTS)",
         "(one line per coefficient)",
@@ -348,17 +354,22 @@ def _append_lmm(lines: list[str], lmm_df: pd.DataFrame | None) -> None:
     if not isinstance(lmm_df, pd.DataFrame) or lmm_df.empty:
         lines.append(f"- {NOT_AVAILABLE}")
         return
-    term_col = _find_col(lmm_df, ["Effect", "Term", "term"])
+    term_col = _find_col(lmm_df, ["Effect (readable)", "Effect", "Effect (raw)", "Term", "term"])
     est_col = _find_col(lmm_df, ["Coef.", "Estimate", "estimate"])
     se_col = _find_col(lmm_df, ["Std.Err.", "SE", "StdErr"])
-    stat_col = _find_col(lmm_df, ["z", "t", "Stat", "stat"])
+    stat_col = _find_col(lmm_df, ["z", "Z", "t", "Stat", "stat"])
     p_col = _find_col(lmm_df, ["P>|z|", "P>|t|", "p_value", "p-value", "pvalue"])
     for _, row in lmm_df.iterrows():
         lines.append(
             f"- {_fmt(row.get(term_col or 'Effect'))}: estimate={_fmt(row.get(est_col))}  "
             f"SE={_fmt(row.get(se_col))}  stat={_fmt(row.get(stat_col))}  "
-            f"p={_fmt(row.get(p_col))}  CI={NOT_AVAILABLE}"
+            f"p={fmt_p(row.get(p_col))}"
         )
+    lrt_table = attrs.get("lrt_table")
+    if isinstance(lrt_table, pd.DataFrame) and not lrt_table.empty:
+        lines.append("- LRT summary (see Excel LRT sheet for full table):")
+        for _, row in lrt_table.iterrows():
+            lines.append(f"  - {_fmt(row.get('Effect'))}: LR={_fmt(row.get('LR'))}, df={_fmt(row.get('df'))}, p={fmt_p(row.get('p (chi2)'))}")
 
 
 def _append_posthoc(lines: list[str], posthoc_df: pd.DataFrame | None) -> None:
