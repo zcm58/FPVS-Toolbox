@@ -196,8 +196,8 @@ class StatsWindow(QMainWindow):
         # lifetime / GC edge cases that could drop Qt signals.
         self._active_workers: list[StatsWorker] = []
 
-        self.setMinimumSize(960, 640)
-        self.resize(1360, 780)
+        self.setMinimumSize(1180, 760)
+        self.resize(1400, 820)
 
         # re-entrancy guard for scan
         self._scan_guard = OpGuard()
@@ -3293,17 +3293,18 @@ class StatsWindow(QMainWindow):
         middle_contents = QWidget()
         middle_layout = QVBoxLayout(middle_contents)
         middle_layout.setContentsMargins(0, 0, 0, 0)
-        middle_layout.setSpacing(10)
+        middle_layout.setSpacing(8)
         middle_layout.addWidget(self.dv_group)
         middle_layout.addWidget(self.dv_variants_group)
         middle_layout.addWidget(self.outlier_group)
+        middle_layout.addWidget(self.manual_exclusion_group)
         middle_layout.addStretch(1)
         middle_scroll_area.setWidget(middle_contents)
 
         right_top_widget = QWidget()
         right_layout = QVBoxLayout(right_top_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(10)
+        right_layout.setSpacing(8)
 
         data_actions_widget = QWidget()
         data_actions_layout = QVBoxLayout(data_actions_widget)
@@ -3311,7 +3312,7 @@ class StatsWindow(QMainWindow):
         data_actions_layout.setSpacing(6)
 
         folder_row = QHBoxLayout()
-        folder_row.setSpacing(5)
+        folder_row.setSpacing(6)
         self.le_folder = ElidedPathLabel()
         self.le_folder.setToolTip(
             "Selected folder that contains the FPVS result spreadsheets."
@@ -3328,9 +3329,6 @@ class StatsWindow(QMainWindow):
         folder_row.addWidget(self.le_folder, 1)
         folder_row.addWidget(btn_browse)
         folder_row.addWidget(self.btn_copy_folder)
-        data_actions_layout.addLayout(folder_row)
-
-        tools_row = QHBoxLayout()
         self.btn_open_results = QPushButton("Open Results Folder")
         self.btn_open_results.clicked.connect(self._open_results_folder)
         self.btn_open_results.setToolTip(
@@ -3338,20 +3336,21 @@ class StatsWindow(QMainWindow):
         )
         fm = QFontMetrics(self.btn_open_results.font())
         self.btn_open_results.setMinimumWidth(fm.horizontalAdvance(self.btn_open_results.text()) + 24)
-        tools_row.addWidget(self.btn_open_results)
+        folder_row.addWidget(self.btn_open_results)
         self.info_button = QPushButton("Analysis Info")
         self.info_button.clicked.connect(self.on_show_analysis_info)
         self.info_button.setToolTip(
             "Show a short description of each analysis step."
         )
-        tools_row.addWidget(self.info_button)
-        tools_row.addStretch(1)
-        data_actions_layout.addLayout(tools_row)
+        folder_row.addWidget(self.info_button)
+        folder_row.addStretch(1)
+        data_actions_layout.addLayout(folder_row)
 
         multigroup_box = QGroupBox("Multi-Group Scan Summary")
+        multigroup_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum))
         multigroup_layout = QVBoxLayout(multigroup_box)
         multigroup_layout.setContentsMargins(8, 8, 8, 8)
-        multigroup_layout.setSpacing(6)
+        multigroup_layout.setSpacing(4)
 
         multigroup_status_row = QHBoxLayout()
         multigroup_status_row.addWidget(QLabel("Status:"))
@@ -3362,6 +3361,10 @@ class StatsWindow(QMainWindow):
         multigroup_layout.addLayout(multigroup_status_row)
 
         multigroup_counts = QFormLayout()
+        multigroup_counts.setLabelAlignment(Qt.AlignLeft)
+        multigroup_counts.setFormAlignment(Qt.AlignLeft)
+        multigroup_counts.setHorizontalSpacing(10)
+        multigroup_counts.setVerticalSpacing(3)
         self.multi_group_discovered_value = QLabel("0")
         self.multi_group_assigned_value = QLabel("0")
         self.multi_group_groups_value = QLabel("0")
@@ -3410,7 +3413,10 @@ class StatsWindow(QMainWindow):
         self.multi_group_issue_text = QPlainTextEdit()
         self.multi_group_issue_text.setReadOnly(True)
         self.multi_group_issue_text.setPlaceholderText("Issues will appear here after scan.")
-        self.multi_group_issue_text.setMinimumHeight(72)
+        self.multi_group_issue_text.setMinimumHeight(70)
+        self.multi_group_issue_text.setMaximumHeight(120)
+        self.multi_group_issue_text.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.multi_group_issue_text.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
         multigroup_layout.addWidget(self.multi_group_issue_text)
 
         right_layout.addWidget(multigroup_box)
@@ -3455,6 +3461,7 @@ class StatsWindow(QMainWindow):
             "ROIs loaded from Settings. Update ROI definitions in Settings to change this list."
         )
         right_layout.addWidget(self.lbl_rois)
+        right_layout.addStretch(1)
 
         # output pane
         self.summary_text = QTextEdit()
@@ -3492,26 +3499,43 @@ class StatsWindow(QMainWindow):
 
         self.output_text = self.log_text
 
-        right_layout.addWidget(self.manual_exclusion_group)
-        right_layout.addStretch(1)
+        column_one = QWidget()
+        column_one_layout = QVBoxLayout(column_one)
+        column_one_layout.setContentsMargins(0, 0, 0, 0)
+        column_one_layout.setSpacing(0)
+        column_one_layout.addWidget(self.conditions_group)
+
+        column_two = QWidget()
+        column_two_layout = QVBoxLayout(column_two)
+        column_two_layout.setContentsMargins(0, 0, 0, 0)
+        column_two_layout.setSpacing(0)
+        column_two_layout.addWidget(middle_scroll_area)
+
+        column_three = QWidget()
+        column_three_layout = QVBoxLayout(column_three)
+        column_three_layout.setContentsMargins(0, 0, 0, 0)
+        column_three_layout.setSpacing(0)
+        column_three_layout.addWidget(right_top_widget)
 
         top_splitter = QSplitter(Qt.Horizontal)
+        top_splitter.setObjectName("stats_top_splitter")
         top_splitter.setChildrenCollapsible(False)
-        top_splitter.addWidget(self.conditions_group)
-        top_splitter.addWidget(middle_scroll_area)
-        top_splitter.addWidget(right_top_widget)
+        top_splitter.addWidget(column_one)
+        top_splitter.addWidget(column_two)
+        top_splitter.addWidget(column_three)
         top_splitter.setStretchFactor(0, 1)
         top_splitter.setStretchFactor(1, 2)
         top_splitter.setStretchFactor(2, 2)
+        top_splitter.setSizes([280, 560, 560])
 
         root_splitter = QSplitter(Qt.Vertical)
         root_splitter.setObjectName("stats_root_splitter")
         root_splitter.setChildrenCollapsible(False)
         root_splitter.addWidget(top_splitter)
         root_splitter.addWidget(output_container)
-        root_splitter.setStretchFactor(0, 3)
+        root_splitter.setStretchFactor(0, 5)
         root_splitter.setStretchFactor(1, 2)
-        root_splitter.setSizes([520, 260])
+        root_splitter.setSizes([620, 200])
 
         main_layout.addWidget(data_actions_widget)
         main_layout.addWidget(root_splitter, 1)
