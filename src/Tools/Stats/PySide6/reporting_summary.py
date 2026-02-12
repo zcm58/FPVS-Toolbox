@@ -187,13 +187,21 @@ def _append_lmm(lines: list[str], lmm_df: pd.DataFrame | None) -> None:
 
 
 def _append_posthoc(lines: list[str], posthoc_df: pd.DataFrame | None) -> None:
+    n_cond_within_roi = 0
+    n_roi_within_cond = 0
+    if isinstance(posthoc_df, pd.DataFrame) and "Direction" in posthoc_df.columns:
+        n_cond_within_roi = int((posthoc_df["Direction"] == "condition_within_roi").sum())
+        n_roi_within_cond = int((posthoc_df["Direction"] == "roi_within_condition").sum())
+
     lines.extend([
         "",
         "POST-HOC TESTS",
         "- Procedure: paired t-tests / model contrasts",
         "- Comparison family definition:",
-        "  - Family corrected together: all rows in current post-hoc table",
+        "  - Family corrected together: within each simple-effects slice",
         f"  - Number of tests in family: {len(posthoc_df) if isinstance(posthoc_df, pd.DataFrame) else NOT_AVAILABLE}",
+        f"  - Conditions within ROI rows: {n_cond_within_roi if isinstance(posthoc_df, pd.DataFrame) else NOT_AVAILABLE}",
+        f"  - ROIs within condition rows: {n_roi_within_cond if isinstance(posthoc_df, pd.DataFrame) else NOT_AVAILABLE}",
         "- Multiple comparison correction:",
         "  - Method: Benjamini–Hochberg (BH) FDR",
         "  - Adjusted p-values reported: YES",
@@ -211,9 +219,15 @@ def _append_posthoc(lines: list[str], posthoc_df: pd.DataFrame | None) -> None:
     df_col = _find_col(posthoc_df, ["df", "DF"])
     p_raw_col = _find_col(posthoc_df, ["p_raw", "p_value", "p"])
     p_adj_col = _find_col(posthoc_df, ["p_fdr_bh", "p_corr", "p_adj"])
+    direction_col = _find_col(posthoc_df, ["Direction", "direction"])
+    slice_col = _find_col(posthoc_df, ["Slice", "slice"])
+    factor_col = _find_col(posthoc_df, ["Factor", "factor"])
     for _, row in posthoc_df.iterrows():
+        direction = _fmt(row.get(direction_col)) if direction_col else "condition_within_roi"
+        slice_val = _fmt(row.get(slice_col)) if slice_col else NOT_AVAILABLE
+        factor = _fmt(row.get(factor_col)) if factor_col else NOT_AVAILABLE
         lines.append(
-            f"- {_fmt(row.get(label_col or 'Comparison'))}: estimate={_fmt(row.get(estimate_col))}  "
+            f"- [{direction}] slice={slice_val} factor={factor} {_fmt(row.get(label_col or 'Comparison'))}: estimate={_fmt(row.get(estimate_col))}  "
             f"SE={_fmt(row.get(se_col))}  stat={_fmt(row.get(stat_col))}  "
             f"df={_fmt(row.get(df_col))}  p_raw={_fmt(row.get(p_raw_col))}  p_adj={_fmt(row.get(p_adj_col))}"
         )
