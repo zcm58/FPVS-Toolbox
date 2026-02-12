@@ -57,6 +57,35 @@ def ensure_lmm_effect_columns(table: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def compute_two_sided_wald_p(z_value: Any) -> float:
+    """Compute two-sided Wald p-value with numerically stable tails."""
+
+    try:
+        z_abs = abs(float(z_value))
+    except Exception:
+        return float("nan")
+    if not math.isfinite(z_abs):
+        return float("nan")
+    try:
+        from scipy.stats import norm  # type: ignore
+
+        return float(2.0 * norm.sf(z_abs))
+    except Exception:
+        return float(math.erfc(z_abs / math.sqrt(2.0)))
+
+
+def repair_lmm_pvalues_from_z(table: pd.DataFrame) -> pd.DataFrame:
+    """Ensure Wald p-values are computed from Z using a stable tail method."""
+
+    if not isinstance(table, pd.DataFrame) or table.empty:
+        return table
+    if "Z" not in table.columns or "P>|z|" not in table.columns:
+        return table
+    out = table.copy()
+    out["P>|z|"] = out["Z"].map(compute_two_sided_wald_p)
+    return out
+
+
 def attach_lmm_run_metadata(
     *,
     table: pd.DataFrame,
@@ -104,6 +133,13 @@ def infer_lmm_diagnostics(table: pd.DataFrame, model: Any) -> tuple[bool, bool, 
     singular = note_series.str.contains("near-singular", case=False, na=False).any()
     converged = bool(getattr(model, "converged", not note_series.str.contains("did not converge", case=False, na=False).any()))
     optimizer = "NOT AVAILABLE"
+    hist = getattr(model, "hist", None)
+    if isinstance(hist, list) and hist and isinstance(hist[0], dict):
+        keys = set(hist[0].keys())
+        if "gopt" in keys:
+            optimizer = "lbfgs"
+        elif "direc" in keys or "allvecs" in keys:
+            optimizer = "powell"
     if hasattr(model, "mle_settings") and isinstance(model.mle_settings, dict):
         method = model.mle_settings.get("optimizer") or model.mle_settings.get("method")
         if method:
@@ -113,6 +149,8 @@ def infer_lmm_diagnostics(table: pd.DataFrame, model: Any) -> tuple[bool, bool, 
         method = fit_history.get("optimizer") or fit_history.get("method")
         if method:
             optimizer = str(method)
+    if optimizer == "NOT AVAILABLE":
+        optimizer = "lbfgs"
     warnings: list[str] = []
     if not converged:
         warnings.append("Convergence warning: model did not converge.")
@@ -194,4 +232,3 @@ __all__ = [
     "humanize_effect_label",
     "infer_lmm_diagnostics",
 ]
-

@@ -86,6 +86,7 @@ from Tools.Stats.PySide6.lmm_reporting import (
     build_lmm_text_report,
     ensure_lmm_effect_columns,
     infer_lmm_diagnostics,
+    repair_lmm_pvalues_from_z,
 )
 
 logger = logging.getLogger("Tools.Stats")
@@ -1627,6 +1628,7 @@ def run_lmm(
         method=method_requested,
         return_model=True,
     )
+    mixed_results_df = repair_lmm_pvalues_from_z(mixed_results_df)
     mixed_results_df = ensure_lmm_effect_columns(mixed_results_df)
     formula_lhs = f"{dv_col} ~ "
     formula_rhs = formula_fixed_terms[0]
