@@ -229,18 +229,58 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def _finite_value(row: pd.Series, col: str) -> float | None:
+    if col not in row.index:
+        return None
+    value = row.get(col)
+    try:
+        numeric = float(value)
+    except Exception:
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _select_reported_p(row: pd.Series) -> tuple[Any, str]:
+    p_unc = _value_or_na(row, "Pr > F", NOT_AVAILABLE)
+    p_gg = _finite_value(row, "Pr > F (GG)")
+    p_hf = _finite_value(row, "Pr > F (HF)")
+    if p_gg is not None:
+        return p_gg, "GG corrected"
+    if p_hf is not None:
+        return p_hf, "HF corrected"
+    return p_unc, "uncorrected"
+
+
 def _append_anova(lines: list[str], context: ReportingSummaryContext, anova_df: pd.DataFrame | None) -> None:
+    backend = "statsmodels"
+    has_sphericity_fields = False
+    has_corrected_p = False
+    correction_methods: list[str] = []
+    if isinstance(anova_df, pd.DataFrame):
+        backend = str(anova_df.attrs.get("rm_anova_backend", "statsmodels"))
+        has_sphericity_fields = {
+            "W (Mauchly)",
+            "p (Mauchly)",
+            "Sphericity (bool)",
+        }.issubset(set(anova_df.columns))
+        has_corrected_p = any(c in anova_df.columns for c in ["Pr > F (GG)", "Pr > F (HF)"])
+        if "Pr > F (GG)" in anova_df.columns:
+            correction_methods.append("Greenhouse–Geisser")
+        if "Pr > F (HF)" in anova_df.columns:
+            correction_methods.append("Huynh–Feldt")
+
     lines.extend([
         "",
         "RM-ANOVA (REPEATED MEASURES)",
         "- DV: Summed BCA",
         f"- Within factors: condition({', '.join(context.selected_conditions) if context.selected_conditions else NOT_AVAILABLE}); "
         f"ROI({', '.join(context.selected_rois) if context.selected_rois else NOT_AVAILABLE})",
-        "- Sphericity test computed: NO",
-        "- Sphericity correction applied: " + ("YES" if isinstance(anova_df, pd.DataFrame) and any(c in anova_df.columns for c in ["Pr > F (GG)", "Pr > F (HF)"]) else "NO"),
-        "- Correction method: " + ("Greenhouse–Geisser" if isinstance(anova_df, pd.DataFrame) and "Pr > F (GG)" in anova_df.columns else ("Huynh–Feldt" if isinstance(anova_df, pd.DataFrame) and "Pr > F (HF)" in anova_df.columns else NOT_AVAILABLE)),
+        f"- RM-ANOVA backend: {backend}",
+        f"- Sphericity test computed: {'YES' if has_sphericity_fields else 'NO'}",
+        f"- Sphericity correction available/applied: {'YES' if has_corrected_p else 'NO'}",
+        "- Correction method: " + (", ".join(correction_methods) if correction_methods else NOT_AVAILABLE),
         "- Software reporting convention note:",
-        "  - Sphericity diagnostics/epsilon were not exposed in the current output payload.",
+        "  - Corrected p-values (GG/HF) and epsilon are shown when provided by Pingouin; dfs remain uncorrected.",
         "",
         "ANOVA EFFECTS TABLE",
         "(effect-by-effect lines; do not use markdown tables)",
@@ -250,16 +290,23 @@ def _append_anova(lines: list[str], context: ReportingSummaryContext, anova_df: 
         return
     for _, row in anova_df.iterrows():
         effect = _fmt(row.get("Effect", "Effect"))
-        p_corr = row.get("Pr > F (GG)") if "Pr > F (GG)" in anova_df.columns else row.get("Pr > F")
-        corr_label = "corrected" if "Pr > F (GG)" in anova_df.columns else "uncorrected"
+        p_reported, p_label = _select_reported_p(row)
+        p_uncorrected = _value_or_na(row, "Pr > F", NOT_AVAILABLE)
+        epsilon_gg = _value_or_na(row, "epsilon (GG)", NOT_AVAILABLE)
+        mauchly_w = _value_or_na(row, "W (Mauchly)", NOT_AVAILABLE)
+        mauchly_p = _value_or_na(row, "p (Mauchly)", NOT_AVAILABLE)
+        sphericity_bool = _value_or_na(row, "Sphericity (bool)", NOT_AVAILABLE)
         lines.extend(
             [
                 f"- {effect}:",
-                f"  - df1: {_fmt(row.get('Num DF'))}   df2: {_fmt(row.get('Den DF'))}   ({corr_label})",
+                f"  - df1 (uncorrected): {_fmt(row.get('Num DF'))}   df2 (uncorrected): {_fmt(row.get('Den DF'))}",
                 f"  - F: {_fmt(row.get('F Value'))}",
-                f"  - p: {_fmt(p_corr)} ({corr_label})",
-                f"  - epsilon (ε): {NOT_AVAILABLE}",
-                f"  - correction used for this effect: {'GG' if 'Pr > F (GG)' in anova_df.columns else 'NONE'}",
+                f"  - p_reported: {_fmt(p_reported)} ({p_label})",
+                f"  - p_uncorrected: {_fmt(p_uncorrected)}",
+                f"  - epsilon (GG): {_fmt(epsilon_gg)}",
+                f"  - W (Mauchly): {_fmt(mauchly_w)}",
+                f"  - p (Mauchly): {_fmt(mauchly_p)}",
+                f"  - Sphericity (bool): {_fmt(sphericity_bool)}",
                 f"  - effect size (if already computed): {_fmt(row.get('partial eta squared'))}",
             ]
         )

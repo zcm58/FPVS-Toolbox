@@ -309,42 +309,60 @@ def _pick_column(df: pd.DataFrame, preferred: str, fallbacks: Iterable[str]) -> 
     return None
 
 
+def _select_rm_anova_p(row: pd.Series) -> tuple[float, str] | None:
+    for col, label in (("Pr > F (GG)", "GG corrected"), ("Pr > F (HF)", "HF corrected"), ("Pr > F", "uncorrected")):
+        if col not in row.index:
+            continue
+        try:
+            value = float(row.get(col))
+        except Exception:
+            continue
+        if np.isfinite(value):
+            return value, label
+    return None
+
+
+def _normalize_effect_name(raw: object) -> str:
+    return " ".join(str(raw).strip().lower().split())
+
+
 def _summarize_rm_anova(anova_terms: Optional[pd.DataFrame], cfg: SummaryConfig) -> list[str]:
     if anova_terms is None or not isinstance(anova_terms, pd.DataFrame):
         return ["- No RM-ANOVA results are available."]
 
-    p_col = _pick_column(anova_terms, cfg.p_col, ["Pr > F", "p_value", "p-value", "p", "P"])
     term_col = _pick_column(anova_terms, "Effect", ["Source", "Factor", "Term"])
-    if p_col is None or term_col is None:
+    if term_col is None:
         return ["- No RM-ANOVA results are available."]
 
-    df = anova_terms.copy()
-    try:
-        df["_term_str"] = df[term_col].astype(str)
-    except Exception:
-        return ["- No RM-ANOVA results are available."]
+    targets = {
+        "condition": "condition",
+        "roi": "roi",
+        "condition * roi": "condition * roi",
+        "condition:roi": "condition * roi",
+        "condition*roi": "condition * roi",
+    }
+    picked: dict[str, tuple[float, str]] = {}
+    for _, row in anova_terms.iterrows():
+        normalized = _normalize_effect_name(row.get(term_col, ""))
+        canonical = targets.get(normalized)
+        if canonical is None:
+            compact = normalized.replace(" ", "")
+            canonical = targets.get(compact)
+        if canonical is None:
+            continue
+        selected = _select_rm_anova_p(row)
+        if selected is None:
+            continue
+        picked[canonical] = selected
 
-    def _is_interaction(term: str) -> bool:
-        lowered = term.lower()
-        if any(sep in term for sep in ("×", ":", "*")):
-            return True
-        if " x " in lowered:
-            return True
-        return False
-
-    main_effects = df[~df["_term_str"].apply(_is_interaction)]
-    try:
-        sig = main_effects[main_effects[p_col] < cfg.alpha].sort_values(p_col)
-    except Exception:
-        return ["- No RM-ANOVA results are available."]
-
-    if sig.empty:
-        return ["- No significant RM-ANOVA effects."]
-
-    bullets = []
-    for _, row in sig.iterrows():
-        term = str(row.get(term_col, "effect")).strip()
-        bullets.append(f"- Significant effect of {term} (p = {float(row[p_col]):.4g}).")
+    bullets: list[str] = []
+    for effect in ("condition", "roi", "condition * roi"):
+        selected = picked.get(effect)
+        if selected is None:
+            continue
+        p_value, p_label = selected
+        if p_value < cfg.alpha:
+            bullets.append(f"- Significant effect of {effect} (p = {p_value:.4g}, {p_label}).")
     return bullets
 
 
