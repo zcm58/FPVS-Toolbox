@@ -93,6 +93,10 @@ from Tools.Stats.PySide6.stats_data_loader import (
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_missingness import export_missingness_workbook
 from Tools.Stats.PySide6.stats_group_contrasts import export_group_contrasts_workbook
+from Tools.Stats.PySide6.stats_export_formatting import (
+    apply_rm_anova_pvalue_number_formats,
+    log_rm_anova_p_minima,
+)
 from Tools.Stats.PySide6.stats_qc_reports import export_qc_context_workbook
 from Tools.Stats.PySide6.stats_workers import StatsWorker
 from Tools.Stats.PySide6 import stats_workers as stats_worker_funcs
@@ -1422,6 +1426,9 @@ class StatsWindow(QMainWindow):
         if data is None:
             return []
 
+        if kind in {"anova", "anova_between"} and isinstance(data, pd.DataFrame):
+            log_rm_anova_p_minima(data)
+
         path = safe_export_call(
             func,
             data,
@@ -1429,6 +1436,8 @@ class StatsWindow(QMainWindow):
             fname,
             log_func=self._set_status,
         )
+        if kind in {"anova", "anova_between"}:
+            apply_rm_anova_pvalue_number_formats(path)
         return [path]
 
     def _write_dv_metadata(self, out_dir: str, pipeline_id: PipelineId) -> None:
