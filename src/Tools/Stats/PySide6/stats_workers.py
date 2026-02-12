@@ -18,6 +18,7 @@ import os
 import threading
 import time
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any, Callable, Dict
 
 import json
@@ -78,6 +79,7 @@ from Tools.Stats.PySide6.stats_qc_exclusion import (
 )
 from Tools.Stats.PySide6.stats_run_report import StatsRunReport
 from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
+from Tools.Stats.PySide6.reporting_summary import build_rm_anova_report_path, build_rm_anova_text_report
 
 logger = logging.getLogger("Tools.Stats")
 RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
@@ -988,6 +990,31 @@ def run_rm_anova(
         provenance_map=provenance_map,
         results_dir=results_dir,
     )
+    if results_dir and isinstance(anova_df_results, pd.DataFrame):
+        try:
+            now_local = datetime.now()
+            report_text = build_rm_anova_text_report(
+                anova_df=anova_df_results,
+                generated_local=now_local,
+                project_name=None,
+            )
+            report_path = build_rm_anova_report_path(results_dir, now_local)
+            report_path.write_text(report_text, encoding="utf-8")
+            message_cb(f"RM-ANOVA text report exported: {report_path}")
+            if anova_df_results.attrs.get("rm_anova_pingouin_failed"):
+                diag = anova_df_results.attrs.get("rm_anova_pingouin_diag", {}) or {}
+                message_cb(
+                    "[RM-ANOVA FALLBACK DIAG] "
+                    f"exception={anova_df_results.attrs.get('rm_anova_pingouin_exception_type', 'Exception')}: "
+                    f"{anova_df_results.attrs.get('rm_anova_pingouin_exception', '')}; "
+                    f"rows={diag.get('rows', 0)} subjects={diag.get('subjects', 0)} "
+                    f"conditions={diag.get('conditions', 0)} rois={diag.get('rois', 0)} "
+                    f"dv_missing_nonfinite={diag.get('dv_missing_nonfinite', 0)}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            message_cb(f"RM-ANOVA text report export failed (non-blocking): {exc}")
+            logger.exception("rm_anova_text_export_failed", exc_info=True)
+
     return {
         "anova_df_results": anova_df_results,
         "output_text": output_text,
