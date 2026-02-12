@@ -80,6 +80,13 @@ from Tools.Stats.PySide6.stats_qc_exclusion import (
 from Tools.Stats.PySide6.stats_run_report import StatsRunReport
 from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
 from Tools.Stats.PySide6.reporting_summary import build_rm_anova_report_path, build_rm_anova_text_report
+from Tools.Stats.PySide6.lmm_reporting import (
+    attach_lmm_run_metadata,
+    build_lmm_report_path,
+    build_lmm_text_report,
+    ensure_lmm_effect_columns,
+    infer_lmm_diagnostics,
+)
 
 logger = logging.getLogger("Tools.Stats")
 RM_ANOVA_DIAG = os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1"
@@ -1605,15 +1612,57 @@ def run_lmm(
 
     message_cb("Running Mixed Effects Model…")
 
-    fixed_effects = ["condition * roi"]
-    if include_group:
-        fixed_effects = ["group * condition * roi"]
+    formula_fixed_terms = ["group * condition * roi"] if include_group else ["condition * roi"]
+    method_requested = "reml"
+    re_formula_requested = "1"
+    model_rows_input = len(df_long)
+    model_rows_used = int(df_long.dropna(subset=[dv_col, "subject", "condition", "roi"] + (["group"] if include_group else [])).shape[0])
 
-    mixed_results_df = run_mixed_effects_model(
+    mixed_results_df, mixed_model = run_mixed_effects_model(
         data=df_long,
         dv_col=dv_col,
         group_col="subject",
-        fixed_effects=fixed_effects,
+        fixed_effects=formula_fixed_terms,
+        re_formula=re_formula_requested,
+        method=method_requested,
+        return_model=True,
+    )
+    mixed_results_df = ensure_lmm_effect_columns(mixed_results_df)
+    formula_lhs = f"{dv_col} ~ "
+    formula_rhs = formula_fixed_terms[0]
+    if include_group:
+        formula_rhs = "C(group, Sum) * C(condition, Sum) * C(roi, Sum)"
+        contrast_map = {"group": "Sum", "condition": "Sum", "roi": "Sum"}
+    else:
+        formula_rhs = "C(condition, Sum) * C(roi, Sum)"
+        contrast_map = {"condition": "Sum", "roi": "Sum"}
+    formula = formula_lhs + formula_rhs
+    converged, singular, optimizer, model_warnings = infer_lmm_diagnostics(mixed_results_df, mixed_model)
+    backed_off = bool(
+        mixed_results_df.get("Note", pd.Series(dtype=str))
+        .astype(str)
+        .str.contains("Fell back to random intercept", case=False, na=False)
+        .any()
+    )
+    lrt_table = mixed_results_df.attrs.get("lrt_table") if isinstance(mixed_results_df.attrs.get("lrt_table"), pd.DataFrame) else None
+    attach_lmm_run_metadata(
+        table=mixed_results_df,
+        formula=formula,
+        fixed_effects=[formula_rhs],
+        contrast_map=contrast_map,
+        method_requested=method_requested,
+        method_used="REML",
+        re_formula_requested=re_formula_requested,
+        re_formula_used=re_formula_requested,
+        backed_off_random_slopes=backed_off,
+        converged=converged,
+        singular=singular,
+        optimizer_used=optimizer,
+        fit_warnings=model_warnings,
+        rows_input=int(model_rows_input),
+        rows_used=int(model_rows_used),
+        subjects_used=int(df_long["subject"].nunique()),
+        lrt_table=lrt_table,
     )
 
     output_text = "============================================================\n"
@@ -1642,6 +1691,28 @@ def run_lmm(
         output_text += generate_lme_summary(mixed_results_df, alpha=alpha)
     else:
         output_text += "Mixed effects model returned no rows.\n"
+
+    if results_dir and isinstance(mixed_results_df, pd.DataFrame):
+        try:
+            now_local = datetime.now().astimezone()
+            report_text = build_lmm_text_report(
+                lmm_df=mixed_results_df,
+                generated_local=now_local,
+                project_name=None,
+            )
+            report_path = build_lmm_report_path(results_dir, now_local)
+            report_path.write_text(report_text, encoding="utf-8")
+            message_cb(f"LMM text report exported: {report_path}")
+        except Exception as exc:  # noqa: BLE001
+            message_cb(f"LMM text report export failed (non-blocking): {exc}")
+            logger.error(
+                "lmm_text_export_failed",
+                extra={
+                    "operation": "export_lmm_text_report",
+                    "path": str(results_dir or ""),
+                    "exception": str(exc),
+                },
+            )
 
     return {
         "mixed_results_df": mixed_results_df,
