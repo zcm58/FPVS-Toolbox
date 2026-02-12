@@ -196,8 +196,8 @@ class StatsWindow(QMainWindow):
         # lifetime / GC edge cases that could drop Qt signals.
         self._active_workers: list[StatsWorker] = []
 
-        self.setMinimumSize(900, 650)
-        self.resize(1200, 800)
+        self.setMinimumSize(960, 640)
+        self.resize(1360, 780)
 
         # re-entrancy guard for scan
         self._scan_guard = OpGuard()
@@ -2939,19 +2939,18 @@ class StatsWindow(QMainWindow):
     def _init_ui(self) -> None:
         central = QWidget(self)
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
+        main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
-        splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(splitter)
 
         # included conditions panel
         self.conditions_group = QGroupBox("Included Conditions")
-        self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
         self.conditions_group.setToolTip(
             "Choose which conditions to include in the analysis."
         )
         conditions_layout = QVBoxLayout(self.conditions_group)
+        conditions_layout.setContentsMargins(8, 8, 8, 8)
         conditions_layout.setSpacing(6)
 
         conditions_button_row = QHBoxLayout()
@@ -2978,11 +2977,12 @@ class StatsWindow(QMainWindow):
 
         # summed BCA definition panel
         self.dv_group = QGroupBox("Summed BCA definition")
-        self.dv_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        self.dv_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
         self.dv_group.setToolTip(
             "Select how the primary Summed BCA DV is computed."
         )
         dv_layout = QVBoxLayout(self.dv_group)
+        dv_layout.setContentsMargins(8, 8, 8, 8)
         dv_layout.setSpacing(6)
 
         dv_method_row = QHBoxLayout()
@@ -3119,8 +3119,9 @@ class StatsWindow(QMainWindow):
         )
 
         self.dv_variants_group = QGroupBox("Optional comparison exports (do not change results)")
-        self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred))
         dv_variants_layout = QVBoxLayout(self.dv_variants_group)
+        dv_variants_layout.setContentsMargins(8, 8, 8, 8)
         dv_variants_layout.setSpacing(4)
         dv_variants_note = QLabel(
             "These exports are for consistency checks. Statistical results use the Primary DV only."
@@ -3147,11 +3148,12 @@ class StatsWindow(QMainWindow):
         self._sync_selected_dv_variants()
 
         self.outlier_group = QGroupBox("Outlier Flagging")
-        self.outlier_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        self.outlier_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred))
         self.outlier_group.setToolTip(
             "Flag participants whose DV values are outside the allowed range."
         )
         outlier_layout = QVBoxLayout(self.outlier_group)
+        outlier_layout.setContentsMargins(8, 8, 8, 8)
         outlier_layout.setSpacing(6)
 
         self.outlier_enable_checkbox = QCheckBox("Enable DV flagging (always on)")
@@ -3194,9 +3196,10 @@ class StatsWindow(QMainWindow):
 
         self.manual_exclusion_group = QGroupBox("Manual Exclusions")
         self.manual_exclusion_group.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         )
         manual_layout = QHBoxLayout(self.manual_exclusion_group)
+        manual_layout.setContentsMargins(8, 8, 8, 8)
         manual_layout.setSpacing(8)
 
         self.manual_exclusion_summary_label = QLabel("Excluded: 0")
@@ -3218,8 +3221,9 @@ class StatsWindow(QMainWindow):
         self.manual_exclusion_clear_btn.clicked.connect(self._clear_manual_exclusions)
 
         analysis_box = QGroupBox("Analysis Controls")
-        analysis_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        analysis_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
         analysis_layout = QHBoxLayout(analysis_box)
+        analysis_layout.setContentsMargins(8, 8, 8, 8)
         analysis_layout.setSpacing(8)
 
         # single group section
@@ -3282,23 +3286,22 @@ class StatsWindow(QMainWindow):
         analysis_layout.addWidget(single_group_box)
         analysis_layout.addWidget(between_box)
 
-        left_scroll_area = QScrollArea()
-        left_scroll_area.setWidgetResizable(True)
-        left_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        left_scroll_area.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
-        left_contents = QWidget()
-        left_layout = QVBoxLayout(left_contents)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(10)
-        left_layout.addWidget(self.conditions_group)
-        left_layout.addWidget(self.dv_group)
-        left_layout.addWidget(self.dv_variants_group)
-        left_layout.addWidget(self.outlier_group)
-        left_layout.addStretch(1)
-        left_scroll_area.setWidget(left_contents)
+        middle_scroll_area = QScrollArea()
+        middle_scroll_area.setWidgetResizable(True)
+        middle_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        middle_scroll_area.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
+        middle_contents = QWidget()
+        middle_layout = QVBoxLayout(middle_contents)
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        middle_layout.setSpacing(10)
+        middle_layout.addWidget(self.dv_group)
+        middle_layout.addWidget(self.dv_variants_group)
+        middle_layout.addWidget(self.outlier_group)
+        middle_layout.addStretch(1)
+        middle_scroll_area.setWidget(middle_contents)
 
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
+        right_top_widget = QWidget()
+        right_layout = QVBoxLayout(right_top_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(10)
 
@@ -3407,11 +3410,9 @@ class StatsWindow(QMainWindow):
         self.multi_group_issue_text = QPlainTextEdit()
         self.multi_group_issue_text.setReadOnly(True)
         self.multi_group_issue_text.setPlaceholderText("Issues will appear here after scan.")
-        self.multi_group_issue_text.setMinimumHeight(90)
-        self.multi_group_issue_text.setMaximumHeight(150)
+        self.multi_group_issue_text.setMinimumHeight(72)
         multigroup_layout.addWidget(self.multi_group_issue_text)
 
-        right_layout.addWidget(data_actions_widget)
         right_layout.addWidget(multigroup_box)
         right_layout.addWidget(analysis_box)
 
@@ -3491,24 +3492,29 @@ class StatsWindow(QMainWindow):
 
         self.output_text = self.log_text
 
-        manual_log_splitter = QSplitter(Qt.Vertical)
-        manual_log_splitter.setChildrenCollapsible(False)
-        manual_log_splitter.addWidget(self.manual_exclusion_group)
-        manual_log_splitter.addWidget(output_container)
-        manual_log_splitter.setSizes([120, 340])
-        right_layout.addWidget(manual_log_splitter, 1)
+        right_layout.addWidget(self.manual_exclusion_group)
+        right_layout.addStretch(1)
 
-        right_layout.setStretch(0, 0)  # data/actions
-        right_layout.setStretch(1, 0)  # analysis controls
-        right_layout.setStretch(2, 0)  # status row
-        right_layout.setStretch(3, 0)  # export row
-        right_layout.setStretch(4, 0)  # ROI label
-        right_layout.setStretch(5, 1)  # manual exclusions + output pane
+        top_splitter = QSplitter(Qt.Horizontal)
+        top_splitter.setChildrenCollapsible(False)
+        top_splitter.addWidget(self.conditions_group)
+        top_splitter.addWidget(middle_scroll_area)
+        top_splitter.addWidget(right_top_widget)
+        top_splitter.setStretchFactor(0, 1)
+        top_splitter.setStretchFactor(1, 2)
+        top_splitter.setStretchFactor(2, 2)
 
-        splitter.addWidget(left_scroll_area)
-        splitter.addWidget(right_widget)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
+        root_splitter = QSplitter(Qt.Vertical)
+        root_splitter.setObjectName("stats_root_splitter")
+        root_splitter.setChildrenCollapsible(False)
+        root_splitter.addWidget(top_splitter)
+        root_splitter.addWidget(output_container)
+        root_splitter.setStretchFactor(0, 3)
+        root_splitter.setStretchFactor(1, 2)
+        root_splitter.setSizes([520, 260])
+
+        main_layout.addWidget(data_actions_widget)
+        main_layout.addWidget(root_splitter, 1)
 
         # initialize export buttons
         self._update_export_buttons()

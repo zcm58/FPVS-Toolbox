@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QPushButton, QSplitter, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import QGroupBox, QSplitter, QTabWidget  # noqa: E402
 
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow  # noqa: E402
 
@@ -21,40 +21,38 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     qtbot.addWidget(window)
     window.show()
 
-    layout = window.centralWidget().layout()
-    splitter = None
-    for idx in range(layout.count()):
-        item = layout.itemAt(idx)
-        if item is None:
-            continue
-        widget = item.widget()
-        if isinstance(widget, QSplitter):
-            splitter = widget
-            break
-    assert splitter is not None
-    assert splitter.orientation() == Qt.Horizontal
-
-    buttons = window.findChildren(QPushButton)
-    texts = {btn.text() for btn in buttons}
-    assert "Analyze Single Group" in texts
-    assert "Analyze Group Differences" in texts
+    splitters = window.findChildren(QSplitter)
+    root_splitter = next(
+        (
+            sp
+            for sp in splitters
+            if sp.objectName() == "stats_root_splitter" and sp.orientation() == Qt.Vertical
+        ),
+        None,
+    )
+    assert root_splitter is not None
 
     tab_widget = window.findChild(QTabWidget)
     assert tab_widget is not None
     assert tab_widget.isVisible()
+    assert root_splitter.widget(1) is not None
+    assert root_splitter.widget(1).isAncestorOf(tab_widget)
 
-    left_pane = splitter.widget(0)
-    right_pane = splitter.widget(1)
-    assert left_pane is not None
-    assert right_pane is not None
-    assert left_pane.isAncestorOf(window.conditions_group)
-    assert right_pane.isAncestorOf(window.output_text)
+    group_boxes = {box.title(): box for box in window.findChildren(QGroupBox)}
+    for title in [
+        "Included Conditions",
+        "Summed BCA definition",
+        "Multi-Group Scan Summary",
+        "Single Group Analysis",
+        "Between-Group Analysis",
+    ]:
+        assert title in group_boxes
 
-    group_boxes = window.findChildren(QGroupBox)
-    analysis_box = next(box for box in group_boxes if box.title() == "Analysis Controls")
-    single_group_box = next(box for box in group_boxes if box.title() == "Single Group Analysis")
-    between_group_box = next(box for box in group_boxes if box.title() == "Between-Group Analysis")
-    analysis_layout = analysis_box.layout()
-    assert isinstance(analysis_layout, QHBoxLayout)
-    assert analysis_layout.indexOf(single_group_box) != -1
-    assert analysis_layout.indexOf(between_group_box) != -1
+    top_panel = root_splitter.widget(0)
+    assert top_panel is not None
+    assert top_panel.isAncestorOf(group_boxes["Included Conditions"])
+    assert top_panel.isAncestorOf(group_boxes["Summed BCA definition"])
+    assert top_panel.isAncestorOf(group_boxes["Multi-Group Scan Summary"])
+
+    assert window.analyze_single_btn.text() == "Analyze Single Group"
+    assert window.analyze_between_btn.text() == "Analyze Group Differences"
