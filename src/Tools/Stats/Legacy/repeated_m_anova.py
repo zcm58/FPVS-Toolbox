@@ -291,6 +291,11 @@ def _tidy_from_pingouin(pg_table: pd.DataFrame) -> pd.DataFrame:
         "ddof1": "Num DF",
         "ddof2": "Den DF",
         "p-unc": "Pr > F",
+        "eps": "epsilon (GG)",
+        "p-GG-corr": "Pr > F (GG)",
+        "W-spher": "W (Mauchly)",
+        "p-spher": "p (Mauchly)",
+        "sphericity": "Sphericity (bool)",
         "np2": "partial eta squared",
     }
     out = df.rename(columns={k: v for k, v in colmap.items() if k in df.columns})
@@ -302,8 +307,6 @@ def _tidy_from_pingouin(pg_table: pd.DataFrame) -> pd.DataFrame:
         )
 
     # If corrected p-values are available, surface them with consistent names
-    if "p-GG-corr" in df.columns and "Pr > F (GG)" not in out.columns:
-        out["Pr > F (GG)"] = df["p-GG-corr"]
     if "p-HF-corr" in df.columns and "Pr > F (HF)" not in out.columns:
         out["Pr > F (HF)"] = df["p-HF-corr"]
 
@@ -313,6 +316,9 @@ def _tidy_from_pingouin(pg_table: pd.DataFrame) -> pd.DataFrame:
         cols.append("Pr > F (GG)")
     if "Pr > F (HF)" in out.columns:
         cols.append("Pr > F (HF)")
+    for extra_col in ["epsilon (GG)", "W (Mauchly)", "p (Mauchly)", "Sphericity (bool)"]:
+        if extra_col in out.columns:
+            cols.append(extra_col)
     cols.append("partial eta squared")
 
     # Keep only present columns, in desired order
@@ -424,6 +430,7 @@ def run_repeated_measures_anova(
         within_arg = list(within_cols) if len(within_cols) > 1 else within_cols[0]
         # Use detailed output; let Pingouin decide on corrections (if supported by version)
         # We call with the safest signature; not all versions expose 'correction' kwarg.
+        correction_outputs_available = True
         try:
             pg_table = pg.rm_anova(
                 data=df,
@@ -431,8 +438,10 @@ def run_repeated_measures_anova(
                 within=within_arg,
                 subject=subject_col,
                 detailed=True,
+                correction=True,
             )
         except TypeError:
+            correction_outputs_available = False
             # Fallback in case an older pingouin version has a different signature
             pg_table = pg.rm_anova(
                 data=df,
@@ -448,6 +457,13 @@ def run_repeated_measures_anova(
         for col in ["F Value", "Num DF", "Den DF", "Pr > F", "partial eta squared"]:
             if col in out.columns:
                 out[col] = pd.to_numeric(out[col], errors="coerce")
+
+        out.attrs["rm_anova_backend"] = "pingouin"
+        out.attrs["rm_anova_correction_outputs_requested"] = True
+        out.attrs["rm_anova_correction_outputs_available"] = correction_outputs_available
+        out.attrs["rm_anova_pingouin_fallback_reason"] = (
+            "correction kwarg not available" if not correction_outputs_available else ""
+        )
 
         return out
 
@@ -482,6 +498,21 @@ def run_repeated_measures_anova(
         res = aov.fit()
         sm_table = res.anova_table.copy()
         out = _tidy_from_statsmodels(sm_table)
+        out.attrs["rm_anova_backend"] = "statsmodels"
+        out.attrs["rm_anova_correction_outputs_available"] = False
+        out.attrs["rm_anova_sphericity_outputs_available"] = False
+        if 'pingouin_error' in locals() and pingouin_error:
+            out.attrs["rm_anova_pingouin_failed"] = True
+            out.attrs["rm_anova_pingouin_exception_type"] = type(pingouin_error).__name__
+            out.attrs["rm_anova_pingouin_exception"] = str(pingouin_error)
+            finite_mask = np.isfinite(pd.to_numeric(df[dv_col], errors="coerce"))
+            out.attrs["rm_anova_pingouin_diag"] = {
+                "rows": int(df.shape[0]),
+                "subjects": int(df[subject_col].nunique()),
+                "conditions": int(df[within_cols[0]].nunique()) if within_cols else 0,
+                "rois": int(df[within_cols[1]].nunique()) if len(within_cols) > 1 else 0,
+                "dv_missing_nonfinite": int((~finite_mask).sum()),
+            }
         return out
     except Exception as e:
         # If we previously caught a Pingouin error, include it for context.

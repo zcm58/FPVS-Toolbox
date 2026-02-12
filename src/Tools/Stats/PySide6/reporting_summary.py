@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import math
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,114 @@ def build_default_report_path(project_root: Path | str, generated_local: datetim
         "Reports",
         f"Stats_Reporting_Summary_{generated_local.strftime('%Y%m%d_%H%M%S')}.txt",
     )
+
+
+def build_rm_anova_report_path(results_dir: Path | str, generated_local: datetime) -> Path:
+    results_path = Path(results_dir)
+    results_path.mkdir(parents=True, exist_ok=True)
+    return results_path / f"RM_ANOVA_Report_{generated_local.strftime('%Y-%m-%d_%H%M%S')}.txt"
+
+
+def _value_or_na(row: pd.Series, col: str, na_label: str) -> Any:
+    if col not in row.index:
+        return na_label
+    value = row.get(col)
+    if isinstance(value, (float, int)) and not math.isfinite(float(value)):
+        return na_label
+    return value
+
+
+def build_rm_anova_text_report(
+    *,
+    anova_df: pd.DataFrame | None,
+    generated_local: datetime,
+    project_name: str | None,
+) -> str:
+    backend = "statsmodels"
+    if isinstance(anova_df, pd.DataFrame):
+        backend = str(anova_df.attrs.get("rm_anova_backend") or "statsmodels")
+
+    has_sphericity = isinstance(anova_df, pd.DataFrame) and {
+        "W (Mauchly)",
+        "p (Mauchly)",
+        "Sphericity (bool)",
+    }.issubset(set(anova_df.columns))
+    has_correction = isinstance(anova_df, pd.DataFrame) and any(
+        col in anova_df.columns for col in ["Pr > F (GG)", "Pr > F (HF)"]
+    )
+
+    lines = [
+        "====================================",
+        "FPVS TOOLBOX — RM-ANOVA TEXT REPORT",
+        "====================================",
+        f"Timestamp (local): {generated_local.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Project: {project_name or NOT_AVAILABLE}",
+        f"RM-ANOVA backend: {backend}",
+        f"Sphericity test computed: {'YES' if has_sphericity else 'NO'}",
+        f"Sphericity correction available: {'YES' if has_correction else 'NO'}",
+        "",
+    ]
+
+    if not isinstance(anova_df, pd.DataFrame) or anova_df.empty:
+        lines.append(f"Effects: {NOT_AVAILABLE}")
+        return "\n".join(lines)
+
+    for _, row in anova_df.iterrows():
+        p_unc = _value_or_na(row, "Pr > F", NOT_AVAILABLE)
+        p_gg = _value_or_na(row, "Pr > F (GG)", None)
+        p_hf = _value_or_na(row, "Pr > F (HF)", None)
+        if p_gg is not None and p_gg != NOT_AVAILABLE:
+            p_reported, p_label = p_gg, "GG corrected"
+        elif p_hf is not None and p_hf != NOT_AVAILABLE:
+            p_reported, p_label = p_hf, "HF corrected"
+        else:
+            p_reported, p_label = p_unc, "uncorrected"
+
+        if backend == "statsmodels":
+            fallback_na = "NOT AVAILABLE (statsmodels fallback)"
+            eps = w = p_spher = s_bool = p_gg_val = p_hf_val = fallback_na
+        else:
+            fallback_na = "NOT AVAILABLE (pingouin output)"
+            eps = _value_or_na(row, "epsilon (GG)", fallback_na)
+            w = _value_or_na(row, "W (Mauchly)", fallback_na)
+            p_spher = _value_or_na(row, "p (Mauchly)", fallback_na)
+            s_bool = _value_or_na(row, "Sphericity (bool)", fallback_na)
+            p_gg_val = _value_or_na(row, "Pr > F (GG)", fallback_na)
+            p_hf_val = _value_or_na(row, "Pr > F (HF)", fallback_na)
+
+        lines.extend(
+            [
+                f"Effect: {_fmt(row.get('Effect'))}",
+                f"  F={_fmt(row.get('F Value'))} df1={_fmt(row.get('Num DF'))} df2={_fmt(row.get('Den DF'))}",
+                f"  p_uncorrected={_fmt(p_unc)}",
+                f"  epsilon (GG)={_fmt(eps)}",
+                f"  W (Mauchly)={_fmt(w)}",
+                f"  p (Mauchly)={_fmt(p_spher)}",
+                f"  Sphericity (bool)={_fmt(s_bool)}",
+                f"  Pr > F (GG)={_fmt(p_gg_val)}",
+                f"  Pr > F (HF)={_fmt(p_hf_val)}",
+                f"  p_reported={_fmt(p_reported)} ({p_label})",
+                "",
+            ]
+        )
+
+    if backend == "statsmodels" and anova_df.attrs.get("rm_anova_pingouin_failed"):
+        ex_type = anova_df.attrs.get("rm_anova_pingouin_exception_type", "Exception")
+        ex_msg = anova_df.attrs.get("rm_anova_pingouin_exception", "")
+        diag = anova_df.attrs.get("rm_anova_pingouin_diag", {}) or {}
+        lines.extend(
+            [
+                "Pingouin failed; fallback used.",
+                f"Fallback diagnostics: exception={ex_type}: {ex_msg}",
+                (
+                    "Fallback diagnostics: "
+                    f"rows={diag.get('rows', 0)} subjects={diag.get('subjects', 0)} "
+                    f"conditions={diag.get('conditions', 0)} rois={diag.get('rois', 0)} "
+                    f"dv_missing_nonfinite={diag.get('dv_missing_nonfinite', 0)}"
+                ),
+            ]
+        )
+    return "\n".join(lines)
 
 
 def _find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
