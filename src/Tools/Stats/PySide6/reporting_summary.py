@@ -1,4 +1,9 @@
-"""Plain-text reporting summary builder for Stats runs."""
+"""Plain-text reporting summary builder for Stats runs.
+
+This is the file that handles the Stats Tool log in the GUI. Check here for updates regarding what text
+is output in this tool.
+
+"""
 
 from __future__ import annotations
 
