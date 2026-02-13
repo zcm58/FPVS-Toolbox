@@ -1,3 +1,4 @@
+"""Shared helper utilities used by the Legacy Stats window and runners."""
 # Helper methods extracted from stats.py
 
 import logging
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def log_to_main_app(self, message):
+    """Run the log to main app helper used by the Legacy Stats workflow."""
     try:
         if hasattr(self.master_app, 'log') and callable(self.master_app.log):
             self.master_app.log(f"[Stats] {message}")
@@ -20,29 +22,34 @@ def log_to_main_app(self, message):
 
 
 def on_close(self):
+    """Run the on close helper used by the Legacy Stats workflow."""
     self.log_to_main_app("Closing Stats Analysis window.")
     self.destroy()
 
 
 def _load_base_freq(self):
+    """Run the load base freq helper used by the Legacy Stats workflow."""
     if hasattr(self.master_app, 'settings'):
         return self.master_app.settings.get('analysis', 'base_freq', '6.0')
     return SettingsManager().get('analysis', 'base_freq', '6.0')
 
 
 def _load_alpha(self):
+    """Run the load alpha helper used by the Legacy Stats workflow."""
     if hasattr(self.master_app, 'settings'):
         return self.master_app.settings.get('analysis', 'alpha', '0.05')
     return SettingsManager().get('analysis', 'alpha', '0.05')
 
 
 def _load_bca_upper_limit(self):
+    """Run the load bca upper limit helper used by the Legacy Stats workflow."""
     if hasattr(self.master_app, 'settings'):
         return self.master_app.settings.get('analysis', 'bca_upper_limit', '16.8')
     return SettingsManager().get('analysis', 'bca_upper_limit', '16.8')
 
 
 def _validate_numeric(self, P):
+    """Run the validate numeric helper used by the Legacy Stats workflow."""
     if P in ("", "-"):
         return True
     try:
@@ -53,6 +60,7 @@ def _validate_numeric(self, P):
 
 
 def _get_included_freqs(self, all_col_names):
+    """Run the get included freqs helper used by the Legacy Stats workflow."""
     return stats_analysis.get_included_freqs(
         self.base_freq,
         all_col_names,
@@ -62,6 +70,7 @@ def _get_included_freqs(self, all_col_names):
 
 
 def aggregate_bca_sum(self, file_path, roi_name):
+    """Run the aggregate bca sum helper used by the Legacy Stats workflow."""
     return stats_analysis.aggregate_bca_sum(
         file_path, roi_name, self.base_freq, self.log_to_main_app
     )

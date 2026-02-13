@@ -49,6 +49,7 @@ DEBUG_UNBALANCED = RM_ANOVA_DIAG
 # ----------------------------- helpers --------------------------------- #
 
 def _dbg(log_func, msg: str) -> None:
+    """Run the dbg helper used by the Legacy Stats workflow."""
     try:
         if log_func:
             log_func(msg)
@@ -159,6 +160,7 @@ def _check_balance(
     # RM_ANOVA DEBUG: unbalanced diagnostics
     if DEBUG_UNBALANCED:
         def _preview(values: List[object]) -> str:
+            """Run the preview helper used by the Legacy Stats workflow."""
             sorted_vals = sorted(values, key=lambda v: repr(v))
             if len(sorted_vals) <= 50:
                 return "[" + ", ".join(repr(v) for v in sorted_vals) + "]"

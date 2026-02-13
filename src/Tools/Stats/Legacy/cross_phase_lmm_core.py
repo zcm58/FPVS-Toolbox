@@ -297,6 +297,7 @@ def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, objec
     def _welch_t_from_stats(
         mean1: float, sd1: float, n1: int, mean2: float, sd2: float, n2: int
     ) -> Dict[str, float]:
+        """Run the welch t from stats helper used by the Legacy Stats workflow."""
         if n1 < 2 or n2 < 2 or not np.isfinite(sd1) or not np.isfinite(sd2):
             return {
                 "t": float("nan"),
@@ -342,6 +343,7 @@ def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, objec
         }
 
     def _paired_t(values_a: np.ndarray, values_b: np.ndarray) -> Dict[str, float]:
+        """Run the paired t helper used by the Legacy Stats workflow."""
         mask = np.isfinite(values_a) & np.isfinite(values_b)
         diffs = (values_b - values_a)[mask]
         n = int(diffs.size)
@@ -474,6 +476,7 @@ def _run_backup_2x2(df: pd.DataFrame, logger: logging.Logger) -> Dict[str, objec
     return result
 
 def _build_fixed_effects_table(result) -> List[Dict[str, object]]:
+    """Run the build fixed effects table helper used by the Legacy Stats workflow."""
     fe = getattr(result, "fe_params", None)
     bse = getattr(result, "bse_fe", None)
     if fe is None or bse is None:
@@ -509,6 +512,7 @@ def _build_fixed_effects_table(result) -> List[Dict[str, object]]:
 def _design_matrix_for_scenario(
     design_formula: str, columns: List[str], scenario_df: pd.DataFrame
 ) -> pd.DataFrame:
+    """Run the design matrix for scenario helper used by the Legacy Stats workflow."""
     try:
         import patsy
     except ImportError as e:
@@ -533,6 +537,7 @@ def _build_contrast(
     result,
     logger: logging.Logger,
 ) -> List[Dict[str, object]]:
+    """Run the build contrast helper used by the Legacy Stats workflow."""
     contrasts: List[Dict[str, object]] = []
     if len(group_levels) < 2:
         logger.warning("Need at least two groups for contrasts; found: %s", group_levels)
@@ -557,6 +562,7 @@ def _build_contrast(
     g0_pa, g1_pa, g0_pb, g1_pb = scenario_dm.to_numpy()
 
     def _add_contrast(label: str, vec: np.ndarray):
+        """Run the add contrast helper used by the Legacy Stats workflow."""
         est = float(np.dot(vec, fe_params))
         se = float(np.sqrt(np.dot(vec, np.dot(cov_mat, vec))))
         stat = est / se if se != 0 else np.nan
@@ -601,6 +607,7 @@ def run_cross_phase_lmm(
     backup_2x2_results: List[Dict[str, object]] = []
 
     def _effect_label_from_test(test: Dict[str, object]) -> str | None:
+        """Run the effect label from test helper used by the Legacy Stats workflow."""
         ttype = test.get("type")
         if ttype == "between_group_at_phase":
             return "group"
@@ -611,6 +618,7 @@ def run_cross_phase_lmm(
         return str(ttype) if ttype is not None else None
 
     def _append_backup_rows(backup: Dict[str, object] | None) -> None:
+        """Run the append backup rows helper used by the Legacy Stats workflow."""
         if not backup:
             return
 
