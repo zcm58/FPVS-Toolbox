@@ -21,6 +21,7 @@ from Tools.Stats.PySide6.stats_outlier_exclusion import outlier_reason_label
 
 
 class ManualOutlierExclusionDialog(QDialog):
+    """Represent the ManualOutlierExclusionDialog part of the Stats PySide6 tool."""
     manualExclusionsApplied = Signal(set)
 
     def __init__(
@@ -32,6 +33,7 @@ class ManualOutlierExclusionDialog(QDialog):
         preselected: Iterable[str] | None = None,
         parent=None,
     ) -> None:
+        """Set up this object so it is ready to be used by the Stats tool."""
         super().__init__(parent)
         self.setWindowTitle("Manual Outlier Exclusion")
         self.setModal(True)
@@ -96,6 +98,7 @@ class ManualOutlierExclusionDialog(QDialog):
         self.button_box.rejected.connect(self.reject)
 
     def _apply_filter(self, text: str) -> None:
+        """Handle the apply filter step for the Stats PySide6 workflow."""
         filter_text = text.strip().lower()
         for idx in range(self.list_widget.count()):
             item = self.list_widget.item(idx)
@@ -103,16 +106,19 @@ class ManualOutlierExclusionDialog(QDialog):
             item.setHidden(bool(filter_text) and filter_text not in pid)
 
     def _select_all(self) -> None:
+        """Handle the select all step for the Stats PySide6 workflow."""
         for idx in range(self.list_widget.count()):
             item = self.list_widget.item(idx)
             item.setCheckState(Qt.Checked)
 
     def _select_none(self) -> None:
+        """Handle the select none step for the Stats PySide6 workflow."""
         for idx in range(self.list_widget.count()):
             item = self.list_widget.item(idx)
             item.setCheckState(Qt.Unchecked)
 
     def _apply_changes(self) -> None:
+        """Handle the apply changes step for the Stats PySide6 workflow."""
         selections = set()
         for idx in range(self.list_widget.count()):
             item = self.list_widget.item(idx)

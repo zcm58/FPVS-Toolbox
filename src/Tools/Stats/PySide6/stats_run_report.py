@@ -10,6 +10,7 @@ from Tools.Stats.PySide6.stats_qc_exclusion import QcExclusionReport
 
 @dataclass(frozen=True)
 class StatsRunReport:
+    """Represent the StatsRunReport part of the Stats PySide6 tool."""
     manual_excluded_pids: list[str]
     qc_report: QcExclusionReport | None
     dv_report: OutlierExclusionReport | None

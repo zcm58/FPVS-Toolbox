@@ -1,3 +1,4 @@
+"""Provide the stats missingness features for the Stats PySide6 statistics workflow."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,6 +10,7 @@ from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
 
 
 def _normalize_group(value: Any) -> str:
+    """Handle the normalize group step for the Stats PySide6 workflow."""
     if value is None:
         return ""
     text = str(value).strip()
@@ -94,6 +96,7 @@ def build_missingness_export_tables(
     anova_excluded_rows: list[dict[str, str]],
     summary_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, pd.DataFrame]:
+    """Handle the build missingness export tables step for the Stats PySide6 workflow."""
     summary_rows = summary_rows or []
     return {
         "ANOVA_ExcludedSubjects": pd.DataFrame(
@@ -116,6 +119,7 @@ def export_missingness_workbook(
     summary_rows: list[dict[str, Any]] | None,
     log_func,
 ) -> Path:
+    """Handle the export missingness workbook step for the Stats PySide6 workflow."""
     tables = build_missingness_export_tables(
         mixed_missing_rows=mixed_missing_rows,
         anova_excluded_rows=anova_excluded_rows,

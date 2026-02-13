@@ -45,6 +45,7 @@ QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS = 2.0
 
 @dataclass(frozen=True)
 class QcViolation:
+    """Represent the QcViolation part of the Stats PySide6 tool."""
     condition: str
     roi: str
     metric: str
@@ -61,6 +62,7 @@ class QcViolation:
 
 @dataclass(frozen=True)
 class QcParticipantReport:
+    """Represent the QcParticipantReport part of the Stats PySide6 tool."""
     participant_id: str
     reasons: list[str]
     n_violations: int
@@ -79,6 +81,7 @@ class QcParticipantReport:
 
 @dataclass(frozen=True)
 class QcExclusionSummary:
+    """Represent the QcExclusionSummary part of the Stats PySide6 tool."""
     n_subjects_before: int
     n_subjects_flagged: int
     n_subjects_after: int
@@ -92,6 +95,7 @@ class QcExclusionSummary:
 
 @dataclass(frozen=True)
 class QcExclusionReport:
+    """Represent the QcExclusionReport part of the Stats PySide6 tool."""
     summary: QcExclusionSummary
     participants: list[QcParticipantReport]
     screened_conditions: list[str]
@@ -136,6 +140,7 @@ class QcExclusionReport:
 
 
 def format_qc_violation(violation: QcViolation) -> str:
+    """Handle the format qc violation step for the Stats PySide6 workflow."""
     label = QC_METRIC_LABELS.get(violation.metric, str(violation.metric))
     lines = [
         f"{label} — {violation.severity}",
@@ -159,10 +164,12 @@ def format_qc_violation(violation: QcViolation) -> str:
 
 
 def qc_metric_label(metric: str) -> str:
+    """Handle the qc metric label step for the Stats PySide6 workflow."""
     return QC_METRIC_LABELS.get(metric, str(metric))
 
 
 def _log_message(log_func: Optional[Callable[[str], None]], message: str) -> None:
+    """Handle the log message step for the Stats PySide6 workflow."""
     if log_func:
         log_func(message)
     else:
@@ -174,6 +181,7 @@ def _build_qc_harmonic_domain(
     base_freq: float,
     log_func: Optional[Callable[[str], None]],
 ) -> list[float]:
+    """Handle the build qc harmonic domain step for the Stats PySide6 workflow."""
     freq_candidates = get_included_freqs(base_freq, columns, lambda m: _log_message(log_func, m))
     if not freq_candidates:
         return []
@@ -187,6 +195,7 @@ def _build_qc_harmonic_domain(
 
 
 def _robust_center_spread(values: np.ndarray) -> tuple[float, float]:
+    """Handle the robust center spread step for the Stats PySide6 workflow."""
     finite = values[np.isfinite(values)]
     if finite.size == 0:
         return float("nan"), float("nan")
@@ -202,6 +211,7 @@ def _robust_center_spread(values: np.ndarray) -> tuple[float, float]:
 
 
 def _robust_score(value: float, center: float, spread: float) -> float:
+    """Handle the robust score step for the Stats PySide6 workflow."""
     if not np.isfinite(value):
         return float("nan")
     if spread > 0:
@@ -223,6 +233,7 @@ def _qc_severity(
     warn_abs_floor: float,
     critical_abs_floor: float,
 ) -> tuple[str | None, float | None]:
+    """Handle the qc severity step for the Stats PySide6 workflow."""
     if not np.isfinite(score) or not np.isfinite(value):
         return None, None
     if score >= critical_threshold and value >= critical_abs_floor:
@@ -247,6 +258,7 @@ def run_qc_exclusion(
     critical_abs_floor_maxabs: float = QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
     log_func: Optional[Callable[[str], None]] = None,
 ) -> QcExclusionReport:
+    """Handle the run qc exclusion step for the Stats PySide6 workflow."""
     screened_conditions = list(conditions_all or [])
     if not screened_conditions:
         screened_conditions = sorted(

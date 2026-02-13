@@ -1,3 +1,4 @@
+"""Provide the stats qc reports features for the Stats PySide6 statistics workflow."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,12 +43,14 @@ QC_SUBJECT_LEVEL_COLUMNS: tuple[str, ...] = (
 
 
 def _normalize_group(value: Any) -> str:
+    """Handle the normalize group step for the Stats PySide6 workflow."""
     if value is None:
         return ""
     return str(value).strip()
 
 
 def _coerce_fixed_dv_table(dv_table: pd.DataFrame) -> pd.DataFrame:
+    """Handle the coerce fixed dv table step for the Stats PySide6 workflow."""
     if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
         return pd.DataFrame(columns=["subject", "condition", "roi", "value"])
 
@@ -162,6 +165,7 @@ def export_qc_context_workbook(
     flagged_pid_map: dict[str, list[str]] | None,
     log_func,
 ) -> Path:
+    """Handle the export qc context workbook step for the Stats PySide6 workflow."""
     tables = build_qc_context_tables(
         dv_table=dv_table,
         subject_to_group=subject_to_group,

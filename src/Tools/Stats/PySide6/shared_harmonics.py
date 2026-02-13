@@ -26,6 +26,7 @@ _ALT_Z_SHEET_NAME = "Z Scores"
 
 
 def _resolve_z_sheet_name(file_path: str) -> str | None:
+    """Handle the resolve z sheet name step for the Stats PySide6 workflow."""
     for candidate in (SUMMED_BCA_Z_SHEET_NAME, _ALT_Z_SHEET_NAME):
         try:
             safe_read_excel(file_path, sheet_name=candidate, index_col="Electrode")
@@ -41,6 +42,7 @@ def _find_first_z_columns_with_fallback(
     subject_data: dict[str, dict[str, str]],
     log_func: Callable[[str], None],
 ) -> tuple[pd.Index, str]:
+    """Handle the find first z columns with fallback step for the Stats PySide6 workflow."""
     for pid in subjects:
         for condition in conditions:
             file_path = subject_data.get(pid, {}).get(condition)
@@ -59,6 +61,7 @@ def _find_first_z_columns_with_fallback(
 
 @dataclass(frozen=True)
 class SharedHarmonicsResult:
+    """Represent the SharedHarmonicsResult part of the Stats PySide6 tool."""
     harmonics_by_roi: dict[str, list[float]]
     exclude_harmonic1_applied: bool
     z_thresh: float
@@ -79,6 +82,7 @@ def _select_two_consecutive_significant(
     z_threshold: float,
     stop_after_n_nonsig: int = 2,
 ) -> list[float]:
+    """Handle the select two consecutive significant step for the Stats PySide6 workflow."""
     selected: list[float] = []
     sig_run = 0
     nonsig_run = 0
@@ -196,6 +200,7 @@ def compute_shared_harmonics(
     z_threshold: float = DEFAULT_Z_THRESH,
     log_func: Callable[[str], None],
 ) -> SharedHarmonicsResult:
+    """Handle the compute shared harmonics step for the Stats PySide6 workflow."""
     if not conditions:
         raise RuntimeError("No selected conditions were provided.")
 
@@ -386,6 +391,7 @@ def intersect_condition_harmonics(
     conditions: list[str],
     rois,
 ) -> dict[str, list[float]]:
+    """Handle the intersect condition harmonics step for the Stats PySide6 workflow."""
     harmonics_by_roi: dict[str, list[float]] = {}
     for roi_name in rois:
         per_condition_sets = [
@@ -406,6 +412,7 @@ def export_shared_harmonics_summary(
     result: SharedHarmonicsResult,
     project_path: Path,
 ) -> Path:
+    """Handle the export shared harmonics summary step for the Stats PySide6 workflow."""
     export_path.parent.mkdir(parents=True, exist_ok=True)
 
     config_df = pd.DataFrame(

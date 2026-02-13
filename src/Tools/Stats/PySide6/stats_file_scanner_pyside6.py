@@ -1,3 +1,4 @@
+"""Provide the stats file scanner pyside6 features for the Stats PySide6 statistics workflow."""
 from __future__ import annotations
 
 """

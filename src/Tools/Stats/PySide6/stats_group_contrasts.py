@@ -1,3 +1,4 @@
+"""Provide the stats group contrasts features for the Stats PySide6 statistics workflow."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -86,6 +87,7 @@ def normalize_group_contrasts_table(results_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def export_group_contrasts_workbook(results_df: pd.DataFrame, save_path: str | Path, log_func) -> bool:
+    """Handle the export group contrasts workbook step for the Stats PySide6 workflow."""
     if results_df is None or not isinstance(results_df, pd.DataFrame) or results_df.empty:
         raise ValueError("No Group Contrasts results data available to export.")
 
