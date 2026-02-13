@@ -50,14 +50,17 @@ from Tools.Stats.PySide6.dv_policies import prepare_summed_bca_data
 
 
 def _print(msg: str) -> None:
+    """Run the print helper used by the Legacy Stats workflow."""
     print(msg, flush=True)
 
 
 def _stage_marker(event: str, step: str) -> None:
+    """Run the stage marker helper used by the Legacy Stats workflow."""
     _print(f"STAGE_{event}:{step}")
 
 
 def _df_to_dict(df: Optional[pd.DataFrame]) -> Optional[dict]:
+    """Run the df to dict helper used by the Legacy Stats workflow."""
     if df is None:
         return None
     return {"columns": list(df.columns), "data": df.to_dict(orient="records")}
@@ -67,6 +70,7 @@ def _long_format_from_bca(
     all_subject_bca_data: Dict[str, Dict[str, Dict[str, float]]],
     subject_groups: dict[str, str | None] | None = None,
 ) -> pd.DataFrame:
+    """Run the long format from bca helper used by the Legacy Stats workflow."""
     rows = []
     groups = subject_groups or {}
     for pid, cond_data in all_subject_bca_data.items():
@@ -90,6 +94,7 @@ def _long_format_from_bca(
 
 @dataclass
 class HarmonicOptions:
+    """Plain-language container for HarmonicOptions behavior in this stats module."""
     metric: str
     mean_value_threshold: float
     base_freq: float
@@ -104,6 +109,7 @@ class HarmonicOptions:
 
 @dataclass
 class JobSpec:
+    """Plain-language container for JobSpec behavior in this stats module."""
     subjects: List[str]
     conditions: List[str]
     subject_data: Dict[str, Dict[str, str]]
@@ -117,6 +123,7 @@ class JobSpec:
 
     @staticmethod
     def load(path: Path) -> "JobSpec":
+        """Load a JSON job file and convert it into a validated JobSpec object."""
         data = json.loads(Path(path).read_text())
         harmonic_raw = data.get("harmonic_options", {})
         harm = HarmonicOptions(
@@ -152,6 +159,7 @@ class JobSpec:
 
 
 def _run_mixed_anova(df_long: pd.DataFrame) -> pd.DataFrame:
+    """Run the run mixed anova helper used by the Legacy Stats workflow."""
     return run_mixed_group_anova(
         df_long,
         dv_col="value",
@@ -162,6 +170,7 @@ def _run_mixed_anova(df_long: pd.DataFrame) -> pd.DataFrame:
 
 
 def _run_mixed_model(df_long: pd.DataFrame) -> pd.DataFrame:
+    """Run the run mixed model helper used by the Legacy Stats workflow."""
     return run_mixed_effects_model(
         data=df_long,
         dv_col="value",
@@ -171,6 +180,7 @@ def _run_mixed_model(df_long: pd.DataFrame) -> pd.DataFrame:
 
 
 def _run_group_contrasts(df_long: pd.DataFrame) -> pd.DataFrame:
+    """Run the run group contrasts helper used by the Legacy Stats workflow."""
     return compute_group_contrasts(
         df_long,
         subject_col="subject",
@@ -182,6 +192,7 @@ def _run_group_contrasts(df_long: pd.DataFrame) -> pd.DataFrame:
 
 
 def _run_harmonic(spec: JobSpec, log_func: Callable[[str], None]):
+    """Run the run harmonic helper used by the Legacy Stats workflow."""
     opts = spec.harmonic_options
     return legacy_run_harmonic_check(
         subject_data=spec.subject_data,
@@ -206,6 +217,7 @@ def _run_harmonic(spec: JobSpec, log_func: Callable[[str], None]):
 
 
 def run_between_groups_pipeline(spec: JobSpec) -> dict:
+    """Run the run between groups pipeline helper used by the Legacy Stats workflow."""
     set_rois(spec.roi_map)
 
     _stage_marker("START", "BETWEEN_GROUP_ANOVA")
@@ -549,6 +561,7 @@ def run_cross_phase_lmm_pipeline(spec: dict) -> int:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Parse CLI arguments, choose the requested stats mode, and run that pipeline."""
     parser = argparse.ArgumentParser(description="Between-group stats pipeline")
     parser.add_argument("job_spec", help="Path to JSON job specification")
     args = parser.parse_args(argv)

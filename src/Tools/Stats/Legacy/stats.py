@@ -60,7 +60,9 @@ HARMONIC_CHECK_ALPHA = 0.05  # Significance level for one-sample t-test
 
 
 class StatsAnalysisWindow(ctk.CTkToplevel):
+    """Plain-language container for StatsAnalysisWindow behavior in this stats module."""
     def __init__(self, master, default_folder=""):
+        """Run the init helper used by the Legacy Stats workflow."""
         super().__init__(master)
         # Keep this window above its parent
         self.transient(master)
@@ -174,24 +176,38 @@ if __name__ == "__main__":
 
 
         class TestMaster:
+            """Plain-language container for TestMaster behavior in this stats module."""
             log = staticmethod(lambda msg: logger.info("[TestHost] %s", msg))
 
 
         # Mock stats_export and repeated_m_anova for standalone testing if not available
         class MockStatsExport:
-            def export_rm_anova_results_to_excel(self, anova_table, parent_folder, log_func): log_func(
-                "Mock: export_rm_anova_results_to_excel called")
+            """Plain-language container for MockStatsExport behavior in this stats module."""
 
-            def export_significance_results_to_excel(self, findings_dict, metric, threshold, parent_folder,
-                                                     log_func): log_func(
-                f"Mock: export_significance_results_to_excel called for {metric}")
+            def export_rm_anova_results_to_excel(self, anova_table, parent_folder, log_func):
+                """Mock export handler for the RM-ANOVA spreadsheet in standalone test mode."""
+                log_func("Mock: export_rm_anova_results_to_excel called")
 
-            def export_posthoc_results_to_excel(self, results_df, factor, parent_folder, log_func): log_func(
-                "Mock: export_posthoc_results_to_excel called")
+            def export_significance_results_to_excel(
+                self,
+                findings_dict,
+                metric,
+                threshold,
+                parent_folder,
+                log_func,
+            ):
+                """Mock export handler for harmonic-significance spreadsheets in test mode."""
+                log_func(f"Mock: export_significance_results_to_excel called for {metric}")
+
+            def export_posthoc_results_to_excel(self, results_df, factor, parent_folder, log_func):
+                """Mock export handler for post-hoc results spreadsheets in standalone test mode."""
+                log_func("Mock: export_posthoc_results_to_excel called")
 
 
         class MockRepeatedMAnova:
+            """Plain-language container for MockRepeatedMAnova behavior in this stats module."""
             def run_repeated_measures_anova(self, data, dv_col, within_cols, subject_col):
+                """Run the run repeated measures anova helper used by the Legacy Stats workflow."""
                 logger.info(
                     "Mock: run_repeated_measures_anova called with DV:%s, Within:%s, Subj:%s",
                     dv_col,

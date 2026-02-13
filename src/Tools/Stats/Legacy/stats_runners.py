@@ -1,3 +1,4 @@
+"""Runner functions that execute each Legacy Stats analysis from UI button actions."""
 # Analysis routine methods extracted from stats.py
 
 import tkinter as tk
@@ -24,6 +25,7 @@ HARMONIC_CHECK_ALPHA = 0.05
 
 
 def run_rm_anova(self):
+    """Run the run rm anova helper used by the Legacy Stats workflow."""
     self.refresh_rois()
     self.log_to_main_app("Running RM-ANOVA (Summed BCA)...")
     self.results_textbox.configure(state="normal");
@@ -219,6 +221,7 @@ def run_rm_anova(self):
 
 
 def run_mixed_model(self):
+    """Run the run mixed model helper used by the Legacy Stats workflow."""
     self.refresh_rois()
     """Run a linear mixed-effects model on the summed BCA data."""
     self.log_to_main_app("Running Mixed Effects Model (Summed BCA)...")
@@ -297,6 +300,7 @@ def run_mixed_model(self):
 
 
 def run_posthoc_tests(self):
+    """Run the run posthoc tests helper used by the Legacy Stats workflow."""
     self.refresh_rois()
     self.log_to_main_app("Running post-hoc pairwise tests...")
     self.results_textbox.configure(state="normal")
@@ -360,6 +364,7 @@ def run_posthoc_tests(self):
 
 
 def run_interaction_posthocs(self):
+    """Run the run interaction posthocs helper used by the Legacy Stats workflow."""
     self.refresh_rois()
     """
     Runs post-hoc tests to break down a significant interaction from the last RM-ANOVA.
@@ -488,6 +493,7 @@ def run_interaction_posthocs(self):
 
 
 def run_harmonic_check(self):
+    """Run the run harmonic check helper used by the Legacy Stats workflow."""
     self.refresh_rois()
     self.log_to_main_app("Running Per-Harmonic Significance Check...")
     self.results_textbox.configure(state="normal");

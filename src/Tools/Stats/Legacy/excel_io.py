@@ -15,6 +15,7 @@ _excel_cache: Dict[Tuple[str, str, str], pd.DataFrame] = {}
 
 
 def _cache_key(path: Path, sheet_name: str, index_col: str | None) -> Tuple[str, str, str]:
+    """Run the cache key helper used by the Legacy Stats workflow."""
     return (str(path), str(sheet_name), str(index_col or ""))
 
 
