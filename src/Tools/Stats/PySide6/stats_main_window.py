@@ -156,6 +156,7 @@ logger = logging.getLogger(__name__)
 _unused_qaction = QAction  # keep import alive for Qt resource checkers
 
 class HarmonicConfig(NamedTuple):
+    """Represent the HarmonicConfig part of the Stats PySide6 tool."""
     metric: str
     threshold: float
 
@@ -168,6 +169,7 @@ class StatsWindow(QMainWindow):
     """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
 
     def __init__(self, parent: Optional[QMainWindow] = None, project_dir: Optional[str] = None):
+        """Set up this object so it is ready to be used by the Stats tool."""
         if project_dir and os.path.isdir(project_dir):
             self.project_dir = project_dir
         else:
@@ -304,6 +306,7 @@ class StatsWindow(QMainWindow):
     # --------- ROI + status helpers ---------
 
     def refresh_rois(self) -> None:
+        """Handle the refresh rois step for the Stats PySide6 workflow."""
         fresh = load_rois_from_settings() or {}
         try:
             set_rois({})
@@ -315,6 +318,7 @@ class StatsWindow(QMainWindow):
         self._update_roi_label()
 
     def _update_roi_label(self) -> None:
+        """Handle the update roi label step for the Stats PySide6 workflow."""
         names = list(self.rois.keys())
         txt = "Using {} ROI{} from Settings: {}".format(
             len(names), "" if len(names) == 1 else "s", ", ".join(names)
@@ -322,14 +326,17 @@ class StatsWindow(QMainWindow):
         self._set_roi_status(txt)
 
     def _set_status(self, txt: str) -> None:
+        """Handle the set status step for the Stats PySide6 workflow."""
         if hasattr(self, "lbl_status"):
             self.lbl_status.setText(txt)
 
     def _set_roi_status(self, txt: str) -> None:
+        """Handle the set roi status step for the Stats PySide6 workflow."""
         if hasattr(self, "lbl_rois"):
             self.lbl_rois.setText(txt)
 
     def _set_data_folder_path(self, path: str) -> None:
+        """Handle the set data folder path step for the Stats PySide6 workflow."""
         if hasattr(self, "le_folder"):
             self.le_folder.setText(path or "")
             if not path:
@@ -340,6 +347,7 @@ class StatsWindow(QMainWindow):
             self.btn_copy_folder.setEnabled(bool(path))
 
     def _set_last_export_path(self, path: str | None) -> None:
+        """Handle the set last export path step for the Stats PySide6 workflow."""
         self._last_export_path = path or ""
         if hasattr(self, "export_path_label"):
             self.export_path_label.set_full_text(self._last_export_path)
@@ -350,6 +358,7 @@ class StatsWindow(QMainWindow):
             self.export_copy_btn.setEnabled(bool(self._last_export_path))
 
     def _copy_text_to_clipboard(self, text: str, *, context: str) -> None:
+        """Handle the copy text to clipboard step for the Stats PySide6 workflow."""
         try:
             QGuiApplication.clipboard().setText(text or "")
         except Exception as exc:  # noqa: BLE001
@@ -361,14 +370,17 @@ class StatsWindow(QMainWindow):
             self._set_status(f"Copy failed ({context}).")
 
     def _copy_summary_text(self) -> None:
+        """Handle the copy summary text step for the Stats PySide6 workflow."""
         text = self.summary_text.toPlainText()
         self._copy_text_to_clipboard(text, context="summary")
 
     def _copy_reporting_summary_text(self) -> None:
+        """Handle the copy reporting summary text step for the Stats PySide6 workflow."""
         text = self.reporting_summary_text.toPlainText() if hasattr(self, "reporting_summary_text") else ""
         self._copy_text_to_clipboard(text, context="reporting_summary")
 
     def _save_reporting_summary_text(self) -> None:
+        """Handle the save reporting summary text step for the Stats PySide6 workflow."""
         report_text = self.reporting_summary_text.toPlainText() if hasattr(self, "reporting_summary_text") else ""
         if not report_text.strip():
             self._set_status("No reporting summary available to save yet.")
@@ -409,16 +421,19 @@ class StatsWindow(QMainWindow):
             self._set_status("Failed to save reporting summary text.")
 
     def _copy_log_text(self) -> None:
+        """Handle the copy log text step for the Stats PySide6 workflow."""
         text = self.log_text.toPlainText()
         self._copy_text_to_clipboard(text, context="log")
 
     def _copy_data_folder_path(self) -> None:
+        """Handle the copy data folder path step for the Stats PySide6 workflow."""
         path = self.le_folder.text()
         if not path:
             return
         self._copy_text_to_clipboard(path, context="data_folder")
 
     def _open_export_path(self) -> None:
+        """Handle the open export path step for the Stats PySide6 workflow."""
         path = self._last_export_path or ""
         if not path:
             self._set_status("No export path available yet.")
@@ -438,12 +453,14 @@ class StatsWindow(QMainWindow):
             self._set_status(f"Failed to open export path: {path}")
 
     def _copy_export_path(self) -> None:
+        """Handle the copy export path step for the Stats PySide6 workflow."""
         path = self._last_export_path or ""
         if not path:
             return
         self._copy_text_to_clipboard(path, context="export_path")
 
     def _clear_output_views(self) -> None:
+        """Handle the clear output views step for the Stats PySide6 workflow."""
         self.summary_text.clear()
         self.output_text.clear()
 
@@ -456,6 +473,7 @@ class StatsWindow(QMainWindow):
             self._set_status(txt)
 
     def _clear_conditions_layout(self) -> None:
+        """Handle the clear conditions layout step for the Stats PySide6 workflow."""
         layout = self.conditions_list_layout
         while layout.count():
             item = layout.takeAt(0)
@@ -464,6 +482,7 @@ class StatsWindow(QMainWindow):
                 widget.deleteLater()
 
     def _populate_conditions_panel(self, conditions: List[str]) -> None:
+        """Handle the populate conditions panel step for the Stats PySide6 workflow."""
         self._clear_conditions_layout()
         self._condition_checkboxes.clear()
         if not conditions:
@@ -487,32 +506,39 @@ class StatsWindow(QMainWindow):
         self._sync_selected_conditions()
 
     def _sync_selected_conditions(self) -> None:
+        """Handle the sync selected conditions step for the Stats PySide6 workflow."""
         self.selected_conditions = [
             name for name, checkbox in self._condition_checkboxes.items() if checkbox.isChecked()
         ]
 
     def _on_condition_toggled(self, _state: int) -> None:
+        """Handle the on condition toggled step for the Stats PySide6 workflow."""
         self._sync_selected_conditions()
 
     def _on_dv_variant_toggled(self, _state: int) -> None:
+        """Handle the on dv variant toggled step for the Stats PySide6 workflow."""
         self._sync_selected_dv_variants()
 
     def _select_all_conditions(self) -> None:
+        """Handle the select all conditions step for the Stats PySide6 workflow."""
         for checkbox in self._condition_checkboxes.values():
             checkbox.setChecked(True)
         self._sync_selected_conditions()
 
     def _select_no_conditions(self) -> None:
+        """Handle the select no conditions step for the Stats PySide6 workflow."""
         for checkbox in self._condition_checkboxes.values():
             checkbox.setChecked(False)
         self._sync_selected_conditions()
 
     def _get_selected_conditions(self) -> List[str]:
+        """Handle the get selected conditions step for the Stats PySide6 workflow."""
         if self._condition_checkboxes:
             return list(self.selected_conditions)
         return list(self.conditions)
 
     def _get_dv_policy_payload(self) -> dict[str, object]:
+        """Handle the get dv policy payload step for the Stats PySide6 workflow."""
         return {
             "name": self._dv_policy_name,
             "fixed_k": int(self._dv_fixed_k),
@@ -523,6 +549,7 @@ class StatsWindow(QMainWindow):
         }
 
     def _get_between_group_dv_policy_payload(self) -> dict[str, object]:
+        """Handle the get between group dv policy payload step for the Stats PySide6 workflow."""
         payload = self._get_dv_policy_payload()
         harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
         if isinstance(harmonics_by_roi, dict) and any((harmonics_by_roi.get(k) or []) for k in harmonics_by_roi):
@@ -531,6 +558,7 @@ class StatsWindow(QMainWindow):
         return payload
 
     def _refresh_fixed_harmonic_ui_state(self) -> None:
+        """Handle the refresh fixed harmonic ui state step for the Stats PySide6 workflow."""
         harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
         has_shared_harmonics = isinstance(harmonics_by_roi, dict) and any(
             (harmonics_by_roi.get(k) or []) for k in harmonics_by_roi
@@ -548,9 +576,11 @@ class StatsWindow(QMainWindow):
                 summary_label.setText("Waiting for shared harmonics.")
 
     def get_dv_policy_snapshot(self) -> dict[str, object]:
+        """Handle the get dv policy snapshot step for the Stats PySide6 workflow."""
         return dict(self._get_dv_policy_payload())
 
     def _sync_selected_dv_variants(self) -> None:
+        """Handle the sync selected dv variants step for the Stats PySide6 workflow."""
         self._dv_variants_selected = [
             name
             for name, checkbox in self._dv_variant_checkboxes.items()
@@ -558,11 +588,13 @@ class StatsWindow(QMainWindow):
         ]
 
     def _get_selected_dv_variants(self) -> List[str]:
+        """Handle the get selected dv variants step for the Stats PySide6 workflow."""
         if self._dv_variant_checkboxes:
             return list(self._dv_variants_selected)
         return []
 
     def _get_dv_variant_payloads(self) -> list[dict[str, object]]:
+        """Handle the get dv variant payloads step for the Stats PySide6 workflow."""
         selected = self._get_selected_dv_variants()
         if not selected:
             return []
@@ -575,15 +607,18 @@ class StatsWindow(QMainWindow):
         return payloads
 
     def get_dv_variants_snapshot(self) -> list[str]:
+        """Handle the get dv variants snapshot step for the Stats PySide6 workflow."""
         return list(self._get_selected_dv_variants())
 
     def _get_outlier_exclusion_payload(self) -> dict[str, object]:
+        """Handle the get outlier exclusion payload step for the Stats PySide6 workflow."""
         return {
             "enabled": True,
             "abs_limit": float(self._outlier_abs_limit),
         }
 
     def _get_qc_exclusion_payload(self) -> dict[str, object]:
+        """Handle the get qc exclusion payload step for the Stats PySide6 workflow."""
         return {
             "warn_threshold": float(self._qc_threshold_sumabs),
             "critical_threshold": float(self._qc_threshold_maxabs),
@@ -594,15 +629,18 @@ class StatsWindow(QMainWindow):
         }
 
     def _on_outlier_exclusion_toggled(self, state: int) -> None:
+        """Handle the on outlier exclusion toggled step for the Stats PySide6 workflow."""
         self._outlier_exclusion_enabled = True
         spinbox = getattr(self, "outlier_abs_limit_spin", None)
         if spinbox is not None:
             spinbox.setEnabled(True)
 
     def _on_outlier_abs_limit_changed(self, value: float) -> None:
+        """Handle the on outlier abs limit changed step for the Stats PySide6 workflow."""
         self._outlier_abs_limit = float(value)
 
     def _current_flagged_pid_map(self) -> dict[str, list[str]]:
+        """Handle the current flagged pid map step for the Stats PySide6 workflow."""
         report = None
         if self._active_pipeline is not None:
             report = self._pipeline_run_reports.get(self._active_pipeline)
@@ -616,6 +654,7 @@ class StatsWindow(QMainWindow):
         return collect_flagged_pid_map(report.qc_report, report.dv_report)
 
     def _current_flagged_details_map(self) -> dict[str, str]:
+        """Handle the current flagged details map step for the Stats PySide6 workflow."""
         report = None
         if self._active_pipeline is not None:
             report = self._pipeline_run_reports.get(self._active_pipeline)
@@ -629,6 +668,7 @@ class StatsWindow(QMainWindow):
         return build_flagged_details_map(report.qc_report, report.dv_report)
 
     def _update_manual_exclusion_summary(self) -> None:
+        """Handle the update manual exclusion summary step for the Stats PySide6 workflow."""
         excluded = sorted(self.manual_excluded_pids)
         self.manual_excluded_pids = set(excluded)
         summary_label = getattr(self, "manual_exclusion_summary_label", None)
@@ -649,6 +689,7 @@ class StatsWindow(QMainWindow):
             list_widget.setToolTip(tooltip_text)
 
     def _reconcile_manual_exclusions(self, candidates: list[str]) -> None:
+        """Handle the reconcile manual exclusions step for the Stats PySide6 workflow."""
         self._manual_exclusion_candidates = list(candidates)
         self.manual_excluded_pids = {
             pid for pid in self.manual_excluded_pids if pid in self._manual_exclusion_candidates
@@ -656,10 +697,12 @@ class StatsWindow(QMainWindow):
         self._update_manual_exclusion_summary()
 
     def _clear_manual_exclusions(self) -> None:
+        """Handle the clear manual exclusions step for the Stats PySide6 workflow."""
         self.manual_excluded_pids.clear()
         self._update_manual_exclusion_summary()
 
     def _open_manual_exclusion_dialog(self) -> None:
+        """Handle the open manual exclusion dialog step for the Stats PySide6 workflow."""
         dialog = ManualOutlierExclusionDialog(
             candidates=self._manual_exclusion_candidates,
             flagged_map=self._current_flagged_pid_map(),
@@ -669,6 +712,7 @@ class StatsWindow(QMainWindow):
         )
 
         def _apply_changes(selections: set[str]) -> None:
+            """Handle the apply changes step for the Stats PySide6 workflow."""
             self.manual_excluded_pids = set(selections)
             self._update_manual_exclusion_summary()
 
@@ -676,6 +720,7 @@ class StatsWindow(QMainWindow):
         dialog.exec()
 
     def _set_fixed_k_controls_enabled(self, enabled: bool) -> None:
+        """Handle the set fixed k controls enabled step for the Stats PySide6 workflow."""
         widgets = [
             getattr(self, "fixed_k_spinbox", None),
             getattr(self, "fixed_k_exclude_h1", None),
@@ -687,6 +732,7 @@ class StatsWindow(QMainWindow):
                 widget.setEnabled(enabled)
 
     def _set_group_mean_controls_visible(self, visible: bool) -> None:
+        """Handle the set group mean controls visible step for the Stats PySide6 workflow."""
         widget = getattr(self, "group_mean_controls", None)
         if widget is not None:
             widget.setVisible(visible)
@@ -698,12 +744,15 @@ class StatsWindow(QMainWindow):
             preview_table.setVisible(visible)
 
     def _on_group_mean_z_threshold_changed(self, value: float) -> None:
+        """Handle the on group mean z threshold changed step for the Stats PySide6 workflow."""
         self._dv_group_mean_z_threshold = float(value)
 
     def _on_empty_list_policy_changed(self, text: str) -> None:
+        """Handle the on empty list policy changed step for the Stats PySide6 workflow."""
         self._dv_empty_list_policy = text
 
     def _clear_group_mean_preview(self) -> None:
+        """Handle the clear group mean preview step for the Stats PySide6 workflow."""
         table = getattr(self, "group_mean_preview_table", None)
         if table is None:
             return
@@ -716,6 +765,7 @@ class StatsWindow(QMainWindow):
         fallback_info: dict[str, dict[str, object]],
         stop_metadata: dict[str, dict[str, object]] | None = None,
     ) -> None:
+        """Handle the update group mean preview table step for the Stats PySide6 workflow."""
         table = getattr(self, "group_mean_preview_table", None)
         if table is None:
             return
@@ -752,6 +802,7 @@ class StatsWindow(QMainWindow):
         table.resizeColumnsToContents()
 
     def _on_preview_group_mean_z_clicked(self) -> None:
+        """Handle the on preview group mean z clicked step for the Stats PySide6 workflow."""
         if self._dv_policy_name != ROSSION_POLICY_NAME:
             return
         if not self.subject_data:
@@ -789,6 +840,7 @@ class StatsWindow(QMainWindow):
             logger.exception("Failed to track preview worker")
 
         def _release():
+            """Handle the release step for the Stats PySide6 workflow."""
             try:
                 if worker in self._active_workers:
                     self._active_workers.remove(worker)
@@ -796,6 +848,7 @@ class StatsWindow(QMainWindow):
                 logger.exception("Failed to release preview worker")
 
         def _on_finished(payload: dict) -> None:
+            """Handle the on finished step for the Stats PySide6 workflow."""
             try:
                 self._group_mean_preview_data = payload or {}
                 union_map = payload.get("union_harmonics_by_roi", {}) if isinstance(payload, dict) else {}
@@ -808,6 +861,7 @@ class StatsWindow(QMainWindow):
                 _release()
 
         def _on_error(message: str) -> None:
+            """Handle the on error step for the Stats PySide6 workflow."""
             try:
                 self.append_log("General", f"Preview error: {message}", level="error")
                 self._set_status(message)
@@ -822,12 +876,14 @@ class StatsWindow(QMainWindow):
         self.pool.start(worker)
 
     def _update_fixed_k_base_freq_label(self) -> None:
+        """Handle the update fixed k base freq label step for the Stats PySide6 workflow."""
         label = getattr(self, "fixed_k_base_freq_value", None)
         if label is None:
             return
         label.setText(f"{self._current_base_freq:g} Hz")
 
     def _on_dv_policy_changed(self, text: str) -> None:
+        """Handle the on dv policy changed step for the Stats PySide6 workflow."""
         self._dv_policy_name = text
         self._set_fixed_k_controls_enabled(text == FIXED_K_POLICY_NAME)
         self._set_group_mean_controls_visible(text == ROSSION_POLICY_NAME)
@@ -835,15 +891,19 @@ class StatsWindow(QMainWindow):
             self._clear_group_mean_preview()
 
     def _on_fixed_k_changed(self, value: int) -> None:
+        """Handle the on fixed k changed step for the Stats PySide6 workflow."""
         self._dv_fixed_k = int(value)
 
     def _on_fixed_k_exclude_h1_changed(self, state: int) -> None:
+        """Handle the on fixed k exclude h1 changed step for the Stats PySide6 workflow."""
         self._dv_exclude_harmonic1 = state == Qt.Checked
 
     def _on_fixed_k_exclude_base_changed(self, state: int) -> None:
+        """Handle the on fixed k exclude base changed step for the Stats PySide6 workflow."""
         self._dv_exclude_base_harmonics = state == Qt.Checked
 
     def append_log(self, section: str, message: str, level: str = "info") -> None:
+        """Handle the append log step for the Stats PySide6 workflow."""
         line = format_log_line(f"[{section}] {message}", level=level)
         if hasattr(self, "output_text") and self.output_text is not None:
             self.output_text.appendPlainText(line)
@@ -853,6 +913,7 @@ class StatsWindow(QMainWindow):
         log_func(line)
 
     def _section_label(self, pipeline: PipelineId | None) -> str:
+        """Handle the section label step for the Stats PySide6 workflow."""
         if pipeline is PipelineId.SINGLE:
             return "Single"
         if pipeline is PipelineId.BETWEEN:
@@ -867,6 +928,7 @@ class StatsWindow(QMainWindow):
         event: str,
         extra: Optional[dict] = None,
     ) -> None:
+        """Handle the log pipeline event step for the Stats PySide6 workflow."""
         if pipeline is None:
             return
         payload = {"pipeline": pipeline.name.lower(), "event": event}
@@ -877,6 +939,7 @@ class StatsWindow(QMainWindow):
         logger.info(format_section_header("stats_pipeline_event"), extra=payload)
 
     def _warn_unknown_excel_files(self, subject_data: Dict[str, Dict[str, str]], participants_map: dict[str, str]) -> None:
+        """Handle the warn unknown excel files step for the Stats PySide6 workflow."""
         if not subject_data:
             return
         unknown_files: set[str] = set()
@@ -904,6 +967,7 @@ class StatsWindow(QMainWindow):
         )
 
     def _start_multigroup_scan(self, excel_root: Path | None = None) -> None:
+        """Handle the start multigroup scan step for the Stats PySide6 workflow."""
         if not self._multigroup_scan_guard.start():
             return
         excel_root = excel_root or Path(self.le_folder.text() or self._preferred_stats_folder())
@@ -926,6 +990,7 @@ class StatsWindow(QMainWindow):
             logger.exception("Failed to track multigroup scan worker")
 
         def _release() -> None:
+            """Handle the release step for the Stats PySide6 workflow."""
             try:
                 if worker in self._active_workers:
                     self._active_workers.remove(worker)
@@ -935,6 +1000,7 @@ class StatsWindow(QMainWindow):
                 self._multigroup_scan_guard.done()
 
         def _on_finished(payload: dict) -> None:
+            """Handle the on finished step for the Stats PySide6 workflow."""
             try:
                 result = payload.get("result") if isinstance(payload, dict) else None
                 if isinstance(result, MultiGroupScanResult):
@@ -947,6 +1013,7 @@ class StatsWindow(QMainWindow):
                 _release()
 
         def _on_error(message: str) -> None:
+            """Handle the on error step for the Stats PySide6 workflow."""
             try:
                 self._set_status(f"Multi-group scan error: {message}")
                 self.append_log("General", f"Multi-group scan error: {message}", level="error")
@@ -960,6 +1027,7 @@ class StatsWindow(QMainWindow):
         self.pool.start(worker)
 
     def _format_multigroup_issue(self, issue: ScanIssue) -> str:
+        """Handle the format multigroup issue step for the Stats PySide6 workflow."""
         context_bits = []
         context = issue.context or {}
         for key in ("pid", "group", "path"):
@@ -970,6 +1038,7 @@ class StatsWindow(QMainWindow):
         return f"[{issue.severity.upper()}] {issue.message}{extra}"
 
     def _render_multigroup_issues(self, issues: list[ScanIssue]) -> None:
+        """Handle the render multigroup issues step for the Stats PySide6 workflow."""
         if not hasattr(self, "multi_group_issue_text"):
             return
         if not issues:
@@ -996,11 +1065,13 @@ class StatsWindow(QMainWindow):
         self.multi_group_issue_text.setPlainText("\n".join(lines))
 
     def _toggle_multigroup_issue_details(self) -> None:
+        """Handle the toggle multigroup issue details step for the Stats PySide6 workflow."""
         self._multigroup_issue_expanded = not self._multigroup_issue_expanded
         if self._multigroup_scan_result:
             self._render_multigroup_issues(self._multigroup_scan_result.issues)
 
     def _update_multigroup_summary(self, result: MultiGroupScanResult) -> None:
+        """Handle the update multigroup summary step for the Stats PySide6 workflow."""
         if hasattr(self, "multi_group_ready_value"):
             status_text = "Ready" if result.multi_group_ready else "Not ready"
             self.multi_group_ready_value.setText(status_text)
@@ -1045,6 +1116,7 @@ class StatsWindow(QMainWindow):
             )
 
     def _on_compute_shared_harmonics_clicked(self) -> None:
+        """Handle the on compute shared harmonics clicked step for the Stats PySide6 workflow."""
         if not self.subject_data or not self.subjects:
             self._set_status("Load project data before computing shared harmonics.")
             return
@@ -1084,6 +1156,7 @@ class StatsWindow(QMainWindow):
         self._active_workers.append(worker)
 
         def _release() -> None:
+            """Handle the release step for the Stats PySide6 workflow."""
             if worker in self._active_workers:
                 self._active_workers.remove(worker)
             self.compute_shared_harmonics_btn.setEnabled(
@@ -1091,6 +1164,7 @@ class StatsWindow(QMainWindow):
             )
 
         def _on_finished(payload: dict) -> None:
+            """Handle the on finished step for the Stats PySide6 workflow."""
             try:
                 result = payload if isinstance(payload, dict) else {}
                 self._shared_harmonics_payload = result
@@ -1118,6 +1192,7 @@ class StatsWindow(QMainWindow):
                 _release()
 
         def _on_error(message: str) -> None:
+            """Handle the on error step for the Stats PySide6 workflow."""
             try:
                 self._set_status(f"Shared harmonics error: {message}")
                 self.append_log("General", f"Shared harmonics error: {message}", level="error")
@@ -1132,6 +1207,7 @@ class StatsWindow(QMainWindow):
         self.pool.start(worker)
 
     def _on_compute_fixed_harmonic_dv_clicked(self) -> None:
+        """Handle the on compute fixed harmonic dv clicked step for the Stats PySide6 workflow."""
         harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
         if not isinstance(harmonics_by_roi, dict) or not any((harmonics_by_roi.get(k) or []) for k in harmonics_by_roi):
             self._set_status("Compute shared harmonics before fixed-harmonic DV.")
@@ -1157,11 +1233,13 @@ class StatsWindow(QMainWindow):
         self._active_workers.append(worker)
 
         def _release() -> None:
+            """Handle the release step for the Stats PySide6 workflow."""
             if worker in self._active_workers:
                 self._active_workers.remove(worker)
             self._refresh_fixed_harmonic_ui_state()
 
         def _on_finished(payload: dict) -> None:
+            """Handle the on finished step for the Stats PySide6 workflow."""
             try:
                 result = payload if isinstance(payload, dict) else {}
                 dv_table = result.get("dv_table")
@@ -1183,6 +1261,7 @@ class StatsWindow(QMainWindow):
                 _release()
 
         def _on_error(message: str) -> None:
+            """Handle the on error step for the Stats PySide6 workflow."""
             try:
                 self._set_status(f"Fixed-harmonic DV error: {message}")
                 self.append_log("General", f"Fixed-harmonic DV error: {message}", level="error")
@@ -1197,9 +1276,11 @@ class StatsWindow(QMainWindow):
 
 
     def _known_group_labels(self) -> list[str]:
+        """Handle the known group labels step for the Stats PySide6 workflow."""
         return sorted({g for g in (self.subject_groups or {}).values() if g})
 
     def _ensure_between_ready(self) -> bool:
+        """Handle the ensure between ready step for the Stats PySide6 workflow."""
         groups = self._known_group_labels()
         if len(groups) < 2:
             if self._multi_group_manifest and not groups:
@@ -1222,11 +1303,13 @@ class StatsWindow(QMainWindow):
     # --------- window focus / run state ---------
 
     def _focus_self(self) -> None:
+        """Handle the focus self step for the Stats PySide6 workflow."""
         self._focus_calls += 1
         self.raise_()
         self.activateWindow()
 
     def _set_running(self, running: bool) -> None:
+        """Handle the set running step for the Stats PySide6 workflow."""
         buttons = [
             getattr(self, "analyze_single_btn", None),
             getattr(self, "single_advanced_btn", None),
@@ -1255,6 +1338,7 @@ class StatsWindow(QMainWindow):
                 spinner.hide()
 
     def _begin_run(self) -> bool:
+        """Handle the begin run step for the Stats PySide6 workflow."""
         if not self._guard.start():
             return False
         self._set_running(True)
@@ -1262,6 +1346,7 @@ class StatsWindow(QMainWindow):
         return True
 
     def _end_run(self) -> None:
+        """Handle the end run step for the Stats PySide6 workflow."""
         self._set_running(False)
         self._guard.done()
         self._focus_self()
@@ -1269,6 +1354,7 @@ class StatsWindow(QMainWindow):
     # --------- settings helpers ---------
 
     def _safe_settings_get(self, section: str, key: str, default) -> Tuple[bool, object]:
+        """Handle the safe settings get step for the Stats PySide6 workflow."""
         try:
             settings = SettingsManager()
             val = settings.get(section, key, default)
@@ -1278,6 +1364,7 @@ class StatsWindow(QMainWindow):
             return False, default
 
     def _get_analysis_settings(self) -> Optional[Tuple[float, float]]:
+        """Handle the get analysis settings step for the Stats PySide6 workflow."""
         ok1, bf = self._safe_settings_get("analysis", "base_freq", 6.0)
         ok2, a = self._safe_settings_get("analysis", "alpha", 0.05)
         try:
@@ -1292,6 +1379,7 @@ class StatsWindow(QMainWindow):
         return base_freq, alpha
 
     def _get_harmonic_settings(self) -> Optional[HarmonicConfig]:
+        """Handle the get harmonic settings step for the Stats PySide6 workflow."""
         ok_metric, metric = self._safe_settings_get("analysis", "harmonic_metric", "Z Score")
         ok_threshold, threshold = self._safe_settings_get("analysis", "harmonic_threshold", 1.64)
         try:
@@ -1308,6 +1396,7 @@ class StatsWindow(QMainWindow):
         return HarmonicConfig(metric_str, threshold_val)
 
     def _get_qc_settings(self) -> Optional[tuple[float, float]]:
+        """Handle the get qc settings step for the Stats PySide6 workflow."""
         ok_warn, warn = self._safe_settings_get(
             "analysis", "qc_warn_threshold", self._qc_threshold_sumabs
         )
@@ -1336,6 +1425,7 @@ class StatsWindow(QMainWindow):
     # --------- centralized pre-run guards ---------
 
     def _precheck(self, *, require_anova: bool = False, start_guard: bool = True) -> bool:
+        """Handle the precheck step for the Stats PySide6 workflow."""
         if self._check_for_open_excel_files(self.le_folder.text()):
             return False
         if not self.subject_data:
@@ -1383,6 +1473,7 @@ class StatsWindow(QMainWindow):
     # --------- exports plumbing ---------
 
     def export_results(self, kind: str, data, out_dir: str) -> list[Path]:
+        """Handle the export results step for the Stats PySide6 workflow."""
         mapping = {
             "anova": (export_rm_anova_results_to_excel, ANOVA_XLS),
             "lmm": (export_mixed_model_results_to_excel, LMM_XLS),
@@ -1407,6 +1498,7 @@ class StatsWindow(QMainWindow):
                 return []
 
             def _adapter(_ignored, *, save_path, log_func):
+                """Handle the adapter step for the Stats PySide6 workflow."""
                 export_harmonic_results_to_excel(
                     grouped,
                     save_path,
@@ -1444,6 +1536,7 @@ class StatsWindow(QMainWindow):
         return [path]
 
     def _write_dv_metadata(self, out_dir: str, pipeline_id: PipelineId) -> None:
+        """Handle the write dv metadata step for the Stats PySide6 workflow."""
         dv_policy = self._pipeline_dv_policy.get(pipeline_id, self._get_dv_policy_payload())
         conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
         base_freq = self._pipeline_base_freq.get(pipeline_id, self._current_base_freq)
@@ -1536,6 +1629,7 @@ class StatsWindow(QMainWindow):
             logger.exception("Failed to write DV definition export.")
 
     def _ensure_results_dir(self) -> str:
+        """Handle the ensure results dir step for the Stats PySide6 workflow."""
         target = ensure_results_dir(
             self._project_path,
             self._results_folder_hint,
@@ -1545,11 +1639,14 @@ class StatsWindow(QMainWindow):
         return str(target)
 
     def _open_results_folder(self) -> None:
+        """Handle the open results folder step for the Stats PySide6 workflow."""
         out_dir = self._ensure_results_dir()
         QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
     def _update_export_buttons(self) -> None:
+        """Handle the update export buttons step for the Stats PySide6 workflow."""
         def _maybe_enable(name: str, enabled: bool) -> None:
+            """Handle the maybe enable step for the Stats PySide6 workflow."""
             btn = getattr(self, name, None)
             if btn:
                 btn.setEnabled(enabled)
@@ -1592,6 +1689,7 @@ class StatsWindow(QMainWindow):
         )
 
     def _build_summary_frames(self, pipeline_id: PipelineId) -> StatsSummaryFrames:
+        """Handle the build summary frames step for the Stats PySide6 workflow."""
         return build_summary_frames_from_results(
             pipeline_id,
             single_posthoc=self.posthoc_results_data,
@@ -1604,6 +1702,7 @@ class StatsWindow(QMainWindow):
         )
 
     def _render_summary(self, summary_text: str) -> None:
+        """Handle the render summary step for the Stats PySide6 workflow."""
         lines = (summary_text or "").splitlines()
         if not lines:
             self.summary_text.append("(No summary generated.)")
@@ -1628,6 +1727,7 @@ class StatsWindow(QMainWindow):
             self.summary_text.append("")
 
     def _collect_excluded_reasons(self, pipeline_id: PipelineId) -> dict[str, str]:
+        """Handle the collect excluded reasons step for the Stats PySide6 workflow."""
         report = self._pipeline_run_reports.get(pipeline_id)
         if not isinstance(report, StatsRunReport):
             return {}
@@ -1643,6 +1743,7 @@ class StatsWindow(QMainWindow):
         return reasons
 
     def _build_reporting_summary_payload(self, pipeline_id: PipelineId, elapsed_ms: int) -> dict[str, object]:
+        """Handle the build reporting summary payload step for the Stats PySide6 workflow."""
         selected_conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
         selected_rois = sorted((self.rois or {}).keys())
         report = self._pipeline_run_reports.get(pipeline_id)
@@ -1673,9 +1774,11 @@ class StatsWindow(QMainWindow):
         }
 
     def _start_reporting_summary_worker(self, pipeline_id: PipelineId, elapsed_ms: int) -> None:
+        """Handle the start reporting summary worker step for the Stats PySide6 workflow."""
         payload = self._build_reporting_summary_payload(pipeline_id, elapsed_ms)
 
         def _worker_fn(progress_emit, message_emit, *, worker_payload):
+            """Handle the worker fn step for the Stats PySide6 workflow."""
             del progress_emit, message_emit
             context = worker_payload["context"]
             text = build_reporting_summary(
@@ -1695,12 +1798,14 @@ class StatsWindow(QMainWindow):
         worker = StatsWorker(_worker_fn, worker_payload=payload, _op="reporting_summary")
 
         def _on_finished(worker_result: dict) -> None:
+            """Handle the on finished step for the Stats PySide6 workflow."""
             report_path = worker_result.get("report_path") if isinstance(worker_result, dict) else None
             if report_path:
                 self._set_last_export_path(str(report_path))
                 self._set_status(f"Reporting summary exported: {report_path}")
 
         def _on_error(message: str) -> None:
+            """Handle the on error step for the Stats PySide6 workflow."""
             logger.error(
                 "stats_reporting_summary_failed",
                 extra={
@@ -1720,12 +1825,14 @@ class StatsWindow(QMainWindow):
 
     @Slot(str)
     def _on_report_ready(self, report_text: str) -> None:
+        """Handle the on report ready step for the Stats PySide6 workflow."""
         self._reporting_summary_text = report_text or ""
         self.reporting_summary_text.setPlainText(self._reporting_summary_text)
 
     # --------- worker signal wiring ---------
 
     def _wire_and_start(self, worker: StatsWorker, finished_slot) -> None:
+        """Handle the wire and start step for the Stats PySide6 workflow."""
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.message.connect(self._on_worker_message)
         worker.signals.error.connect(self._on_worker_error)
@@ -1733,6 +1840,7 @@ class StatsWindow(QMainWindow):
         self.pool.start(worker)
 
     def set_busy(self, is_busy: bool) -> None:
+        """Handle the set busy step for the Stats PySide6 workflow."""
         try:
             self._set_running(is_busy)
         except Exception as exc:  # noqa: BLE001
@@ -1837,6 +1945,7 @@ class StatsWindow(QMainWindow):
 
         def _on_finished(payload, pid=pipeline_id, sid=step.id):
             # This is the first place we know the Qt finished signal reached the view.
+            """Handle the on finished step for the Stats PySide6 workflow."""
             try:
                 payload_type = type(payload).__name__
                 payload_keys = list(payload.keys()) if isinstance(payload, dict) else None
@@ -1892,6 +2001,7 @@ class StatsWindow(QMainWindow):
                 _release_worker()
 
         def _on_error(message: str, pid=pipeline_id, sid=step.id):
+            """Handle the on error step for the Stats PySide6 workflow."""
             logger.error(
                 "stats_view_error_slot_enter",
                 extra={
@@ -1946,13 +2056,16 @@ class StatsWindow(QMainWindow):
             logger.exception("stats_view_start_step_worker_exit_log_failed")
 
     def ensure_results_dir(self) -> str:
+        """Handle the ensure results dir step for the Stats PySide6 workflow."""
         return self._ensure_results_dir()
 
     def prompt_phase_folder(self, title: str, start_dir: str | None = None) -> Optional[str]:
+        """Handle the prompt phase folder step for the Stats PySide6 workflow."""
         folder = QFileDialog.getExistingDirectory(self, title, start_dir or self.project_dir)
         return folder or None
 
     def get_analysis_settings_snapshot(self) -> tuple[float, float, dict, list[str]]:
+        """Handle the get analysis settings snapshot step for the Stats PySide6 workflow."""
         self.refresh_rois()
         got = self._get_analysis_settings()
         if not got:
@@ -1964,6 +2077,7 @@ class StatsWindow(QMainWindow):
     def ensure_pipeline_ready(
         self, pipeline_id: PipelineId, *, require_anova: bool = False
     ) -> bool:
+        """Handle the ensure pipeline ready step for the Stats PySide6 workflow."""
         self._log_pipeline_event(pipeline=pipeline_id, event="start")
         if not self._precheck(require_anova=require_anova, start_guard=False):
             self._log_pipeline_event(
@@ -2000,6 +2114,7 @@ class StatsWindow(QMainWindow):
         return True
 
     def on_pipeline_started(self, pipeline_id: PipelineId) -> None:
+        """Handle the on pipeline started step for the Stats PySide6 workflow."""
         self._pipeline_start_perf[pipeline_id] = time.perf_counter()
         self._active_pipeline = pipeline_id
         self._harmonic_results[pipeline_id] = []
@@ -2027,6 +2142,7 @@ class StatsWindow(QMainWindow):
     def store_dv_variants_payload(
         self, pipeline_id: PipelineId, dv_variants: dict | None
     ) -> None:
+        """Handle the store dv variants payload step for the Stats PySide6 workflow."""
         if not isinstance(dv_variants, dict) or not dv_variants:
             return
         self._store_dv_variants(pipeline_id, {"dv_variants": dv_variants})
@@ -2039,6 +2155,7 @@ class StatsWindow(QMainWindow):
         *,
         exports_ran: bool,
     ) -> None:
+        """Handle the on analysis finished step for the Stats PySide6 workflow."""
         logger.info(
             "stats_analysis_finished_enter",
             extra={
@@ -2130,6 +2247,7 @@ class StatsWindow(QMainWindow):
                 )
 
     def closeEvent(self, event):  # type: ignore[override]
+        """Handle the closeEvent step for the Stats PySide6 workflow."""
         logger.info(
             "stats_window_close_event",
             extra={
@@ -2140,6 +2258,7 @@ class StatsWindow(QMainWindow):
         super().closeEvent(event)
 
     def build_and_render_summary(self, pipeline_id: PipelineId) -> None:
+        """Handle the build and render summary step for the Stats PySide6 workflow."""
         cfg = SummaryConfig(
             alpha=0.05,
             min_effect=0.50,
@@ -2153,6 +2272,7 @@ class StatsWindow(QMainWindow):
         self._render_summary(summary_text)
 
     def export_pipeline_results(self, pipeline_id: PipelineId) -> bool:
+        """Handle the export pipeline results step for the Stats PySide6 workflow."""
         if pipeline_id is PipelineId.SINGLE:
             return self._export_single_pipeline()
         if pipeline_id is PipelineId.BETWEEN:
@@ -2162,6 +2282,7 @@ class StatsWindow(QMainWindow):
     def _build_harmonic_kwargs(self) -> dict:
         # [SAFETY UPDATE] Load fresh ROIs from settings to ensure thread receives
         # the most up-to-date map, preventing 0xC0000005 errors.
+        """Handle the build harmonic kwargs step for the Stats PySide6 workflow."""
         fresh_rois = load_rois_from_settings() or self.rois
         manual_excluded = set(self.manual_excluded_pids)
         filtered_subjects = [pid for pid in self.subjects if pid not in manual_excluded]
@@ -2183,6 +2304,7 @@ class StatsWindow(QMainWindow):
     def get_step_config(
         self, pipeline_id: PipelineId, step_id: StepId
     ) -> tuple[dict, Callable[[dict], None]]:
+        """Handle the get step config step for the Stats PySide6 workflow."""
         dv_variants_payload = self._get_dv_variant_payloads()
         outlier_payload = self._pipeline_outlier_config.get(
             pipeline_id, self._get_outlier_exclusion_payload()
@@ -2210,6 +2332,7 @@ class StatsWindow(QMainWindow):
                 if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
                     kwargs["results_dir"] = self._ensure_results_dir()
                 def handler(payload):
+                    """Handle the handler step for the Stats PySide6 workflow."""
                     self._apply_rm_anova_results(payload, update_text=False)
 
                 return kwargs, handler
@@ -2233,6 +2356,7 @@ class StatsWindow(QMainWindow):
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
+                    """Handle the handler step for the Stats PySide6 workflow."""
                     self._apply_mixed_model_results(payload, update_text=False)
 
                 return kwargs, handler
@@ -2256,6 +2380,7 @@ class StatsWindow(QMainWindow):
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
+                    """Handle the handler step for the Stats PySide6 workflow."""
                     self._apply_posthoc_results(payload, update_text=True)
 
                 return kwargs, handler
@@ -2263,6 +2388,7 @@ class StatsWindow(QMainWindow):
                 kwargs = self._build_harmonic_kwargs()
 
                 def handler(payload, *, pid=pipeline_id):
+                    """Handle the handler step for the Stats PySide6 workflow."""
                     self._apply_harmonic_results(payload, pipeline_id=pid, update_text=True)
 
                 return kwargs, handler
@@ -2291,6 +2417,7 @@ class StatsWindow(QMainWindow):
                     subject_to_group=self.subject_groups,
                 )
                 def handler(payload):
+                    """Handle the handler step for the Stats PySide6 workflow."""
                     self._apply_between_anova_results(payload, update_text=False)
 
                 return kwargs, handler
@@ -2320,6 +2447,7 @@ class StatsWindow(QMainWindow):
                     results_dir=results_dir,
                 )
                 def handler(payload):
+                    """Handle the handler step for the Stats PySide6 workflow."""
                     self._apply_between_mixed_results(payload, update_text=False)
 
                 return kwargs, handler
@@ -2343,6 +2471,7 @@ class StatsWindow(QMainWindow):
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
+                    """Handle the handler step for the Stats PySide6 workflow."""
                     self._apply_group_contrasts_results(payload, update_text=True)
 
                 return kwargs, handler
@@ -2350,12 +2479,14 @@ class StatsWindow(QMainWindow):
                 kwargs = self._build_harmonic_kwargs()
 
                 def handler(payload, *, pid=pipeline_id):
+                    """Handle the handler step for the Stats PySide6 workflow."""
                     self._apply_harmonic_results(payload, pipeline_id=pid, update_text=True)
 
                 return kwargs, handler
         raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
 
     def _prompt_view_results(self, section: str, stats_folder: Path) -> None:
+        """Handle the prompt view results step for the Stats PySide6 workflow."""
         msg = QMessageBox(self)
         msg.setWindowTitle("Statistical Analysis Complete")
         msg.setText("Statistical analysis complete.\nView results?")
@@ -2371,12 +2502,14 @@ class StatsWindow(QMainWindow):
                 self.append_log(section, f"Stats folder not found: {stats_folder}", "error")
 
     def _show_outlier_exclusion_dialog(self, pipeline_id: PipelineId) -> None:
+        """Handle the show outlier exclusion dialog step for the Stats PySide6 workflow."""
         dialog = self._build_flagged_participants_dialog(pipeline_id)
         if dialog is None:
             return
         dialog.exec()
 
     def _build_flagged_participants_dialog(self, pipeline_id: PipelineId) -> QDialog | None:
+        """Handle the build flagged participants dialog step for the Stats PySide6 workflow."""
         report = self._pipeline_run_reports.get(pipeline_id)
         if not isinstance(report, StatsRunReport):
             return None
@@ -2542,6 +2675,7 @@ class StatsWindow(QMainWindow):
             layout.addWidget(details_panel)
 
             def _update_details() -> None:
+                """Handle the update details step for the Stats PySide6 workflow."""
                 current = table.currentRow()
                 if current < 0:
                     details_panel.clear()
@@ -2572,10 +2706,12 @@ class StatsWindow(QMainWindow):
         layout.addLayout(button_row)
 
         def _copy_summary() -> None:
+            """Handle the copy summary step for the Stats PySide6 workflow."""
             if summary_text:
                 QGuiApplication.clipboard().setText(summary_text)
 
         def _copy_table() -> None:
+            """Handle the copy table step for the Stats PySide6 workflow."""
             if not display_rows:
                 return
             display_df = pd.DataFrame(
@@ -2593,6 +2729,7 @@ class StatsWindow(QMainWindow):
             QGuiApplication.clipboard().setText(display_df.to_csv(sep="\t", index=False))
 
         def _copy_details() -> None:
+            """Handle the copy details step for the Stats PySide6 workflow."""
             if not details_map or table is None:
                 return
             current = table.currentRow()
@@ -2617,6 +2754,7 @@ class StatsWindow(QMainWindow):
         return dialog
 
     def _export_single_pipeline(self) -> bool:
+        """Handle the export single pipeline step for the Stats PySide6 workflow."""
         section = "Single"
         exports = [
             ("anova", self.rm_anova_results_data, "RM-ANOVA"),
@@ -2680,6 +2818,7 @@ class StatsWindow(QMainWindow):
             return False
 
     def _export_dv_variants(self, pipeline_id: PipelineId, out_dir: str) -> list[Path]:
+        """Handle the export dv variants step for the Stats PySide6 workflow."""
         selected = self._pipeline_dv_variants.get(pipeline_id, [])
         if not selected:
             return []
@@ -2724,6 +2863,7 @@ class StatsWindow(QMainWindow):
         return [save_path]
 
     def _export_outlier_exclusions(self, pipeline_id: PipelineId, out_dir: str) -> list[Path]:
+        """Handle the export outlier exclusions step for the Stats PySide6 workflow."""
         report = self._pipeline_run_reports.get(pipeline_id)
         if not isinstance(report, StatsRunReport):
             return []
@@ -2745,6 +2885,7 @@ class StatsWindow(QMainWindow):
         return paths
 
     def _export_between_pipeline(self) -> bool:
+        """Handle the export between pipeline step for the Stats PySide6 workflow."""
         section = "Between"
         exports = [
             ("anova_between", self.between_anova_results_data, "Between-Group ANOVA"),
@@ -2815,6 +2956,7 @@ class StatsWindow(QMainWindow):
             return False
 
     def _export_between_missingness(self, out_dir: str) -> Path | None:
+        """Handle the export between missingness step for the Stats PySide6 workflow."""
         payload = self._between_missingness_payload if isinstance(self._between_missingness_payload, dict) else {}
         mixed_rows = payload.get("mixed_model_missing_cells", [])
         anova_rows = payload.get("anova_excluded_subjects", [])
@@ -2840,6 +2982,7 @@ class StatsWindow(QMainWindow):
         return export_path
 
     def _export_qc_context_by_group(self, out_dir: str) -> Path | None:
+        """Handle the export qc context by group step for the Stats PySide6 workflow."""
         fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
         dv_table = fixed_payload.get("dv_table")
         if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
@@ -2866,14 +3009,17 @@ class StatsWindow(QMainWindow):
 
     @Slot(int)
     def _on_worker_progress(self, val: int) -> None:
+        """Handle the on worker progress step for the Stats PySide6 workflow."""
         self._progress_updates.append(val)
 
     @Slot(str)
     def _on_worker_message(self, msg: str) -> None:
+        """Handle the on worker message step for the Stats PySide6 workflow."""
         self._set_detected_info(msg)
 
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
+        """Handle the on worker error step for the Stats PySide6 workflow."""
         self.output_text.appendPlainText(f"Error: {msg}")
         section = "General"
         try:
@@ -2887,12 +3033,14 @@ class StatsWindow(QMainWindow):
         self._end_run()
 
     def _store_dv_metadata(self, pipeline_id: PipelineId, payload: dict) -> None:
+        """Handle the store dv metadata step for the Stats PySide6 workflow."""
         dv_meta = payload.get("dv_metadata")
         if isinstance(dv_meta, dict) and dv_meta:
             self._pipeline_dv_metadata[pipeline_id] = dv_meta
         self._store_dv_variants(pipeline_id, payload)
 
     def _store_dv_variants(self, pipeline_id: PipelineId, payload: dict) -> None:
+        """Handle the store dv variants step for the Stats PySide6 workflow."""
         dv_variants = payload.get("dv_variants")
         if not isinstance(dv_variants, dict) or not dv_variants:
             return
@@ -2913,15 +3061,18 @@ class StatsWindow(QMainWindow):
                 )
 
     def _store_run_report(self, pipeline_id: PipelineId, payload: dict) -> None:
+        """Handle the store run report step for the Stats PySide6 workflow."""
         report = payload.get("run_report")
         if isinstance(report, StatsRunReport):
             self._pipeline_run_reports[pipeline_id] = report
 
     def store_run_report(self, pipeline_id: PipelineId, report: StatsRunReport) -> None:
+        """Handle the store run report step for the Stats PySide6 workflow."""
         if isinstance(report, StatsRunReport):
             self._pipeline_run_reports[pipeline_id] = report
 
     def _refresh_between_missingness_summary(self) -> None:
+        """Handle the refresh between missingness summary step for the Stats PySide6 workflow."""
         payload = self._between_missingness_payload
         if not isinstance(payload, dict):
             return
@@ -2943,6 +3094,7 @@ class StatsWindow(QMainWindow):
         }
 
     def _apply_rm_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
+        """Handle the apply rm anova results step for the Stats PySide6 workflow."""
         self.rm_anova_results_data = payload.get("anova_df_results")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
         self._store_run_report(PipelineId.SINGLE, payload)
@@ -2968,6 +3120,7 @@ class StatsWindow(QMainWindow):
         return output_text
 
     def _apply_between_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
+        """Handle the apply between anova results step for the Stats PySide6 workflow."""
         self.between_anova_results_data = payload.get("anova_df_results")
         self._store_dv_metadata(PipelineId.BETWEEN, payload)
         self._store_run_report(PipelineId.BETWEEN, payload)
@@ -2984,6 +3137,7 @@ class StatsWindow(QMainWindow):
         return output_text
 
     def _apply_mixed_model_results(self, payload: dict, *, update_text: bool = True) -> str:
+        """Handle the apply mixed model results step for the Stats PySide6 workflow."""
         self.mixed_model_results_data = payload.get("mixed_results_df")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
         self._store_run_report(PipelineId.SINGLE, payload)
@@ -2994,6 +3148,7 @@ class StatsWindow(QMainWindow):
         return output_text
 
     def _apply_between_mixed_results(self, payload: dict, *, update_text: bool = True) -> str:
+        """Handle the apply between mixed results step for the Stats PySide6 workflow."""
         if not isinstance(payload, dict):
             raise ValueError("Mixed-model payload must be a dict.")
         if "mixed_results_df" not in payload:
@@ -3013,6 +3168,7 @@ class StatsWindow(QMainWindow):
         return output_text
 
     def _apply_posthoc_results(self, payload: dict, *, update_text: bool = True) -> str:
+        """Handle the apply posthoc results step for the Stats PySide6 workflow."""
         self.posthoc_results_data = payload.get("results_df")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
         self._store_run_report(PipelineId.SINGLE, payload)
@@ -3023,6 +3179,7 @@ class StatsWindow(QMainWindow):
         return output_text
 
     def _apply_group_contrasts_results(self, payload: dict, *, update_text: bool = True) -> str:
+        """Handle the apply group contrasts results step for the Stats PySide6 workflow."""
         self.group_contrasts_results_data = payload.get("results_df")
         self._store_dv_metadata(PipelineId.BETWEEN, payload)
         self._store_run_report(PipelineId.BETWEEN, payload)
@@ -3035,6 +3192,7 @@ class StatsWindow(QMainWindow):
     def _apply_harmonic_results(
         self, payload: dict, *, pipeline_id: PipelineId, update_text: bool = True
     ) -> str:
+        """Handle the apply harmonic results step for the Stats PySide6 workflow."""
         output_text = payload.get("output_text") or ""
         findings = payload.get("findings") or []
         if update_text:
@@ -3046,42 +3204,50 @@ class StatsWindow(QMainWindow):
 
     @Slot(dict)
     def _on_rm_anova_finished(self, payload: dict) -> None:
+        """Handle the on rm anova finished step for the Stats PySide6 workflow."""
         self._apply_rm_anova_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_between_anova_finished(self, payload: dict) -> None:
+        """Handle the on between anova finished step for the Stats PySide6 workflow."""
         self._apply_between_anova_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_mixed_model_finished(self, payload: dict) -> None:
+        """Handle the on mixed model finished step for the Stats PySide6 workflow."""
         self._apply_mixed_model_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_between_mixed_finished(self, payload: dict) -> None:
+        """Handle the on between mixed finished step for the Stats PySide6 workflow."""
         self._apply_between_mixed_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_posthoc_finished(self, payload: dict) -> None:
+        """Handle the on posthoc finished step for the Stats PySide6 workflow."""
         self._apply_posthoc_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_group_contrasts_finished(self, payload: dict) -> None:
+        """Handle the on group contrasts finished step for the Stats PySide6 workflow."""
         self._apply_group_contrasts_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_harmonic_finished(self, payload: dict) -> None:
+        """Handle the on harmonic finished step for the Stats PySide6 workflow."""
         pipeline_id = self._active_pipeline or PipelineId.SINGLE
         self._apply_harmonic_results(payload, pipeline_id=pipeline_id)
         self._end_run()
 
     @Slot(object)
     def _on_lela_mode_finished(self, stats_folder: Path | None = None) -> None:
+        """Handle the on lela mode finished step for the Stats PySide6 workflow."""
         try:
             section = self._section_label(PipelineId.BETWEEN)
             self.append_log(section, "[Between] Lela Mode: complete — see Cross-Phase LMM Analysis.xlsx")
@@ -3092,6 +3258,7 @@ class StatsWindow(QMainWindow):
 
     @Slot(str)
     def _on_lela_mode_error(self, message: str) -> None:
+        """Handle the on lela mode error step for the Stats PySide6 workflow."""
         try:
             section = self._section_label(PipelineId.BETWEEN)
             self.append_log(section, f"[Between] Lela Mode error: {message}", level="error")
@@ -3101,6 +3268,7 @@ class StatsWindow(QMainWindow):
     # --------------------------- UI building ---------------------------
 
     def _init_ui(self) -> None:
+        """Handle the init ui step for the Stats PySide6 workflow."""
         central = QWidget(self)
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
@@ -3740,12 +3908,15 @@ class StatsWindow(QMainWindow):
     # --------------------------- actions ---------------------------
 
     def on_analyze_single_group_clicked(self) -> None:
+        """Handle the on analyze single group clicked step for the Stats PySide6 workflow."""
         self._controller.run_single_group_analysis()
 
     def on_analyze_between_groups_clicked(self) -> None:
+        """Handle the on analyze between groups clicked step for the Stats PySide6 workflow."""
         self._controller.run_between_group_analysis()
 
     def _open_advanced_dialog(self, title: str, actions: list[tuple[str, Callable[[], None], bool]]) -> None:
+        """Handle the open advanced dialog step for the Stats PySide6 workflow."""
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
         layout = QVBoxLayout(dialog)
@@ -3763,6 +3934,7 @@ class StatsWindow(QMainWindow):
         dialog.exec()
 
     def on_single_advanced_clicked(self) -> None:
+        """Handle the on single advanced clicked step for the Stats PySide6 workflow."""
         actions = [
             ("Run RM-ANOVA", self.on_run_rm_anova, True),
             ("Run Mixed Model", self.on_run_mixed_model, True),
@@ -3786,6 +3958,7 @@ class StatsWindow(QMainWindow):
         self._open_advanced_dialog("Single Group – Advanced", actions)
 
     def on_between_advanced_clicked(self) -> None:
+        """Handle the on between advanced clicked step for the Stats PySide6 workflow."""
         actions = [
             ("Run Between-Group ANOVA", self.on_run_between_anova, True),
             ("Run Between-Group Mixed Model", self.on_run_between_mixed_model, True),
@@ -3879,24 +4052,28 @@ class StatsWindow(QMainWindow):
     # ---- run buttons ----
 
     def on_run_rm_anova(self) -> None:
+        """Handle the on run rm anova step for the Stats PySide6 workflow."""
         self._clear_output_views()
         self.rm_anova_results_data = None
         self._update_export_buttons()
         self._controller.run_single_group_rm_anova_only()
 
     def on_run_mixed_model(self) -> None:
+        """Handle the on run mixed model step for the Stats PySide6 workflow."""
         self._clear_output_views()
         self.mixed_model_results_data = None
         self._update_export_buttons()
         self._controller.run_single_group_mixed_model_only()
 
     def on_run_between_anova(self) -> None:
+        """Handle the on run between anova step for the Stats PySide6 workflow."""
         self._clear_output_views()
         self.between_anova_results_data = None
         self._update_export_buttons()
         self._controller.run_between_group_anova_only()
 
     def on_run_between_mixed_model(self) -> None:
+        """Handle the on run between mixed model step for the Stats PySide6 workflow."""
         self._clear_output_views()
         self.between_mixed_model_results_data = None
         self._update_export_buttons()
@@ -3924,12 +4101,14 @@ class StatsWindow(QMainWindow):
             raise
 
     def on_run_group_contrasts(self) -> None:
+        """Handle the on run group contrasts step for the Stats PySide6 workflow."""
         self._clear_output_views()
         self.group_contrasts_results_data = None
         self._update_export_buttons()
         self._controller.run_between_group_contrasts_only()
 
     def on_run_interaction_posthocs(self) -> None:
+        """Handle the on run interaction posthocs step for the Stats PySide6 workflow."""
         self._clear_output_views()
         self.posthoc_results_data = None
         our = self._update_export_buttons  # keep line short
@@ -3939,6 +4118,7 @@ class StatsWindow(QMainWindow):
     # ---- exports ----
 
     def on_export_rm_anova(self) -> None:
+        """Handle the on export rm anova step for the Stats PySide6 workflow."""
         if not isinstance(self.rm_anova_results_data, pd.DataFrame) or self.rm_anova_results_data.empty:
             QMessageBox.information(self, "No Results", "Run RM-ANOVA first.")
             return
@@ -3954,6 +4134,7 @@ class StatsWindow(QMainWindow):
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_mixed_model(self) -> None:
+        """Handle the on export mixed model step for the Stats PySide6 workflow."""
         if not isinstance(self.mixed_model_results_data, pd.DataFrame) or self.mixed_model_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Mixed Model first.")
             return
@@ -3969,6 +4150,7 @@ class StatsWindow(QMainWindow):
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_between_anova(self) -> None:
+        """Handle the on export between anova step for the Stats PySide6 workflow."""
         if not isinstance(self.between_anova_results_data, pd.DataFrame) or self.between_anova_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Between-Group ANOVA first.")
             return
@@ -3984,6 +4166,7 @@ class StatsWindow(QMainWindow):
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_between_mixed(self) -> None:
+        """Handle the on export between mixed step for the Stats PySide6 workflow."""
         if not isinstance(self.between_mixed_model_results_data,
                           pd.DataFrame) or self.between_mixed_model_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Between-Group Mixed Model first.")
@@ -4000,6 +4183,7 @@ class StatsWindow(QMainWindow):
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_posthoc(self) -> None:
+        """Handle the on export posthoc step for the Stats PySide6 workflow."""
         if not isinstance(self.posthoc_results_data, pd.DataFrame) or self.posthoc_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Interaction Post-hocs first.")
             return
@@ -4015,6 +4199,7 @@ class StatsWindow(QMainWindow):
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_group_contrasts(self) -> None:
+        """Handle the on export group contrasts step for the Stats PySide6 workflow."""
         if not isinstance(self.group_contrasts_results_data, pd.DataFrame) or self.group_contrasts_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Group Contrasts first.")
             return
@@ -4030,6 +4215,7 @@ class StatsWindow(QMainWindow):
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_qc_context_by_group(self) -> None:
+        """Handle the on export qc context by group step for the Stats PySide6 workflow."""
         fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
         dv_table = fixed_payload.get("dv_table")
         if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
@@ -4054,6 +4240,7 @@ class StatsWindow(QMainWindow):
     # ---- folder & scan ----
 
     def on_browse_folder(self) -> None:
+        """Handle the on browse folder step for the Stats PySide6 workflow."""
         start_dir = self.le_folder.text() or self.project_dir
         folder = QFileDialog.getExistingDirectory(self, "Select Data Folder", start_dir)
         if folder:
@@ -4061,6 +4248,7 @@ class StatsWindow(QMainWindow):
             self._scan_button_clicked()
 
     def _scan_button_clicked(self) -> None:
+        """Handle the scan button clicked step for the Stats PySide6 workflow."""
         if not self._scan_guard.start():
             return
         try:

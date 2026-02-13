@@ -10,11 +10,13 @@ from Main_App.PySide6_App.Backend.project import STATS_SUBFOLDER_NAME
 
 
 class PipelineId(Enum):
+    """Represent the PipelineId part of the Stats PySide6 tool."""
     SINGLE = auto()
     BETWEEN = auto()
 
 
 class StepId(Enum):
+    """Represent the StepId part of the Stats PySide6 tool."""
     RM_ANOVA = auto()
     MIXED_MODEL = auto()
     INTERACTION_POSTHOCS = auto()
@@ -37,6 +39,7 @@ GROUP_CONTRAST_XLS: Final[str] = "Group Contrasts.xlsx"
 
 @dataclass
 class PipelineStep:
+    """Represent the PipelineStep part of the Stats PySide6 tool."""
     id: StepId
     name: str
     worker_fn: Callable[..., Any]

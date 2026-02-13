@@ -17,6 +17,7 @@ PID_REGEX = re.compile(r"(?i)p0*(\d+)(?!\d)")
 
 
 def _pid_sort_key(pid: str) -> tuple[int, str]:
+    """Handle the pid sort key step for the Stats PySide6 workflow."""
     match = PID_REGEX.search(pid or "")
     if match:
         return int(match.group(1)), str(pid)
@@ -25,6 +26,7 @@ def _pid_sort_key(pid: str) -> tuple[int, str]:
 
 @dataclass(frozen=True)
 class ScanIssue:
+    """Represent the ScanIssue part of the Stats PySide6 tool."""
     severity: str
     message: str
     context: dict[str, str]
@@ -32,6 +34,7 @@ class ScanIssue:
 
 @dataclass(frozen=True)
 class MultiGroupScanResult:
+    """Represent the MultiGroupScanResult part of the Stats PySide6 tool."""
     subject_groups: list[str]
     group_to_subjects: dict[str, list[str]]
     unassigned_subjects: list[str]
@@ -42,10 +45,12 @@ class MultiGroupScanResult:
 
 
 def _build_issue(severity: str, message: str, context: dict[str, str] | None = None) -> ScanIssue:
+    """Handle the build issue step for the Stats PySide6 workflow."""
     return ScanIssue(severity=severity, message=message, context=context or {})
 
 
 def extract_canonical_pid(text: str, *, context: dict[str, str] | None = None) -> tuple[str | None, list[ScanIssue]]:
+    """Handle the extract canonical pid step for the Stats PySide6 workflow."""
     matches = list(PID_REGEX.finditer(text or ""))
     if not matches:
         return None, [_build_issue("blocking", "PID parse failure.", context)]
@@ -62,6 +67,7 @@ def extract_canonical_pid(text: str, *, context: dict[str, str] | None = None) -
 
 
 def _load_manifest(project_root: Path) -> tuple[dict | None, list[ScanIssue]]:
+    """Handle the load manifest step for the Stats PySide6 workflow."""
     issues: list[ScanIssue] = []
     manifest_path = project_root / "project.json"
     if not manifest_path.is_file():
@@ -100,6 +106,7 @@ def _load_manifest(project_root: Path) -> tuple[dict | None, list[ScanIssue]]:
 
 
 def _parse_manifest_participants(manifest: dict | None) -> tuple[dict[str, str], list[ScanIssue]]:
+    """Handle the parse manifest participants step for the Stats PySide6 workflow."""
     issues: list[ScanIssue] = []
     if not isinstance(manifest, dict):
         return {}, issues
@@ -167,6 +174,7 @@ def _parse_manifest_participants(manifest: dict | None) -> tuple[dict[str, str],
 
 
 def _scan_excel_folder(excel_root: Path) -> tuple[list[str], list[ScanIssue]]:
+    """Handle the scan excel folder step for the Stats PySide6 workflow."""
     issues: list[ScanIssue] = []
     discovered: set[str] = set()
 
@@ -218,6 +226,7 @@ def _scan_excel_folder(excel_root: Path) -> tuple[list[str], list[ScanIssue]]:
 
 
 def _sorted_groups_from_mapping(group_map: dict[str, list[str]]) -> list[str]:
+    """Handle the sorted groups from mapping step for the Stats PySide6 workflow."""
     return sorted(group_map.keys())
 
 
@@ -225,6 +234,7 @@ def _build_group_to_subjects(
     discovered: Iterable[str],
     manifest_map: dict[str, str],
 ) -> dict[str, list[str]]:
+    """Handle the build group to subjects step for the Stats PySide6 workflow."""
     group_to_subjects: dict[str, list[str]] = {}
     for pid in discovered:
         group = manifest_map.get(pid)
@@ -238,6 +248,7 @@ def _build_group_to_subjects(
 
 
 def scan_multigroup_readiness(project_root: Path, excel_root: Path) -> MultiGroupScanResult:
+    """Handle the scan multigroup readiness step for the Stats PySide6 workflow."""
     issues: list[ScanIssue] = []
 
     manifest, manifest_issues = _load_manifest(project_root)
@@ -319,6 +330,7 @@ def run_multigroup_scan_worker(
     project_root: Path,
     excel_root: Path,
 ) -> MultiGroupScanResult:
+    """Handle the run multigroup scan worker step for the Stats PySide6 workflow."""
     return scan_multigroup_readiness(project_root, excel_root)
 
 

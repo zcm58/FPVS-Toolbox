@@ -31,6 +31,7 @@ class LelaFilenameParseError(Exception):
     """Raised when a Lela Mode Excel filename cannot be parsed."""
 
     def __init__(self, path: Path, message: str) -> None:
+        """Set up this object so it is ready to be used by the Stats tool."""
         super().__init__(f"{path}: {message}")
         self.path = Path(path)
         self.message = message
@@ -38,6 +39,7 @@ class LelaFilenameParseError(Exception):
 
 @dataclass(frozen=True)
 class LelaFilenameMetadata:
+    """Represent the LelaFilenameMetadata part of the Stats PySide6 tool."""
     subject_id: str
     group_code: str
     phase_code: str
@@ -50,6 +52,7 @@ class ScanError(Exception):
 
 @dataclass
 class ProjectScanResult:
+    """Represent the ProjectScanResult part of the Stats PySide6 tool."""
     subjects: List[str]
     conditions: List[str]
     subject_data: Dict[str, Dict[str, str]]
@@ -74,6 +77,7 @@ def auto_detect_project_dir() -> str:
 
 
 def load_manifest_data(project_root: Path, cfg: dict | None = None) -> tuple[str | None, dict[str, str]]:
+    """Handle the load manifest data step for the Stats PySide6 workflow."""
     if cfg is None:
         manifest = project_root / "project.json"
         if not manifest.is_file():
@@ -93,6 +97,7 @@ def load_manifest_data(project_root: Path, cfg: dict | None = None) -> tuple[str
 
 
 def _resolve_results_root(project_root: Path, results_folder: str | None) -> Path:
+    """Handle the resolve results root step for the Stats PySide6 workflow."""
     if results_folder:
         base = Path(results_folder)
         if not base.is_absolute():
@@ -109,6 +114,7 @@ def resolve_project_subfolder(
     key: str,
     default_name: str,
 ) -> Path:
+    """Handle the resolve project subfolder step for the Stats PySide6 workflow."""
     name = subfolders.get(key, default_name)
     candidate = Path(name)
     if candidate.is_absolute():
@@ -196,10 +202,12 @@ def normalize_participants_map(manifest: dict | None) -> dict[str, str]:
 
 
 def map_subjects_to_groups(subjects: Iterable[str], participants_map: dict[str, str]) -> dict[str, str | None]:
+    """Handle the map subjects to groups step for the Stats PySide6 workflow."""
     return {pid: participants_map.get(pid.upper()) for pid in subjects}
 
 
 def has_multi_groups(manifest: dict | None) -> bool:
+    """Handle the has multi groups step for the Stats PySide6 workflow."""
     if not isinstance(manifest, dict):
         return False
     groups = manifest.get("groups")
@@ -284,6 +292,7 @@ def parse_lela_excel_filename(path: Path) -> LelaFilenameMetadata:
 
 @dataclass
 class LelaPhaseScanResult:
+    """Represent the LelaPhaseScanResult part of the Stats PySide6 tool."""
     subjects: list[str]
     conditions: list[str]
     subject_data: dict[str, dict[str, str]]
@@ -495,6 +504,7 @@ def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[s
 
 
 def load_project_scan(folder: str) -> ProjectScanResult:
+    """Handle the load project scan step for the Stats PySide6 workflow."""
     subjects, conditions, data = scan_folder_simple(folder)
     manifest = load_project_manifest_for_excel_root(Path(folder))
     participants_map = normalize_participants_map(manifest)

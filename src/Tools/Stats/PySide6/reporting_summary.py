@@ -20,6 +20,7 @@ NOT_AVAILABLE = "NOT AVAILABLE (not computed by this run)"
 
 @dataclass(frozen=True)
 class ReportingSummaryContext:
+    """Represent the ReportingSummaryContext part of the Stats PySide6 tool."""
     project_name: str
     project_root: Path
     pipeline_name: str
@@ -34,6 +35,7 @@ class ReportingSummaryContext:
 
 
 def safe_project_path_join(project_root: Path | str, *parts: str) -> Path:
+    """Handle the safe project path join step for the Stats PySide6 workflow."""
     root = Path(project_root).resolve()
     target = (root.joinpath(*parts)).resolve()
     try:
@@ -50,6 +52,7 @@ def build_reporting_summary(
     lmm_df: pd.DataFrame | None,
     posthoc_df: pd.DataFrame | None,
 ) -> str:
+    """Handle the build reporting summary step for the Stats PySide6 workflow."""
     included = sorted({str(pid) for pid in context.included_participants})
     excluded_ids = sorted({str(pid) for pid in context.excluded_reasons.keys() if pid not in included})
     if context.total_participants > 0:
@@ -98,6 +101,7 @@ def build_reporting_summary(
 
 
 def build_default_report_path(project_root: Path | str, generated_local: datetime) -> Path:
+    """Handle the build default report path step for the Stats PySide6 workflow."""
     return safe_project_path_join(
         project_root,
         "Stats",
@@ -107,12 +111,14 @@ def build_default_report_path(project_root: Path | str, generated_local: datetim
 
 
 def build_rm_anova_report_path(results_dir: Path | str, generated_local: datetime) -> Path:
+    """Handle the build rm anova report path step for the Stats PySide6 workflow."""
     results_path = Path(results_dir)
     results_path.mkdir(parents=True, exist_ok=True)
     return results_path / f"RM_ANOVA_Report_{generated_local.strftime('%Y-%m-%d_%H%M%S')}.txt"
 
 
 def _value_or_na(row: pd.Series, col: str, na_label: str) -> Any:
+    """Handle the value or na step for the Stats PySide6 workflow."""
     if col not in row.index:
         return na_label
     value = row.get(col)
@@ -127,6 +133,7 @@ def build_rm_anova_text_report(
     generated_local: datetime,
     project_name: str | None,
 ) -> str:
+    """Handle the build rm anova text report step for the Stats PySide6 workflow."""
     backend = "statsmodels"
     if isinstance(anova_df, pd.DataFrame):
         backend = str(anova_df.attrs.get("rm_anova_backend") or "statsmodels")
@@ -215,6 +222,7 @@ def build_rm_anova_text_report(
 
 
 def _find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """Handle the find col step for the Stats PySide6 workflow."""
     for col in candidates:
         if col in df.columns:
             return col
@@ -222,6 +230,7 @@ def _find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
 
 
 def _fmt(value: Any) -> str:
+    """Handle the fmt step for the Stats PySide6 workflow."""
     if value is None:
         return NOT_AVAILABLE
     if isinstance(value, float):
@@ -230,6 +239,7 @@ def _fmt(value: Any) -> str:
 
 
 def fmt_p(value: Any) -> str:
+    """Handle the fmt p step for the Stats PySide6 workflow."""
     if value is None:
         return NOT_AVAILABLE
     try:
@@ -244,6 +254,7 @@ def fmt_p(value: Any) -> str:
 
 
 def _finite_value(row: pd.Series, col: str) -> float | None:
+    """Handle the finite value step for the Stats PySide6 workflow."""
     if col not in row.index:
         return None
     value = row.get(col)
@@ -255,6 +266,7 @@ def _finite_value(row: pd.Series, col: str) -> float | None:
 
 
 def _select_reported_p(row: pd.Series) -> tuple[Any, str]:
+    """Handle the select reported p step for the Stats PySide6 workflow."""
     p_unc = _value_or_na(row, "Pr > F", NOT_AVAILABLE)
     p_gg = _finite_value(row, "Pr > F (GG)")
     p_hf = _finite_value(row, "Pr > F (HF)")
@@ -266,6 +278,7 @@ def _select_reported_p(row: pd.Series) -> tuple[Any, str]:
 
 
 def _append_anova(lines: list[str], context: ReportingSummaryContext, anova_df: pd.DataFrame | None) -> None:
+    """Handle the append anova step for the Stats PySide6 workflow."""
     backend = "statsmodels"
     has_sphericity_fields = False
     has_corrected_p = False
@@ -327,6 +340,7 @@ def _append_anova(lines: list[str], context: ReportingSummaryContext, anova_df: 
 
 
 def _append_lmm(lines: list[str], lmm_df: pd.DataFrame | None) -> None:
+    """Handle the append lmm step for the Stats PySide6 workflow."""
     attrs = lmm_df.attrs if isinstance(lmm_df, pd.DataFrame) else {}
     contrast_map = attrs.get("lmm_contrast_map") if isinstance(attrs.get("lmm_contrast_map"), dict) else {}
     contrast_text = "; ".join(f"{k}: {v}" for k, v in contrast_map.items()) if contrast_map else NOT_AVAILABLE
@@ -373,6 +387,7 @@ def _append_lmm(lines: list[str], lmm_df: pd.DataFrame | None) -> None:
 
 
 def _append_posthoc(lines: list[str], posthoc_df: pd.DataFrame | None) -> None:
+    """Handle the append posthoc step for the Stats PySide6 workflow."""
     n_cond_within_roi = 0
     n_roi_within_cond = 0
     if isinstance(posthoc_df, pd.DataFrame) and "Direction" in posthoc_df.columns:

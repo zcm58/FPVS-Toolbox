@@ -46,6 +46,7 @@ _DV_DATA_CACHE_MAX = 8
 
 
 def _freeze_nested_mapping(mapping: Dict[str, Dict[str, str]]) -> tuple:
+    """Handle the freeze nested mapping step for the Stats PySide6 workflow."""
     frozen = []
     for key, inner in sorted(mapping.items(), key=lambda item: item[0]):
         inner_items = tuple(sorted((inner or {}).items()))
@@ -54,6 +55,7 @@ def _freeze_nested_mapping(mapping: Dict[str, Dict[str, str]]) -> tuple:
 
 
 def _freeze_rois(rois: Optional[Dict[str, List[str]]]) -> tuple:
+    """Handle the freeze rois step for the Stats PySide6 workflow."""
     if not rois:
         return tuple()
     return tuple(
@@ -71,6 +73,7 @@ def _build_cache_key(
     rois: Optional[Dict[str, List[str]]],
     settings: DVPolicySettings,
 ) -> tuple:
+    """Handle the build cache key step for the Stats PySide6 workflow."""
     return (
         tuple(subjects),
         tuple(conditions),
@@ -88,6 +91,7 @@ def _build_cache_key(
 
 @dataclass(frozen=True)
 class DVPolicySettings:
+    """Represent the DVPolicySettings part of the Stats PySide6 tool."""
     name: str = LEGACY_POLICY_NAME
     fixed_k: int = 5
     exclude_harmonic1: bool = True
@@ -96,6 +100,7 @@ class DVPolicySettings:
     empty_list_policy: str = EMPTY_LIST_FALLBACK_FIXED_K
 
     def to_metadata(self, *, base_freq: float, selected_conditions: List[str]) -> dict:
+        """Handle the to metadata step for the Stats PySide6 workflow."""
         return {
             "policy_name": self.name,
             "fixed_k": int(self.fixed_k),
@@ -109,6 +114,7 @@ class DVPolicySettings:
 
 
 def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
+    """Handle the normalize dv policy step for the Stats PySide6 workflow."""
     if not settings:
         return DVPolicySettings()
     name = str(settings.get("name", LEGACY_POLICY_NAME))
@@ -143,6 +149,7 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
 
 
 def _dv_trace_enabled() -> bool:
+    """Handle the dv trace enabled step for the Stats PySide6 workflow."""
     value = os.getenv(_DV_TRACE_ENV, "").strip().lower()
     return value not in ("", "0", "false", "no", "off")
 
@@ -159,6 +166,7 @@ def prepare_summed_bca_data(
     dv_policy: dict[str, object] | None = None,
     dv_metadata: Optional[dict[str, object]] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
+    """Handle the prepare summed bca data step for the Stats PySide6 workflow."""
     settings = normalize_dv_policy(dv_policy)
     meta_target: dict[str, object] | None = dv_metadata if dv_metadata is not None else {}
     cache_key = None
@@ -249,6 +257,7 @@ def _parse_freqs_from_columns(
     all_col_names: Iterable[object],
     log_func: Callable[[str], None],
 ) -> List[float]:
+    """Handle the parse freqs from columns step for the Stats PySide6 workflow."""
     numeric_freqs: List[float] = []
     for col_name in all_col_names:
         if isinstance(col_name, str) and col_name.endswith("_Hz"):
@@ -262,6 +271,7 @@ def _parse_freqs_from_columns(
 
 
 def _is_base_multiple(freq_val: float, base_freq: float, tol: float = 1e-6) -> bool:
+    """Handle the is base multiple step for the Stats PySide6 workflow."""
     return abs(freq_val / base_freq - round(freq_val / base_freq)) < tol
 
 
@@ -272,6 +282,7 @@ def _determine_fixed_k_freqs(
     settings: DVPolicySettings,
     log_func: Callable[[str], None],
 ) -> List[float]:
+    """Handle the determine fixed k freqs step for the Stats PySide6 workflow."""
     if settings.exclude_base_harmonics:
         freq_candidates = get_included_freqs(base_freq, columns, log_func)
     else:
@@ -304,6 +315,7 @@ def _find_first_bca_columns(
     base_freq: float,
     log_func: Callable[[str], None],
 ) -> Optional[pd.Index]:
+    """Handle the find first bca columns step for the Stats PySide6 workflow."""
     for pid in subjects:
         for cond_name in conditions:
             file_path = subject_data.get(pid, {}).get(cond_name)
@@ -327,6 +339,7 @@ def _aggregate_bca_sum_harmonics(
     rois: Optional[Dict[str, List[str]]] = None,
     diag_meta: Optional[dict[str, object]] = None,
 ) -> float:
+    """Handle the aggregate bca sum harmonics step for the Stats PySide6 workflow."""
     try:
         if diag_meta is not None:
             diag_meta.setdefault("source_file", file_path)
@@ -412,6 +425,7 @@ def _prepare_fixed_k_bca_data(
     provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
     settings: DVPolicySettings,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
+    """Handle the prepare fixed k bca data step for the Stats PySide6 workflow."""
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
         return None
@@ -493,6 +507,7 @@ def _normalize_harmonics_by_roi(
     *,
     rois: dict[str, list[str]],
 ) -> dict[str, list[float]]:
+    """Handle the normalize harmonics by roi step for the Stats PySide6 workflow."""
     normalized: dict[str, list[float]] = {}
     source = harmonics_by_roi or {}
     for roi_name in rois.keys():
@@ -513,6 +528,7 @@ def _aggregate_bca_sum_harmonics_fixed(
     rois: dict[str, list[str]],
     diag_meta: Optional[dict[str, object]] = None,
 ) -> tuple[float, list[float]]:
+    """Handle the aggregate bca sum harmonics fixed step for the Stats PySide6 workflow."""
     try:
         if diag_meta is not None:
             diag_meta.setdefault("source_file", file_path)
@@ -598,6 +614,7 @@ def _prepare_fixed_harmonics_by_roi_bca_data(
     dv_metadata: Optional[dict[str, object]] = None,
     settings: Optional[DVPolicySettings] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
+    """Handle the prepare fixed harmonics by roi bca data step for the Stats PySide6 workflow."""
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
         return None
@@ -735,6 +752,7 @@ def apply_empty_union_policy(
     policy: str,
     fallback_freqs: list[float],
 ) -> tuple[dict[str, list[float]], dict[str, dict[str, object]]]:
+    """Handle the apply empty union policy step for the Stats PySide6 workflow."""
     final_map: dict[str, list[float]] = {}
     info: dict[str, dict[str, object]] = {}
     for roi, freqs in union_harmonics.items():
@@ -767,6 +785,7 @@ def _log_dv_trace_empty_policy(
     final_map: dict[str, list[float]],
     fallback_info: dict[str, dict[str, object]],
 ) -> None:
+    """Handle the log dv trace empty policy step for the Stats PySide6 workflow."""
     if not _dv_trace_enabled():
         return
     for roi_name, initial_freqs in initial_map.items():
@@ -796,6 +815,7 @@ def _log_dv_trace_dv_table_summary(
     rois_map: dict[str, list[str]],
     all_subject_data: dict[str, dict[str, dict[str, float]]],
 ) -> None:
+    """Handle the log dv trace dv table summary step for the Stats PySide6 workflow."""
     if not _dv_trace_enabled():
         return
     expected_rows = len(subjects) * len(conditions) * len(rois_map)
@@ -896,6 +916,7 @@ def build_rossion_preview_payload(
     log_func: Callable[[str], None],
     dv_policy: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    """Handle the build rossion preview payload step for the Stats PySide6 workflow."""
     settings = normalize_dv_policy(dv_policy)
     if settings.name != ROSSION_POLICY_NAME:
         raise RuntimeError("Rossion preview requires the Rossion policy.")
@@ -961,6 +982,7 @@ def _prepare_rossion_bca_data(
     settings: DVPolicySettings,
     dv_metadata: Optional[dict[str, object]] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
+    """Handle the prepare rossion bca data step for the Stats PySide6 workflow."""
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
         return None

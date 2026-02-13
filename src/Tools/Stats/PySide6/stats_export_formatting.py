@@ -24,6 +24,7 @@ def log_rm_anova_p_minima(anova_df: pd.DataFrame) -> None:
     """Emit diagnostic stats confirming whether tiny p-values are real zeros or display artifacts."""
 
     def _series_metrics(column: str) -> tuple[float | None, bool]:
+        """Handle the series metrics step for the Stats PySide6 workflow."""
         if column not in anova_df.columns:
             return None, False
         numeric = pd.to_numeric(anova_df[column], errors="coerce")
