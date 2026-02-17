@@ -10,6 +10,7 @@ import threading
 import traceback
 import time
 import logging
+from datetime import datetime
 import mne
 import numpy as np
 import pandas as pd
@@ -22,6 +23,7 @@ from Tools.SourceLocalization.logging_utils import QueueLogHandler
 from Main_App.Legacy_App.post_process import post_process as _external_post_process
 from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
 from Main_App.Legacy_App.load_utils import load_eeg_file
+from Main_App.Legacy_App.fft_crop_utils import compute_fft_crop_from_events
 
 
 def _sanitize_folder_name(label: str) -> str:
@@ -262,6 +264,19 @@ class ProcessingMixin:
         event_id_map_from_gui = params.get('event_id_map', {})
         stim_channel_name = params.get('stim_channel', config.DEFAULT_STIM_CHANNEL)
         save_folder = self.save_folder_path.get()
+        project_root = save_folder if save_folder else os.getcwd()
+        logs_dir = os.path.join(project_root, "Logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        fft_crop_log_path = os.path.join(
+            logs_dir,
+            f"fft_crop_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+        )
+
+        def fft_crop_log(level, message):
+            prefix = f"{level} [fft_crop]"
+            gui_queue.put({'type': 'log', 'message': f"{prefix} {message}"})
+            with open(fft_crop_log_path, "a", encoding="utf-8") as fp:
+                fp.write(f"{datetime.now().isoformat()} {prefix} {message}\n")
         max_bad_channels_alert_thresh = params.get('max_bad_channels_alert_thresh', 9999)
         run_loreta_enabled = (
             getattr(self, 'run_loreta_var', None)
@@ -274,6 +289,10 @@ class ProcessingMixin:
         quality_flagged_files_info_for_run = []
 
         try:
+            with open(fft_crop_log_path, "w", encoding="utf-8") as fp:
+                fp.write(f"project_root={project_root}\n")
+                fp.write(f"timestamp={datetime.now().isoformat()}\n")
+                fp.write("oddball_hz=1.2\n")
             for i, f_path in enumerate(data_paths):
                 f_name = os.path.basename(f_path)
                 gui_queue.put(
@@ -437,28 +456,96 @@ class ProcessingMixin:
                     if self.settings.debug_enabled():
                         gui_queue.put({'type': 'log',
                                        'message': f"DEBUG [{f_name}]: Starting epoching based on GUI event_id_map: {event_id_map_from_gui}"})
+                    onset_ids = set(event_id_map_from_gui.values())
+                    sfreq = float(raw_proc.info['sfreq'])
+                    crop_results, n_step, run_warnings = compute_fft_crop_from_events(
+                        events=events,
+                        fs=sfreq,
+                        onset_ids=onset_ids,
+                        oddball_id=55,
+                        stream_end_sample=int(raw_proc.n_times),
+                    )
+                    fft_crop_log("INFO", f"file={f_name} input={f_path} fs={sfreq:.6f} n_step={n_step}")
+                    for warning_msg in run_warnings:
+                        fft_crop_log("WARN", f"file={f_name} run_warning={warning_msg}")
+
+                    n_common_by_label = {}
                     for lbl, num_id_val_gui in event_id_map_from_gui.items():
                         if self.settings.debug_enabled():
                             gui_queue.put({'type': 'log',
                                            'message': f"DEBUG [{f_name}]: Attempting to epoch for GUI label '{lbl}' (using Int ID: {num_id_val_gui}). Events array shape: {events.shape}"})
                         if events.size > 0 and num_id_val_gui in events[:, 2]:
                             try:
-                                epochs = mne.Epochs(
-                                    raw_proc,
-                                    events,
-                                    event_id={lbl: num_id_val_gui},
-                                    tmin=params['epoch_start'],
-                                    tmax=params['epoch_end'],
-                                    preload=False,
-                                    verbose=False,
-                                    baseline=None,
-                                    on_missing='warn',
-                                    decim=1,
-                                )
-                                if len(epochs.events) > 0:
+                                rep_keys = sorted([k for k in crop_results if k[0] == int(num_id_val_gui)], key=lambda x: x[1])
+                                rep_segments = []
+                                rep_events = []
+                                rep_fallback_count = 0
+                                n_common = None
+                                for rep_key in rep_keys:
+                                    crop = crop_results[rep_key]
+                                    for w in crop.warnings:
+                                        fft_crop_log("WARN", f"file={f_name} condition={lbl} rep={rep_key[1]} warn={w}")
+
+                                    if not crop.fallback and crop.n_samples > 0:
+                                        n_common = crop.n_samples if n_common is None else min(n_common, crop.n_samples)
+
+                                if n_common_by_label.get(lbl) is None and n_common is not None:
+                                    n_common_by_label[lbl] = n_common
+
+                                for rep_key in rep_keys:
+                                    crop = crop_results[rep_key]
+                                    use_fallback = crop.fallback or n_common is None
+                                    if use_fallback:
+                                        rep_fallback_count += 1
+                                        start_samp = int(crop.block_start_sample + params['epoch_start'] * sfreq)
+                                        stop_samp = int(crop.block_start_sample + params['epoch_end'] * sfreq)
+                                        start_samp = max(0, start_samp)
+                                        stop_samp = min(int(raw_proc.n_times), stop_samp)
+                                        n_used = max(0, stop_samp - start_samp)
+                                        fallback_reason = crop.fallback_reason or "no_nonfallback_n_common"
+                                    else:
+                                        start_samp = int(crop.crop_start_sample)
+                                        stop_samp = int(start_samp + n_common)
+                                        n_used = int(n_common)
+                                        fallback_reason = None
+
+                                    if n_used <= 0 or stop_samp <= start_samp:
+                                        fft_crop_log("WARN", f"file={f_name} condition={lbl} rep={rep_key[1]} skipped=true reason=empty_segment")
+                                        continue
+
+                                    data = raw_proc.get_data(start=start_samp, stop=stop_samp)
+                                    rep_segments.append(data)
+                                    rep_events.append([start_samp, 0, int(num_id_val_gui)])
+
+                                    t_sec = n_used / sfreq if sfreq > 0 else 0.0
+                                    df_hz = sfreq / n_used if n_used > 0 else 0.0
+                                    k = (1.2 * n_used / sfreq) if sfreq > 0 else 0.0
+                                    k_is_int = abs(k - round(k)) < 1e-9
+                                    fft_crop_log(
+                                        "INFO" if not use_fallback else "WARN",
+                                        f"file={f_name} condition={lbl} rep={rep_key[1]} block=({crop.block_start_sample},{crop.block_end_sample}) "
+                                        f"n55_raw={crop.n55_raw} n55_dedup={crop.n55_dedup} cycles={crop.cycles} "
+                                        f"first55={crop.first55_sample} last55={crop.last55_sample} available={crop.available_samples} "
+                                        f"N={n_used} T={t_sec:.6f} df={df_hz:.6f} k={k:.8f} on_bin_pass={k_is_int} "
+                                        f"fallback={use_fallback} fallback_reason={fallback_reason} dedup_dropped={crop.dedup_dropped} missing_gap_warns={crop.missing_gap_count}",
+                                    )
+
+                                if rep_segments:
+                                    epoch_data = np.stack(rep_segments, axis=0)
+                                    epochs = mne.EpochsArray(
+                                        epoch_data,
+                                        raw_proc.info.copy(),
+                                        events=np.asarray(rep_events, dtype=int),
+                                        event_id={lbl: int(num_id_val_gui)},
+                                        tmin=0.0,
+                                        baseline=None,
+                                        verbose=False,
+                                    )
                                     gui_queue.put({'type': 'log',
                                                    'message': f"  -> Successfully created {len(epochs.events)} epochs for GUI label '{lbl}' in {f_name}."})
                                     file_epochs[lbl] = [epochs]
+                                    if rep_fallback_count:
+                                        fft_crop_log("WARN", f"file={f_name} condition={lbl} fallback_reps={rep_fallback_count}")
                                 else:
                                     gui_queue.put({'type': 'log',
                                                    'message': f"  -> No epochs generated for GUI label '{lbl}' in {f_name}."})
@@ -472,6 +559,12 @@ class ProcessingMixin:
                     if self.settings.debug_enabled():
                         gui_queue.put(
                             {'type': 'log', 'message': f"DEBUG [{f_name}]: Epoching loop for all GUI labels finished."})
+                    if n_common_by_label:
+                        summary = ", ".join([f"{k}:{v}" for k, v in n_common_by_label.items()])
+                        fft_crop_log("INFO", f"file={f_name} n_common_summary={summary}")
+                        unique_n = sorted(set(n_common_by_label.values()))
+                        if len(unique_n) > 1:
+                            fft_crop_log("WARN", f"file={f_name} n_common_mismatch={unique_n}")
 
                 except Exception as file_proc_err:
                     gui_queue.put({'type': 'log',

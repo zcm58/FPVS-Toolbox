@@ -216,9 +216,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
                 sfreq = data_eeg.info["sfreq"]
                 num_fft_bins = num_times // 2 + 1
-                fft_frequencies = np.linspace(
-                    0, sfreq / 2.0, num=num_fft_bins, endpoint=True
-                )
+                fft_frequencies = np.fft.rfftfreq(num_times, d=1.0 / sfreq)
                 fft_full_spectrum = np.fft.fft(avg_data_uv, axis=1)
                 fft_amplitudes = (
                     np.abs(fft_full_spectrum[:, :num_fft_bins]) / num_times * 2
@@ -243,9 +241,15 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                 )
                             continue
 
-                        target_bin_index = int(
-                            np.argmin(np.abs(fft_frequencies - target_freq))
-                        )
+                        target_bin_index = int(np.argmin(np.abs(fft_frequencies - target_freq)))
+                        exact_k = int(round(target_freq * num_times / sfreq))
+                        on_bin = abs((target_freq * num_times / sfreq) - round(target_freq * num_times / sfreq)) < 1e-9
+                        if on_bin and 0 <= exact_k < len(fft_frequencies):
+                            if exact_k != target_bin_index:
+                                app.log(
+                                    f"WARN [fft_crop] bin_mismatch cond={cond_label_from_keys} target={target_freq} argmin={target_bin_index} exact={exact_k}"
+                                )
+                            target_bin_index = exact_k
 
                         # Shared noise-floor logic: ±10 bins, exclude neighbors, remove 2 extremes
                         noise_mean_val, noise_std_val = compute_noise_stats_for_bin(
