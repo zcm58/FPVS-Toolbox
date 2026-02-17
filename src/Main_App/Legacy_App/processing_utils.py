@@ -23,7 +23,7 @@ from Tools.SourceLocalization.logging_utils import QueueLogHandler
 from Main_App.Legacy_App.post_process import post_process as _external_post_process
 from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
 from Main_App.Legacy_App.load_utils import load_eeg_file
-from Main_App.Legacy_App.fft_crop_utils import compute_fft_crop_from_events
+from Main_App.Legacy_App.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step, ODDBALL_FREQ
 
 
 def _sanitize_folder_name(label: str) -> str:
@@ -489,6 +489,11 @@ class ProcessingMixin:
                                     if not crop.fallback and crop.n_samples > 0:
                                         n_common = crop.n_samples if n_common is None else min(n_common, crop.n_samples)
 
+                                if n_common is not None and n_step is not None:
+                                    n_common = (n_common // n_step) * n_step
+                                    if n_common <= 0:
+                                        n_common = None
+
                                 if n_common_by_label.get(lbl) is None and n_common is not None:
                                     n_common_by_label[lbl] = n_common
 
@@ -521,6 +526,30 @@ class ProcessingMixin:
                                     df_hz = sfreq / n_used if n_used > 0 else 0.0
                                     k = (1.2 * n_used / sfreq) if sfreq > 0 else 0.0
                                     k_is_int = abs(k - round(k)) < 1e-9
+                                    _, n_step_check, step_err = compute_onbin_step(fs=sfreq, f_oddball=ODDBALL_FREQ)
+                                    f_bin_hz = (sfreq / n_used) * round(k) if n_used > 0 and sfreq > 0 else 0.0
+                                    if not use_fallback:
+                                        if n_step_check is None or n_used % n_step_check != 0:
+                                            raise ValueError(
+                                                f"FFT crop enforcement failed for {f_name}/{lbl}: N={n_used}, N_step={n_step_check}"
+                                            )
+                                        fs_i = int(round(sfreq))
+                                        if (ODDBALL_FREQ.numerator * n_used) % (ODDBALL_FREQ.denominator * fs_i) != 0:
+                                            raise ValueError(
+                                                f"FFT bin-lock failed for {f_name}/{lbl}: N={n_used}, fs_i={fs_i}"
+                                            )
+                                        fft_crop_log(
+                                            "INFO",
+                                            f"FFT_CROP_ACTIVE file={f_name} condition={lbl} rep={rep_key[1]} fs={sfreq:.6f} "
+                                            f"N_step={n_step_check} N={n_used} N%N_step={n_used % n_step_check} "
+                                            f"k={k:.8f} f_bin={f_bin_hz:.12f}",
+                                        )
+                                    else:
+                                        fft_crop_log(
+                                            "WARN",
+                                            f"FFT_CROP_FALLBACK file={f_name} condition={lbl} rep={rep_key[1]} reason={fallback_reason or step_err or 'unknown'} "
+                                            f"N={n_used} k={k:.8f} f_bin={f_bin_hz:.12f}",
+                                        )
                                     fft_crop_log(
                                         "INFO" if not use_fallback else "WARN",
                                         f"file={f_name} condition={lbl} rep={rep_key[1]} block=({crop.block_start_sample},{crop.block_end_sample}) "

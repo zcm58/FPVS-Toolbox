@@ -27,13 +27,22 @@ class CropResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def _compute_n_step(fs: float) -> Tuple[Optional[int], Optional[str]]:
+ODDBALL_FREQ = Fraction(6, 5)
+
+
+def compute_onbin_step(fs: float, f_oddball: Fraction = ODDBALL_FREQ) -> Tuple[Optional[int], Optional[int], Optional[str]]:
     fs_i = int(round(fs))
     if abs(fs - fs_i) >= 1e-6:
-        return None, f"non_integer_fs:{fs}"
-    frac = Fraction(6, 5)
-    den_fs = frac.denominator * fs_i
-    return den_fs // gcd(frac.numerator, den_fs), None
+        return None, None, f"non_integer_fs:{fs}"
+    den_fs = f_oddball.denominator * fs_i
+    n_step = den_fs // gcd(f_oddball.numerator, den_fs)
+    return fs_i, n_step, None
+
+
+def compute_onbin_N(available_samples: int, N_step: int) -> int:
+    if available_samples <= 0 or N_step <= 0:
+        return 0
+    return (available_samples // N_step) * N_step
 
 
 def compute_fft_crop_from_events(
@@ -51,7 +60,7 @@ def compute_fft_crop_from_events(
         run_warnings.append("empty_events")
         return results, None, run_warnings
 
-    n_step, step_err = _compute_n_step(fs)
+    _, n_step, step_err = compute_onbin_step(fs=fs)
     if step_err:
         run_warnings.append(step_err)
 
@@ -103,7 +112,7 @@ def compute_fft_crop_from_events(
             n_samples = 0
             crop_start = onset_sample
         else:
-            n_samples = (available // n_step) * n_step
+            n_samples = compute_onbin_N(available_samples=available, N_step=n_step)
             crop_start = first55
             if n_samples <= 0:
                 fallback = True
