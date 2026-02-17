@@ -7,10 +7,12 @@ import gc
 import mne
 import re
 from config import TARGET_FREQUENCIES, DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
-from typing import List, Any
+from typing import List, Any, Dict
 from Tools.Stats.Legacy.full_snr import compute_full_snr
 from Tools.Stats.Legacy.noise_utils import compute_noise_stats_for_bin
 
+
+from Main_App.Legacy_App.post_process_excel import build_fft_neighbors_rows, write_results_workbook
 
 def post_process(app: Any, condition_labels_present: List[str]) -> None:
     """
@@ -128,6 +130,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         # --- Metrics Calculation (largely unchanged) ---
         accum = {"fft": None, "snr": None, "z": None, "bca": None}
         full_snr_accum = None
+        fft_neighbors_rows: List[Dict[str, Any]] = []
         valid_data_count = 0
         final_num_channels = 0
         final_electrode_names_ordered = []
@@ -220,6 +223,22 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 fft_full_spectrum = np.fft.fft(avg_data_uv, axis=1)
                 fft_amplitudes = (
                     np.abs(fft_full_spectrum[:, :num_fft_bins]) / num_times * 2
+                )
+
+                source_file_name = os.path.basename(app.data_paths[0]) if app.data_paths else pid
+                fft_neighbors_rows.extend(
+                    build_fft_neighbors_rows(
+                        file_name=source_file_name,
+                        condition_label=cond_label_from_keys,
+                        condition_id=cond_label_from_keys,
+                        repetition_index=str(data_idx + 1),
+                        electrode_names=ordered_electrode_names_for_df,
+                        fft_amplitudes=fft_amplitudes,
+                        freqs=fft_frequencies,
+                        fs=sfreq,
+                        n_samples=num_times,
+                        target_freq=1.2,
+                    )
                 )
 
                 # Full-spectrum SNR (uses shared noise logic via compute_full_snr)
@@ -368,30 +387,35 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     0, "Electrode", dataframes_to_save[df_name_iter].index
                 )
 
+            neighbor_columns = [
+                "file_name",
+                "condition_label",
+                "condition_id",
+                "repetition_index",
+                "channel_or_roi",
+                "target",
+                "fs",
+                "N",
+                "T_sec",
+                "df_hz",
+                "k0",
+                "f_bin_hz",
+                *[f"amp_m{i}" for i in range(11, 0, -1)],
+                *[f"amp_p{i}" for i in range(1, 12)],
+                "warning",
+            ]
+            fft_neighbors_df = pd.DataFrame(fft_neighbors_rows)
+            if fft_neighbors_df.empty:
+                fft_neighbors_df = pd.DataFrame(columns=neighbor_columns)
+            else:
+                fft_neighbors_df = fft_neighbors_df.reindex(columns=neighbor_columns)
+
             try:
-                with pd.ExcelWriter(full_excel_path, engine="xlsxwriter") as writer:
-                    workbook = writer.book
-                    center_fmt = workbook.add_format(
-                        {"align": "center", "valign": "vcenter"}
-                    )
-                    for sheet_name, df_to_write in dataframes_to_save.items():
-                        df_to_write.to_excel(
-                            writer, sheet_name=sheet_name, index=False
-                        )
-                        worksheet = writer.sheets[sheet_name]
-                        for col_idx, header_name in enumerate(df_to_write.columns):
-                            max_len = max(
-                                len(str(header_name)),
-                                df_to_write[header_name]
-                                .astype(str)
-                                .map(len)
-                                .max()
-                                if not df_to_write[header_name].empty
-                                else 0,
-                            )
-                            worksheet.set_column(
-                                col_idx, col_idx, max_len + 4, center_fmt
-                            )
+                write_results_workbook(
+                    full_excel_path=full_excel_path,
+                    dataframes_to_save=dataframes_to_save,
+                    fft_neighbors_df=fft_neighbors_df,
+                )
                 app.log(f"Successfully saved Excel: {excel_filename}")
                 any_results_saved = True
             except Exception as write_err:
