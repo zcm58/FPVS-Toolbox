@@ -18,6 +18,12 @@ def build_fft_neighbors_rows(
     fs: float,
     n_samples: int,
     target_freq: float = 1.2,
+    crop_mode: str = "fixed_epoch_fallback",
+    n55: Optional[int] = None,
+    first55_samp: Optional[int] = None,
+    last55_samp: Optional[int] = None,
+    n_step: Optional[int] = None,
+    fallback_reason: str = "",
 ) -> List[Dict[str, Any]]:
     """Build per-channel FFT neighbor rows (±11 bins, excluding center bin)."""
     rows: List[Dict[str, Any]] = []
@@ -28,6 +34,12 @@ def build_fft_neighbors_rows(
     if not (0 <= k0 < len(freqs)):
         k0 = int(np.argmin(np.abs(freqs - target_freq)))
     f_bin_hz = float(freqs[k0]) if 0 <= k0 < len(freqs) else np.nan
+    n_mod_step = int(n_samples % n_step) if n_step else np.nan
+
+    if crop_mode == "55_onbin" and n_step and n_mod_step != 0:
+        raise ValueError(
+            f"Invalid on-bin metadata for FFT neighbors row: N={n_samples}, N_step={n_step}, N_mod_step={n_mod_step}"
+        )
 
     for chan_idx, channel_name in enumerate(electrode_names):
         row: Dict[str, Any] = {
@@ -43,6 +55,13 @@ def build_fft_neighbors_rows(
             "df_hz": float(fs / n_samples) if n_samples else np.nan,
             "k0": int(k0),
             "f_bin_hz": f_bin_hz,
+            "crop_mode": crop_mode,
+            "n55": int(n55) if n55 is not None else np.nan,
+            "first55_samp": int(first55_samp) if first55_samp is not None else np.nan,
+            "last55_samp": int(last55_samp) if last55_samp is not None else np.nan,
+            "N_step": int(n_step) if n_step is not None else np.nan,
+            "N_mod_step": n_mod_step,
+            "fallback_reason": fallback_reason if crop_mode == "fixed_epoch_fallback" else "",
             "warning": "",
         }
         out_of_bounds = []

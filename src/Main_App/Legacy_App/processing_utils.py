@@ -479,6 +479,7 @@ class ProcessingMixin:
                                 rep_keys = sorted([k for k in crop_results if k[0] == int(num_id_val_gui)], key=lambda x: x[1])
                                 rep_segments = []
                                 rep_events = []
+                                rep_diagnostics = []
                                 rep_fallback_count = 0
                                 n_common = None
                                 for rep_key in rep_keys:
@@ -558,6 +559,17 @@ class ProcessingMixin:
                                         f"N={n_used} T={t_sec:.6f} df={df_hz:.6f} k={k:.8f} on_bin_pass={k_is_int} "
                                         f"fallback={use_fallback} fallback_reason={fallback_reason} dedup_dropped={crop.dedup_dropped} missing_gap_warns={crop.missing_gap_count}",
                                     )
+                                    rep_diagnostics.append(
+                                        {
+                                            "crop_mode": "fixed_epoch_fallback" if use_fallback else "55_onbin",
+                                            "n55": int(crop.n55_dedup),
+                                            "first55_samp": int(crop.first55_sample) if crop.first55_sample is not None else np.nan,
+                                            "last55_samp": int(crop.last55_sample) if crop.last55_sample is not None else np.nan,
+                                            "N_step": int(n_step_check) if n_step_check is not None else np.nan,
+                                            "N_mod_step": int(n_used % n_step_check) if n_step_check else np.nan,
+                                            "fallback_reason": fallback_reason or "",
+                                        }
+                                    )
 
                                 if rep_segments:
                                     epoch_data = np.stack(rep_segments, axis=0)
@@ -570,6 +582,8 @@ class ProcessingMixin:
                                         baseline=None,
                                         verbose=False,
                                     )
+                                    if rep_diagnostics and len(rep_diagnostics) == len(epochs.events):
+                                        epochs.metadata = pd.DataFrame(rep_diagnostics)
                                     gui_queue.put({'type': 'log',
                                                    'message': f"  -> Successfully created {len(epochs.events)} epochs for GUI label '{lbl}' in {f_name}."})
                                     file_epochs[lbl] = [epochs]
