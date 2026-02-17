@@ -225,6 +225,54 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     np.abs(fft_full_spectrum[:, :num_fft_bins]) / num_times * 2
                 )
 
+                crop_mode = "fixed_epoch_fallback"
+                n55 = None
+                first55_samp = None
+                last55_samp = None
+                n_step = None
+                fallback_reason = "legacy_epoch_path"
+                if not is_evoked and getattr(data_object, "metadata", None) is not None and not data_object.metadata.empty:
+                    md = data_object.metadata
+                    crop_modes = [m for m in md.get("crop_mode", pd.Series(dtype=object)).dropna().astype(str).tolist() if m]
+                    if crop_modes and all(m == "55_onbin" for m in crop_modes):
+                        crop_mode = "55_onbin"
+                        fallback_reason = ""
+                    elif crop_modes:
+                        crop_mode = "fixed_epoch_fallback"
+                        fallback_reasons = [
+                            r
+                            for r in md.get("fallback_reason", pd.Series(dtype=object)).fillna("").astype(str).tolist()
+                            if r
+                        ]
+                        fallback_reason = "; ".join(sorted(set(fallback_reasons))) if fallback_reasons else "mixed_or_fallback_reps"
+
+                    n55_vals = md.get("n55", pd.Series(dtype=float)).dropna().tolist()
+                    if n55_vals:
+                        n55 = int(min(n55_vals))
+
+                    first_vals = md.get("first55_samp", pd.Series(dtype=float)).dropna().tolist()
+                    if first_vals:
+                        first55_samp = int(min(first_vals))
+
+                    last_vals = md.get("last55_samp", pd.Series(dtype=float)).dropna().tolist()
+                    if last_vals:
+                        last55_samp = int(max(last_vals))
+
+                    step_vals = md.get("N_step", pd.Series(dtype=float)).dropna().tolist()
+                    if step_vals:
+                        unique_steps = sorted({int(v) for v in step_vals})
+                        if len(unique_steps) > 1:
+                            raise ValueError(f"Inconsistent N_step values for {cond_label_from_keys}: {unique_steps}")
+                        n_step = unique_steps[0]
+
+                if crop_mode == "55_onbin":
+                    if not n_step:
+                        raise ValueError(f"Missing N_step for 55_onbin path in condition {cond_label_from_keys}")
+                    if num_times % n_step != 0:
+                        raise ValueError(
+                            f"55_onbin data is not divisible by N_step in post_process: N={num_times}, N_step={n_step}"
+                        )
+
                 source_file_name = os.path.basename(app.data_paths[0]) if app.data_paths else pid
                 fft_neighbors_rows.extend(
                     build_fft_neighbors_rows(
@@ -238,6 +286,12 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         fs=sfreq,
                         n_samples=num_times,
                         target_freq=1.2,
+                        crop_mode=crop_mode,
+                        n55=n55,
+                        first55_samp=first55_samp,
+                        last55_samp=last55_samp,
+                        n_step=n_step,
+                        fallback_reason=fallback_reason,
                     )
                 )
 
@@ -400,6 +454,13 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 "df_hz",
                 "k0",
                 "f_bin_hz",
+                "crop_mode",
+                "n55",
+                "first55_samp",
+                "last55_samp",
+                "N_step",
+                "N_mod_step",
+                "fallback_reason",
                 *[f"amp_m{i}" for i in range(11, 0, -1)],
                 *[f"amp_p{i}" for i in range(1, 12)],
                 "warning",
