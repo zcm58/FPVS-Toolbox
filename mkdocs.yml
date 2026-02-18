@@ -4,7 +4,9 @@ theme:
 
 nav:
   - Home: index.md
-  - Processing Pipeline: processing-pipeline.md
+  - Processing Pipeline:
+      - Overview: processing-pipeline.md
+      - FFT and Frequency-Domain Quantification (FPVS): fft-frequency-domain-quantification.md
   - Statistical Analysis:
       - Overview: statistical-analysis.md
       - Rossion harmonic selection: statistics/rossion-harmonic-selection.md
