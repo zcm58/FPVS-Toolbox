@@ -22,17 +22,20 @@ import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
 from dataclasses import dataclass
+from fractions import Fraction
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
 from Main_App.PySide6_App.Backend import preprocess as backend_preprocess
+from Main_App.Legacy_App.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step
 
 import psutil  # soft memory cap
 from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
+ODDBALL_FREQ = Fraction(6, 5)
 
 
 @dataclass(frozen=True)
@@ -144,11 +147,40 @@ def _make_error_result(
     return payload
 
 
+def _build_fft_crop_file_logger(project_root: Path, file_path: Path) -> logging.Logger:
+    """Create a per-file crop logger so child-process diagnostics are always persisted."""
+    logs_dir = project_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / f"fft_crop_{file_path.stem}_{os.getpid()}.log"
+
+    logger_name = f"{__name__}.fft_crop.{file_path.stem}.{os.getpid()}"
+    crop_logger = logging.getLogger(logger_name)
+    crop_logger.setLevel(logging.INFO)
+    crop_logger.propagate = False
+    for handler in list(crop_logger.handlers):
+        crop_logger.removeHandler(handler)
+
+    handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    crop_logger.addHandler(handler)
+    return crop_logger
+
+
+def _close_worker_logger(target_logger: logging.Logger) -> None:
+    for handler in list(target_logger.handlers):
+        try:
+            handler.flush()
+            handler.close()
+        finally:
+            target_logger.removeHandler(handler)
+
+
 def _run_full_pipeline_for_file(
     file_path: Path,
     settings: Dict[str, object],
     event_map: Dict[str, int],
     save_folder: Path,
+    project_root: Path,
 ) -> Dict[str, object]:
     """
     Canonical single-file pipeline using the PySide6 backend.
@@ -159,17 +191,14 @@ def _run_full_pipeline_for_file(
     """
     t0 = time.perf_counter()
     stage = "load"
+    crop_logger = _build_fft_crop_file_logger(project_root=project_root, file_path=file_path)
     try:
-        # Debug sentinel so we know this worker path is being used
-        print(
-            f"[SENTINEL] process_runner _run_full_pipeline_for_file running for "
-            f"{file_path.name}"
-        )
         logger.info(
             "[PIPELINE START] file=%s stage=%s",
             file_path.name,
             stage,
         )
+        crop_logger.info("file=%s stage=start", file_path.name)
 
         # Lazy imports (inside worker only)
         from Main_App.PySide6_App.Backend.loader import load_eeg_file  # type: ignore
@@ -341,9 +370,23 @@ def _run_full_pipeline_for_file(
         stage = "epochs"
         tmin = float(settings.get("epoch_start", -1.0))
         tmax = float(settings.get("epoch_end", 1.0))
+        sfreq = float(raw_proc.info["sfreq"])
+        _, n_step, step_err = compute_onbin_step(fs=sfreq, f_oddball=ODDBALL_FREQ)
+        if step_err:
+            crop_logger.warning("file=%s step_error=%s", file_path.name, step_err)
 
         # Which event codes are actually present in this recording?
         have_codes = {int(c) for c in events[:, 2].tolist()}
+        onset_ids = set(int(v) for v in event_map.values())
+        crop_results, _, run_warnings = compute_fft_crop_from_events(
+            events=events,
+            fs=sfreq,
+            onset_ids=onset_ids,
+            oddball_id=55,
+            stream_end_sample=int(raw_proc.n_times),
+        )
+        for run_warning in run_warnings:
+            crop_logger.warning("file=%s run_warning=%s", file_path.name, run_warning)
 
         epochs_dict: Dict[str, List[object]] = {}
         total_epochs = 0
@@ -352,62 +395,149 @@ def _run_full_pipeline_for_file(
             code_int = int(code)
 
             if code_int not in have_codes:
-                # Participant simply never saw this condition/run.
                 msg = (
                     f"[AUDIT WARNING] {file_path.name}: label='{label}' code={code_int} "
                     f"has 0 matching events; skipping epochs for this label."
                 )
                 logger.warning(msg)
-                print(msg)
-                epochs_dict[label] = []  # keep key present but with no runs
+                epochs_dict[label] = []
                 continue
 
-            # Create epochs for codes that are present; allow MNE to warn instead of raise.
-            # Keep preload=False for memory reasons.
-            epochs = mne.Epochs(
-                raw_proc,
-                events,
-                event_id={label: code_int},
-                tmin=tmin,
-                tmax=tmax,
-                preload=False,
-                baseline=None,
-                decim=1,
-                verbose=False,
-                on_missing="warn",
-            )
+            rep_keys = sorted([k for k in crop_results if int(k[0]) == code_int], key=lambda x: x[1])
+            rep_segments: List[object] = []
+            rep_events: List[List[int]] = []
+            rep_metadata: List[dict] = []
 
-            # MNE requires that bad epochs be dropped (or preload=True) before len(epochs)
-            # is called when preload=False. We do not change any reject/flat configuration
-            # here; drop_bad() will simply apply any existing thresholds and mark that
-            # the bad-epoch decision has been made.
-            epochs.drop_bad()
+            n_common: Optional[int] = None
+            if n_step:
+                rep_lengths = [crop_results[k].n_samples for k in rep_keys if not crop_results[k].fallback and crop_results[k].n_samples > 0]
+                if rep_lengths:
+                    n_common = (min(rep_lengths) // n_step) * n_step
+                    if n_common <= 0:
+                        n_common = None
 
-            # For audit: how many raw events had this code, and how many epochs remain.
-            n_events_for_code = int((events[:, 2] == code_int).sum())
-            n_ep = len(epochs)
+            for rep_key in rep_keys:
+                crop = crop_results[rep_key]
+                fallback_reason = ""
+                crop_mode = "55_onbin"
+                first55_samp = crop.first55_sample
+                last55_samp = crop.last55_sample
+                n55 = int(crop.n55_dedup)
+                n_rep = int(crop.n_samples)
+                available_samples = int(crop.available_samples)
 
+                use_fallback = bool(crop.fallback or n_common is None or not n_step)
+                if use_fallback:
+                    crop_mode = "fixed_epoch_fallback"
+                    fallback_reason = crop.fallback_reason or ("missing_n_common" if n_common is None else "unknown")
+                    start_samp = int(crop.block_start_sample + tmin * sfreq)
+                    stop_samp = int(crop.block_start_sample + tmax * sfreq)
+                    start_samp = max(0, start_samp)
+                    stop_samp = min(int(raw_proc.n_times), stop_samp)
+                else:
+                    start_samp = int(crop.crop_start_sample)
+                    stop_samp = int(start_samp + n_common)
+
+                if stop_samp <= start_samp:
+                    crop_logger.warning(
+                        "file=%s condition=%s rep=%d skip_empty_segment start=%d stop=%d",
+                        file_path.name,
+                        label,
+                        int(rep_key[1]),
+                        start_samp,
+                        stop_samp,
+                    )
+                    continue
+
+                epoch_data = raw_proc.get_data(start=start_samp, stop=stop_samp)
+                if epoch_data.size == 0:
+                    crop_logger.warning(
+                        "file=%s condition=%s rep=%d skip_no_data start=%d stop=%d",
+                        file_path.name,
+                        label,
+                        int(rep_key[1]),
+                        start_samp,
+                        stop_samp,
+                    )
+                    continue
+
+                n_used = int(epoch_data.shape[1])
+                n_mod_step = int(n_used % n_step) if n_step else -1
+                df_hz = (sfreq / float(n_used)) if n_used > 0 else 0.0
+                k0 = (1.2 * float(n_used) / sfreq) if n_used > 0 else 0.0
+                f_bin_hz = (round(k0) * df_hz) if n_used > 0 else 0.0
+
+                crop_logger.info(
+                    (
+                        "file=%s condition=%s rep=%d fs=%.6f N_step=%s n55=%d first55_samp=%s "
+                        "last55_samp=%s available_samples=%d N_rep=%d N_common=%s N_common_mod_step=%s "
+                        "df_hz=%.9f k0=%.9f f_bin_hz=%.9f crop_mode=%s fallback_reason=%s"
+                    ),
+                    file_path.name,
+                    label,
+                    int(rep_key[1]),
+                    sfreq,
+                    n_step,
+                    n55,
+                    first55_samp,
+                    last55_samp,
+                    available_samples,
+                    n_rep,
+                    n_common,
+                    n_mod_step,
+                    df_hz,
+                    k0,
+                    f_bin_hz,
+                    crop_mode,
+                    fallback_reason,
+                )
+
+                rep_segments.append(epoch_data)
+                rep_events.append([start_samp, 0, code_int])
+                rep_metadata.append(
+                    {
+                        "crop_mode": crop_mode,
+                        "n55": n55,
+                        "first55_samp": first55_samp,
+                        "last55_samp": last55_samp,
+                        "N_step": int(n_step) if n_step else None,
+                        "N_mod_step": n_mod_step if n_step else None,
+                        "fallback_reason": fallback_reason,
+                    }
+                )
+
+            n_ep = len(rep_segments)
             logger.info(
-                "[AUDIT DEBUG] %s: label='%s' code=%s events_for_code=%d "
-                "epochs_after_drop_bad=%d",
+                "[AUDIT DEBUG] %s: label='%s' code=%s events_for_code=%d epochs_after_crop=%d",
                 file_path.name,
                 label,
                 code_int,
-                n_events_for_code,
+                int((events[:, 2] == code_int).sum()),
                 n_ep,
             )
 
             if n_ep == 0:
-                # Code exists in the event array but epoch window / rejection yielded no data.
                 msg = (
                     f"[AUDIT WARNING] {file_path.name}: label='{label}' code={code_int} "
                     f"produced 0 epochs after epoching; skipping this label."
                 )
                 logger.warning(msg)
-                print(msg)
                 epochs_dict[label] = []
                 continue
 
+            import numpy as np  # local for worker import minimization
+            import pandas as pd
+
+            epochs = mne.EpochsArray(
+                np.stack(rep_segments, axis=0),
+                raw_proc.info.copy(),
+                events=np.asarray(rep_events, dtype=int),
+                event_id={label: code_int},
+                tmin=0.0,
+                baseline=None,
+                verbose=False,
+            )
+            epochs.metadata = pd.DataFrame(rep_metadata)
             epochs_dict[label] = [epochs]
             total_epochs += n_ep
 
@@ -494,7 +624,7 @@ def _run_full_pipeline_for_file(
             if problems:
                 parts.append(f"problems={problems}")
 
-            print("[AUDIT DEBUG] " + " ".join(parts))
+            logger.info("[AUDIT DEBUG] %s", " ".join(parts))
 
         # Done with Raw/Epochs
         del raw_proc, epochs_dict
@@ -530,12 +660,15 @@ def _run_full_pipeline_for_file(
             "post_export_ok": bool(fif_written),
         }
     except Exception as e:  # pragma: no cover - worker error path
+        crop_logger.exception("file=%s stage=%s worker_error=%s", file_path.name, stage, str(e))
         return _make_error_result(
             file_path=file_path,
             stage=stage,
             exc=e,
             start_time=t0,
         )
+    finally:
+        _close_worker_logger(crop_logger)
 
 
 
@@ -544,6 +677,7 @@ def _process_one_file(
     settings: Dict[str, object],
     event_map: Dict[str, int],
     save_folder: Path,
+    project_root: Path,
 ) -> Dict[str, object]:
     """
     Execute the processing steps for a single file using the PySide6 backend.
@@ -551,7 +685,7 @@ def _process_one_file(
     This is the worker entry point used by multiprocessing. It delegates to
     _run_full_pipeline_for_file so the same pipeline can be reused by other callers.
     """
-    return _run_full_pipeline_for_file(file_path, settings, event_map, save_folder)
+    return _run_full_pipeline_for_file(file_path, settings, event_map, save_folder, project_root)
 
 
 def _memory_ok(limit_ratio: Optional[float]) -> Tuple[bool, float]:
@@ -658,6 +792,7 @@ def run_project_parallel(
                 params.settings,
                 params.event_map,
                 params.save_folder,
+                params.project_root,
             )
             in_flight[fut] = f
             if len(in_flight) > peak_in_flight:
