@@ -6,6 +6,7 @@ import traceback
 import gc
 import mne
 import re
+from fractions import Fraction
 from config import TARGET_FREQUENCIES, DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
 from typing import List, Any, Dict
 from Tools.Stats.Legacy.full_snr import compute_full_snr
@@ -14,6 +15,9 @@ from Main_App.Legacy_App.fft_crop_utils import compute_onbin_N, compute_onbin_st
 
 
 from Main_App.Legacy_App.post_process_excel import build_fft_neighbors_rows, write_results_workbook
+
+
+ODDBALL_FREQ = Fraction(6, 5)
 
 
 def _resolve_condition_id(event_id_map: Dict[str, Any], condition_label: str) -> int | None:
@@ -56,6 +60,64 @@ def _load_events_for_file(raw_path: str, event_id_map: Dict[str, Any], stim_chan
         return events, int(raw.n_times)
     finally:
         raw.close()
+
+
+def _attempt_legacy_55_onbin_crop(
+    avg_data: np.ndarray,
+    sfreq: float,
+    data_idx: int,
+    condition_id: int,
+    onset_ids: list[int],
+    global_events: np.ndarray,
+    stream_end_sample: int,
+    epoch_start_sec: float,
+):
+    num_channels, num_times = avg_data.shape
+    samples_55 = []
+    n55 = None
+    first55_samp = None
+    last55_samp = None
+    n_step = None
+
+    cond_starts = [int(row[0]) for row in global_events if int(row[2]) == condition_id]
+    all_starts = sorted([int(row[0]) for row in global_events if int(row[2]) in onset_ids])
+    if not cond_starts:
+        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, "no_condition_starts"
+    if not all_starts:
+        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, "no_onset_starts"
+
+    rep_idx = min(data_idx, len(cond_starts) - 1)
+    block_start = cond_starts[rep_idx]
+    block_end = next((s for s in all_starts if s > block_start), stream_end_sample)
+
+    samples_55 = [
+        int(row[0])
+        for row in global_events
+        if block_start < int(row[0]) < block_end and int(row[2]) == 55
+    ]
+    n55 = int(len(samples_55))
+    first55_samp = int(samples_55[0]) if samples_55 else None
+    last55_samp = int(samples_55[-1]) if samples_55 else None
+
+    _, n_step, step_err = compute_onbin_step(fs=float(sfreq), f_oddball=ODDBALL_FREQ)
+    if step_err or n_step is None:
+        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, step_err or "step_error"
+    if len(samples_55) < 2:
+        reason = "no_55_in_block" if len(samples_55) == 0 else "insufficient_55"
+        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, reason
+
+    available_samples = int(block_end - first55_samp)
+    n_used = int(compute_onbin_N(available_samples=available_samples, N_step=n_step))
+    epoch_start_sample = int(round(block_start + epoch_start_sec * sfreq))
+    crop_start_idx = int(max(0, first55_samp - epoch_start_sample))
+    max_available_from_epoch = int(max(0, num_times - crop_start_idx))
+    n_used = int(compute_onbin_N(available_samples=min(n_used, max_available_from_epoch), N_step=n_step))
+
+    if n_used < n_step:
+        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, "too_short_for_step"
+
+    cropped = avg_data[:, crop_start_idx:crop_start_idx + n_used]
+    return cropped, "55_onbin", n55, first55_samp, last55_samp, n_step, ""
 
 def post_process(app: Any, condition_labels_present: List[str]) -> None:
     """
@@ -270,8 +332,10 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     condition_id = _resolve_condition_id(event_id_map, cond_label_from_keys)
                     onset_ids = sorted({int(v) for v in event_id_map.values() if str(v).isdigit()})
                     epoch_start_sec = float(validated_params.get("epoch_start", 0.0))
-                    if condition_id is None or not onset_ids:
-                        fallback_reason = "legacy_epoch_path"
+                    if condition_id is None:
+                        fallback_reason = "missing_condition_id"
+                    elif not onset_ids:
+                        fallback_reason = "missing_onset_ids"
                     else:
                         try:
                             source_path = app.data_paths[0]
@@ -279,50 +343,20 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                 event_cache[source_path] = _load_events_for_file(raw_path=source_path, event_id_map=event_id_map)
                             global_events, stream_end_sample = event_cache[source_path]
 
-                            cond_starts = [
-                                int(row[0])
-                                for row in global_events
-                                if int(row[2]) == condition_id
-                            ]
-                            all_starts = sorted([int(row[0]) for row in global_events if int(row[2]) in onset_ids])
-                            if not cond_starts or not all_starts:
-                                fallback_reason = "legacy_epoch_path"
-                            else:
-                                rep_idx = min(data_idx, len(cond_starts) - 1)
-                                block_start = cond_starts[rep_idx]
-                                block_end = next((s for s in all_starts if s > block_start), stream_end_sample)
-                                samples_55 = [
-                                    int(row[0])
-                                    for row in global_events
-                                    if block_start <= int(row[0]) < block_end and int(row[2]) == 55
-                                ]
-                                n55 = int(len(samples_55))
-                                first55_samp = int(samples_55[0]) if samples_55 else None
-                                last55_samp = int(samples_55[-1]) if samples_55 else None
-
-                                _, n_step, step_err = compute_onbin_step(fs=float(sfreq))
-                                if step_err or n_step is None:
-                                    fallback_reason = step_err or "legacy_epoch_path"
-                                elif len(samples_55) < 2:
-                                    fallback_reason = "no_55_in_block" if len(samples_55) == 0 else "insufficient_55"
-                                else:
-                                    available_samples = int(block_end - first55_samp)
-                                    n_used = int(compute_onbin_N(available_samples=available_samples, N_step=n_step))
-                                    epoch_start_sample = int(round(block_start + epoch_start_sec * sfreq))
-                                    crop_start_idx = int(max(0, first55_samp - epoch_start_sample))
-                                    max_available_from_epoch = int(max(0, num_times - crop_start_idx))
-                                    n_used = int(compute_onbin_N(available_samples=min(n_used, max_available_from_epoch), N_step=n_step))
-
-                                    if n_used < n_step:
-                                        fallback_reason = "too_short_for_step"
-                                    else:
-                                        avg_data = avg_data[:, crop_start_idx:crop_start_idx + n_used]
-                                        num_channels, num_times = avg_data.shape
-                                        crop_mode = "55_onbin"
-                                        fallback_reason = ""
+                            avg_data, crop_mode, n55, first55_samp, last55_samp, n_step, fallback_reason = _attempt_legacy_55_onbin_crop(
+                                avg_data=avg_data,
+                                sfreq=float(sfreq),
+                                data_idx=int(data_idx),
+                                condition_id=int(condition_id),
+                                onset_ids=onset_ids,
+                                global_events=global_events,
+                                stream_end_sample=int(stream_end_sample),
+                                epoch_start_sec=float(epoch_start_sec),
+                            )
+                            num_channels, num_times = avg_data.shape
                         except Exception as crop_err:
                             app.log(f"    Warn: 55-based crop attempt failed in legacy path: {crop_err}")
-                            fallback_reason = "legacy_epoch_path"
+                            fallback_reason = "crop_exception"
 
                 if not is_evoked and getattr(data_object, "metadata", None) is not None and not data_object.metadata.empty:
                     md = data_object.metadata
