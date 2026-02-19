@@ -18,6 +18,12 @@ RM_ANOVA_P_COLUMNS: tuple[str, ...] = ("Pr > F", "Pr > F (GG)", "Pr > F (HF)")
 SCIENTIFIC_P_THRESHOLD = 0.001
 SCIENTIFIC_FMT = "0.00E+00"
 DEFAULT_P_FMT = "0.0000"
+BASELINE_VS_ZERO_P_COLUMNS: tuple[str, ...] = (
+    "p (raw)",
+    "p (BH-FDR corrected)",
+    "p_raw",
+    "p_corr",
+)
 
 
 def log_rm_anova_p_minima(anova_df: pd.DataFrame) -> None:
@@ -191,6 +197,49 @@ def apply_lmm_number_formats_and_metadata(
         for col in ws_meta.columns:
             width = max(len(str(c.value)) if c.value is not None else 0 for c in col) + 2
             ws_meta.column_dimensions[col[0].column_letter].width = min(width, 120)
+    finally:
+        workbook.save(path)
+        workbook.close()
+
+
+def apply_baseline_vs_zero_number_formats(
+    workbook_path: str | Path,
+    *,
+    sheet_name: str = "Baseline_vs_Zero",
+) -> None:
+    """Apply high-precision/scientific formatting to baseline-vs-zero p-value columns."""
+
+    path = Path(workbook_path)
+    workbook = openpyxl.load_workbook(path)
+    try:
+        if sheet_name not in workbook.sheetnames:
+            return
+        worksheet = workbook[sheet_name]
+        headers = {
+            str(cell.value).strip(): idx
+            for idx, cell in enumerate(worksheet[1], start=1)
+            if isinstance(cell.value, str)
+        }
+        target_indices = [headers[col] for col in BASELINE_VS_ZERO_P_COLUMNS if col in headers]
+        if not target_indices:
+            return
+        for row_idx in range(2, worksheet.max_row + 1):
+            for col_idx in target_indices:
+                cell = worksheet.cell(row=row_idx, column=col_idx)
+                value = cell.value
+                if isinstance(value, bool) or value is None:
+                    continue
+                try:
+                    numeric = float(value)
+                except Exception:
+                    continue
+                if not math.isfinite(numeric):
+                    continue
+                cell.value = numeric
+                if numeric != 0.0 and abs(numeric) < SCIENTIFIC_P_THRESHOLD:
+                    cell.number_format = SCIENTIFIC_FMT
+                else:
+                    cell.number_format = "0.000000"
     finally:
         workbook.save(path)
         workbook.close()
