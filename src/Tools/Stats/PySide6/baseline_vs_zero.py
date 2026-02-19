@@ -117,7 +117,7 @@ def run_baseline_vs_zero_tests(
 
     if not results_df.empty:
         if correction_scope == "global":
-            mask = results_df["p_raw"].notna()
+            mask = pd.to_numeric(results_df["p_raw"], errors="coerce").map(np.isfinite)
             if mask.any():
                 reject, p_corr, _, _ = multipletests(
                     results_df.loc[mask, "p_raw"].to_numpy(dtype=float),
@@ -127,8 +127,9 @@ def run_baseline_vs_zero_tests(
                 results_df.loc[mask, "p_corr"] = p_corr
                 results_df.loc[mask, "reject"] = reject
         else:
-            for roi, idx in results_df.groupby("roi", dropna=False).groups.items():
-                roi_mask = results_df.index.isin(idx) & results_df["p_raw"].notna()
+            finite_mask = pd.to_numeric(results_df["p_raw"], errors="coerce").map(np.isfinite)
+            for idx in results_df.groupby("roi", dropna=False).groups.values():
+                roi_mask = results_df.index.isin(idx) & finite_mask
                 if not roi_mask.any():
                     continue
                 reject, p_corr, _, _ = multipletests(
@@ -192,9 +193,30 @@ def export_baseline_vs_zero_results_to_excel(
 
     metadata_obj = payload.get("metadata")
     metadata: dict[str, object] = metadata_obj if isinstance(metadata_obj, dict) else {}
+    correction_method_raw = str(metadata.get("correction", "fdr_bh"))
+    correction_scope = str(metadata.get("correction_scope", "global"))
+    correction_method_label = (
+        "fdr_bh (Benjamini–Hochberg FDR)"
+        if correction_method_raw == "fdr_bh"
+        else correction_method_raw
+    )
+    correction_scope_definition = (
+        "Across all condition×ROI cells with finite raw p-values."
+        if correction_scope == "global"
+        else "Within each ROI across condition cells, using finite raw p-values only."
+    )
+
+    export_df = results_df.copy()
+    if "p_raw" in export_df.columns:
+        export_df = export_df.rename(columns={"p_raw": "p (raw)"})
+    if "p_corr" in export_df.columns:
+        export_df = export_df.rename(columns={"p_corr": "p (BH-FDR corrected)"})
+    export_df["correction_method"] = "BH-FDR" if correction_method_raw == "fdr_bh" else correction_method_raw
+    export_df["correction_scope"] = correction_scope
+
     n_by_cell = (
-        results_df.loc[:, ["condition", "roi", "N"]]
-        if {"condition", "roi", "N"}.issubset(results_df.columns)
+        export_df.loc[:, ["condition", "roi", "N"]]
+        if {"condition", "roi", "N"}.issubset(export_df.columns)
         else pd.DataFrame(columns=["condition", "roi", "N"])
     )
     summary_rows = [
@@ -202,11 +224,15 @@ def export_baseline_vs_zero_results_to_excel(
         {"field": "dv_col", "value": metadata.get("dv_col", "value")},
         {"field": "alpha", "value": metadata.get("alpha", 0.05)},
         {"field": "alternative", "value": metadata.get("alternative", "greater")},
-        {"field": "correction", "value": metadata.get("correction", "fdr_bh")},
+        {"field": "correction", "value": correction_method_raw},
+        {"field": "correction_method", "value": correction_method_label},
         {
             "field": "correction_scope",
-            "value": metadata.get("correction_scope", "global"),
+            "value": correction_scope,
         },
+        {"field": "correction_scope_definition", "value": correction_scope_definition},
+        {"field": "corrected_p_value_column", "value": "p_corr"},
+        {"field": "corrected_p_value_column_in_sheet", "value": "p (BH-FDR corrected)"},
         {
             "field": "total_unique_subjects",
             "value": metadata.get("total_unique_subjects", np.nan),
@@ -233,6 +259,6 @@ def export_baseline_vs_zero_results_to_excel(
 
     save_path = Path(save_path)
     with pd.ExcelWriter(save_path, engine="xlsxwriter") as writer:
-        _auto_format_and_write_excel(writer, results_df, "Baseline_vs_Zero", log_func)
+        _auto_format_and_write_excel(writer, export_df, "Baseline_vs_Zero", log_func)
         _auto_format_and_write_excel(writer, metadata_df, "Metadata", log_func)
     return True

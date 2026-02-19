@@ -96,6 +96,7 @@ from Tools.Stats.PySide6.stats_missingness import export_missingness_workbook
 from Tools.Stats.PySide6.stats_group_contrasts import export_group_contrasts_workbook
 from Tools.Stats.PySide6.baseline_vs_zero import export_baseline_vs_zero_results_to_excel
 from Tools.Stats.PySide6.stats_export_formatting import (
+    apply_baseline_vs_zero_number_formats,
     apply_lmm_number_formats_and_metadata,
     apply_rm_anova_pvalue_number_formats,
     log_rm_anova_p_minima,
@@ -1537,6 +1538,8 @@ class StatsWindow(QMainWindow):
             apply_rm_anova_pvalue_number_formats(path)
         if kind in {"lmm", "lmm_between"} and isinstance(data, pd.DataFrame):
             apply_lmm_number_formats_and_metadata(path, lmm_df=data)
+        if kind == "baseline_vs_zero":
+            apply_baseline_vs_zero_number_formats(path)
         return [path]
 
     def _write_dv_metadata(self, out_dir: str, pipeline_id: PipelineId) -> None:
