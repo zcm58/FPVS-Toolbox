@@ -79,6 +79,7 @@ from Tools.Stats.PySide6.stats_qc_exclusion import (
 )
 from Tools.Stats.PySide6.stats_run_report import StatsRunReport
 from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
+from Tools.Stats.PySide6.baseline_vs_zero import run_baseline_vs_zero_tests
 from Tools.Stats.PySide6.reporting_summary import build_rm_anova_report_path, build_rm_anova_text_report
 from Tools.Stats.PySide6.lmm_reporting import (
     attach_lmm_run_metadata,
@@ -1878,6 +1879,122 @@ def run_posthoc(
             dv_report=exclusion_report,
             required_exclusions=required_exclusions,
             final_modeled_pids=sorted(df_long["subject"].unique().tolist()),
+        ),
+    }
+
+
+def run_baseline_vs_zero(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    conditions_all=None,
+    subject_data,
+    base_freq,
+    alpha,
+    rois,
+    rois_all=None,
+    dv_policy: dict | None = None,
+    dv_variants: list[dict[str, object]] | None = None,
+    outlier_exclusion_enabled: bool = True,
+    outlier_abs_limit: float = 50.0,
+    qc_config: dict | None = None,
+    qc_state: dict | None = None,
+    manual_excluded_pids: list[str] | None = None,
+    alternative: str = "greater",
+    correction: str = "fdr_bh",
+    correction_scope: str = "global",
+):
+    """Run baseline-vs-zero one-sample tests for the single-group pipeline."""
+    _ = progress_cb
+    _ = dv_variants
+    set_rois(rois)
+    message_cb("Preparing data for baseline-vs-zero tests…")
+
+    all_subjects = list(subjects) if subjects else []
+    subjects, subject_data, _subject_groups, qc_report = _apply_qc_screening(
+        subjects=all_subjects,
+        subject_data=subject_data,
+        subject_groups=None,
+        conditions_all=list(conditions_all) if conditions_all else [],
+        rois_all=rois_all or rois,
+        base_freq=base_freq,
+        message_cb=message_cb,
+        qc_config=qc_config,
+        qc_state=qc_state,
+    )
+    subjects, subject_data, _subject_groups, manual_excluded = _apply_manual_exclusions(
+        subjects=list(subjects) if subjects else [],
+        subject_data=subject_data,
+        subject_groups=None,
+        manual_excluded_pids=manual_excluded_pids,
+        message_cb=message_cb,
+    )
+    if not subjects:
+        raise RuntimeError("All participants excluded by manual exclusions.")
+
+    all_subject_bca_data = prepare_summed_bca_data(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_freq=base_freq,
+        log_func=message_cb,
+        rois=rois,
+        dv_policy=dv_policy,
+        dv_metadata={},
+    )
+    if not all_subject_bca_data:
+        raise RuntimeError("Data preparation failed (empty).")
+
+    df_long = _long_format_from_bca(all_subject_bca_data)
+    df_long, exclusion_report = _apply_outlier_exclusion(
+        df_long,
+        enabled=outlier_exclusion_enabled,
+        abs_limit=outlier_abs_limit,
+        message_cb=message_cb,
+    )
+    exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
+    required_exclusions = _extract_required_exclusions(exclusion_report)
+    required_pids = {violation.participant_id for violation in required_exclusions}
+    if required_pids:
+        df_long = df_long[~df_long["subject"].astype(str).isin(required_pids)].copy()
+
+    if df_long.empty:
+        raise RuntimeError("No rows available for baseline-vs-zero tests after exclusions.")
+
+    message_cb("Running baseline-vs-zero tests…")
+    output_text, results_df = run_baseline_vs_zero_tests(
+        df_long,
+        dv_col="value",
+        subject_col="subject",
+        condition_col="condition",
+        roi_col="roi",
+        alpha=alpha,
+        alternative=alternative,
+        correction=correction,
+        correction_scope=correction_scope,
+    )
+    message_cb(output_text)
+
+    metadata = {
+        "dv_col": "value",
+        "alpha": alpha,
+        "alternative": alternative,
+        "correction": correction,
+        "correction_scope": correction_scope,
+        "total_unique_subjects": int(df_long["subject"].nunique()),
+    }
+
+    return {
+        "results_df": results_df,
+        "output_text": output_text,
+        "metadata": metadata,
+        "run_report": StatsRunReport(
+            manual_excluded_pids=manual_excluded,
+            qc_report=qc_report,
+            dv_report=exclusion_report,
+            required_exclusions=required_exclusions,
         ),
     }
 
