@@ -1995,6 +1995,7 @@ def run_baseline_vs_zero(
             qc_report=qc_report,
             dv_report=exclusion_report,
             required_exclusions=required_exclusions,
+            final_modeled_pids=sorted(df_long["subject"].unique().tolist()),
         ),
     }
 
