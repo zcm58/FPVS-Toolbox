@@ -14,6 +14,7 @@ nav:
       - Post-hoc tests: statistics/posthoc-tests.md
       - Mixed model: statistics/mixed-model.md
       - Outliers and QC: statistics/outliers-and-qc.md
+      - Baseline vs Zero tests: statistics/baseline-vs-zero.md
   - Relevant Publications: relevant-publications.md
   - Tools:
       - Individual-level Detectability: tools/individual-level-detectability.md
