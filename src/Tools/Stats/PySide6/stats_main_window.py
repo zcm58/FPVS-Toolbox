@@ -69,6 +69,7 @@ from Tools.Stats.PySide6.stats_controller import StatsController
 from Tools.Stats.PySide6.stats_core import (
     ANOVA_BETWEEN_XLS,
     ANOVA_XLS,
+    BASELINE_VS_ZERO_XLS,
     GROUP_CONTRAST_XLS,
     HARMONIC_XLS,
     LMM_BETWEEN_XLS,
@@ -93,6 +94,7 @@ from Tools.Stats.PySide6.stats_data_loader import (
 from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_missingness import export_missingness_workbook
 from Tools.Stats.PySide6.stats_group_contrasts import export_group_contrasts_workbook
+from Tools.Stats.PySide6.baseline_vs_zero import export_baseline_vs_zero_results_to_excel
 from Tools.Stats.PySide6.stats_export_formatting import (
     apply_lmm_number_formats_and_metadata,
     apply_rm_anova_pvalue_number_formats,
@@ -234,6 +236,7 @@ class StatsWindow(QMainWindow):
         self.between_mixed_model_results_data: Optional[pd.DataFrame] = None
         self.group_contrasts_results_data: Optional[pd.DataFrame] = None
         self.posthoc_results_data: Optional[pd.DataFrame] = None
+        self.baseline_vs_zero_results_payload: Optional[dict] = None
         self.harmonic_check_results_data: List[dict] = []
         self._harmonic_results: dict[PipelineId, list[dict]] = {
             PipelineId.SINGLE: [],
@@ -1482,6 +1485,7 @@ class StatsWindow(QMainWindow):
             "anova_between": (export_rm_anova_results_to_excel, ANOVA_BETWEEN_XLS),
             "lmm_between": (export_mixed_model_results_to_excel, LMM_BETWEEN_XLS),
             "group_contrasts": (export_group_contrasts_workbook, GROUP_CONTRAST_XLS),
+            "baseline_vs_zero": (export_baseline_vs_zero_results_to_excel, BASELINE_VS_ZERO_XLS),
         }
         func, fname = mapping[kind]
 
@@ -2384,6 +2388,30 @@ class StatsWindow(QMainWindow):
                     self._apply_posthoc_results(payload, update_text=True)
 
                 return kwargs, handler
+            if step_id is StepId.BASELINE_VS_ZERO:
+                kwargs = dict(
+                    subjects=self.subjects,
+                    conditions=self._get_selected_conditions(),
+                    conditions_all=self.conditions,
+                    subject_data=self.subject_data,
+                    base_freq=self._current_base_freq,
+                    alpha=self._current_alpha,
+                    rois=self.rois,
+                    rois_all=self.rois,
+                    dv_policy=self._get_between_group_dv_policy_payload(),
+                    dv_variants=dv_variants_payload,
+                    outlier_exclusion_enabled=outlier_payload.get("enabled", True),
+                    outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
+                    qc_config=qc_payload,
+                    qc_state=qc_state,
+                    manual_excluded_pids=sorted(self.manual_excluded_pids),
+                )
+
+                def handler(payload):
+                    """Handle the handler step for the Stats PySide6 workflow."""
+                    self._apply_baseline_vs_zero_results(payload, update_text=True)
+
+                return kwargs, handler
             if step_id is StepId.HARMONIC_CHECK:
                 kwargs = self._build_harmonic_kwargs()
 
@@ -2760,6 +2788,7 @@ class StatsWindow(QMainWindow):
             ("anova", self.rm_anova_results_data, "RM-ANOVA"),
             ("lmm", self.mixed_model_results_data, "Mixed Model"),
             ("posthoc", self.posthoc_results_data, "Interaction Post-hocs"),
+            ("baseline_vs_zero", self.baseline_vs_zero_results_payload, "Baseline vs Zero"),
             ("harmonic", self._harmonic_results.get(PipelineId.SINGLE), "Harmonic Check"),
         ]
         out_dir = self._ensure_results_dir()
@@ -3171,6 +3200,16 @@ class StatsWindow(QMainWindow):
         """Handle the apply posthoc results step for the Stats PySide6 workflow."""
         self.posthoc_results_data = payload.get("results_df")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
+        self._store_run_report(PipelineId.SINGLE, payload)
+        output_text = payload.get("output_text", "")
+        if update_text:
+            self.summary_text.append(output_text)
+        self._update_export_buttons()
+        return output_text
+
+    def _apply_baseline_vs_zero_results(self, payload: dict, *, update_text: bool = True) -> str:
+        """Handle the apply baseline-vs-zero results step for the Stats PySide6 workflow."""
+        self.baseline_vs_zero_results_payload = payload
         self._store_run_report(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
         if update_text:

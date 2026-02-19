@@ -162,6 +162,7 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.RM_ANOVA,
     StepId.MIXED_MODEL,
     StepId.INTERACTION_POSTHOCS,
+    StepId.BASELINE_VS_ZERO,
     StepId.HARMONIC_CHECK,
 )
 """Default ordered steps for the Single pipeline."""
@@ -181,6 +182,7 @@ STEP_LABELS: Dict[StepId, str] = {
     StepId.BETWEEN_GROUP_ANOVA: "Between-Group ANOVA",
     StepId.BETWEEN_GROUP_MIXED_MODEL: "Between-Group Mixed Model",
     StepId.GROUP_CONTRASTS: "Group Contrasts",
+    StepId.BASELINE_VS_ZERO: "Baseline vs Zero",
     StepId.HARMONIC_CHECK: "Harmonic Check",
 }
 
@@ -191,6 +193,7 @@ WORKER_FN_BY_STEP: Dict[StepId, Callable[..., Any]] = {
     StepId.BETWEEN_GROUP_ANOVA: stats_workers.run_between_group_anova,
     StepId.BETWEEN_GROUP_MIXED_MODEL: stats_workers.run_lmm,
     StepId.GROUP_CONTRASTS: stats_workers.run_group_contrasts,
+    StepId.BASELINE_VS_ZERO: stats_workers.run_baseline_vs_zero,
     StepId.HARMONIC_CHECK: stats_workers.run_harmonic_check,
 }
 

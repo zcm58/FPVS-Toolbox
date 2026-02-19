@@ -24,6 +24,7 @@ class StepId(Enum):
     BETWEEN_GROUP_MIXED_MODEL = auto()
     GROUP_CONTRASTS = auto()
     HARMONIC_CHECK = auto()
+    BASELINE_VS_ZERO = auto()
 
 
 RESULTS_SUBFOLDER_NAME: Final[str] = STATS_SUBFOLDER_NAME
@@ -35,6 +36,7 @@ HARMONIC_XLS: Final[str] = "Harmonic Results.xlsx"
 ANOVA_BETWEEN_XLS: Final[str] = "Mixed ANOVA Between Groups.xlsx"
 LMM_BETWEEN_XLS: Final[str] = "Mixed Model Between Groups.xlsx"
 GROUP_CONTRAST_XLS: Final[str] = "Group Contrasts.xlsx"
+BASELINE_VS_ZERO_XLS: Final[str] = "Baseline vs Zero Tests.xlsx"
 
 
 @dataclass
@@ -58,5 +60,6 @@ __all__ = [
     "ANOVA_BETWEEN_XLS",
     "LMM_BETWEEN_XLS",
     "GROUP_CONTRAST_XLS",
+    "BASELINE_VS_ZERO_XLS",
     "PipelineStep",
 ]
