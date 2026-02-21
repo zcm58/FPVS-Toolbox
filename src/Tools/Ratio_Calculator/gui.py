@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import re
 import sys
+from time import perf_counter
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+import logging
 
-from PySide6.QtCore import QSignalBlocker, QThread, Qt
+from PySide6.QtCore import QSignalBlocker, QThread, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -35,16 +37,23 @@ from PySide6.QtWidgets import (
     QStyle,
 )
 
-from .constants import RatioCalculatorSettings, ROI_DEFS_DEFAULT
+from .constants import RatioCalculatorSettings
+from .roi_provider import load_ratio_rois
 from .worker import RatioCalculatorWorker
 from .utils import parse_participant_id
 
 PID_PATTERN = re.compile(r"^P\d+$", re.IGNORECASE)
 CUSTOM_CONDITION_OPTION = "Custom path"
+logger = logging.getLogger(__name__)
 
 
 class RatioCalculatorWindow(QWidget):
-    def __init__(self, parent: QWidget | None = None, project_root: str | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        project_root: str | None = None,
+        roi_loader: Callable[[], dict[str, list[str]]] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Ratio Calculator")
         self.resize(980, 760)
@@ -60,6 +69,12 @@ class RatioCalculatorWindow(QWidget):
         self._label_b_dirty = False
         self._run_label_dirty = False
         self._loading_participants = False
+        self._roi_loader = roi_loader or load_ratio_rois
+        self._active_roi_defs: dict[str, list[str]] = {}
+        self._roi_settings_signature: tuple[tuple[str, tuple[str, ...]], ...] = ()
+        self._roi_watch_timer = QTimer(self)
+        self._roi_watch_timer.setInterval(1500)
+        self._roi_watch_timer.timeout.connect(self._sync_rois_if_changed)
 
         main_layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -79,6 +94,8 @@ class RatioCalculatorWindow(QWidget):
         self._apply_button_icons()
 
         self._refresh_conditions()
+        self._refresh_rois()
+        self._roi_watch_timer.start()
         self._set_default_output()
         self._update_run_state()
 
@@ -289,23 +306,13 @@ class RatioCalculatorWindow(QWidget):
         self.roi_table.verticalHeader().setVisible(False)
         self.roi_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.roi_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.roi_table.setRowCount(len(ROI_DEFS_DEFAULT))
+        self.roi_table.setRowCount(0)
         self.roi_table.setAlternatingRowColors(True)
         self.roi_table.setWordWrap(True)
         self.roi_table.setTextElideMode(Qt.ElideRight)
         header = self.roi_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
-
-        for row, (roi, electrodes) in enumerate(ROI_DEFS_DEFAULT.items()):
-            roi_item = QTableWidgetItem(roi)
-            roi_item.setFlags(roi_item.flags() & ~Qt.ItemIsEditable)
-            electrodes_text = ", ".join(electrodes)
-            elec_item = QTableWidgetItem(electrodes_text)
-            elec_item.setToolTip(electrodes_text)
-            elec_item.setFlags(elec_item.flags() & ~Qt.ItemIsEditable)
-            self.roi_table.setItem(row, 0, roi_item)
-            self.roi_table.setItem(row, 1, elec_item)
 
         roi_layout.addWidget(self.roi_table)
 
@@ -437,7 +444,58 @@ class RatioCalculatorWindow(QWidget):
                 self.condition_b_combo.setCurrentText(second)
             self._apply_condition_selection(second, is_a=False)
         self._maybe_autoload_participants(force=True)
+        self._refresh_rois()
         self._update_run_state()
+
+    def _rois_signature(self, rois: dict[str, list[str]]) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        return tuple((name, tuple(channels)) for name, channels in rois.items())
+
+    def _refresh_rois(self) -> None:
+        started = perf_counter()
+        try:
+            rois = self._roi_loader()
+        except Exception as exc:
+            elapsed_ms = int((perf_counter() - started) * 1000)
+            logger.exception(
+                "operation=refresh_rois project_root=%s elapsed_ms=%d error=%s",
+                self._project_root,
+                elapsed_ms,
+                exc,
+            )
+            rois = {}
+
+        self._active_roi_defs = rois
+        self._roi_settings_signature = self._rois_signature(rois)
+        self._populate_roi_table(rois)
+        if not rois:
+            self._set_status_message("No valid ROIs found in Settings. Update Settings or click Refresh.")
+        self._update_run_state()
+
+    def _sync_rois_if_changed(self) -> None:
+        try:
+            rois = self._roi_loader()
+        except Exception:
+            return
+        new_signature = self._rois_signature(rois)
+        if new_signature == self._roi_settings_signature:
+            return
+        self._active_roi_defs = rois
+        self._roi_settings_signature = new_signature
+        self._populate_roi_table(rois)
+        self._append_log("ROI settings changed. Table refreshed from Settings.")
+        self._update_run_state()
+
+    def _populate_roi_table(self, rois: dict[str, list[str]]) -> None:
+        self.roi_table.setRowCount(len(rois))
+        for row, (roi, electrodes) in enumerate(rois.items()):
+            roi_item = QTableWidgetItem(roi)
+            roi_item.setFlags(roi_item.flags() & ~Qt.ItemIsEditable)
+            electrodes_text = ", ".join(electrodes)
+            elec_item = QTableWidgetItem(electrodes_text)
+            elec_item.setToolTip(electrodes_text)
+            elec_item.setFlags(elec_item.flags() & ~Qt.ItemIsEditable)
+            self.roi_table.setItem(row, 0, roi_item)
+            self.roi_table.setItem(row, 1, elec_item)
 
     def _populate_condition_combo(self, combo: QComboBox, edit: QLineEdit) -> None:
         current_path = edit.text().strip()
@@ -916,6 +974,9 @@ class RatioCalculatorWindow(QWidget):
         if folders_ready and not self._paired_participants:
             errors.append("Participants are not loaded.")
 
+        if not self._active_roi_defs:
+            errors.append("No valid ROIs are configured in Settings.")
+
         return errors
 
     def _set_validation_errors(self, errors: list[str]) -> None:
@@ -978,6 +1039,16 @@ class RatioCalculatorWindow(QWidget):
             QMessageBox.warning(self, "Missing fields", "Fill out all required fields before running.")
             return
 
+        if not self._active_roi_defs:
+            message = "Cannot run: no valid ROIs are configured in Settings."
+            self._set_status_message(message)
+            logger.warning(
+                "operation=start_run project_root=%s elapsed_ms=0 error=%s",
+                self._project_root,
+                message,
+            )
+            return
+
         ok_out, out_err = self._ensure_output_dir(output_dir)
         if not ok_out:
             QMessageBox.warning(self, "Output folder error", out_err or "Output folder is not usable.")
@@ -1031,7 +1102,7 @@ class RatioCalculatorWindow(QWidget):
             run_label=run_label,
             manual_exclude=manual_list,
             settings=settings,
-            roi_defs=ROI_DEFS_DEFAULT,
+            roi_defs=self._active_roi_defs,
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
