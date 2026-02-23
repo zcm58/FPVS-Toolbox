@@ -653,7 +653,7 @@ def perform_preprocessing(
                 k_values = kurtosis(
                     data, axis=1, fisher=True, bias=False
                 )
-                k_values = np.nan_to_num(k_values)
+                k_values = np.nan_to_num(k_values, copy=False)
                 proportion_to_cut = 0.1
                 n_k = len(k_values)
                 trim_count = int(np.floor(n_k * proportion_to_cut))
