@@ -777,13 +777,11 @@ def run_project_parallel(
                 return False
 
             # Optional soft-cap on system RAM
-            while True:
-                mem_ok, percent_used = _memory_ok(memory_limit_ratio)
-                if percent_used > max_memory_percent:
-                    max_memory_percent = percent_used
-                if mem_ok:
-                    break
-                time.sleep(memory_check_interval)
+            mem_ok, percent_used = _memory_ok(memory_limit_ratio)
+            if percent_used > max_memory_percent:
+                max_memory_percent = percent_used
+            if not mem_ok:
+                return False
 
             f = remaining.pop(0)
             fut = pool.submit(
@@ -813,7 +811,7 @@ def run_project_parallel(
                     # Nothing could be submitted (likely due to cancellation).
                     if _cancelled() or not remaining:
                         break
-                    time.sleep(0.05)
+                    time.sleep(max(0.01, float(memory_check_interval)))
                 continue
 
             done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED, timeout=0.5)
