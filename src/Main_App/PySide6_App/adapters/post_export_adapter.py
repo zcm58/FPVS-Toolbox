@@ -81,7 +81,7 @@ def _extract_setting(settings: Any, key: str, default: Any = None) -> Any:
 def _build_legacy_shim(ctx: LegacyCtx) -> Any:
     """
     Build minimal 'self' object expected by Legacy post_process.
-    Guarantees FIF-saving toggles exist and are ON.
+    Ensures FIF-saving toggles exist and follow user preference.
     """
     log = ctx.log or (lambda _m: None)
 
@@ -156,7 +156,21 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
     Per-file fallback: for each expected FIF path, write it only if missing.
     Preserves legacy structure:
       <save_root>/.fif files/<Label>/<base>_<Label_underscored>-epo.fif
+
+    If save_preprocessed_fif is disabled, this fallback is skipped entirely.
     """
+    # Use helper for robust extraction
+    save_pref = _coerce_bool(
+        _extract_setting(ctx.settings, "save_preprocessed_fif"),
+        default=False
+    )
+    if not save_pref:
+        logger.info(
+            "post_export_write_missing_fifs_skipped",
+            extra={"save_root": str(save_root), "reason": "save_preprocessed_fif_disabled"},
+        )
+        return 0
+
     try:
         import mne  # noqa: F401  # local import in worker
     except Exception:
@@ -167,12 +181,6 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
         return 0
 
     written = 0
-
-    # Use helper for robust extraction
-    save_pref = _coerce_bool(
-        _extract_setting(ctx.settings, "save_preprocessed_fif"),
-        default=False
-    )
 
     # Robust base_stem extraction
     data_paths = ctx.data_paths or ["unknown"]
@@ -213,17 +221,6 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
         out_path = out_dir / _legacy_like_fname(base_stem, label)
 
         if not out_path.exists():
-            if not save_pref:
-                message = (
-                    f"[AUDIT WARNING] FIF write forced (required for export) despite 'save_preprocessed_fif=False'. "
-                    f"Target: {out_path.name}"
-                )
-                logger.warning(message)
-                if ctx.log:
-                    try:
-                        ctx.log(message)
-                    except Exception:
-                        pass
             try:
                 logger.debug(
                     "post_export_write_missing_fif_saving",
@@ -254,7 +251,7 @@ def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> i
 def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
     """
     Execute legacy export. Then, for this specific file and labels,
-    write any missing -epo.fif files (per-file fallback).
+    optionally write missing -epo.fif files when save_preprocessed_fif is enabled.
     """
     try:
         logger.info(
