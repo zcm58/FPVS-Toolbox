@@ -43,6 +43,13 @@ logger = logging.getLogger(__name__)
 # Keep this module quiet unless the app configures handlers; avoids accidental console output.
 logger.addHandler(logging.NullHandler())
 
+WINDOWS_FORBIDDEN_CONDITION_CHARS = set('<>:"/\\|?*')
+WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT = '< > : " / \\ | ? *'
+
+
+def _illegal_condition_chars(label: str) -> list[str]:
+    return sorted({ch for ch in label if ch in WINDOWS_FORBIDDEN_CONDITION_CHARS})
+
 
 def _excel_paths_in_output_root(output_root: Path | str | None) -> list[Path]:
     if not output_root:
@@ -1338,8 +1345,31 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         for row in self.event_rows:
             edits = row.findChildren(QLineEdit)
             if len(edits) >= 2:
-                label = edits[0].text().strip()
+                label_edit = edits[0]
+                label = label_edit.text().strip()
                 ident = edits[1].text().strip()
+                if label:
+                    illegal_chars = _illegal_condition_chars(label)
+                    if illegal_chars:
+                        bad = " ".join(illegal_chars)
+                        QMessageBox.warning(
+                            self,
+                            "Invalid Condition Name",
+                            (
+                                "Condition names cannot contain characters that are invalid for "
+                                "Windows file/folder names.\n\n"
+                                f"Condition: {label}\n"
+                                f"Illegal character(s): {bad}\n\n"
+                                "Please rename this condition using only allowed characters.\n"
+                                f"Not allowed: {WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT}"
+                            ),
+                        )
+                        try:
+                            label_edit.setFocus()
+                            label_edit.selectAll()
+                        except Exception:
+                            pass
+                        return None
                 if label and ident.isdigit():
                     event_map[label] = int(ident)
         if not event_map:
@@ -1781,10 +1811,32 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 edits = row.findChildren(QLineEdit)
                 if len(edits) < 2:
                     continue
-                label = edits[0].text().strip()
+                label_edit = edits[0]
+                label = label_edit.text().strip()
                 ident = edits[1].text().strip()
                 if not label:
                     continue
+                illegal_chars = _illegal_condition_chars(label)
+                if illegal_chars:
+                    bad = " ".join(illegal_chars)
+                    QMessageBox.warning(
+                        self,
+                        "Invalid Condition Name",
+                        (
+                            "Condition names cannot contain characters that are invalid for "
+                            "Windows file/folder names.\n\n"
+                            f"Condition: {label}\n"
+                            f"Illegal character(s): {bad}\n\n"
+                            "Please rename this condition using only allowed characters.\n"
+                            f"Not allowed: {WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT}"
+                        ),
+                    )
+                    try:
+                        label_edit.setFocus()
+                        label_edit.selectAll()
+                    except Exception:
+                        pass
+                    return
                 try:
                     mapping[label] = int(ident)
                 except Exception:
