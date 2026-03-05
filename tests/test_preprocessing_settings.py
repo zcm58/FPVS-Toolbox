@@ -23,3 +23,14 @@ def test_legacy_bandpass_can_be_interpreted():
     )
     assert normalized["high_pass"] == 0.1
     assert normalized["low_pass"] == 50.0
+
+
+def test_max_parallel_workers_override_aliases():
+    normalized = normalize_preprocessing_settings({"max_parallel_workers": "6"})
+    assert normalized["max_parallel_workers_override"] == 6
+    assert normalized["max_workers"] == 6
+
+
+def test_negative_max_parallel_workers_override_raises():
+    with pytest.raises(ValueError):
+        normalize_preprocessing_settings({"max_parallel_workers_override": -1})
