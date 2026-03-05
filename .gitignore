@@ -65,3 +65,16 @@ venv/
 *.label
 *.H
 *.K
+
+# JetBrains
+.idea/
+
+# Static site output (MkDocs build artifact)
+site/
+
+# Local fsaverage template/data caches
+src/fsaverage/
+src/Tools/fsaverage/
+
+# Quarantined legacy code not used by active runtime
+src/quarantine/
