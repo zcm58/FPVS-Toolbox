@@ -1,21 +1,53 @@
 site_name: FPVS Toolbox
 theme:
   name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.expand
+    - toc.integrate
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - def_list
+  - footnotes
+  - toc:
+      permalink: true
 
 nav:
   - Home: index.md
-  - Processing Pipeline:
-      - Overview: processing-pipeline.md
+  - Start Here:
+      - Getting Started: getting-started.md
+      - FPVS Concepts for Non-Experts: fpvs-concepts.md
+      - Feature Tour: feature-tour.md
+      - FAQ: faq.md
+  - Analysis Workflow:
+      - Processing Pipeline Overview: processing-pipeline.md
       - FFT and Frequency-Domain Quantification (FPVS): fft-frequency-domain-quantification.md
-  - Statistical Analysis:
-      - Overview: statistical-analysis.md
-      - Rossion harmonic selection: statistics/rossion-harmonic-selection.md
+      - Statistical Analysis Overview: statistical-analysis.md
+      - Rossion Harmonic Selection: statistics/rossion-harmonic-selection.md
       - RM-ANOVA: statistics/rm-anova.md
-      - Post-hoc tests: statistics/posthoc-tests.md
-      - Mixed model: statistics/mixed-model.md
+      - Post-hoc Tests: statistics/posthoc-tests.md
+      - Mixed Model: statistics/mixed-model.md
       - Outliers and QC: statistics/outliers-and-qc.md
-      - Baseline vs Zero tests: statistics/baseline-vs-zero.md
-  - Relevant Publications: relevant-publications.md
+      - Baseline vs Zero Tests: statistics/baseline-vs-zero.md
   - Tools:
       - Individual-level Detectability: tools/individual-level-detectability.md
-  - Tutorials: tutorials.md
+  - Tutorials:
+      - First End-to-End Walkthrough: tutorial.md
+  - Reference:
+      - Output Files: outputs-reference.md
+      - Troubleshooting: troubleshooting.md
+      - Glossary: glossary.md
+      - Relevant Publications: relevant-publications.md
