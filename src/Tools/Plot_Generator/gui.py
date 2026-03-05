@@ -264,12 +264,19 @@ class PlotGeneratorWindow(QWidget):
             if not default_out:
                 default_out = main_default
 
+        try:
+            plot_x_max_default = str(
+                float(mgr.get("analysis", "bca_upper_limit", "10.0"))
+            )
+        except Exception:
+            plot_x_max_default = "10.0"
+
         self._defaults = {
             "title_snr": "SNR Plot",
             "xlabel": "Frequency (Hz)",
             "ylabel_snr": "SNR",
             "x_min": "0.0",
-            "x_max": "10.0",
+            "x_max": plot_x_max_default,
             "y_min_snr": "0.0",
             "y_max_snr": "3.0",
             "input_folder": default_in,
@@ -328,6 +335,7 @@ class PlotGeneratorWindow(QWidget):
                 float,
                 str,
                 str,
+                dict[str, object],
             ]
             | None
         ) = None
@@ -358,9 +366,18 @@ class PlotGeneratorWindow(QWidget):
         }
 
     def _update_legend_group_visibility(self) -> None:
-        show = self.overlay_check.isChecked()
-        self.legend_group.setVisible(show)
-        if show and self.legend_custom_check.isChecked():
+        self.legend_group.setVisible(True)
+        show_b = self.overlay_check.isChecked()
+        self.legend_condition_b_label.setVisible(show_b)
+        self.legend_condition_b_edit.setVisible(show_b)
+        self.legend_b_peaks_label.setVisible(show_b)
+        self.legend_b_peaks_edit.setVisible(show_b)
+        custom = self.legend_custom_check.isChecked()
+        self.legend_condition_a_edit.setEnabled(custom)
+        self.legend_a_peaks_edit.setEnabled(custom)
+        self.legend_condition_b_edit.setEnabled(custom and show_b)
+        self.legend_b_peaks_edit.setEnabled(custom and show_b)
+        if custom:
             self._prefill_legend_defaults_if_empty()
 
     def _prefill_legend_defaults_if_empty(self) -> None:
@@ -376,9 +393,10 @@ class PlotGeneratorWindow(QWidget):
 
     def _toggle_custom_legend_labels(self, checked: bool) -> None:
         self.legend_condition_a_edit.setEnabled(checked)
-        self.legend_condition_b_edit.setEnabled(checked)
         self.legend_a_peaks_edit.setEnabled(checked)
-        self.legend_b_peaks_edit.setEnabled(checked)
+        show_b = self.overlay_check.isChecked()
+        self.legend_condition_b_edit.setEnabled(checked and show_b)
+        self.legend_b_peaks_edit.setEnabled(checked and show_b)
         if checked:
             self._prefill_legend_defaults_if_empty()
         if not self._ui_initializing:
@@ -812,25 +830,29 @@ class PlotGeneratorWindow(QWidget):
         self.legend_condition_a_edit.setPlaceholderText("Condition A label")
         self.legend_condition_a_edit.setEnabled(False)
         self.legend_condition_a_edit.textChanged.connect(self._persist_legend_settings)
-        legend_form.addRow(QLabel("Condition A label:"), self.legend_condition_a_edit)
+        self.legend_condition_a_label = QLabel("Condition A label:")
+        legend_form.addRow(self.legend_condition_a_label, self.legend_condition_a_edit)
 
         self.legend_condition_b_edit = QLineEdit()
         self.legend_condition_b_edit.setPlaceholderText("Condition B label")
         self.legend_condition_b_edit.setEnabled(False)
         self.legend_condition_b_edit.textChanged.connect(self._persist_legend_settings)
-        legend_form.addRow(QLabel("Condition B label:"), self.legend_condition_b_edit)
+        self.legend_condition_b_label = QLabel("Condition B label:")
+        legend_form.addRow(self.legend_condition_b_label, self.legend_condition_b_edit)
 
         self.legend_a_peaks_edit = QLineEdit()
         self.legend_a_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_A_PEAKS)
         self.legend_a_peaks_edit.setEnabled(False)
         self.legend_a_peaks_edit.textChanged.connect(self._persist_legend_settings)
-        legend_form.addRow(QLabel("A-Peaks label:"), self.legend_a_peaks_edit)
+        self.legend_a_peaks_label = QLabel("A-Peaks label:")
+        legend_form.addRow(self.legend_a_peaks_label, self.legend_a_peaks_edit)
 
         self.legend_b_peaks_edit = QLineEdit()
         self.legend_b_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_B_PEAKS)
         self.legend_b_peaks_edit.setEnabled(False)
         self.legend_b_peaks_edit.textChanged.connect(self._persist_legend_settings)
-        legend_form.addRow(QLabel("B-Peaks label:"), self.legend_b_peaks_edit)
+        self.legend_b_peaks_label = QLabel("B-Peaks label:")
+        legend_form.addRow(self.legend_b_peaks_label, self.legend_b_peaks_edit)
 
         legend_layout.addLayout(legend_form)
         self.legend_reset_btn = QPushButton("Reset to defaults")
@@ -1171,7 +1193,7 @@ class PlotGeneratorWindow(QWidget):
         self._update_chart_title_state(condition)
         if not (self._ui_initializing or self._populating_conditions):
             self.scalp_title_a_edit.clear()
-        if self.legend_custom_check.isChecked() and self.overlay_check.isChecked():
+        if self.legend_custom_check.isChecked():
             self._prefill_legend_defaults_if_empty()
         self._update_scalp_title_warnings()
         self._check_required()
@@ -1180,7 +1202,7 @@ class PlotGeneratorWindow(QWidget):
         _ = condition  # unused value required by signal signature
         if not (self._ui_initializing or self._populating_conditions):
             self.scalp_title_b_edit.clear()
-        if self.legend_custom_check.isChecked() and self.overlay_check.isChecked():
+        if self.legend_custom_check.isChecked():
             self._prefill_legend_defaults_if_empty()
         self._update_scalp_title_warnings()
         self._check_required()
@@ -1328,6 +1350,24 @@ class PlotGeneratorWindow(QWidget):
             "multi_group_mode": self._has_multi_groups,
         }
 
+    def _worker_roi_selection(self) -> tuple[dict[str, list[str]], str] | None:
+        selected_roi = self.roi_combo.currentText().strip()
+        if not selected_roi:
+            QMessageBox.warning(self, "ROI", "Select a region of interest before plotting.")
+            return None
+        if selected_roi == ALL_ROIS_OPTION:
+            return {k: list(v) for k, v in self.roi_map.items()}, selected_roi
+
+        channels = self.roi_map.get(selected_roi)
+        if not channels:
+            QMessageBox.warning(
+                self,
+                "ROI",
+                f"The selected ROI '{selected_roi}' has no electrode mapping.",
+            )
+            return None
+        return {selected_roi: list(channels)}, selected_roi
+
     def _append_log(self, text: str) -> None:
         self.log.append(text)
         self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
@@ -1384,9 +1424,20 @@ class PlotGeneratorWindow(QWidget):
             scalp_max,
             scalp_title_a,
             scalp_title_b,
+            legend_payload,
         ) = self._gen_params
         condition = self._conditions_queue.pop(0)
         self._current_condition += 1
+
+        roi_payload = self._worker_roi_selection()
+        if roi_payload is None:
+            self._conditions_queue.clear()
+            self._finish_all()
+            return
+        roi_map_for_worker, selected_roi = roi_payload
+        self._append_log(
+            f"Generating condition '{condition}' for ROI selection '{selected_roi}'."
+        )
 
         cond_out = Path(out_dir)
         if self._all_conditions:
@@ -1399,8 +1450,8 @@ class PlotGeneratorWindow(QWidget):
         self._worker = _Worker(
             folder,
             condition,
-            self.roi_map,
-            self.roi_combo.currentText(),
+            roi_map_for_worker,
+            selected_roi,
             title,
             self.xlabel_edit.text(),
             self.ylabel_edit.text(),
@@ -1415,6 +1466,14 @@ class PlotGeneratorWindow(QWidget):
             scalp_vmax=scalp_max,
             scalp_title_a_template=scalp_title_a,
             scalp_title_b_template=scalp_title_b,
+            legend_custom_enabled=bool(legend_payload["custom_labels_enabled"]),
+            legend_condition_a=str(legend_payload["condition_a_label"]),
+            legend_condition_b=str(legend_payload["condition_b_label"]),
+            legend_a_peaks=str(legend_payload["a_peaks_label"]),
+            legend_b_peaks=str(legend_payload["b_peaks_label"]),
+            project_root=(
+                str(self._project_root) if self._project_root else None
+            ),
             **group_kwargs,
         )
         self._worker.moveToThread(self._thread)
@@ -1561,6 +1620,7 @@ class PlotGeneratorWindow(QWidget):
                 self.cancel_btn.setEnabled(False)
                 return
             group_kwargs = self._group_worker_kwargs(overlay_groups, selected_groups)
+            legend_payload = self._legend_settings_payload()
             self._persist_scalp_settings(save=True)
 
             self.gen_btn.setEnabled(False)
@@ -1577,13 +1637,21 @@ class PlotGeneratorWindow(QWidget):
                     self.gen_btn.setEnabled(True)
                     self.cancel_btn.setEnabled(False)
                     return
-                legend_payload = self._legend_settings_payload()
+                roi_payload = self._worker_roi_selection()
+                if roi_payload is None:
+                    self.gen_btn.setEnabled(True)
+                    self.cancel_btn.setEnabled(False)
+                    return
+                roi_map_for_worker, selected_roi = roi_payload
+                self._append_log(
+                    f"Generating overlay '{cond_a}' vs '{cond_b}' for ROI selection '{selected_roi}'."
+                )
                 self._thread = QThread()
                 self._worker = _Worker(
                     folder,
                     cond_a,
-                    self.roi_map,
-                    self.roi_combo.currentText(),
+                    roi_map_for_worker,
+                    selected_roi,
                     self.title_edit.text(),
                     self.xlabel_edit.text(),
                     self.ylabel_edit.text(),
@@ -1633,6 +1701,10 @@ class PlotGeneratorWindow(QWidget):
                     self._conditions_queue = [self.condition_combo.currentText()]
                 self._total_conditions = len(self._conditions_queue)
                 self._current_condition = 0
+                if self._conditions_queue:
+                    self._append_log(
+                        "Queued conditions: " + ", ".join(self._conditions_queue)
+                    )
                 self._gen_params = (
                     folder,
                     out_dir,
@@ -1646,6 +1718,7 @@ class PlotGeneratorWindow(QWidget):
                     scalp_max,
                     self.scalp_title_a_edit.text(),
                     self.scalp_title_b_edit.text(),
+                    legend_payload.copy(),
                 )
                 self._start_next_condition()
         except Exception as exc:

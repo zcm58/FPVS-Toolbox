@@ -1387,6 +1387,26 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             return None
 
         stim_channel = normalized.get("stim_channel") or config.DEFAULT_STIM_CHANNEL
+        try:
+            base_freq = float(self.settings.get("analysis", "base_freq", "6.0"))
+        except Exception:
+            base_freq = 6.0
+        try:
+            oddball_freq = float(
+                self.settings.get("analysis", "oddball_freq", str(config.DEFAULT_ODDBALL_FREQ))
+            )
+        except Exception:
+            oddball_freq = float(config.DEFAULT_ODDBALL_FREQ)
+        try:
+            bca_upper_limit = float(
+                self.settings.get(
+                    "analysis",
+                    "bca_upper_limit",
+                    str(config.DEFAULT_BCA_UPPER_LIMIT),
+                )
+            )
+        except Exception:
+            bca_upper_limit = float(config.DEFAULT_BCA_UPPER_LIMIT)
 
         params = {
             "low_pass": float(normalized.get("low_pass")),
@@ -1403,6 +1423,14 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             "stim_channel": stim_channel,
             "save_preprocessed_fif": bool(normalized.get("save_preprocessed_fif", False)),
             "event_id_map": event_map,
+            "base_freq": base_freq,
+            "oddball_freq": oddball_freq,
+            "bca_upper_limit": bca_upper_limit,
+            "analysis": {
+                "base_freq": base_freq,
+                "oddball_freq": oddball_freq,
+                "bca_upper_limit": bca_upper_limit,
+            },
         }
         logger.info(
             "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "

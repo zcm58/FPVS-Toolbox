@@ -7,7 +7,8 @@ import gc
 import mne
 import re
 from fractions import Fraction
-from config import TARGET_FREQUENCIES, DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
+import config
+from config import DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
 from typing import List, Any, Dict
 from Tools.Stats.Legacy.full_snr import compute_full_snr
 from Tools.Stats.Legacy.noise_utils import compute_noise_stats_for_bin
@@ -18,6 +19,53 @@ from Main_App.Legacy_App.post_process_excel import build_fft_neighbors_rows, wri
 
 
 ODDBALL_FREQ = Fraction(6, 5)
+
+
+def _read_analysis_setting(app: Any, option: str, default: float | str) -> Any:
+    """Return analysis setting from SettingsManager-like objects or plain dict payloads."""
+    settings = getattr(app, "settings", None)
+    if settings is None:
+        return default
+
+    getter = getattr(settings, "get", None)
+    if callable(getter):
+        try:
+            # SettingsManager signature: get(section, option, fallback)
+            return getter("analysis", option, str(default))
+        except TypeError:
+            # dict-like getter may not accept 3 args
+            pass
+        except Exception:
+            pass
+
+    if isinstance(settings, dict):
+        analysis_section = settings.get("analysis")
+        if isinstance(analysis_section, dict) and option in analysis_section:
+            return analysis_section.get(option, default)
+        if option in settings:
+            return settings.get(option, default)
+
+    if hasattr(settings, option):
+        try:
+            return getattr(settings, option)
+        except Exception:
+            pass
+
+    return default
+
+
+def _read_analysis_float(app: Any, option: str, default: float) -> float:
+    value = _read_analysis_setting(app, option, default)
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _resolve_target_frequencies(app: Any) -> tuple[np.ndarray, float]:
+    oddball_freq = _read_analysis_float(app, "oddball_freq", config.DEFAULT_ODDBALL_FREQ)
+    upper_limit = _read_analysis_float(app, "bca_upper_limit", config.DEFAULT_BCA_UPPER_LIMIT)
+    return config.update_target_frequencies(oddball_freq, upper_limit), upper_limit
 
 
 def _resolve_condition_id(event_id_map: Dict[str, Any], condition_label: str) -> int | None:
@@ -131,6 +179,14 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     if not parent_folder or not os.path.isdir(parent_folder):
         app.log(f"Error: Invalid save folder: '{parent_folder}'")
         return
+
+    target_frequencies, configured_upper_limit = _resolve_target_frequencies(app)
+    app.log(
+        "Using target frequencies from settings: "
+        f"oddball={target_frequencies[0] if len(target_frequencies) else 'n/a'} Hz, "
+        f"upper_limit={configured_upper_limit} Hz, "
+        f"count={len(target_frequencies)}"
+    )
 
     # --- PID Determination ---
     pid = "UnknownPID"
@@ -438,7 +494,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 # Full-spectrum SNR (uses shared noise logic via compute_full_snr)
                 full_snr_matrix = compute_full_snr(avg_data_uv, sfreq)
 
-                num_target_freqs = len(TARGET_FREQUENCIES)
+                num_target_freqs = len(target_frequencies)
                 metrics_fft = np.zeros((final_num_channels, num_target_freqs))
                 metrics_snr = np.zeros((final_num_channels, num_target_freqs))
                 metrics_z = np.zeros((final_num_channels, num_target_freqs))
@@ -446,7 +502,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
                 for chan_idx in range(final_num_channels):
                     channel_amplitudes = fft_amplitudes[chan_idx, :]
-                    for freq_idx, target_freq in enumerate(TARGET_FREQUENCIES):
+                    for freq_idx, target_freq in enumerate(target_frequencies):
                         if not (fft_frequencies[0] <= target_freq <= fft_frequencies[-1]):
                             if chan_idx == 0 and data_idx == 0:
                                 app.log(
@@ -526,7 +582,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
         if valid_data_count > 0 and final_electrode_names_ordered:
             avg_metrics = {k: v / valid_data_count for k, v in accum.items()}
-            freq_column_names = [f"{f:.4f}_Hz" for f in TARGET_FREQUENCIES]
+            freq_column_names = [f"{f:.4f}_Hz" for f in target_frequencies]
             full_snr_avg = (
                 full_snr_accum / valid_data_count if full_snr_accum is not None else None
             )
@@ -553,14 +609,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 ),
             }
             if full_snr_avg is not None:
-                try:
-                    upper_limit = float(
-                        app.settings.get("analysis", "bca_upper_limit", "16.8")
-                    )
-                except Exception:
-                    upper_limit = 16.8
-
-                max_freq = min(upper_limit, float(fft_frequencies[-1]))
+                max_freq = min(configured_upper_limit, float(fft_frequencies[-1]))
                 freq_grid = np.arange(0.5, max_freq + 0.01, 0.01)
 
                 interp_snr = np.zeros((full_snr_avg.shape[0], len(freq_grid)))

@@ -72,7 +72,11 @@ def _get_included_freqs(self, all_col_names):
 def aggregate_bca_sum(self, file_path, roi_name):
     """Run the aggregate bca sum helper used by the Legacy Stats workflow."""
     return stats_analysis.aggregate_bca_sum(
-        file_path, roi_name, self.base_freq, self.log_to_main_app
+        file_path,
+        roi_name,
+        self.base_freq,
+        self.log_to_main_app,
+        max_freq=getattr(self, "bca_upper_limit", None),
     )
 
 
@@ -90,6 +94,7 @@ def prepare_all_subject_summed_bca_data(self, roi_filter=None):
             self.base_freq,
             self.log_to_main_app,
             roi_filter=roi_filter,
+            max_freq=getattr(self, "bca_upper_limit", None),
         ) or {}
     except ValueError as e:
         self.log_to_main_app(f"ROI resolution failed: {e}")

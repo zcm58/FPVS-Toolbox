@@ -551,6 +551,7 @@ def aggregate_bca_sum(
     log_func,
     rois: Optional[Union[List[ROI], Dict[str, List[str]]]] = None,
     diag_meta: Optional[dict[str, object]] = None,
+    max_freq: Optional[float] = None,
 ) -> float:
     """
     Return summed BCA for an ROI across significant oddball harmonics.
@@ -611,7 +612,12 @@ def aggregate_bca_sum(
             return np.nan
 
         # --- Candidate freqs: exclude base-rate multiples, then restrict to oddball harmonics ---
-        included_freq_values = get_included_freqs(base_freq, df_bca.columns, log_func)
+        included_freq_values = get_included_freqs(
+            base_freq,
+            df_bca.columns,
+            log_func,
+            max_freq=max_freq,
+        )
         if not included_freq_values:
             log_func(f"No freqs to sum for BCA in {file_path}.")
             return np.nan
@@ -701,6 +707,7 @@ def prepare_all_subject_summed_bca_data(
     roi_filter: Optional[List[str]] = None,
     rois: Optional[Dict[str, List[str]]] = None,
     provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
+    max_freq: Optional[float] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Prepare summed BCA data for all subjects and conditions."""
     all_subject_data: Dict[str, Dict[str, Dict[str, float]]] = {}
@@ -748,6 +755,7 @@ def prepare_all_subject_summed_bca_data(
                             log_func,
                             rois=rois_map,
                             diag_meta=diag_meta,
+                            max_freq=max_freq,
                         )
                     except Exception as e:
                         log_func(f"Failed to read {os.path.basename(file_path)} for {pid}: {e}")

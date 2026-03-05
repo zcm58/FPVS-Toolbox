@@ -59,11 +59,12 @@ def _build_harmonic_domain(
     log_func: Callable[[str], None],
     *,
     exclude_harmonic1: bool = False,
+    max_freq: float | None = None,
     trace_label: str | None = None,
 ) -> List[float]:
     """Handle the build harmonic domain step for the Stats PySide6 workflow."""
     trace_enabled = _dv_trace_enabled() and trace_label
-    freq_candidates = get_included_freqs(base_freq, columns, log_func)
+    freq_candidates = get_included_freqs(base_freq, columns, log_func, max_freq=max_freq)
     if not freq_candidates:
         return []
     if trace_enabled:
@@ -119,6 +120,7 @@ def build_rossion_harmonics_summary(
     rois: Dict[str, List[str]],
     z_threshold: float,
     exclude_harmonic1: bool,
+    max_freq: float | None = None,
     log_func: Callable[[str], None],
 ) -> RossionHarmonicsSummary:
     """Handle the build rossion harmonics summary step for the Stats PySide6 workflow."""
@@ -133,6 +135,7 @@ def build_rossion_harmonics_summary(
         base_freq,
         log_func,
         exclude_harmonic1=exclude_harmonic1,
+        max_freq=max_freq,
         trace_label="rossion",
     )
     if not harmonic_freqs:

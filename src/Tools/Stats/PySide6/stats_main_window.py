@@ -2291,6 +2291,11 @@ class StatsWindow(QMainWindow):
         # the most up-to-date map, preventing 0xC0000005 errors.
         """Handle the build harmonic kwargs step for the Stats PySide6 workflow."""
         fresh_rois = load_rois_from_settings() or self.rois
+        _, max_freq_raw = self._safe_settings_get("analysis", "bca_upper_limit", 16.8)
+        try:
+            max_freq = float(max_freq_raw)
+        except Exception:
+            max_freq = None
         manual_excluded = set(self.manual_excluded_pids)
         filtered_subjects = [pid for pid in self.subjects if pid not in manual_excluded]
         filtered_subject_data = {
@@ -2305,6 +2310,7 @@ class StatsWindow(QMainWindow):
             mean_value_threshold=self._harmonic_config.threshold,
             base_freq=self._current_base_freq,
             alpha=self._current_alpha,
+            max_freq=max_freq,
             rois=fresh_rois,  # <--- Using fresh_rois instead of potentially stale self.rois
         )
 

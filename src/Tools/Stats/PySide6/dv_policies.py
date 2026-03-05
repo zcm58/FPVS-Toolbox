@@ -12,6 +12,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from Main_App.Legacy_App.settings_manager import SettingsManager
 from Tools.Stats.Legacy.excel_io import safe_read_excel
 from Tools.Stats.Legacy.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
@@ -45,6 +46,25 @@ _DV_DATA_CACHE_LOCK = threading.Lock()
 _DV_DATA_CACHE_MAX = 8
 
 
+def _resolve_max_freq(max_freq: object | None) -> float | None:
+    """Resolve harmonic max frequency from explicit input or persisted settings."""
+    candidate = max_freq
+    if candidate is None:
+        try:
+            candidate = SettingsManager().get("analysis", "bca_upper_limit", "16.8")
+        except Exception:
+            candidate = None
+    if candidate is None:
+        return None
+    try:
+        value = float(candidate)
+    except Exception:
+        return None
+    if not np.isfinite(value) or value <= 0:
+        return None
+    return value
+
+
 def _freeze_nested_mapping(mapping: Dict[str, Dict[str, str]]) -> tuple:
     """Handle the freeze nested mapping step for the Stats PySide6 workflow."""
     frozen = []
@@ -72,6 +92,7 @@ def _build_cache_key(
     base_freq: float,
     rois: Optional[Dict[str, List[str]]],
     settings: DVPolicySettings,
+    max_freq: float | None,
 ) -> tuple:
     """Handle the build cache key step for the Stats PySide6 workflow."""
     return (
@@ -80,6 +101,7 @@ def _build_cache_key(
         _freeze_nested_mapping(subject_data),
         float(base_freq),
         _freeze_rois(rois),
+        float(max_freq) if max_freq is not None else None,
         settings.name,
         settings.fixed_k,
         settings.exclude_harmonic1,
@@ -165,10 +187,14 @@ def prepare_summed_bca_data(
     provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
     dv_policy: dict[str, object] | None = None,
     dv_metadata: Optional[dict[str, object]] = None,
+    max_freq: float | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Handle the prepare summed bca data step for the Stats PySide6 workflow."""
     settings = normalize_dv_policy(dv_policy)
+    resolved_max_freq = _resolve_max_freq(max_freq)
     meta_target: dict[str, object] | None = dv_metadata if dv_metadata is not None else {}
+    if meta_target is not None and resolved_max_freq is not None:
+        meta_target["max_frequency_hz"] = float(resolved_max_freq)
     cache_key = None
     if provenance_map is None:
         cache_key = _build_cache_key(
@@ -178,6 +204,7 @@ def prepare_summed_bca_data(
             base_freq=base_freq,
             rois=rois,
             settings=settings,
+            max_freq=resolved_max_freq,
         )
         with _DV_DATA_CACHE_LOCK:
             cached = _DV_DATA_CACHE.get(cache_key)
@@ -211,6 +238,7 @@ def prepare_summed_bca_data(
             provenance_map=provenance_map,
             settings=settings,
             dv_metadata=meta_target,
+            max_freq=resolved_max_freq,
         )
     elif settings.name == FIXED_K_POLICY_NAME:
         if meta_target is not None:
@@ -228,6 +256,7 @@ def prepare_summed_bca_data(
             rois=rois,
             provenance_map=provenance_map,
             settings=settings,
+            max_freq=resolved_max_freq,
         )
     else:
         if meta_target is not None:
@@ -242,6 +271,7 @@ def prepare_summed_bca_data(
             log_func=log_func,
             rois=rois,
             provenance_map=provenance_map,
+            max_freq=resolved_max_freq,
         )
     if cache_key is not None and data is not None:
         if meta_target is None:
@@ -281,12 +311,20 @@ def _determine_fixed_k_freqs(
     base_freq: float,
     settings: DVPolicySettings,
     log_func: Callable[[str], None],
+    max_freq: float | None = None,
 ) -> List[float]:
     """Handle the determine fixed k freqs step for the Stats PySide6 workflow."""
     if settings.exclude_base_harmonics:
-        freq_candidates = get_included_freqs(base_freq, columns, log_func)
+        freq_candidates = get_included_freqs(
+            base_freq,
+            columns,
+            log_func,
+            max_freq=max_freq,
+        )
     else:
         freq_candidates = _parse_freqs_from_columns(columns, log_func)
+        if max_freq is not None:
+            freq_candidates = [freq for freq in freq_candidates if freq <= max_freq]
     if not freq_candidates:
         return []
 
@@ -295,6 +333,7 @@ def _determine_fixed_k_freqs(
         base_freq,
         every_n=SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
         tol=1e-3,
+        max_freq=max_freq,
     )
     if settings.exclude_base_harmonics:
         oddball_list = [
@@ -424,6 +463,7 @@ def _prepare_fixed_k_bca_data(
     rois: Optional[Dict[str, List[str]]] = None,
     provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
     settings: DVPolicySettings,
+    max_freq: float | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Handle the prepare fixed k bca data step for the Stats PySide6 workflow."""
     if not subjects or not subject_data:
@@ -441,7 +481,11 @@ def _prepare_fixed_k_bca_data(
         return None
 
     harmonic_freqs = _determine_fixed_k_freqs(
-        columns=columns, base_freq=base_freq, settings=settings, log_func=log_func
+        columns=columns,
+        base_freq=base_freq,
+        settings=settings,
+        log_func=log_func,
+        max_freq=max_freq,
     )
     if not harmonic_freqs:
         raise RuntimeError(
@@ -915,9 +959,11 @@ def build_rossion_preview_payload(
     rois: Dict[str, List[str]],
     log_func: Callable[[str], None],
     dv_policy: dict[str, object] | None = None,
+    max_freq: float | None = None,
 ) -> dict[str, object]:
     """Handle the build rossion preview payload step for the Stats PySide6 workflow."""
     settings = normalize_dv_policy(dv_policy)
+    resolved_max_freq = _resolve_max_freq(max_freq)
     if settings.name != ROSSION_POLICY_NAME:
         raise RuntimeError("Rossion preview requires the Rossion policy.")
 
@@ -929,6 +975,7 @@ def build_rossion_preview_payload(
         rois=rois,
         z_threshold=settings.z_threshold,
         exclude_harmonic1=settings.exclude_harmonic1,
+        max_freq=resolved_max_freq,
         log_func=log_func,
     )
     selected_map, stop_meta = select_rossion_harmonics_by_roi(
@@ -942,6 +989,7 @@ def build_rossion_preview_payload(
         base_freq=base_freq,
         settings=settings,
         log_func=log_func,
+        max_freq=resolved_max_freq,
     )
     final_map, fallback_info = apply_empty_union_policy(
         selected_map, policy=settings.empty_list_policy, fallback_freqs=fallback_freqs
@@ -981,6 +1029,7 @@ def _prepare_rossion_bca_data(
     provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
     settings: DVPolicySettings,
     dv_metadata: Optional[dict[str, object]] = None,
+    max_freq: float | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Handle the prepare rossion bca data step for the Stats PySide6 workflow."""
     if not subjects or not subject_data:
@@ -1000,6 +1049,7 @@ def _prepare_rossion_bca_data(
         rois=rois_map,
         z_threshold=settings.z_threshold,
         exclude_harmonic1=settings.exclude_harmonic1,
+        max_freq=max_freq,
         log_func=log_func,
     )
     selected_map, stop_meta = select_rossion_harmonics_by_roi(
@@ -1013,6 +1063,7 @@ def _prepare_rossion_bca_data(
         base_freq=base_freq,
         settings=settings,
         log_func=log_func,
+        max_freq=max_freq,
     )
     final_map, fallback_info = apply_empty_union_policy(
         selected_map, policy=settings.empty_list_policy, fallback_freqs=fallback_freqs

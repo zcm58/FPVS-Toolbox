@@ -2263,6 +2263,11 @@ def run_harmonic_check(
     """Handle the run harmonic check step for the Stats PySide6 workflow."""
     set_rois(rois)
     tail = "greater" if selected_metric in ("Z Score", "SNR") else "two-sided"
+    max_freq_raw = kwargs.get("max_freq")
+    try:
+        max_freq = float(max_freq_raw) if max_freq_raw is not None else None
+    except Exception:
+        max_freq = None
     message_cb("Running harmonic check…")
     output_text, findings = run_harmonic_check_new(
         subject_data=subject_data,
@@ -2272,7 +2277,7 @@ def run_harmonic_check(
         mean_value_threshold=mean_value_threshold,
         base_freq=base_freq,
         log_func=message_cb,
-        max_freq=None,
+        max_freq=max_freq,
         correction_method="holm",
         tail=tail,
         min_subjects=3,
