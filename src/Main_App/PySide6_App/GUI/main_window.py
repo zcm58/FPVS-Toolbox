@@ -218,6 +218,12 @@ debug_utils.messagebox._qt_showerror = _qt_showerror
 
 # Toggle which Stats GUI to launch
 USE_PYSIDE6_STATS = True  # set to False to use the legacy CustomTkinter GUI
+STATS_TOOL_UNDER_DEVELOPMENT_WARNING = (
+    "The Statistics Tool is currently under development. Certain features, like "
+    "multigroup analysis, are not currently functional. Single Group Analysis mode "
+    "does work as expected. Future updates will fix the Statistics Tool and add "
+    "between group analysis."
+)
 
 
 class Processor(QObject):
@@ -1502,6 +1508,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     # --------------------------- tools UI --------------------------- #
     def open_stats_analyzer(self) -> None:
+        QMessageBox.warning(
+            self,
+            "Statistics Tool Under Development",
+            STATS_TOOL_UNDER_DEVELOPMENT_WARNING,
+        )
         if USE_PYSIDE6_STATS:
             window = PysideStatsWindow(self)
             window.show()
