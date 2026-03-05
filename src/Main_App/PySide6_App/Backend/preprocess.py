@@ -80,6 +80,10 @@ def begin_preproc_audit(
     Returns:
         A dictionary containing the initial state 'capture' and filename.
     """
+    # Ensure per-run audit keys do not leak across files when params is reused
+    params.pop("_fpvs_initial_ref_ok", None)
+    params.pop("_fpvs_initial_ref_pair", None)
+
     try:
         logger.debug(
             "begin_preproc_audit_start",
@@ -225,6 +229,13 @@ def perform_preprocessing(
         ValueError: If filter cutoffs are logically invalid (HPF >= LPF).
     """
     raw = raw_input
+
+    # Ensure per-run audit keys do not leak across files when params is reused
+    params.pop("_fpvs_initial_ref_ok", None)
+    params.pop("_fpvs_initial_ref_pair", None)
+
+    debug_enabled = bool(params.get("debug_preproc", False)) or logger.isEnabledFor(logging.DEBUG)
+
     fingerprint_in = _build_preproc_fingerprint(params)
     fingerprint_message = f"PREPROC_FINGERPRINT_PREPROCESS_IN {fingerprint_in}"
     log_func(fingerprint_message)
@@ -280,16 +291,18 @@ def perform_preprocessing(
             f"Preprocessing {len(orig_ch_names)} chans from '{filename_for_log}' "
             f"(sfreq={orig_sfreq:.3f} Hz)..."
         )
-        print(
-            f"[REF DEBUG] {filename_for_log}: "
-            f"ref1={ref1!r} present1={ref1 in orig_ch_names}, "
-            f"ref2={ref2!r} present2={ref2 in orig_ch_names}, "
-            f"n_ch={len(orig_ch_names)}"
-        )
-        log_func(
-            f"DEBUG [preprocess for {filename_for_log}]: Initial channel names "
-            f"({len(orig_ch_names)}): {orig_ch_names}"
-        )
+        if debug_enabled:
+            print(
+                f"[REF DEBUG] {filename_for_log}: "
+                f"ref1={ref1!r} present1={ref1 in orig_ch_names}, "
+                f"ref2={ref2!r} present2={ref2 in orig_ch_names}, "
+                f"n_ch={len(orig_ch_names)}"
+            )
+        if debug_enabled:
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: Initial channel names "
+                f"({len(orig_ch_names)}): {orig_ch_names}"
+            )
         log_func(
             f"DEBUG [preprocess for {filename_for_log}]: Expected stim_ch: "
             f"'{stim_ch}', max_idx_keep: {max_keep}"
@@ -325,12 +338,13 @@ def perform_preprocessing(
                     mne_custom = raw.info.get("custom_ref_applied", None)
                 except Exception:
                     mne_custom = None
-                print(
-                    f"[REF APPLY] {filename_for_log}: "
-                    f"mne_custom_ref={mne_custom} "
-                    f"initial_ref_ok={params.get('_fpvs_initial_ref_ok', False)} "
-                    f"pair=({ref1},{ref2})"
-                )
+                if debug_enabled:
+                    print(
+                        f"[REF APPLY] {filename_for_log}: "
+                        f"mne_custom_ref={mne_custom} "
+                        f"initial_ref_ok={params.get('_fpvs_initial_ref_ok', False)} "
+                        f"pair=({ref1},{ref2})"
+                    )
 
                 log_func(
                     f"AUDIT: custom_ref_applied=True pair=[{ref1},{ref2}]"
@@ -346,9 +360,13 @@ def perform_preprocessing(
             )
 
         # 2) Explicitly drop the selected reference channels after initial reference
+        refs_to_drop: List[str] = []
         for ch in (ref1, ref2):
-            if ch in raw.ch_names:
-                raw.drop_channels([ch])
+            if ch in raw.ch_names and ch not in refs_to_drop:
+                refs_to_drop.append(ch)
+        if refs_to_drop:
+            raw.drop_channels(refs_to_drop)
+            for ch in refs_to_drop:
                 log_func(f"Dropped {ch} after initial referencing.")
         try:
             logger.debug(
@@ -366,48 +384,60 @@ def perform_preprocessing(
 
         # 3) Optional channel limit (keeps stim if present)
         current_names_before_drop = list(raw.info["ch_names"])
-        log_func(
-            f"DEBUG [preprocess for {filename_for_log}]: Channel names BEFORE drop logic "
-            f"({len(current_names_before_drop)}): {current_names_before_drop}"
-        )
+        if debug_enabled:
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: Channel names BEFORE drop logic "
+                f"({len(current_names_before_drop)}): {current_names_before_drop}"
+            )
         if max_keep is not None and 0 < max_keep < len(current_names_before_drop):
             channels_to_keep_by_index = current_names_before_drop[:max_keep]
             final_keep = list(channels_to_keep_by_index)
             if stim_ch in current_names_before_drop and stim_ch not in final_keep:
                 final_keep.append(stim_ch)
-                log_func(
-                    f"DEBUG [preprocess for {filename_for_log}]: Stim_ch '{stim_ch}' "
-                    f"added to keep list."
-                )
+                if debug_enabled:
+                    log_func(
+                        f"DEBUG [preprocess for {filename_for_log}]: Stim_ch '{stim_ch}' "
+                        f"added to keep list."
+                    )
             unique_keep = set(final_keep)
-            ordered_keep = [
-                nm for nm in current_names_before_drop if nm in unique_keep
-            ]
-            to_drop = [
-                nm for nm in current_names_before_drop if nm not in ordered_keep
-            ]
-            log_func(
-                f"DEBUG [preprocess for {filename_for_log}]: Final KEEP "
-                f"({len(ordered_keep)}): {ordered_keep}"
-            )
-            log_func(
-                f"DEBUG [preprocess for {filename_for_log}]: Final DROP "
-                f"({len(to_drop)}): {to_drop}"
-            )
-            if to_drop:
+
+            if debug_enabled:
+                ordered_keep = [
+                    nm for nm in current_names_before_drop if nm in unique_keep
+                ]
+                to_drop = [
+                    nm for nm in current_names_before_drop if nm not in ordered_keep
+                ]
                 log_func(
-                    f"Attempting to drop {len(to_drop)} channels from "
+                    f"DEBUG [preprocess for {filename_for_log}]: Final KEEP "
+                    f"({len(ordered_keep)}): {ordered_keep}"
+                )
+                log_func(
+                    f"DEBUG [preprocess for {filename_for_log}]: Final DROP "
+                    f"({len(to_drop)}): {to_drop}"
+                )
+                drop_count = len(to_drop)
+            else:
+                keep_count = sum(
+                    1 for nm in current_names_before_drop if nm in unique_keep
+                )
+                drop_count = len(current_names_before_drop) - keep_count
+
+            if drop_count:
+                log_func(
+                    f"Attempting to drop {drop_count} channels from "
                     f"{filename_for_log}..."
                 )
-                raw.drop_channels(to_drop, on_missing="warn")
+                raw.pick_channels(final_keep, ordered=False)
                 log_func(
                     f"{len(raw.ch_names)} channels remain in "
                     f"{filename_for_log} after drop."
                 )
-                log_func(
-                    f"DEBUG [preprocess for {filename_for_log}]: Channel names AFTER "
-                    f"drop: {list(raw.info['ch_names'])}"
-                )
+                if debug_enabled:
+                    log_func(
+                        f"DEBUG [preprocess for {filename_for_log}]: Channel names AFTER "
+                        f"drop: {list(raw.info['ch_names'])}"
+                    )
             else:
                 log_func(
                     f"No channels selected to be dropped for {filename_for_log}."
@@ -450,30 +480,34 @@ def perform_preprocessing(
                     log_func(
                         f"Resampled {filename_for_log} to {new_sf:.3f} Hz."
                     )
-                    print(
-                        f"[DS] {filename_for_log}: sfreq {sf:.3f} -> {new_sf:.3f}"
-                    )
+                    if debug_enabled:
+                        print(
+                            f"[DS] {filename_for_log}: sfreq {sf:.3f} -> {new_sf:.3f}"
+                        )
                 except Exception as resample_err:
                     log_func(
                         f"Warn: Resampling failed for {filename_for_log}: "
                         f"{resample_err}"
                     )
-                    print(
-                        f"[DS] {filename_for_log}: RESAMPLE FAILED "
-                        f"(sfreq={sf:.3f}, target={downsample_rate})"
-                    )
+                    if debug_enabled:
+                        print(
+                            f"[DS] {filename_for_log}: RESAMPLE FAILED "
+                            f"(sfreq={sf:.3f}, target={downsample_rate})"
+                        )
             else:
                 log_func(
                     f"No downsampling needed for {filename_for_log} "
                     f"(sfreq={sf:.3f}, target={downsample_rate})."
                 )
-                print(
-                    f"[DS] {filename_for_log}: no resample "
-                    f"(sfreq={sf:.3f}, target={downsample_rate})"
-                )
+                if debug_enabled:
+                    print(
+                        f"[DS] {filename_for_log}: no resample "
+                        f"(sfreq={sf:.3f}, target={downsample_rate})"
+                    )
         else:
             log_func(f"Skip downsample for {filename_for_log}.")
-            print(f"[DS] {filename_for_log}: skip (no downsample_rate set)")
+            if debug_enabled:
+                print(f"[DS] {filename_for_log}: skip (no downsample_rate set)")
         try:
             logger.debug(
                 "preprocess_stage_after_downsample",
@@ -508,7 +542,8 @@ def perform_preprocessing(
                 snapshot_message = f"FILTER_SNAPSHOT {snapshot_payload}"
                 log_func(snapshot_message)
                 logger.info(snapshot_message)
-                print(f"[FILTER_SNAPSHOT] {snapshot_payload}")
+                if debug_enabled:
+                    print(f"[FILTER_SNAPSHOT] {snapshot_payload}")
                 if h_freq is not None and h_freq > sf_current / 2.0:
                     nyquist_warning = (
                         "FILTER_NYQUIST_WARNING "
@@ -541,11 +576,12 @@ def perform_preprocessing(
                     f"Filtering {filename_for_log} "
                     f"({effective_l}-{effective_h} Hz) at sfreq={sf_current:.3f}..."
                 )
-                print(
-                    f"[FILTER] {filename_for_log}: FIR bandpass "
-                    f"l_freq={effective_l} h_freq={effective_h} "
-                    f"sfreq={sf_current:.3f}"
-                )
+                if debug_enabled:
+                    print(
+                        f"[FILTER] {filename_for_log}: FIR bandpass "
+                        f"l_freq={effective_l} h_freq={effective_h} "
+                        f"sfreq={sf_current:.3f}"
+                    )
                 raw.filter(
                     l_freq,
                     h_freq,
@@ -570,7 +606,8 @@ def perform_preprocessing(
                 applied_message = f"FILTER_APPLIED {applied_payload}"
                 log_func(applied_message)
                 logger.info(applied_message)
-                print(f"[FILTER_APPLIED] {applied_payload}")
+                if debug_enabled:
+                    print(f"[FILTER_APPLIED] {applied_payload}")
                 expected_highpass = l_freq if l_freq is not None else 0.0
                 expected_lowpass = (
                     h_freq
@@ -607,13 +644,15 @@ def perform_preprocessing(
                 log_func(
                     f"Warn: Filter failed for {filename_for_log}: {e}"
                 )
-                print(
-                    f"[FILTER] {filename_for_log}: FAILED "
-                    f"l_freq={l_freq} h_freq={h_freq}"
-                )
+                if debug_enabled:
+                    print(
+                        f"[FILTER] {filename_for_log}: FAILED "
+                        f"l_freq={l_freq} h_freq={h_freq}"
+                    )
         else:
             log_func(f"Skip filter for {filename_for_log}.")
-            print(f"[FILTER] {filename_for_log}: skip (no l_freq/h_freq)")
+            if debug_enabled:
+                print(f"[FILTER] {filename_for_log}: skip (no l_freq/h_freq)")
         try:
             logger.debug(
                 "preprocess_stage_after_filter",
@@ -653,7 +692,7 @@ def perform_preprocessing(
                 k_values = kurtosis(
                     data, axis=1, fisher=True, bias=False
                 )
-                k_values = np.nan_to_num(k_values)
+                k_values = np.nan_to_num(k_values, copy=False)
                 proportion_to_cut = 0.1
                 n_k = len(k_values)
                 trim_count = int(np.floor(n_k * proportion_to_cut))
@@ -697,20 +736,22 @@ def perform_preprocessing(
                     log_func(
                         f"No channels bad by Kurtosis for {filename_for_log}."
                     )
-                print(
-                    f"[KURTOSIS] {filename_for_log}: "
-                    f"n_bad={num_kurtosis_bads_identified} "
-                    f"bad_chs={bad_k_auto}"
-                )
+                if debug_enabled:
+                    print(
+                        f"[KURTOSIS] {filename_for_log}: "
+                        f"n_bad={num_kurtosis_bads_identified} "
+                        f"bad_chs={bad_k_auto}"
+                    )
             else:
                 log_func(
                     f"Skip Kurtosis for {filename_for_log} "
                     f"(< 2 good EEG channels; n_picks={len(eeg_picks)})."
                 )
-                print(
-                    f"[KURTOSIS] {filename_for_log}: skip "
-                    f"(n_eeg_picks={len(eeg_picks)})"
-                )
+                if debug_enabled:
+                    print(
+                        f"[KURTOSIS] {filename_for_log}: skip "
+                        f"(n_eeg_picks={len(eeg_picks)})"
+                    )
 
             new_bads = [
                 b
@@ -727,10 +768,11 @@ def perform_preprocessing(
                         f"Interpolating bads in {filename_for_log}: "
                         f"{interp_targets}"
                     )
-                    print(
-                        f"[INTERP] {filename_for_log}: "
-                        f"interpolated_chs={interp_targets}"
-                    )
+                    if debug_enabled:
+                        print(
+                            f"[INTERP] {filename_for_log}: "
+                            f"interpolated_chs={interp_targets}"
+                        )
                     raw.interpolate_bads(
                         reset_bads=True,
                         mode="accurate",
@@ -741,27 +783,31 @@ def perform_preprocessing(
                     log_func(
                         f"Warn: Interpolation failed for {filename_for_log}: {e}"
                     )
-                    print(
-                        f"[INTERP] {filename_for_log}: FAILED "
-                        f"bads={raw.info.get('bads', [])}"
-                    )
+                    if debug_enabled:
+                        print(
+                            f"[INTERP] {filename_for_log}: FAILED "
+                            f"bads={raw.info.get('bads', [])}"
+                        )
             elif raw.info["bads"]:
                 log_func(
                     f"Warn: No montage for {filename_for_log}, "
                     f"cannot interpolate. Bads remain: {raw.info['bads']}"
                 )
-                print(
-                    f"[INTERP] {filename_for_log}: no montage; "
-                    f"bads={raw.info['bads']}"
-                )
+                if debug_enabled:
+                    print(
+                        f"[INTERP] {filename_for_log}: no montage; "
+                        f"bads={raw.info['bads']}"
+                    )
             else:
                 log_func(f"No bads to interpolate in {filename_for_log}.")
-                print(f"[INTERP] {filename_for_log}: no bads")
+                if debug_enabled:
+                    print(f"[INTERP] {filename_for_log}: no bads")
         else:
             log_func(
                 f"Skip Kurtosis for {filename_for_log} (no threshold)."
             )
-            print(f"[KURTOSIS] {filename_for_log}: skip (no threshold)")
+            if debug_enabled:
+                print(f"[KURTOSIS] {filename_for_log}: skip (no threshold)")
         try:
             logger.debug(
                 "preprocess_stage_after_kurtosis",
@@ -807,24 +853,26 @@ def perform_preprocessing(
             mne_custom_final = raw.info.get("custom_ref_applied", None)
         except Exception:
             mne_custom_final = None
-        print(
-            f"[REF FINAL] {filename_for_log}: "
-            f"mne_custom_ref={mne_custom_final} "
-            f"fpvs_initial_custom_ref={raw.info.get('fpvs_initial_custom_ref', None)} "
-            f"n_ch={len(raw.ch_names)} "
-            f"bads={raw.info.get('bads', [])}"
-        )
+        if debug_enabled:
+            print(
+                f"[REF FINAL] {filename_for_log}: "
+                f"mne_custom_ref={mne_custom_final} "
+                f"fpvs_initial_custom_ref={raw.info.get('fpvs_initial_custom_ref', None)} "
+                f"n_ch={len(raw.ch_names)} "
+                f"bads={raw.info.get('bads', [])}"
+            )
 
         log_func(
             f"Preprocessing OK for {filename_for_log}. "
             f"{len(raw.ch_names)} channels, {raw.info['sfreq']:.1f} Hz."
         )
-        final_ch_names = list(raw.info["ch_names"])
-        log_func(
-            f"DEBUG [preprocess for {filename_for_log}]: Final channel names "
-            f"before returning ({len(final_ch_names)}): {final_ch_names}"
-        )
-        if stim_ch in final_ch_names:
+        if debug_enabled:
+            final_ch_names = list(raw.info["ch_names"])
+            log_func(
+                f"DEBUG [preprocess for {filename_for_log}]: Final channel names "
+                f"before returning ({len(final_ch_names)}): {final_ch_names}"
+            )
+        if stim_ch in raw.ch_names:
             log_func(
                 f"DEBUG [preprocess for {filename_for_log}]: Expected stim_ch "
                 f"'{stim_ch}' IS PRESENT at VERY END."
@@ -840,7 +888,7 @@ def perform_preprocessing(
                 "preprocess_ok",
                 extra={
                     "file": filename_for_log,
-                    "n_channels": len(final_ch_names),
+                    "n_channels": len(raw.ch_names),
                     "sfreq": float(raw.info.get("sfreq", -1.0)),
                     "n_rejected": num_kurtosis_bads_identified,
                 },

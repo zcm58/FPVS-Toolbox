@@ -4,10 +4,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import hashlib
 import math
-import os
 import re
 import traceback
-from typing import Callable, Iterable, Sequence, TYPE_CHECKING
+from typing import Callable, Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
@@ -19,7 +18,7 @@ ELECTRODE_COL = "Electrode"
 
 # Participant ID parsing
 _PID_SCP_RE = re.compile(r"SCP0*(\d+)", re.IGNORECASE)
-_PID_P_RE = re.compile(r"\bP0*(\d+)\b", re.IGNORECASE)
+_PID_P_RE = re.compile(r"(?<![A-Z0-9])P0*(\d+)(?!\d)", re.IGNORECASE)
 
 # Filename sanitization
 _ILLEGAL_FILENAME = re.compile(r'[<>:"/\\\\|?*]+')

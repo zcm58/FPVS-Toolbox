@@ -1,3 +1,4 @@
+"""UI-construction helpers for laying out the Legacy Stats analysis window."""
 # UI creation method extracted from stats.py
 
 import customtkinter as ctk
@@ -6,6 +7,7 @@ from . import stats_export
 
 
 def create_widgets(self):
+    """Run the create widgets helper used by the Legacy Stats workflow."""
     validate_num_cmd = (self.register(self._validate_numeric), '%P')
 
     main_frame = ctk.CTkFrame(self)

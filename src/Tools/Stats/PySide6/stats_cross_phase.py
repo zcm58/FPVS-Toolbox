@@ -65,6 +65,7 @@ def _condition_intersection_with_order(
 def _subset_df_for_condition(
     df_long: pd.DataFrame, *, condition: str, roi: str
 ) -> pd.DataFrame:
+    """Handle the subset df for condition step for the Stats PySide6 workflow."""
     df = df_long[df_long["condition"] == condition]
     df = df[df["roi"] == roi]
     return df.copy()
@@ -78,6 +79,7 @@ def _run_roi_condition_lmm(
     phase_labels: Sequence[str],
     message_cb=None,
 ) -> dict:
+    """Handle the run roi condition lmm step for the Stats PySide6 workflow."""
     meta_warnings: list[str] = []
     backup_rows: list[dict] = []
 
@@ -163,6 +165,7 @@ def _run_roi_condition_lmm(
         backup_2x2 = _run_backup_2x2(df.rename(columns={"bca": "value"}), logger)
 
     def _append_backup_rows(backup: dict | None) -> None:
+        """Handle the append backup rows step for the Stats PySide6 workflow."""
         if not backup:
             return
         tests = backup.get("tests") or []
@@ -225,6 +228,7 @@ def _run_roi_condition_lmm(
 
 
 def _format_results_excel(results: dict, excel_path: Path) -> None:
+    """Handle the format results excel step for the Stats PySide6 workflow."""
     fixed_effects_df = pd.DataFrame(results.get("fixed_effects") or [])
     if fixed_effects_df.empty:
         fixed_effects_df = pd.DataFrame(

@@ -87,6 +87,7 @@ SUMMED_BCA_STOP_AFTER_N_CONSEC_NONSIG_DEFAULT = 2
 
 
 def _rm_anova_value_is_valid(value: object) -> bool:
+    """Run the rm anova value is valid helper used by the Legacy Stats workflow."""
     if pd.isna(value):
         return False
     try:
@@ -96,6 +97,7 @@ def _rm_anova_value_is_valid(value: object) -> bool:
 
 
 def _preview_values(values: list[object], limit: int = 50) -> str:
+    """Run the preview values helper used by the Legacy Stats workflow."""
     sorted_vals = sorted(values, key=lambda v: repr(v))
     if len(sorted_vals) <= limit:
         return "[" + ", ".join(repr(v) for v in sorted_vals) + "]"
@@ -110,6 +112,7 @@ def _rm_anova_expected_levels(
     conditions: Optional[list[str]] = None,
     rois: Optional[list[str]] = None,
 ) -> tuple[list[str], list[str], list[str]]:
+    """Run the rm anova expected levels helper used by the Legacy Stats workflow."""
     subject_list = list(subjects) if subjects else sorted(all_subject_data.keys(), key=repr)
     if conditions:
         condition_list = list(conditions)
@@ -143,6 +146,7 @@ def _collect_rm_anova_diagnostics(
     rois: Optional[list[str]] = None,
     provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
 ) -> dict[str, object]:
+    """Run the collect rm anova diagnostics helper used by the Legacy Stats workflow."""
     subject_list, condition_list, roi_list = _rm_anova_expected_levels(
         all_subject_data,
         subjects=subjects,
@@ -215,6 +219,7 @@ def _collect_rm_anova_diagnostics(
 
 
 def _rm_anova_diag_summary(diag: dict[str, object]) -> str:
+    """Run the rm anova diag summary helper used by the Legacy Stats workflow."""
     missing_count = len(diag["missing_in_dict"])
     invalid_count = len(diag["present_but_invalid"])
     duplicate_count = len(diag["duplicate_cells"])
@@ -242,6 +247,7 @@ def _log_rm_anova_diagnostics(
     force: bool = False,
     results_dir: Optional[str] = None,
 ) -> None:
+    """Run the log rm anova diagnostics helper used by the Legacy Stats workflow."""
     if not log_func or (not RM_ANOVA_DIAG and not force):
         return
 
@@ -488,6 +494,7 @@ def filter_to_oddball_harmonics(
     max_k: Optional[int] = None,
     max_freq: Optional[float] = None,
 ) -> List[Tuple[float, int]]:
+    """Run the filter to oddball harmonics helper used by the Legacy Stats workflow."""
     try:
         base = float(base_freq)
         if base <= 0:
@@ -512,6 +519,7 @@ def filter_to_oddball_harmonics(
 
 
 def _match_freq_column(columns, freq_value: float) -> Optional[str]:
+    """Run the match freq column helper used by the Legacy Stats workflow."""
     patterns = [
         f"{freq_value:.1f}_Hz",
         f"{freq_value:.2f}_Hz",
@@ -543,6 +551,7 @@ def aggregate_bca_sum(
     log_func,
     rois: Optional[Union[List[ROI], Dict[str, List[str]]]] = None,
     diag_meta: Optional[dict[str, object]] = None,
+    max_freq: Optional[float] = None,
 ) -> float:
     """
     Return summed BCA for an ROI across significant oddball harmonics.
@@ -603,7 +612,12 @@ def aggregate_bca_sum(
             return np.nan
 
         # --- Candidate freqs: exclude base-rate multiples, then restrict to oddball harmonics ---
-        included_freq_values = get_included_freqs(base_freq, df_bca.columns, log_func)
+        included_freq_values = get_included_freqs(
+            base_freq,
+            df_bca.columns,
+            log_func,
+            max_freq=max_freq,
+        )
         if not included_freq_values:
             log_func(f"No freqs to sum for BCA in {file_path}.")
             return np.nan
@@ -693,6 +707,7 @@ def prepare_all_subject_summed_bca_data(
     roi_filter: Optional[List[str]] = None,
     rois: Optional[Dict[str, List[str]]] = None,
     provenance_map: Optional[dict[tuple[str, str, str], dict[str, object]]] = None,
+    max_freq: Optional[float] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Prepare summed BCA data for all subjects and conditions."""
     all_subject_data: Dict[str, Dict[str, Dict[str, float]]] = {}
@@ -740,6 +755,7 @@ def prepare_all_subject_summed_bca_data(
                             log_func,
                             rois=rois_map,
                             diag_meta=diag_meta,
+                            max_freq=max_freq,
                         )
                     except Exception as e:
                         log_func(f"Failed to read {os.path.basename(file_path)} for {pid}: {e}")
@@ -852,6 +868,7 @@ def run_rm_anova(
 def _ttest_onesample_tail(
     x: np.ndarray, popmean: float = 0.0, tail: str = "greater", min_n: int = 3
 ):
+    """Run the ttest onesample tail helper used by the Legacy Stats workflow."""
     x = np.asarray(x, dtype=float)
     x = x[np.isfinite(x)]
     if x.size < min_n:
@@ -878,6 +895,7 @@ def _ttest_onesample_tail(
 
 
 def _dz_ci(x: np.ndarray, alpha: float = 0.05, min_n: int = 3):
+    """Run the dz ci helper used by the Legacy Stats workflow."""
     x = np.asarray(x, dtype=float)
     x = x[np.isfinite(x)]
     if x.size < min_n:
@@ -898,6 +916,7 @@ def _dz_ci(x: np.ndarray, alpha: float = 0.05, min_n: int = 3):
 
 
 def _passes_threshold(mean_val: float, threshold: float, tail: str = "greater") -> bool:
+    """Run the passes threshold helper used by the Legacy Stats workflow."""
     if not np.isfinite(mean_val):
         return False
     if tail == "greater":
@@ -925,6 +944,7 @@ def run_harmonic_check(
     limit_n_harmonics: Optional[int] = None,
     rois: Optional[Dict[str, List[str]]] = None,
 ):
+    """Run the run harmonic check helper used by the Legacy Stats workflow."""
     with single_threaded_blas():
         return _run_harmonic_check_impl(
             subject_data,
@@ -962,6 +982,7 @@ def _run_harmonic_check_impl(
     limit_n_harmonics: Optional[int] = None,
     rois: Optional[Dict[str, List[str]]] = None,
 ):
+    """Run the run harmonic check impl helper used by the Legacy Stats workflow."""
     alpha = globals().get("HARMONIC_CHECK_ALPHA", 0.05)
 
     # Safe ROI resolution

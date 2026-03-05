@@ -1,3 +1,4 @@
+"""Helpers for scanning a data folder and populating Stats UI file selections."""
 # Functions moved from stats.py for file browsing and scanning
 
 import os
@@ -17,6 +18,7 @@ IGNORED_FOLDERS = {".fif files", "loreta results"}
 
 
 def browse_folder(self):
+    """Run the browse folder helper used by the Legacy Stats workflow."""
     current_folder = self.stats_data_folder_var.get()
     initial_dir = current_folder if os.path.isdir(current_folder) else os.path.expanduser("~")
     folder = filedialog.askdirectory(title="Select Parent Folder Containing Condition Subfolders",
@@ -128,6 +130,7 @@ def scan_folder(self):
 
 
 def update_condition_menus(self, conditions_list):
+    """Run the update condition menus helper used by the Legacy Stats workflow."""
     current_a = self.condition_A_var.get()
     display_list = conditions_list if conditions_list else ["(Scan Folder)"]
     if current_a not in display_list and display_list:
@@ -139,6 +142,7 @@ def update_condition_menus(self, conditions_list):
 
 
 def update_condition_B_options(self, *args):
+    """Run the update condition B options helper used by the Legacy Stats workflow."""
     cond_a = self.condition_A_var.get()
     valid_b = [c for c in self.conditions if c and c != cond_a]
     if not self.conditions:

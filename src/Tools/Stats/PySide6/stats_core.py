@@ -10,11 +10,13 @@ from Main_App.PySide6_App.Backend.project import STATS_SUBFOLDER_NAME
 
 
 class PipelineId(Enum):
+    """Represent the PipelineId part of the Stats PySide6 tool."""
     SINGLE = auto()
     BETWEEN = auto()
 
 
 class StepId(Enum):
+    """Represent the StepId part of the Stats PySide6 tool."""
     RM_ANOVA = auto()
     MIXED_MODEL = auto()
     INTERACTION_POSTHOCS = auto()
@@ -22,6 +24,7 @@ class StepId(Enum):
     BETWEEN_GROUP_MIXED_MODEL = auto()
     GROUP_CONTRASTS = auto()
     HARMONIC_CHECK = auto()
+    BASELINE_VS_ZERO = auto()
 
 
 RESULTS_SUBFOLDER_NAME: Final[str] = STATS_SUBFOLDER_NAME
@@ -33,10 +36,12 @@ HARMONIC_XLS: Final[str] = "Harmonic Results.xlsx"
 ANOVA_BETWEEN_XLS: Final[str] = "Mixed ANOVA Between Groups.xlsx"
 LMM_BETWEEN_XLS: Final[str] = "Mixed Model Between Groups.xlsx"
 GROUP_CONTRAST_XLS: Final[str] = "Group Contrasts.xlsx"
+BASELINE_VS_ZERO_XLS: Final[str] = "Baseline vs Zero Tests.xlsx"
 
 
 @dataclass
 class PipelineStep:
+    """Represent the PipelineStep part of the Stats PySide6 tool."""
     id: StepId
     name: str
     worker_fn: Callable[..., Any]
@@ -55,5 +60,6 @@ __all__ = [
     "ANOVA_BETWEEN_XLS",
     "LMM_BETWEEN_XLS",
     "GROUP_CONTRAST_XLS",
+    "BASELINE_VS_ZERO_XLS",
     "PipelineStep",
 ]

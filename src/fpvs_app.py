@@ -72,6 +72,12 @@ from Main_App import SettingsManager
 from Main_App import SettingsWindow
 
 logger = logging.getLogger(__name__)
+STATS_TOOL_UNDER_DEVELOPMENT_WARNING = (
+    "The Statistics Tool is currently under development. Certain features, like "
+    "multigroup analysis, are not currently functional. Single Group Analysis mode "
+    "does work as expected. Future updates will fix the Statistics Tool and add "
+    "between group analysis."
+)
 
 # =====================================================
 # GUI Configuration (unchanged)
@@ -257,6 +263,10 @@ class FPVSApp(ctk.CTk, LoggingMixin, EventMapMixin, FileSelectionMixin,
         """Opens the statistical analysis Toplevel window."""
         self.log("Opening Statistical Analysis tool...")  # Log the action
         self.debug("Stats window requested")
+        messagebox.showwarning(
+            "Statistics Tool Under Development",
+            STATS_TOOL_UNDER_DEVELOPMENT_WARNING,
+        )
 
         # Get the last used output folder path from the main GUI's variable
         last_output_folder = self.save_folder_path.get()

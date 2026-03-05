@@ -43,6 +43,34 @@ logger = logging.getLogger(__name__)
 # Keep this module quiet unless the app configures handlers; avoids accidental console output.
 logger.addHandler(logging.NullHandler())
 
+WINDOWS_FORBIDDEN_CONDITION_CHARS = set('<>:"/\\|?*')
+WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT = '< > : " / \\ | ? *'
+
+
+def _illegal_condition_chars(label: str) -> list[str]:
+    return sorted({ch for ch in label if ch in WINDOWS_FORBIDDEN_CONDITION_CHARS})
+
+
+def _excel_paths_in_output_root(output_root: Path | str | None) -> list[Path]:
+    if not output_root:
+        return []
+    root = Path(output_root)
+    if not root.is_dir():
+        return []
+    return sorted(p.resolve() for p in root.rglob("*.xls*"))
+
+
+def _should_show_no_excel_popup(
+    generated_excel_paths: list[str],
+    output_root: Path | str | None,
+    existing_excel_paths: list[str] | None = None,
+) -> bool:
+    if generated_excel_paths:
+        return False
+    if existing_excel_paths:
+        return False
+    return len(_excel_paths_in_output_root(output_root)) == 0
+
 # ----------------------------------------------------------------------
 # Canonical Qt messagebox adapters (used for both tk and legacy debug utils)
 # ----------------------------------------------------------------------
@@ -190,6 +218,12 @@ debug_utils.messagebox._qt_showerror = _qt_showerror
 
 # Toggle which Stats GUI to launch
 USE_PYSIDE6_STATS = True  # set to False to use the legacy CustomTkinter GUI
+STATS_TOOL_UNDER_DEVELOPMENT_WARNING = (
+    "The Statistics Tool is currently under development. Certain features, like "
+    "multigroup analysis, are not currently functional. Single Group Analysis mode "
+    "does work as expected. Future updates will fix the Statistics Tool and add "
+    "between group analysis."
+)
 
 
 class Processor(QObject):
@@ -983,6 +1017,42 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             for msg in payload.get("logs", []):
                 self.log(msg)
 
+            output_root = payload.get("output_root", "")
+            generated_excel_paths = payload.get("generated_excel_paths", []) or []
+            existing_excel_paths = payload.get("existing_excel_paths", []) or []
+
+            logger.info(
+                "pipeline_excel_export",
+                extra={
+                    "operation": "pipeline_excel_export",
+                    "project_root": str(getattr(getattr(self, "currentProject", None), "project_root", "")),
+                    "expected_output_dir": output_root,
+                    "export_reported_success": not bool(payload.get("error")),
+                    "generated_excel_count": len(generated_excel_paths),
+                    "glob_result_count": len(existing_excel_paths),
+                    "elapsed_ms": payload.get("elapsed_ms", 0),
+                },
+            )
+
+            show_no_excel_popup = _should_show_no_excel_popup(
+                generated_excel_paths,
+                output_root,
+                existing_excel_paths,
+            )
+            self._last_job_success = not show_no_excel_popup and not bool(payload.get("error"))
+
+            if not generated_excel_paths and not show_no_excel_popup:
+                self.log(
+                    "Excel outputs already existed; no new files were written during this run.",
+                    level=logging.INFO,
+                )
+
+            if payload.get("error") and existing_excel_paths:
+                self.log(
+                    "Excel export reported an error, but Excel outputs were found on disk.",
+                    level=logging.WARNING,
+                )
+
         # Clear current worker
         self._post_worker = None
         self._post_thread = None
@@ -1291,8 +1361,31 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         for row in self.event_rows:
             edits = row.findChildren(QLineEdit)
             if len(edits) >= 2:
-                label = edits[0].text().strip()
+                label_edit = edits[0]
+                label = label_edit.text().strip()
                 ident = edits[1].text().strip()
+                if label:
+                    illegal_chars = _illegal_condition_chars(label)
+                    if illegal_chars:
+                        bad = " ".join(illegal_chars)
+                        QMessageBox.warning(
+                            self,
+                            "Invalid Condition Name",
+                            (
+                                "Condition names cannot contain characters that are invalid for "
+                                "Windows file/folder names.\n\n"
+                                f"Condition: {label}\n"
+                                f"Illegal character(s): {bad}\n\n"
+                                "Please rename this condition using only allowed characters.\n"
+                                f"Not allowed: {WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT}"
+                            ),
+                        )
+                        try:
+                            label_edit.setFocus()
+                            label_edit.selectAll()
+                        except Exception:
+                            pass
+                        return None
                 if label and ident.isdigit():
                     event_map[label] = int(ident)
         if not event_map:
@@ -1310,6 +1403,26 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             return None
 
         stim_channel = normalized.get("stim_channel") or config.DEFAULT_STIM_CHANNEL
+        try:
+            base_freq = float(self.settings.get("analysis", "base_freq", "6.0"))
+        except Exception:
+            base_freq = 6.0
+        try:
+            oddball_freq = float(
+                self.settings.get("analysis", "oddball_freq", str(config.DEFAULT_ODDBALL_FREQ))
+            )
+        except Exception:
+            oddball_freq = float(config.DEFAULT_ODDBALL_FREQ)
+        try:
+            bca_upper_limit = float(
+                self.settings.get(
+                    "analysis",
+                    "bca_upper_limit",
+                    str(config.DEFAULT_BCA_UPPER_LIMIT),
+                )
+            )
+        except Exception:
+            bca_upper_limit = float(config.DEFAULT_BCA_UPPER_LIMIT)
 
         params = {
             "low_pass": float(normalized.get("low_pass")),
@@ -1326,6 +1439,14 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             "stim_channel": stim_channel,
             "save_preprocessed_fif": bool(normalized.get("save_preprocessed_fif", False)),
             "event_id_map": event_map,
+            "base_freq": base_freq,
+            "oddball_freq": oddball_freq,
+            "bca_upper_limit": bca_upper_limit,
+            "analysis": {
+                "base_freq": base_freq,
+                "oddball_freq": oddball_freq,
+                "bca_upper_limit": bca_upper_limit,
+            },
         }
         logger.info(
             "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "
@@ -1387,6 +1508,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     # --------------------------- tools UI --------------------------- #
     def open_stats_analyzer(self) -> None:
+        QMessageBox.warning(
+            self,
+            "Statistics Tool Under Development",
+            STATS_TOOL_UNDER_DEVELOPMENT_WARNING,
+        )
         if USE_PYSIDE6_STATS:
             window = PysideStatsWindow(self)
             window.show()
@@ -1564,8 +1690,12 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def _export_with_post_process(self, labels: list[str]) -> None:
         """
-        Run legacy post_process then decide whether *new* Excel files appeared.
-        Treat "no new files" as a warning (not fatal) because files may be overwritten or stored in subfolders.
+        Run legacy post_process then classify whether Excel output was produced.
+
+        Uses a snapshot of files with mtime_ns+size to detect writes/overwrites.
+        If no deltas are detectable but the exporter did not report "no files saved"
+        and Excel files still exist, treat as success to avoid false negatives on
+        coarse timestamp filesystems.
         """
         excel_dir = self.save_folder_path.get() if hasattr(self.save_folder_path, "get") else ""
         if not excel_dir or not Path(excel_dir).is_dir():
@@ -1575,45 +1705,72 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         out_path = Path(excel_dir)
 
-        def _excel_snapshot() -> tuple[int, float]:
-            count = 0
-            latest_mtime = 0.0
+        def _excel_snapshot() -> dict[Path, tuple[int, int]]:
+            snapshot: dict[Path, tuple[int, int]] = {}
             for p in out_path.rglob("*.xls*"):
                 try:
-                    st = p.stat().st_mtime
+                    stat_result = p.stat()
                 except OSError:
                     continue
-                count += 1
-                latest_mtime = max(latest_mtime, st)
-            return count, latest_mtime
+                snapshot[p.resolve()] = (int(stat_result.st_mtime_ns), int(stat_result.st_size))
+            return snapshot
 
         original_log = self.log
+        legacy_reported_no_excel = False
 
         def queue_log(message: str, level: int = logging.INFO) -> None:
+            nonlocal legacy_reported_no_excel
+            if "no excel files were saved" in str(message).lower():
+                legacy_reported_no_excel = True
             self.gui_queue.put({"type": "log", "message": message})
             logger.log(level, message)
 
         self.log = queue_log
 
-        pre_count, pre_mtime = _excel_snapshot()
+        pre_snapshot = _excel_snapshot()
 
         try:
             _legacy_post_process(self, labels)
 
-            post_count, post_mtime = _excel_snapshot()
-            created = post_count - pre_count
-            changed = post_mtime > pre_mtime
+            post_snapshot = _excel_snapshot()
+            created = len(set(post_snapshot) - set(pre_snapshot))
+            overwritten = sum(
+                1
+                for path, post_sig in post_snapshot.items()
+                if path in pre_snapshot and post_sig != pre_snapshot[path]
+            )
+            post_count = len(post_snapshot)
 
-            if created > 0 or changed:
-                self._last_job_success = bool(self._last_job_success or True)
-                msg = f"Excel export completed ({max(created, 0)} new file(s){' or overwrites' if created == 0 and changed else ''})."
-                self.gui_queue.put({"type": "log", "message": msg})
+            if created > 0 or overwritten > 0:
+                self._last_job_success = True
+                self.gui_queue.put(
+                    {
+                        "type": "log",
+                        "message": (
+                            f"Excel export completed ({created} new file(s), "
+                            f"{overwritten} overwritten file(s))."
+                        ),
+                    }
+                )
+            elif legacy_reported_no_excel or post_count == 0:
+                self._last_job_success = False
+                self.gui_queue.put(
+                    {
+                        "type": "log",
+                        "message": "Post-process finished but no Excel outputs were detected.",
+                    }
+                )
             else:
-                self.gui_queue.put({
-                    "type": "log",
-                    "message": "Post-process finished but no NEW Excel files were detected. "
-                               "If files were overwritten or saved elsewhere, this can be expected.",
-                })
+                self._last_job_success = True
+                self.gui_queue.put(
+                    {
+                        "type": "log",
+                        "message": (
+                            "Post-process finished with existing Excel outputs and no detectable "
+                            "timestamp/size changes; treating export as successful."
+                        ),
+                    }
+                )
         except Exception as err:
             logger.exception("Excel export failed")
             self._last_job_success = False
@@ -1734,10 +1891,32 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 edits = row.findChildren(QLineEdit)
                 if len(edits) < 2:
                     continue
-                label = edits[0].text().strip()
+                label_edit = edits[0]
+                label = label_edit.text().strip()
                 ident = edits[1].text().strip()
                 if not label:
                     continue
+                illegal_chars = _illegal_condition_chars(label)
+                if illegal_chars:
+                    bad = " ".join(illegal_chars)
+                    QMessageBox.warning(
+                        self,
+                        "Invalid Condition Name",
+                        (
+                            "Condition names cannot contain characters that are invalid for "
+                            "Windows file/folder names.\n\n"
+                            f"Condition: {label}\n"
+                            f"Illegal character(s): {bad}\n\n"
+                            "Please rename this condition using only allowed characters.\n"
+                            f"Not allowed: {WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT}"
+                        ),
+                    )
+                    try:
+                        label_edit.setFocus()
+                        label_edit.selectAll()
+                    except Exception:
+                        pass
+                    return
                 try:
                     mapping[label] = int(ident)
                 except Exception:
@@ -1995,3 +2174,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

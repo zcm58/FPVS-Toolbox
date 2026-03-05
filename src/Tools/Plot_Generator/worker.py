@@ -67,7 +67,7 @@ class _Worker(QObject):
     """Worker to process Excel files and generate plots."""
 
     progress = Signal(str, int, int)
-    finished = Signal()
+    finished = Signal(dict)
 
     def __init__(
         self,
@@ -153,11 +153,17 @@ class _Worker(QObject):
         self.legend_a_peaks = legend_a_peaks
         self.legend_b_peaks = legend_b_peaks
         self.project_root = project_root
+        self.generated_paths: list[str] = []
+        self.failed_items: list[dict[str, str]] = []
 
     def run(self) -> None:
         try:
             self._run()
         except Exception as exc:
+            self._record_failure(
+                item=self.condition,
+                error=f"Unhandled worker exception: {exc}",
+            )
             logger.error(
                 "SNR plot generation failed.",
                 exc_info=exc,
@@ -170,7 +176,14 @@ class _Worker(QObject):
             )
             self._emit("SNR plot generation failed. See logs for details.", 0, 0)
         finally:
-            self.finished.emit()
+            self.finished.emit(
+                {
+                    "condition": self.condition,
+                    "overlay": self.overlay,
+                    "generated_paths": list(self.generated_paths),
+                    "failed_items": list(self.failed_items),
+                }
+            )
 
     def stop(self) -> None:
         self._stop_requested = True
@@ -182,6 +195,12 @@ class _Worker(QObject):
         if self.legend_custom_enabled and custom is not None and custom.strip():
             return custom.strip()
         return default
+
+    def _record_generated_path(self, path: Path) -> None:
+        self.generated_paths.append(str(path))
+
+    def _record_failure(self, *, item: str, error: str) -> None:
+        self.failed_items.append({"item": item, "error": error})
 
     def _selected_roi_names(self) -> List[str]:
         return list(self.roi_map.keys()) if self.selected_roi == ALL_ROIS_OPTION else [self.selected_roi]
@@ -420,20 +439,27 @@ class _Worker(QObject):
 
     def _count_excel_files(self, condition: str) -> int:
         """Return the number of Excel files for a condition."""
+        return len(self._list_excel_files(condition))
+
+    def _list_excel_files(self, condition: str) -> list[Path]:
+        """Return sorted Excel files under a condition folder (recursive)."""
         cond_folder = Path(self.folder) / condition
         if not cond_folder.is_dir():
-            return 0
-        return sum(
-            1
-            for root, _, files in os.walk(cond_folder)
-            for f in files
+            return []
+        files = [
+            Path(root) / f
+            for root, _, names in os.walk(cond_folder)
+            for f in names
             if f.lower().endswith(".xlsx")
-        )
+        ]
+        files.sort()
+        return files
 
     def _collect_data(
         self,
         condition: str,
         *,
+        excel_files: Sequence[Path] | None = None,
         offset: int = 0,
         total_override: int | None = None,
         ) -> tuple[List[float], Dict[str, Dict[str, List[float]]], Dict[str, Dict[str, float]]]:
@@ -444,17 +470,12 @@ class _Worker(QObject):
 
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
-        excel_files = [
-            Path(root) / f
-            for root, _, files in os.walk(cond_folder)
-            for f in files
-            if f.lower().endswith(".xlsx")
-        ]
-        if not excel_files:
+        files = list(excel_files) if excel_files is not None else self._list_excel_files(condition)
+        if not files:
             self._emit("No Excel files found for condition.")
-            return [], {}
+            return [], {}, {}
 
-        total_files = len(excel_files)
+        total_files = len(files)
         overall_total = total_override if total_override is not None else total_files
         processed_files = 0
         self._emit(
@@ -473,8 +494,12 @@ class _Worker(QObject):
         warned_missing_z = False
         freqs: Iterable[float] | None = None
         self._unknown_subject_files.clear()
+        roi_channels_upper = {
+            roi: {ch.upper() for ch in self.roi_map.get(roi, [])}
+            for roi in roi_names
+        }
 
-        for excel_path in excel_files:
+        for excel_path in files:
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return [], {}, {}
@@ -486,7 +511,36 @@ class _Worker(QObject):
             try:
                 xls = pd.ExcelFile(excel_path)
                 if "FullSNR" in xls.sheet_names:
-                    df = pd.read_excel(xls, sheet_name="FullSNR")
+                    header = pd.read_excel(xls, sheet_name="FullSNR", nrows=0)
+                    freq_pairs: List[tuple[float, str]] = []
+                    for col in header.columns:
+                        if isinstance(col, str) and col.endswith("_Hz"):
+                            try:
+                                freq_pairs.append((float(col.split("_")[0]), col))
+                            except ValueError:
+                                continue
+                    freq_pairs.sort(key=lambda x: x[0])
+                    selected_pairs = [
+                        (freq, col)
+                        for freq, col in freq_pairs
+                        if self.x_min <= freq <= self.x_max
+                    ]
+                    if not selected_pairs:
+                        self._emit(
+                            f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
+                            offset + processed_files,
+                            overall_total,
+                        )
+                        self._record_failure(
+                            item=excel_path.name,
+                            error="No frequencies in selected x-range",
+                        )
+                        processed_files += 1
+                        continue
+                    ordered_freqs = [f for f, _ in selected_pairs]
+                    ordered_cols = [c for _, c in selected_pairs]
+                    usecols = ["Electrode"] + ordered_cols
+                    df = pd.read_excel(xls, sheet_name="FullSNR", usecols=usecols)
                 else:
                     df_amp = pd.read_excel(xls, sheet_name="FFT Amplitude (uV)")
                     freq_cols_tmp = [
@@ -498,20 +552,48 @@ class _Worker(QObject):
                     snr_vals.columns = freq_cols_tmp
                     snr_vals.insert(0, "Electrode", df_amp["Electrode"])
                     df = snr_vals
+                    freq_pairs = []
+                    for col in freq_cols_tmp:
+                        try:
+                            freq_pairs.append((float(col.split("_")[0]), col))
+                        except ValueError:
+                            continue
+                    freq_pairs.sort(key=lambda x: x[0])
+                    selected_pairs = [
+                        (freq, col)
+                        for freq, col in freq_pairs
+                        if self.x_min <= freq <= self.x_max
+                    ]
+                    if not selected_pairs:
+                        self._emit(
+                            f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
+                            offset + processed_files,
+                            overall_total,
+                        )
+                        self._record_failure(
+                            item=excel_path.name,
+                            error="No frequencies in selected x-range",
+                        )
+                        processed_files += 1
+                        continue
+                    ordered_freqs = [f for f, _ in selected_pairs]
+                    ordered_cols = [c for _, c in selected_pairs]
+                    df = df[["Electrode"] + ordered_cols]
             except Exception as e:  # pragma: no cover - simple logging
                 self._emit(f"Failed reading {excel_path.name}: {e}")
+                self._record_failure(item=excel_path.name, error=f"Failed reading Excel: {e}")
                 continue
-            freq_cols = [c for c in df.columns if isinstance(c, str) and c.endswith("_Hz")]
-            if not freq_cols:
+            if not ordered_cols:
                 self._emit(
                     f"No freq columns in {excel_path.name}",
                     offset + processed_files,
                     overall_total,
                 )
+                self._record_failure(item=excel_path.name, error="No frequency columns found")
                 processed_files += 1
                 continue
             self._emit(
-                f"Found {len(freq_cols)} frequency columns in {excel_path.name}",
+                f"Using {len(ordered_cols)} frequency columns in {excel_path.name}",
                 offset + processed_files,
                 overall_total,
             )
@@ -523,6 +605,7 @@ class _Worker(QObject):
                     offset + processed_files,
                     overall_total,
                 )
+                self._record_failure(item=excel_path.name, error="Unable to determine subject ID")
                 processed_files += 1
                 continue
             if (
@@ -562,26 +645,31 @@ class _Worker(QObject):
                         )
                     except Exception as e:  # pragma: no cover - logged to UI
                         self._emit(f"Failed reading scalp data in {excel_path.name}: {e}")
+                        self._record_failure(
+                            item=excel_path.name,
+                            error=f"Failed reading scalp data: {e}",
+                        )
 
-            freq_pairs: List[tuple[float, str]] = []
-            for col in freq_cols:
-                try:
-                    freq = float(col.split("_")[0])
-                except ValueError:
-                    continue
-                freq_pairs.append((freq, col))
-
-            freq_pairs.sort(key=lambda x: x[0])
-            ordered_freqs = [f for f, _ in freq_pairs]
-            ordered_cols = [c for _, c in freq_pairs]
             if freqs is None:
                 freqs = ordered_freqs
 
+            electrode_upper = df["Electrode"].astype(str).str.upper()
             for roi in roi_names:
-                chans = [c.upper() for c in self.roi_map.get(roi, [])]
-                df_roi = df[df["Electrode"].str.upper().isin(chans)]
+                chans = roi_channels_upper.get(roi, set())
+                if not chans:
+                    self._emit(f"No electrode definition for ROI {roi}")
+                    self._record_failure(
+                        item=f"{excel_path.name}:{roi}",
+                        error="No electrodes configured for ROI",
+                    )
+                    continue
+                df_roi = df[electrode_upper.isin(chans)]
                 if df_roi.empty:
                     self._emit(f"No electrodes for ROI {roi} in {excel_path.name}")
+                    self._record_failure(
+                        item=f"{excel_path.name}:{roi}",
+                        error="No electrodes for ROI",
+                    )
                     continue
 
                 means = df_roi[ordered_cols].mean().tolist()
@@ -609,16 +697,20 @@ class _Worker(QObject):
 
     def _run(self) -> None:
         if self.overlay and self.condition_b:
-            total_a = self._count_excel_files(self.condition)
-            total_b = self._count_excel_files(self.condition_b)
+            files_a = self._list_excel_files(self.condition)
+            files_b = self._list_excel_files(self.condition_b)
+            total_a = len(files_a)
+            total_b = len(files_b)
             total = total_a + total_b
             freqs_a, data_a, scalp_a = self._collect_data(
                 self.condition,
+                excel_files=files_a,
                 offset=0,
                 total_override=total,
             )
             freqs_b, data_b, scalp_b = self._collect_data(
                 self.condition_b,
+                excel_files=files_b,
                 offset=total_a,
                 total_override=total,
             )
@@ -731,30 +823,30 @@ class _Worker(QObject):
                         0,
                     )
             else:
-                line_color = self.stem_color
-                stem_vals = amps
-                cont = ax.stem(
+                ax.plot(
                     freqs,
-                    stem_vals,
-                    linefmt=line_color,
-                    markerfmt=" ",
-                    basefmt=" ",
-                    bottom=1.0,
+                    amps,
+                    color=self.stem_color,
+                    label=self._resolve_legend_label(self.legend_condition_a, self.condition),
                 )
-                cont.markerline.set_label(self.metric)
                 self._emit(
-                    f"Plotted {len(stem_vals)} SNR stems for ROI {roi}", 0, 0
+                    f"Plotted {len(amps)} SNR values for ROI {roi}", 0, 0
                 )
 
-            if odd_freqs and not self.use_matlab_style:
+            if odd_freqs:
                 freq_array = np.array(freqs)
                 for idx, odd in enumerate(odd_freqs):
                     closest = int(np.abs(freq_array - odd).argmin())
-                    label = "Oddball Peaks" if idx == 0 else "_nolegend_"
+                    label = (
+                        self._resolve_legend_label(self.legend_a_peaks, _DEFAULT_A_PEAKS)
+                        if idx == 0
+                        else "_nolegend_"
+                    )
                     ax.scatter(
                         freq_array[closest],
                         amps[closest],
-                        facecolor="red",
+                        marker="o",
+                        facecolor=self.stem_color,
                         edgecolor="black",
                         zorder=4,
                         label=label,
@@ -815,8 +907,10 @@ class _Worker(QObject):
             save_kwargs = {"dpi": 300, "pad_inches": 0.05}
             if not has_scalp:
                 save_kwargs["bbox_inches"] = "tight"
-            fig.savefig(self.out_dir / fname, **save_kwargs)
+            out_path = self.out_dir / fname
+            fig.savefig(out_path, **save_kwargs)
             plt.close(fig)
+            self._record_generated_path(out_path)
             self._emit(f"Saved {fname}")
 
     def _plot_overlay(
@@ -1008,10 +1102,12 @@ class _Worker(QObject):
                 fig.subplots_adjust(top=0.90)
 
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
+            out_path = self.out_dir / fname
             fig.savefig(
-                self.out_dir / fname,
+                out_path,
                 dpi=300,
                 pad_inches=0.05,
             )
             plt.close(fig)
+            self._record_generated_path(out_path)
             self._emit(f"Saved {fname}")

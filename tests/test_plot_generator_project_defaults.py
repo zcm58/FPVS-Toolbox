@@ -97,3 +97,27 @@ def test_legacy_results_folder_detected(tmp_path, monkeypatch):
     assert win.folder_edit.text() == str(excel)
     assert win.out_edit.text() == str(snr)
     app.quit()
+
+
+def test_xmax_defaults_to_analysis_upper_limit(tmp_path, monkeypatch):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "project.json").write_text(json.dumps({"name": "XMax"}))
+
+    monkeypatch.chdir(proj)
+    module = _import_module()
+    import Tools.Plot_Generator.gui as gui_module
+    from PySide6.QtWidgets import QApplication
+
+    class _FakeSettings:
+        def get(self, section, option, fallback=None):
+            if section == "analysis" and option == "bca_upper_limit":
+                return "24.0"
+            return fallback
+
+    monkeypatch.setattr(gui_module, "SettingsManager", lambda: _FakeSettings())
+
+    app = QApplication.instance() or QApplication([])
+    win = module.PlotGeneratorWindow()
+    assert win.xmax_spin.value() == pytest.approx(24.0)
+    app.quit()

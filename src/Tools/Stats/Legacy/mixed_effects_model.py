@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _FitResult:
+    """Plain-language container for  FitResult behavior in this stats module."""
     table: pd.DataFrame
     model: "MixedLMResults"  # type: ignore[name-defined]
     used_re_formula: str
@@ -244,6 +245,7 @@ def _make_reduced_terms(processed_terms: List[str], drop: str) -> List[str]:
 
     def _mentions(var: str, term: str) -> bool:
         # Match both raw and C(var, ...)
+        """Run the mentions helper used by the Legacy Stats workflow."""
         return re.search(rf'(?i)(?<![A-Za-z0-9_]){var}(?![A-Za-z0-9_])', term) or \
                re.search(rf'(?i)C\(\s*{var}\s*,', term)
 
