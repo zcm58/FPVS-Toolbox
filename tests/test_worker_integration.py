@@ -1,6 +1,7 @@
 import importlib.util
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +11,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtWidgets import QApplication
 
 from Main_App.PySide6_App.Backend.project import Project
+import Main_App.PySide6_App.GUI.main_window as main_window_module
 from Main_App.PySide6_App.GUI.main_window import MainWindow
 from Main_App.PySide6_App.workers.mp_runner_bridge import MpRunnerBridge
 
@@ -28,6 +30,7 @@ def _build_worker_project(root: Path) -> Project:
             "ref_chan2": "EXG2",
             "max_chan_idx_keep": 64,
             "max_bad_chans": 10,
+            "max_parallel_workers_override": 0,
             "save_preprocessed_fif": True,
             "stim_channel": "StimA",
         }
@@ -56,6 +59,7 @@ def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
     def fake_start(self, project_root, data_files, settings, event_map, save_folder, max_workers):
         captured["settings"] = settings
         captured["event_map"] = event_map
+        captured["max_workers"] = max_workers
         self.finished.emit({"files": len(data_files)})
 
     monkeypatch.setattr(MpRunnerBridge, "start", fake_start, raising=False)
@@ -66,3 +70,38 @@ def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
     assert captured["event_map"] == {"CondA": 11}
     assert captured["settings"]["stim_channel"] == "StimA"
     assert captured["settings"]["save_preprocessed_fif"] is True
+    assert captured["max_workers"] >= 1
+
+
+def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monkeypatch):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+
+    project = _build_worker_project(tmp_path / "proj_override")
+    project.update_preprocessing({**project.preprocessing, "max_parallel_workers_override": 6})
+    project.save()
+
+    QApplication.instance() or QApplication([])
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    monkeypatch.setattr(
+        main_window_module.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=int(16 * (1024 ** 3))),
+    )
+    monkeypatch.setattr(main_window_module.os, "cpu_count", lambda: 8)
+
+    captured: dict = {}
+
+    def fake_start(self, project_root, data_files, settings, event_map, save_folder, max_workers):
+        captured["max_workers"] = max_workers
+        self.finished.emit({"files": len(data_files)})
+
+    monkeypatch.setattr(MpRunnerBridge, "start", fake_start, raising=False)
+
+    win.start_processing()
+    qtbot.waitUntil(lambda: not getattr(win, "_run_active", False), timeout=2000)
+
+    assert captured["max_workers"] == 6

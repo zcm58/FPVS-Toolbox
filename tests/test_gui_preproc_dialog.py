@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
 from Main_App.PySide6_App.Backend.project import Project
 from Main_App.PySide6_App.GUI.main_window import MainWindow
+import Main_App.PySide6_App.GUI.settings_panel as settings_panel
 from Main_App.PySide6_App.GUI.settings_panel import SettingsDialog
 
 
@@ -30,6 +32,7 @@ def _prep_project(root):
             "ref_chan2": "Pz",
             "max_chan_idx_keep": 32,
             "max_bad_chans": 5,
+            "max_parallel_workers_override": 0,
             "save_preprocessed_fif": False,
             "stim_channel": "Status",
         }
@@ -145,3 +148,65 @@ def test_preproc_tab_blocks_invalid_bandpass(tmp_path, qtbot, monkeypatch):
     dlg.tabs.setCurrentIndex(dlg._loreta_tab_index)
 
     assert dlg.tabs.currentIndex() == dlg._loreta_tab_index
+
+
+def test_parallel_worker_override_warning_blocks_save_on_no(tmp_path, qtbot, monkeypatch):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    monkeypatch.setattr(
+        settings_panel.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=int(16 * (1024 ** 3))),
+    )
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    prompts: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: (
+            prompts.append(args[2] if len(args) >= 3 else kwargs.get("text", "")),
+            QMessageBox.No,
+        )[1],
+    )
+
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    dlg.preproc_edits[10].setText("6")
+    dlg._save()
+
+    reloaded = Project.load(project.project_root)
+    assert reloaded.preprocessing["max_parallel_workers_override"] == 0
+    assert prompts
+    assert "[4]" in prompts[0]
+
+
+def test_parallel_worker_override_warning_allows_save_on_yes(tmp_path, qtbot, monkeypatch):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    monkeypatch.setattr(
+        settings_panel.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=int(16 * (1024 ** 3))),
+    )
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+    dlg.preproc_edits[10].setText("6")
+    dlg._save()
+
+    reloaded = Project.load(project.project_root)
+    assert reloaded.preprocessing["max_parallel_workers_override"] == 6

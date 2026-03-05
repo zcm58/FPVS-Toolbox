@@ -48,6 +48,12 @@ _FIELDS: tuple[_Field, ...] = (
         10,
         _INT,
     ),
+    _Field(
+        "max_parallel_workers_override",
+        ("max_parallel_workers_override", "max_parallel_workers", "max_workers"),
+        0,
+        _INT,
+    ),
     _Field("save_preprocessed_fif", ("save_preprocessed_fif", "save_fif"), False, _BOOL),
     _Field("stim_channel", ("stim_channel", "stim", "stim_channel_name"), config.DEFAULT_STIM_CHANNEL, _STR),
 )
@@ -63,6 +69,7 @@ _ALIASES_FOR_OUTPUT: dict[str, Iterable[str]] = {
     "epoch_end_s": ("epoch_end",),
     "max_chan_idx_keep": ("max_idx_keep",),
     "max_bad_chans": ("max_bad_channels_alert_thresh",),
+    "max_parallel_workers_override": ("max_parallel_workers", "max_workers"),
 }
 
 
@@ -170,6 +177,7 @@ def normalize_preprocessing_settings(
 
     low_pass_val = float(normalized.get("low_pass")) if "low_pass" in normalized else None
     high_pass_val = float(normalized.get("high_pass")) if "high_pass" in normalized else None
+    max_workers_override = int(normalized.get("max_parallel_workers_override", 0))
 
     try:
         _validate_bandpass(low_pass=low_pass_val, high_pass=high_pass_val)
@@ -184,6 +192,11 @@ def normalize_preprocessing_settings(
                 on_legacy_inversion(high_pass_val, low_pass_val)
         else:
             raise
+
+    if max_workers_override < 0:
+        raise ValueError(
+            "max_parallel_workers_override must be zero or a positive integer."
+        )
 
     # Surface runtime aliases expected by legacy helpers without duplicating storage
     for canonical, aliases in _ALIASES_FOR_OUTPUT.items():

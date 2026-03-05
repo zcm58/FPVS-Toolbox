@@ -11,6 +11,30 @@ from typing import Optional
 GLOBAL_MAX_WORKERS = 16
 
 
+def get_ram_tier_recommendation(total_ram_bytes: int) -> tuple[str, Optional[int], float]:
+    """
+    Return ``(tier_label, recommended_cap, total_ram_gib)`` from host RAM.
+
+    ``recommended_cap`` is the hardcoded safety recommendation used for automatic
+    worker selection. ``None`` means no RAM-tier cap applies.
+    """
+
+    total_ram_gib = total_ram_bytes / float(1024 ** 3) if total_ram_bytes > 0 else 0.0
+
+    # Cumulative tiers with no gaps.
+    if total_ram_gib < 12.0:
+        return "8GB", 2, total_ram_gib
+    if total_ram_gib < 20.0:
+        return "16GB", 4, total_ram_gib
+    if total_ram_gib < 40.0:
+        return "32GB", 4, total_ram_gib
+    if total_ram_gib < 80.0:
+        return "64GB", 7, total_ram_gib
+    if total_ram_gib < 140.0:
+        return "128GB", 12, total_ram_gib
+    return "140GB+", None, total_ram_gib
+
+
 def set_blas_threads_single_process() -> None:
     """Allow BLAS to use many threads in single-process mode."""
     cores = os.cpu_count() or 1
@@ -32,45 +56,20 @@ def compute_effective_max_workers(
         total_ram_bytes: int,
         cpu_count: int,
         project_max_workers: Optional[int],
+        allow_ram_cap_bypass: bool = False,
 ) -> int:
     """Return a worker count capped by CPU availability and RAM tiers."""
 
     cores = cpu_count if cpu_count and cpu_count > 0 else 1
     cpu_cap = max(1, cores - 1)
-
-    total_ram_gib = total_ram_bytes / float(1024 ** 3) if total_ram_bytes > 0 else 0.0
-
-    # CUMULATIVE LOGIC:
-    # Uses '<' to ensure no gaps. Any system falls into the safest lower tier.
-
-    if total_ram_gib < 12.0:
-        # 8GB Tier (and below):
-        # Windows/OS uses ~3GB. Leaving ~5GB. 2 workers is the safe max.
-        ram_cap = 2
-    elif total_ram_gib < 20.0:
-        # 16GB Tier (covers 12GB-19GB): Your setting.
-        ram_cap = 4
-    elif total_ram_gib < 40.0:
-        # 32GB Tier (covers 24GB-39GB): Your setting.
-        ram_cap = 4
-    elif total_ram_gib < 80.0:
-        # 64GB Tier (covers 40GB-79GB): Your setting.
-        ram_cap = 7
-    elif total_ram_gib < 140.0:
-        # 128GB Tier (covers 80GB-139GB):
-        # With this much RAM, we can safely double the 64GB cap.
-        ram_cap = 12
-    else:
-        # >140GB (e.g. 192GB, 256GB):
-        # No strict RAM limit needed; fallback to CPU cap or Global limit.
-        ram_cap = None
+    _tier, ram_cap, _ram_gib = get_ram_tier_recommendation(total_ram_bytes)
 
     if project_max_workers is not None and project_max_workers > 0:
         desired = project_max_workers
     else:
         desired = cpu_cap
 
-    if ram_cap is None:
+    if ram_cap is None or allow_ram_cap_bypass:
         effective = min(desired, cpu_cap)
     else:
         effective = min(desired, cpu_cap, ram_cap)

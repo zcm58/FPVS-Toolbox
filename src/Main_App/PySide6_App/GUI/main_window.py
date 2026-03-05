@@ -189,6 +189,7 @@ from Main_App.PySide6_App.Backend.preprocessing_settings import (
 )
 from Main_App.Performance.mp_env import (
     compute_effective_max_workers,
+    get_ram_tier_recommendation,
     set_blas_threads_single_process,
 )
 from Tools.Average_Preprocessing.New_PySide6.main_window import (
@@ -616,70 +617,88 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 self._n_jobs_ignored_logged = True
 
             project_max_workers: int | None = None
+            allow_ram_cap_bypass = False
+            override_source = "none"
             if getattr(self, "currentProject", None):
                 opts = getattr(self.currentProject, "options", {})
                 self.parallel_mode = opts.get(
                     "parallel_mode", getattr(self, "parallel_mode", "process")
                 )
-                raw_override = opts.get("max_workers")
+
+                normalized_preproc = normalize_preprocessing_settings(
+                    getattr(self.currentProject, "preprocessing", {})
+                )
+                raw_override = normalized_preproc.get("max_parallel_workers_override")
                 if raw_override is not None:
                     try:
                         override_value = int(raw_override)
                     except (TypeError, ValueError):
                         logger.warning(
-                            "Project max_workers override must be an integer; received %r",
+                            "Preprocessing max_parallel_workers_override must be an integer; received %r",
                             raw_override,
                         )
                     else:
                         if override_value > 0:
                             project_max_workers = override_value
+                            allow_ram_cap_bypass = True
+                            override_source = "preprocessing.max_parallel_workers_override"
                         else:
+                            allow_ram_cap_bypass = False
+
+                if project_max_workers is None:
+                    raw_override = opts.get("max_workers")
+                    if raw_override is not None:
+                        try:
+                            override_value = int(raw_override)
+                        except (TypeError, ValueError):
                             logger.warning(
-                                "Project max_workers override must be positive; received %r",
+                                "Project max_workers override must be an integer; received %r",
                                 raw_override,
                             )
+                        else:
+                            if override_value > 0:
+                                project_max_workers = override_value
+                                override_source = "options.max_workers"
+                            else:
+                                logger.warning(
+                                    "Project max_workers override must be positive; received %r",
+                                    raw_override,
+                                )
 
             total_ram_bytes = psutil.virtual_memory().total
             cpu_count = os.cpu_count() or 1
-            total_ram_gib = total_ram_bytes / float(1024 ** 3) if total_ram_bytes > 0 else 0.0
-            ram_tier = "default"
-            ram_cap: int | None = None
-            if 14.0 <= total_ram_gib <= 18.0:
-                ram_tier = "16GB"
-                ram_cap = 4
-            elif 28.0 <= total_ram_gib <= 36.0:
-                ram_tier = "32GB"
-                ram_cap = 5
-            elif 56.0 <= total_ram_gib <= 72.0:
-                ram_tier = "64GB"
-                ram_cap = 6
+            ram_tier, ram_cap, total_ram_gib = get_ram_tier_recommendation(total_ram_bytes)
 
             effective_max_workers = compute_effective_max_workers(
                 total_ram_bytes=total_ram_bytes,
                 cpu_count=cpu_count,
                 project_max_workers=project_max_workers,
+                allow_ram_cap_bypass=allow_ram_cap_bypass,
             )
             if (
                 project_max_workers is not None
                 and effective_max_workers != project_max_workers
             ):
                 logger.warning(
-                    "Clamped project max_workers from %s to %s (cpu_count=%s, ram_tier=%s, ram_cap=%s)",
+                    "Clamped project max_workers from %s to %s (cpu_count=%s, ram_tier=%s, ram_cap=%s, ram_cap_bypass=%s)",
                     project_max_workers,
                     effective_max_workers,
                     cpu_count,
                     ram_tier,
                     ram_cap if ram_cap is not None else "none",
+                    allow_ram_cap_bypass,
                 )
 
             logger.info(
-                "Resolved max_workers=%s (cpu_count=%s, ram_gib=%.1f, ram_tier=%s, ram_cap=%s, project_override=%s)",
+                "Resolved max_workers=%s (cpu_count=%s, ram_gib=%.1f, ram_tier=%s, ram_cap=%s, project_override=%s, override_source=%s, ram_cap_bypass=%s)",
                 effective_max_workers,
                 cpu_count,
                 total_ram_gib,
                 ram_tier,
                 ram_cap if ram_cap is not None else "none",
                 project_max_workers,
+                override_source,
+                allow_ram_cap_bypass,
             )
             self.max_workers = effective_max_workers
 

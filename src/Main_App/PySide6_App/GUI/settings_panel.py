@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import config
+import psutil
 
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import (
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.Legacy_App.settings_manager import SettingsManager
+from Main_App.Performance.mp_env import get_ram_tier_recommendation
 from .roi_settings_editor import ROISettingsEditor
 from ..config.projects_root import changeProjectsRoot
 from ..Backend.project import Project
@@ -169,6 +171,7 @@ class SettingsDialog(QDialog):
             "Ref Chan 2:",
             "Max Chan Idx Keep:",
             "Max Bad Chans (Flag):",
+            "Max Parallel Workers Override (0=Auto):",
         ]
         self.preproc_edits: list[QLineEdit] = []
         for i, label_text in enumerate(params):
@@ -190,6 +193,12 @@ class SettingsDialog(QDialog):
             ("preprocessing", "ref_chan2", str(PREPROCESSING_DEFAULTS["ref_chan2"]), "ref_chan2"),
             ("preprocessing", "max_idx_keep", str(PREPROCESSING_DEFAULTS["max_chan_idx_keep"]), "max_chan_idx_keep"),
             ("preprocessing", "max_bad_chans", str(PREPROCESSING_DEFAULTS["max_bad_chans"]), "max_bad_chans"),
+            (
+                "preprocessing",
+                "max_parallel_workers",
+                str(PREPROCESSING_DEFAULTS["max_parallel_workers_override"]),
+                "max_parallel_workers_override",
+            ),
         ]
         project_pp = self._project_preprocessing() if self.project else None
         for edit, (sec, opt, fallback, canonical) in zip(self.preproc_edits, pre_keys):
@@ -206,7 +215,8 @@ class SettingsDialog(QDialog):
             self.save_fif_check.setChecked(
                 self.manager.get("paths", "save_fif", "False").lower() == "true"
             )
-        grid.addWidget(self.save_fif_check, 5, 0, 1, 4)
+        save_fif_row = (len(params) + 1) // 2
+        grid.addWidget(self.save_fif_check, save_fif_row, 0, 1, 4)
 
         layout.addWidget(self.group_preproc)
         layout.addStretch(1)
@@ -222,6 +232,7 @@ class SettingsDialog(QDialog):
             "ref_chan2",
             "max_chan_idx_keep",
             "max_bad_chans",
+            "max_parallel_workers_override",
         ]
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
             edit.editingFinished.connect(
@@ -380,6 +391,8 @@ class SettingsDialog(QDialog):
             target_idx = 0
         elif "high-pass" in msg_lower or "'high_pass'" in msg_lower:
             target_idx = 1
+        elif "'max_parallel_workers_override'" in msg_lower:
+            target_idx = 10
         if target_idx is not None and target_idx < len(self.preproc_edits):
             edit = self.preproc_edits[target_idx]
             edit.setFocus()
@@ -401,12 +414,48 @@ class SettingsDialog(QDialog):
             field.setFocus()
             field.selectAll()
 
+    def _confirm_parallel_worker_override(self, normalized: Dict[str, Any]) -> bool:
+        override = int(normalized.get("max_parallel_workers_override", 0))
+        if override <= 0:
+            return True
+
+        try:
+            total_ram_bytes = int(psutil.virtual_memory().total)
+        except Exception:
+            return True
+
+        _tier, recommended_cap, _ram_gib = get_ram_tier_recommendation(total_ram_bytes)
+        if recommended_cap is None or override <= recommended_cap:
+            return True
+
+        message = (
+            f"The maximum amount of workers recommended for your RAM tier is [{recommended_cap}]. "
+            "Selecting a value higher than this could cause your system to become slow or "
+            "completely unresponsive for a time. Do you wish to continue?"
+        )
+        choice = QMessageBox.question(
+            self,
+            "High Worker Count Warning",
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if choice != QMessageBox.Yes:
+            if len(self.preproc_edits) > 10:
+                field = self.preproc_edits[10]
+                field.setFocus()
+                field.selectAll()
+            return False
+        return True
+
     # ------------------------------------------------------------------
     def _save(self) -> None:
         using_project = self.project is not None
 
         validated_preproc = self._validated_preproc_payload()
         if validated_preproc is None:
+            return
+        if not self._confirm_parallel_worker_override(validated_preproc):
             return
 
         if not using_project:
@@ -429,6 +478,7 @@ class SettingsDialog(QDialog):
             ("preprocessing", "ref_chan2", "ref_chan2"),
             ("preprocessing", "max_idx_keep", "max_chan_idx_keep"),
             ("preprocessing", "max_bad_chans", "max_bad_chans"),
+            ("preprocessing", "max_parallel_workers", "max_parallel_workers_override"),
         ]
         if not using_project:
             for _edit, (sec, opt, canonical) in zip(self.preproc_edits, pre_keys):
@@ -520,6 +570,7 @@ class SettingsDialog(QDialog):
             "ref_chan2",
             "max_chan_idx_keep",
             "max_bad_chans",
+            "max_parallel_workers_override",
         ]
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
             values[canonical] = edit.text()
