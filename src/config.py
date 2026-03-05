@@ -23,7 +23,7 @@ FPVS_TOOLBOX_REPO_PAGE: str = "https://github.com/zcm58/FPVS-Toolbox-Repo/releas
 
 # — Defaults for analysis —
 DEFAULT_ODDBALL_FREQ: float = 1.2
-DEFAULT_BCA_UPPER_LIMIT: float = 16.8
+DEFAULT_BCA_UPPER_LIMIT: float = 40
 
 def _load_frequency_settings() -> tuple[float, float]:
     """Return oddball frequency and upper limit from saved settings."""
