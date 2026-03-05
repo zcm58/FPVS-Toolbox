@@ -60,8 +60,14 @@ def _excel_paths_in_output_root(output_root: Path | str | None) -> list[Path]:
     return sorted(p.resolve() for p in root.rglob("*.xls*"))
 
 
-def _should_show_no_excel_popup(generated_excel_paths: list[str], output_root: Path | str | None) -> bool:
+def _should_show_no_excel_popup(
+    generated_excel_paths: list[str],
+    output_root: Path | str | None,
+    existing_excel_paths: list[str] | None = None,
+) -> bool:
     if generated_excel_paths:
+        return False
+    if existing_excel_paths:
         return False
     return len(_excel_paths_in_output_root(output_root)) == 0
 
@@ -1022,7 +1028,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 },
             )
 
-            show_no_excel_popup = _should_show_no_excel_popup(generated_excel_paths, output_root)
+            show_no_excel_popup = _should_show_no_excel_popup(
+                generated_excel_paths,
+                output_root,
+                existing_excel_paths,
+            )
             self._last_job_success = not show_no_excel_popup and not bool(payload.get("error"))
 
             if not generated_excel_paths and not show_no_excel_popup:
@@ -1669,8 +1679,12 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def _export_with_post_process(self, labels: list[str]) -> None:
         """
-        Run legacy post_process then decide whether *new* Excel files appeared.
-        Treat "no new files" as a warning (not fatal) because files may be overwritten or stored in subfolders.
+        Run legacy post_process then classify whether Excel output was produced.
+
+        Uses a snapshot of files with mtime_ns+size to detect writes/overwrites.
+        If no deltas are detectable but the exporter did not report "no files saved"
+        and Excel files still exist, treat as success to avoid false negatives on
+        coarse timestamp filesystems.
         """
         excel_dir = self.save_folder_path.get() if hasattr(self.save_folder_path, "get") else ""
         if not excel_dir or not Path(excel_dir).is_dir():
@@ -1680,45 +1694,72 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         out_path = Path(excel_dir)
 
-        def _excel_snapshot() -> tuple[int, float]:
-            count = 0
-            latest_mtime = 0.0
+        def _excel_snapshot() -> dict[Path, tuple[int, int]]:
+            snapshot: dict[Path, tuple[int, int]] = {}
             for p in out_path.rglob("*.xls*"):
                 try:
-                    st = p.stat().st_mtime
+                    stat_result = p.stat()
                 except OSError:
                     continue
-                count += 1
-                latest_mtime = max(latest_mtime, st)
-            return count, latest_mtime
+                snapshot[p.resolve()] = (int(stat_result.st_mtime_ns), int(stat_result.st_size))
+            return snapshot
 
         original_log = self.log
+        legacy_reported_no_excel = False
 
         def queue_log(message: str, level: int = logging.INFO) -> None:
+            nonlocal legacy_reported_no_excel
+            if "no excel files were saved" in str(message).lower():
+                legacy_reported_no_excel = True
             self.gui_queue.put({"type": "log", "message": message})
             logger.log(level, message)
 
         self.log = queue_log
 
-        pre_count, pre_mtime = _excel_snapshot()
+        pre_snapshot = _excel_snapshot()
 
         try:
             _legacy_post_process(self, labels)
 
-            post_count, post_mtime = _excel_snapshot()
-            created = post_count - pre_count
-            changed = post_mtime > pre_mtime
+            post_snapshot = _excel_snapshot()
+            created = len(set(post_snapshot) - set(pre_snapshot))
+            overwritten = sum(
+                1
+                for path, post_sig in post_snapshot.items()
+                if path in pre_snapshot and post_sig != pre_snapshot[path]
+            )
+            post_count = len(post_snapshot)
 
-            if created > 0 or changed:
-                self._last_job_success = bool(self._last_job_success or True)
-                msg = f"Excel export completed ({max(created, 0)} new file(s){' or overwrites' if created == 0 and changed else ''})."
-                self.gui_queue.put({"type": "log", "message": msg})
+            if created > 0 or overwritten > 0:
+                self._last_job_success = True
+                self.gui_queue.put(
+                    {
+                        "type": "log",
+                        "message": (
+                            f"Excel export completed ({created} new file(s), "
+                            f"{overwritten} overwritten file(s))."
+                        ),
+                    }
+                )
+            elif legacy_reported_no_excel or post_count == 0:
+                self._last_job_success = False
+                self.gui_queue.put(
+                    {
+                        "type": "log",
+                        "message": "Post-process finished but no Excel outputs were detected.",
+                    }
+                )
             else:
-                self.gui_queue.put({
-                    "type": "log",
-                    "message": "Post-process finished but no NEW Excel files were detected. "
-                               "If files were overwritten or saved elsewhere, this can be expected.",
-                })
+                self._last_job_success = True
+                self.gui_queue.put(
+                    {
+                        "type": "log",
+                        "message": (
+                            "Post-process finished with existing Excel outputs and no detectable "
+                            "timestamp/size changes; treating export as successful."
+                        ),
+                    }
+                )
         except Exception as err:
             logger.exception("Excel export failed")
             self._last_job_success = False
@@ -2122,3 +2163,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

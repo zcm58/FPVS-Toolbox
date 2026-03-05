@@ -62,15 +62,19 @@ class PostProcessWorker(QObject):
 
             output_root = Path(save_folder_value).resolve() if save_folder_value else None
 
-            def _excel_snapshot() -> dict[str, float]:
+            def _excel_snapshot() -> dict[str, tuple[int, int]]:
                 if output_root is None or not output_root.is_dir():
                     return {}
-                snapshot: dict[str, float] = {}
+                snapshot: dict[str, tuple[int, int]] = {}
                 for path in output_root.rglob("*.xls*"):
                     try:
-                        snapshot[str(path.resolve())] = path.stat().st_mtime
+                        stat_result = path.stat()
                     except OSError:
                         continue
+                    snapshot[str(path.resolve())] = (
+                        int(stat_result.st_mtime_ns),
+                        int(stat_result.st_size),
+                    )
                 return snapshot
 
             before_snapshot = _excel_snapshot()
@@ -88,8 +92,8 @@ class PostProcessWorker(QObject):
 
             generated_excel_paths = sorted(
                 path
-                for path, mtime in after_snapshot.items()
-                if path not in before_snapshot or mtime > before_snapshot[path]
+                for path, signature in after_snapshot.items()
+                if path not in before_snapshot or signature != before_snapshot[path]
             )
             existing_excel_paths = sorted(after_snapshot.keys())
 
@@ -133,3 +137,4 @@ class PostProcessWorker(QObject):
             # FIX 3: Ensure thread terminates even on error
             # Use a distinct status so Main App knows it failed, but thread still dies.
             self.finished.emit({"file": self._file, "cancelled": False, "error": str(e)})
+
