@@ -74,7 +74,7 @@ site/
 
 # Local fsaverage template/data caches
 src/fsaverage/
-src/Tools/fsaverage/
+src/quarantine/Tools/LORETA/fsaverage/
 
 # Quarantined legacy code not used by active runtime
 src/quarantine/

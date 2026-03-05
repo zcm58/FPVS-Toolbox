@@ -18,8 +18,9 @@ import re
 from tkinter import messagebox
 import tkinter as tk
 import config
-from Tools.SourceLocalization import runner as eloreta_runner, source_model
-from Tools.SourceLocalization.logging_utils import QueueLogHandler
+from quarantine.Tools.LORETA.SourceLocalization import runner as eloreta_runner
+from quarantine.Tools.LORETA.SourceLocalization import source_model
+from quarantine.Tools.LORETA.SourceLocalization.logging_utils import QueueLogHandler
 from Main_App.Legacy_App.post_process import post_process as _external_post_process
 from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
 from Main_App.Legacy_App.load_utils import load_eeg_file

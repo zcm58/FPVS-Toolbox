@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QMessageBox
 
 try:
     # Optional GUI; may not exist in your slimmed repo
-    from Tools.SourceLocalization.qt_dialog import SourceLocalizationDialog
+    from quarantine.Tools.LORETA.SourceLocalization import SourceLocalizationDialog
 except Exception:
     SourceLocalizationDialog = None
 
