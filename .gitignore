@@ -78,3 +78,4 @@ src/Tools/fsaverage/
 
 # Quarantined legacy code not used by active runtime
 src/quarantine/
+/src/fpvs_cache/
