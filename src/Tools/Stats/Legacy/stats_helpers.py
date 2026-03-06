@@ -6,6 +6,10 @@ from tkinter import messagebox
 
 from Main_App import SettingsManager
 from . import stats_analysis
+from Tools.Stats.shared_rois import (
+    apply_rois_to_modules as _shared_apply_rois_to_modules,
+    load_rois_from_settings as _shared_load_rois_from_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,53 +108,11 @@ def prepare_all_subject_summed_bca_data(self, roi_filter=None):
 
 
 def load_rois_from_settings(manager=None):
-    """
-    Return ROIs exactly as defined in Settings (case-sensitive).
-    - Trim surrounding whitespace from ROI names and electrodes
-    - Drop empty ROI names and empty/whitespace-only electrodes
-    - If Settings is missing/unreadable/empty: return {}
-    """
-    mgr = manager or SettingsManager()
-    rois_from_settings = None
-
-    try:
-        get_roi_pairs = getattr(mgr, "get_roi_pairs", None)
-        if callable(get_roi_pairs):
-            pairs = get_roi_pairs() or []
-            # get_roi_pairs may return a dict or list/tuple of (name, electrodes)
-            if isinstance(pairs, dict):
-                rois_from_settings = dict(pairs)
-            else:
-                rois_from_settings = {name: electrodes for name, electrodes in pairs}
-    except Exception:
-        rois_from_settings = None
-
-    if rois_from_settings is None:
-        return {}
-
-    cleaned: dict[str, list[str]] = {}
-    for raw_name, raw_vals in rois_from_settings.items():
-        name = str(raw_name).strip()
-        if not name or not isinstance(raw_vals, (list, tuple)):
-            continue
-        # Preserve case; remove surrounding whitespace; drop empties
-        vals = [str(e).strip() for e in raw_vals if str(e).strip()]
-        cleaned[name] = vals
-
-    return cleaned
+    """Compatibility wrapper for the shared ROI settings helper."""
+    return _shared_load_rois_from_settings(manager)
 
 
 
 def apply_rois_to_modules(rois_dict):
-    """Update ROI dictionaries in related stats modules."""
-    import sys
-
-    import Tools.Stats.Legacy.stats_analysis as analysis_mod
-    import Tools.Stats.Legacy.stats_runners as runners_mod
-
-    analysis_mod.set_rois(rois_dict)
-    runners_mod.ROIS = rois_dict
-
-    stats_mod = sys.modules.get("Tools.Stats.Legacy.stats")
-    if stats_mod is not None:
-        setattr(stats_mod, "ROIS", rois_dict)
+    """Compatibility wrapper for the shared ROI propagation helper."""
+    _shared_apply_rois_to_modules(rois_dict)

@@ -33,6 +33,7 @@ _PID_PATTERN = re.compile(r"(?:[A-Za-z]*)?(P\d+)", re.IGNORECASE)
 logger = logging.getLogger(__name__)
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
+_DEFAULT_ODDBALL_FREQ = 1.2
 
 
 def _infer_subject_id_from_path(excel_path: Path) -> str | None:
@@ -125,8 +126,24 @@ class _Worker(QObject):
         self.stem_color_b = stem_color_b.lower()
         self.condition_b = condition_b
         self.overlay = overlay
-        # maintain oddballs attribute for compatibility with older versions
-        self.oddballs: List[float] = list(oddballs or [])
+        self._analysis_base_freq = self._read_analysis_float("base_freq", 0.0)
+        self._analysis_oddball_freq = self._read_analysis_float(
+            "oddball_freq", _DEFAULT_ODDBALL_FREQ
+        )
+        # Maintain explicit oddballs override for compatibility with older callers.
+        if oddballs:
+            parsed_oddballs: List[float] = []
+            for odd in oddballs:
+                try:
+                    odd_val = float(odd)
+                except Exception:
+                    continue
+                if not math.isfinite(odd_val) or odd_val <= 0:
+                    continue
+                parsed_oddballs.append(odd_val)
+            self.oddballs = parsed_oddballs
+        else:
+            self.oddballs = self._derive_oddball_harmonics(self.x_max)
         self.use_matlab_style = use_matlab_style
         self._stop_requested = False
         normalized_groups = {
@@ -202,6 +219,44 @@ class _Worker(QObject):
     def _record_failure(self, *, item: str, error: str) -> None:
         self.failed_items.append({"item": item, "error": error})
 
+    def _read_analysis_float(self, option: str, fallback: float) -> float:
+        try:
+            mgr = SettingsManager()
+            raw = mgr.get("analysis", option, str(fallback))
+            value = float(raw)
+        except Exception:
+            return fallback
+        return value if math.isfinite(value) else fallback
+
+    def _derive_oddball_harmonics(self, max_hz: float) -> List[float]:
+        if not math.isfinite(max_hz) or max_hz <= 0:
+            return []
+
+        oddball_freq = self._analysis_oddball_freq
+        if not math.isfinite(oddball_freq) or oddball_freq <= 0:
+            oddball_freq = _DEFAULT_ODDBALL_FREQ
+
+        max_harmonic = int(math.floor((max_hz / oddball_freq) + 1e-9))
+        if max_harmonic < 1:
+            return []
+
+        configured = [oddball_freq * idx for idx in range(1, max_harmonic + 1)]
+        selected = select_oddball_harmonics(configured, base_freq=self._analysis_base_freq)
+        return sorted(
+            {
+                round(freq, 4)
+                for freq in selected
+                if math.isfinite(freq) and freq > 0
+            }
+        )
+
+    def _visible_oddball_frequencies(self, freqs: Sequence[float]) -> List[float]:
+        if not self.oddballs or not freqs:
+            return []
+        lo = min(freqs)
+        hi = max(freqs)
+        return [freq for freq in self.oddballs if lo <= freq <= hi]
+
     def _selected_roi_names(self) -> List[str]:
         return list(self.roi_map.keys()) if self.selected_roi == ALL_ROIS_OPTION else [self.selected_roi]
 
@@ -226,22 +281,7 @@ class _Worker(QObject):
         return aggregated
 
     def _scalp_oddball_frequencies(self) -> List[float]:
-        mgr = SettingsManager()
-        harm_str = mgr.get(
-            "loreta",
-            "oddball_harmonics",
-            "1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8",
-        )
-        try:
-            configured = [float(h) for h in harm_str.replace(";", ",").split(",") if h.strip()]
-        except Exception:
-            configured = []
-        base_freq = 0.0
-        try:
-            base_freq = float(mgr.get("analysis", "base_freq", "0.0"))
-        except Exception:
-            base_freq = 0.0
-        return select_oddball_harmonics(configured, base_freq=base_freq)
+        return list(self.oddballs)
 
     def _build_group_curves(
         self,
@@ -742,17 +782,7 @@ class _Worker(QObject):
         group_curves: Dict[str, Dict[str, List[float]]] | None = None,
         scalp_inputs: ScalpInputs | None = None,
     ) -> None:
-        mgr = SettingsManager()
-        harm_str = mgr.get(
-            "loreta",
-            "oddball_harmonics",
-            "1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8",
-        )
-        try:
-            cfg_odds = [float(h) for h in harm_str.replace(";", ",").split(",") if h.strip()]
-        except Exception:
-            cfg_odds = []
-        odd_freqs = self.oddballs if self.oddballs else cfg_odds
+        odd_freqs = self._visible_oddball_frequencies(freqs)
 
         group_curves = group_curves or {}
         use_group_overlay = bool(group_curves)
@@ -922,18 +952,7 @@ class _Worker(QObject):
             scalp_b: ScalpInputs | None = None,
     ) -> None:
         plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
-
-        mgr = SettingsManager()
-        harm_str = mgr.get(
-            "loreta",
-            "oddball_harmonics",
-            "1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8",
-        )
-        try:
-            cfg_odds = [float(h) for h in harm_str.replace(";", ",").split(",") if h.strip()]
-        except Exception:
-            cfg_odds = []
-        odd_freqs = self.oddballs if self.oddballs else cfg_odds
+        odd_freqs = self._visible_oddball_frequencies(freqs)
 
         for roi in data_a:
             if self._stop_requested:

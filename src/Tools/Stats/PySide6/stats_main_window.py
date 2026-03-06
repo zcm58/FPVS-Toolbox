@@ -64,7 +64,7 @@ from Tools.Stats.Legacy.stats_export import (
     export_rm_anova_results_to_excel,
     export_significance_results_to_excel as export_harmonic_results_to_excel,
 )
-from Tools.Stats.Legacy.stats_helpers import apply_rois_to_modules, load_rois_from_settings
+from Tools.Stats.shared_rois import apply_rois_to_modules, load_rois_from_settings
 from Tools.Stats.PySide6.stats_controller import StatsController
 from Tools.Stats.PySide6.stats_core import (
     ANOVA_BETWEEN_XLS,

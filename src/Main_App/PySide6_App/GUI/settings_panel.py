@@ -283,11 +283,6 @@ class SettingsDialog(QDialog):
         self.oddball_freq_edit = QLineEdit(self.manager.get("analysis", "oddball_freq", "1.2"))
         form.addRow(QLabel("Oddball Frequency (Hz)"), self.oddball_freq_edit)
 
-        self.harmonics_edit = QLineEdit(
-            self.manager.get("loreta", "oddball_harmonics", "1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8")
-        )
-        form.addRow(QLabel("Oddball Harmonics"), self.harmonics_edit)
-
         tabs.addTab(tab, "Oddball")
 
     # ------------------------------------------------------------------
@@ -499,7 +494,6 @@ class SettingsDialog(QDialog):
         self.manager.set("loreta", "mri_path", self.mri_edit.text())
         self.manager.set("loreta", "loreta_low_freq", self.low_freq_edit.text())
         self.manager.set("loreta", "loreta_high_freq", self.high_freq_edit.text())
-        self.manager.set("loreta", "oddball_harmonics", self.harmonics_edit.text())
         self.manager.set("loreta", "loreta_snr", self.snr_edit.text())
         self.manager.set("loreta", "loreta_threshold", self.thr_edit.text())
         self.manager.set("loreta", "time_window_start_ms", self.t_start_edit.text())
@@ -519,7 +513,7 @@ class SettingsDialog(QDialog):
             )
 
         try:
-            from Tools.Stats.Legacy.stats_helpers import (
+            from Tools.Stats.shared_rois import (
                 load_rois_from_settings,
                 apply_rois_to_modules,
             )

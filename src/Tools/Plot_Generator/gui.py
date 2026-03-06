@@ -45,7 +45,7 @@ from Main_App.PySide6_App.Backend.project import (
     Project,
 )
 from Main_App.PySide6_App.Backend.project_metadata import read_project_metadata
-from Tools.Stats.Legacy.stats_helpers import load_rois_from_settings
+from Tools.Stats.shared_rois import load_rois_from_settings
 from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION
 from Tools.Plot_Generator.manifest_utils import (
     extract_group_names,
@@ -926,7 +926,9 @@ class PlotGeneratorWindow(QWidget):
         self.xmax_spin.setSingleStep(0.1)
         self.xmax_spin.setSuffix(" Hz")
         self.xmax_spin.setValue(float(self._defaults["x_max"]))
-        self.xmax_spin.setToolTip("Maximum X frequency")
+        self.xmax_spin.setToolTip(
+            "Maximum X frequency. Oddball harmonics and peak markers are derived up to this value."
+        )
         x_row = QHBoxLayout()
         x_row.setContentsMargins(0, 0, 0, 0)
         x_row.setSpacing(8)
