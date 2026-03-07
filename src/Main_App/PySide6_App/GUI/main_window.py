@@ -19,12 +19,13 @@ from collections import deque
 import psutil
 
 # Qt / PySide6
-from PySide6.QtCore import QObject, QEvent, QTimer, Signal, QThread, Slot, Qt
-from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QAction, QValidator  # noqa: F401
+from PySide6.QtCore import QObject, QEvent, QEasingCurve, QPropertyAnimation, QTimer, Signal, QThread, Slot, Qt
+from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QAction, QShowEvent, QValidator  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QAbstractButton,
+    QGraphicsOpacityEffect,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QScrollArea,
     QStatusBar,
+    QToolButton,
     QWidget,
 )
 
@@ -208,6 +210,7 @@ from . import update_manager
 from .file_menu import init_file_menu
 from .settings_panel import SettingsDialog
 from .sidebar import init_sidebar
+from .style_tokens import EVENT_ID_COLUMN_WIDTH, EVENT_REMOVE_BUTTON_SIZE
 from .ui_main import init_ui
 import Main_App.Legacy_App.debug_utils as debug_utils
 
@@ -339,6 +342,10 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         # Build UI
         init_ui(self)
         self._bind_existing_event_map_rows()
+        self._launch_reveal_done = False
+        self._launch_reveal_animation: QPropertyAnimation | None = None
+        self._launch_reveal_effect: QGraphicsOpacityEffect | None = None
+        self._launch_reveal_target: QWidget | None = None
 
         # Poll the worker queue so the GUI stays responsive
         self._processing_timer = QTimer(self)
@@ -384,6 +391,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         status = QStatusBar(self)
         self.setStatusBar(status)
         status.showMessage(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
+        if hasattr(self, "landing_version_label"):
+            self.landing_version_label.setText(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
 
         # --- Busy spinner (ENLARGED) ---
         self.statusBar().setSizeGripEnabled(False)
@@ -434,6 +443,11 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 self.btn_select_input_file.clicked.connect(self.select_single_file)
             except Exception:
                 pass
+        if hasattr(self, "btn_select_input_folder"):
+            try:
+                self.btn_select_input_folder.clicked.connect(self.edit_project_settings)
+            except Exception:
+                pass
         if hasattr(self, "le_input_file"):
             try:
                 self.le_input_file.textChanged.connect(self._update_start_enabled)
@@ -476,6 +490,47 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Auto update check on launch: prompt only if update exists
         QTimer.singleShot(1000, lambda: check_for_updates_on_launch(self))
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if not self._launch_reveal_done:
+            self._launch_reveal_done = True
+            QTimer.singleShot(0, self._start_launch_reveal)
+
+    def _launch_reveal_widget(self) -> QWidget | None:
+        if not hasattr(self, "stacked"):
+            return None
+        if self.stacked.currentWidget() is getattr(self, "landing_page", None):
+            return getattr(self, "landing_card", None)
+        return getattr(self, "page1_container", None)
+
+    def _start_launch_reveal(self) -> None:
+        target = self._launch_reveal_widget()
+        if target is None or not target.isVisible():
+            return
+
+        effect = QGraphicsOpacityEffect(target)
+        effect.setOpacity(0.0)
+        target.setGraphicsEffect(effect)
+
+        animation = QPropertyAnimation(effect, b"opacity", self)
+        animation.setDuration(180)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.finished.connect(self._finish_launch_reveal)
+
+        self._launch_reveal_target = target
+        self._launch_reveal_effect = effect
+        self._launch_reveal_animation = animation
+        animation.start()
+
+    def _finish_launch_reveal(self) -> None:
+        if self._launch_reveal_target is not None:
+            self._launch_reveal_target.setGraphicsEffect(None)
+        self._launch_reveal_target = None
+        self._launch_reveal_effect = None
+        self._launch_reveal_animation = None
 
     # ---------------------------- logging --------------------------- #
     def _emit_backend_log(self, level: int, message: str) -> None:
@@ -1517,12 +1572,16 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def edit_project_settings(self) -> None:
         edit_project_settings(self)
+        self._sync_input_folder_display()
+        self._update_start_enabled()
 
     def _on_project_ready(self) -> None:
         if not getattr(self, "currentProject", None):
             return
         opts = getattr(self.currentProject, "options", {})
         self.parallel_mode = opts.get("parallel_mode", self.parallel_mode)
+        self._sync_input_folder_display()
+        self.update_select_button_text()
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
 
@@ -1640,6 +1699,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self.event_rows.append(row)
 
     def _bind_event_map_row_widgets(self, row: QWidget) -> None:
+        row.setAttribute(Qt.WA_StyledBackground, True)
         row.setProperty("event_map_row", True)
         label_edit, id_edit = self._event_row_edits(row)
         if label_edit is None or id_edit is None:
@@ -1743,12 +1803,30 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def add_event_row(self, label: str = "", id: str = "") -> None:
         row = QWidget(self.event_container)
+        row.setObjectName("event_map_row")
+        row.setAttribute(Qt.WA_StyledBackground, True)
+        row.setProperty("event_map_row", True)
         hl = QHBoxLayout(row)
+        hl.setContentsMargins(10, 6, 6, 6)
+        hl.setSpacing(8)
 
         le_label = QLineEdit(label, row)
+        le_label.setPlaceholderText("Condition")
+        le_label.setProperty("event_map_role", "label")
         le_id = QLineEdit(id, row)
+        le_id.setPlaceholderText("ID")
+        le_id.setProperty("event_map_role", "id")
+        le_id.setFixedWidth(EVENT_ID_COLUMN_WIDTH)
+        le_id.setAlignment(Qt.AlignCenter)
 
-        btn_rm = QPushButton("✕", row)
+        btn_rm = QToolButton(row)
+        btn_rm.setObjectName("event_map_remove_button")
+        btn_rm.setText("✕")
+        btn_rm.setAutoRaise(True)
+        btn_rm.setToolTip("Remove condition")
+        btn_rm.setCursor(Qt.PointingHandCursor)
+        btn_rm.setFixedSize(EVENT_REMOVE_BUTTON_SIZE, EVENT_REMOVE_BUTTON_SIZE)
+        btn_rm.setText("x")
 
         def _remove() -> None:
             self.event_layout.removeWidget(row)
@@ -1758,9 +1836,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             self.log("Event map row removed.")
         btn_rm.clicked.connect(_remove)
 
-        hl.addWidget(le_label)
-        hl.addWidget(le_id)
-        hl.addWidget(btn_rm)
+        hl.addWidget(le_label, 1)
+        hl.addWidget(le_id, 0)
+        hl.addWidget(btn_rm, 0, Qt.AlignVCenter)
         self.event_layout.addWidget(row)
         self._bind_event_map_row_widgets(row)
         self.log("Added event map row")
@@ -1906,6 +1984,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         groups = getattr(project, "groups", {}) or {}
         input_dir = Path(project.input_folder)
+        self._sync_input_folder_display()
 
         if self.data_paths:
             if isinstance(groups, dict) and len(groups) >= 2:
@@ -2057,6 +2136,14 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 pass
 
     # --------------------------- UI helpers --------------------------- #
+    def _sync_input_folder_display(self) -> None:
+        folder_text = ""
+        if getattr(self, "currentProject", None):
+            folder_text = str(self.currentProject.input_folder)
+        line_edit = getattr(self, "le_input_folder", None)
+        if isinstance(line_edit, QLineEdit):
+            line_edit.setText(folder_text)
+
     def update_select_button_text(self) -> None:
         """
         Ensure the file/folder select button(s) reflect the active mode.
@@ -2133,7 +2220,27 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 row.setVisible(is_single)
             except Exception:
                 pass
+        file_label = getattr(self, "lbl_single_file", None)
+        if file_label and hasattr(file_label, "setVisible"):
+            try:
+                file_label.setVisible(is_single)
+            except Exception:
+                pass
 
+        folder_row = getattr(self, "row_input_folder", None)
+        if folder_row and hasattr(folder_row, "setVisible"):
+            try:
+                folder_row.setVisible(not is_single)
+            except Exception:
+                pass
+        folder_label = getattr(self, "lbl_input_folder", None)
+        if folder_label and hasattr(folder_label, "setVisible"):
+            try:
+                folder_label.setVisible(not is_single)
+            except Exception:
+                pass
+
+        self._sync_input_folder_display()
         self.update_select_button_text()
 
         # Optional label feedback

@@ -1,6 +1,8 @@
-from PySide6.QtWidgets import QWidget, QLabel, QHBoxLayout
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+
+from .style_tokens import build_header_bar_stylesheet
 
 class HeaderBar(QWidget):
     def __init__(self, title: str, parent=None):
@@ -11,24 +13,16 @@ class HeaderBar(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)  # <- ensures bg color is drawn
 
         # Style just this widget (not every QWidget)
-        self.setStyleSheet("""
-            #HeaderBar {
-                background-color: #2C2C2C;       /* charcoal */
-                border-bottom: 2px solid #0078D4; /* Windows blue accent */
-            }
-            #HeaderBar QLabel {
-                color: white;
-            }
-        """)
+        self.setStyleSheet(build_header_bar_stylesheet())
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setContentsMargins(18, 8, 18, 8)
         layout.setSpacing(0)
 
         self.titleLabel = QLabel(title, self)
         font = QFont()
         font.setPointSize(12)
-        font.setBold(True)
+        font.setWeight(QFont.DemiBold)
         self.titleLabel.setFont(font)
 
         layout.addWidget(self.titleLabel)
