@@ -31,6 +31,15 @@ folder containing `FPVS_Toolbox.exe`, its required DLLs, and configuration
 files. Manual installations can download this installer directly from the
 GitHub release page and execute it to install the toolbox.
 
+## Development Environment
+
+Use `.\.venv1` as the canonical repository virtual environment. Rebuild it with
+`py -3.13 -m venv .venv1` and install dependencies with
+`py -3.13 -m pip --python .\.venv1\Scripts\python.exe install -r requirements.txt`.
+
+For validation commands, set `PYTHONNOUSERSITE=1` so tests and import checks do
+not fall back to user-site packages from the global Python installation.
+
 ## Configuration
 
 The look and feel of the interface can be tweaked by editing constants in
