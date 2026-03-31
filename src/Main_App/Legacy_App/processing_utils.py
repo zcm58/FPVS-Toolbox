@@ -18,13 +18,14 @@ import re
 from tkinter import messagebox
 import tkinter as tk
 import config
-from quarantine.Tools.LORETA.SourceLocalization import runner as eloreta_runner
-from quarantine.Tools.LORETA.SourceLocalization import source_model
-from quarantine.Tools.LORETA.SourceLocalization.logging_utils import QueueLogHandler
 from Main_App.Legacy_App.post_process import post_process as _external_post_process
 from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
 from Main_App.Legacy_App.load_utils import load_eeg_file
 from Main_App.Legacy_App.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step, ODDBALL_FREQ
+from Main_App.Shared.source_localization_optional import (
+    SourceLocalizationUnavailableError,
+    get_source_model_module,
+)
 
 
 def _sanitize_folder_name(label: str) -> str:
@@ -42,6 +43,7 @@ def _stc_basename_from_fif(path: str) -> str:
     name = re.sub(r'\s+', '_', name.strip())
     name = re.sub(r'_+', '_', name)
     return name
+
 
 class ProcessingMixin:
     _queue_job_id = None
@@ -71,6 +73,17 @@ class ProcessingMixin:
         self.log("=" * 50)
         self.log("START PROCESSING Initiated...")
         if getattr(self, 'run_loreta_var', None) and getattr(self.run_loreta_var, 'get', lambda: False)():
+            try:
+                get_source_model_module(operation="start_processing_source_localization_preflight")
+            except SourceLocalizationUnavailableError as exc:
+                self.log(exc.user_message, level=logging.WARNING)
+                notifier = getattr(self, "notify_source_localization_unavailable", None)
+                if callable(notifier):
+                    notifier(exc.user_message)
+                else:
+                    messagebox.showwarning("Source Localization Unavailable", exc.user_message)
+                self._set_controls_enabled(True)
+                return
             if not messagebox.askyesno(
                     "Run LORETA",
                     (
@@ -659,7 +672,9 @@ class ProcessingMixin:
                         # === Source localization ===
                         if run_loreta_enabled:
                             try:
-
+                                source_model = get_source_model_module(
+                                    operation="processing_thread_source_localization"
+                                )
                                 fwd, subj, subj_dir = source_model.prepare_head_model(raw_proc)
                                 noise_cov = source_model.estimate_noise_cov(raw_proc)
                                 inv = source_model.make_inverse_operator(raw_proc, fwd, noise_cov)
@@ -686,86 +701,15 @@ class ProcessingMixin:
                                         source_model.append_source_to_excel(excel_path, f"{cond_label}_Source", df)
                                     except Exception as e_xl:
                                         gui_queue.put({'type': 'log', 'message': f"Error appending source results: {e_xl}"})
+                            except SourceLocalizationUnavailableError as exc:
+                                gui_queue.put(
+                                    {
+                                        'type': 'log',
+                                        'message': f"Source Localization unavailable for {f_name}: {exc.user_message}",
+                                    }
+                                )
                             except Exception as e_src:
                                 gui_queue.put({'type': 'log', 'message': f"Source localization error for {f_name}: {e_src}"})
-                    if raw_proc is not None and getattr(self, 'save_fif_var', None) and getattr(self.save_fif_var, 'get', lambda: False)():
-                        try:
-                            fif_dir = os.path.join(save_folder, ".fif files")
-                            os.makedirs(fif_dir, exist_ok=True)
-                            for cond_label, epoch_list in file_epochs.items():
-                                if not epoch_list or not isinstance(epoch_list[0], mne.Epochs):
-                                    continue
-                                cond_subfolder = os.path.join(
-                                    fif_dir, _sanitize_folder_name(cond_label)
-                                )
-                                os.makedirs(cond_subfolder, exist_ok=True)
-                                cond_fname = (
-                                    f"{os.path.splitext(f_name)[0]}_{cond_label.replace(' ', '_')}-epo.fif"
-                                )
-                                cond_path = os.path.join(cond_subfolder, cond_fname)
-
-                                auto_loc = (
-                                    self.settings.get(
-                                        'loreta',
-                                        'auto_oddball_localization',
-                                        'False',
-                                    ).lower()
-                                    == 'true'
-                                ) and run_loreta_enabled
-                                if auto_loc:
-                                    sanitized_folder = _sanitize_folder_name(cond_label)
-                                    out_folder = os.path.join(
-                                        save_folder, 'LORETA RESULTS', sanitized_folder
-                                    )
-                                    os.makedirs(out_folder, exist_ok=True)
-                                    try:
-                                        gui_queue.put({'type': 'log', 'message': f"Running oddball localization for {cond_label}..."})
-                                        thr_str = self.settings.get('loreta', 'loreta_threshold', '0.0')
-                                        try:
-                                            thr_val = float(thr_str)
-                                        except ValueError:
-                                            thr_val = None
-                                        start_ms = self.settings.get('loreta', 'time_window_start_ms', '')
-                                        end_ms = self.settings.get('loreta', 'time_window_end_ms', '')
-                                        try:
-                                            t_window = (
-                                                float(start_ms),
-                                                float(end_ms),
-                                            ) if start_ms and end_ms else None
-                                        except ValueError:
-                                            t_window = None
-                                        handler = QueueLogHandler(gui_queue)
-                                        pkg_logger = logging.getLogger("Tools.SourceLocalization")
-                                        pkg_logger.addHandler(handler)
-                                        try:
-                                            eloreta_runner.run_source_localization(
-                                                cond_path,
-                                                out_folder,
-                                                oddball=True,
-                                                stc_basename=_stc_basename_from_fif(cond_path),
-                                                log_func=lambda m: gui_queue.put({'type': 'log', 'message': m}),
-                                                progress_cb=lambda f: gui_queue.put({'type': 'log', 'message': f"Localization {cond_label}: {int(f*100)}%"}),
-                                                show_brain=False,
-                                                epochs=epoch_list[0],
-                                                threshold=thr_val,
-                                                time_window=t_window,
-                                            )
-                                        finally:
-                                            pkg_logger.removeHandler(handler)
-                                        gui_queue.put({'type': 'log', 'message': f"Localization complete for {cond_label}."})
-                                    except Exception as e_loc:
-                                        gui_queue.put({'type': 'log', 'message': f"Localization failed for {cond_label}: {e_loc}"})
-
-                                epoch_list[0].save(cond_path, overwrite=True)
-                                gui_queue.put({'type': 'log', 'message': f"Condition FIF saved to: {cond_path}"})
-
-                        except Exception as e_save:
-                            gui_queue.put({'type': 'log', 'message': f"Error saving FIF for {f_name}: {e_save}"})
-                    elif raw_proc is not None:
-                        gui_queue.put({'type': 'log', 'message': 'FIF saving disabled.'})
-                    else:
-                        gui_queue.put({'type': 'log', 'message': f'Skipping FIF save for {f_name} (no preprocessed data).'})
-
                     gui_queue.put({'type': 'log', 'message': f"Cleaning up memory for {f_name}..."})
                     if isinstance(file_epochs, dict):
                         for epochs_list_to_del in file_epochs.values():

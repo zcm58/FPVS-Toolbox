@@ -33,7 +33,6 @@ def _prep_project(root):
             "max_chan_idx_keep": 32,
             "max_bad_chans": 5,
             "max_parallel_workers_override": 0,
-            "save_preprocessed_fif": False,
             "stim_channel": "Status",
         }
     )
@@ -57,13 +56,12 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
 
     assert dlg.preproc_edits[2].text() == "512"
     assert dlg.stim_edit.text() == "Status"
-    assert dlg.save_fif_check.isChecked() is False
+    assert not hasattr(dlg, "save_fif_check")
 
     dlg.preproc_edits[2].setText("256")
     dlg.preproc_edits[4].setText("3.5")
     dlg.preproc_edits[5].setText("100")
     dlg.stim_edit.setText("Trigger")
-    dlg.save_fif_check.setChecked(True)
 
     dlg._save()
 
@@ -72,13 +70,13 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["rejection_z"] == 3.5
     assert reloaded.preprocessing["epoch_end_s"] == 100.0
     assert reloaded.preprocessing["stim_channel"] == "Trigger"
-    assert reloaded.preprocessing["save_preprocessed_fif"] is True
+    assert "save_preprocessed_fif" not in reloaded.preprocessing
 
     dlg2 = SettingsDialog(win.settings, win, reloaded)
     qtbot.addWidget(dlg2)
     assert dlg2.preproc_edits[2].text() == "256"
     assert dlg2.stim_edit.text() == "Trigger"
-    assert dlg2.save_fif_check.isChecked() is True
+    assert not hasattr(dlg2, "save_fif_check")
 
     win.loadProject(reloaded)
     first_row = win.event_rows[0].findChildren(QLineEdit)
@@ -90,7 +88,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["reject_thresh"] == 3.5
     assert params["epoch_end"] == 100.0
     assert params["stim_channel"] == "Trigger"
-    assert params["save_preprocessed_fif"] is True
+    assert params["save_preprocessed_fif"] is False
 
 
 def test_dialog_saves_bandpass_mapping(tmp_path, qtbot, monkeypatch):

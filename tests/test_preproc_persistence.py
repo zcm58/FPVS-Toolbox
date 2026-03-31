@@ -47,7 +47,7 @@ def test_normalization_and_roundtrip(tmp_path):
     assert normalized["ref_chan2"] == "Pz"
     assert normalized["max_chan_idx_keep"] == 32
     assert normalized["max_bad_chans"] == 4
-    assert normalized["save_preprocessed_fif"] is True
+    assert "save_preprocessed_fif" not in normalized
     assert normalized["stim_channel"] == "Status"
 
     project.update_preprocessing(
@@ -62,7 +62,6 @@ def test_normalization_and_roundtrip(tmp_path):
             "ref_chan2": "EXG2",
             "max_chan_idx_keep": 64,
             "max_bad_chans": 8,
-            "save_preprocessed_fif": False,
             "stim_channel": "Status",
         }
     )
@@ -78,7 +77,7 @@ def test_normalization_and_roundtrip(tmp_path):
     assert fresh.preprocessing["high_pass"] == 0.5
     assert fresh.preprocessing["low_pass"] == 30.0
     assert fresh.preprocessing["max_chan_idx_keep"] == 64
-    assert fresh.preprocessing["save_preprocessed_fif"] is False
+    assert "save_preprocessed_fif" not in fresh.preprocessing
 
 
 def test_project_loads_legacy_inverted_bandpass(tmp_path):

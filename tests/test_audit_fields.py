@@ -24,8 +24,6 @@ def test_format_audit_summary_includes_req_act():
         "req_reject_thresh": 3.0,
         "n_rejected": 2,
         "act_events": 240,
-        "req_save_fif": True,
-        "act_fif_written": 1,
     }
 
     line, is_warning = format_audit_summary(audit)
@@ -37,4 +35,3 @@ def test_format_audit_summary_includes_req_act():
     assert "ch req=≤8 act=8" in line
     assert "events req_stim='Status' act=240" in line
     assert "reject req=3 act=2" in line
-    assert "FIF req=True act_written=1" in line

@@ -208,16 +208,6 @@ class SettingsDialog(QDialog):
             else:
                 edit.setText(self.manager.get(sec, opt, fallback))
 
-        self.save_fif_check = QCheckBox("Save Preprocessed .fif", self.group_preproc)
-        if project_pp is not None:
-            self.save_fif_check.setChecked(bool(project_pp.get("save_preprocessed_fif", False)))
-        else:
-            self.save_fif_check.setChecked(
-                self.manager.get("paths", "save_fif", "False").lower() == "true"
-            )
-        save_fif_row = (len(params) + 1) // 2
-        grid.addWidget(self.save_fif_check, save_fif_row, 0, 1, 4)
-
         layout.addWidget(self.group_preproc)
         layout.addStretch(1)
         tabs.addTab(tab, "Preprocessing")
@@ -479,7 +469,6 @@ class SettingsDialog(QDialog):
             for _edit, (sec, opt, canonical) in zip(self.preproc_edits, pre_keys):
                 value = validated_preproc.get(canonical, "")
                 self.manager.set(sec, opt, str(value))
-            self.manager.set("paths", "save_fif", str(bool(validated_preproc.get("save_preprocessed_fif", False))))
         else:
             try:
                 normalized = self.project.update_preprocessing(validated_preproc)
@@ -569,5 +558,4 @@ class SettingsDialog(QDialog):
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
             values[canonical] = edit.text()
         values["stim_channel"] = self.stim_edit.text()
-        values["save_preprocessed_fif"] = self.save_fif_check.isChecked()
         return values

@@ -27,7 +27,6 @@ def _payload(tmp_path: Path) -> dict:
         "n_events": 2,
         "n_rejected": 0,
         "stim_channel": "Status",
-        "save_preprocessed_fif": False,
         "fif_written": 0,
         "sha256_head": "deadbeef",
     }

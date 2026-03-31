@@ -69,7 +69,7 @@ def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
 
     assert captured["event_map"] == {"CondA": 11}
     assert captured["settings"]["stim_channel"] == "StimA"
-    assert captured["settings"]["save_preprocessed_fif"] is True
+    assert captured["settings"]["save_preprocessed_fif"] is False
     assert captured["max_workers"] >= 1
 
 

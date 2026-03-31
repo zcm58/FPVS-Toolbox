@@ -54,7 +54,6 @@ _FIELDS: tuple[_Field, ...] = (
         0,
         _INT,
     ),
-    _Field("save_preprocessed_fif", ("save_preprocessed_fif", "save_fif"), False, _BOOL),
     _Field("stim_channel", ("stim_channel", "stim", "stim_channel_name"), config.DEFAULT_STIM_CHANNEL, _STR),
 )
 

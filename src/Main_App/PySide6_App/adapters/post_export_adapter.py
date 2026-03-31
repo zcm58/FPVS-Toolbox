@@ -2,7 +2,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import logging
-import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
@@ -52,36 +51,10 @@ def _normalize_save_folder(save_folder_path: Any) -> Any:
     return SimpleNamespace(get=lambda r=root: str(r))
 
 
-def _extract_setting(settings: Any, key: str, default: Any = None) -> Any:
-    """
-    Helper to safely extract settings from dict, object with .get(), or attribute.
-    """
-    if settings is None:
-        return default
-
-    # 1. Try dict access
-    if isinstance(settings, dict):
-        return settings.get(key, default)
-
-    # 2. Try .get() method
-    getter = getattr(settings, "get", None)
-    if callable(getter):
-        try:
-            return getter(key)
-        except (TypeError, KeyError):
-            pass
-
-    # 3. Try direct attribute access
-    if hasattr(settings, key):
-        return getattr(settings, key)
-
-    return default
-
-
 def _build_legacy_shim(ctx: LegacyCtx) -> Any:
     """
     Build minimal 'self' object expected by Legacy post_process.
-    Ensures FIF-saving toggles exist and follow user preference.
+    Ensures legacy code receives a stable, data-only context.
     """
     log = ctx.log or (lambda _m: None)
 
@@ -98,19 +71,13 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
         log=log,
     )
 
-    # Use helper to get preference, force defaults
-    save_pref = _coerce_bool(
-        _extract_setting(ctx.settings, "save_preprocessed_fif"),
-        default=False
-    )
-
-    settings_dict["save_preprocessed_fif"] = save_pref
-    settings_dict["save_condition_fif"] = save_pref
-
-    # FIF toggles some legacy branches check
-    shim.save_fif_var = SimpleNamespace(get=lambda val=save_pref: val)
-    shim.save_condition_fif_var = SimpleNamespace(get=lambda val=save_pref: val)
-    shim.save_condition_fif = save_pref
+    # Exporting preprocessed FIF files is no longer supported, but legacy
+    # branches still expect these attributes to exist.
+    settings_dict["save_preprocessed_fif"] = False
+    settings_dict["save_condition_fif"] = False
+    shim.save_fif_var = SimpleNamespace(get=lambda: False)
+    shim.save_condition_fif_var = SimpleNamespace(get=lambda: False)
+    shim.save_condition_fif = False
 
     # Other common knobs
     if not hasattr(shim, "run_loreta_var") or not hasattr(getattr(shim, "run_loreta_var"), "get"):
@@ -140,118 +107,9 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
     return shim
 
 
-def _legacy_like_fname(base_stem: str, label: str) -> str:
-    """
-    Match legacy naming: <base>_<label_sanitized>-epo.fif
-    Uses regex to remove all illegal characters for Windows/Linux/Mac compatibility.
-    """
-    safe_label = label.replace(" ", "_")
-    # Remove invalid chars: \ / : * ? " < > |
-    safe_label = re.sub(r'[\\/*?:"<>|]', '_', safe_label)
-    return f"{base_stem}_{safe_label}-epo.fif"
-
-
-def _write_missing_fifs(ctx: LegacyCtx, save_root: Path, labels: List[str]) -> int:
-    """
-    Per-file fallback: for each expected FIF path, write it only if missing.
-    Preserves legacy structure:
-      <save_root>/.fif files/<Label>/<base>_<Label_underscored>-epo.fif
-
-    If save_preprocessed_fif is disabled, this fallback is skipped entirely.
-    """
-    # Use helper for robust extraction
-    save_pref = _coerce_bool(
-        _extract_setting(ctx.settings, "save_preprocessed_fif"),
-        default=False
-    )
-    if not save_pref:
-        logger.info(
-            "post_export_write_missing_fifs_skipped",
-            extra={"save_root": str(save_root), "reason": "save_preprocessed_fif_disabled"},
-        )
-        return 0
-
-    try:
-        import mne  # noqa: F401  # local import in worker
-    except Exception:
-        logger.debug(
-            "post_export_write_missing_fifs_mne_import_failed",
-            extra={"save_root": str(save_root)},
-        )
-        return 0
-
-    written = 0
-
-    # Robust base_stem extraction
-    data_paths = ctx.data_paths or ["unknown"]
-    if not data_paths:
-        data_paths = ["unknown"]
-    base_stem = Path(str(data_paths[0])).stem
-
-    logger.debug(
-        "post_export_write_missing_fifs_start",
-        extra={
-            "save_root": str(save_root),
-            "base_stem": base_stem,
-            "labels": labels,
-            "save_pref": save_pref,
-        },
-    )
-
-    for label in labels:
-        ep_list = ctx.preprocessed_data.get(label, [])
-        if not ep_list:
-            continue
-
-        # Assuming ep_list[0] exists per upstream guarantees
-        epochs = ep_list[0]
-        if not hasattr(epochs, "save"):
-            continue
-
-        out_dir = save_root / ".fif files" / label
-        try:
-            out_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            logger.error(
-                "post_export_write_missing_fifs_mkdir_failed",
-                extra={"dir": str(out_dir), "error": str(e)},
-            )
-            continue
-
-        out_path = out_dir / _legacy_like_fname(base_stem, label)
-
-        if not out_path.exists():
-            try:
-                logger.debug(
-                    "post_export_write_missing_fif_saving",
-                    extra={"label": label, "out_path": str(out_path)},
-                )
-                epochs.save(str(out_path), overwrite=True, split_size=2 * 1024 ** 3)
-                written += 1
-            except Exception as e:
-                # Log failure instead of silent pass
-                err_msg = f"Failed to save fallback FIF for '{label}': {e}"
-                logger.error(
-                    "post_export_write_missing_fif_failed",
-                    extra={"label": label, "out_path": str(out_path), "error": str(e)},
-                )
-                if ctx.log:
-                    try:
-                        ctx.log(err_msg)
-                    except Exception:
-                        pass
-
-    logger.debug(
-        "post_export_write_missing_fifs_done",
-        extra={"save_root": str(save_root), "written": written},
-    )
-    return written
-
-
 def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
     """
-    Execute legacy export. Then, for this specific file and labels,
-    optionally write missing -epo.fif files when save_preprocessed_fif is enabled.
+    Execute legacy post-processing exports.
     """
     try:
         logger.info(
@@ -294,36 +152,18 @@ def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
         )
         raise
 
-    # Per-file FIF fallback (only writes files that are missing)
-    written = _write_missing_fifs(ctx, save_root, labels)
-
     try:
         logger.info(
             "post_export_done",
             extra={
                 "save_root": str(save_root),
                 "labels": labels,
-                "fallback_fifs_written": written,
             },
         )
     except Exception:
         logger.debug(
             "post_export_done_logging_failed",
-            extra={"save_root": str(save_root), "written": written},
+            extra={"save_root": str(save_root)},
         )
 
-    return written
-
-
-def _coerce_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {"1", "true", "yes", "on"}:
-            return True
-        if lowered in {"0", "false", "no", "off"}:
-            return False
-    return default
+    return 0

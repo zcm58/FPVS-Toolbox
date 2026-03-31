@@ -565,9 +565,8 @@ def _run_full_pipeline_for_file(
         )
         fif_written = run_post_export(ctx, list(event_map.keys()))
         logger.info(
-            "[PIPELINE] %s: export complete fif_written=%s",
+            "[PIPELINE] %s: export complete",
             file_path.name,
-            bool(fif_written),
         )
 
         # 7) Preproc audit (after)
@@ -657,7 +656,7 @@ def _run_full_pipeline_for_file(
             "audit": audit_after,
             "problems": problems,
             "events_info": events_info,
-            "post_export_ok": bool(fif_written),
+            "post_export_ok": True,
         }
     except Exception as e:  # pragma: no cover - worker error path
         crop_logger.exception("file=%s stage=%s worker_error=%s", file_path.name, stage, str(e))

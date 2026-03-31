@@ -38,7 +38,6 @@ def test_preproc_audit_round_trip():
         "ref_channel2": "EXG2",
         "max_idx_keep": 8,
         "stim_channel": "Status",
-        "save_preprocessed_fif": False,
     }
 
     before = begin_preproc_audit(raw, params, "demo.bdf")

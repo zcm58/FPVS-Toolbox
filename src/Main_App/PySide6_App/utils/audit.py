@@ -121,7 +121,6 @@ def end_preproc_audit(
         "n_events": n_events,
         "n_rejected": int(n_rejected),
         "stim_channel": stim_channel,
-        "save_preprocessed_fif": bool(params.get("save_preprocessed_fif", False)),
         "fif_written": int(fif_written),
         "sha256_head": fingerprint(raw),
     }
@@ -228,16 +227,6 @@ def compare_preproc(
         if events_info and events_info.get("source") == "annotations":
             problems.append(f"stim '{stim_channel}' fallback to annotations")
 
-    # FIF write consistency
-    fif_flag = bool(after.get("save_preprocessed_fif"))
-    fif_written = int(after.get("fif_written", 0))
-    if fif_flag:
-        if fif_written <= 0:
-            problems.append("save_preprocessed_fif=True but no FIF outputs recorded")
-    else:
-        if fif_written > 0:
-            problems.append("save_preprocessed_fif=False but FIF outputs were written")
-
     return problems
 
 
@@ -320,9 +309,6 @@ def format_audit_summary(
     act_channels = audit.get("n_channels")
     req_reject = audit.get("req_reject_thresh")
     act_rejected = audit.get("n_rejected")
-    req_save_fif = audit.get("req_save_fif")
-    act_fif_written = audit.get("act_fif_written")
-
     ds_part = "DS req=NAHz act=NAHz"
     if req_ds is not None or act_ds is not None:
         req_ds_str = _fmt_freq(req_ds, "NA")
@@ -350,7 +336,6 @@ def format_audit_summary(
 
     events_part = f"events req_stim='{req_stim}' act={_fmt_int(act_events)}"
     reject_part = f"reject req={_fmt_int(req_reject)} act={_fmt_int(act_rejected)}"
-    fif_part = f"FIF req={bool(req_save_fif)} act_written={_fmt_int(act_fif_written)}"
 
     line = "[AUDIT] " + " ".join(
         [
@@ -361,7 +346,6 @@ def format_audit_summary(
             ch_part,
             events_part,
             reject_part,
-            fif_part,
         ]
     )
     return line, False

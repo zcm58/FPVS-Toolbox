@@ -36,7 +36,6 @@ def test_fif_flag_audit_reports_zero(tmp_path):
         "ref_channel2": "EXG2",
         "max_idx_keep": 3,
         "stim_channel": "Status",
-        "save_preprocessed_fif": False,
     }
 
     before = begin_preproc_audit(raw, params, "flag.bdf")
@@ -53,6 +52,6 @@ def test_fif_flag_audit_reports_zero(tmp_path):
         n_rejected=rejected,
     )
 
-    assert audit["save_preprocessed_fif"] is False
     assert audit["fif_written"] == 0
+    assert "save_preprocessed_fif" not in audit
     assert problems == []

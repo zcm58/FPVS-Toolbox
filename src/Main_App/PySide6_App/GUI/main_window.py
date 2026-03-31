@@ -470,7 +470,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Flags/vars the mixin expects
         self.run_loreta_var = SimpleNamespace(get=lambda: False)
-        self.save_fif_var = SimpleNamespace(get=lambda: True)
+        self.save_fif_var = SimpleNamespace(get=lambda: False)
         self.save_folder_path = SimpleNamespace(get=lambda: "", set=lambda v: None)
         self.file_mode = SimpleNamespace(get=lambda: "Batch")
         self.file_type = SimpleNamespace(set=lambda v: None)
@@ -486,6 +486,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._op_guard = OpGuard()
         self._selected_bdf: str | None = None
         self._processing_notice = None
+        self._source_localization_notice = None
         self._event_row_return_in_progress = False
 
         # Auto update check on launch: prompt only if update exists
@@ -586,6 +587,39 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 box.close()
 
         self._processing_notice = box
+        box.show()
+        QTimer.singleShot(10000, _auto_close)
+
+    def notify_source_localization_unavailable(self, message: str) -> None:
+        status_bar = self.statusBar()
+        if status_bar is not None:
+            status_bar.showMessage(message, 10000)
+
+        existing = getattr(self, "_source_localization_notice", None)
+        if existing is not None and existing.isVisible():
+            existing.setText(message)
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Source Localization Unavailable")
+        box.setIcon(QMessageBox.Warning)
+        box.setText(message)
+        box.addButton("Dismiss", QMessageBox.AcceptRole)
+        box.setWindowModality(Qt.NonModal)
+
+        def _clear_notice(_: int | None = None) -> None:
+            if getattr(self, "_source_localization_notice", None) is box:
+                self._source_localization_notice = None
+
+        box.finished.connect(_clear_notice)
+
+        def _auto_close() -> None:
+            if getattr(self, "_source_localization_notice", None) is box and box.isVisible():
+                box.close()
+
+        self._source_localization_notice = box
         box.show()
         QTimer.singleShot(10000, _auto_close)
 
@@ -1346,8 +1380,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             for opt in preproc_options:
                 if self.settings.config.has_option("preprocessing", opt):
                     settings_snapshot[opt] = self.settings.get("preprocessing", opt, "")
-            if self.settings.config.has_option("paths", "save_fif"):
-                settings_snapshot["save_preprocessed_fif"] = self.settings.get("paths", "save_fif", "")
             if self.settings.config.has_option("stim", "channel"):
                 settings_snapshot["stim_channel"] = self.settings.get("stim", "channel", "")
         dialog_snapshot = None
@@ -1369,11 +1401,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     key: edit.text()
                     for key, edit in zip(dialog_preproc_keys, self._settings_dialog.preproc_edits)
                 }
-                dialog_snapshot["save_preprocessed_fif"] = (
-                    self._settings_dialog.save_fif_check.isChecked()
-                    if hasattr(self._settings_dialog, "save_fif_check")
-                    else None
-                )
             except Exception:
                 dialog_snapshot = {"error": "unavailable"}
         if debug_enabled:
@@ -1512,7 +1539,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             "epoch_start": epoch_start,
             "epoch_end": epoch_end,
             "stim_channel": stim_channel,
-            "save_preprocessed_fif": bool(normalized.get("save_preprocessed_fif", False)),
+            "save_preprocessed_fif": False,
             "event_id_map": event_map,
             "base_freq": base_freq,
             "oddball_freq": oddball_freq,

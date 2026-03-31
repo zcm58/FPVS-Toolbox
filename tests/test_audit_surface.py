@@ -38,15 +38,11 @@ def _audit_payload(tmp_path: Path) -> dict:
         "req_reject_thresh": 3.0,
         "n_rejected": 0,
         "stim_channel": "Status",
-        "save_preprocessed_fif": False,
-        "req_save_fif": False,
-        "fif_written": 2,
-        "act_fif_written": 2,
         "sha256_head": "cafebabe",
     }
     problems = [
         "reference requested but custom_ref_applied=False",
-        "save_preprocessed_fif=False but FIF outputs were written",
+        "channel cap 8 but 9 channels remain",
     ]
     return {
         "results": [
@@ -73,7 +69,7 @@ def test_audit_problems_surface(tmp_path, main_window, monkeypatch):
         for msg in warning_lines
     )
     assert any(
-        "save_preprocessed_fif=False but FIF outputs were written" in msg
+        "channel cap 8 but 9 channels remain" in msg
         for msg in warning_lines
     )
 
