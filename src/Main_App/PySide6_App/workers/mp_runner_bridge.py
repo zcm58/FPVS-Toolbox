@@ -90,7 +90,7 @@ class MpRunnerBridge(QObject):
         self._results = []
 
         bridge_fingerprint = _build_preproc_fingerprint(settings)
-        logger.info("PREPROC_FINGERPRINT_BRIDGE %s", bridge_fingerprint)
+        logger.debug("PREPROC_FINGERPRINT_BRIDGE %s", bridge_fingerprint)
         if self.validated_fingerprint and self.validated_fingerprint != bridge_fingerprint:
             logger.warning(
                 "PREPROC_FINGERPRINT_MISMATCH validated=%s bridge=%s",
@@ -107,31 +107,19 @@ class MpRunnerBridge(QObject):
             max_workers=max_workers,
         )
 
-        for file_path in data_files:
-            logger.info(
-                "BRIDGE_SETTINGS_SNAPSHOT n_files=%d high_pass=%r low_pass=%r "
-                "downsample_rate=%r reject_thresh=%r ref=(%r,%r) stim=%r",
-                len(data_files),
-                settings.get("high_pass"),
-                settings.get("low_pass"),
-                settings.get("downsample_rate", settings.get("downsample")),
-                settings.get("reject_thresh"),
-                settings.get("ref_channel1"),
-                settings.get("ref_channel2"),
-                settings.get("stim_channel"),
-                extra={
-                    "source": "mp_runner_bridge",
-                    "file": file_path.name,
-                    "high_pass": settings.get("high_pass"),
-                    "low_pass": settings.get("low_pass"),
-                    "downsample_rate": settings.get("downsample_rate"),
-                    "downsample": settings.get("downsample"),
-                    "reject_thresh": settings.get("reject_thresh"),
-                    "ref_channel1": settings.get("ref_channel1"),
-                    "ref_channel2": settings.get("ref_channel2"),
-                    "stim_channel": settings.get("stim_channel"),
-                },
-            )
+        logger.debug(
+            "BRIDGE_SETTINGS_SNAPSHOT n_files=%d high_pass=%r low_pass=%r "
+            "downsample_rate=%r reject_thresh=%r ref=(%r,%r) stim=%r files=%s",
+            len(data_files),
+            settings.get("high_pass"),
+            settings.get("low_pass"),
+            settings.get("downsample_rate", settings.get("downsample")),
+            settings.get("reject_thresh"),
+            settings.get("ref_channel1"),
+            settings.get("ref_channel2"),
+            settings.get("stim_channel"),
+            [file_path.name for file_path in data_files],
+        )
 
         logger.info(
             "MpRunnerBridge starting run_project_parallel: project_root=%s "

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from tkinter import messagebox
@@ -246,12 +247,19 @@ def load_eeg_file(
             to_eeg = {ch: "eeg" for ch in ref_keep}
 
             # Apply in two stages to avoid conflicts
-            if to_misc:
-                raw.set_channel_types(to_misc)
-            if to_eeg:
-                raw.set_channel_types(to_eeg)
-            if stim_name in raw.ch_names:
-                raw.set_channel_types({stim_name: "stim"})
+            with warnings.catch_warnings():
+                # These unit-change warnings are expected when normalizing BioSemi EXG/stim types.
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"The unit for channel\(s\) .* has changed from .* to .*\.",
+                    category=RuntimeWarning,
+                )
+                if to_misc:
+                    raw.set_channel_types(to_misc)
+                if to_eeg:
+                    raw.set_channel_types(to_eeg)
+                if stim_name in raw.ch_names:
+                    raw.set_channel_types({stim_name: "stim"})
 
             kept = sorted(ref_keep)
             demoted = sorted([ch for ch in exg_present if ch not in ref_keep])
@@ -264,7 +272,8 @@ def load_eeg_file(
         # Apply standard 10-20 montage to EEG channels only; EXG* are not in the montage.
         app.log("Applying standard_1020 montage...")
         try:
-            raw.set_montage(_cached_1020(), on_missing="warn", match_case=False, verbose=False)
+            # EXG reference channels are intentionally kept as EEG but do not belong to standard_1020.
+            raw.set_montage(_cached_1020(), on_missing="ignore", match_case=False, verbose=False)
             app.log("Montage applied.")
         except Exception as e:
             app.log(f"Warning: Montage error: {e}")

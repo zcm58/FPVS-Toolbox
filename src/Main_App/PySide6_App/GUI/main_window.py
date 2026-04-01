@@ -712,7 +712,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         try:
             if not getattr(self, "_n_jobs_ignored_logged", False):
-                logger.info(
+                logger.debug(
                     "n_jobs is ignored in this version; using parallel_mode=%s",
                     self.parallel_mode,
                 )
@@ -1404,14 +1404,14 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             except Exception:
                 dialog_snapshot = {"error": "unavailable"}
         if debug_enabled:
-            logger.info(
+            logger.debug(
                 "PREPROC_SOURCE_SNAPSHOT project=%s settings=%s dialog=%s",
                 project_snapshot,
                 settings_snapshot,
                 dialog_snapshot,
             )
         else:
-            logger.info(
+            logger.debug(
                 "PREPROC_SOURCE_SNAPSHOT project_keys=%s settings_keys=%s dialog_present=%s",
                 list(project_snapshot.keys()),
                 list(settings_snapshot.keys()) if settings_snapshot else [],
@@ -1428,7 +1428,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             f"hp={fp_hp}|lp={fp_lp}|ds={fp_ds}|rz={fp_rz}|"
             f"ref={fp_r1},{fp_r2}|stim={fp_stim}"
         )
-        logger.info("PREPROC_FINGERPRINT_VALIDATED %s", validated_fingerprint)
+        logger.debug("PREPROC_FINGERPRINT_VALIDATED %s", validated_fingerprint)
         self._preproc_fingerprint_validated = validated_fingerprint
 
         # We show a concise summary (not noisy) so users see what's about to run
@@ -1449,7 +1449,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def _build_validated_params(self) -> dict | None:
         normalized = normalize_preprocessing_settings(self.currentProject.preprocessing)
-        logger.info(
+        logger.debug(
             "NORMALIZED_PREPROC_SNAPSHOT file_mode=%s normalized.high_pass=%r "
             "normalized.low_pass=%r normalized.downsample=%r",
             getattr(self, "file_mode", None).get() if hasattr(self, "file_mode") else "UNKNOWN",
@@ -1550,7 +1550,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 "bca_upper_limit": bca_upper_limit,
             },
         }
-        logger.info(
+        logger.debug(
             "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "
             "reject_thresh=%r ref=(%r,%r) stim=%r",
             params.get("high_pass"),

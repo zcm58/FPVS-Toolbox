@@ -1,15 +1,35 @@
 import sys
-from multiprocessing import get_context
+import logging
+from pathlib import Path
 
 import pytest
 from PySide6.QtWidgets import QApplication
 
+import Main_App.PySide6_App.workers.mp_runner_bridge as mp_runner_bridge
 from Main_App.PySide6_App.workers.mp_runner_bridge import MpRunnerBridge
 
 
 @pytest.fixture(scope="session")
 def app():
     return QApplication.instance() or QApplication(sys.argv)
+
+
+class _FakeQueue:
+    def __init__(self) -> None:
+        self._items = []
+
+    def put(self, item) -> None:
+        self._items.append(item)
+
+    def get_nowait(self):
+        if not self._items:
+            raise mp_runner_bridge.Empty
+        return self._items.pop(0)
+
+
+class _FakeContext:
+    def Queue(self):
+        return _FakeQueue()
 
 
 def test_mp_runner_bridge_error_and_finished(app, qtbot):
@@ -22,8 +42,7 @@ def test_mp_runner_bridge_error_and_finished(app, qtbot):
     bridge.finished.connect(lambda payload: finished_payloads.append(payload))
     bridge.progress.connect(lambda pct: progresses.append(pct))
 
-    ctx = get_context("spawn")
-    q = ctx.Queue()
+    q = _FakeQueue()
     # Inject the queue and a total count so _poll() can run without starting real workers.
     bridge._q = q  # type: ignore[assignment]
     bridge._total = 2
@@ -77,3 +96,45 @@ def test_mp_runner_bridge_error_and_finished(app, qtbot):
 
     # Progress signal should have been emitted at least once.
     assert any(p > 0 for p in progresses)
+
+
+def test_mp_runner_bridge_logs_single_settings_snapshot(app, caplog, monkeypatch):
+    bridge = MpRunnerBridge()
+
+    monkeypatch.setattr(mp_runner_bridge, "set_blas_threads_single_process", lambda: None)
+    monkeypatch.setattr(mp_runner_bridge.Thread, "start", lambda self: None)
+    monkeypatch.setattr(mp_runner_bridge, "get_context", lambda name: _FakeContext())
+
+    project_root = Path(r"C:\Projects\FPVS\Semantic Categories")
+    data_files = [
+        project_root / "SC_P13.bdf",
+        project_root / "SC_P14.bdf",
+        project_root / "SC_P15.bdf",
+    ]
+    settings = {
+        "high_pass": 0.1,
+        "low_pass": 50.0,
+        "downsample_rate": 256,
+        "reject_thresh": 5.0,
+        "ref_channel1": "EXG1",
+        "ref_channel2": "EXG2",
+        "stim_channel": "Status",
+    }
+
+    with caplog.at_level(logging.DEBUG):
+        bridge.start(
+            project_root=project_root,
+            data_files=data_files,
+            settings=settings,
+            event_map={"CondA": 1},
+            save_folder=project_root / "1 - Excel Data Files",
+            max_workers=4,
+        )
+
+    snapshot_records = [
+        record for record in caplog.records if "BRIDGE_SETTINGS_SNAPSHOT" in record.getMessage()
+    ]
+    assert len(snapshot_records) == 1
+    assert "SC_P13.bdf" in snapshot_records[0].getMessage()
+    assert "SC_P15.bdf" in snapshot_records[0].getMessage()
+    bridge._timer.stop()
