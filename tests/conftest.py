@@ -60,8 +60,9 @@ if _safe_find_spec("PySide6") is None:
     sys.modules.setdefault("PySide6.QtCore", qtcore)
 else:
     pyside6 = importlib.import_module("PySide6")
-    if _safe_find_spec("PySide6.QtGui") is not None:
-        pyside6.QtGui = importlib.import_module("PySide6.QtGui")
+    for qt_module_name in ("QtCore", "QtGui", "QtTest", "QtWidgets"):
+        if _safe_find_spec(f"PySide6.{qt_module_name}") is not None:
+            setattr(pyside6, qt_module_name, importlib.import_module(f"PySide6.{qt_module_name}"))
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
