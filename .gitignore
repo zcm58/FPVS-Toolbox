@@ -34,6 +34,7 @@ coverage.xml
 
 # Pytest cache
 .pytest_cache/
+.tmp/
 
 # MyPy, Pyre and other type-checking tools
 .mypy_cache/
