@@ -125,7 +125,7 @@ def test_stats_single_group_behavior(qtbot, tmp_path, monkeypatch, stats_smoke_e
     assert isinstance(win.rm_anova_results_data, pd.DataFrame)
 
     win.on_run_between_anova()
-    assert any("Between-group" in msg or "between-group" in msg.lower() for msg in infos)
+    assert any("paused" in msg.lower() for msg in infos)
 
 
 @pytest.mark.qt
@@ -164,16 +164,16 @@ def test_stats_between_group_complete_metadata(qtbot, tmp_path, monkeypatch, sta
         "P02": {"CondA": {"ROI": 2.0}},
     }
 
-    win.on_run_between_anova()
     win.on_run_between_mixed_model()
+    win.on_run_group_contrasts()
 
-    assert isinstance(win.between_anova_results_data, pd.DataFrame)
     assert isinstance(win.between_mixed_model_results_data, pd.DataFrame)
+    assert isinstance(win.group_contrasts_results_data, pd.DataFrame)
 
-    win.on_export_between_anova()
     win.on_export_between_mixed()
+    win.on_export_group_contrasts()
     kinds = {kind for kind, _path in export_calls}
-    assert {"anova_between", "lmm_between"}.issubset(kinds)
+    assert {"lmm_between", "group_contrasts"}.issubset(kinds)
     assert any(STATS_SUBFOLDER_NAME in str(path) for _kind, path in export_calls)
 
 
@@ -222,9 +222,9 @@ def test_stats_multigroup_missing_participants_warns_once(qtbot, tmp_path, monke
         "P04": {"CondA": {"ROI": 4.0}},
     }
 
-    win.on_run_between_anova()
     win.on_run_between_mixed_model()
+    win.on_run_group_contrasts()
 
-    assert isinstance(win.between_anova_results_data, pd.DataFrame)
     assert isinstance(win.between_mixed_model_results_data, pd.DataFrame)
+    assert isinstance(win.group_contrasts_results_data, pd.DataFrame)
     assert not infos, "Between-group actions should succeed without multi-group errors"

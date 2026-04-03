@@ -5,7 +5,7 @@ try:
     from PySide6.QtCore import Qt
 
     from Tools.Stats.PySide6 import stats_workers
-    from Tools.Stats.PySide6.stats_controller import PipelineId
+    from Tools.Stats.PySide6.stats_controller import PipelineId, StepId
     from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     pytest.skip("PySide6 is required for Stats mixed model tests", allow_module_level=True)
@@ -16,13 +16,15 @@ def _stub_default_loader(monkeypatch):
     monkeypatch.setattr(StatsWindow, "_load_default_data_folder", lambda self: None, raising=False)
 
 
-def _make_immediate_worker(monkeypatch):
+def _make_immediate_worker(monkeypatch, seen_steps=None):
     def ready_stub(self, pipeline_id, *, require_anova=False):
         self._current_base_freq = 6.0
         self._current_alpha = 0.05
         return True
 
     def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb):
+        if isinstance(seen_steps, list):
+            seen_steps.append(step.id)
         try:
             payload = step.worker_fn(lambda *_a, **_k: None, lambda *_a, **_k: None, **step.kwargs)
         except Exception as exc:  # noqa: BLE001
@@ -46,16 +48,11 @@ def _prime_between_subjects(window: StatsWindow) -> None:
 
 @pytest.mark.qt
 def test_between_mixed_model_valid_payload_advances(monkeypatch, qtbot, tmp_path):
-    _make_immediate_worker(monkeypatch)
+    seen_steps = []
+    _make_immediate_worker(monkeypatch, seen_steps)
 
     dummy_df = pd.DataFrame({"value": [1.0, 2.0, 3.0]})
 
-    monkeypatch.setattr(
-        stats_workers,
-        "run_between_group_anova",
-        lambda *_a, **_k: {"anova_df_results": dummy_df.copy(), "output_text": "anova"},
-        raising=False,
-    )
     monkeypatch.setattr(
         stats_workers,
         "run_lmm",
@@ -89,21 +86,21 @@ def test_between_mixed_model_valid_payload_advances(monkeypatch, qtbot, tmp_path
         lambda: "Between-Group Analysis finished" in win.output_text.toPlainText(), timeout=2000
     )
     assert "Between-Group Mixed Model completed" in win.output_text.toPlainText()
+    assert seen_steps == [
+        StepId.BETWEEN_GROUP_MIXED_MODEL,
+        StepId.GROUP_CONTRASTS,
+        StepId.HARMONIC_CHECK,
+    ]
     assert not win._controller.is_running(PipelineId.BETWEEN)
 
 
 @pytest.mark.qt
 def test_between_mixed_model_invalid_payload_finalizes(monkeypatch, qtbot, tmp_path):
-    _make_immediate_worker(monkeypatch)
+    seen_steps = []
+    _make_immediate_worker(monkeypatch, seen_steps)
 
     dummy_df = pd.DataFrame({"value": [1.0, 2.0]})
 
-    monkeypatch.setattr(
-        stats_workers,
-        "run_between_group_anova",
-        lambda *_a, **_k: {"anova_df_results": dummy_df.copy(), "output_text": "anova"},
-        raising=False,
-    )
     monkeypatch.setattr(
         stats_workers,
         "run_lmm",
@@ -131,4 +128,5 @@ def test_between_mixed_model_invalid_payload_finalizes(monkeypatch, qtbot, tmp_p
 
     qtbot.waitUntil(lambda: win.analyze_between_btn.isEnabled(), timeout=2000)
     assert "Step handler failed" in win.output_text.toPlainText()
+    assert seen_steps == [StepId.BETWEEN_GROUP_MIXED_MODEL]
     assert not win._controller.is_running(PipelineId.BETWEEN)

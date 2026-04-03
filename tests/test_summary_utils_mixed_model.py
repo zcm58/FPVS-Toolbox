@@ -86,3 +86,34 @@ def test_no_summary_when_missing_df():
 
     assert "NOT AVAILABLE" in summary
     assert "Wald z-tests" not in summary
+
+
+def test_between_summary_omits_rm_anova_section():
+    contrasts_df = pd.DataFrame(
+        {
+            "group_1": ["G1"],
+            "group_2": ["G2"],
+            "condition": ["Face"],
+            "roi": ["Occipital"],
+            "difference": [0.6],
+            "effect_size": [0.7],
+            "p_fdr": [0.02],
+        }
+    )
+    lmm_df = pd.DataFrame(
+        {
+            "Effect": ["group"],
+            "Estimate": [0.5],
+            "P>|z|": [0.03],
+        }
+    )
+
+    frames = StatsSummaryFrames(
+        between_contrasts=contrasts_df,
+        mixed_model_terms=lmm_df,
+        pipeline_id=_PipelineId.BETWEEN,
+    )
+    summary = build_summary_from_frames(frames, SummaryConfig())
+
+    assert "RM-ANOVA:" not in summary
+    assert "Group contrasts:" in summary

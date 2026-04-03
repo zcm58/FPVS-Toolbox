@@ -53,6 +53,7 @@ class StatsSummaryFrames:
     harmonic_results: Optional[pd.DataFrame] = None
     anova_terms: Optional[pd.DataFrame] = None
     mixed_model_terms: Optional[pd.DataFrame] = None
+    pipeline_id: Optional[PipelineId] = None
 
 
 def build_summary_from_files(stats_folder: Path, config: SummaryConfig) -> str:
@@ -128,6 +129,21 @@ def build_summary_from_frames(frames: StatsSummaryFrames, config: SummaryConfig)
     except Exception:
         interaction_lines = []
 
+    if frames.pipeline_id is PipelineId.BETWEEN:
+        parts = [
+            f"--- Summary (\u03b1 = {config.alpha:.2f}, FDR correction: Benjamini-Hochberg) ---",
+            "",
+            "Mixed model:",
+            *(mixed_lines or ["- Mixed model: NOT AVAILABLE (not computed by this run)."]),
+            "",
+            "Group contrasts:",
+            *(posthoc_lines or ["- No significant group contrasts after correction."]),
+            "",
+            "Please see the newly generated Excel files in the '3 - Statistical Analysis' folder for complete results. Consult your",
+            "favorite statistics expert (for example, ChatGPT) for help interpreting these findings.",
+        ]
+        return "\n".join(parts)
+
     parts = [
         f"--- Summary (α = {config.alpha:.2f}, FDR correction: Benjamini–Hochberg) ---",
         "",
@@ -195,14 +211,13 @@ def build_summary_frames_from_results(
     harmonic_results: Optional[pd.DataFrame | list[dict]] = None,
 ) -> StatsSummaryFrames:
     """Handle the build summary frames from results step for the Stats PySide6 workflow."""
-    frames = StatsSummaryFrames()
+    frames = StatsSummaryFrames(pipeline_id=pipeline_id)
     if pipeline_id is PipelineId.SINGLE:
         frames.single_posthoc = to_dataframe(single_posthoc)
         frames.anova_terms = to_dataframe(rm_anova_results)
         frames.mixed_model_terms = to_dataframe(mixed_model_results)
     elif pipeline_id is PipelineId.BETWEEN:
         frames.between_contrasts = to_dataframe(between_contrasts)
-        frames.anova_terms = to_dataframe(between_anova_results)
         frames.mixed_model_terms = to_dataframe(between_mixed_model_results)
     frames.harmonic_results = to_dataframe(harmonic_results)
     return frames

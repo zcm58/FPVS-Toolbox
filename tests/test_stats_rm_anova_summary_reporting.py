@@ -99,6 +99,46 @@ def test_gui_rm_anova_summary_reports_significant_interaction_using_gg_p() -> No
     assert "Significant effect of condition * roi (p = 0.0014, GG corrected)." in summary
 
 
+def test_between_reporting_summary_omits_rm_anova_section() -> None:
+    context = ReportingSummaryContext(
+        project_name="Demo",
+        project_root=Path("/tmp/demo"),
+        pipeline_name=PipelineId.BETWEEN.name,
+        generated_local=datetime(2025, 1, 1, 12, 0, 0),
+        elapsed_ms=100,
+        timezone_label="UTC",
+        total_participants=8,
+        included_participants=[f"S{i:02d}" for i in range(1, 9)],
+        excluded_reasons={},
+        selected_conditions=["A", "B"],
+        selected_rois=["ROI1", "ROI2"],
+    )
+    anova_df = pd.DataFrame([{"Effect": "group", "Pr > F": 0.01}])
+    lmm_df = pd.DataFrame([{"Effect": "group", "Estimate": 0.5, "P>|z|": 0.03}])
+    contrasts_df = pd.DataFrame(
+        [
+            {
+                "group_pair": "G1 vs G2",
+                "mean_diff": 0.4,
+                "t_statistic": 2.1,
+                "df": 10.5,
+                "p_raw": 0.04,
+                "p_fdr_bh": 0.05,
+            }
+        ]
+    )
+
+    text = build_reporting_summary(
+        context,
+        anova_df=anova_df,
+        lmm_df=lmm_df,
+        posthoc_df=contrasts_df,
+    )
+
+    assert "RM-ANOVA (REPEATED MEASURES)" not in text
+    assert "GROUP CONTRASTS" in text
+
+
 def test_rm_anova_text_report_exports_to_results_dir_used_by_stats_outputs(tmp_path: Path, monkeypatch) -> None:
     messages: list[str] = []
     results_dir = tmp_path / "3 - Statistical Analysis"

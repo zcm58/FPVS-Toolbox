@@ -71,8 +71,10 @@ reference level. Under this coding:
   changes differ across ROIs (i.e., whether the condition effect depends
   on ROI).
 
-Group contrasts are not explicitly configured in the current workflow,
-so group terms follow the default contrast handling used by statsmodels.
+For the active multi-group workflow, group contrasts are exposed as a
+separate step alongside the mixed model. Between-group ANOVA is paused
+in that workflow, while the single-group workflow still retains its
+existing RM-ANOVA support.
 
 ### Practical relationship to RM-ANOVA
 

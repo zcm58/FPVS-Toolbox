@@ -33,9 +33,20 @@ GitHub release page and execute it to install the toolbox.
 
 ## Development Environment
 
-Use `.\.venv1` as the canonical repository virtual environment. Rebuild it with
-`py -3.13 -m venv .venv1` and install dependencies with
-`py -3.13 -m pip --python .\.venv1\Scripts\python.exe install -r requirements.txt`.
+Use `.\.venv1` as the canonical repository virtual environment on every
+development machine. Recreate it locally from that machine's Python 3.13
+interpreter instead of reusing a copied virtual environment from another
+computer:
+
+`python -m venv .venv1`
+
+Then install dependencies with:
+
+`.\.venv1\Scripts\python.exe -m pip install -r requirements.txt`
+
+If PyCharm or another IDE reports that it "did not find executable", repoint
+the project interpreter to `.\.venv1\Scripts\python.exe` and remove any stale
+reference to `.venv`.
 
 For validation commands, set `PYTHONNOUSERSITE=1` so tests and import checks do
 not fall back to user-site packages from the global Python installation.

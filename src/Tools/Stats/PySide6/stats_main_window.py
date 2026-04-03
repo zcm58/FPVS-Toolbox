@@ -1675,8 +1675,7 @@ class StatsWindow(QMainWindow):
         )
         _maybe_enable(
             "export_between_anova_btn",
-            isinstance(self.between_anova_results_data, pd.DataFrame)
-            and not self.between_anova_results_data.empty,
+            False,
         )
         _maybe_enable(
             "export_between_mixed_btn",
@@ -1768,7 +1767,7 @@ class StatsWindow(QMainWindow):
             selected_conditions=list(selected_conditions),
             selected_rois=selected_rois,
         )
-        anova_df = self.rm_anova_results_data if pipeline_id is PipelineId.SINGLE else self.between_anova_results_data
+        anova_df = self.rm_anova_results_data if pipeline_id is PipelineId.SINGLE else None
         lmm_df = self.mixed_model_results_data if pipeline_id is PipelineId.SINGLE else self.between_mixed_model_results_data
         posthoc_df = self.posthoc_results_data if pipeline_id is PipelineId.SINGLE else self.group_contrasts_results_data
         auto_export = bool(getattr(self, "reporting_summary_export_checkbox", None) and self.reporting_summary_export_checkbox.isChecked())
@@ -2136,6 +2135,7 @@ class StatsWindow(QMainWindow):
         self._pipeline_qc_state[pipeline_id] = {"report": None}
         self._pipeline_run_reports[pipeline_id] = None
         if pipeline_id is PipelineId.BETWEEN:
+            self.between_anova_results_data = None
             self._between_missingness_payload = {}
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
@@ -2196,8 +2196,7 @@ class StatsWindow(QMainWindow):
                             line = (
                                 "Between-group complete: "
                                 f"groups={summary.get('n_groups', 0)}, "
-                                f"mixed subjects={summary.get('n_mixed_subjects', 0)}, "
-                                f"ANOVA complete-case={summary.get('n_anova_complete_case', 0)}, "
+                                f"modeled subjects={summary.get('n_mixed_subjects', 0)}, "
                                 f"missingness export={export_path or 'pending export'}"
                             )
                             self._set_status(line)
@@ -2926,7 +2925,6 @@ class StatsWindow(QMainWindow):
         """Handle the export between pipeline step for the Stats PySide6 workflow."""
         section = "Between"
         exports = [
-            ("anova_between", self.between_anova_results_data, "Between-Group ANOVA"),
             ("lmm_between", self.between_mixed_model_results_data, "Between-Group Mixed Model"),
             ("group_contrasts", self.group_contrasts_results_data, "Group Contrasts"),
             ("harmonic", self._harmonic_results.get(PipelineId.BETWEEN), "Harmonic Check"),
@@ -2997,13 +2995,10 @@ class StatsWindow(QMainWindow):
         """Handle the export between missingness step for the Stats PySide6 workflow."""
         payload = self._between_missingness_payload if isinstance(self._between_missingness_payload, dict) else {}
         mixed_rows = payload.get("mixed_model_missing_cells", [])
-        anova_rows = payload.get("anova_excluded_subjects", [])
         summary = payload.get("summary", {})
         summary_rows = [
             {"Metric": "N groups", "Value": summary.get("n_groups", 0)},
-            {"Metric": "N subjects mixed model", "Value": summary.get("n_mixed_subjects", 0)},
-            {"Metric": "N complete-case ANOVA", "Value": summary.get("n_anova_complete_case", 0)},
-            {"Metric": "N ANOVA excluded", "Value": len(anova_rows)},
+            {"Metric": "N subjects modeled", "Value": summary.get("n_mixed_subjects", 0)},
             {"Metric": "N mixed-model missing cells", "Value": len(mixed_rows)},
             {"Metric": "N discovered", "Value": summary.get("n_discovered_subjects", 0)},
             {"Metric": "N assigned", "Value": summary.get("n_assigned_subjects", 0)},
@@ -3012,7 +3007,7 @@ class StatsWindow(QMainWindow):
         export_path = export_missingness_workbook(
             save_path=save_path,
             mixed_missing_rows=mixed_rows if isinstance(mixed_rows, list) else [],
-            anova_excluded_rows=anova_rows if isinstance(anova_rows, list) else [],
+            anova_excluded_rows=[],
             summary_rows=summary_rows,
             log_func=self._set_status,
         )
@@ -3119,14 +3114,10 @@ class StatsWindow(QMainWindow):
             subjects = payload.get("mixed_model_subjects")
             if isinstance(subjects, list):
                 mixed_subjects = len(subjects)
-        anova_subjects = payload.get("anova_complete_case_subjects", [])
-        if not isinstance(anova_subjects, list):
-            anova_subjects = []
         scan = self._multigroup_scan_result
         payload["summary"] = {
             "n_groups": len(self._known_group_labels()),
             "n_mixed_subjects": mixed_subjects or len(set(payload.get("mixed_model_subjects", []))),
-            "n_anova_complete_case": len(anova_subjects),
             "n_discovered_subjects": len(scan.discovered_subjects) if scan else 0,
             "n_assigned_subjects": len(scan.assigned_subjects) if scan else 0,
         }
@@ -4008,15 +3999,8 @@ class StatsWindow(QMainWindow):
     def on_between_advanced_clicked(self) -> None:
         """Handle the on between advanced clicked step for the Stats PySide6 workflow."""
         actions = [
-            ("Run Between-Group ANOVA", self.on_run_between_anova, True),
             ("Run Between-Group Mixed Model", self.on_run_between_mixed_model, True),
             ("Run Group Contrasts", self.on_run_group_contrasts, True),
-            (
-                "Export Between-Group ANOVA",
-                self.on_export_between_anova,
-                isinstance(self.between_anova_results_data, pd.DataFrame)
-                and not self.between_anova_results_data.empty,
-            ),
             (
                 "Export Between-Group Mixed Model",
                 self.on_export_between_mixed,
@@ -4076,6 +4060,14 @@ class StatsWindow(QMainWindow):
             f"• Excel exports in the '{RESULTS_SUBFOLDER_NAME}' folder contain "
             "the full tables for all analyses, including raw and corrected p-values.\n"
         )
+        text = text.replace(
+            (
+                "Between-group ANOVA: Mixed ANOVA with group as a between-subject factor "
+                "and condition as a within-subject factor on Summed BCA (ROI collapsed). "
+                "Pingouin's mixed_anova is used when available."
+            ),
+            "Between-group ANOVA (paused): This analysis is unavailable in the supported multi-group workflow in this phase.",
+        )
 
         QMessageBox.information(
             self,
@@ -4115,10 +4107,11 @@ class StatsWindow(QMainWindow):
 
     def on_run_between_anova(self) -> None:
         """Handle the on run between anova step for the Stats PySide6 workflow."""
-        self._clear_output_views()
-        self.between_anova_results_data = None
-        self._update_export_buttons()
-        self._controller.run_between_group_anova_only()
+        QMessageBox.information(
+            self,
+            "Between-Group ANOVA Paused",
+            "Between-group ANOVA is paused and unavailable in the multigroup workflow in this phase.",
+        )
 
     def on_run_between_mixed_model(self) -> None:
         """Handle the on run between mixed model step for the Stats PySide6 workflow."""
@@ -4199,19 +4192,11 @@ class StatsWindow(QMainWindow):
 
     def on_export_between_anova(self) -> None:
         """Handle the on export between anova step for the Stats PySide6 workflow."""
-        if not isinstance(self.between_anova_results_data, pd.DataFrame) or self.between_anova_results_data.empty:
-            QMessageBox.information(self, "No Results", "Run Between-Group ANOVA first.")
-            return
-        out_dir = self._ensure_results_dir()
-        try:
-            self.export_results("anova_between", self.between_anova_results_data, out_dir)
-            self._set_status(f"Between-group ANOVA exported to: {out_dir}")
-            self._set_last_export_path(out_dir)
-        except Exception as e:
-            import traceback
-            logger.exception("Between-group ANOVA export failed.")
-            tb = traceback.format_exc()
-            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
+        QMessageBox.information(
+            self,
+            "Between-Group ANOVA Paused",
+            "Between-group ANOVA exports are unavailable because this workflow is paused in the multigroup UI.",
+        )
 
     def on_export_between_mixed(self) -> None:
         """Handle the on export between mixed step for the Stats PySide6 workflow."""

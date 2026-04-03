@@ -98,17 +98,19 @@ def build_missingness_export_tables(
 ) -> dict[str, pd.DataFrame]:
     """Handle the build missingness export tables step for the Stats PySide6 workflow."""
     summary_rows = summary_rows or []
-    return {
-        "ANOVA_ExcludedSubjects": pd.DataFrame(
-            anova_excluded_rows,
-            columns=["Subject", "Group", "MissingConditions", "Reason"],
-        ),
+    tables = {
         "MixedModel_MissingCells": pd.DataFrame(
             mixed_missing_rows,
             columns=["Subject", "Group", "Condition", "Status", "Note"],
         ),
         "Summary": pd.DataFrame(summary_rows),
     }
+    if anova_excluded_rows:
+        tables["ANOVA_ExcludedSubjects"] = pd.DataFrame(
+            anova_excluded_rows,
+            columns=["Subject", "Group", "MissingConditions", "Reason"],
+        )
+    return tables
 
 
 def export_missingness_workbook(

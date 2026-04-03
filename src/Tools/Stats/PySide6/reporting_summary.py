@@ -53,6 +53,8 @@ def build_reporting_summary(
     posthoc_df: pd.DataFrame | None,
 ) -> str:
     """Handle the build reporting summary step for the Stats PySide6 workflow."""
+    pipeline_name = str(context.pipeline_name or "").strip().upper()
+    is_between = pipeline_name == "BETWEEN"
     included = sorted({str(pid) for pid in context.included_participants})
     excluded_ids = sorted({str(pid) for pid in context.excluded_reasons.keys() if pid not in included})
     if context.total_participants > 0:
@@ -86,9 +88,10 @@ def build_reporting_summary(
     else:
         lines.append(f"  - {NOT_AVAILABLE}")
 
-    _append_anova(lines, context, anova_df)
+    if not is_between:
+        _append_anova(lines, context, anova_df)
     _append_lmm(lines, lmm_df)
-    _append_posthoc(lines, posthoc_df)
+    _append_posthoc(lines, posthoc_df, between_mode=is_between)
 
     lines.extend(
         [
@@ -386,13 +389,49 @@ def _append_lmm(lines: list[str], lmm_df: pd.DataFrame | None) -> None:
             lines.append(f"  - {_fmt(row.get('Effect'))}: LR={_fmt(row.get('LR'))}, df={_fmt(row.get('df'))}, p={fmt_p(row.get('p (chi2)'))}")
 
 
-def _append_posthoc(lines: list[str], posthoc_df: pd.DataFrame | None) -> None:
+def _append_posthoc(
+    lines: list[str],
+    posthoc_df: pd.DataFrame | None,
+    *,
+    between_mode: bool = False,
+) -> None:
     """Handle the append posthoc step for the Stats PySide6 workflow."""
     n_cond_within_roi = 0
     n_roi_within_cond = 0
     if isinstance(posthoc_df, pd.DataFrame) and "Direction" in posthoc_df.columns:
         n_cond_within_roi = int((posthoc_df["Direction"] == "condition_within_roi").sum())
         n_roi_within_cond = int((posthoc_df["Direction"] == "roi_within_condition").sum())
+
+    if between_mode:
+        lines.extend([
+            "",
+            "GROUP CONTRASTS",
+            "- Procedure: pairwise between-group contrasts / model contrasts",
+            f"- Number of contrasts: {len(posthoc_df) if isinstance(posthoc_df, pd.DataFrame) else NOT_AVAILABLE}",
+            "- Multiple comparison correction:",
+            "  - Method: Benjaminiâ€“Hochberg (BH) FDR",
+            "  - Adjusted p-values reported: YES",
+            "",
+            "GROUP CONTRAST RESULTS",
+            "(one line per comparison)",
+        ])
+        if not isinstance(posthoc_df, pd.DataFrame) or posthoc_df.empty:
+            lines.append(f"- {NOT_AVAILABLE}")
+            return
+        label_col = _find_col(posthoc_df, ["Comparison", "Effect", "contrast", "group_pair"])
+        estimate_col = _find_col(posthoc_df, ["mean_diff", "Estimate", "estimate"])
+        se_col = _find_col(posthoc_df, ["SE", "Std.Err.", "std_error"])
+        stat_col = _find_col(posthoc_df, ["t_statistic", "t", "z", "stat"])
+        df_col = _find_col(posthoc_df, ["df", "DF"])
+        p_raw_col = _find_col(posthoc_df, ["p_raw", "p_value", "p"])
+        p_adj_col = _find_col(posthoc_df, ["p_fdr_bh", "p_corr", "p_adj"])
+        for _, row in posthoc_df.iterrows():
+            lines.append(
+                f"- {_fmt(row.get(label_col or 'Comparison'))}: estimate={_fmt(row.get(estimate_col))}  "
+                f"SE={_fmt(row.get(se_col))}  stat={_fmt(row.get(stat_col))}  "
+                f"df={_fmt(row.get(df_col))}  p_raw={_fmt(row.get(p_raw_col))}  p_adj={_fmt(row.get(p_adj_col))}"
+            )
+        return
 
     lines.extend([
         "",

@@ -85,3 +85,46 @@ def test_between_group_run_smoke(qtbot, tmp_path, monkeypatch, app):
 
     log_text = win.output_text.toPlainText()
     assert "Between-Group" in log_text or "Between" in log_text
+
+
+@pytest.mark.qt
+def test_single_group_advanced_actions_keep_anova_and_lmm(qtbot, tmp_path, monkeypatch, app):
+    win = StatsWindow(project_dir=str(tmp_path))
+    qtbot.addWidget(win)
+    _prepare_window(win, monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr(
+        StatsWindow,
+        "_open_advanced_dialog",
+        lambda self, title, actions: captured.update(title=title, actions=actions),
+        raising=False,
+    )
+
+    win.on_single_advanced_clicked()
+
+    labels = [label for label, _cb, _enabled in captured["actions"]]
+    assert "Run RM-ANOVA" in labels
+    assert "Run Mixed Model" in labels
+
+
+@pytest.mark.qt
+def test_between_group_advanced_actions_hide_anova(qtbot, tmp_path, monkeypatch, app):
+    win = StatsWindow(project_dir=str(tmp_path))
+    qtbot.addWidget(win)
+    _prepare_window(win, monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr(
+        StatsWindow,
+        "_open_advanced_dialog",
+        lambda self, title, actions: captured.update(title=title, actions=actions),
+        raising=False,
+    )
+
+    win.on_between_advanced_clicked()
+
+    labels = [label for label, _cb, _enabled in captured["actions"]]
+    assert "Run Between-Group Mixed Model" in labels
+    assert "Run Group Contrasts" in labels
+    assert all("ANOVA" not in label for label in labels)

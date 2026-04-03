@@ -112,6 +112,12 @@ Multi-group mode compares two or more groups (e.g., clinical vs control).
 
 ### Between-group ANOVA (mixed ANOVA)
 
+- **Status:** Paused for the active multi-group workflow in the current
+  PySide6 application phase.
+- **Scope note:** This pause applies to the **multi-group** workflow
+  only. The separate **single-group** workflow still retains its
+  existing RM-ANOVA support.
+
 - **Factors:** Group (between-subjects) × Condition (within-subjects).
 - **DV:** Summed BCA, typically **collapsed across ROI** for this test.
 - **Implementation:** Pingouin `mixed_anova` is required; the fallback

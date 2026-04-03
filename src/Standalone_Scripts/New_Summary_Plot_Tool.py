@@ -33,11 +33,13 @@ PIPELINE STEPS:
               reference line at y=1.0 for easy interpretation
 8. Completion dialog (PySide6) offering to open the output folder (Windows).
 
-This is a personal script intended to run on a single PC; hard-coded paths are OK.
+Provide input/output paths via command-line flags or environment variables so the script
+remains portable across development machines.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import math
 import re
@@ -58,17 +60,17 @@ from openpyxl.utils import get_column_letter
 
 
 # =================================================================
-# 1. USER INPUTS (EDIT THESE)
+# 1. USER INPUTS / RUNTIME CONFIGURATION
 # =================================================================
 
-INPUT_DIR_A = r"C:\Users\zackm\OneDrive - Mississippi State University\NERD\2 - Results\1 - FPVS Toolbox Projects\Semantic Categories\1 - Excel Data Files\Green Fruit vs Green Veg"
+INPUT_DIR_A = os.environ.get("FPVS_RATIO_INPUT_DIR_A", "")
 CONDITION_LABEL_A = "Semantic Response"
 
-INPUT_DIR_B = r"C:\Users\zackm\OneDrive - Mississippi State University\NERD\2 - Results\1 - FPVS Toolbox Projects\Semantic Categories\1 - Excel Data Files\Green Veg vs Red Veg"
+INPUT_DIR_B = os.environ.get("FPVS_RATIO_INPUT_DIR_B", "")
 CONDITION_LABEL_B = "Color Response"
 
-OUTPUT_DIR = r"C:\Users\zackm\OneDrive - Mississippi State University\NERD\2 - Results\1 - FPVS Toolbox Projects\Semantic Categories\5 - Ratio Summaries"
-RUN_LABEL = "High to Low Ratio Calculations"
+OUTPUT_DIR = os.environ.get("FPVS_RATIO_OUTPUT_DIR", "")
+RUN_LABEL = os.environ.get("FPVS_RATIO_RUN_LABEL", "High to Low Ratio Calculations")
 
 ROI_DEFS = {
     "Bilateral OT": ["P7", "P9", "PO7", "PO3", "O1","Oz","O2","P8", "P10", "PO8", "PO4"],
@@ -118,6 +120,58 @@ SHEET_SNR = "SNR"
 SHEET_Z = "Z Score"
 SHEET_BCA = "BCA (uV)"
 ELECTRODE_COL = "Electrode"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Aggregate ROI sums and semantic/color ratios from two folders of FPVS Excel outputs."
+        )
+    )
+    parser.add_argument(
+        "--input-dir-a",
+        default=INPUT_DIR_A,
+        help="Folder for condition A Excel files. Defaults to FPVS_RATIO_INPUT_DIR_A.",
+    )
+    parser.add_argument(
+        "--input-dir-b",
+        default=INPUT_DIR_B,
+        help="Folder for condition B Excel files. Defaults to FPVS_RATIO_INPUT_DIR_B.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=OUTPUT_DIR,
+        help="Destination folder for reports and plots. Defaults to FPVS_RATIO_OUTPUT_DIR.",
+    )
+    parser.add_argument(
+        "--run-label",
+        default=RUN_LABEL,
+        help="Label used in output filenames. Defaults to FPVS_RATIO_RUN_LABEL.",
+    )
+    return parser.parse_args()
+
+
+def resolve_runtime_config() -> tuple[str, str, str, str]:
+    args = parse_args()
+    missing: list[str] = []
+
+    if not args.input_dir_a:
+        missing.append("--input-dir-a or FPVS_RATIO_INPUT_DIR_A")
+    if not args.input_dir_b:
+        missing.append("--input-dir-b or FPVS_RATIO_INPUT_DIR_B")
+    if not args.output_dir:
+        missing.append("--output-dir or FPVS_RATIO_OUTPUT_DIR")
+
+    if missing:
+        missing_text = ", ".join(missing)
+        raise RuntimeError(f"Missing required runtime configuration: {missing_text}")
+
+    return (
+        str(Path(args.input_dir_a).expanduser()),
+        str(Path(args.input_dir_b).expanduser()),
+        str(Path(args.output_dir).expanduser()),
+        args.run_label,
+    )
 
 # Keep your named palettes as a starting point, but auto-fill missing ROI colors
 PALETTES = {
@@ -887,6 +941,9 @@ def _apply_excel_qol(writer: pd.ExcelWriter) -> None:
 # -----------------------------
 
 def main():
+    global INPUT_DIR_A, INPUT_DIR_B, OUTPUT_DIR, RUN_LABEL
+
+    INPUT_DIR_A, INPUT_DIR_B, OUTPUT_DIR, RUN_LABEL = resolve_runtime_config()
     validate_manual_exclude(MANUAL_EXCLUDE)
 
     out_dir = Path(OUTPUT_DIR).expanduser().resolve()

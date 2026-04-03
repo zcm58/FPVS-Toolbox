@@ -169,7 +169,6 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
 
 BETWEEN_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.BETWEEN_GROUP_MIXED_MODEL,
-    StepId.BETWEEN_GROUP_ANOVA,
     StepId.GROUP_CONTRASTS,
     StepId.HARMONIC_CHECK,
 )
@@ -273,10 +272,10 @@ class StatsController:
 
     def run_between_group_anova_only(self) -> None:
         """Handle the run between group anova only step for the Stats PySide6 workflow."""
-        self.run_between_group_analysis(
-            step_ids=(StepId.BETWEEN_GROUP_ANOVA,),
-            run_exports=False,
-            run_summary=False,
+        self._view.append_log(
+            self._section_label(PipelineId.BETWEEN),
+            "Between-group ANOVA is paused and unavailable in the multigroup workflow.",
+            level="warning",
         )
 
     def run_between_group_mixed_only(self) -> None:
@@ -673,6 +672,21 @@ class StatsController:
     def _start_between_process_pipeline(self) -> None:
         """Handle the start between process pipeline step for the Stats PySide6 workflow."""
         pipeline_id = PipelineId.BETWEEN
+        message = (
+            "Between-group process mode is unavailable while between-group ANOVA is paused."
+        )
+        self._view.append_log(
+            self._section_label(pipeline_id),
+            message,
+            level="warning",
+        )
+        self._finalize_pipeline(
+            pipeline_id,
+            success=False,
+            error_message=message,
+            exports_ran=False,
+        )
+        return
         state = self._states[pipeline_id]
         state.process_mode = True
 

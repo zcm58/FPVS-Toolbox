@@ -1,12 +1,12 @@
+"""Inspect multigroup project discovery for a selected project folder."""
+
+import argparse
+import os
 import sys
 from pathlib import Path
 
-# ==== EDIT THESE TWO LINES BEFORE RUNNING ====
-REPO_ROOT = Path(r"C:\Users\zackm\PycharmProjects\FPVS-Toolbox-Repo")
-PROJECT_ROOT = Path(
-    r"C:\Users\zackm\OneDrive - Mississippi State University\NERD\2 - Results\1 - FPVS Toolbox Projects\BC Luteal"
-)
-# =============================================
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_PROJECT_ROOT = os.environ.get("FPVS_DEBUG_PROJECT_ROOT")
 
 # Make sure src is on sys.path so imports work like in main.py
 SRC_ROOT = REPO_ROOT / "src"
@@ -16,14 +16,39 @@ if str(SRC_ROOT) not in sys.path:
 from Main_App.PySide6_App.Backend.project import Project  # noqa: E402
 from Main_App.PySide6_App.Backend.processing_controller import discover_raw_files  # noqa: E402
 
+
+def parse_args() -> Path:
+    parser = argparse.ArgumentParser(
+        description="Inspect group and raw-file discovery for an FPVS project directory."
+    )
+    parser.add_argument(
+        "project_root",
+        nargs="?",
+        default=DEFAULT_PROJECT_ROOT,
+        help="Path to the project directory. Defaults to FPVS_DEBUG_PROJECT_ROOT if set.",
+    )
+    args = parser.parse_args()
+    if not args.project_root:
+        parser.error(
+            "project_root is required. Pass it on the command line or set FPVS_DEBUG_PROJECT_ROOT."
+        )
+
+    project_root = Path(args.project_root).expanduser().resolve()
+    if not project_root.exists():
+        parser.error(f"project_root does not exist: {project_root}")
+    return project_root
+
+
 def main() -> None:
+    project_root = parse_args()
+
     print("=== Multigroup Debug ===")
     print(f"REPO_ROOT   : {REPO_ROOT}")
-    print(f"PROJECT_ROOT: {PROJECT_ROOT}")
+    print(f"PROJECT_ROOT: {project_root}")
     print()
 
     # 1) Load project and inspect groups as seen at runtime
-    project = Project.load(PROJECT_ROOT)
+    project = Project.load(project_root)
 
     print("Project.input_folder:", project.input_folder)
     print()
