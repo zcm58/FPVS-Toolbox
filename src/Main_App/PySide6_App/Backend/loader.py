@@ -19,12 +19,16 @@ from __future__ import annotations
 import os
 import tempfile
 import warnings
+import logging
 from functools import lru_cache
 from pathlib import Path
 from tkinter import messagebox
 from typing import Tuple, Optional, Iterable, Dict, Set, Any
 
 import mne
+
+
+logger = logging.getLogger(__name__)
 
 
 def _memmap_dir_for_pid() -> Path:
@@ -149,6 +153,49 @@ def _canon_present(raw_names: Iterable[str], candidates: Iterable[str]) -> Set[s
     return out
 
 
+def _try_warning_log(app: Any, message: str) -> bool:
+    """
+    Route warning text to the GUI log when the caller supports warning levels.
+
+    The multiprocessing worker's lightweight ``_App`` stub only accepts a plain
+    message argument, so we fall back to the module logger there to avoid
+    duplicate console lines.
+    """
+    try:
+        app.log(message, level=logging.WARNING)
+        return True
+    except TypeError:
+        return False
+    except Exception:
+        return False
+
+
+def _emit_reader_warnings(
+    app: Any,
+    filepath: str,
+    caught_warnings: Iterable[warnings.WarningMessage],
+) -> None:
+    """
+    Re-log file-reader warnings with explicit file context.
+
+    MNE's default warning surface does not include the offending BDF path, which
+    makes parallel batch runs hard to diagnose. We intercept those warnings and
+    attach both the basename and full path.
+    """
+    base = os.path.basename(filepath)
+    for caught in caught_warnings:
+        warning_text = str(caught.message).strip()
+        if not warning_text:
+            continue
+
+        detailed = f"[LOADER WARNING] {base}: {warning_text} [path='{filepath}']"
+        if "Number of records from the header does not match the file size" in warning_text:
+            detailed += " MNE will infer the record count from the file size."
+
+        if not _try_warning_log(app, detailed):
+            logger.warning(detailed)
+
+
 def load_eeg_file(
     app: Any,
     filepath: str,
@@ -188,13 +235,16 @@ def load_eeg_file(
         )
 
         if ext == ".bdf":
-            with mne.utils.use_log_level("WARNING"):
-                raw = mne.io.read_raw_bdf(
-                    filepath,
-                    preload=memmap_path,          # disk-backed; safe for big filters
-                    stim_channel=stim_name if stim_name else "Status",
-                    verbose=False,
-                )
+            with warnings.catch_warnings(record=True) as caught_read_warnings:
+                warnings.simplefilter("always")
+                with mne.utils.use_log_level("WARNING"):
+                    raw = mne.io.read_raw_bdf(
+                        filepath,
+                        preload=memmap_path,          # disk-backed; safe for big filters
+                        stim_channel=stim_name if stim_name else "Status",
+                        verbose=False,
+                    )
+            _emit_reader_warnings(app, filepath, caught_read_warnings)
             # Do NOT drop EXG channels here. We may need EXG3/EXG4, etc. for referencing.
             raw.load_data()  # ensures the memmap is materialized
             app.log("BDF loaded successfully.")
@@ -202,17 +252,23 @@ def load_eeg_file(
         elif ext == ".set":
             # Prefer disk-backed preload if available in current MNE version
             try:
-                with mne.utils.use_log_level("WARNING"):
-                    raw = mne.io.read_raw_eeglab(
-                        filepath,
-                        preload=memmap_path,      # memmap instead of RAM (newer MNE)
-                        verbose=False,
-                    )
+                with warnings.catch_warnings(record=True) as caught_read_warnings:
+                    warnings.simplefilter("always")
+                    with mne.utils.use_log_level("WARNING"):
+                        raw = mne.io.read_raw_eeglab(
+                            filepath,
+                            preload=memmap_path,      # memmap instead of RAM (newer MNE)
+                            verbose=False,
+                        )
+                _emit_reader_warnings(app, filepath, caught_read_warnings)
                 raw.load_data()
             except TypeError:
                 # Fallback for older MNE that doesn't accept a path for preload
-                with mne.utils.use_log_level("WARNING"):
-                    raw = mne.io.read_raw_eeglab(filepath, preload=True, verbose=False)
+                with warnings.catch_warnings(record=True) as caught_read_warnings:
+                    warnings.simplefilter("always")
+                    with mne.utils.use_log_level("WARNING"):
+                        raw = mne.io.read_raw_eeglab(filepath, preload=True, verbose=False)
+                _emit_reader_warnings(app, filepath, caught_read_warnings)
             app.log("EEGLAB file loaded successfully.")
         else:
             messagebox.showwarning(

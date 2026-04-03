@@ -63,6 +63,35 @@ def _excel_paths_in_output_root(output_root: Path | str | None) -> list[Path]:
     return sorted(p.resolve() for p in root.rglob("*.xls*"))
 
 
+def _excel_snapshot(output_root: Path | str | None) -> dict[str, tuple[int, int]]:
+    if not output_root:
+        return {}
+    root = Path(output_root)
+    if not root.is_dir():
+        return {}
+    snapshot: dict[str, tuple[int, int]] = {}
+    for path in root.rglob("*.xls*"):
+        try:
+            stat_result = path.stat()
+        except OSError:
+            continue
+        snapshot[str(path.resolve())] = (
+            int(stat_result.st_mtime_ns),
+            int(stat_result.st_size),
+        )
+    return snapshot
+
+
+def _excel_snapshot_has_changes(
+    before_snapshot: dict[str, tuple[int, int]],
+    after_snapshot: dict[str, tuple[int, int]],
+) -> bool:
+    return any(
+        path not in before_snapshot or signature != before_snapshot[path]
+        for path, signature in after_snapshot.items()
+    )
+
+
 def _should_show_no_excel_popup(
     generated_excel_paths: list[str],
     output_root: Path | str | None,
@@ -488,6 +517,9 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._processing_notice = None
         self._source_localization_notice = None
         self._event_row_return_in_progress = False
+        self._run_had_successful_export = False
+        self._run_excel_output_root = ""
+        self._run_excel_snapshot_before: dict[str, tuple[int, int]] = {}
 
         # Auto update check on launch: prompt only if update exists
         QTimer.singleShot(1000, lambda: check_for_updates_on_launch(self))
@@ -698,6 +730,13 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._cancel_requested = False
         self._run_active = False
         self._snr_tick = 0
+        self._run_had_successful_export = False
+        self._run_excel_output_root = (
+            self.save_folder_path.get()
+            if hasattr(self.save_folder_path, "get")
+            else str(getattr(self, "save_folder_path", "") or "")
+        )
+        self._run_excel_snapshot_before = _excel_snapshot(self._run_excel_output_root)
 
         # Start spinner immediately (if present)
         try:
@@ -1148,7 +1187,10 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 output_root,
                 existing_excel_paths,
             )
-            self._last_job_success = not show_no_excel_popup and not bool(payload.get("error"))
+            current_export_succeeded = not show_no_excel_popup
+            if current_export_succeeded:
+                self._run_had_successful_export = True
+            self._last_job_success = self._run_had_successful_export
 
             if not generated_excel_paths and not show_no_excel_popup:
                 self.log(
@@ -1176,6 +1218,20 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         if getattr(self, "_pending_finalize", False):
             self._pending_finalize = False
             self._finalize_processing(True)
+
+    def _refresh_run_excel_success_from_disk(self) -> None:
+        output_root = self._run_excel_output_root or (
+            self.save_folder_path.get()
+            if hasattr(self.save_folder_path, "get")
+            else str(getattr(self, "save_folder_path", "") or "")
+        )
+        after_snapshot = _excel_snapshot(output_root)
+        if (
+            not self._run_had_successful_export
+            and _excel_snapshot_has_changes(self._run_excel_snapshot_before, after_snapshot)
+        ):
+            self._run_had_successful_export = True
+        self._last_job_success = self._run_had_successful_export
 
     def _finalize_processing(self, *args, **kwargs) -> None:
         """
@@ -1240,6 +1296,8 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         # Call into the legacy finalization path, optionally suppressing its dialogs
         test_suppress = bool(os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"))
+        if success and not cancelled:
+            self._refresh_run_excel_success_from_disk()
 
         if cancelled:
             self._suppress_completion_dialogs = True
@@ -1925,16 +1983,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         out_path = Path(excel_dir)
 
-        def _excel_snapshot() -> dict[Path, tuple[int, int]]:
-            snapshot: dict[Path, tuple[int, int]] = {}
-            for p in out_path.rglob("*.xls*"):
-                try:
-                    stat_result = p.stat()
-                except OSError:
-                    continue
-                snapshot[p.resolve()] = (int(stat_result.st_mtime_ns), int(stat_result.st_size))
-            return snapshot
-
         original_log = self.log
         legacy_reported_no_excel = False
 
@@ -1947,12 +1995,12 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
         self.log = queue_log
 
-        pre_snapshot = _excel_snapshot()
+        pre_snapshot = _excel_snapshot(out_path)
 
         try:
             _legacy_post_process(self, labels)
 
-            post_snapshot = _excel_snapshot()
+            post_snapshot = _excel_snapshot(out_path)
             created = len(set(post_snapshot) - set(pre_snapshot))
             overwritten = sum(
                 1
@@ -1962,6 +2010,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
             post_count = len(post_snapshot)
 
             if created > 0 or overwritten > 0:
+                self._run_had_successful_export = True
                 self._last_job_success = True
                 self.gui_queue.put(
                     {
@@ -1973,7 +2022,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     }
                 )
             elif legacy_reported_no_excel or post_count == 0:
-                self._last_job_success = False
+                self._last_job_success = self._run_had_successful_export
                 self.gui_queue.put(
                     {
                         "type": "log",
@@ -1981,6 +2030,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                     }
                 )
             else:
+                self._run_had_successful_export = True
                 self._last_job_success = True
                 self.gui_queue.put(
                     {
@@ -1993,7 +2043,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 )
         except Exception as err:
             logger.exception("Excel export failed")
-            self._last_job_success = False
+            self._last_job_success = self._run_had_successful_export
             self.gui_queue.put({"type": "error", "message": str(err)})
         finally:
             self.log = original_log
