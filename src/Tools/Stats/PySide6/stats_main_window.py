@@ -74,6 +74,8 @@ from Tools.Stats.PySide6.stats_core import (
     HARMONIC_XLS,
     LMM_BETWEEN_XLS,
     LMM_XLS,
+    MULTIGROUP_MISSINGNESS_XLS,
+    MULTIGROUP_QC_CONTEXT_XLS,
     PipelineId,
     PipelineStep,
     POSTHOC_XLS,
@@ -1722,6 +1724,41 @@ class StatsWindow(QMainWindow):
         out_dir = self._ensure_results_dir()
         QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
+    def _between_mixed_model_support_state(
+        self,
+        payload: dict | None = None,
+    ) -> tuple[bool, str]:
+        """Return whether the current multigroup LMM result is exportable/supported."""
+
+        candidate_payload = payload if isinstance(payload, dict) else {}
+        fit_status = candidate_payload.get("fit_status")
+        if isinstance(fit_status, dict) and fit_status.get("supported") is False:
+            return False, str(fit_status.get("message") or "Supported multigroup LMM blocked.")
+        if str(candidate_payload.get("status", "")).strip().lower() == "blocked":
+            blocked_message = candidate_payload.get("message") or candidate_payload.get("blocked_reason")
+            return False, str(blocked_message or "Supported multigroup LMM blocked.")
+
+        results_df = (
+            candidate_payload.get("mixed_results_df")
+            if isinstance(candidate_payload.get("mixed_results_df"), pd.DataFrame)
+            else self.between_mixed_model_results_data
+        )
+        if not isinstance(results_df, pd.DataFrame) or results_df.empty:
+            attrs = results_df.attrs if isinstance(results_df, pd.DataFrame) else {}
+            message = attrs.get("lmm_fit_status_message") if isinstance(attrs, dict) else ""
+            return False, str(message or "Run Between-Group Mixed Model first.")
+
+        attrs = results_df.attrs if isinstance(results_df.attrs, dict) else {}
+        if attrs.get("lmm_fit_supported") is False:
+            return False, str(attrs.get("lmm_fit_status_message") or "Supported multigroup LMM blocked.")
+        return True, ""
+
+    def _can_export_between_mixed_model(self) -> bool:
+        """Return whether a supported between-group LMM export is available."""
+
+        supported, _message = self._between_mixed_model_support_state()
+        return supported
+
     def _update_export_buttons(self) -> None:
         """Handle the update export buttons step for the Stats PySide6 workflow."""
         def _maybe_enable(name: str, enabled: bool) -> None:
@@ -1751,8 +1788,7 @@ class StatsWindow(QMainWindow):
         )
         _maybe_enable(
             "export_between_mixed_btn",
-            isinstance(self.between_mixed_model_results_data, pd.DataFrame)
-            and not self.between_mixed_model_results_data.empty,
+            self._can_export_between_mixed_model(),
         )
         _maybe_enable(
             "export_group_contrasts_btn",
@@ -2546,6 +2582,9 @@ class StatsWindow(QMainWindow):
                 def handler(payload):
                     """Handle the handler step for the Stats PySide6 workflow."""
                     self._apply_between_mixed_results(payload, update_text=False)
+                    supported, support_message = self._between_mixed_model_support_state(payload)
+                    if not supported:
+                        raise RuntimeError(support_message)
 
                 return kwargs, handler
             if step_id is StepId.GROUP_CONTRASTS:
@@ -3057,13 +3096,17 @@ class StatsWindow(QMainWindow):
         mixed_rows = payload.get("mixed_model_missing_cells", [])
         summary = payload.get("summary", {})
         summary_rows = [
+            {"Metric": "Supported workflow", "Value": "Between-group mixed model + group contrasts"},
             {"Metric": "N groups", "Value": summary.get("n_groups", 0)},
-            {"Metric": "N subjects modeled", "Value": summary.get("n_mixed_subjects", 0)},
-            {"Metric": "N mixed-model missing cells", "Value": len(mixed_rows)},
-            {"Metric": "N discovered", "Value": summary.get("n_discovered_subjects", 0)},
-            {"Metric": "N assigned", "Value": summary.get("n_assigned_subjects", 0)},
+            {
+                "Metric": "N subjects modeled in multigroup mixed model",
+                "Value": summary.get("n_mixed_subjects", 0),
+            },
+            {"Metric": "N mixed-model missing condition cells", "Value": len(mixed_rows)},
+            {"Metric": "N discovered multigroup subjects", "Value": summary.get("n_discovered_subjects", 0)},
+            {"Metric": "N assigned multigroup subjects", "Value": summary.get("n_assigned_subjects", 0)},
         ]
-        save_path = Path(out_dir) / "Missingness and Exclusions.xlsx"
+        save_path = Path(out_dir) / MULTIGROUP_MISSINGNESS_XLS
         export_path = export_missingness_workbook(
             save_path=save_path,
             mixed_missing_rows=mixed_rows if isinstance(mixed_rows, list) else [],
@@ -3086,7 +3129,7 @@ class StatsWindow(QMainWindow):
         if isinstance(run_report, StatsRunReport):
             flagged_map = collect_flagged_pid_map(run_report.qc_report, run_report.dv_report)
 
-        save_path = Path(out_dir) / "QC_Context_ByGroup.xlsx"
+        save_path = Path(out_dir) / MULTIGROUP_QC_CONTEXT_XLS
         export_path = export_qc_context_workbook(
             save_path=save_path,
             dv_table=dv_table,
@@ -4064,8 +4107,7 @@ class StatsWindow(QMainWindow):
             (
                 "Export Between-Group Mixed Model",
                 self.on_export_between_mixed,
-                isinstance(self.between_mixed_model_results_data, pd.DataFrame)
-                and not self.between_mixed_model_results_data.empty,
+                self._can_export_between_mixed_model(),
             ),
             (
                 "Export Group Contrasts",
@@ -4251,9 +4293,13 @@ class StatsWindow(QMainWindow):
 
     def on_export_between_mixed(self) -> None:
         """Handle the on export between mixed step for the Stats PySide6 workflow."""
-        if not isinstance(self.between_mixed_model_results_data,
-                          pd.DataFrame) or self.between_mixed_model_results_data.empty:
-            QMessageBox.information(self, "No Results", "Run Between-Group Mixed Model first.")
+        supported, support_message = self._between_mixed_model_support_state()
+        if not supported:
+            QMessageBox.information(
+                self,
+                "No Results",
+                support_message or "Run Between-Group Mixed Model first.",
+            )
             return
         out_dir = self._ensure_results_dir()
         try:

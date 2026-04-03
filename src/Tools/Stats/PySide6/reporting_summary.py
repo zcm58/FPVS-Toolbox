@@ -61,6 +61,15 @@ def build_reporting_summary(
         excluded_count = max(context.total_participants - len(included), len(excluded_ids))
     else:
         excluded_count = len(excluded_ids)
+    included_label = "Included in analysis"
+    excluded_label = "Excluded"
+    excluded_ids_label = "Excluded IDs (if available)"
+    exclusion_reasons_label = "Exclusion reasons (if available)"
+    if is_between:
+        included_label = "Included in supported multigroup model"
+        excluded_label = "Not modeled"
+        excluded_ids_label = "Not-modeled IDs (if available)"
+        exclusion_reasons_label = "Not-modeled reasons (if available)"
 
     lines: list[str] = [
         "==========================",
@@ -77,10 +86,10 @@ def build_reporting_summary(
         "",
         "DATASET COUNTS",
         f"- Total participants discovered: {context.total_participants}",
-        f"- Included in analysis: {len(included)}",
-        f"- Excluded: {excluded_count}",
-        "- Excluded IDs (if available): " + (", ".join(excluded_ids) if excluded_ids else NOT_AVAILABLE),
-        "- Exclusion reasons (if available):",
+        f"- {included_label}: {len(included)}",
+        f"- {excluded_label}: {excluded_count}",
+        f"- {excluded_ids_label}: " + (", ".join(excluded_ids) if excluded_ids else NOT_AVAILABLE),
+        f"- {exclusion_reasons_label}:",
     ]
     if excluded_ids:
         for pid in excluded_ids:
@@ -90,7 +99,7 @@ def build_reporting_summary(
 
     if not is_between:
         _append_anova(lines, context, anova_df)
-    _append_lmm(lines, lmm_df)
+    _append_lmm(lines, lmm_df, between_mode=is_between)
     _append_posthoc(lines, posthoc_df, between_mode=is_between)
 
     lines.extend(
@@ -280,6 +289,50 @@ def _select_reported_p(row: pd.Series) -> tuple[Any, str]:
     return p_unc, "uncorrected"
 
 
+def _coerce_between_contrast_rows(posthoc_df: pd.DataFrame | None) -> pd.DataFrame | None:
+    """Normalize multigroup contrast rows from raw or exported schemas."""
+    if not isinstance(posthoc_df, pd.DataFrame) or posthoc_df.empty:
+        return None
+
+    label_col = _find_col(posthoc_df, ["Comparison", "Effect", "contrast", "group_pair"])
+    roi_col = _find_col(posthoc_df, ["ROI", "roi"])
+    condition_col = _find_col(posthoc_df, ["Condition", "condition"])
+    group_a_col = _find_col(posthoc_df, ["GroupA", "group_1", "Group_1", "group1"])
+    group_b_col = _find_col(posthoc_df, ["GroupB", "group_2", "Group_2", "group2"])
+    estimate_col = _find_col(posthoc_df, ["Estimate", "mean_diff", "difference", "estimate"])
+    se_col = _find_col(posthoc_df, ["SE", "Std.Err.", "std_error"])
+    stat_col = _find_col(posthoc_df, ["TestStat", "t_statistic", "t_stat", "t", "z", "stat"])
+    df_col = _find_col(posthoc_df, ["DF", "df"])
+    p_raw_col = _find_col(posthoc_df, ["P", "p_raw", "p_value", "p"])
+    p_adj_col = _find_col(posthoc_df, ["P_corrected", "p_fdr_bh", "p_corr", "p_adj", "p_fdr"])
+    method_col = _find_col(posthoc_df, ["Method", "method"])
+
+    if label_col is None and any(col is None for col in (roi_col, condition_col, group_a_col, group_b_col)):
+        return None
+
+    rows: list[dict[str, object]] = []
+    for _, row in posthoc_df.iterrows():
+        roi = _fmt(row.get(roi_col)) if roi_col else NOT_AVAILABLE
+        condition = _fmt(row.get(condition_col)) if condition_col else NOT_AVAILABLE
+        group_a = _fmt(row.get(group_a_col)) if group_a_col else NOT_AVAILABLE
+        group_b = _fmt(row.get(group_b_col)) if group_b_col else NOT_AVAILABLE
+        label = _fmt(row.get(label_col)) if label_col else f"{roi} / {condition}: {group_a} vs {group_b}"
+        rows.append(
+            {
+                "label": label,
+                "estimate": row.get(estimate_col) if estimate_col else None,
+                "se": row.get(se_col) if se_col else None,
+                "stat": row.get(stat_col) if stat_col else None,
+                "df": row.get(df_col) if df_col else None,
+                "p_raw": row.get(p_raw_col) if p_raw_col else None,
+                "p_adj": row.get(p_adj_col) if p_adj_col else None,
+                "method": row.get(method_col) if method_col else None,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def _append_anova(lines: list[str], context: ReportingSummaryContext, anova_df: pd.DataFrame | None) -> None:
     """Handle the append anova step for the Stats PySide6 workflow."""
     backend = "statsmodels"
@@ -342,32 +395,57 @@ def _append_anova(lines: list[str], context: ReportingSummaryContext, anova_df: 
         )
 
 
-def _append_lmm(lines: list[str], lmm_df: pd.DataFrame | None) -> None:
+def _append_lmm(lines: list[str], lmm_df: pd.DataFrame | None, *, between_mode: bool = False) -> None:
     """Handle the append lmm step for the Stats PySide6 workflow."""
     attrs = lmm_df.attrs if isinstance(lmm_df, pd.DataFrame) else {}
     contrast_map = attrs.get("lmm_contrast_map") if isinstance(attrs.get("lmm_contrast_map"), dict) else {}
     contrast_text = "; ".join(f"{k}: {v}" for k, v in contrast_map.items()) if contrast_map else NOT_AVAILABLE
     warnings = attrs.get("lmm_fit_warnings") if isinstance(attrs.get("lmm_fit_warnings"), list) else []
-    lines.extend([
-        "",
-        "LINEAR MIXED MODEL (LMM)",
-        f"- Model formula: {attrs.get('lmm_formula', NOT_AVAILABLE)}",
-        "- DV: Summed BCA",
-        f"- Fixed effects terms: {', '.join(attrs.get('lmm_processed_terms', [])) if attrs.get('lmm_processed_terms') else NOT_AVAILABLE}",
-        f"- Random effects: (1|subject), re_formula used={attrs.get('lmm_re_formula_used', NOT_AVAILABLE)}",
-        f"- Estimation: {attrs.get('lmm_method_used', NOT_AVAILABLE)}",
-        f"- Contrast coding: {contrast_text}",
-        "- Inference for fixed effects: Wald z-tests (normal approximation)",
-        f"- LRTs computed under ML for interaction/main effects: {'YES' if attrs.get('lmm_lrt_computed') else 'NO'}",
-        f"- Optimizer: {attrs.get('lmm_optimizer_used', NOT_AVAILABLE)}",
-        f"- Converged: {attrs.get('lmm_converged', NOT_AVAILABLE)}",
-        f"- Singularity: {attrs.get('lmm_singular', NOT_AVAILABLE)}; backed-off random slopes: {attrs.get('lmm_backed_off_random_slopes', NOT_AVAILABLE)}",
-        f"- Warnings (if any): {', '.join(warnings) if warnings else 'NONE'}",
-        f"- Data used: input_rows={attrs.get('lmm_rows_input', NOT_AVAILABLE)}, dropped_rows={attrs.get('lmm_rows_dropped', NOT_AVAILABLE)}, used_rows={attrs.get('lmm_rows_used', NOT_AVAILABLE)}, subjects={attrs.get('lmm_subjects_used', NOT_AVAILABLE)}",
-        "",
-        "LMM FIXED EFFECTS (COEFFICIENTS)",
-        "(one line per coefficient)",
-    ])
+    status_label = attrs.get("lmm_fit_status_label", NOT_AVAILABLE)
+    status_message = attrs.get("lmm_fit_status_message", NOT_AVAILABLE)
+    fixed_effects_summary = attrs.get("lmm_fixed_effects_summary", NOT_AVAILABLE)
+    random_effects_summary = attrs.get(
+        "lmm_random_effects_summary",
+        f"(1|subject), re_formula used={attrs.get('lmm_re_formula_used', NOT_AVAILABLE)}",
+    )
+    estimation_summary = attrs.get("lmm_estimation_summary", attrs.get("lmm_method_used", NOT_AVAILABLE))
+    coding_summary = attrs.get("lmm_coding_summary", contrast_text)
+    lines.extend(
+        [
+            "",
+            "LINEAR MIXED MODEL (LMM)",
+            f"- Model formula: {attrs.get('lmm_formula', NOT_AVAILABLE)}",
+            "- DV: Summed BCA",
+            *(
+                [
+                    f"- Supported multigroup fit status: {status_label} ({status_message})",
+                    f"- Fixed effects contract: {fixed_effects_summary}",
+                    f"- Random effects contract: {random_effects_summary}",
+                    f"- Estimation contract: {estimation_summary}",
+                    f"- Coding summary: {coding_summary}",
+                    "- Inference for fixed effects: Wald z-tests (normal approximation)",
+                    f"- LRTs computed under ML for interaction/main effects: {'YES' if attrs.get('lmm_lrt_computed') else 'NO'}",
+                ]
+                if between_mode
+                else [
+                    f"- Fixed effects terms: {', '.join(attrs.get('lmm_processed_terms', [])) if attrs.get('lmm_processed_terms') else NOT_AVAILABLE}",
+                    f"- Random effects: {random_effects_summary}",
+                    f"- Estimation: {attrs.get('lmm_method_used', NOT_AVAILABLE)}",
+                    f"- Contrast coding: {contrast_text}",
+                    "- Inference for fixed effects: Wald z-tests (normal approximation)",
+                    f"- LRTs computed under ML for interaction/main effects: {'YES' if attrs.get('lmm_lrt_computed') else 'NO'}",
+                ]
+            ),
+            f"- Optimizer: {attrs.get('lmm_optimizer_used', NOT_AVAILABLE)}",
+            f"- Converged: {attrs.get('lmm_converged', NOT_AVAILABLE)}",
+            f"- Singularity: {attrs.get('lmm_singular', NOT_AVAILABLE)}; backed-off random slopes: {attrs.get('lmm_backed_off_random_slopes', NOT_AVAILABLE)}",
+            f"- Warnings (if any): {', '.join(warnings) if warnings else 'NONE'}",
+            f"- Data used: input_rows={attrs.get('lmm_rows_input', NOT_AVAILABLE)}, dropped_rows={attrs.get('lmm_rows_dropped', NOT_AVAILABLE)}, used_rows={attrs.get('lmm_rows_used', NOT_AVAILABLE)}, subjects={attrs.get('lmm_subjects_used', NOT_AVAILABLE)}",
+            "",
+            "LMM FIXED EFFECTS (COEFFICIENTS)",
+            "(one line per coefficient)",
+        ]
+    )
     if not isinstance(lmm_df, pd.DataFrame) or lmm_df.empty:
         lines.append(f"- {NOT_AVAILABLE}")
         return
@@ -403,11 +481,12 @@ def _append_posthoc(
         n_roi_within_cond = int((posthoc_df["Direction"] == "roi_within_condition").sum())
 
     if between_mode:
+        between_rows = _coerce_between_contrast_rows(posthoc_df)
         lines.extend([
             "",
             "GROUP CONTRASTS",
-            "- Procedure: pairwise between-group contrasts / model contrasts",
-            f"- Number of contrasts: {len(posthoc_df) if isinstance(posthoc_df, pd.DataFrame) else NOT_AVAILABLE}",
+            "- Procedure: pairwise multigroup contrasts (Welch t-tests)",
+            f"- Number of contrasts: {len(between_rows) if isinstance(between_rows, pd.DataFrame) else NOT_AVAILABLE}",
             "- Multiple comparison correction:",
             "  - Method: Benjaminiâ€“Hochberg (BH) FDR",
             "  - Adjusted p-values reported: YES",
@@ -415,21 +494,15 @@ def _append_posthoc(
             "GROUP CONTRAST RESULTS",
             "(one line per comparison)",
         ])
-        if not isinstance(posthoc_df, pd.DataFrame) or posthoc_df.empty:
+        if not isinstance(between_rows, pd.DataFrame) or between_rows.empty:
             lines.append(f"- {NOT_AVAILABLE}")
             return
-        label_col = _find_col(posthoc_df, ["Comparison", "Effect", "contrast", "group_pair"])
-        estimate_col = _find_col(posthoc_df, ["mean_diff", "Estimate", "estimate"])
-        se_col = _find_col(posthoc_df, ["SE", "Std.Err.", "std_error"])
-        stat_col = _find_col(posthoc_df, ["t_statistic", "t", "z", "stat"])
-        df_col = _find_col(posthoc_df, ["df", "DF"])
-        p_raw_col = _find_col(posthoc_df, ["p_raw", "p_value", "p"])
-        p_adj_col = _find_col(posthoc_df, ["p_fdr_bh", "p_corr", "p_adj"])
-        for _, row in posthoc_df.iterrows():
+        for _, row in between_rows.iterrows():
             lines.append(
-                f"- {_fmt(row.get(label_col or 'Comparison'))}: estimate={_fmt(row.get(estimate_col))}  "
-                f"SE={_fmt(row.get(se_col))}  stat={_fmt(row.get(stat_col))}  "
-                f"df={_fmt(row.get(df_col))}  p_raw={_fmt(row.get(p_raw_col))}  p_adj={_fmt(row.get(p_adj_col))}"
+                f"- {_fmt(row.get('label'))}: estimate={_fmt(row.get('estimate'))}  "
+                f"SE={_fmt(row.get('se'))}  stat={_fmt(row.get('stat'))}  "
+                f"df={_fmt(row.get('df'))}  p_raw={_fmt(row.get('p_raw'))}  "
+                f"p_adj={_fmt(row.get('p_adj'))}  method={_fmt(row.get('method'))}"
             )
         return
 

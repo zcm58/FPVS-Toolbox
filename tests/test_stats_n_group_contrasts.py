@@ -5,11 +5,14 @@ from pathlib import Path
 import pandas as pd
 
 from Tools.Stats.Legacy.group_contrasts import compute_group_contrasts
+from Tools.Stats.Legacy.stats_export import export_mixed_model_results_to_excel
+from Tools.Stats.PySide6.stats_core import GROUP_CONTRAST_XLS, LMM_BETWEEN_XLS
 from Tools.Stats.PySide6.stats_group_contrasts import (
     PAIRWISE_CONTRAST_COLUMNS,
     export_group_contrasts_workbook,
     normalize_group_contrasts_table,
 )
+from Tools.Stats.PySide6.summary_utils import SummaryConfig, build_summary_from_files
 
 
 def _build_long_df(groups: tuple[str, ...]) -> pd.DataFrame:
@@ -106,3 +109,75 @@ def test_export_uses_pairwise_contrasts_sheet(tmp_path: Path) -> None:
     assert "Pairwise_Contrasts" in xls.sheet_names
     exported = pd.read_excel(save_path, sheet_name="Pairwise_Contrasts")
     assert list(exported.columns[: len(PAIRWISE_CONTRAST_COLUMNS)]) == list(PAIRWISE_CONTRAST_COLUMNS)
+
+
+def test_supported_between_export_roundtrip_builds_between_summary(tmp_path: Path) -> None:
+    contrasts_df = pd.DataFrame(
+        [
+            {
+                "condition": "Face",
+                "roi": "Occipital",
+                "group_1": "G1",
+                "group_2": "G2",
+                "difference": 0.6,
+                "t_stat": 3.2,
+                "p_value": 0.01,
+                "effect_size": 0.8,
+                "p_fdr_bh": 0.02,
+            }
+        ]
+    )
+    lmm_df = pd.DataFrame(
+        {
+            "Effect (raw)": ["Intercept"],
+            "Estimate": [0.5],
+            "P>|z|": [0.03],
+        }
+    )
+
+    export_group_contrasts_workbook(contrasts_df, tmp_path / GROUP_CONTRAST_XLS, log_func=lambda _msg: None)
+    export_mixed_model_results_to_excel(lmm_df, tmp_path / LMM_BETWEEN_XLS, log_func=lambda _msg: None)
+
+    summary = build_summary_from_files(tmp_path, SummaryConfig())
+
+    assert "RM-ANOVA:" not in summary
+    assert "Group contrasts:" in summary
+    assert "Occipital (Face): G1 > G2, p_adj = 0.020, d = 0.80." in summary
+    assert "Overall response present" in summary
+
+
+def test_supported_between_summary_reader_accepts_legacy_sheet_alias(tmp_path: Path) -> None:
+    contrasts_df = normalize_group_contrasts_table(
+        pd.DataFrame(
+            [
+                {
+                    "condition": "Face",
+                    "roi": "Occipital",
+                    "group_1": "G1",
+                    "group_2": "G2",
+                    "difference": 0.6,
+                    "t_stat": 3.2,
+                    "p_value": 0.01,
+                    "effect_size": 0.8,
+                    "p_fdr_bh": 0.02,
+                }
+            ]
+        )
+    )
+    lmm_df = pd.DataFrame(
+        {
+            "Effect (raw)": ["Intercept"],
+            "Estimate": [0.5],
+            "P>|z|": [0.03],
+        }
+    )
+
+    with pd.ExcelWriter(tmp_path / GROUP_CONTRAST_XLS, engine="xlsxwriter") as writer:
+        contrasts_df.to_excel(writer, sheet_name="Post-hoc Results", index=False)
+    export_mixed_model_results_to_excel(lmm_df, tmp_path / LMM_BETWEEN_XLS, log_func=lambda _msg: None)
+
+    summary = build_summary_from_files(tmp_path, SummaryConfig())
+
+    assert "RM-ANOVA:" not in summary
+    assert "Group contrasts:" in summary
+    assert "Occipital (Face): G1 > G2, p_adj = 0.020, d = 0.80." in summary

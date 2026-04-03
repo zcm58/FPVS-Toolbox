@@ -7,21 +7,12 @@ import numpy as np
 import pandas as pd
 
 from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
-
-PAIRWISE_CONTRAST_COLUMNS: tuple[str, ...] = (
-    "ModelType",
-    "ROI",
-    "Condition",
-    "GroupA",
-    "GroupB",
-    "Estimate",
-    "SE",
-    "TestStat",
-    "DF",
-    "P",
-    "P_corrected",
-    "Method",
+from Tools.Stats.PySide6.stats_core import (
+    MULTIGROUP_GROUP_CONTRAST_COLUMNS,
+    MULTIGROUP_GROUP_CONTRAST_SHEET,
 )
+
+PAIRWISE_CONTRAST_COLUMNS: tuple[str, ...] = MULTIGROUP_GROUP_CONTRAST_COLUMNS
 
 
 def normalize_group_contrasts_table(results_df: pd.DataFrame) -> pd.DataFrame:
@@ -93,5 +84,5 @@ def export_group_contrasts_workbook(results_df: pd.DataFrame, save_path: str | P
 
     export_table = normalize_group_contrasts_table(results_df)
     with pd.ExcelWriter(Path(save_path), engine="xlsxwriter") as writer:
-        _auto_format_and_write_excel(writer, export_table, "Pairwise_Contrasts", log_func)
+        _auto_format_and_write_excel(writer, export_table, MULTIGROUP_GROUP_CONTRAST_SHEET, log_func)
     return True

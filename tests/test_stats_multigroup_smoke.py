@@ -286,3 +286,45 @@ def test_stats_multigroup_missing_participants_warns_once(qtbot, tmp_path, monke
     assert isinstance(win.between_mixed_model_results_data, pd.DataFrame)
     assert isinstance(win.group_contrasts_results_data, pd.DataFrame)
     assert not infos, "Between-group actions should succeed without multi-group errors"
+
+
+@pytest.mark.qt
+def test_between_missingness_export_uses_supported_multigroup_summary_labels(
+    qtbot,
+    tmp_path,
+    stats_smoke_env,
+):
+    win = StatsWindow(project_dir=str(tmp_path))
+    qtbot.addWidget(win)
+    win._between_missingness_payload = {
+        "mixed_model_missing_cells": [
+            {
+                "Subject": "P2",
+                "Group": "GroupA",
+                "Condition": "CondB",
+                "Status": "Missing",
+                "Note": "Required condition cell absent; retained for mixed model.",
+            }
+        ],
+        "summary": {
+            "n_groups": 2,
+            "n_mixed_subjects": 3,
+            "n_discovered_subjects": 4,
+            "n_assigned_subjects": 4,
+        },
+    }
+
+    export_path = win._export_between_missingness(str(tmp_path))
+
+    assert export_path is not None
+    assert export_path.name == "Missingness and Exclusions.xlsx"
+    xls = pd.ExcelFile(export_path)
+    assert "Summary" in xls.sheet_names
+    assert "MixedModel_MissingCells" in xls.sheet_names
+    assert "ANOVA_ExcludedSubjects" not in xls.sheet_names
+
+    summary_df = pd.read_excel(export_path, sheet_name="Summary")
+    metrics = summary_df["Metric"].tolist()
+    assert "Supported workflow" in metrics
+    assert "N subjects modeled in multigroup mixed model" in metrics
+    assert "N mixed-model missing condition cells" in metrics

@@ -84,11 +84,14 @@ from Tools.Stats.PySide6.baseline_vs_zero import run_baseline_vs_zero_tests
 from Tools.Stats.PySide6.reporting_summary import build_rm_anova_report_path, build_rm_anova_text_report
 from Tools.Stats.PySide6.lmm_reporting import (
     attach_lmm_run_metadata,
+    build_lmm_run_contract,
     build_lmm_report_path,
     build_lmm_text_report,
+    classify_lmm_fit_status,
     ensure_lmm_effect_columns,
     infer_lmm_diagnostics,
     repair_lmm_pvalues_from_z,
+    resolve_lmm_formula,
 )
 
 logger = logging.getLogger("Tools.Stats")
@@ -232,6 +235,19 @@ def _build_lmm_blocked_payload(
             message_cb(f"Failed to export blocked diagnostics workbook: {exc}")
             diagnostics_path = None
 
+    blocked_results_df = pd.DataFrame()
+    blocked_fit_status = {
+        "status": "blocked",
+        "label": "BLOCKED",
+        "supported": False,
+        "message": message,
+        "issues": [blocked_reason or message],
+    }
+    blocked_results_df.attrs["lmm_fit_status"] = blocked_fit_status["status"]
+    blocked_results_df.attrs["lmm_fit_status_label"] = blocked_fit_status["label"]
+    blocked_results_df.attrs["lmm_fit_supported"] = blocked_fit_status["supported"]
+    blocked_results_df.attrs["lmm_fit_status_message"] = blocked_fit_status["message"]
+    blocked_results_df.attrs["lmm_fit_issues"] = blocked_fit_status["issues"]
     return {
         "status": "blocked",
         "blocked_stage": stage,
@@ -239,11 +255,12 @@ def _build_lmm_blocked_payload(
         "blocked_reason": blocked_reason or "",
         "stage_counts": stage_counts,
         "excluded_participants": exclusion_rows,
-        "mixed_results_df": pd.DataFrame(),
+        "mixed_results_df": blocked_results_df,
         "output_text": message,
         "diagnostics_workbook": str(diagnostics_path) if diagnostics_path else None,
         "missingness": {},
         "merge_match_stats": merge_match_stats or {},
+        "fit_status": blocked_fit_status,
     }
 
 
@@ -1996,6 +2013,7 @@ def run_lmm(
     formula_fixed_terms = ["group * condition * roi"] if include_group else ["condition * roi"]
     method_requested = "reml"
     re_formula_requested = "1"
+    contrast_map_requested = {"condition": "Sum", "roi": "Sum"} if include_group else None
     model_rows_input = len(df_long)
     model_rows_used = int(df_long.dropna(subset=[dv_col, "subject", "condition", "roi"] + (["group"] if include_group else [])).shape[0])
 
@@ -2006,20 +2024,34 @@ def run_lmm(
         fixed_effects=formula_fixed_terms,
         re_formula=re_formula_requested,
         method=method_requested,
+        contrast_map=contrast_map_requested,
         return_model=True,
     )
     mixed_results_df = repair_lmm_pvalues_from_z(mixed_results_df)
     mixed_results_df = ensure_lmm_effect_columns(mixed_results_df)
-    formula_lhs = f"{dv_col} ~ "
-    formula_rhs = formula_fixed_terms[0]
-    if include_group:
-        formula_rhs = "C(group, Sum) * C(condition, Sum) * C(roi, Sum)"
-        contrast_map = {"group": "Sum", "condition": "Sum", "roi": "Sum"}
-    else:
-        formula_rhs = "C(condition, Sum) * C(roi, Sum)"
-        contrast_map = {"condition": "Sum", "roi": "Sum"}
-    formula = formula_lhs + formula_rhs
+    formula = resolve_lmm_formula(
+        model=mixed_model,
+        fallback_formula=f"{dv_col} ~ {formula_fixed_terms[0]}",
+    )
+    formula_rhs = formula.split("~", maxsplit=1)[1].strip() if "~" in formula else formula_fixed_terms[0]
+    contract = build_lmm_run_contract(
+        include_group=include_group,
+        formula=formula,
+        method_used="REML",
+        re_formula_used=re_formula_requested,
+    )
+    contrast_map = (
+        dict(contract.get("coding_map", {}))
+        if isinstance(contract.get("coding_map"), dict)
+        else {}
+    )
     converged, singular, optimizer, model_warnings = infer_lmm_diagnostics(mixed_results_df, mixed_model)
+    fit_status = classify_lmm_fit_status(
+        mixed_results_df,
+        include_group=include_group,
+        converged=converged,
+        singular=singular,
+    )
     backed_off = bool(
         mixed_results_df.get("Note", pd.Series(dtype=str))
         .astype(str)
@@ -2045,11 +2077,18 @@ def run_lmm(
         rows_used=int(model_rows_used),
         subjects_used=int(df_long["subject"].nunique()),
         lrt_table=lrt_table,
+        contract=contract if include_group else None,
+        fit_status=fit_status if include_group else None,
     )
+    if include_group and not fit_status["supported"]:
+        message_cb(fit_status["message"])
 
     output_text = "============================================================\n"
     if include_group:
-        output_text += "       Between-Group Mixed-Effects Model Results\n"
+        title = "Between-Group Mixed-Effects Model Results"
+        if not fit_status["supported"]:
+            title = "Between-Group Mixed-Effects Model Diagnostic Output (Unsupported Fit)"
+        output_text += f"       {title}\n"
     else:
         output_text += "       Linear Mixed-Effects Model Results\n"
     output_text += "       Analysis conducted on: Summed BCA Data\n"
@@ -2058,6 +2097,16 @@ def run_lmm(
         output_text += (
             "Group was modeled as a between-subject factor interacting with condition\n"
             "and ROI. Only subjects with known group assignments were included.\n\n"
+        )
+        output_text += (
+            f"Supported multigroup contract: {contract.get('fixed_effects_summary', '')}; "
+            f"{contract.get('random_effects_summary', '')}; "
+            f"estimation={contract.get('estimation_summary', '')}; "
+            f"coding={contract.get('coding_summary', '')}\n"
+        )
+        output_text += (
+            f"Fit status: {fit_status.get('label', 'UNKNOWN')} - "
+            f"{fit_status.get('message', '')}\n\n"
         )
     else:
         output_text += (
@@ -2097,11 +2146,13 @@ def run_lmm(
             )
 
     return {
+        "status": fit_status["status"] if include_group else "completed",
         "mixed_results_df": mixed_results_df,
         "output_text": output_text,
         "dv_metadata": dv_metadata,
         "missingness": missingness_payload or {},
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
+        "fit_status": fit_status if include_group else None,
         "run_report": (
             shared_multigroup_payload.get("run_report")
             if include_group and isinstance(shared_multigroup_payload, dict)

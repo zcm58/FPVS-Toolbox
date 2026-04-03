@@ -21,11 +21,13 @@ import numpy as np
 import pandas as pd
 
 from Tools.Stats.PySide6.stats_core import (
-    ANOVA_BETWEEN_XLS,
     ANOVA_XLS,
     GROUP_CONTRAST_XLS,
     LMM_BETWEEN_XLS,
     LMM_XLS,
+    MULTIGROUP_GROUP_CONTRAST_LEGACY_SHEETS,
+    MULTIGROUP_GROUP_CONTRAST_SHEET,
+    MULTIGROUP_MIXED_MODEL_SHEET,
     POSTHOC_XLS,
     PipelineId,
 )
@@ -81,20 +83,34 @@ def build_summary_from_files(stats_folder: Path, config: SummaryConfig) -> str:
                 return df
         return None
 
+    single_posthoc = _safe_read_any(stats_folder / POSTHOC_XLS, ["Combined", "Post-hoc Results"])
+    between_contrasts = _safe_read_any(
+        stats_folder / GROUP_CONTRAST_XLS,
+        [MULTIGROUP_GROUP_CONTRAST_SHEET, *MULTIGROUP_GROUP_CONTRAST_LEGACY_SHEETS],
+    )
+    single_lmm = _safe_read(stats_folder / LMM_XLS, MULTIGROUP_MIXED_MODEL_SHEET)
     frames = StatsSummaryFrames(
-        single_posthoc=_safe_read_any(stats_folder / POSTHOC_XLS, ["Combined", "Post-hoc Results"]),
-        between_contrasts=_safe_read(stats_folder / GROUP_CONTRAST_XLS, "Post-hoc Results"),
-        mixed_model_terms=_safe_read(stats_folder / LMM_XLS, "Mixed Model"),
+        single_posthoc=single_posthoc,
+        between_contrasts=between_contrasts,
+        mixed_model_terms=single_lmm,
     )
 
-    for fname in (ANOVA_BETWEEN_XLS, ANOVA_XLS):
-        candidate = _safe_read(stats_folder / fname, "RM-ANOVA Table")
-        if candidate is not None:
-            frames.anova_terms = candidate
-            break
+    frames.anova_terms = _safe_read(stats_folder / ANOVA_XLS, "RM-ANOVA Table")
 
-    candidate_lmm_between = _safe_read(stats_folder / LMM_BETWEEN_XLS, "Mixed Model")
-    if candidate_lmm_between is not None:
+    candidate_lmm_between = _safe_read(stats_folder / LMM_BETWEEN_XLS, MULTIGROUP_MIXED_MODEL_SHEET)
+    single_sources_present = any(
+        df is not None for df in (frames.single_posthoc, single_lmm, frames.anova_terms)
+    )
+    between_sources_present = any(
+        df is not None for df in (frames.between_contrasts, candidate_lmm_between)
+    )
+    if between_sources_present and not single_sources_present:
+        frames.pipeline_id = PipelineId.BETWEEN
+        frames.mixed_model_terms = candidate_lmm_between
+    elif single_sources_present:
+        frames.pipeline_id = PipelineId.SINGLE
+        frames.mixed_model_terms = single_lmm
+    elif candidate_lmm_between is not None:
         frames.mixed_model_terms = candidate_lmm_between
 
     return build_summary_from_frames(frames, config)
@@ -107,6 +123,13 @@ def build_summary_from_frames(frames: StatsSummaryFrames, config: SummaryConfig)
     the affected sections.
     """
 
+    between_mode = frames.pipeline_id is PipelineId.BETWEEN
+    posthoc_empty_line = (
+        "- No group contrasts are available for summary."
+        if between_mode
+        else "- No post-hoc results are available for summary."
+    )
+
     try:
         anova_lines = _summarize_rm_anova(frames.anova_terms, config)
     except Exception:
@@ -117,10 +140,16 @@ def build_summary_from_frames(frames: StatsSummaryFrames, config: SummaryConfig)
             frames.single_posthoc, frames.between_contrasts, config
         )
     except Exception:
-        posthoc_lines = ["- No post-hoc results are available for summary."]
+        posthoc_lines = [posthoc_empty_line]
+    if between_mode and posthoc_lines == ["- No post-hoc results are available for summary."]:
+        posthoc_lines = [posthoc_empty_line]
 
     try:
-        mixed_lines = _summarize_mixed_model(frames.mixed_model_terms, config)
+        mixed_lines = _summarize_mixed_model(
+            frames.mixed_model_terms,
+            config,
+            between_mode=between_mode,
+        )
     except Exception:
         mixed_lines = ["- Mixed model: NOT AVAILABLE (not computed by this run)."]
 
@@ -129,7 +158,7 @@ def build_summary_from_frames(frames: StatsSummaryFrames, config: SummaryConfig)
     except Exception:
         interaction_lines = []
 
-    if frames.pipeline_id is PipelineId.BETWEEN:
+    if between_mode:
         parts = [
             f"--- Summary (\u03b1 = {config.alpha:.2f}, FDR correction: Benjamini-Hochberg) ---",
             "",
@@ -402,6 +431,52 @@ def _summarize_rm_anova(anova_terms: Optional[pd.DataFrame], cfg: SummaryConfig)
     return bullets
 
 
+def _coerce_between_contrasts_for_summary(
+    between_contrasts: Optional[pd.DataFrame],
+) -> Optional[pd.DataFrame]:
+    """Normalize multigroup contrast tables from raw or exported schemas."""
+    if between_contrasts is None or not isinstance(between_contrasts, pd.DataFrame) or between_contrasts.empty:
+        return None
+
+    df = between_contrasts.copy()
+    roi_col = _pick_column(df, "ROI", ["roi"])
+    cond_col = _pick_column(df, "Condition", ["condition"])
+    g1_col = _pick_column(df, "GroupA", ["group_1", "Group_1", "group1"])
+    g2_col = _pick_column(df, "GroupB", ["group_2", "Group_2", "group2"])
+    estimate_col = _pick_column(df, "Estimate", ["difference", "mean_diff", "mean_difference", "estimate"])
+    effect_col = _pick_column(df, "effect_size", ["cohens_d", "d"])
+    p_adj_col = _pick_column(df, "P_corrected", ["p_fdr_bh", "p_fdr", "p_corr", "p_adj"])
+    p_raw_col = _pick_column(df, "P", ["p_value", "p_raw", "p"])
+    if any(col is None for col in (roi_col, cond_col, g1_col, g2_col)):
+        return None
+
+    out = pd.DataFrame(
+        {
+            "roi": df[roi_col],
+            "condition": df[cond_col],
+            "group_1": df[g1_col],
+            "group_2": df[g2_col],
+            "estimate": pd.to_numeric(df[estimate_col], errors="coerce")
+            if estimate_col is not None
+            else np.nan,
+            "effect_size": pd.to_numeric(df[effect_col], errors="coerce")
+            if effect_col is not None
+            else np.nan,
+            "p_adjusted": pd.to_numeric(df[p_adj_col], errors="coerce")
+            if p_adj_col is not None
+            else np.nan,
+            "p_raw": pd.to_numeric(df[p_raw_col], errors="coerce")
+            if p_raw_col is not None
+            else np.nan,
+        }
+    )
+    out["roi"] = out["roi"].astype(str)
+    out["condition"] = out["condition"].astype(str)
+    out["group_1"] = out["group_1"].astype(str)
+    out["group_2"] = out["group_2"].astype(str)
+    return out
+
+
 def _summarize_posthocs(
     single_posthoc: Optional[pd.DataFrame],
     between_contrasts: Optional[pd.DataFrame],
@@ -412,38 +487,43 @@ def _summarize_posthocs(
         return _summarize_single_posthocs_by_direction(single_posthoc, cfg)
 
     if isinstance(between_contrasts, pd.DataFrame) and not between_contrasts.empty:
-        df = between_contrasts.copy()
-        p_col = _pick_column(df, cfg.p_col, ["p_fdr_bh", "p_fdr"])
-        eff_col = _pick_column(df, cfg.effect_col, ["effect_size", "cohens_d", "d"])
-        diff_col = _pick_column(df, "difference", ["mean_diff", "mean_difference"])
-        roi_col = _pick_column(df, "roi", ["ROI"])
-        cond_col = _pick_column(df, "condition", ["Condition"])
-        g1_col = _pick_column(df, "group_1", ["Group_1", "group1"])
-        g2_col = _pick_column(df, "group_2", ["Group_2", "group2"])
-        required = [p_col, eff_col, roi_col, cond_col, g1_col, g2_col]
-        if any(col is None for col in required):
-            return ["- No post-hoc results are available for summary."]
+        df = _coerce_between_contrasts_for_summary(between_contrasts)
+        if df is None or df.empty:
+            return ["- No group contrasts are available for summary."]
         try:
-            sig = df[df[p_col] < cfg.alpha].sort_values(p_col)
+            sort_key = df["p_adjusted"].where(df["p_adjusted"].notna(), df["p_raw"])
+            sig = df[sort_key < cfg.alpha].copy()
+            sig["_sort_p"] = sort_key.loc[sig.index]
+            sig["_sort_effect"] = sig["effect_size"].abs().where(
+                sig["effect_size"].notna(), sig["estimate"].abs()
+            )
+            sig = sig.sort_values(by=["_sort_p", "_sort_effect"], ascending=[True, False])
         except Exception:
-            return ["- No post-hoc results are available for summary."]
+            return ["- No group contrasts are available for summary."]
         if sig.empty:
-            return ["- No significant post-hoc comparisons after correction."]
+            return ["- No significant group contrasts after correction."]
         bullets = []
         for _, row in sig.head(cfg.max_bullets).iterrows():
-            roi = row.get(roi_col, "ROI")
-            cond = row.get(cond_col, "Condition")
-            g1 = str(row.get(g1_col, "Group 1"))
-            g2 = str(row.get(g2_col, "Group 2"))
-            diff = row.get(diff_col, np.nan) if diff_col else np.nan
+            roi = row.get("roi", "ROI")
+            cond = row.get("condition", "Condition")
+            g1 = str(row.get("group_1", "Group 1"))
+            g2 = str(row.get("group_2", "Group 2"))
+            diff = row.get("estimate", np.nan)
             high, low = (g1, g2)
             if pd.notna(diff) and float(diff) < 0:
                 high, low = (g2, g1)
-            d_val = float(row[eff_col]) if pd.notna(row[eff_col]) else 0.0
-            bullets.append(
-                f"- {roi} ({cond}): {high} > {low}, "
-                f"p = {float(row[p_col]):.3f}, d = {d_val:.2f}."
-            )
+            p_value = row.get("p_adjusted", np.nan)
+            p_label = "p_adj"
+            if pd.isna(p_value):
+                p_value = row.get("p_raw", np.nan)
+                p_label = "p"
+            detail = f"{p_label} = {float(p_value):.3f}"
+            effect_value = row.get("effect_size", np.nan)
+            if pd.notna(effect_value):
+                detail += f", d = {float(effect_value):.2f}"
+            elif pd.notna(diff):
+                detail += f", estimate = {float(diff):.2f}"
+            bullets.append(f"- {roi} ({cond}): {high} > {low}, {detail}.")
         return bullets
 
     return ["- No post-hoc results are available for summary."]
@@ -550,12 +630,21 @@ def _summarize_between(between_contrasts: Optional[pd.DataFrame], cfg: SummaryCo
     return bullets
 
 
-def _summarize_mixed_model(mixed_model_terms: Optional[pd.DataFrame], cfg: SummaryConfig) -> list[str]:
+def _summarize_mixed_model(
+    mixed_model_terms: Optional[pd.DataFrame],
+    cfg: SummaryConfig,
+    *,
+    between_mode: bool = False,
+) -> list[str]:
     """Handle the summarize mixed model step for the Stats PySide6 workflow."""
     if mixed_model_terms is None or not isinstance(mixed_model_terms, pd.DataFrame) or mixed_model_terms.empty:
         return ["- Mixed model: NOT AVAILABLE (not computed by this run)."]
 
-    return format_mixed_model_plain_language(mixed_model_terms, cfg.alpha)
+    return format_mixed_model_plain_language(
+        mixed_model_terms,
+        cfg.alpha,
+        between_mode=between_mode,
+    )
 
 
 def _format_p_value(p_value: float) -> str:
@@ -626,12 +715,31 @@ def _is_intercept(term: str) -> bool:
 def format_mixed_model_plain_language(
     mixed_model_terms: pd.DataFrame,
     alpha: float,
+    *,
+    between_mode: bool = False,
 ) -> list[str]:
     """Handle the format mixed model plain language step for the Stats PySide6 workflow."""
     p_col = _pick_column(mixed_model_terms, "p", ["P>|z|", "p", "pvalue", "p_value"])
     raw_term_col = _pick_column(mixed_model_terms, "term", ["Effect (raw)", "Effect", "Term"])
     readable_term_col = _pick_column(mixed_model_terms, "readable_term", ["Effect (readable)"])
+    if raw_term_col is None and readable_term_col is not None:
+        raw_term_col = readable_term_col
     estimate_col = _pick_column(mixed_model_terms, "Estimate", ["Coef.", "Estimate", "coef"])
+    attrs = mixed_model_terms.attrs if isinstance(mixed_model_terms, pd.DataFrame) else {}
+
+    if between_mode and attrs.get("lmm_fit_supported") is False:
+        status_message = attrs.get("lmm_fit_status_message", "Supported multigroup LMM blocked.")
+        contract_bits = [
+            attrs.get("lmm_fixed_effects_summary"),
+            attrs.get("lmm_random_effects_summary"),
+            attrs.get("lmm_estimation_summary"),
+            attrs.get("lmm_coding_summary"),
+        ]
+        bullets = [f"- {status_message}"]
+        contract_text = "; ".join(str(bit) for bit in contract_bits if bit)
+        if contract_text:
+            bullets.append(f"- Attempted contract: {contract_text}.")
+        return bullets
 
     if p_col is None or raw_term_col is None:
         return ["- Mixed model: NOT AVAILABLE (not computed by this run)."]
@@ -645,7 +753,26 @@ def format_mixed_model_plain_language(
     df["_p_val"] = pd.to_numeric(df[p_col], errors="coerce")
     df["_estimate"] = pd.to_numeric(df[estimate_col], errors="coerce") if estimate_col else np.nan
 
-    bullets: list[str] = ["- Inference for fixed effects: Wald z-tests (normal approximation)."]
+    bullets: list[str] = []
+    if between_mode:
+        status_label = attrs.get("lmm_fit_status_label")
+        status_message = attrs.get("lmm_fit_status_message")
+        contract_bits = [
+            attrs.get("lmm_fixed_effects_summary"),
+            attrs.get("lmm_random_effects_summary"),
+            attrs.get("lmm_estimation_summary"),
+            attrs.get("lmm_coding_summary"),
+        ]
+        if status_label or status_message:
+            bullets.append(
+                "- Fit status: "
+                f"{status_label or 'NOT AVAILABLE'}"
+                f" ({status_message or 'NOT AVAILABLE'})."
+            )
+        contract_text = "; ".join(str(bit) for bit in contract_bits if bit)
+        if contract_text:
+            bullets.append(f"- Contract: {contract_text}.")
+    bullets.append("- Inference for fixed effects: Wald z-tests (normal approximation).")
     sig = df[df["_p_val"] < alpha]
     if sig.empty:
         return bullets

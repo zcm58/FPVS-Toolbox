@@ -139,6 +139,54 @@ def test_between_reporting_summary_omits_rm_anova_section() -> None:
     assert "GROUP CONTRASTS" in text
 
 
+def test_between_reporting_summary_reads_supported_multigroup_contrast_schema() -> None:
+    context = ReportingSummaryContext(
+        project_name="Demo",
+        project_root=Path("/tmp/demo"),
+        pipeline_name=PipelineId.BETWEEN.name,
+        generated_local=datetime(2025, 1, 1, 12, 0, 0),
+        elapsed_ms=100,
+        timezone_label="UTC",
+        total_participants=8,
+        included_participants=[f"P{i}" for i in range(1, 7)],
+        excluded_reasons={"P7": "missing group assignment", "P8": "manual exclusion"},
+        selected_conditions=["A", "B"],
+        selected_rois=["ROI1", "ROI2"],
+    )
+    lmm_df = pd.DataFrame([{"Effect": "Intercept", "Estimate": 0.5, "P>|z|": 0.03}])
+    contrasts_df = pd.DataFrame(
+        [
+            {
+                "ROI": "Occipital",
+                "Condition": "Face",
+                "GroupA": "G1",
+                "GroupB": "G2",
+                "Estimate": 0.4,
+                "TestStat": 2.1,
+                "DF": 10.5,
+                "P": 0.04,
+                "P_corrected": 0.05,
+                "Method": "fdr_bh",
+            }
+        ]
+    )
+
+    text = build_reporting_summary(
+        context,
+        anova_df=None,
+        lmm_df=lmm_df,
+        posthoc_df=contrasts_df,
+    )
+
+    assert "RM-ANOVA (REPEATED MEASURES)" not in text
+    assert "GROUP CONTRASTS" in text
+    assert "POST-HOC TESTS" not in text
+    assert "Included in supported multigroup model: 6" in text
+    assert "Not modeled: 2" in text
+    assert "Occipital / Face: G1 vs G2" in text
+    assert "p_adj=0.05" in text
+
+
 def test_rm_anova_text_report_exports_to_results_dir_used_by_stats_outputs(tmp_path: Path, monkeypatch) -> None:
     messages: list[str] = []
     results_dir = tmp_path / "3 - Statistical Analysis"

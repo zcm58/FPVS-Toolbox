@@ -37,6 +37,34 @@ ANOVA_BETWEEN_XLS: Final[str] = "Mixed ANOVA Between Groups.xlsx"
 LMM_BETWEEN_XLS: Final[str] = "Mixed Model Between Groups.xlsx"
 GROUP_CONTRAST_XLS: Final[str] = "Group Contrasts.xlsx"
 BASELINE_VS_ZERO_XLS: Final[str] = "Baseline vs Zero Tests.xlsx"
+MULTIGROUP_MIXED_MODEL_SHEET: Final[str] = "Mixed Model"
+MULTIGROUP_GROUP_CONTRAST_COLUMNS: Final[tuple[str, ...]] = (
+    "ModelType",
+    "ROI",
+    "Condition",
+    "GroupA",
+    "GroupB",
+    "Estimate",
+    "SE",
+    "TestStat",
+    "DF",
+    "P",
+    "P_corrected",
+    "Method",
+)
+MULTIGROUP_GROUP_CONTRAST_SHEET: Final[str] = "Pairwise_Contrasts"
+MULTIGROUP_GROUP_CONTRAST_LEGACY_SHEETS: Final[tuple[str, ...]] = ("Post-hoc Results",)
+MULTIGROUP_MISSINGNESS_XLS: Final[str] = "Missingness and Exclusions.xlsx"
+MULTIGROUP_MISSINGNESS_SHEETS: Final[tuple[str, ...]] = (
+    "MixedModel_MissingCells",
+    "Summary",
+)
+MULTIGROUP_QC_CONTEXT_XLS: Final[str] = "QC_Context_ByGroup.xlsx"
+MULTIGROUP_QC_CONTEXT_SHEETS: Final[tuple[str, ...]] = (
+    "Summary",
+    "DV_Distribution",
+    "Subject_Level",
+)
 
 
 @dataclass
@@ -61,5 +89,13 @@ __all__ = [
     "LMM_BETWEEN_XLS",
     "GROUP_CONTRAST_XLS",
     "BASELINE_VS_ZERO_XLS",
+    "MULTIGROUP_MIXED_MODEL_SHEET",
+    "MULTIGROUP_GROUP_CONTRAST_COLUMNS",
+    "MULTIGROUP_GROUP_CONTRAST_SHEET",
+    "MULTIGROUP_GROUP_CONTRAST_LEGACY_SHEETS",
+    "MULTIGROUP_MISSINGNESS_XLS",
+    "MULTIGROUP_MISSINGNESS_SHEETS",
+    "MULTIGROUP_QC_CONTEXT_XLS",
+    "MULTIGROUP_QC_CONTEXT_SHEETS",
     "PipelineStep",
 ]
