@@ -1177,7 +1177,7 @@ class StatsWindow(QMainWindow):
                 "stats_multigroup_issue",
                 extra={
                     "severity": issue.severity,
-                    "message": issue.message,
+                    "issue_message": issue.message,
                     **(issue.context or {}),
                 },
             )

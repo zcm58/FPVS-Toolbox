@@ -83,6 +83,30 @@ def test_manifest_conflicting_normalized_group_assignment_blocks(tmp_path: Path)
     assert any(issue.context.get("pid") == "P7" for issue in blocking)
 
 
+def test_manifest_prefixed_pid_tokens_still_normalize_to_canonical_ids(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    excel_root = project_root / "1 - Excel Data Files"
+    condition = excel_root / "Condition A"
+
+    _write_manifest(
+        project_root,
+        participants={
+            "ValenceP01": {"group": "Control"},
+            "ValenceP02": {"group": "Treatment"},
+        },
+        groups={"Control": {}, "Treatment": {}},
+    )
+
+    _make_excel_file(condition, "P1_results.xlsx")
+    _make_excel_file(condition, "P2_results.xlsx")
+
+    result = scan_multigroup_readiness(project_root, excel_root)
+    assert result.multi_group_ready is True
+    assert not any("does not match the supported multigroup P<n> format" in issue.message for issue in result.issues)
+    assert any("ValenceP01 -> P1" in issue.message for issue in result.issues if issue.severity == "warning")
+
+
 def test_readiness_with_unassigned_subjects(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     project_root.mkdir()
