@@ -54,6 +54,7 @@ from Tools.Stats.PySide6.dv_policies import (
 from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
 from Tools.Stats.PySide6.stats_group_contrasts import normalize_group_contrasts_table
 from Tools.Stats.PySide6.stats_missingness import compute_complete_case_subjects, compute_missingness
+from Tools.Stats.PySide6.stats_multigroup_ids import normalize_multigroup_pid
 from Tools.Stats.PySide6.shared_harmonics import (
     DEFAULT_Z_THRESH,
     compute_shared_harmonics,
@@ -373,11 +374,71 @@ def _normalize_between_group_merge_keys(df: pd.DataFrame) -> pd.DataFrame:
     """Handle the normalize between group merge keys step for the Stats PySide6 workflow."""
     normalized = df.copy()
     if "subject" in normalized.columns:
-        normalized["subject"] = normalized["subject"].map(lambda v: canonical_subject_id(str(v)) if pd.notna(v) else v)
+        normalized["subject"] = normalized["subject"].map(
+            lambda v: _normalize_between_group_subject(v) if pd.notna(v) else v
+        )
     if "condition" in normalized.columns:
         normalized["condition"] = normalized["condition"].map(lambda v: str(v).strip().casefold() if pd.notna(v) else v)
     if "roi" in normalized.columns:
         normalized["roi"] = normalized["roi"].map(lambda v: str(v).strip() if pd.notna(v) else v)
+    return normalized
+
+
+def _normalize_between_group_subject(value: object) -> str:
+    """Normalize between-group subject identifiers to canonical IDs when possible."""
+
+    text = str(value).strip()
+    normalized = normalize_multigroup_pid(text)
+    if normalized is not None:
+        return normalized.canonical_id
+
+    legacy = canonical_subject_id(text)
+    legacy_normalized = normalize_multigroup_pid(legacy)
+    if legacy_normalized is not None:
+        return legacy_normalized.canonical_id
+
+    return text
+
+
+def _normalize_between_group_subject_map(
+    subject_map: dict[str, str | None] | None,
+) -> dict[str, str | None]:
+    """Normalize subject-group mappings onto canonical between-group IDs."""
+
+    normalized: dict[str, str | None] = {}
+    if not isinstance(subject_map, dict):
+        return normalized
+
+    raw_ids_by_canonical: dict[str, set[str]] = {}
+    for raw_pid, group in subject_map.items():
+        canonical_pid = _normalize_between_group_subject(raw_pid)
+        if not canonical_pid:
+            continue
+
+        raw_ids_by_canonical.setdefault(canonical_pid, set()).add(str(raw_pid))
+        existing_group = normalized.get(canonical_pid)
+        if existing_group is None:
+            normalized[canonical_pid] = group
+            continue
+
+        incoming_group = group if isinstance(group, str) and group.strip() else None
+        existing_clean = existing_group if isinstance(existing_group, str) and existing_group.strip() else None
+        if existing_clean == incoming_group or incoming_group is None:
+            continue
+        if existing_clean is None:
+            normalized[canonical_pid] = group
+            continue
+
+        logger.warning(
+            "stats_multigroup_subject_group_collision",
+            extra={
+                "canonical_pid": canonical_pid,
+                "raw_ids": sorted(raw_ids_by_canonical.get(canonical_pid, set())),
+                "existing_group": existing_clean,
+                "incoming_group": incoming_group,
+            },
+        )
+
     return normalized
 
 
@@ -1276,6 +1337,7 @@ def run_lmm(
         f"[LMM DIAG] participants_after_qc={len(subjects)} excluded_by_qc="
         f"{len(getattr(qc_report, 'excluded_pids', set()) if qc_report else set())}"
     )
+    normalized_subject_group_map = _normalize_between_group_subject_map(subject_to_group or subject_groups or {})
     subjects, subject_data, subject_groups, manual_excluded = _apply_manual_exclusions(
         subjects=list(subjects) if subjects else [],
         subject_data=subject_data,
@@ -1284,10 +1346,11 @@ def run_lmm(
         message_cb=message_cb,
     )
     for pid in manual_excluded:
+        canonical_pid = _normalize_between_group_subject(pid)
         exclusion_rows.append(
             {
-                "subject": str(pid),
-                "group": str((subject_to_group or subject_groups or {}).get(pid) or ""),
+                "subject": canonical_pid,
+                "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
                 "reason": "manual",
             }
         )
@@ -1340,7 +1403,7 @@ def run_lmm(
             dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
     if "group" not in df_long.columns:
-        map_groups = subject_to_group or subject_groups or {}
+        map_groups = normalized_subject_group_map
         df_long["group"] = df_long["subject"].astype(str).map(map_groups)
 
     dv_col = "value" if "value" in df_long.columns else "dv_value"
@@ -1396,10 +1459,17 @@ def run_lmm(
 
     if include_group:
         _record_stage("before_any_filters")
-        selected_subjects = [str(pid) for pid in (subjects or [])]
+        selected_subjects: list[str] = []
+        seen_subjects: set[str] = set()
+        for pid in subjects or []:
+            canonical_pid = _normalize_between_group_subject(pid)
+            if not canonical_pid or canonical_pid in seen_subjects:
+                continue
+            selected_subjects.append(canonical_pid)
+            seen_subjects.add(canonical_pid)
         selected_conditions = [str(cond) for cond in (conditions or [])]
         selected_rois = [str(roi_name) for roi_name in (rois or {}).keys()]
-        map_groups = subject_to_group or subject_groups or {}
+        map_groups = normalized_subject_group_map
         model_df = pd.MultiIndex.from_product(
             [selected_subjects, selected_conditions, selected_rois],
             names=["subject", "condition", "roi"],
@@ -1513,9 +1583,9 @@ def run_lmm(
 
     if include_group:
         before_merge = len(df_long)
-        keep_subjects = {canonical_subject_id(str(pid)) for pid in (subjects or [])}
+        keep_subjects = {_normalize_between_group_subject(pid) for pid in (subjects or [])}
         df_long = df_long.loc[
-            df_long["subject"].astype(str).map(canonical_subject_id).isin(keep_subjects)
+            df_long["subject"].astype(str).map(_normalize_between_group_subject).isin(keep_subjects)
         ].copy()
         removed_merge = before_merge - len(df_long)
         if removed_merge:
@@ -1533,10 +1603,11 @@ def run_lmm(
 
     if isinstance(qc_report, QcExclusionReport):
         for pid in sorted(qc_report.excluded_pids):
+            canonical_pid = _normalize_between_group_subject(pid)
             exclusion_rows.append(
                 {
-                    "subject": str(pid),
-                    "group": str((subject_to_group or subject_groups or {}).get(pid) or ""),
+                    "subject": canonical_pid,
+                    "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
                     "reason": "QC",
                 }
             )
@@ -1545,10 +1616,11 @@ def run_lmm(
     required_pids = {violation.participant_id for violation in required_exclusions}
     if required_pids:
         for pid in sorted(required_pids):
+            canonical_pid = _normalize_between_group_subject(pid)
             exclusion_rows.append(
                 {
-                    "subject": str(pid),
-                    "group": str((subject_to_group or subject_groups or {}).get(pid) or ""),
+                    "subject": canonical_pid,
+                    "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
                     "reason": "outlier_or_nonfinite",
                 }
             )
@@ -1620,7 +1692,7 @@ def run_lmm(
     missingness_payload = None
     if include_group:
         required = list(required_conditions) if required_conditions else list(conditions)
-        group_map = subject_to_group or subject_groups or {}
+        group_map = normalized_subject_group_map
         mixed_missing_rows = compute_missingness(
             dv_table=df_long,
             required_conditions=required,

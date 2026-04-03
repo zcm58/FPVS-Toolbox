@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 import pandas as pd
-import sys
 from PySide6.QtCore import QThreadPool
 
 from . import stats_cross_phase, stats_workers
@@ -170,7 +169,6 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
 BETWEEN_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.BETWEEN_GROUP_MIXED_MODEL,
     StepId.GROUP_CONTRASTS,
-    StepId.HARMONIC_CHECK,
 )
 """Default ordered steps for the Between pipeline."""
 
@@ -263,9 +261,34 @@ class StatsController:
         run_summary: bool = True,
     ) -> None:
         """Handle the run between group analysis step for the Stats PySide6 workflow."""
+        requested_steps = tuple(step_ids or BETWEEN_PIPELINE_STEPS)
+        unsupported_steps = [step_id for step_id in requested_steps if step_id not in BETWEEN_PIPELINE_STEPS]
+        if unsupported_steps:
+            blocked_step = unsupported_steps[0]
+            if blocked_step is StepId.BETWEEN_GROUP_ANOVA:
+                message = "Between-group ANOVA is paused and unavailable in the multigroup workflow."
+            elif blocked_step is StepId.HARMONIC_CHECK:
+                message = (
+                    "Harmonic Check is not part of the supported multigroup workflow in this phase."
+                )
+            else:
+                message = f"Step '{blocked_step.name}' is not supported in the multigroup workflow."
+            blocked_message = f"Blocked: {message}"
+            self._view.append_log(
+                self._section_label(PipelineId.BETWEEN),
+                blocked_message,
+                level="warning",
+            )
+            self._finalize_pipeline(
+                PipelineId.BETWEEN,
+                success=False,
+                error_message=blocked_message,
+                exports_ran=False,
+            )
+            return
         self._start_pipeline(
             PipelineId.BETWEEN,
-            step_ids or BETWEEN_PIPELINE_STEPS,
+            requested_steps,
             run_exports=run_exports,
             run_summary=run_summary,
         )
@@ -673,48 +696,19 @@ class StatsController:
         """Handle the start between process pipeline step for the Stats PySide6 workflow."""
         pipeline_id = PipelineId.BETWEEN
         message = (
-            "Between-group process mode is unavailable while between-group ANOVA is paused."
+            "Between-group process mode is unavailable in the supported multigroup workflow."
         )
+        blocked_message = f"Blocked: {message}"
         self._view.append_log(
             self._section_label(pipeline_id),
-            message,
+            blocked_message,
             level="warning",
         )
         self._finalize_pipeline(
             pipeline_id,
             success=False,
-            error_message=message,
+            error_message=blocked_message,
             exports_ran=False,
-        )
-        return
-        state = self._states[pipeline_id]
-        state.process_mode = True
-
-        job_spec_path, summary_path = self._build_between_job_spec(state)
-        state.process_job_path = job_spec_path
-        state.process_summary_path = summary_path
-
-        self._view.append_log(
-            self._section_label(pipeline_id),
-            "Launching between-group pipeline in isolated process…",
-        )
-
-        process_step = PipelineStep(
-            StepId.BETWEEN_GROUP_ANOVA,
-            "Between-Group Pipeline",
-            stats_workers.run_between_group_process_task,
-            {"job_spec_path": str(job_spec_path), "python_executable": sys.executable},
-            handler=lambda payload: None,
-        )
-
-        self._view.start_step_worker(
-            pipeline_id,
-            process_step,
-            finished_cb=self._on_between_process_finished,
-            error_cb=self._on_between_process_error,
-            message_cb=lambda msg, pid=pipeline_id: self._on_between_process_message(
-                pid, msg
-            ),
         )
 
     def _build_between_job_spec(self, state: SectionRunState) -> tuple[Path, Path]:

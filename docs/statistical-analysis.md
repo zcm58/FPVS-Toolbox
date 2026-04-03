@@ -110,6 +110,11 @@ For more details, see: **[Mixed model details](statistics/mixed-model.md)**.
 
 Multi-group mode compares two or more groups (e.g., clinical vs control).
 
+Supported multi-group workflow in the active PySide6 app phase:
+
+- Between-group mixed model (LMM)
+- Group contrasts
+
 ### Between-group ANOVA (mixed ANOVA)
 
 - **Status:** Paused for the active multi-group workflow in the current
@@ -118,10 +123,8 @@ Multi-group mode compares two or more groups (e.g., clinical vs control).
   only. The separate **single-group** workflow still retains its
   existing RM-ANOVA support.
 
-- **Factors:** Group (between-subjects) × Condition (within-subjects).
-- **DV:** Summed BCA, typically **collapsed across ROI** for this test.
-- **Implementation:** Pingouin `mixed_anova` is required; the fallback
-  does not support a between-group factor.
+- **Current behavior:** Not part of the supported multi-group run/export
+  path in this phase.
 
 ### Between-group mixed model
 
@@ -151,7 +154,7 @@ The Stats tool can generate **QC and DV flags** and separate them from
 - Results are written to the project’s **“3 - Statistical Analysis
   Results”** folder.
 - Common exports include:
-  - RM-ANOVA tables.
+  - RM-ANOVA tables (single-group workflow).
   - Mixed-model fixed-effects tables.
   - Post-hoc tables with raw and FDR-adjusted p-values plus effect sizes.
   - Rossion DV definition export (when using Rossion selection).

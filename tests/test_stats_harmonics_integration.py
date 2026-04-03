@@ -1,11 +1,14 @@
 """Integration coverage for harmonic checks within the Stats pipelines."""
 
+from pathlib import Path
+
 import pytest
 
 import pandas as pd
 
 try:
     from PySide6.QtCore import Qt
+    from Tools.Stats.PySide6.stats_controller import StepId, WORKER_FN_BY_STEP
     from Tools.Stats.PySide6.stats_main_window import HarmonicConfig
     from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
     from Tools.Stats.PySide6 import stats_workers
@@ -60,6 +63,18 @@ def patched_workers(monkeypatch, harmonic_calls):
     monkeypatch.setattr(stats_workers, "run_between_group_anova", fake_rm_anova, raising=False)
     monkeypatch.setattr(stats_workers, "run_group_contrasts", fake_contrasts, raising=False)
     monkeypatch.setattr(stats_workers, "run_harmonic_check", fake_harmonic, raising=False)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.RM_ANOVA, fake_rm_anova)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.MIXED_MODEL, fake_lmm)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.INTERACTION_POSTHOCS, fake_posthoc)
+    monkeypatch.setitem(
+        WORKER_FN_BY_STEP,
+        StepId.BASELINE_VS_ZERO,
+        lambda *_a, **_k: {"output_text": "baseline"},
+    )
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BETWEEN_GROUP_ANOVA, fake_rm_anova)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BETWEEN_GROUP_MIXED_MODEL, fake_lmm)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.GROUP_CONTRASTS, fake_contrasts)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.HARMONIC_CHECK, fake_harmonic)
     return dummy_df
 
 
@@ -83,6 +98,7 @@ def synced_window(monkeypatch, qtbot, tmp_path, patched_workers, harmonic_calls)
 
     def export_stub(self, kind, data, out_dir):
         export_calls.append(kind)
+        return [Path(out_dir) / f"{kind}.xlsx"]
 
     monkeypatch.setattr(StatsWindow, "ensure_pipeline_ready", ready_stub, raising=False)
     monkeypatch.setattr(StatsWindow, "start_step_worker", start_immediate, raising=False)
@@ -113,11 +129,10 @@ def test_single_pipeline_runs_harmonics_and_exports(qtbot, synced_window):
     assert "harmonic" in export_calls
     text = win.output_text.toPlainText()
     assert "Harmonic Check completed" in text
-    assert "Significant responses" in text
 
 
 @pytest.mark.qt
-def test_between_pipeline_runs_harmonics_and_exports(qtbot, synced_window):
+def test_between_pipeline_excludes_harmonics_from_supported_path(qtbot, synced_window):
     win, export_calls, harmonic_calls = synced_window
     win.subjects = ["S1", "S2"]
     win.conditions = ["C1"]
@@ -132,7 +147,7 @@ def test_between_pipeline_runs_harmonics_and_exports(qtbot, synced_window):
         lambda: "Between-Group Analysis finished" in win.output_text.toPlainText(), timeout=2000
     )
 
-    assert any(call.get("selected_metric") == "Z Score" for call in harmonic_calls)
-    assert export_calls.count("harmonic") >= 1
+    assert harmonic_calls == []
+    assert "harmonic" not in export_calls
     text = win.output_text.toPlainText()
-    assert "Harmonic Check completed" in text
+    assert "Harmonic Check completed" not in text

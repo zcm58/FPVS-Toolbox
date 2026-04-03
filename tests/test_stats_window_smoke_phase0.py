@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox
 
 from Tools.Stats.PySide6 import stats_ui_pyside6 as stats_mod
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
@@ -128,3 +129,27 @@ def test_between_group_advanced_actions_hide_anova(qtbot, tmp_path, monkeypatch,
     assert "Run Between-Group Mixed Model" in labels
     assert "Run Group Contrasts" in labels
     assert all("ANOVA" not in label for label in labels)
+
+
+@pytest.mark.qt
+def test_between_anova_actions_fail_closed_and_info_copy_is_explicit(qtbot, tmp_path, monkeypatch, app):
+    win = StatsWindow(project_dir=str(tmp_path))
+    qtbot.addWidget(win)
+    _prepare_window(win, monkeypatch)
+    infos: list[str] = []
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, _title, message, *_rest: infos.append(message),
+        raising=False,
+    )
+
+    win.on_run_between_anova()
+    win.on_export_between_anova()
+    win.on_show_analysis_info()
+
+    assert any("between-group anova is paused" in msg.lower() for msg in infos)
+    assert any("exports are unavailable" in msg.lower() for msg in infos)
+    assert any("between-group anova (paused)" in msg.lower() for msg in infos)
+    assert any("single-group analyses" in msg.lower() and "rm-anova" in msg.lower() for msg in infos)

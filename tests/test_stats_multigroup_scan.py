@@ -40,7 +40,7 @@ def test_pid_extraction_canonicalization() -> None:
     assert any(issue.severity == "warning" for issue in issues)
 
 
-def test_manifest_collision_detection(tmp_path: Path) -> None:
+def test_manifest_representational_duplicate_warns_but_does_not_block(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     project_root.mkdir()
     excel_root = project_root / "1 - Excel Data Files"
@@ -57,7 +57,30 @@ def test_manifest_collision_detection(tmp_path: Path) -> None:
     )
 
     result = scan_multigroup_readiness(project_root, excel_root)
-    assert any(issue.severity == "blocking" for issue in result.issues)
+    assert not any(issue.severity == "blocking" for issue in result.issues)
+    assert any("P07 -> P7" in issue.message for issue in result.issues if issue.severity == "warning")
+
+
+def test_manifest_conflicting_normalized_group_assignment_blocks(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    excel_root = project_root / "1 - Excel Data Files"
+    excel_root.mkdir()
+
+    _write_manifest(
+        project_root,
+        participants={
+            "P7": {"group": "Control"},
+            "P07": {"group": "Treatment"},
+        },
+        groups={"Control": {}, "Treatment": {}},
+    )
+
+    result = scan_multigroup_readiness(project_root, excel_root)
+    blocking = [issue for issue in result.issues if issue.severity == "blocking"]
+    assert blocking
+    assert any("same canonical PID" in issue.message for issue in blocking)
+    assert any(issue.context.get("pid") == "P7" for issue in blocking)
 
 
 def test_readiness_with_unassigned_subjects(tmp_path: Path) -> None:
@@ -104,3 +127,4 @@ def test_folder_scan_maps_filenames(tmp_path: Path) -> None:
 
     result = scan_multigroup_readiness(project_root, excel_root)
     assert result.discovered_subjects == ["P7", "P10"]
+    assert any("P07 -> P7" in issue.message for issue in result.issues if issue.severity == "warning")

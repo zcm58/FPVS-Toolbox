@@ -44,6 +44,24 @@ def test_missingness_rules_complete_case_and_mixed() -> None:
     assert excluded[0]["MissingConditions"] == "B"
 
 
+def test_missingness_normalizes_subject_ids_to_canonical_form() -> None:
+    dv_table = pd.DataFrame(
+        [
+            {"subject": "P01", "group": "G1", "condition": "A", "roi": "ROI1", "value": 1.0},
+            {"subject": "P1", "group": "G1", "condition": "B", "roi": "ROI1", "value": 2.0},
+        ]
+    )
+
+    mixed_missing = compute_missingness(dv_table, ["A", "B", "C"], {"P01": "G1"})
+    assert [row["Subject"] for row in mixed_missing] == ["P1"]
+    assert mixed_missing[0]["Group"] == "G1"
+
+    included, excluded = compute_complete_case_subjects(dv_table, ["A", "B", "C"], {"P1": "G1"})
+    assert included == []
+    assert len(excluded) == 1
+    assert excluded[0]["Subject"] == "P1"
+
+
 def test_missingness_export_tables_schema_and_workbook(tmp_path: Path) -> None:
     mixed_missing = [
         {
@@ -59,7 +77,7 @@ def test_missingness_export_tables_schema_and_workbook(tmp_path: Path) -> None:
             "Subject": "P2",
             "Group": "G1",
             "MissingConditions": "B",
-            "Reason": "Incomplete required condition cells for between-group ANOVA complete-case rule.",
+            "Reason": "Incomplete required condition cells for the multigroup complete-case rule.",
         }
     ]
     summary_rows = [{"Metric": "N groups", "Value": 2}]

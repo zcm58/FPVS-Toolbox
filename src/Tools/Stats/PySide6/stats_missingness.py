@@ -7,6 +7,10 @@ from typing import Any
 import pandas as pd
 
 from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
+from Tools.Stats.PySide6.stats_multigroup_ids import (
+    canonical_multigroup_pid_sort_key,
+    normalize_multigroup_pid,
+)
 
 
 def _normalize_group(value: Any) -> str:
@@ -14,6 +18,18 @@ def _normalize_group(value: Any) -> str:
     if value is None:
         return ""
     text = str(value).strip()
+    return text
+
+
+def _normalize_subject(value: Any) -> str:
+    """Normalize multigroup subject IDs to canonical ``P<n>`` form when possible."""
+
+    if value is None:
+        return ""
+    text = str(value).strip()
+    normalized = normalize_multigroup_pid(text)
+    if normalized is not None:
+        return normalized.canonical_id
     return text
 
 
@@ -31,16 +47,29 @@ def compute_missingness(
         return []
 
     working = dv_table.copy()
+    if "subject" in working.columns:
+        working["subject"] = working["subject"].map(_normalize_subject)
     if "value" in working.columns:
         working = working.loc[working["value"].notna()].copy()
 
     missing_rows: list[dict[str, str]] = []
-    subjects = sorted({str(subject) for subject in working.get("subject", pd.Series(dtype=str)).dropna().tolist()})
+    normalized_groups = {
+        _normalize_subject(subject): group
+        for subject, group in (subject_to_group or {}).items()
+    }
+    subjects = sorted(
+        {
+            _normalize_subject(subject)
+            for subject in working.get("subject", pd.Series(dtype=str)).dropna().tolist()
+            if _normalize_subject(subject)
+        },
+        key=canonical_multigroup_pid_sort_key,
+    )
 
     for subject in subjects:
         subject_rows = working.loc[working["subject"].astype(str) == subject]
         present = {str(cond) for cond in subject_rows.get("condition", pd.Series(dtype=str)).dropna().tolist()}
-        group_name = _normalize_group(subject_to_group.get(subject))
+        group_name = _normalize_group(normalized_groups.get(subject))
         for condition in required:
             if condition in present:
                 continue
@@ -72,18 +101,29 @@ def compute_complete_case_subjects(
     for row in missing_rows:
         missing_map.setdefault(row["Subject"], []).append(row["Condition"])
 
-    subjects = sorted({str(subject) for subject in dv_table.get("subject", pd.Series(dtype=str)).dropna().tolist()})
+    normalized_groups = {
+        _normalize_subject(pid): group
+        for pid, group in (subject_to_group or {}).items()
+    }
+    subjects = sorted(
+        {
+            _normalize_subject(subject)
+            for subject in dv_table.get("subject", pd.Series(dtype=str)).dropna().tolist()
+            if _normalize_subject(subject)
+        },
+        key=canonical_multigroup_pid_sort_key,
+    )
     included = [subject for subject in subjects if subject not in missing_map]
 
     excluded_rows: list[dict[str, str]] = []
-    for subject in sorted(missing_map):
+    for subject in sorted(missing_map, key=canonical_multigroup_pid_sort_key):
         missing_conditions = sorted(set(missing_map[subject]))
         excluded_rows.append(
             {
                 "Subject": subject,
-                "Group": _normalize_group(subject_to_group.get(subject)),
+                "Group": _normalize_group(normalized_groups.get(subject)),
                 "MissingConditions": ", ".join(missing_conditions),
-                "Reason": "Incomplete required condition cells for between-group ANOVA complete-case rule.",
+                "Reason": "Incomplete required condition cells for the multigroup complete-case rule.",
             }
         )
 

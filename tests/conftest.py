@@ -8,6 +8,8 @@ import importlib
 import importlib.util
 from importlib.machinery import ModuleSpec
 
+import pytest
+
 os.environ.setdefault("FPVS_TEST_MODE", "1")
 
 
@@ -68,3 +70,42 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+
+def _is_windows_tmpdir_cleanup_permission_error(exc: BaseException) -> bool:
+    """Return True when pytest tmpdir cleanup hits known WinError 5 ACL issues."""
+    if not isinstance(exc, PermissionError):
+        return False
+    if getattr(exc, "winerror", None) != 5:
+        return False
+    tb = exc.__traceback__
+    while tb is not None:
+        filename = (tb.tb_frame.f_code.co_filename or "").replace("\\", "/")
+        func_name = tb.tb_frame.f_code.co_name
+        if filename.endswith("/_pytest/pathlib.py") and func_name == "cleanup_dead_symlinks":
+            return True
+        tb = tb.tb_next
+    return False
+
+
+@pytest.hookimpl(hookwrapper=True, trylast=True)
+def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
+    """
+    Keep Windows runs actionable when pytest tmpdir ACL cleanup fails externally.
+
+    This does not affect test execution itself; it only suppresses a known
+    session-finalization crash path caused by WinError 5 in cleanup_dead_symlinks.
+    """
+    outcome = yield
+    excinfo = getattr(outcome, "excinfo", None)
+    if not excinfo:
+        return
+    exc = excinfo[1]
+    if sys.platform.startswith("win") and _is_windows_tmpdir_cleanup_permission_error(exc):
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            reporter.write_sep(
+                "!",
+                "Ignored WinError 5 during pytest tmpdir cleanup (external ACL issue).",
+            )
+        outcome.force_result(None)

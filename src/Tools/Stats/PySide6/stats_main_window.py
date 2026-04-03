@@ -153,6 +153,12 @@ from Tools.Stats.PySide6.stats_multigroup_scan import (
     ScanIssue,
     run_multigroup_scan_worker,
 )
+from Tools.Stats.PySide6.stats_multigroup_ids import (
+    MultigroupRuntimeSnapshot,
+    build_multigroup_runtime_snapshot,
+    normalize_multigroup_manifest_groups,
+    normalize_multigroup_pid,
+)
 from Tools.Stats.PySide6.widgets.elided_label import ElidedPathLabel
 
 logger = logging.getLogger(__name__)
@@ -276,6 +282,7 @@ class StatsWindow(QMainWindow):
         self._qc_threshold_maxabs: float = QC_DEFAULT_CRITICAL_THRESHOLD
         self._last_export_path: str | None = None
         self._multigroup_scan_result: MultiGroupScanResult | None = None
+        self._between_subject_snapshot: MultigroupRuntimeSnapshot | None = None
         self._shared_harmonics_payload: dict[str, object] = {}
         self._fixed_harmonic_dv_payload: dict[str, object] = {}
         self._between_missingness_payload: dict[str, object] = {}
@@ -942,15 +949,19 @@ class StatsWindow(QMainWindow):
             payload.update(extra)
         logger.info(format_section_header("stats_pipeline_event"), extra=payload)
 
-    def _warn_unknown_excel_files(self, subject_data: Dict[str, Dict[str, str]], participants_map: dict[str, str]) -> None:
+    def _warn_unknown_excel_files(self, subject_data: Dict[str, Dict[str, str]], manifest: dict | None) -> None:
         """Handle the warn unknown excel files step for the Stats PySide6 workflow."""
         if not subject_data:
+            return
+        participants_map, _examples, manifest_issues = normalize_multigroup_manifest_groups(manifest)
+        if manifest_issues or not participants_map:
             return
         unknown_files: set[str] = set()
         for pid, cond_map in subject_data.items():
             if not isinstance(cond_map, dict):
                 continue
-            if pid.upper() in participants_map:
+            normalized_pid = normalize_multigroup_pid(pid)
+            if normalized_pid is not None and normalized_pid.canonical_id in participants_map:
                 continue
             for filepath in cond_map.values():
                 try:
@@ -969,6 +980,58 @@ class StatsWindow(QMainWindow):
                 "Please remove these files from the folder or update the project metadata."
             ),
         )
+
+    def _between_subjects(self) -> list[str]:
+        """Return canonical multigroup subjects for between-group actions only."""
+
+        snapshot = self._between_subject_snapshot
+        if self._multi_group_manifest and snapshot is not None:
+            return list(snapshot.subjects)
+        return list(self.subjects)
+
+    def _between_subject_data(self) -> Dict[str, Dict[str, str]]:
+        """Return canonical multigroup subject data for between-group actions only."""
+
+        snapshot = self._between_subject_snapshot
+        if self._multi_group_manifest and snapshot is not None:
+            return dict(snapshot.subject_data)
+        return dict(self.subject_data)
+
+    def _between_subject_groups(self) -> dict[str, str | None]:
+        """Return canonical multigroup group assignments for between-group actions only."""
+
+        snapshot = self._between_subject_snapshot
+        if self._multi_group_manifest and snapshot is not None:
+            return dict(snapshot.subject_groups)
+        return dict(self.subject_groups)
+
+    def _between_manual_excluded_pids(self) -> list[str]:
+        """Normalize manual exclusions to canonical multigroup IDs when needed."""
+
+        if not self._multi_group_manifest:
+            return sorted(self.manual_excluded_pids)
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw_pid in sorted(self.manual_excluded_pids):
+            pid_match = normalize_multigroup_pid(raw_pid)
+            canonical_pid = pid_match.canonical_id if pid_match is not None else str(raw_pid)
+            if canonical_pid in seen:
+                continue
+            normalized.append(canonical_pid)
+            seen.add(canonical_pid)
+        return normalized
+
+    def _log_between_snapshot_messages(self) -> None:
+        """Surface multigroup normalization messages without blocking the UI."""
+
+        snapshot = self._between_subject_snapshot
+        if snapshot is None:
+            return
+        for message in snapshot.warnings:
+            self.append_log("Between", message, level="warning")
+        for message in snapshot.errors:
+            self.append_log("Between", message, level="error")
 
     def _start_multigroup_scan(self, excel_root: Path | None = None) -> None:
         """Handle the start multigroup scan step for the Stats PySide6 workflow."""
@@ -1121,7 +1184,9 @@ class StatsWindow(QMainWindow):
 
     def _on_compute_shared_harmonics_clicked(self) -> None:
         """Handle the on compute shared harmonics clicked step for the Stats PySide6 workflow."""
-        if not self.subject_data or not self.subjects:
+        between_subject_data = self._between_subject_data()
+        between_subjects = self._between_subjects()
+        if not between_subject_data or not between_subjects:
             self._set_status("Load project data before computing shared harmonics.")
             return
         selected_conditions = self._get_selected_conditions()
@@ -1146,9 +1211,9 @@ class StatsWindow(QMainWindow):
 
         worker = StatsWorker(
             stats_worker_funcs.run_shared_harmonics_worker,
-            subjects=self.subjects,
+            subjects=between_subjects,
             conditions=selected_conditions,
-            subject_data=self.subject_data,
+            subject_data=between_subject_data,
             base_freq=self._current_base_freq,
             rois=self.rois,
             exclude_harmonic1=self._dv_exclude_harmonic1,
@@ -1226,9 +1291,9 @@ class StatsWindow(QMainWindow):
         self.compute_fixed_harmonic_dv_btn.setEnabled(False)
         worker = StatsWorker(
             stats_worker_funcs.run_fixed_harmonic_dv_worker,
-            subjects=self.subjects,
+            subjects=self._between_subjects(),
             conditions=selected_conditions,
-            subject_data=self.subject_data,
+            subject_data=self._between_subject_data(),
             rois=self.rois,
             harmonics_by_roi=harmonics_by_roi,
             _op="fixed_harmonic_dv",
@@ -1281,10 +1346,17 @@ class StatsWindow(QMainWindow):
 
     def _known_group_labels(self) -> list[str]:
         """Handle the known group labels step for the Stats PySide6 workflow."""
-        return sorted({g for g in (self.subject_groups or {}).values() if g})
+        return sorted({g for g in self._between_subject_groups().values() if g})
 
     def _ensure_between_ready(self) -> bool:
         """Handle the ensure between ready step for the Stats PySide6 workflow."""
+        snapshot = self._between_subject_snapshot if self._multi_group_manifest else None
+        if snapshot is not None and snapshot.errors:
+            message = f"Between-group analysis is blocked: {snapshot.errors[0]}"
+            self._set_status(message)
+            self.append_log("Between", message, level="warning")
+            return False
+
         groups = self._known_group_labels()
         if len(groups) < 2:
             if self._multi_group_manifest and not groups:
@@ -1754,6 +1826,7 @@ class StatsWindow(QMainWindow):
         selected_rois = sorted((self.rois or {}).keys())
         report = self._pipeline_run_reports.get(pipeline_id)
         included = report.final_modeled_pids if isinstance(report, StatsRunReport) else []
+        total_participants = len(self.subjects) if pipeline_id is PipelineId.SINGLE else len(self._between_subjects())
         context = ReportingSummaryContext(
             project_name=self.project_title,
             project_root=self._project_path,
@@ -1761,7 +1834,7 @@ class StatsWindow(QMainWindow):
             generated_local=datetime.now().astimezone(),
             elapsed_ms=int(elapsed_ms),
             timezone_label=str(datetime.now().astimezone().tzinfo or "Local"),
-            total_participants=len(self.subjects),
+            total_participants=total_participants,
             included_participants=list(included),
             excluded_reasons=self._collect_excluded_reasons(pipeline_id),
             selected_conditions=list(selected_conditions),
@@ -2429,46 +2502,28 @@ class StatsWindow(QMainWindow):
 
                 return kwargs, handler
         if pipeline_id is PipelineId.BETWEEN:
+            between_subjects = self._between_subjects()
+            between_subject_data = self._between_subject_data()
+            between_subject_groups = self._between_subject_groups()
+            between_manual_excluded = self._between_manual_excluded_pids()
             fixed_dv_table = self._fixed_harmonic_dv_payload.get("dv_table")
             selected_conditions = self._get_selected_conditions()
             if step_id is StepId.BETWEEN_GROUP_ANOVA:
-                kwargs = dict(
-                    subjects=self.subjects,
-                    conditions=selected_conditions,
-                    conditions_all=self.conditions,
-                    subject_data=self.subject_data,
-                    base_freq=self._current_base_freq,
-                    rois=self.rois,
-                    rois_all=self.rois,
-                    subject_groups=self.subject_groups,
-                    dv_policy=self._get_between_group_dv_policy_payload(),
-                    dv_variants=dv_variants_payload,
-                    outlier_exclusion_enabled=outlier_payload.get("enabled", True),
-                    outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
-                    qc_config=qc_payload,
-                    qc_state=qc_state,
-                    manual_excluded_pids=sorted(self.manual_excluded_pids),
-                    fixed_harmonic_dv_table=fixed_dv_table,
-                    required_conditions=selected_conditions,
-                    subject_to_group=self.subject_groups,
+                raise ValueError(
+                    "Between-group ANOVA is paused and unavailable in the multigroup workflow."
                 )
-                def handler(payload):
-                    """Handle the handler step for the Stats PySide6 workflow."""
-                    self._apply_between_anova_results(payload, update_text=False)
-
-                return kwargs, handler
             if step_id is StepId.BETWEEN_GROUP_MIXED_MODEL:
                 results_dir = self._ensure_results_dir()
                 kwargs = dict(
-                    subjects=self.subjects,
+                    subjects=between_subjects,
                     conditions=self._get_selected_conditions(),
                     conditions_all=self.conditions,
-                    subject_data=self.subject_data,
+                    subject_data=between_subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
                     rois=self.rois,
                     rois_all=self.rois,
-                    subject_groups=self.subject_groups,
+                    subject_groups=between_subject_groups,
                     include_group=True,
                     dv_policy=self._get_between_group_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
@@ -2476,10 +2531,10 @@ class StatsWindow(QMainWindow):
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
-                    manual_excluded_pids=sorted(self.manual_excluded_pids),
+                    manual_excluded_pids=between_manual_excluded,
                     fixed_harmonic_dv_table=fixed_dv_table,
                     required_conditions=selected_conditions,
-                    subject_to_group=self.subject_groups,
+                    subject_to_group=between_subject_groups,
                     results_dir=results_dir,
                 )
                 def handler(payload):
@@ -2489,22 +2544,22 @@ class StatsWindow(QMainWindow):
                 return kwargs, handler
             if step_id is StepId.GROUP_CONTRASTS:
                 kwargs = dict(
-                    subjects=self.subjects,
+                    subjects=between_subjects,
                     conditions=self._get_selected_conditions(),
                     conditions_all=self.conditions,
-                    subject_data=self.subject_data,
+                    subject_data=between_subject_data,
                     base_freq=self._current_base_freq,
                     alpha=self._current_alpha,
                     rois=self.rois,
                     rois_all=self.rois,
-                    subject_groups=self.subject_groups,
+                    subject_groups=between_subject_groups,
                     dv_policy=self._get_between_group_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
                     qc_state=qc_state,
-                    manual_excluded_pids=sorted(self.manual_excluded_pids),
+                    manual_excluded_pids=between_manual_excluded,
                 )
                 def handler(payload):
                     """Handle the handler step for the Stats PySide6 workflow."""
@@ -2512,13 +2567,9 @@ class StatsWindow(QMainWindow):
 
                 return kwargs, handler
             if step_id is StepId.HARMONIC_CHECK:
-                kwargs = self._build_harmonic_kwargs()
-
-                def handler(payload, *, pid=pipeline_id):
-                    """Handle the handler step for the Stats PySide6 workflow."""
-                    self._apply_harmonic_results(payload, pipeline_id=pid, update_text=True)
-
-                return kwargs, handler
+                raise ValueError(
+                    "Harmonic Check is not part of the supported multigroup workflow in this phase."
+                )
         raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
 
     def _prompt_view_results(self, section: str, stats_folder: Path) -> None:
@@ -2927,7 +2978,6 @@ class StatsWindow(QMainWindow):
         exports = [
             ("lmm_between", self.between_mixed_model_results_data, "Between-Group Mixed Model"),
             ("group_contrasts", self.group_contrasts_results_data, "Group Contrasts"),
-            ("harmonic", self._harmonic_results.get(PipelineId.BETWEEN), "Harmonic Check"),
         ]
         out_dir = self._ensure_results_dir()
 
@@ -3030,7 +3080,7 @@ class StatsWindow(QMainWindow):
         export_path = export_qc_context_workbook(
             save_path=save_path,
             dv_table=dv_table,
-            subject_to_group=self.subject_groups,
+            subject_to_group=self._between_subject_groups(),
             missing_harmonics_rows=fixed_payload.get("missing_harmonics", []),
             flagged_pid_map=flagged_map,
             log_func=self._set_status,
@@ -4028,50 +4078,41 @@ class StatsWindow(QMainWindow):
         This is read-only and does not modify any data or settings.
         """
         text = (
-            "FPVS Toolbox – Statistical Pipeline Overview\n\n"
+            "FPVS Toolbox - Statistical Pipeline Overview\n\n"
             "Data analyzed\n"
-            "• All analyses use the summed baseline-corrected oddball amplitude "
-            "(Summed BCA) per subject × condition × ROI.\n\n"
+            "- All analyses use the summed baseline-corrected oddball amplitude "
+            "(Summed BCA) per subject x condition x ROI.\n\n"
             "Single-group analyses\n"
-            "• RM-ANOVA: Repeated-measures ANOVA with within-subject factors "
+            "- RM-ANOVA: Repeated-measures ANOVA with within-subject factors "
             "condition and ROI. When available, Pingouin's rm_anova is used and "
-            "both uncorrected and Greenhouse–Geisser/Huynh–Feldt corrected p-values "
+            "both uncorrected and Greenhouse-Geisser/Huynh-Feldt corrected p-values "
             "are reported; otherwise statsmodels' AnovaRM is used (uncorrected p-values).\n"
-            "• Post-hoc tests: Paired t-tests between conditions, run separately within "
+            "- Post-hoc tests: Paired t-tests between conditions, run separately within "
             "each ROI. P-values are corrected for multiple comparisons using the "
-            "Benjamini–Hochberg false discovery rate (FDR) procedure; exports include "
+            "Benjamini-Hochberg false discovery rate (FDR) procedure; exports include "
             "raw p and FDR-adjusted p (p_fdr_bh) plus effect sizes.\n"
-            "• Mixed model: Linear mixed-effects model with a random intercept for each "
+            "- Mixed model: Linear mixed-effects model with a random intercept for each "
             "subject and fixed effects for condition, ROI, and their interaction. No "
             "additional multiple-comparison correction is applied to these coefficients.\n\n"
             "Multi-group analyses\n"
-            "• Between-group ANOVA: Mixed ANOVA with group as a between-subject factor "
-            "and condition as a within-subject factor on Summed BCA (ROI collapsed). "
-            "Pingouin's mixed_anova is used when available.\n"
-            "• Between-group mixed model: Linear mixed-effects model on Summed BCA with "
+            "- Between-group ANOVA (paused): This analysis is unavailable in the supported "
+            "multigroup workflow in this phase.\n"
+            "- Between-group mixed model: Linear mixed-effects model on Summed BCA with "
             "fixed effects for group, condition, ROI, and their interactions, plus a "
             "random intercept per subject.\n"
-            "• Group contrasts: Pairwise group comparisons (Welch's t-tests) computed "
-            "separately for each condition × ROI. P-values are corrected for multiple "
-            "comparisons using Benjamini–Hochberg FDR, and effect sizes (Cohen's d) "
+            "- Group contrasts: Pairwise group comparisons (Welch's t-tests) computed "
+            "separately for each condition x ROI. P-values are corrected for multiple "
+            "comparisons using Benjamini-Hochberg FDR, and effect sizes (Cohen's d) "
             "are reported.\n\n"
             "General notes\n"
-            "• Unless otherwise noted, the default alpha level is 0.05.\n"
-            f"• Excel exports in the '{RESULTS_SUBFOLDER_NAME}' folder contain "
+            "- Unless otherwise noted, the default alpha level is 0.05.\n"
+            f"- Excel exports in the '{RESULTS_SUBFOLDER_NAME}' folder contain "
             "the full tables for all analyses, including raw and corrected p-values.\n"
-        )
-        text = text.replace(
-            (
-                "Between-group ANOVA: Mixed ANOVA with group as a between-subject factor "
-                "and condition as a within-subject factor on Summed BCA (ROI collapsed). "
-                "Pingouin's mixed_anova is used when available."
-            ),
-            "Between-group ANOVA (paused): This analysis is unavailable in the supported multi-group workflow in this phase.",
         )
 
         QMessageBox.information(
             self,
-            "FPVS Toolbox – Analysis Info",
+            "FPVS Toolbox - Analysis Info",
             text,
         )
 
@@ -4294,9 +4335,16 @@ class StatsWindow(QMainWindow):
                 scan_result = load_project_scan(folder)
                 self.subject_groups = {}
                 self._multi_group_manifest = scan_result.multi_group_manifest
+                self._between_subject_snapshot = None
 
                 if scan_result.multi_group_manifest:
-                    self._warn_unknown_excel_files(scan_result.subject_data, scan_result.participants_map)
+                    self._between_subject_snapshot = build_multigroup_runtime_snapshot(
+                        manifest=scan_result.manifest,
+                        subjects=scan_result.subjects,
+                        subject_data=scan_result.subject_data,
+                    )
+                    self._warn_unknown_excel_files(scan_result.subject_data, scan_result.manifest)
+                    self._log_between_snapshot_messages()
 
                 self.subjects = scan_result.subjects
                 self.conditions = scan_result.conditions

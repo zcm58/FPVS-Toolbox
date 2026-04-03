@@ -6,22 +6,22 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-import re
 from typing import Iterable
 
 from Tools.Stats.PySide6.stats_data_loader import IGNORED_FOLDERS
+from Tools.Stats.PySide6.stats_multigroup_ids import (
+    build_multigroup_pid_warning,
+    canonical_multigroup_pid_sort_key,
+    extract_multigroup_pid,
+    normalize_multigroup_manifest_groups,
+)
 
 logger = logging.getLogger("Tools.Stats")
-
-PID_REGEX = re.compile(r"(?i)p0*(\d+)(?!\d)")
 
 
 def _pid_sort_key(pid: str) -> tuple[int, str]:
     """Handle the pid sort key step for the Stats PySide6 workflow."""
-    match = PID_REGEX.search(pid or "")
-    if match:
-        return int(match.group(1)), str(pid)
-    return 10**9, str(pid)
+    return canonical_multigroup_pid_sort_key(pid)
 
 
 @dataclass(frozen=True)
@@ -51,19 +51,12 @@ def _build_issue(severity: str, message: str, context: dict[str, str] | None = N
 
 def extract_canonical_pid(text: str, *, context: dict[str, str] | None = None) -> tuple[str | None, list[ScanIssue]]:
     """Handle the extract canonical pid step for the Stats PySide6 workflow."""
-    matches = list(PID_REGEX.finditer(text or ""))
-    if not matches:
+    match, warnings = extract_multigroup_pid(text)
+    if match is None:
         return None, [_build_issue("blocking", "PID parse failure.", context)]
 
-    if len(matches) > 1:
-        warning = _build_issue("warning", "Multiple PID matches found; using the first.", context)
-    else:
-        warning = None
-
-    pid_value = int(matches[0].group(1))
-    canonical = f"P{pid_value}"
-    issues = [warning] if warning else []
-    return canonical, issues
+    issues = [_build_issue("warning", message, context) for message in warnings]
+    return match.canonical_id, issues
 
 
 def _load_manifest(project_root: Path) -> tuple[dict | None, list[ScanIssue]]:
@@ -107,68 +100,62 @@ def _load_manifest(project_root: Path) -> tuple[dict | None, list[ScanIssue]]:
 
 def _parse_manifest_participants(manifest: dict | None) -> tuple[dict[str, str], list[ScanIssue]]:
     """Handle the parse manifest participants step for the Stats PySide6 workflow."""
-    issues: list[ScanIssue] = []
     if not isinstance(manifest, dict):
-        return {}, issues
+        return {}, []
 
-    participants = manifest.get("participants")
-    if not isinstance(participants, dict):
-        issues.append(_build_issue("blocking", "project.json participants mapping is missing or invalid."))
-        return {}, issues
+    mapping, normalization_examples, manifest_issues = normalize_multigroup_manifest_groups(manifest)
+    issues: list[ScanIssue] = []
 
-    groups = manifest.get("groups")
-    valid_groups = set(groups.keys()) if isinstance(groups, dict) else set()
-    if not isinstance(groups, dict):
-        issues.append(_build_issue("blocking", "project.json groups mapping is missing or invalid."))
+    for issue in manifest_issues:
+        context = dict(issue.context)
+        if "raw_pid" in context and "pid" not in context:
+            context["pid"] = context["raw_pid"]
 
-    mapping: dict[str, str] = {}
-    canonical_sources: dict[str, str] = {}
-
-    for raw_pid, raw_info in participants.items():
-        pid_text = raw_pid if isinstance(raw_pid, str) else str(raw_pid)
-        pid_context = {"pid": pid_text}
-        canonical_pid, pid_issues = extract_canonical_pid(pid_text, context=pid_context)
-        issues.extend(pid_issues)
-        if not canonical_pid:
-            continue
-
-        group_name = None
-        if isinstance(raw_info, dict):
-            group_name = raw_info.get("group")
-        if not isinstance(group_name, str) or not group_name.strip():
+        if issue.kind == "missing_participants_mapping":
+            issues.append(
+                _build_issue("blocking", "project.json participants mapping is missing or invalid.")
+            )
+        elif issue.kind == "missing_groups_mapping":
+            issues.append(_build_issue("blocking", "project.json groups mapping is missing or invalid."))
+        elif issue.kind == "invalid_pid":
+            issues.append(
+                _build_issue(
+                    "blocking",
+                    "Participant ID does not match the supported multigroup P<n> format.",
+                    context,
+                )
+            )
+        elif issue.kind == "missing_group":
             issues.append(
                 _build_issue(
                     "blocking",
                     "Participant entry is missing a group assignment.",
-                    {"pid": canonical_pid},
+                    context,
                 )
             )
-            continue
-        group_name = group_name.strip()
-        if group_name not in valid_groups:
+        elif issue.kind == "undefined_group":
             issues.append(
                 _build_issue(
                     "blocking",
                     "Participant group is not defined in project.json groups.",
-                    {"pid": canonical_pid, "group": group_name},
+                    context,
                 )
             )
-            continue
-
-        existing = mapping.get(canonical_pid)
-        if existing is not None:
-            if canonical_sources.get(canonical_pid) != pid_text:
-                issues.append(
-                    _build_issue(
-                        "blocking",
-                        "Duplicate manifest participant IDs collapse to the same canonical PID.",
-                        {"pid": canonical_pid},
-                    )
+        elif issue.kind == "conflicting_group_assignment":
+            issues.append(
+                _build_issue(
+                    "blocking",
+                    "Conflicting manifest participant IDs collapse to the same canonical PID.",
+                    context,
                 )
-            continue
+            )
 
-        mapping[canonical_pid] = group_name
-        canonical_sources[canonical_pid] = pid_text
+    warning_message = build_multigroup_pid_warning(
+        normalization_examples,
+        surface_label="multigroup manifest",
+    )
+    if warning_message:
+        issues.append(_build_issue("warning", warning_message))
 
     return mapping, issues
 
@@ -177,6 +164,7 @@ def _scan_excel_folder(excel_root: Path) -> tuple[list[str], list[ScanIssue]]:
     """Handle the scan excel folder step for the Stats PySide6 workflow."""
     issues: list[ScanIssue] = []
     discovered: set[str] = set()
+    normalization_examples: dict[str, str] = {}
 
     if not excel_root.exists() or not excel_root.is_dir():
         issues.append(
@@ -197,14 +185,23 @@ def _scan_excel_folder(excel_root: Path) -> tuple[list[str], list[ScanIssue]]:
             for file_path in entry.iterdir():
                 if file_path.suffix.lower() not in (".xlsx", ".xls"):
                     continue
-                canonical_pid, pid_issues = extract_canonical_pid(
-                    file_path.name,
-                    context={"path": str(file_path)},
-                )
-                issues.extend(pid_issues)
-                if not canonical_pid:
+                pid_match, pid_warnings = extract_multigroup_pid(file_path.name)
+                if pid_match is None:
+                    issues.append(
+                        _build_issue(
+                            "blocking",
+                            "PID parse failure.",
+                            {"path": str(file_path)},
+                        )
+                    )
                     continue
-                discovered.add(canonical_pid)
+                if pid_match.matched_text != pid_match.canonical_id:
+                    normalization_examples[pid_match.matched_text] = pid_match.canonical_id
+                issues.extend(
+                    _build_issue("warning", message, {"path": str(file_path)})
+                    for message in pid_warnings
+                )
+                discovered.add(pid_match.canonical_id)
     except PermissionError as exc:
         issues.append(
             _build_issue(
@@ -221,6 +218,13 @@ def _scan_excel_folder(excel_root: Path) -> tuple[list[str], list[ScanIssue]]:
                 {"path": str(excel_root)},
             )
         )
+
+    warning_message = build_multigroup_pid_warning(
+        normalization_examples,
+        surface_label="multigroup scan",
+    )
+    if warning_message:
+        issues.append(_build_issue("warning", warning_message))
 
     return sorted(discovered, key=_pid_sort_key), issues
 
