@@ -409,12 +409,40 @@ def _run_full_pipeline_for_file(
             rep_metadata: List[dict] = []
 
             n_common: Optional[int] = None
+            label_has_fallback_rep = any(crop_results[k].fallback for k in rep_keys)
             if n_step:
                 rep_lengths = [crop_results[k].n_samples for k in rep_keys if not crop_results[k].fallback and crop_results[k].n_samples > 0]
                 if rep_lengths:
                     n_common = (min(rep_lengths) // n_step) * n_step
                     if n_common <= 0:
                         n_common = None
+
+            label_uses_fallback = bool(label_has_fallback_rep or n_common is None or not n_step)
+            if label_uses_fallback:
+                if label_has_fallback_rep:
+                    label_fallback_reason = "label_has_fallback_rep"
+                elif n_common is None:
+                    label_fallback_reason = "missing_n_common"
+                else:
+                    label_fallback_reason = "missing_n_step"
+                crop_logger.warning(
+                    "file=%s condition=%s label_epoch_mode=fixed_epoch_fallback fallback_reps=%d n_common=%s n_step=%s reason=%s",
+                    file_path.name,
+                    label,
+                    sum(1 for k in rep_keys if crop_results[k].fallback),
+                    n_common,
+                    n_step,
+                    label_fallback_reason,
+                )
+            else:
+                label_fallback_reason = ""
+                crop_logger.info(
+                    "file=%s condition=%s label_epoch_mode=55_onbin fallback_reps=0 n_common=%d n_step=%s",
+                    file_path.name,
+                    label,
+                    int(n_common),
+                    n_step,
+                )
 
             for rep_key in rep_keys:
                 crop = crop_results[rep_key]
@@ -426,10 +454,13 @@ def _run_full_pipeline_for_file(
                 n_rep = int(crop.n_samples)
                 available_samples = int(crop.available_samples)
 
-                use_fallback = bool(crop.fallback or n_common is None or not n_step)
+                use_fallback = label_uses_fallback
                 if use_fallback:
                     crop_mode = "fixed_epoch_fallback"
-                    fallback_reason = crop.fallback_reason or ("missing_n_common" if n_common is None else "unknown")
+                    if crop.fallback:
+                        fallback_reason = crop.fallback_reason or label_fallback_reason or "unknown"
+                    else:
+                        fallback_reason = label_fallback_reason or "unknown"
                     start_samp = int(crop.block_start_sample + tmin * sfreq)
                     stop_samp = int(crop.block_start_sample + tmax * sfreq)
                     start_samp = max(0, start_samp)
@@ -437,6 +468,8 @@ def _run_full_pipeline_for_file(
                 else:
                     start_samp = int(crop.crop_start_sample)
                     stop_samp = int(start_samp + n_common)
+
+                expected_n = max(0, stop_samp - start_samp)
 
                 if stop_samp <= start_samp:
                     crop_logger.warning(
@@ -460,8 +493,19 @@ def _run_full_pipeline_for_file(
                         stop_samp,
                     )
                     continue
+                if epoch_data.shape[1] != expected_n:
+                    crop_logger.warning(
+                        "file=%s condition=%s rep=%d skip_shape_mismatch expected=%d actual=%d crop_mode=%s",
+                        file_path.name,
+                        label,
+                        int(rep_key[1]),
+                        expected_n,
+                        int(epoch_data.shape[1]),
+                        crop_mode,
+                    )
+                    continue
 
-                n_used = int(epoch_data.shape[1])
+                n_used = expected_n
                 n_mod_step = int(n_used % n_step) if n_step else -1
                 df_hz = (sfreq / float(n_used)) if n_used > 0 else 0.0
                 k0 = (1.2 * float(n_used) / sfreq) if n_used > 0 else 0.0
