@@ -20,10 +20,11 @@ def test_between_group_lmm_maps_dv_value_to_value_and_does_not_block(monkeypatch
 
     captured: dict[str, object] = {}
 
-    def _fake_mixed_effects_model(*, data, dv_col, group_col, fixed_effects):
+    def _fake_mixed_effects_model(*, data, dv_col, group_col, fixed_effects, **_kwargs):
+        _ = group_col, fixed_effects
         captured["dv_col"] = dv_col
         captured["data"] = data.copy()
-        return pd.DataFrame({"Effect": ["condition"], "P-Value": [0.04]})
+        return pd.DataFrame({"Effect": ["condition"], "P-Value": [0.04]}), object()
 
     monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.run_mixed_effects_model", _fake_mixed_effects_model)
 

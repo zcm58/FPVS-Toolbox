@@ -125,22 +125,44 @@ def test_multigroup_end_to_end_smoke_with_fixed_dv(tmp_path: Path) -> None:
 def test_single_group_fixed_dv_regression_schema_stable(tmp_path: Path) -> None:
     dv_df, groups = _build_fixed_dv_payload(tmp_path)
     single_df = dv_df[dv_df["subject"].isin(["P1", "P2", "P3"])].copy()
+    nested = {
+        str(subject): {
+            str(condition): {str(roi_name): float(value)}
+            for condition, roi_name, value in zip(group["condition"], group["roi"], group["dv_value"], strict=False)
+        }
+        for subject, group in single_df.groupby("subject", sort=True)
+    }
 
-    payload = run_lmm(
-        lambda _progress: None,
-        lambda _message: None,
-        subjects=["P1", "P2", "P3"],
-        conditions=["A", "B"],
-        conditions_all=["A", "B"],
-        subject_data={},
-        base_freq=6.0,
-        alpha=0.05,
-        rois={"ROI1": ["O1", "O2"]},
-        rois_all={"ROI1": ["O1", "O2"]},
-        include_group=False,
-        subject_groups={pid: groups[pid] for pid in ["P1", "P2", "P3"]},
-        fixed_harmonic_dv_table=single_df,
-    )
+    def _fake_prepare(**_kwargs):
+        return nested
+
+    def _fake_lmm(**_kwargs):
+        return pd.DataFrame({"Effect": ["condition"], "P-Value": [0.05]}), object()
+
+    from Tools.Stats.PySide6 import stats_workers
+
+    original_prepare = stats_workers.prepare_summed_bca_data
+    original_lmm = stats_workers.run_mixed_effects_model
+    try:
+        stats_workers.prepare_summed_bca_data = _fake_prepare
+        stats_workers.run_mixed_effects_model = _fake_lmm
+        payload = run_lmm(
+            lambda _progress: None,
+            lambda _message: None,
+            subjects=["P1", "P2", "P3"],
+            conditions=["A", "B"],
+            conditions_all=["A", "B"],
+            subject_data={},
+            base_freq=6.0,
+            alpha=0.05,
+            rois={"ROI1": ["O1", "O2"]},
+            rois_all={"ROI1": ["O1", "O2"]},
+            include_group=False,
+            subject_groups={pid: groups[pid] for pid in ["P1", "P2", "P3"]},
+        )
+    finally:
+        stats_workers.prepare_summed_bca_data = original_prepare
+        stats_workers.run_mixed_effects_model = original_lmm
 
     assert set(["subject", "condition", "roi", "dv_value"]).issubset(single_df.columns)
     assert "missingness" in payload

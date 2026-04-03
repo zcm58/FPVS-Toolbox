@@ -2210,6 +2210,8 @@ class StatsWindow(QMainWindow):
         if pipeline_id is PipelineId.BETWEEN:
             self.between_anova_results_data = None
             self._between_missingness_payload = {}
+            if isinstance(self._fixed_harmonic_dv_payload, dict):
+                self._fixed_harmonic_dv_payload.pop("prepared_multigroup_dv_payload", None)
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
             label.setText("Running…")
@@ -2507,6 +2509,9 @@ class StatsWindow(QMainWindow):
             between_subject_groups = self._between_subject_groups()
             between_manual_excluded = self._between_manual_excluded_pids()
             fixed_dv_table = self._fixed_harmonic_dv_payload.get("dv_table")
+            shared_multigroup_dv_payload = self._fixed_harmonic_dv_payload.setdefault(
+                "prepared_multigroup_dv_payload", {}
+            )
             selected_conditions = self._get_selected_conditions()
             if step_id is StepId.BETWEEN_GROUP_ANOVA:
                 raise ValueError(
@@ -2535,6 +2540,7 @@ class StatsWindow(QMainWindow):
                     fixed_harmonic_dv_table=fixed_dv_table,
                     required_conditions=selected_conditions,
                     subject_to_group=between_subject_groups,
+                    prepared_multigroup_dv_payload=shared_multigroup_dv_payload,
                     results_dir=results_dir,
                 )
                 def handler(payload):
@@ -2560,6 +2566,10 @@ class StatsWindow(QMainWindow):
                     qc_config=qc_payload,
                     qc_state=qc_state,
                     manual_excluded_pids=between_manual_excluded,
+                    fixed_harmonic_dv_table=fixed_dv_table,
+                    required_conditions=selected_conditions,
+                    subject_to_group=between_subject_groups,
+                    prepared_multigroup_dv_payload=shared_multigroup_dv_payload,
                 )
                 def handler(payload):
                     """Handle the handler step for the Stats PySide6 workflow."""

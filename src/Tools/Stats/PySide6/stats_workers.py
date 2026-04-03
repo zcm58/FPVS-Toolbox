@@ -872,6 +872,241 @@ def _empty_outlier_report(subjects: list[str], *, abs_limit: float) -> OutlierEx
     return OutlierExclusionReport(summary=summary, participants=[])
 
 
+def _has_supported_multigroup_dv_contract(payload: dict[str, object] | None) -> bool:
+    """Return whether a cached supported multigroup DV contract is ready."""
+
+    if not isinstance(payload, dict):
+        return False
+    return (
+        isinstance(payload.get("prepared_dv_lookup_df"), pd.DataFrame)
+        and isinstance(payload.get("prepared_dv_table"), pd.DataFrame)
+        and isinstance(payload.get("run_report"), StatsRunReport)
+    )
+
+
+def _prepare_supported_multigroup_dv_contract(
+    *,
+    subjects,
+    conditions,
+    conditions_all=None,
+    subject_data,
+    base_freq,
+    rois,
+    rois_all=None,
+    subject_groups: dict[str, str | None] | None = None,
+    dv_policy: dict | None = None,
+    outlier_exclusion_enabled: bool = True,
+    outlier_abs_limit: float = 50.0,
+    qc_config: dict | None = None,
+    qc_state: dict | None = None,
+    manual_excluded_pids: list[str] | None = None,
+    fixed_harmonic_dv_table: pd.DataFrame | None = None,
+    subject_to_group: dict[str, str | None] | None = None,
+    prepared_multigroup_dv_payload: dict[str, object] | None = None,
+    message_cb=None,
+) -> dict[str, object]:
+    """Build or reuse the authoritative prepared DV contract for the supported multigroup path."""
+
+    if _has_supported_multigroup_dv_contract(prepared_multigroup_dv_payload):
+        if message_cb:
+            message_cb("Using authoritative prepared multigroup DV contract.")
+        return prepared_multigroup_dv_payload
+
+    all_subjects = list(subjects) if subjects else []
+    exclusion_rows: list[dict[str, str]] = []
+    normalized_subject_group_map = _normalize_between_group_subject_map(
+        subject_to_group or subject_groups or {}
+    )
+    subjects_after_qc, subject_data_after_qc, subject_groups_after_qc, qc_report = _apply_qc_screening(
+        subjects=all_subjects,
+        subject_data=subject_data,
+        subject_groups=subject_groups,
+        conditions_all=list(conditions_all) if conditions_all else [],
+        rois_all=rois_all or rois,
+        base_freq=base_freq,
+        message_cb=message_cb,
+        qc_config=qc_config,
+        qc_state=qc_state,
+    )
+    if message_cb:
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"participants_after_qc={len(subjects_after_qc)} "
+            f"excluded_by_qc={len(getattr(qc_report, 'excluded_pids', set()) if qc_report else set())}"
+        )
+
+    (
+        subjects_after_manual,
+        subject_data_after_manual,
+        subject_groups_after_manual,
+        manual_excluded,
+    ) = _apply_manual_exclusions(
+        subjects=list(subjects_after_qc) if subjects_after_qc else [],
+        subject_data=subject_data_after_qc,
+        subject_groups=subject_groups_after_qc,
+        manual_excluded_pids=manual_excluded_pids,
+        message_cb=message_cb,
+    )
+    for pid in manual_excluded:
+        canonical_pid = _normalize_between_group_subject(pid)
+        exclusion_rows.append(
+            {
+                "subject": canonical_pid,
+                "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
+                "reason": "manual",
+            }
+        )
+    if message_cb:
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"participants_after_manual={len(subjects_after_manual)} manually_excluded={len(manual_excluded)}"
+        )
+    if not subjects_after_manual:
+        raise RuntimeError("All participants excluded by manual exclusions.")
+
+    dv_metadata: dict[str, object] = {}
+    all_subject_bca_data = None
+    if isinstance(fixed_harmonic_dv_table, pd.DataFrame) and not fixed_harmonic_dv_table.empty:
+        if message_cb:
+            message_cb("Using fixed-harmonic DV table for supported multigroup contract.")
+        lookup_df = fixed_harmonic_dv_table.copy()
+    else:
+        all_subject_bca_data = prepare_summed_bca_data(
+            subjects=subjects_after_manual,
+            conditions=conditions,
+            subject_data=subject_data_after_manual,
+            base_freq=base_freq,
+            log_func=message_cb,
+            rois=rois,
+            dv_policy=dv_policy,
+            dv_metadata=dv_metadata,
+        )
+        if not all_subject_bca_data:
+            raise RuntimeError("Data preparation failed (empty).")
+        lookup_df = _long_format_from_bca(all_subject_bca_data, subject_groups_after_manual)
+
+    if "group" not in lookup_df.columns:
+        lookup_df["group"] = lookup_df["subject"].astype(str).map(normalized_subject_group_map)
+    lookup_df, mapped_source_col, tried_columns, model_input_columns_df = _map_between_group_model_dv_column(
+        lookup_df
+    )
+    if "value" not in lookup_df.columns:
+        raise RuntimeError(
+            "Supported multigroup DV contract is missing dependent variable column ('value')."
+        )
+
+    lookup_df = _normalize_between_group_merge_keys(lookup_df)
+    lookup_df["group"] = lookup_df["subject"].astype(str).map(normalized_subject_group_map)
+    lookup_df["value"] = pd.to_numeric(lookup_df["value"], errors="coerce").astype(float)
+
+    selected_subjects: list[str] = []
+    seen_subjects: set[str] = set()
+    for pid in subjects_after_manual or []:
+        canonical_pid = _normalize_between_group_subject(pid)
+        if not canonical_pid or canonical_pid in seen_subjects:
+            continue
+        selected_subjects.append(canonical_pid)
+        seen_subjects.add(canonical_pid)
+
+    selected_subject_set = set(selected_subjects)
+    selected_lookup_df = lookup_df.loc[
+        lookup_df["subject"].astype(str).isin(selected_subject_set)
+    ].copy()
+
+    if selected_lookup_df.empty:
+        exclusion_report = merge_exclusion_reports(
+            _empty_outlier_report(selected_subjects, abs_limit=outlier_abs_limit),
+            qc_report,
+        )
+    else:
+        selected_lookup_df, exclusion_report = _apply_outlier_exclusion(
+            selected_lookup_df,
+            enabled=outlier_exclusion_enabled,
+            abs_limit=outlier_abs_limit,
+            message_cb=message_cb,
+        )
+        exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
+
+    if isinstance(qc_report, QcExclusionReport):
+        for pid in sorted(qc_report.excluded_pids):
+            canonical_pid = _normalize_between_group_subject(pid)
+            exclusion_rows.append(
+                {
+                    "subject": canonical_pid,
+                    "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
+                    "reason": "QC",
+                }
+            )
+
+    required_exclusions = _extract_required_exclusions(exclusion_report)
+    required_pids = {
+        canonical_pid
+        for violation in required_exclusions
+        if (canonical_pid := _normalize_between_group_subject(violation.participant_id))
+    }
+    if required_pids:
+        for pid in sorted(required_pids):
+            exclusion_rows.append(
+                {
+                    "subject": pid,
+                    "group": str(normalized_subject_group_map.get(pid) or ""),
+                    "reason": "outlier_or_nonfinite",
+                }
+            )
+        selected_lookup_df = selected_lookup_df.loc[
+            ~selected_lookup_df["subject"].astype(str).isin(required_pids)
+        ].copy()
+
+    prepared_dv_table = selected_lookup_df
+    if "group" in prepared_dv_table.columns:
+        prepared_dv_table = prepared_dv_table.dropna(subset=["group"]).copy()
+        if not prepared_dv_table.empty:
+            prepared_dv_table["group"] = prepared_dv_table["group"].astype(str)
+
+    prepared_subjects = (
+        sorted(prepared_dv_table["subject"].astype(str).unique().tolist())
+        if isinstance(prepared_dv_table, pd.DataFrame) and not prepared_dv_table.empty
+        else []
+    )
+    if message_cb:
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"lookup_rows={len(lookup_df)} prepared_rows={len(prepared_dv_table)} "
+            f"prepared_subjects={len(prepared_subjects)}"
+        )
+
+    payload = {
+        "prepared_dv_lookup_df": lookup_df,
+        "prepared_dv_table": prepared_dv_table,
+        "selected_subjects_after_manual": selected_subjects,
+        "subject_data_after_manual": subject_data_after_manual,
+        "subject_groups_after_manual": subject_groups_after_manual,
+        "normalized_subject_group_map": normalized_subject_group_map,
+        "manual_excluded": manual_excluded,
+        "qc_report": qc_report,
+        "dv_report": exclusion_report,
+        "required_exclusions": required_exclusions,
+        "exclusion_rows": exclusion_rows,
+        "dv_metadata": dv_metadata,
+        "all_subject_bca_data": all_subject_bca_data,
+        "mapped_source_col": mapped_source_col,
+        "tried_columns": tried_columns,
+        "model_input_columns_df": model_input_columns_df,
+        "run_report": StatsRunReport(
+            manual_excluded_pids=manual_excluded,
+            qc_report=qc_report,
+            dv_report=exclusion_report,
+            required_exclusions=required_exclusions,
+            final_modeled_pids=prepared_subjects,
+        ),
+    }
+    if isinstance(prepared_multigroup_dv_payload, dict):
+        prepared_multigroup_dv_payload.clear()
+        prepared_multigroup_dv_payload.update(payload)
+        return prepared_multigroup_dv_payload
+    return payload
+
+
 def _validate_group_contrasts_input(
     df: pd.DataFrame,
     *,
@@ -1307,6 +1542,7 @@ def run_lmm(
     fixed_harmonic_dv_table: pd.DataFrame | None = None,
     required_conditions: list[str] | None = None,
     subject_to_group: dict[str, str | None] | None = None,
+    prepared_multigroup_dv_payload: dict[str, object] | None = None,
     results_dir: str | None = None,
 ):
     """Handle the run lmm step for the Stats PySide6 workflow."""
@@ -1320,45 +1556,6 @@ def run_lmm(
         rois=rois,
         subjects=list(subjects) if subjects else [],
     )
-    all_subjects = list(subjects) if subjects else []
-    exclusion_rows: list[dict[str, str]] = []
-    subjects, subject_data, subject_groups, qc_report = _apply_qc_screening(
-        subjects=all_subjects,
-        subject_data=subject_data,
-        subject_groups=subject_groups,
-        conditions_all=list(conditions_all) if conditions_all else [],
-        rois_all=rois_all or rois,
-        base_freq=base_freq,
-        message_cb=message_cb,
-        qc_config=qc_config,
-        qc_state=qc_state,
-    )
-    message_cb(
-        f"[LMM DIAG] participants_after_qc={len(subjects)} excluded_by_qc="
-        f"{len(getattr(qc_report, 'excluded_pids', set()) if qc_report else set())}"
-    )
-    normalized_subject_group_map = _normalize_between_group_subject_map(subject_to_group or subject_groups or {})
-    subjects, subject_data, subject_groups, manual_excluded = _apply_manual_exclusions(
-        subjects=list(subjects) if subjects else [],
-        subject_data=subject_data,
-        subject_groups=subject_groups,
-        manual_excluded_pids=manual_excluded_pids,
-        message_cb=message_cb,
-    )
-    for pid in manual_excluded:
-        canonical_pid = _normalize_between_group_subject(pid)
-        exclusion_rows.append(
-            {
-                "subject": canonical_pid,
-                "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
-                "reason": "manual",
-            }
-        )
-    message_cb(
-        f"[LMM DIAG] participants_after_manual={len(subjects)} manually_excluded={len(manual_excluded)}"
-    )
-    if not subjects:
-        raise RuntimeError("All participants excluded by manual exclusions.")
     dv_metadata: dict[str, object] = {}
     all_subject_bca_data = None
     model_input_columns_df = pd.DataFrame()
@@ -1367,10 +1564,87 @@ def run_lmm(
     dv_column_audit_df = pd.DataFrame(columns=["column", "dtype", "non_nan_count", "is_selected_dv_col"])
     merge_match_stats: dict[str, object] = {}
     final_before_dropna_df = pd.DataFrame()
-    if isinstance(fixed_harmonic_dv_table, pd.DataFrame) and not fixed_harmonic_dv_table.empty:
-        message_cb("Using fixed-harmonic DV table for mixed model.")
-        df_long = fixed_harmonic_dv_table.copy()
+    shared_multigroup_payload = None
+    exclusion_rows: list[dict[str, str]] = []
+    if include_group:
+        shared_multigroup_payload = _prepare_supported_multigroup_dv_contract(
+            subjects=subjects,
+            conditions=conditions,
+            conditions_all=conditions_all,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            rois=rois,
+            rois_all=rois_all,
+            subject_groups=subject_groups,
+            dv_policy=dv_policy,
+            outlier_exclusion_enabled=outlier_exclusion_enabled,
+            outlier_abs_limit=outlier_abs_limit,
+            qc_config=qc_config,
+            qc_state=qc_state,
+            manual_excluded_pids=manual_excluded_pids,
+            fixed_harmonic_dv_table=fixed_harmonic_dv_table,
+            subject_to_group=subject_to_group,
+            prepared_multigroup_dv_payload=prepared_multigroup_dv_payload,
+            message_cb=message_cb,
+        )
+        subjects = list(shared_multigroup_payload.get("selected_subjects_after_manual", []))
+        subject_data = shared_multigroup_payload.get("subject_data_after_manual", subject_data)
+        subject_groups = shared_multigroup_payload.get("subject_groups_after_manual", subject_groups)
+        qc_report = shared_multigroup_payload.get("qc_report")
+        manual_excluded = list(shared_multigroup_payload.get("manual_excluded", []))
+        exclusion_rows = list(shared_multigroup_payload.get("exclusion_rows", []))
+        normalized_subject_group_map = dict(
+            shared_multigroup_payload.get("normalized_subject_group_map", {})
+        )
+        dv_metadata = dict(shared_multigroup_payload.get("dv_metadata", {}))
+        all_subject_bca_data = shared_multigroup_payload.get("all_subject_bca_data")
+        model_input_columns_df = shared_multigroup_payload.get(
+            "model_input_columns_df", pd.DataFrame()
+        )
+        df_long = shared_multigroup_payload.get("prepared_dv_lookup_df", pd.DataFrame()).copy()
+        exclusion_report = shared_multigroup_payload.get("dv_report")
+        required_exclusions = list(shared_multigroup_payload.get("required_exclusions", []))
     else:
+        all_subjects = list(subjects) if subjects else []
+        subjects, subject_data, subject_groups, qc_report = _apply_qc_screening(
+            subjects=all_subjects,
+            subject_data=subject_data,
+            subject_groups=subject_groups,
+            conditions_all=list(conditions_all) if conditions_all else [],
+            rois_all=rois_all or rois,
+            base_freq=base_freq,
+            message_cb=message_cb,
+            qc_config=qc_config,
+            qc_state=qc_state,
+        )
+        message_cb(
+            f"[LMM DIAG] participants_after_qc={len(subjects)} excluded_by_qc="
+            f"{len(getattr(qc_report, 'excluded_pids', set()) if qc_report else set())}"
+        )
+        normalized_subject_group_map = _normalize_between_group_subject_map(
+            subject_to_group or subject_groups or {}
+        )
+        subjects, subject_data, subject_groups, manual_excluded = _apply_manual_exclusions(
+            subjects=list(subjects) if subjects else [],
+            subject_data=subject_data,
+            subject_groups=subject_groups,
+            manual_excluded_pids=manual_excluded_pids,
+            message_cb=message_cb,
+        )
+        for pid in manual_excluded:
+            canonical_pid = _normalize_between_group_subject(pid)
+            exclusion_rows.append(
+                {
+                    "subject": canonical_pid,
+                    "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
+                    "reason": "manual",
+                }
+            )
+        message_cb(
+            f"[LMM DIAG] participants_after_manual={len(subjects)} manually_excluded={len(manual_excluded)}"
+        )
+        if not subjects:
+            raise RuntimeError("All participants excluded by manual exclusions.")
         all_subject_bca_data = prepare_summed_bca_data(
             subjects=subjects,
             conditions=conditions,
@@ -1410,9 +1684,8 @@ def run_lmm(
     mapped_source_col = dv_col
     tried_columns: list[str] = []
     if include_group:
-        df_long, mapped_source_col, tried_columns, model_input_columns_df = _map_between_group_model_dv_column(
-            df_long
-        )
+        mapped_source_col = str(shared_multigroup_payload.get("mapped_source_col", dv_col))
+        tried_columns = list(shared_multigroup_payload.get("tried_columns", []))
         dv_col = "value"
     if dv_col not in df_long.columns:
         raise RuntimeError("Mixed model input is missing dependent variable column ('value'/'dv_value').")
@@ -1592,39 +1865,49 @@ def run_lmm(
             message_cb(f"[LMM DIAG] merge/filter removed_rows={removed_merge}")
     _record_stage("after_group_condition_roi_filters")
     _record_stage("after_manual_exclusions")
-    df_long, exclusion_report = _apply_outlier_exclusion(
-        df_long,
-        enabled=outlier_exclusion_enabled,
-        abs_limit=outlier_abs_limit,
-        message_cb=message_cb,
-    )
-    exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
-    _record_stage("after_qc_screen")
+    if not include_group:
+        df_long, exclusion_report = _apply_outlier_exclusion(
+            df_long,
+            enabled=outlier_exclusion_enabled,
+            abs_limit=outlier_abs_limit,
+            message_cb=message_cb,
+        )
+        exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
+        _record_stage("after_qc_screen")
 
-    if isinstance(qc_report, QcExclusionReport):
-        for pid in sorted(qc_report.excluded_pids):
-            canonical_pid = _normalize_between_group_subject(pid)
-            exclusion_rows.append(
-                {
-                    "subject": canonical_pid,
-                    "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
-                    "reason": "QC",
-                }
-            )
+        if isinstance(qc_report, QcExclusionReport):
+            for pid in sorted(qc_report.excluded_pids):
+                canonical_pid = _normalize_between_group_subject(pid)
+                exclusion_rows.append(
+                    {
+                        "subject": canonical_pid,
+                        "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
+                        "reason": "QC",
+                    }
+                )
 
-    required_exclusions = _extract_required_exclusions(exclusion_report)
-    required_pids = {violation.participant_id for violation in required_exclusions}
+        required_exclusions = _extract_required_exclusions(exclusion_report)
+    else:
+        _record_stage("after_qc_screen")
+    required_pids = {
+        _normalize_between_group_subject(violation.participant_id)
+        for violation in required_exclusions
+    }
+    required_pids.discard("")
     if required_pids:
-        for pid in sorted(required_pids):
-            canonical_pid = _normalize_between_group_subject(pid)
-            exclusion_rows.append(
-                {
-                    "subject": canonical_pid,
-                    "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
-                    "reason": "outlier_or_nonfinite",
-                }
-            )
-        df_long = df_long.loc[~df_long["subject"].isin(required_pids)].copy()
+        if not include_group:
+            for pid in sorted(required_pids):
+                canonical_pid = _normalize_between_group_subject(pid)
+                exclusion_rows.append(
+                    {
+                        "subject": canonical_pid,
+                        "group": str(normalized_subject_group_map.get(canonical_pid) or ""),
+                        "reason": "outlier_or_nonfinite",
+                    }
+                )
+        df_long = df_long.loc[
+            ~df_long["subject"].astype(str).map(_normalize_between_group_subject).isin(required_pids)
+        ].copy()
     _record_stage("after_outlier_exclusions")
     message_cb(
         f"[LMM DIAG] participants_after_outlier={int(df_long['subject'].nunique()) if 'subject' in df_long.columns else 0}"
@@ -1819,12 +2102,16 @@ def run_lmm(
         "dv_metadata": dv_metadata,
         "missingness": missingness_payload or {},
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
-        "run_report": StatsRunReport(
-            manual_excluded_pids=manual_excluded,
-            qc_report=qc_report,
-            dv_report=exclusion_report,
-            required_exclusions=required_exclusions,
-            final_modeled_pids=sorted(df_long["subject"].unique().tolist()),
+        "run_report": (
+            shared_multigroup_payload.get("run_report")
+            if include_group and isinstance(shared_multigroup_payload, dict)
+            else StatsRunReport(
+                manual_excluded_pids=manual_excluded,
+                qc_report=qc_report,
+                dv_report=exclusion_report,
+                required_exclusions=required_exclusions,
+                final_modeled_pids=sorted(df_long["subject"].unique().tolist()),
+            )
         ),
     }
 
@@ -2092,45 +2379,40 @@ def run_group_contrasts(
     qc_config: dict | None = None,
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
+    fixed_harmonic_dv_table: pd.DataFrame | None = None,
+    required_conditions: list[str] | None = None,
+    subject_to_group: dict[str, str | None] | None = None,
+    prepared_multigroup_dv_payload: dict[str, object] | None = None,
 ):
     """Handle the run group contrasts step for the Stats PySide6 workflow."""
     set_rois(rois)
     _ = alpha
     message_cb("Preparing data for Between-Group Contrasts…")
-    all_subjects = list(subjects) if subjects else []
-    subjects, subject_data, subject_groups, qc_report = _apply_qc_screening(
-        subjects=all_subjects,
-        subject_data=subject_data,
-        subject_groups=subject_groups,
-        conditions_all=list(conditions_all) if conditions_all else [],
-        rois_all=rois_all or rois,
-        base_freq=base_freq,
-        message_cb=message_cb,
-        qc_config=qc_config,
-        qc_state=qc_state,
-    )
-    subjects, subject_data, subject_groups, manual_excluded = _apply_manual_exclusions(
-        subjects=list(subjects) if subjects else [],
-        subject_data=subject_data,
-        subject_groups=subject_groups,
-        manual_excluded_pids=manual_excluded_pids,
-        message_cb=message_cb,
-    )
-    if not subjects:
-        raise RuntimeError("All participants excluded by manual exclusions.")
-    dv_metadata: dict[str, object] = {}
-    all_subject_bca_data = prepare_summed_bca_data(
+    shared_multigroup_payload = _prepare_supported_multigroup_dv_contract(
         subjects=subjects,
         conditions=conditions,
+        conditions_all=conditions_all,
         subject_data=subject_data,
         base_freq=base_freq,
-        log_func=message_cb,
         rois=rois,
+        rois_all=rois_all,
+        subject_groups=subject_groups,
         dv_policy=dv_policy,
-        dv_metadata=dv_metadata,
+        outlier_exclusion_enabled=outlier_exclusion_enabled,
+        outlier_abs_limit=outlier_abs_limit,
+        qc_config=qc_config,
+        qc_state=qc_state,
+        manual_excluded_pids=manual_excluded_pids,
+        fixed_harmonic_dv_table=fixed_harmonic_dv_table,
+        subject_to_group=subject_to_group,
+        prepared_multigroup_dv_payload=prepared_multigroup_dv_payload,
+        message_cb=message_cb,
     )
-    if not all_subject_bca_data:
-        raise RuntimeError("Data preparation failed (empty).")
+    subjects = list(shared_multigroup_payload.get("selected_subjects_after_manual", []))
+    subject_data = shared_multigroup_payload.get("subject_data_after_manual", subject_data)
+    dv_metadata = dict(shared_multigroup_payload.get("dv_metadata", {}))
+    all_subject_bca_data = shared_multigroup_payload.get("all_subject_bca_data")
+    _ = required_conditions
     dv_variants_payload = None
     if dv_variants:
         try:
@@ -2149,18 +2431,7 @@ def run_group_contrasts(
             message_cb(f"DV variants computation failed: {exc}")
             dv_variants_payload = _variant_error_payload(dv_policy, dv_variants, exc)
 
-    df_long = _long_format_from_bca(all_subject_bca_data, subject_groups)
-    df_long, exclusion_report = _apply_outlier_exclusion(
-        df_long,
-        enabled=outlier_exclusion_enabled,
-        abs_limit=outlier_abs_limit,
-        message_cb=message_cb,
-    )
-    exclusion_report = merge_exclusion_reports(exclusion_report, qc_report)
-    required_exclusions = _extract_required_exclusions(exclusion_report)
-    required_pids = {violation.participant_id for violation in required_exclusions}
-    if required_pids:
-        df_long = df_long.loc[~df_long["subject"].isin(required_pids)].copy()
+    df_long = shared_multigroup_payload.get("prepared_dv_table", pd.DataFrame()).copy()
     df_long = df_long.dropna(subset=["group"])
     if df_long.empty:
         raise RuntimeError("No rows with group assignments to compute contrasts.")
@@ -2191,13 +2462,7 @@ def run_group_contrasts(
         "output_text": "",
         "dv_metadata": dv_metadata,
         "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
-        "run_report": StatsRunReport(
-            manual_excluded_pids=manual_excluded,
-            qc_report=qc_report,
-            dv_report=exclusion_report,
-            required_exclusions=required_exclusions,
-            final_modeled_pids=sorted(df_long["subject"].unique().tolist()),
-        ),
+        "run_report": shared_multigroup_payload.get("run_report"),
     }
 
 

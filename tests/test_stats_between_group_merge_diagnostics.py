@@ -57,7 +57,7 @@ def test_between_group_lmm_blocks_with_condition_mismatch(tmp_path) -> None:
     payload = run_lmm(lambda _progress: None, lambda _msg: None, **_base_kwargs(fixed_dv, tmp_path))
 
     assert payload["status"] == "blocked"
-    assert "Selected conditions not found" in payload["message"]
+    assert "condition mismatch" in payload["message"]
     assert payload["merge_match_stats"]["intersection_count"] == 0
 
 
@@ -75,7 +75,10 @@ def test_between_group_lmm_merge_success_does_not_block(monkeypatch, tmp_path) -
     monkeypatch.setattr(
         stats_workers,
         "run_mixed_effects_model",
-        lambda **_kwargs: pd.DataFrame({"term": ["Intercept"], "pvalue": [0.1]}),
+        lambda **_kwargs: (
+            pd.DataFrame({"Effect": ["Intercept"], "P-Value": [0.1]}),
+            object(),
+        ),
     )
 
     payload = run_lmm(lambda _progress: None, lambda _msg: None, **_base_kwargs(fixed_dv, tmp_path))
