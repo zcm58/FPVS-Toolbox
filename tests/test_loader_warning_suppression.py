@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import warnings
 from types import SimpleNamespace
 
@@ -49,3 +50,39 @@ def test_load_eeg_file_suppresses_expected_channel_and_montage_warnings(monkeypa
 
     assert raw is fake_raw
     assert caught == []
+
+
+def test_load_eeg_file_logs_header_mismatch_with_exact_file(monkeypatch, tmp_path, caplog):
+    fake_raw = _FakeRaw()
+    bdf_path = tmp_path / "problem_sample.bdf"
+
+    def _fake_read_raw_bdf(*args, **kwargs):
+        warnings.warn(
+            "Number of records from the header does not match the file size "
+            "(perhaps the recording was not stopped before exiting). "
+            "Inferring from the file size.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return fake_raw
+
+    monkeypatch.setattr(loader, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(loader, "_cached_1020", lambda: object())
+    monkeypatch.setattr(loader.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
+
+    app = SimpleNamespace(
+        currentProject=SimpleNamespace(preprocessing={"ref_chan1": "EXG1", "ref_chan2": "EXG2"}),
+        settings=SimpleNamespace(get=lambda *args, **kwargs: "Status"),
+        log=lambda msg: None,
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with caplog.at_level(logging.WARNING, logger=loader.__name__):
+            raw = loader.load_eeg_file(app, str(bdf_path))
+
+    assert raw is fake_raw
+    assert caught == []
+    assert "problem_sample.bdf" in caplog.text
+    assert str(bdf_path) in caplog.text
+    assert "Number of records from the header does not match the file size" in caplog.text
