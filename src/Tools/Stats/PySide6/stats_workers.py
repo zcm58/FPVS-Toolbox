@@ -54,7 +54,10 @@ from Tools.Stats.PySide6.dv_policies import (
 from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
 from Tools.Stats.PySide6.stats_group_contrasts import normalize_group_contrasts_table
 from Tools.Stats.PySide6.stats_missingness import compute_complete_case_subjects, compute_missingness
-from Tools.Stats.PySide6.stats_multigroup_ids import normalize_multigroup_pid
+from Tools.Stats.PySide6.stats_multigroup_ids import (
+    extract_multigroup_pid,
+    normalize_multigroup_pid,
+)
 from Tools.Stats.PySide6.shared_harmonics import (
     DEFAULT_Z_THRESH,
     compute_shared_harmonics,
@@ -415,6 +418,68 @@ def _normalize_between_group_subject(value: object) -> str:
         return legacy_normalized.canonical_id
 
     return text
+
+
+def _normalize_supported_multigroup_subject(value: object) -> str:
+    """Normalize supported multigroup subject values onto the scan/load PID contract."""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    extracted_pid, _warnings = extract_multigroup_pid(text)
+    if extracted_pid is not None:
+        return extracted_pid.canonical_id
+    return text
+
+
+def _collect_unique_subject_texts(values: list[object]) -> list[str]:
+    """Collect unique non-empty subject strings in encounter order."""
+
+    unique_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if pd.isna(value):
+            continue
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        unique_values.append(text)
+        seen.add(text)
+    return unique_values
+
+
+def _build_supported_multigroup_subject_alignment_metrics(
+    *,
+    selected_subjects_after_manual: list[str],
+    lookup_subjects_before_alignment: list[object],
+    lookup_subjects_after_alignment: list[object],
+) -> dict[str, object]:
+    """Summarize subject overlap at the supported multigroup selection gate."""
+
+    selected_subjects = _collect_unique_subject_texts(list(selected_subjects_after_manual))
+    lookup_subjects_before = _collect_unique_subject_texts(lookup_subjects_before_alignment)
+    lookup_subjects_after = _collect_unique_subject_texts(lookup_subjects_after_alignment)
+
+    selected_subject_set = set(selected_subjects)
+    lookup_subject_set_after = set(lookup_subjects_after)
+    unmatched_selected_subjects = [
+        subject for subject in selected_subjects if subject not in lookup_subject_set_after
+    ]
+    unmatched_lookup_subjects = [
+        subject for subject in lookup_subjects_after if subject not in selected_subject_set
+    ]
+
+    return {
+        "selected_subjects_after_manual_count": len(selected_subjects),
+        "selected_subjects_after_manual_sample": selected_subjects[:5],
+        "lookup_unique_subject_count_before_alignment": len(lookup_subjects_before),
+        "lookup_unique_subject_sample_before_alignment": lookup_subjects_before[:5],
+        "lookup_unique_subject_count_after_alignment": len(lookup_subjects_after),
+        "lookup_unique_subject_sample_after_alignment": lookup_subjects_after[:5],
+        "unmatched_selected_subjects_sample": unmatched_selected_subjects[:5],
+        "unmatched_lookup_subjects_sample": unmatched_lookup_subjects[:5],
+    }
 
 
 def _normalize_between_group_subject_map(
@@ -901,6 +966,183 @@ def _has_supported_multigroup_dv_contract(payload: dict[str, object] | None) -> 
     )
 
 
+def _supported_multigroup_prepared_metrics(
+    payload: dict[str, object] | None,
+) -> dict[str, object]:
+    """Summarize the shared prepared payload used by supported multigroup workers."""
+
+    if not isinstance(payload, dict):
+        return {
+            "selected_subjects_after_manual_count": 0,
+            "selected_subjects_after_manual_sample": [],
+            "lookup_unique_subject_count_before_alignment": 0,
+            "lookup_unique_subject_sample_before_alignment": [],
+            "lookup_unique_subject_count_after_alignment": 0,
+            "lookup_unique_subject_sample_after_alignment": [],
+            "unmatched_selected_subjects_sample": [],
+            "unmatched_lookup_subjects_sample": [],
+            "prepared_dv_lookup_df_rows": 0,
+            "prepared_dv_table_rows": 0,
+            "dropped_null_group_rows": 0,
+            "selected_lookup_rows_before_exclusions": 0,
+            "final_modeled_subject_ids": [],
+        }
+
+    lookup_df = payload.get("prepared_dv_lookup_df")
+    prepared_df = payload.get("prepared_dv_table")
+    run_report = payload.get("run_report")
+
+    lookup_rows = (
+        int(payload.get("prepared_dv_lookup_df_rows"))
+        if isinstance(payload.get("prepared_dv_lookup_df_rows"), int)
+        else int(len(lookup_df))
+        if isinstance(lookup_df, pd.DataFrame)
+        else 0
+    )
+    prepared_rows = (
+        int(payload.get("prepared_dv_table_rows"))
+        if isinstance(payload.get("prepared_dv_table_rows"), int)
+        else int(len(prepared_df))
+        if isinstance(prepared_df, pd.DataFrame)
+        else 0
+    )
+    dropped_null_group_rows = (
+        int(payload.get("prepared_dv_table_null_group_dropped_rows"))
+        if isinstance(payload.get("prepared_dv_table_null_group_dropped_rows"), int)
+        else 0
+    )
+    selected_lookup_rows_before_exclusions = (
+        int(payload.get("selected_lookup_rows_before_exclusions"))
+        if isinstance(payload.get("selected_lookup_rows_before_exclusions"), int)
+        else 0
+    )
+    final_modeled_subject_ids = (
+        list(run_report.final_modeled_pids)
+        if isinstance(run_report, StatsRunReport)
+        else []
+    )
+    return {
+        "selected_subjects_after_manual_count": (
+            int(payload.get("selected_subjects_after_manual_count"))
+            if isinstance(payload.get("selected_subjects_after_manual_count"), int)
+            else 0
+        ),
+        "selected_subjects_after_manual_sample": list(
+            payload.get("selected_subjects_after_manual_sample", [])
+        ),
+        "lookup_unique_subject_count_before_alignment": (
+            int(payload.get("lookup_unique_subject_count_before_alignment"))
+            if isinstance(payload.get("lookup_unique_subject_count_before_alignment"), int)
+            else 0
+        ),
+        "lookup_unique_subject_sample_before_alignment": list(
+            payload.get("lookup_unique_subject_sample_before_alignment", [])
+        ),
+        "lookup_unique_subject_count_after_alignment": (
+            int(payload.get("lookup_unique_subject_count_after_alignment"))
+            if isinstance(payload.get("lookup_unique_subject_count_after_alignment"), int)
+            else 0
+        ),
+        "lookup_unique_subject_sample_after_alignment": list(
+            payload.get("lookup_unique_subject_sample_after_alignment", [])
+        ),
+        "unmatched_selected_subjects_sample": list(
+            payload.get("unmatched_selected_subjects_sample", [])
+        ),
+        "unmatched_lookup_subjects_sample": list(
+            payload.get("unmatched_lookup_subjects_sample", [])
+        ),
+        "prepared_dv_lookup_df_rows": lookup_rows,
+        "prepared_dv_table_rows": prepared_rows,
+        "dropped_null_group_rows": dropped_null_group_rows,
+        "selected_lookup_rows_before_exclusions": selected_lookup_rows_before_exclusions,
+        "final_modeled_subject_ids": final_modeled_subject_ids,
+    }
+
+
+def _emit_supported_multigroup_prepared_diag(
+    message_cb,
+    payload: dict[str, object] | None,
+    *,
+    consumer: str,
+) -> dict[str, object]:
+    """Emit targeted diagnostics for the shared supported multigroup payload."""
+
+    metrics = _supported_multigroup_prepared_metrics(payload)
+    if message_cb:
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"consumer={consumer} "
+            f"selected_subjects_after_manual_count={metrics['selected_subjects_after_manual_count']} "
+            f"selected_subjects_after_manual_sample={metrics['selected_subjects_after_manual_sample']} "
+            f"lookup_unique_subject_count_before_alignment={metrics['lookup_unique_subject_count_before_alignment']} "
+            f"lookup_unique_subject_sample_before_alignment="
+            f"{metrics['lookup_unique_subject_sample_before_alignment']}"
+        )
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"consumer={consumer} "
+            f"lookup_unique_subject_count_after_alignment={metrics['lookup_unique_subject_count_after_alignment']} "
+            f"lookup_unique_subject_sample_after_alignment="
+            f"{metrics['lookup_unique_subject_sample_after_alignment']} "
+            f"unmatched_selected_subjects_sample={metrics['unmatched_selected_subjects_sample']} "
+            f"unmatched_lookup_subjects_sample={metrics['unmatched_lookup_subjects_sample']}"
+        )
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"consumer={consumer} "
+            f"prepared_dv_lookup_df_rows={metrics['prepared_dv_lookup_df_rows']} "
+            f"prepared_dv_table_rows={metrics['prepared_dv_table_rows']} "
+            f"dropped_null_group_rows={metrics['dropped_null_group_rows']} "
+            f"final_modeled_subject_ids={metrics['final_modeled_subject_ids']}"
+        )
+    return metrics
+
+
+def _build_supported_multigroup_empty_prepared_reason(
+    payload: dict[str, object] | None,
+) -> str:
+    """Describe why the authoritative supported multigroup payload is empty."""
+
+    metrics = _supported_multigroup_prepared_metrics(payload)
+    lookup_rows = int(metrics["prepared_dv_lookup_df_rows"])
+    prepared_rows = int(metrics["prepared_dv_table_rows"])
+    dropped_null_group_rows = int(metrics["dropped_null_group_rows"])
+    selected_lookup_rows_before_exclusions = int(metrics["selected_lookup_rows_before_exclusions"])
+    final_modeled_subject_ids = list(metrics["final_modeled_subject_ids"])
+
+    detail = (
+        "authoritative prepared multigroup table is empty upstream "
+        f"(prepared_dv_lookup_df rows={lookup_rows}, "
+        f"prepared_dv_table rows={prepared_rows}, "
+        f"dropped_null_group_rows={dropped_null_group_rows}, "
+        f"final_modeled_subject_ids={final_modeled_subject_ids})."
+    )
+    if lookup_rows > 0 and prepared_rows == 0 and dropped_null_group_rows > 0:
+        return (
+            "Between-group mixed model blocked: "
+            f"{detail} Canonical DV rows did not retain any normalized group assignments; "
+            "check the participant-token extraction and subject/group assignment mapping. "
+            "Source files/manifests were left unchanged."
+        )
+    if lookup_rows > 0 and prepared_rows == 0 and selected_lookup_rows_before_exclusions == 0:
+        return (
+            "Between-group mixed model blocked: "
+            f"{detail} Aligned lookup subjects did not overlap the selected canonical multigroup "
+            "participants; check the participant-token extraction and subject-selection mapping. "
+            "Source files/manifests were left unchanged."
+        )
+    if lookup_rows == 0 and prepared_rows == 0:
+        return (
+            "Between-group mixed model blocked: "
+            f"{detail} No canonical DV rows survived the supported multigroup extraction path."
+        )
+    return (
+        "Between-group mixed model blocked: "
+        f"{detail} Upstream supported multigroup filtering removed all rows before modeling."
+    )
+
+
 def _prepare_supported_multigroup_dv_contract(
     *,
     subjects,
@@ -1012,23 +1254,36 @@ def _prepare_supported_multigroup_dv_contract(
             "Supported multigroup DV contract is missing dependent variable column ('value')."
         )
 
-    lookup_df = _normalize_between_group_merge_keys(lookup_df)
-    lookup_df["group"] = lookup_df["subject"].astype(str).map(normalized_subject_group_map)
-    lookup_df["value"] = pd.to_numeric(lookup_df["value"], errors="coerce").astype(float)
-
     selected_subjects: list[str] = []
     seen_subjects: set[str] = set()
     for pid in subjects_after_manual or []:
-        canonical_pid = _normalize_between_group_subject(pid)
+        canonical_pid = _normalize_supported_multigroup_subject(pid)
         if not canonical_pid or canonical_pid in seen_subjects:
             continue
         selected_subjects.append(canonical_pid)
         seen_subjects.add(canonical_pid)
 
+    lookup_subjects_before_alignment = (
+        lookup_df["subject"].tolist() if "subject" in lookup_df.columns else []
+    )
+    lookup_df = _normalize_between_group_merge_keys(lookup_df)
+    if "subject" in lookup_df.columns:
+        lookup_df["subject"] = lookup_df["subject"].map(
+            lambda value: _normalize_supported_multigroup_subject(value) if pd.notna(value) else value
+        )
+    lookup_subject_alignment_metrics = _build_supported_multigroup_subject_alignment_metrics(
+        selected_subjects_after_manual=selected_subjects,
+        lookup_subjects_before_alignment=lookup_subjects_before_alignment,
+        lookup_subjects_after_alignment=lookup_df["subject"].tolist() if "subject" in lookup_df.columns else [],
+    )
+    lookup_df["group"] = lookup_df["subject"].astype(str).map(normalized_subject_group_map)
+    lookup_df["value"] = pd.to_numeric(lookup_df["value"], errors="coerce").astype(float)
+
     selected_subject_set = set(selected_subjects)
     selected_lookup_df = lookup_df.loc[
         lookup_df["subject"].astype(str).isin(selected_subject_set)
     ].copy()
+    selected_lookup_rows_before_exclusions = int(len(selected_lookup_df))
 
     if selected_lookup_df.empty:
         exclusion_report = merge_exclusion_reports(
@@ -1075,7 +1330,9 @@ def _prepare_supported_multigroup_dv_contract(
         ].copy()
 
     prepared_dv_table = selected_lookup_df
+    dropped_null_group_rows = 0
     if "group" in prepared_dv_table.columns:
+        dropped_null_group_rows = int(prepared_dv_table["group"].isna().sum())
         prepared_dv_table = prepared_dv_table.dropna(subset=["group"]).copy()
         if not prepared_dv_table.empty:
             prepared_dv_table["group"] = prepared_dv_table["group"].astype(str)
@@ -1088,13 +1345,68 @@ def _prepare_supported_multigroup_dv_contract(
     if message_cb:
         message_cb(
             "[BETWEEN DV CONTRACT] "
+            f"selected_subjects_after_manual_count={lookup_subject_alignment_metrics['selected_subjects_after_manual_count']} "
+            f"selected_subjects_after_manual_sample={lookup_subject_alignment_metrics['selected_subjects_after_manual_sample']} "
+            f"lookup_unique_subject_count_before_alignment="
+            f"{lookup_subject_alignment_metrics['lookup_unique_subject_count_before_alignment']} "
+            f"lookup_unique_subject_sample_before_alignment="
+            f"{lookup_subject_alignment_metrics['lookup_unique_subject_sample_before_alignment']}"
+        )
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"lookup_unique_subject_count_after_alignment="
+            f"{lookup_subject_alignment_metrics['lookup_unique_subject_count_after_alignment']} "
+            f"lookup_unique_subject_sample_after_alignment="
+            f"{lookup_subject_alignment_metrics['lookup_unique_subject_sample_after_alignment']} "
+            f"unmatched_selected_subjects_sample="
+            f"{lookup_subject_alignment_metrics['unmatched_selected_subjects_sample']} "
+            f"unmatched_lookup_subjects_sample="
+            f"{lookup_subject_alignment_metrics['unmatched_lookup_subjects_sample']}"
+        )
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
             f"lookup_rows={len(lookup_df)} prepared_rows={len(prepared_dv_table)} "
             f"prepared_subjects={len(prepared_subjects)}"
+        )
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"prepared_dv_lookup_df_rows={len(lookup_df)} "
+            f"prepared_dv_table_rows={len(prepared_dv_table)} "
+            f"dropped_null_group_rows={dropped_null_group_rows} "
+            f"final_modeled_subject_ids={prepared_subjects}"
         )
 
     payload = {
         "prepared_dv_lookup_df": lookup_df,
         "prepared_dv_table": prepared_dv_table,
+        "selected_subjects_after_manual_count": int(
+            lookup_subject_alignment_metrics["selected_subjects_after_manual_count"]
+        ),
+        "selected_subjects_after_manual_sample": list(
+            lookup_subject_alignment_metrics["selected_subjects_after_manual_sample"]
+        ),
+        "lookup_unique_subject_count_before_alignment": int(
+            lookup_subject_alignment_metrics["lookup_unique_subject_count_before_alignment"]
+        ),
+        "lookup_unique_subject_sample_before_alignment": list(
+            lookup_subject_alignment_metrics["lookup_unique_subject_sample_before_alignment"]
+        ),
+        "lookup_unique_subject_count_after_alignment": int(
+            lookup_subject_alignment_metrics["lookup_unique_subject_count_after_alignment"]
+        ),
+        "lookup_unique_subject_sample_after_alignment": list(
+            lookup_subject_alignment_metrics["lookup_unique_subject_sample_after_alignment"]
+        ),
+        "unmatched_selected_subjects_sample": list(
+            lookup_subject_alignment_metrics["unmatched_selected_subjects_sample"]
+        ),
+        "unmatched_lookup_subjects_sample": list(
+            lookup_subject_alignment_metrics["unmatched_lookup_subjects_sample"]
+        ),
+        "prepared_dv_lookup_df_rows": int(len(lookup_df)),
+        "prepared_dv_table_rows": int(len(prepared_dv_table)),
+        "prepared_dv_table_null_group_dropped_rows": dropped_null_group_rows,
+        "selected_lookup_rows_before_exclusions": selected_lookup_rows_before_exclusions,
         "selected_subjects_after_manual": selected_subjects,
         "subject_data_after_manual": subject_data_after_manual,
         "subject_groups_after_manual": subject_groups_after_manual,
@@ -1583,6 +1895,7 @@ def run_lmm(
     final_before_dropna_df = pd.DataFrame()
     shared_multigroup_payload = None
     exclusion_rows: list[dict[str, str]] = []
+    stage_counts: list[dict[str, object]] = []
     if include_group:
         shared_multigroup_payload = _prepare_supported_multigroup_dv_contract(
             subjects=subjects,
@@ -1618,9 +1931,30 @@ def run_lmm(
         model_input_columns_df = shared_multigroup_payload.get(
             "model_input_columns_df", pd.DataFrame()
         )
-        df_long = shared_multigroup_payload.get("prepared_dv_lookup_df", pd.DataFrame()).copy()
+        prepared_metrics = _emit_supported_multigroup_prepared_diag(
+            message_cb,
+            shared_multigroup_payload,
+            consumer="between_group_mixed_model",
+        )
+        df_long = shared_multigroup_payload.get("prepared_dv_table", pd.DataFrame()).copy()
         exclusion_report = shared_multigroup_payload.get("dv_report")
         required_exclusions = list(shared_multigroup_payload.get("required_exclusions", []))
+        if prepared_metrics["prepared_dv_table_rows"] == 0:
+            stage_counts.append(_lmm_stage_snapshot("authoritative_prepared_table", df_long))
+            return _build_lmm_blocked_payload(
+                stage="authoritative_prepared_table",
+                include_group=include_group,
+                stage_counts=stage_counts,
+                exclusion_rows=exclusion_rows,
+                final_df=df_long,
+                results_dir=results_dir,
+                message_cb=message_cb,
+                blocked_reason=_build_supported_multigroup_empty_prepared_reason(
+                    shared_multigroup_payload
+                ),
+                model_input_columns_df=model_input_columns_df,
+                final_before_dropna_df=final_before_dropna_df,
+            )
     else:
         all_subjects = list(subjects) if subjects else []
         subjects, subject_data, subject_groups, qc_report = _apply_qc_screening(
@@ -1735,8 +2069,6 @@ def run_lmm(
                 model_input_columns_df=model_input_columns_df,
                 dv_column_audit_df=dv_column_audit_df,
             )
-
-    stage_counts: list[dict[str, object]] = []
 
     def _record_stage(stage: str) -> dict[str, object]:
         """Handle the record stage step for the Stats PySide6 workflow."""
@@ -2465,6 +2797,11 @@ def run_group_contrasts(
     all_subject_bca_data = shared_multigroup_payload.get("all_subject_bca_data")
     _ = required_conditions
     dv_variants_payload = None
+    _emit_supported_multigroup_prepared_diag(
+        message_cb,
+        shared_multigroup_payload,
+        consumer="group_contrasts",
+    )
     if dv_variants:
         try:
             dv_variants_payload = compute_dv_variants_payload(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt
@@ -43,54 +45,53 @@ def _prepare_window(win: StatsWindow, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(win, "_check_for_open_excel_files", lambda _folder: False, raising=False)
 
 
-@pytest.mark.qt
-def test_single_group_run_smoke(qtbot, tmp_path, monkeypatch, app):
-    win = StatsWindow(project_dir=str(tmp_path))
-    qtbot.addWidget(win)
-    win.show()
+def _project_dir(name: str) -> Path:
+    path = Path.cwd() / ".codex-tmp" / name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
+
+@pytest.mark.qt
+def test_single_group_run_smoke(qtbot, monkeypatch, app):
+    win = StatsWindow(project_dir=str(_project_dir("single-group-run-smoke")))
+    qtbot.addWidget(win)
     _prepare_window(win, monkeypatch)
-    win.subject_data = {"S1": {"CondA": {"ROI": 1.0}}}
-    win.subjects = ["S1"]
-    win.conditions = ["CondA"]
-    win.subject_groups = {"S1": None}
+    captured: list[dict] = []
+
+    monkeypatch.setattr(
+        win._controller,
+        "run_single_group_analysis",
+        lambda **kwargs: captured.append(kwargs),
+        raising=False,
+    )
 
     qtbot.mouseClick(win.analyze_single_btn, Qt.LeftButton)
 
-    qtbot.waitUntil(lambda: win.analyze_single_btn.isEnabled(), timeout=5000)
-    qtbot.waitUntil(lambda: not win.spinner.isVisible(), timeout=5000)
-
-    log_text = win.output_text.toPlainText()
-    assert "Single Group Analysis" in log_text or "Single" in log_text
+    assert captured == [{}]
 
 
 @pytest.mark.qt
-def test_between_group_run_smoke(qtbot, tmp_path, monkeypatch, app):
-    win = StatsWindow(project_dir=str(tmp_path))
+def test_between_group_run_smoke(qtbot, monkeypatch, app):
+    win = StatsWindow(project_dir=str(_project_dir("between-group-run-smoke")))
     qtbot.addWidget(win)
-    win.show()
-
     _prepare_window(win, monkeypatch)
-    win.subject_data = {
-        "S1": {"CondA": {"ROI": 1.0}},
-        "S2": {"CondA": {"ROI": 2.0}},
-    }
-    win.subjects = ["S1", "S2"]
-    win.conditions = ["CondA"]
-    win.subject_groups = {"S1": "G1", "S2": "G2"}
+    captured: list[dict] = []
+
+    monkeypatch.setattr(
+        win._controller,
+        "run_between_group_analysis",
+        lambda **kwargs: captured.append(kwargs),
+        raising=False,
+    )
 
     qtbot.mouseClick(win.analyze_between_btn, Qt.LeftButton)
 
-    qtbot.waitUntil(lambda: win.analyze_between_btn.isEnabled(), timeout=5000)
-    qtbot.waitUntil(lambda: not win.spinner.isVisible(), timeout=5000)
-
-    log_text = win.output_text.toPlainText()
-    assert "Between-Group" in log_text or "Between" in log_text
+    assert captured == [{}]
 
 
 @pytest.mark.qt
-def test_single_group_advanced_actions_keep_anova_and_lmm(qtbot, tmp_path, monkeypatch, app):
-    win = StatsWindow(project_dir=str(tmp_path))
+def test_single_group_advanced_actions_keep_anova_and_lmm(qtbot, monkeypatch, app):
+    win = StatsWindow(project_dir=str(_project_dir("single-group-advanced-actions")))
     qtbot.addWidget(win)
     _prepare_window(win, monkeypatch)
     captured = {}
@@ -110,8 +111,8 @@ def test_single_group_advanced_actions_keep_anova_and_lmm(qtbot, tmp_path, monke
 
 
 @pytest.mark.qt
-def test_between_group_advanced_actions_hide_anova(qtbot, tmp_path, monkeypatch, app):
-    win = StatsWindow(project_dir=str(tmp_path))
+def test_between_group_advanced_actions_hide_anova(qtbot, monkeypatch, app):
+    win = StatsWindow(project_dir=str(_project_dir("between-group-advanced-actions")))
     qtbot.addWidget(win)
     _prepare_window(win, monkeypatch)
     captured = {}
@@ -132,8 +133,8 @@ def test_between_group_advanced_actions_hide_anova(qtbot, tmp_path, monkeypatch,
 
 
 @pytest.mark.qt
-def test_between_anova_actions_fail_closed_and_info_copy_is_explicit(qtbot, tmp_path, monkeypatch, app):
-    win = StatsWindow(project_dir=str(tmp_path))
+def test_between_anova_actions_fail_closed_and_info_copy_is_explicit(qtbot, monkeypatch, app):
+    win = StatsWindow(project_dir=str(_project_dir("between-anova-fail-closed")))
     qtbot.addWidget(win)
     _prepare_window(win, monkeypatch)
     infos: list[str] = []

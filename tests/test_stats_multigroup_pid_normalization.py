@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 try:
@@ -14,6 +16,12 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
 @pytest.fixture(autouse=True)
 def _stub_default_loader(monkeypatch):
     monkeypatch.setattr(StatsWindow, "_load_default_data_folder", lambda self: None, raising=False)
+
+
+def _project_dir(name: str) -> Path:
+    path = Path.cwd() / ".codex-tmp" / name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def test_multigroup_runtime_snapshot_normalizes_and_warns() -> None:
@@ -73,11 +81,20 @@ def test_multigroup_runtime_snapshot_accepts_prefixed_manifest_participant_ids()
     assert snapshot.subject_groups == {"P1": "GroupA"}
     assert snapshot.errors == []
     assert any("ValenceP01 -> P1" in warning for warning in snapshot.warnings)
+    assert any(
+        "left source files/manifests unchanged" in warning
+        for warning in snapshot.warnings
+    )
+    assert all(
+        "rename source files/manifests" not in warning.lower()
+        for warning in snapshot.warnings
+    )
 
 
 @pytest.mark.qt
-def test_between_get_step_config_uses_canonical_multigroup_snapshot(qtbot, tmp_path, monkeypatch) -> None:
-    win = StatsWindow(project_dir=str(tmp_path))
+def test_between_get_step_config_uses_canonical_multigroup_snapshot(qtbot, monkeypatch) -> None:
+    project_dir = _project_dir("multigroup-step-config")
+    win = StatsWindow(project_dir=str(project_dir))
     qtbot.addWidget(win)
 
     manifest = {
@@ -103,7 +120,7 @@ def test_between_get_step_config_uses_canonical_multigroup_snapshot(qtbot, tmp_p
     win.manual_excluded_pids = {"P01"}
 
     monkeypatch.setattr(StatsWindow, "_get_selected_conditions", lambda self: ["CondA", "CondB"], raising=False)
-    monkeypatch.setattr(StatsWindow, "_ensure_results_dir", lambda self: str(tmp_path), raising=False)
+    monkeypatch.setattr(StatsWindow, "_ensure_results_dir", lambda self: str(project_dir), raising=False)
 
     kwargs, _handler = win.get_step_config(PipelineId.BETWEEN, StepId.BETWEEN_GROUP_MIXED_MODEL)
 
@@ -120,8 +137,8 @@ def test_between_get_step_config_uses_canonical_multigroup_snapshot(qtbot, tmp_p
 
 
 @pytest.mark.qt
-def test_update_multigroup_summary_does_not_overwrite_logrecord_message(qtbot, tmp_path) -> None:
-    win = StatsWindow(project_dir=str(tmp_path))
+def test_update_multigroup_summary_does_not_overwrite_logrecord_message(qtbot) -> None:
+    win = StatsWindow(project_dir=str(_project_dir("multigroup-summary-logrecord")))
     qtbot.addWidget(win)
 
     result = MultiGroupScanResult(

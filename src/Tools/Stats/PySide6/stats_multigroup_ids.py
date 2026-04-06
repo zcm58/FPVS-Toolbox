@@ -140,8 +140,8 @@ def build_multigroup_pid_warning(
     return (
         "Non-canonical participant IDs were normalized internally for this "
         f"{surface_label} (e.g. {example_raw} -> {example_canonical}). "
-        "Canonical format is P1, P2, P3, ... The app did not rename files on disk; "
-        "rename source files/manifests to canonical names to avoid ambiguity."
+        "Canonical format is P1, P2, P3, ... The app extracted participant tokens "
+        "internally and left source files/manifests unchanged."
     )
 
 
