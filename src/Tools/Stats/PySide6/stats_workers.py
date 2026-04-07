@@ -420,7 +420,7 @@ def _normalize_between_group_subject(value: object) -> str:
     return text
 
 
-def _normalize_supported_multigroup_subject(value: object) -> str:
+def _multigroup_subject(value: object) -> str:
     """Normalize supported multigroup subject values onto the scan/load PID contract."""
 
     text = str(value).strip()
