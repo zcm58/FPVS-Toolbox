@@ -3151,6 +3151,12 @@ class StatsWindow(QMainWindow):
     @Slot(str)
     def _on_worker_message(self, msg: str) -> None:
         """Handle the on worker message step for the Stats PySide6 workflow."""
+        text = msg or ""
+        if (
+            text.startswith("[BETWEEN DV CONTRACT]")
+            and self._controller.is_running(PipelineId.BETWEEN)
+        ):
+            self.append_log("Between", text)
         self._set_detected_info(msg)
 
     @Slot(str)

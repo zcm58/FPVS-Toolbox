@@ -69,9 +69,13 @@ def stats_smoke_env(monkeypatch):
     def _run_group_contrasts(*_args, **_kwargs):
         return {"results_df": dummy_df.copy(), "output_text": "contrasts"}
 
-    def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb):  # noqa: ARG001
+    def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb, message_cb=None):  # noqa: ARG001
         try:
-            payload = step.worker_fn(lambda *_a, **_k: None, lambda *_a, **_k: None, **step.kwargs)
+            payload = step.worker_fn(
+                lambda *_a, **_k: None,
+                message_cb or (lambda *_a, **_k: None),
+                **step.kwargs,
+            )
         except Exception as exc:  # noqa: BLE001
             error_cb(pipeline_id, step.id, str(exc))
         else:

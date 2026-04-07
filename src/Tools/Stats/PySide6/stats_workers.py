@@ -1257,7 +1257,7 @@ def _prepare_supported_multigroup_dv_contract(
     selected_subjects: list[str] = []
     seen_subjects: set[str] = set()
     for pid in subjects_after_manual or []:
-        canonical_pid = _normalize_supported_multigroup_subject(pid)
+        canonical_pid = _normalize_between_group_subject(pid)
         if not canonical_pid or canonical_pid in seen_subjects:
             continue
         selected_subjects.append(canonical_pid)
@@ -1269,7 +1269,7 @@ def _prepare_supported_multigroup_dv_contract(
     lookup_df = _normalize_between_group_merge_keys(lookup_df)
     if "subject" in lookup_df.columns:
         lookup_df["subject"] = lookup_df["subject"].map(
-            lambda value: _normalize_supported_multigroup_subject(value) if pd.notna(value) else value
+            lambda value: _normalize_between_group_subject(value) if pd.notna(value) else value
         )
     lookup_subject_alignment_metrics = _build_supported_multigroup_subject_alignment_metrics(
         selected_subjects_after_manual=selected_subjects,

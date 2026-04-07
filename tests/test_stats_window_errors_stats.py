@@ -1,9 +1,12 @@
 import pytest
+from types import SimpleNamespace
+
 from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtWidgets import QMessageBox
 
 from Tools.Stats.Legacy import stats_analysis, stats_helpers
 from Tools.Stats.PySide6 import stats_workers
+from Tools.Stats.PySide6.stats_core import PipelineId
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
 from Tools.Stats.PySide6.stats_workers import StatsWorker
 
@@ -112,6 +115,21 @@ def test_between_pipeline_mixed_model_failure(qtbot, tmp_path, monkeypatch):
 
     log_text = win.output_text.toPlainText()
     assert "between mixed failure" in log_text or "ERROR" in log_text
+
+
+def test_between_worker_dv_contract_messages_are_mirrored_into_log(monkeypatch):
+    mirrored: list[tuple[str, str, str]] = []
+    detected: list[str] = []
+    dummy = SimpleNamespace(
+        _controller=SimpleNamespace(is_running=lambda pid: pid is PipelineId.BETWEEN),
+        append_log=lambda section, message, level="info": mirrored.append((section, message, level)),
+        _set_detected_info=lambda msg: detected.append(msg),
+    )
+
+    StatsWindow._on_worker_message(dummy, "[BETWEEN DV CONTRACT] prepared_dv_table_rows=0")
+
+    assert mirrored == [("Between", "[BETWEEN DV CONTRACT] prepared_dv_table_rows=0", "info")]
+    assert detected == ["[BETWEEN DV CONTRACT] prepared_dv_table_rows=0"]
 
 
 def test_summary_failure_releases_busy_state(qtbot, tmp_path, monkeypatch):

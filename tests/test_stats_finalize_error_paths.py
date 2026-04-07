@@ -49,7 +49,7 @@ def fast_window(monkeypatch, qtbot, tmp_path, patched_workers):
         self._current_alpha = 0.05
         return True
 
-    def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb):
+    def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb, message_cb=None):
         finished_cb(pipeline_id, step.id, {})
 
     def fake_get_step_config(self, pipeline_id, step_id):  # noqa: ARG001

@@ -830,6 +830,7 @@ class StatsController:
                 step,
                 finished_cb=self._on_step_finished,
                 error_cb=self._on_step_error,
+                message_cb=None,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(

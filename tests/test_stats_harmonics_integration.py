@@ -88,9 +88,13 @@ def synced_window(monkeypatch, qtbot, tmp_path, patched_workers, harmonic_calls)
         self._harmonic_config = HarmonicConfig("Z Score", 1.64)
         return True
 
-    def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb):
+    def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb, message_cb=None):
         try:
-            payload = step.worker_fn(lambda *_a, **_k: None, lambda *_a, **_k: None, **step.kwargs)
+            payload = step.worker_fn(
+                lambda *_a, **_k: None,
+                message_cb or (lambda *_a, **_k: None),
+                **step.kwargs,
+            )
         except Exception as exc:  # noqa: BLE001
             error_cb(pipeline_id, step.id, str(exc))
         else:
