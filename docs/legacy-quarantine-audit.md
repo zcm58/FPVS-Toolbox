@@ -46,10 +46,13 @@ Legend:
 - `src/Tools/Stats/Legacy/stats_runners.py`
 - `src/Tools/Stats/Legacy/stats_ui.py`
 
-## Test-only (runtime-safe to quarantine, but tests will fail unless updated)
+## Newly quarantined after follow-up cleanup
 
-- `src/Main_App/Legacy_App/app_logic.py`
-- `src/Main_App/Legacy_App/validation_mixins.py`
+- `src/Main_App/Legacy_App/app_logic.py` -> moved to `src/quarantine/Main_App/Legacy_App/app_logic.py`
+- `src/Main_App/Legacy_App/validation_mixins.py` -> moved to `src/quarantine/Main_App/Legacy_App/validation_mixins.py`
+- `src/Tools/Stats/Quarantined/Legacy_UI/stats.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/stats.py`
+- `src/Tools/Stats/Quarantined/Legacy_UI/stats_ui.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/stats_ui.py`
+- `src/Tools/Stats/Quarantined/Legacy_UI/__init__.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/__init__.py`
 
 ## Quarantine candidates (no runtime/test import references found)
 
@@ -69,3 +72,4 @@ Legend:
 ## Note
 
 - `Main_App.__init__` still defines a proxy for `SettingsWindow`, but `src/Main_App/Legacy_App/settings_window.py` does not exist.
+- `Main_App.__init__` keeps fail-fast compatibility exports for quarantined `ValidationMixin` and `preprocess_raw`.

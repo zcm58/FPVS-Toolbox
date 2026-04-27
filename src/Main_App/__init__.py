@@ -146,7 +146,7 @@ class EventDetectionMixin:  # pragma: no cover
 
 class ValidationMixin:  # pragma: no cover
     def __init_subclass__(cls, **kw: Any) -> None:
-        raise RuntimeError("Legacy mixin not available at import; import explicitly from Legacy_App.validation_mixins")
+        raise RuntimeError("Legacy ValidationMixin has been quarantined; use the PySide6 validation path.")
 
 def ProcessingMixin(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     return _lazy_import("processing_utils", "ProcessingMixin")(*args, **kwargs)
@@ -158,7 +158,7 @@ def perform_preprocessing(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     return _lazy_import("eeg_preprocessing", "perform_preprocessing")(*args, **kwargs)
 
 def preprocess_raw(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    return _lazy_import("app_logic", "preprocess_raw")(*args, **kwargs)
+    raise RuntimeError("Legacy preprocess_raw has been quarantined; use the PySide6 preprocessing path.")
 
 def post_process(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     return _lazy_import("post_process", "post_process")(*args, **kwargs)

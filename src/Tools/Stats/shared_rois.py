@@ -46,7 +46,6 @@ def apply_rois_to_modules(rois_dict: dict[str, list[str]]) -> None:
     for module_name in (
         "Tools.Stats.Legacy.stats_runners",
         "Tools.Stats.Legacy.stats",
-        "Tools.Stats.Quarantined.Legacy_UI.stats",
     ):
         module = sys.modules.get(module_name)
         if module is not None:

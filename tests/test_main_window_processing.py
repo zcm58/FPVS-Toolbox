@@ -12,9 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from Main_App.PySide6_App.Backend.project import Project
 import Main_App.PySide6_App.Backend.project_manager as project_manager
-import Main_App.Legacy_App.validation_mixins as validation_mixins
 import Main_App.PySide6_App.Backend.loader as load_utils
-import Main_App.Legacy_App.app_logic as app_logic
 import Main_App.Legacy_App.eeg_preprocessing as eeg_preprocessing
 import Main_App.PySide6_App.Backend.processing as processing
 import Main_App.Legacy_App.post_process as post_process
@@ -31,9 +29,7 @@ def _stub_processing(monkeypatch, projects_root: Path) -> None:
         "select_projects_root",
         lambda self: setattr(self, "projectsRoot", projects_root),
     )
-    monkeypatch.setattr(validation_mixins.ValidationMixin, "_validate_inputs", lambda self: True)
     monkeypatch.setattr(load_utils, "load_eeg_file", lambda *a, **k: object())
-    monkeypatch.setattr(app_logic, "preprocess_raw", lambda *a, **k: object())
     monkeypatch.setattr(eeg_preprocessing, "perform_preprocessing", lambda *a, **k: (object(), 0))
     monkeypatch.setattr(processing, "process_data", lambda *a, **k: None)
     monkeypatch.setattr(post_process, "post_process", lambda *a, **k: None)

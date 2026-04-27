@@ -108,7 +108,7 @@ SNR mini-spectrum is aligned with that style for visual comparability in individ
 
 David, J., Quenon, L., Hanseeuw, B., Ivanoiu, A., Volfart, A., Koessler, L., & Rossion, B. (2025). 
 **An objective and sensitive electrophysiological marker of word semantic categorization impairment in Alzheimer's 
-disease.** *Clinical Neurophysiology*, 170, 98–109. https://doi.org/10.1016/j.clinph.2024.12.018.【F:docs/relevant-publications.md†L21-L28】
+disease.** *Clinical Neurophysiology*, 170, 98–109. https://doi.org/10.1016/j.clinph.2024.12.018.
 
 ## Manuscript / thesis-ready text (copy/paste)
 

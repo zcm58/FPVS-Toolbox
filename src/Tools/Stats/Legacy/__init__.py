@@ -14,7 +14,7 @@ def quarantined_stats_window_message() -> str:
         "quarantined and is no longer supported.\n"
         "Use the PySide6 Stats tool instead.\n"
         "Reference source is preserved at "
-        "`src/Tools/Stats/Quarantined/Legacy_UI/stats.py`."
+        "`src/quarantine/Tools/Stats/Legacy_UI/stats.py`."
     )
 
 
@@ -23,7 +23,7 @@ def quarantined_stats_ui_message() -> str:
         "The legacy CustomTkinter Stats UI helpers at `Tools.Stats.Legacy.stats_ui` "
         "have been quarantined and are no longer supported.\n"
         "Reference source is preserved at "
-        "`src/Tools/Stats/Quarantined/Legacy_UI/stats_ui.py`."
+        "`src/quarantine/Tools/Stats/Legacy_UI/stats_ui.py`."
     )
 
 

@@ -261,3 +261,50 @@ def test_rm_anova_text_report_exports_to_results_dir_used_by_stats_outputs(tmp_p
     exported = list(results_dir.glob("RM_ANOVA_Report_*.txt"))
     assert len(exported) == 1
     assert any("RM-ANOVA text report exported:" in msg for msg in messages)
+
+
+def test_single_file_rm_anova_still_excludes_required_nonfinite_subjects(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.set_rois", lambda _rois: None)
+    monkeypatch.setattr(
+        "Tools.Stats.PySide6.stats_workers._apply_qc_screening",
+        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, None),
+    )
+    monkeypatch.setattr(
+        "Tools.Stats.PySide6.stats_workers._apply_manual_exclusions",
+        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, []),
+    )
+    monkeypatch.setattr(
+        "Tools.Stats.PySide6.stats_workers.prepare_summed_bca_data",
+        lambda **kwargs: {"P1": {"A": {"ROI1": 1.0}}, "P2": {"A": {"ROI1": 2.0}}},
+    )
+    monkeypatch.setattr(
+        "Tools.Stats.PySide6.stats_workers._long_format_from_bca",
+        lambda _data: pd.DataFrame(
+            [
+                {"subject": "P1", "condition": "A", "roi": "ROI1", "value": 1.0},
+                {"subject": "P2", "condition": "A", "roi": "ROI1", "value": float("nan")},
+            ]
+        ),
+    )
+
+    def _capture_rm_anova(all_subject_bca_data, message_cb, **kwargs):  # noqa: ANN001, ANN002
+        seen["subjects"] = list(kwargs["subjects"])
+        return "ok", pd.DataFrame([{"Effect": "condition", "Pr > F": 0.01}])
+
+    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.analysis_run_rm_anova", _capture_rm_anova)
+
+    run_rm_anova(
+        lambda _progress: None,
+        lambda _message: None,
+        subjects=["P1", "P2"],
+        conditions=["A"],
+        conditions_all=["A"],
+        subject_data={"P1": {"A": {"ROI1": 1.0}}, "P2": {"A": {"ROI1": 2.0}}},
+        base_freq=6.0,
+        rois={"ROI1": ["O1"]},
+        rois_all={"ROI1": ["O1"]},
+    )
+
+    assert seen["subjects"] == ["P1"]

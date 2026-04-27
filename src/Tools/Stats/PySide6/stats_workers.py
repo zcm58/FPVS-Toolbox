@@ -17,6 +17,7 @@ import logging
 import os
 import threading
 import time
+from collections import Counter
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Callable, Dict
@@ -941,6 +942,20 @@ def _extract_required_exclusions(report: OutlierExclusionReport) -> list[DvViola
     return required
 
 
+def _summarize_supported_multigroup_exclusion_reasons(
+    report: OutlierExclusionReport | None,
+) -> dict[str, int]:
+    """Summarize exclusion reasons for the supported multigroup diagnostics."""
+
+    if not isinstance(report, OutlierExclusionReport) or not report.participants:
+        return {}
+
+    reason_counts = Counter()
+    for participant in report.participants:
+        reason_counts.update(str(reason) for reason in participant.reasons)
+    return dict(sorted(reason_counts.items()))
+
+
 def _empty_outlier_report(subjects: list[str], *, abs_limit: float) -> OutlierExclusionReport:
     """Handle the empty outlier report step for the Stats PySide6 workflow."""
     summary = OutlierExclusionSummary(
@@ -982,6 +997,11 @@ def _supported_multigroup_prepared_metrics(
             "unmatched_selected_subjects_sample": [],
             "unmatched_lookup_subjects_sample": [],
             "prepared_dv_lookup_df_rows": 0,
+            "rows_after_outlier_filter": 0,
+            "required_exclusion_count": 0,
+            "required_pids_sample": [],
+            "exclusion_reason_counts": {},
+            "rows_after_required_exclusions": 0,
             "prepared_dv_table_rows": 0,
             "dropped_null_group_rows": 0,
             "selected_lookup_rows_before_exclusions": 0,
@@ -1009,6 +1029,23 @@ def _supported_multigroup_prepared_metrics(
     dropped_null_group_rows = (
         int(payload.get("prepared_dv_table_null_group_dropped_rows"))
         if isinstance(payload.get("prepared_dv_table_null_group_dropped_rows"), int)
+        else 0
+    )
+    rows_after_outlier_filter = (
+        int(payload.get("rows_after_outlier_filter"))
+        if isinstance(payload.get("rows_after_outlier_filter"), int)
+        else 0
+    )
+    required_exclusion_count = (
+        int(payload.get("required_exclusion_count"))
+        if isinstance(payload.get("required_exclusion_count"), int)
+        else 0
+    )
+    required_pids_sample = list(payload.get("required_pids_sample", []))
+    exclusion_reason_counts = dict(payload.get("exclusion_reason_counts", {}))
+    rows_after_required_exclusions = (
+        int(payload.get("rows_after_required_exclusions"))
+        if isinstance(payload.get("rows_after_required_exclusions"), int)
         else 0
     )
     selected_lookup_rows_before_exclusions = (
@@ -1053,6 +1090,11 @@ def _supported_multigroup_prepared_metrics(
             payload.get("unmatched_lookup_subjects_sample", [])
         ),
         "prepared_dv_lookup_df_rows": lookup_rows,
+        "rows_after_outlier_filter": rows_after_outlier_filter,
+        "required_exclusion_count": required_exclusion_count,
+        "required_pids_sample": required_pids_sample,
+        "exclusion_reason_counts": exclusion_reason_counts,
+        "rows_after_required_exclusions": rows_after_required_exclusions,
         "prepared_dv_table_rows": prepared_rows,
         "dropped_null_group_rows": dropped_null_group_rows,
         "selected_lookup_rows_before_exclusions": selected_lookup_rows_before_exclusions,
@@ -1091,6 +1133,16 @@ def _emit_supported_multigroup_prepared_diag(
         message_cb(
             "[BETWEEN DV CONTRACT] "
             f"consumer={consumer} "
+            f"selected_lookup_rows_before_exclusions={metrics['selected_lookup_rows_before_exclusions']} "
+            f"rows_after_outlier_filter={metrics['rows_after_outlier_filter']} "
+            f"required_exclusion_count={metrics['required_exclusion_count']} "
+            f"required_pids_sample={metrics['required_pids_sample']}"
+        )
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"consumer={consumer} "
+            f"exclusion_reason_counts={metrics['exclusion_reason_counts']} "
+            f"rows_after_required_exclusions={metrics['rows_after_required_exclusions']} "
             f"prepared_dv_lookup_df_rows={metrics['prepared_dv_lookup_df_rows']} "
             f"prepared_dv_table_rows={metrics['prepared_dv_table_rows']} "
             f"dropped_null_group_rows={metrics['dropped_null_group_rows']} "
@@ -1286,13 +1338,14 @@ def _prepare_supported_multigroup_dv_contract(
     selected_lookup_rows_before_exclusions = int(len(selected_lookup_df))
 
     if selected_lookup_df.empty:
+        outlier_filtered_df = selected_lookup_df.copy()
         exclusion_report = merge_exclusion_reports(
             _empty_outlier_report(selected_subjects, abs_limit=outlier_abs_limit),
             qc_report,
         )
     else:
-        selected_lookup_df, exclusion_report = _apply_outlier_exclusion(
-            selected_lookup_df,
+        outlier_filtered_df, exclusion_report = _apply_outlier_exclusion(
+            selected_lookup_df.copy(),
             enabled=outlier_exclusion_enabled,
             abs_limit=outlier_abs_limit,
             message_cb=message_cb,
@@ -1316,6 +1369,17 @@ def _prepare_supported_multigroup_dv_contract(
         for violation in required_exclusions
         if (canonical_pid := _normalize_between_group_subject(violation.participant_id))
     }
+    required_pids_sample = sorted(required_pids)[:5]
+    exclusion_reason_counts = _summarize_supported_multigroup_exclusion_reasons(
+        exclusion_report
+    )
+
+    prepared_dv_table = selected_lookup_df.copy()
+    if "value" in prepared_dv_table.columns and not prepared_dv_table.empty:
+        finite_mask = np.isfinite(prepared_dv_table["value"].to_numpy())
+        prepared_dv_table = prepared_dv_table.loc[finite_mask].copy()
+    rows_after_required_exclusions = int(len(prepared_dv_table))
+
     if required_pids:
         for pid in sorted(required_pids):
             exclusion_rows.append(
@@ -1325,11 +1389,7 @@ def _prepare_supported_multigroup_dv_contract(
                     "reason": "outlier_or_nonfinite",
                 }
             )
-        selected_lookup_df = selected_lookup_df.loc[
-            ~selected_lookup_df["subject"].astype(str).isin(required_pids)
-        ].copy()
 
-    prepared_dv_table = selected_lookup_df
     dropped_null_group_rows = 0
     if "group" in prepared_dv_table.columns:
         dropped_null_group_rows = int(prepared_dv_table["group"].isna().sum())
@@ -1365,8 +1425,19 @@ def _prepare_supported_multigroup_dv_contract(
         )
         message_cb(
             "[BETWEEN DV CONTRACT] "
-            f"lookup_rows={len(lookup_df)} prepared_rows={len(prepared_dv_table)} "
-            f"prepared_subjects={len(prepared_subjects)}"
+            f"selected_lookup_rows_before_exclusions={selected_lookup_rows_before_exclusions} "
+            f"rows_after_outlier_filter={len(outlier_filtered_df)} "
+            f"required_exclusion_count={len(required_pids)} "
+            f"required_pids_sample={required_pids_sample}"
+        )
+        message_cb(
+            "[BETWEEN DV CONTRACT] "
+            f"exclusion_reason_counts={exclusion_reason_counts} "
+            f"rows_after_required_exclusions={rows_after_required_exclusions} "
+            f"prepared_dv_lookup_df_rows={len(lookup_df)} "
+            f"prepared_dv_table_rows={len(prepared_dv_table)} "
+            f"dropped_null_group_rows={dropped_null_group_rows} "
+            f"final_modeled_subject_ids={prepared_subjects}"
         )
         message_cb(
             "[BETWEEN DV CONTRACT] "
@@ -1404,9 +1475,15 @@ def _prepare_supported_multigroup_dv_contract(
             lookup_subject_alignment_metrics["unmatched_lookup_subjects_sample"]
         ),
         "prepared_dv_lookup_df_rows": int(len(lookup_df)),
+        "rows_after_outlier_filter": int(len(outlier_filtered_df)),
+        "required_exclusion_count": int(len(required_pids)),
+        "required_pids_sample": required_pids_sample,
+        "exclusion_reason_counts": exclusion_reason_counts,
+        "rows_after_required_exclusions": rows_after_required_exclusions,
         "prepared_dv_table_rows": int(len(prepared_dv_table)),
         "prepared_dv_table_null_group_dropped_rows": dropped_null_group_rows,
         "selected_lookup_rows_before_exclusions": selected_lookup_rows_before_exclusions,
+        "final_modeled_subject_ids": prepared_subjects,
         "selected_subjects_after_manual": selected_subjects,
         "subject_data_after_manual": subject_data_after_manual,
         "subject_groups_after_manual": subject_groups_after_manual,
@@ -2254,9 +2331,13 @@ def run_lmm(
                         "reason": "outlier_or_nonfinite",
                     }
                 )
-        df_long = df_long.loc[
-            ~df_long["subject"].astype(str).map(_normalize_between_group_subject).isin(required_pids)
-        ].copy()
+            df_long = df_long.loc[
+                ~df_long["subject"].astype(str).map(_normalize_between_group_subject).isin(required_pids)
+            ].copy()
+        elif shared_multigroup_payload is None:
+            df_long = df_long.loc[
+                ~df_long["subject"].astype(str).map(_normalize_between_group_subject).isin(required_pids)
+            ].copy()
     _record_stage("after_outlier_exclusions")
     message_cb(
         f"[LMM DIAG] participants_after_outlier={int(df_long['subject'].nunique()) if 'subject' in df_long.columns else 0}"
