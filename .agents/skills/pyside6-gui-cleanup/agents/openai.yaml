@@ -1,0 +1,4 @@
+interface:
+  display_name: "PySide6 GUI Cleanup"
+  short_description: "Clean up PySide6 GUI code with behavior-preserving verification."
+  default_prompt: "Use this skill when changing PySide6 GUI widgets, actions, dialogs, workers, or theme usage."

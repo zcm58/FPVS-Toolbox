@@ -1,11 +1,8 @@
-"""Helpers for treating the local Source Localization tree as optional."""
+"""Helpers for treating Source Localization as quarantined dead code."""
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import logging
-from types import ModuleType
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -17,13 +14,13 @@ SOURCE_LOCALIZATION_SOURCE_MODEL_MODULE = f"{SOURCE_LOCALIZATION_PACKAGE}.source
 SOURCE_LOCALIZATION_DIALOG_ATTR = "SourceLocalizationDialog"
 
 _UNAVAILABLE_MESSAGE = (
-    "Source Localization is unavailable because the optional local package "
-    "`src/quarantine` is not present in this installation."
+    "Source Localization is unavailable because the LORETA SourceLocalization "
+    "tree is quarantined dead code and is not an active runtime feature."
 )
 
 
 class SourceLocalizationUnavailableError(ImportError):
-    """Raised when the optional local Source Localization tree is unavailable."""
+    """Raised when Source Localization is unavailable because it is quarantined."""
 
     def __init__(
         self,
@@ -50,64 +47,48 @@ def get_source_localization_unavailable_message() -> str:
 
 
 def is_source_localization_available() -> bool:
-    """Return whether the optional local Source Localization package is importable."""
+    """Return whether Source Localization is available in active runtime."""
 
-    try:
-        return importlib.util.find_spec(SOURCE_LOCALIZATION_PACKAGE) is not None
-    except (ImportError, ModuleNotFoundError, ValueError):
-        return False
+    return False
 
 
-def get_eloreta_runner(operation: str = "source_localization_runner") -> ModuleType:
-    """Import and return the optional eLORETA runner module."""
+def get_eloreta_runner(operation: str = "source_localization_runner") -> Any:
+    """Raise because Source Localization is quarantined dead code."""
 
-    return _import_optional_module(
-        SOURCE_LOCALIZATION_RUNNER_MODULE,
+    raise _unavailable_error(
         operation=operation,
+        attempted_import=SOURCE_LOCALIZATION_RUNNER_MODULE,
+        exception=None,
     )
 
 
-def get_source_model_module(operation: str = "source_localization_source_model") -> ModuleType:
-    """Import and return the optional Source Localization model module."""
+def get_source_model_module(operation: str = "source_localization_source_model") -> Any:
+    """Raise because Source Localization is quarantined dead code."""
 
-    return _import_optional_module(
-        SOURCE_LOCALIZATION_SOURCE_MODEL_MODULE,
+    raise _unavailable_error(
         operation=operation,
+        attempted_import=SOURCE_LOCALIZATION_SOURCE_MODEL_MODULE,
+        exception=None,
     )
 
 
 def get_source_localization_dialog_class(
     operation: str = "source_localization_dialog",
 ) -> type[Any]:
-    """Import and return the optional Source Localization dialog class."""
+    """Raise because Source Localization is quarantined dead code."""
 
-    try:
-        module = importlib.import_module(SOURCE_LOCALIZATION_PACKAGE)
-        return getattr(module, SOURCE_LOCALIZATION_DIALOG_ATTR)
-    except (AttributeError, ImportError, ModuleNotFoundError) as exc:
-        raise _unavailable_error(
-            operation=operation,
-            attempted_import=SOURCE_LOCALIZATION_PACKAGE,
-            exception=exc,
-        ) from exc
-
-
-def _import_optional_module(module_name: str, *, operation: str) -> ModuleType:
-    try:
-        return importlib.import_module(module_name)
-    except (ImportError, ModuleNotFoundError) as exc:
-        raise _unavailable_error(
-            operation=operation,
-            attempted_import=module_name,
-            exception=exc,
-        ) from exc
+    raise _unavailable_error(
+        operation=operation,
+        attempted_import=SOURCE_LOCALIZATION_PACKAGE,
+        exception=None,
+    )
 
 
 def _unavailable_error(
     *,
     operation: str,
     attempted_import: str,
-    exception: BaseException,
+    exception: BaseException | None,
 ) -> SourceLocalizationUnavailableError:
     err = SourceLocalizationUnavailableError(
         operation=operation,

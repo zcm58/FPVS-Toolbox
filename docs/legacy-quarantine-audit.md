@@ -54,6 +54,12 @@ Legend:
 - `src/Tools/Stats/Quarantined/Legacy_UI/stats_ui.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/stats_ui.py`
 - `src/Tools/Stats/Quarantined/Legacy_UI/__init__.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/__init__.py`
 
+## Source Localization dead-code quarantine
+
+- `src/Tools/SourceLocalization/**` is no longer an active black-box module and must remain empty of source files.
+- The ignored reference copy under `src/quarantine/Tools/LORETA/SourceLocalization/**` is quarantined dead code.
+- Do not revive imports from `Tools.SourceLocalization` or `quarantine.Tools.LORETA.SourceLocalization` unless Source Localization is explicitly restored.
+
 ## Quarantine candidates (no runtime/test import references found)
 
 - `src/Main_App/Legacy_App/eloreta_gui.py` -> moved to `src/quarantine/Main_App/Legacy_App/eloreta_gui.py`

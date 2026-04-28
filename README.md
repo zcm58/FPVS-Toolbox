@@ -13,9 +13,9 @@ The FPVS Toolbox is a python based application for preprocessing, cleaning, and 
 - Users can easily process and analyze datasets with multiple experimental groups 
 
 
-## Features currently under development:
+## Quarantined features:
 
-- LORETA source localization and 3D visualization of neural responses on a transparent brain mesh
+- LORETA source localization and 3D visualization are quarantined dead code and are not active runtime features.
 
 
 ## Installation

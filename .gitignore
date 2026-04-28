@@ -35,6 +35,9 @@ coverage.xml
 # Pytest cache
 .pytest_cache/
 .tmp/
+.codex-tmp/
+.tmp_pytest_local/
+pytest-cache-files-*/
 
 # MyPy, Pyre and other type-checking tools
 .mypy_cache/
@@ -77,6 +80,15 @@ site/
 src/fsaverage/
 src/quarantine/Tools/LORETA/fsaverage/
 
-# Quarantined legacy code not used by active runtime
-src/quarantine/
+# Quarantined legacy code not used by active runtime.
+# Keep the dead-code AGENTS note visible without tracking quarantined code.
+src/quarantine/**
+!src/quarantine/
+!src/quarantine/Tools/
+!src/quarantine/Tools/LORETA/
+!src/quarantine/Tools/LORETA/SourceLocalization/
+!src/quarantine/Tools/LORETA/SourceLocalization/AGENTS.md
 /src/fpvs_cache/
+
+# Agent harness manifests intentionally tracked despite the general *.txt rule.
+!docs/architecture/protected-paths.txt

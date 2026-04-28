@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import importlib.util
 import logging
 import os
@@ -35,24 +34,6 @@ def _clear_optional_source_localization_modules() -> None:
             sys.modules.pop(name, None)
 
 
-def _simulate_missing_quarantine(monkeypatch) -> None:
-    real_find_spec = importlib.util.find_spec
-    real_import_module = importlib.import_module
-
-    def _find_spec(name: str, package: str | None = None):
-        if name == "quarantine" or name.startswith("quarantine."):
-            return None
-        return real_find_spec(name, package)
-
-    def _import_module(name: str, package: str | None = None):
-        if name == "quarantine" or name.startswith("quarantine."):
-            raise ModuleNotFoundError("No module named 'quarantine'")
-        return real_import_module(name, package)
-
-    monkeypatch.setattr(importlib.util, "find_spec", _find_spec)
-    monkeypatch.setattr(importlib, "import_module", _import_module)
-
-
 @pytest.fixture
 def app():
     application = QApplication.instance() or QApplication([])
@@ -70,7 +51,6 @@ def _build_window(tmp_path: Path, monkeypatch):
     os.environ["LOCALAPPDATA"] = str(runtime_home)
 
     _clear_optional_source_localization_modules()
-    _simulate_missing_quarantine(monkeypatch)
 
     from Main_App.PySide6_App.GUI import main_window as main_window_module
     import Main_App.PySide6_App.GUI.update_manager as update_manager
@@ -104,7 +84,7 @@ def _find_tools_action(window, text: str):
     raise AssertionError(f"Action not found: {text}")
 
 
-def test_main_window_starts_when_quarantine_is_missing(app, tmp_path: Path, monkeypatch) -> None:
+def test_main_window_disables_quarantined_source_localization(app, tmp_path: Path, monkeypatch) -> None:
     window = _build_window(tmp_path, monkeypatch)
 
     action = _find_tools_action(window, "Source Localization (eLORETA/sLORETA)")
@@ -112,12 +92,12 @@ def test_main_window_starts_when_quarantine_is_missing(app, tmp_path: Path, monk
     assert window.isVisible()
     assert getattr(window, "actionSourceLocalization", None) is action
     assert not action.isEnabled()
-    assert "src/quarantine" in action.statusTip()
+    assert "quarantined dead code" in action.statusTip()
     window.close()
     app.processEvents()
 
 
-def test_open_eloreta_tool_surfaces_missing_optional_dependency(
+def test_open_eloreta_tool_surfaces_quarantined_source_localization(
     app,
     tmp_path: Path,
     monkeypatch,
@@ -135,9 +115,9 @@ def test_open_eloreta_tool_surfaces_missing_optional_dependency(
     notice = getattr(window, "_source_localization_notice", None)
     assert notice is not None
     assert notice.isVisible()
-    assert "src/quarantine" in notice.text()
-    assert "src/quarantine" in window.statusBar().currentMessage()
-    assert "src/quarantine" in window.text_log.toPlainText()
+    assert "quarantined dead code" in notice.text()
+    assert "quarantined dead code" in window.statusBar().currentMessage()
+    assert "quarantined dead code" in window.text_log.toPlainText()
 
     matching_records = [
         record
@@ -148,6 +128,6 @@ def test_open_eloreta_tool_surfaces_missing_optional_dependency(
     record = matching_records[-1]
     assert record.attempted_import == "quarantine.Tools.LORETA.SourceLocalization"
     assert record.optional_dependency_present is False
-    assert "quarantine" in record.exception_text
+    assert record.exception_text == ""
     window.close()
     app.processEvents()

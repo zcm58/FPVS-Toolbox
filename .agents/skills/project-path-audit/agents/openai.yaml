@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Path Audit"
+  short_description: "Audit project-root file I/O, dialogs, manifests, and exports."
+  default_prompt: "Use this skill when changing file paths, QFileDialog behavior, imports, exports, manifests, or generated files."
