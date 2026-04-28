@@ -1,12 +1,14 @@
 # Linear mixed-effects model (Summed BCA)
 
+Use this page when you need details about mixed models for repeated-measures FPVS data.
+
 ## Plain-language overview
 
-A linear mixed-effects model (often shortened to “mixed model” or “LMM”)
+A linear mixed-effects model (often shortened to "mixed model" or "LMM")
 is a standard way to analyze **repeated-measures** data.
 
 In FPVS-EEG, a repeated-measures structure happens any time each
-participant contributes **multiple values**—for example, one Summed BCA
+participant contributes **multiple values**-for example, one Summed BCA
 value for each **condition** and each **ROI**. Those values are related
 because they come from the same person, so treating them as independent
 would be statistically inappropriate.
@@ -25,13 +27,13 @@ A mixed model handles this by combining two ideas:
 Why this is useful in FPVS-EEG research:
 
 - It matches the reality that FPVS datasets are usually
-  **subject × condition × ROI**.
+  **subject x condition x ROI**.
 - It gives interpretable answers to the same questions you would ask
   with repeated-measures ANOVA (condition effects, ROI effects, and the
   interaction), while explicitly accounting for subject-to-subject
   variability in overall response magnitude.
 - It can be more tolerant of **minor imbalance** (e.g., a small number of
-  missing condition×ROI cells after exclusions) than approaches that
+  missing conditionxROI cells after exclusions) than approaches that
   require perfectly complete data tables.
 
 ---
@@ -49,7 +51,7 @@ harmonics defined for the analysis). Data are indexed by participant, condition,
 
 Models are fit in Python using statsmodels (`MixedLM`) with a
 participant-level random intercept. For single-group analyses, fixed
-effects included Condition, ROI, and the Condition × ROI interaction. For
+effects included Condition, ROI, and the Condition x ROI interaction. For
 multi-group analyses, Group was included as an additional fixed effect
 along with all interactions among Group, Condition, and ROI. This
 specification estimates group-average effects of condition and ROI while
@@ -67,7 +69,7 @@ reference level. Under this coding:
   factor levels.
 - **Condition** and **ROI** terms reflect how each level deviates from
   that grand mean.
-- The **Condition × ROI** interaction tests whether condition-related
+- The **Condition x ROI** interaction tests whether condition-related
   changes differ across ROIs (i.e., whether the condition effect depends
   on ROI).
 
@@ -80,7 +82,7 @@ existing RM-ANOVA support.
 
 RM-ANOVA provides a familiar summary test for within-subject designs, but
 it is most straightforward when every participant contributes a complete,
-balanced set of condition×ROI observations. The mixed model addresses the
+balanced set of conditionxROI observations. The mixed model addresses the
 same repeated-measures structure while explicitly modeling
 participant-to-participant differences (via the random intercept) and
 can use all available observations when a small number of cells are

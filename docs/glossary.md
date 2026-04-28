@@ -1,5 +1,7 @@
 # Glossary
 
+Use this page when you need a plain-language definition of an FPVS Toolbox term.
+
 This glossary explains common FPVS Toolbox terms in plain language.
 
 ## `.bdf` file

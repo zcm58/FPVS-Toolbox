@@ -1,5 +1,7 @@
 # FAQ
 
+Use this page when you have a common setup, processing, output, or statistics question.
+
 ## Do I need coding experience?
 
 No. The main workflow is designed to run through the graphical interface. You

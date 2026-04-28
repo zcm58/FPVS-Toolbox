@@ -1,5 +1,7 @@
 # Getting Started
 
+Use this page when you are opening FPVS Toolbox for the first time or preparing your first project.
+
 This page is for first-time users. It explains what FPVS Toolbox needs, what it
 creates, and how to get through your first run without needing to write code.
 

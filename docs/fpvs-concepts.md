@@ -1,10 +1,12 @@
 # FPVS Concepts for Non-Experts
 
+Use this page when FPVS, oddball responses, harmonics, BCA, SNR, or ROI terms are unfamiliar.
+
 This page explains the main FPVS terms used in the app and docs. It is written for readers who are comfortable with basic data analysis but are new to EEG.
 
 ## FPVS in one sentence
 
-FPVS presents images at a fixed rhythm and uses EEG to test whether the brain locks onto that same rhythm — and onto any slower rhythm created by periodic "oddball" images.
+FPVS presents images at a fixed rhythm and uses EEG to test whether the brain locks onto that same rhythm - and onto any slower rhythm created by periodic "oddball" images.
 
 > **Mental model:** show the visual system a rhythm, then look for that rhythm in the EEG.
 
@@ -26,14 +28,14 @@ An **oddball** is the item that breaks the repeating pattern. The **oddball freq
 - **Example:** if images are shown at 6 Hz and every 5th image is an oddball, the oddball frequency is **6/5 = 1.2 Hz**.
 - **What it captures:** whether the brain is responding differently to the oddball than to the base stream.
 
-A peak at the oddball frequency means there is a **stimulus-locked difference** between base and oddball processing. By itself, it does **not** tell you exactly *why* the difference happened — only that it happened. This is why careful design of the experiment is important.
+A peak at the oddball frequency means there is a **stimulus-locked difference** between base and oddball processing. By itself, it does **not** tell you exactly *why* the difference happened - only that it happened. This is why careful design of the experiment is important.
 
 ### Harmonics
 
 A **harmonic** is an integer multiple of a frequency.
 
 - **Fundamental frequency:** the main frequency itself
-- **Harmonics:** 2×, 3×, 4×, and so on
+- **Harmonics:** 2x, 3x, 4x, and so on
 
 **Example:** if the oddball frequency is 1.2 Hz, its harmonics are 2.4 Hz, 3.6 Hz, 4.8 Hz, and so on.
 
@@ -56,7 +58,7 @@ A useful way to think about it: the FFT does not decide what the brain "means." 
 
 These are three common ways to describe the same frequency-domain peak.
 
-- **BCA (baseline-corrected amplitude):** the peak amplitude after subtracting nearby background activity. Usually reported in **microvolts (µV)**.
+- **BCA (baseline-corrected amplitude):** the peak amplitude after subtracting nearby background activity. Usually reported in **microvolts (uV)**.
 - **SNR (signal-to-noise ratio):** the peak amplitude relative to nearby noise.
 - **Z score:** how unusual the peak is compared with nearby noise bins.
 
@@ -72,11 +74,11 @@ These measures are related, but they answer slightly different questions. BCA is
 
 ## Why this matters for analysis
 
-FPVS is useful because it turns a broad question —
+FPVS is useful because it turns a broad question -
 
 **"Did the brain respond differently?"**
 
-into a more concrete question —
+into a more concrete question -
 
 **"Is there a measurable peak at a frequency where we expected one?"**
 

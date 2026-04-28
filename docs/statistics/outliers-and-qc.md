@@ -1,16 +1,18 @@
 # Outliers, QC flags, and manual exclusions
 
+Use this page when you need to understand flagged values, exclusions, or QC reports.
+
 ## Plain-language overview
 
 FPVS datasets can contain participants with unusually large values,
 missing values, or other issues that might distort group statistics.
 This module helps you handle that cleanly by separating two concepts:
 
-- **Flags**: warnings that say “this looks unusual, and you should take a look.”
+- **Flags**: warnings that say "this looks unusual, and you should take a look."
 - **Exclusions**: a decision to actually remove a participant from the
   analysis.
 
-The point is to avoid “silent” data removal. You get a transparent paper
+The point is to avoid "silent" data removal. You get a transparent paper
 trail showing what was flagged, what was excluded, and why.
 
 Why this is useful in FPVS-EEG research:
@@ -54,7 +56,7 @@ enforce removal.
 
 ### Required and manual exclusions
 
-Participants with **non-finite Summed BCA values** (e.g., NaN or ±Inf)
+Participants with **non-finite Summed BCA values** (e.g., NaN or +/-Inf)
 are treated as **required exclusions** and are automatically removed
 from all inferential analyses because their outcomes cannot be modeled.
 All other exclusions are **user-controlled**: after reviewing QC reports,
@@ -67,7 +69,7 @@ as a transparent record of potential data-quality concerns.
 ### Outputs for documentation
 
 QC and exclusion outputs are exported to the project results directory
-under **“3 - Statistical Analysis Results”**. The toolbox generates a
+under **"3 - Statistical Analysis Results"**. The toolbox generates a
 Flagged Participants report (summarizing QC and DV flags) and an Excluded
 Participants report (recording required non-finite exclusions and
 user-selected manual exclusions), enabling clear documentation of data

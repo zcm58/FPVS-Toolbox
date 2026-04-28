@@ -1,5 +1,7 @@
 # FPVS Toolbox Documentation
 
+Use this site when you need practical help processing FPVS EEG data, finding outputs, or choosing analysis steps without writing custom scripts.
+
 FPVS Toolbox is a desktop app for processing FPVS EEG data and running statistics without writing custom analysis scripts.
 
 !!! tip "New to FPVS or EEG analysis?"
@@ -24,9 +26,11 @@ FPVS Toolbox is a desktop app for processing FPVS EEG data and running statistic
 | Section | Best for | Outcome |
 |---|---|---|
 | [Start Here](getting-started.md) | New users | Set up and complete your first run |
-| [Analysis Workflow](processing-pipeline.md) | Methods and analysis users | Understand processing and stats steps |
-| [Tools](tools/individual-level-detectability.md) | Advanced figure workflows | Individual-level detectability figures |
-| [Reference](outputs-reference.md) | Day-to-day troubleshooting | File locations, glossary, and fixes |
+| [Run a Study](run-a-study.md) | Users preparing or processing data | Create a project, run files, and find outputs |
+| [Understand Results](understand-results.md) | Users interpreting processed data | Choose statistics and review outputs |
+| [Statistics Reference](statistics/index.md) | Users reporting specific methods | Understand each statistical method |
+| [Tools](feature-tour.md) | Users exploring extra tools | Learn what each tool is for |
+| [Reference](glossary.md) | Day-to-day lookup | Glossary, methods checklist, and publications |
 
 ## Project links
 

@@ -1,5 +1,7 @@
 # Troubleshooting
 
+Use this page when setup, processing, exports, or statistics are not working as expected.
+
 Use this page for common setup, processing, and stats issues.
 
 ## Installation and startup

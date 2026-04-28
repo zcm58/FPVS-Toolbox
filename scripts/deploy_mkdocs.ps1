@@ -39,6 +39,8 @@ try {
         Write-Host "Git remote origin: $originUrl"
         Write-Host "Checking MkDocs availability..."
 
+        $env:NO_MKDOCS_2_WARNING = "1"
+
         & $pythonExe -c "import mkdocs" 2>$null
         if ($LASTEXITCODE -ne 0) {
             Fail "MkDocs is not installed in '.venv1'. Install it with: `"$pythonExe`" -m pip install mkdocs mkdocs-material"

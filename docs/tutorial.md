@@ -1,5 +1,7 @@
 # First End-to-End Walkthrough
 
+Use this page when you want a step-by-step first successful run from raw files to statistics outputs.
+
 This walkthrough is for a first successful FPVS Toolbox run. It assumes you are
 not an EEG analysis expert and want a practical path from raw files to results
 you can inspect.

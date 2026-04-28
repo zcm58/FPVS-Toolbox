@@ -1,5 +1,7 @@
 # Feature Tour
 
+Use this page when you want a quick map of the main FPVS Toolbox features and when to use each one.
+
 This page lists the main FPVS Toolbox features and when to use each one.
 
 ## Core features
