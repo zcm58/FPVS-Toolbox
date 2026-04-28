@@ -30,6 +30,11 @@ plugins:
 
 not_in_nav: |
   /legacy-quarantine-audit.md
+  /agent-index.md
+  /agent-prompts/*
+  /architecture/*
+  /quality/*
+  /reviews/*
 
 validation:
   omitted_files: warn

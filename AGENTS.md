@@ -12,6 +12,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Preserve existing processing order, data formats, exports, and user workflows unless the task explicitly changes them.
 - Prefer executable checks over broad reading. Run the relevant skill script or `python scripts/agent_audit.py` first, then read only the focused docs needed for failures or context.
 - Treat [ARCHITECTURE.md](ARCHITECTURE.md) as the repo map before structural changes; do not read every architecture page by default.
+- Start with [docs/agent-index.md](docs/agent-index.md) when choosing skills, scripts, and focused tests.
 
 ## Non-Negotiables
 
@@ -48,6 +49,7 @@ Use the script output to decide what to read next. If a script passes, do not sc
 ## Useful Docs
 
 - Architecture map: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Agent command index: [docs/agent-index.md](docs/agent-index.md)
 - Module map: [docs/architecture/module-map.md](docs/architecture/module-map.md)
 - Protected paths: [docs/architecture/protected-paths.txt](docs/architecture/protected-paths.txt)
 - Test selection: [docs/quality/test-selection.md](docs/quality/test-selection.md)

@@ -1,6 +1,15 @@
 In the backend directory, please ensure that only the functionality and the core logic of the FPVS Toolbox is
 present. The GUI code should be kept out of this directory as much as possible and instead be placed in the GUI directory.
 
+Before broad manual inspection, run relevant executable checks:
+
+```powershell
+python scripts/agent_audit.py
+python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
+```
+
+Use script output to decide what to read next.
+
 []: # 
 []: # The backend code should be modular and easy to read. 
 []: # 

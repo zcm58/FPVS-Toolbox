@@ -2,6 +2,8 @@
 
 Use the narrowest executable gate that can prove the change first, then broaden when the change touches shared behavior. Prefer skill-local scripts over manually reading broad folders.
 
+For a compact command map, use `docs/agent-index.md`.
+
 ## Standard Commands
 
 ```powershell

@@ -3,6 +3,14 @@ The GUI code should be kept separate from the functionality of the app.
 
 Instructions for Codex: 
 
+Run boundary checks before reading or editing broadly:
+
+```powershell
+python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
+```
+
+This is protected legacy code. Do not edit files here unless the user explicitly approves it.
+
 Processing should always occur on a separate thread from the GUI
 so that it does not become unresponsive. 
 
@@ -10,5 +18,5 @@ so that it does not become unresponsive.
 
 **post_process.py should not be edited for any reason.**
 
-The main_app.py GUI should not be altered in any way unless given specific 
-instructions to do so. 
+The main_app.py GUI should not be altered in any way unless given specific
+instructions to do so.

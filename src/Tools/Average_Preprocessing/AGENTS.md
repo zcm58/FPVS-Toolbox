@@ -3,6 +3,15 @@ user can average the epochs together of multiple files AFTER pre-processing
 the files but BEFORE any post processing is applied. You are allowed to make 
 GUI edits and minor bug fixes to this directory.
 
+Before broad manual inspection, run:
+
+```powershell
+python scripts/agent_audit.py
+python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
+```
+
+Use script output to decide what to read next.
+
 Tooltips should be added (if not already present) to inform the user what 
 "Pooled Average" and "Average of Averages" means in the context. 
 
@@ -16,4 +25,4 @@ equal weight to both files, but not all epochs.
 
 As with the rest of this directory, the GUI code should be kept separate from the functionality of the app. Keep 
 each .py file under 500 lines if possible, and separate functions into their own files that make sense for a human
-user. If any files are over roughly 500 lines, please suggest ways to break them up into smaller files. 
+user. If any files are over roughly 500 lines, please suggest ways to break them up into smaller files.

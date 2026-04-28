@@ -2,6 +2,7 @@
 
 Use this before handing off non-trivial changes.
 
+- Run the relevant command from `docs/agent-index.md` before broad manual inspection.
 - The diff is limited to the requested behavior and direct support files.
 - Protected legacy folders are unchanged unless explicitly approved.
 - Source Localization remains quarantined dead code unless explicitly restored.

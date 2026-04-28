@@ -5,6 +5,14 @@ customtkinter GUI, but with a more modern look and feel.
 
 # Instructions for Codex: 
 
+Before broad manual inspection, run:
+
+```powershell
+python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
+```
+
+Use the script result before manually scanning GUI imports or broad folders.
+
 1. When adding new features, please try to keep the code modular and under 500 lines per file. 
 2. The functionality of this PySide6 GUI must exactly mirror the customtkinter GUI. 
 3. Before making a change to this directory, please review the legacy customtkinter GUI code to ensure it matches.

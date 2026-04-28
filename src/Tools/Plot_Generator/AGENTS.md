@@ -5,6 +5,16 @@ per file. ROI definitions should be loaded from the existing settings using the
 utilities in `Tools.Stats`. Plots should be averaged across participants within
 each condition and saved to a user-selected output folder.
 
+Before broad manual inspection, run:
+
+```powershell
+python scripts/agent_audit.py
+python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
+python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
+```
+
+Use script output to decide what to read next.
+
 This tool will be used to generate publication quality figures within the FPVS Toolbox. Users should have the ability
 to edit the plot title, x and y labels, and the scale of the x and y axes.
 

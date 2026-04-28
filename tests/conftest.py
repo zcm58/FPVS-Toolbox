@@ -6,6 +6,7 @@ import types
 from pathlib import Path
 import importlib
 import importlib.util
+import shutil
 from importlib.machinery import ModuleSpec
 
 import pytest
@@ -70,6 +71,30 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+
+def _safe_test_name(nodeid: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in nodeid)[-120:]
+
+
+@pytest.fixture
+def tmp_path(request):
+    """
+    Provide a repo-local tmp_path that avoids locked Windows pytest temp roots.
+
+    Some Windows sandbox runs create pytest-managed temp roots with ACLs that
+    are unreadable to later fixture setup. Creating the per-test directory
+    directly under an ignored repo-local folder avoids that external failure.
+    """
+
+    base = ROOT / "test_tmp"
+    base.mkdir(exist_ok=True)
+    path = base / _safe_test_name(request.node.nodeid)
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+    path.mkdir(parents=True, exist_ok=False)
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def _is_windows_tmpdir_cleanup_permission_error(exc: BaseException) -> bool:

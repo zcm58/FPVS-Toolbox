@@ -13,7 +13,7 @@ python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ```
 
-Read the focused architecture pages below only when the task touches that area or a check reports a relevant issue.
+Read [docs/agent-index.md](docs/agent-index.md) for the compact skill/script/test map. Read the focused architecture pages below only when the task touches that area or a check reports a relevant issue.
 
 ## Application Shape
 

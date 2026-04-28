@@ -12,6 +12,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = REPO_ROOT / "docs" / "architecture" / "protected-paths.txt"
 ACTIVE_SOURCE_LOCALIZATION = "src/Tools/SourceLocalization"
+AGENT_INDEX = REPO_ROOT / "docs" / "agent-index.md"
+SKILL_SCRIPT_PATHS = (
+    ".agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py",
+    ".agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py",
+    ".agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py",
+)
 
 QACTION_BAD_IMPORT_RE = re.compile(r"^\s*from\s+PySide6\.(?:QtWidgets|QtCore)\s+import\s+.*\bQAction\b")
 CUSTOMTK_IMPORT_RE = re.compile(
@@ -21,6 +27,9 @@ PRINT_RE = re.compile(r"^\s*print\s*\(")
 WINDOWS_USER_PATH_RE = r"[A-Za-z]:\\" + r"Users\\" + r"[^\\\s]+"
 POSIX_USER_PATH_RE = "/" + "Users/" + r"[^/\s]+"
 LOCAL_PATH_RE = re.compile(f"(?:{WINDOWS_USER_PATH_RE}|{POSIX_USER_PATH_RE})")
+ACTIVE_SOURCE_LOCALIZATION_REF_RE = re.compile(
+    r"(?:Tools\.SourceLocalization|src[/\\]Tools[/\\]SourceLocalization)"
+)
 
 CURRENT_CODE_EXCLUDES = (
     "src/Main_App/Legacy_App/",
@@ -54,6 +63,8 @@ def _git_lines(*args: str) -> list[str]:
         ["git", *args],
         cwd=REPO_ROOT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
@@ -140,6 +151,8 @@ def _added_lines(path: str) -> list[tuple[int, str]]:
         ["git", "diff", "--unified=0", "HEAD", "--", path],
         cwd=REPO_ROOT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
@@ -173,6 +186,8 @@ def check_protected_edits() -> list[Issue]:
     issues: list[Issue] = []
     for path in _changed_files():
         normalized = _normalize(path)
+        if normalized.endswith("/AGENTS.md"):
+            continue
         if _matches_any(normalized, protected):
             issues.append(
                 Issue(
@@ -180,6 +195,43 @@ def check_protected_edits() -> list[Issue]:
                     normalized,
                     None,
                     "protected path changed; keep legacy edits out unless explicitly approved",
+                )
+            )
+    return issues
+
+
+def check_agent_harness() -> list[Issue]:
+    issues: list[Issue] = []
+    if not AGENT_INDEX.exists():
+        issues.append(
+            Issue(
+                "agent-harness",
+                _repo_path(AGENT_INDEX),
+                None,
+                "missing compact agent command index",
+            )
+        )
+    else:
+        text = AGENT_INDEX.read_text(encoding="utf-8", errors="replace")
+        for script_path in SKILL_SCRIPT_PATHS:
+            if script_path not in text:
+                issues.append(
+                    Issue(
+                        "agent-harness",
+                        _repo_path(AGENT_INDEX),
+                        None,
+                        f"agent index does not mention {script_path}",
+                    )
+                )
+
+    for script_path in SKILL_SCRIPT_PATHS:
+        if not (REPO_ROOT / script_path).exists():
+            issues.append(
+                Issue(
+                    "agent-harness",
+                    script_path,
+                    None,
+                    "missing skill-local audit wrapper",
                 )
             )
     return issues
@@ -273,6 +325,27 @@ def check_added_paths() -> list[Issue]:
     return issues
 
 
+def check_added_source_localization_refs() -> list[Issue]:
+    issues: list[Issue] = []
+    for path in _changed_files():
+        normalized = _normalize(path)
+        if normalized == "scripts/agent_audit.py":
+            continue
+        if not _is_python(normalized):
+            continue
+        for line_no, line in _added_lines(normalized):
+            if ACTIVE_SOURCE_LOCALIZATION_REF_RE.search(line):
+                issues.append(
+                    Issue(
+                        "source-localization",
+                        normalized,
+                        line_no,
+                        "new active SourceLocalization reference detected; keep Source Localization quarantined",
+                    )
+                )
+    return issues
+
+
 def check_added_prints() -> list[Issue]:
     issues: list[Issue] = []
     for path in _changed_files():
@@ -293,8 +366,10 @@ def check_added_prints() -> list[Issue]:
 
 
 CHECKS = {
+    "agent-harness": check_agent_harness,
     "protected": check_protected_edits,
     "source-localization": check_source_localization_quarantine,
+    "source-localization-refs": check_added_source_localization_refs,
     "gui": check_gui_imports,
     "paths": check_added_paths,
     "prints": check_added_prints,

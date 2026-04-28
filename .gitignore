@@ -36,6 +36,9 @@ coverage.xml
 .pytest_cache/
 .tmp/
 .codex-tmp/
+.codex-pytest-tmp/
+codex_pytest_tmp/
+test_tmp/
 .tmp_pytest_local/
 pytest-cache-files-*/
 
