@@ -2,6 +2,27 @@
 
 Pick the smallest relevant tests first, then broaden when the change affects shared behavior.
 
+## Marker Shortcuts
+
+The repository auto-applies common pytest markers from test filenames during
+collection. Use these for quick local selection:
+
+```powershell
+python -m pytest -m "not slow and not source_localization" -q
+python -m pytest -m gui -q
+python -m pytest -m stats -q
+python -m pytest -m project_io -q
+python -m pytest -m processing -q
+python -m pytest -m smoke -q
+```
+
+Available markers are declared in `pytest.ini`: `gui`, `stats`, `project_io`,
+`processing`, `plot_generator`, `ratio`, `source_localization`, `smoke`,
+`integration`, `slow`, and `qt`.
+
+Markers are selection aids, not a substitute for the focused test lists below.
+When changing a specific module, run the nearest named test first.
+
 ## Main Window And GUI
 
 - Main window layout: `tests/test_main_window_layout_smoke.py`
