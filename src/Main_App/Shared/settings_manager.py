@@ -6,11 +6,14 @@ also provides helpers for manipulating event label/ID pairs and detecting debug
 mode.
 """
 
-import os
-import sys
 import json
 import configparser
+import os
+import ast
+from pathlib import Path
 from typing import List, Tuple
+
+from Main_App.Shared.settings_paths import app_settings_dir, app_settings_file, legacy_settings_file
 
 DEFAULTS = {
     'appearance': {
@@ -68,30 +71,73 @@ DEFAULTS = {
     }
 }
 
+_LEGACY_QT_KEYS = (
+    ("paths/projectsRoot", "paths", "projectsRoot"),
+    ("recentProjects", "recent", "projects"),
+    ("updates/last_checked_utc", "updates", "last_checked_utc"),
+    ("loreta/mri_path", "loreta", "mri_path"),
+)
+
 INI_NAME = 'settings.ini'
 CONFIGS_DIR = 'configs'
 
 def _default_ini_path() -> str:
-    """Return the default path for the settings file in a user-writable location."""
-    if sys.platform.startswith('win'):
-        base = os.environ.get('APPDATA', os.path.expanduser('~'))
-    else:
-        base = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser('~'), '.config'))
-    return os.path.join(base, 'FPVS_Toolbox', INI_NAME)
+    """Return the default path for the central app settings file."""
+    return str(app_settings_file())
 
 
 def _default_configs_dir() -> str:
-    base = os.path.dirname(_default_ini_path())
-    return os.path.join(base, CONFIGS_DIR)
+    return str(app_settings_dir() / CONFIGS_DIR)
+
+
+def _legacy_qt_settings_file() -> Path | None:
+    try:
+        from PySide6.QtCore import QCoreApplication, QStandardPaths
+    except Exception:
+        return None
+    if not QCoreApplication.organizationName():
+        QCoreApplication.setOrganizationName("MississippiStateUniversity")
+    if not QCoreApplication.applicationName():
+        QCoreApplication.setApplicationName("FPVS Toolbox")
+    location = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+    if not location:
+        return None
+    old_path = Path(location) / "settings.ini"
+    try:
+        if old_path.resolve() == Path(_default_ini_path()).resolve():
+            return None
+    except OSError:
+        pass
+    return old_path
+
+
+def _read_legacy_qt_value(path: Path | None, key: str):
+    try:
+        from PySide6.QtCore import QSettings
+    except Exception:
+        return None
+    stores = [QSettings()]
+    if path and path.exists():
+        stores.append(QSettings(str(path), QSettings.IniFormat))
+    for store in stores:
+        value = store.value(key, None)
+        if value not in (None, ""):
+            return value
+    return None
 
 class SettingsManager:
     """Handles loading and saving user preferences to an INI file."""
 
     def __init__(self, ini_path: str = None):
+        self._uses_default_path = ini_path is None
         if ini_path is None:
             ini_path = _default_ini_path()
         self.ini_path = ini_path
-        self.configs_dir = _default_configs_dir()
+        self.configs_dir = (
+            _default_configs_dir()
+            if self._uses_default_path
+            else os.path.join(os.path.dirname(self.ini_path), CONFIGS_DIR)
+        )
         self.config = configparser.ConfigParser()
         self.load()
 
@@ -99,6 +145,7 @@ class SettingsManager:
         """Load settings from disk, applying defaults where needed."""
         self.config.read_dict(DEFAULTS)
         missing_loreta = False
+        migrated = False
         if os.path.exists(self.ini_path):
             existing = configparser.ConfigParser()
             existing.read(self.ini_path)
@@ -119,8 +166,33 @@ class SettingsManager:
                 if not existing.has_option('loreta', opt):
                     missing_loreta = True
             self.config.read(self.ini_path)
+        elif self._uses_default_path:
+            old_path = legacy_settings_file()
+            if old_path and old_path.exists():
+                self.config.read(old_path)
+                migrated = True
+        if self._uses_default_path:
+            migrated = self._migrate_legacy_qt_settings() or migrated
         if missing_loreta:
             self.save()
+        elif migrated:
+            self.save()
+
+    def _migrate_legacy_qt_settings(self) -> bool:
+        migrated = False
+        old_path = _legacy_qt_settings_file()
+        for qt_key, section, option in _LEGACY_QT_KEYS:
+            if self.config.has_option(section, option):
+                continue
+            value = _read_legacy_qt_value(old_path, qt_key)
+            if value in (None, ""):
+                continue
+            if section == 'recent' and option == 'projects' and isinstance(value, (list, tuple)):
+                self.set(section, option, json.dumps([str(item) for item in value]))
+            else:
+                self.set(section, option, str(value))
+            migrated = True
+        return migrated
 
     def save(self) -> None:
         """Write the current settings to disk."""
@@ -210,6 +282,28 @@ class SettingsManager:
         if not self.config.has_section(section):
             self.config.add_section(section)
         self.config.set(section, option, value)
+
+    def get_project_root(self, fallback: str = '') -> str:
+        return self.get('paths', 'projectsRoot', fallback)
+
+    def set_project_root(self, value: str) -> None:
+        self.set('paths', 'projectsRoot', value)
+
+    def get_recent_projects(self) -> List[str]:
+        raw = self.get('recent', 'projects', '')
+        if not raw:
+            return []
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(raw)
+            except (ValueError, SyntaxError, TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(parsed, (list, tuple)):
+                return [str(item) for item in parsed if str(item)]
+        return [item.strip() for item in raw.splitlines() if item.strip()]
+
+    def set_recent_projects(self, projects: List[str]) -> None:
+        self.set('recent', 'projects', json.dumps([str(project) for project in projects]))
 
     # --- Convenience helpers for event mappings ---
     def get_event_pairs(self) -> List[Tuple[str, str]]:

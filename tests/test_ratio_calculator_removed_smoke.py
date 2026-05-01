@@ -48,9 +48,25 @@ def test_ratio_calculator_window_smoke(qtbot):
 
     from PySide6.QtWidgets import QApplication
 
+    from Main_App.PySide6_App.widgets import SectionCard, StatusBanner
     from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 
     QApplication.instance() or QApplication([])
     window = RatioCalculatorWindow()
     qtbot.addWidget(window)
     window.show()
+
+    cards = {card.objectName(): card for card in window.findChildren(SectionCard)}
+    expected_cards = {
+        "ratio_calculator_conditions",
+        "ratio_calculator_participants",
+        "ratio_calculator_rois",
+        "ratio_calculator_harmonic_settings",
+        "ratio_calculator_run",
+    }
+    assert expected_cards <= set(cards)
+    assert isinstance(window.status_label, StatusBanner)
+    assert isinstance(window.validation_label, StatusBanner)
+    assert window.run_btn.property("variant") == "primary"
+    assert window.log_toggle_btn.property("variant") == "tertiary"
+    assert window.log_box.property("logSurface") is True

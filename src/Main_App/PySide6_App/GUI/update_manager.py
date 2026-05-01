@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QWidget, QMessageBox
 from PySide6.QtGui import QDesktopServices
 
 from config import FPVS_TOOLBOX_VERSION, FPVS_TOOLBOX_UPDATE_API
-from Main_App.PySide6_App.utils.settings import get_app_settings
+from Main_App.Shared.settings_manager import SettingsManager
 
 _LOG = logging.getLogger(__name__)
 
@@ -169,8 +169,8 @@ def _is_newer(latest: str, current: str) -> bool:
 
 
 def _last_checked_utc() -> datetime | None:
-    settings = get_app_settings()
-    raw_value = settings.value("updates/last_checked_utc", "", type=str)
+    settings = SettingsManager()
+    raw_value = settings.get("updates", "last_checked_utc", "")
     if not raw_value:
         return None
     try:
@@ -190,6 +190,6 @@ def _should_skip_update_check() -> bool:
 
 
 def _record_successful_check() -> None:
-    settings = get_app_settings()
-    settings.setValue("updates/last_checked_utc", datetime.now(timezone.utc).isoformat())
-    settings.sync()
+    settings = SettingsManager()
+    settings.set("updates", "last_checked_utc", datetime.now(timezone.utc).isoformat())
+    settings.save()

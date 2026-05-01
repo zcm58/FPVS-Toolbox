@@ -11,6 +11,7 @@ if not hasattr(QtCore, "QThread"):
 from Tools.Individual_Detectability.main_window import (  # noqa: E402
     IndividualDetectabilityWindow,
 )
+from Main_App.PySide6_App.widgets import PathPickerRow, SectionCard, StatusBanner  # noqa: E402
 
 
 def test_individual_detectability_window_smoke(qtbot, tmp_path: Path) -> None:
@@ -18,6 +19,22 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path) -> None:
     qtbot.addWidget(window)
     window.show()
     qtbot.waitExposed(window)
+
+    cards = {card.objectName(): card for card in window.findChildren(SectionCard)}
+    expected_cards = {
+        "individual_detectability_input",
+        "individual_detectability_conditions",
+        "individual_detectability_output",
+        "individual_detectability_participants",
+        "individual_detectability_run",
+    }
+    assert expected_cards <= set(cards)
+    assert isinstance(window.input_root_row, PathPickerRow)
+    assert isinstance(window.output_root_row, PathPickerRow)
+    assert isinstance(window.status_label, StatusBanner)
+    assert window.run_btn.property("variant") == "primary"
+    assert window.toggle_log_btn.property("variant") == "tertiary"
+    assert window.log_box.property("logSurface") is True
 
 
 def test_individual_detectability_scan_populates_participants_with_missingness(

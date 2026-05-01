@@ -9,13 +9,13 @@ if __package__ is None:  # pragma: no cover - executed when run as script
 
 from PySide6.QtWidgets import QApplication
 
-from Main_App.PySide6_App.utils.theme import apply_light_palette
+from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 
 
 def main() -> None:
     app = QApplication([])
-    apply_light_palette(app)
+    apply_fpvs_theme(app)
     win = RatioCalculatorWindow()
     win.show()
     app.exec()

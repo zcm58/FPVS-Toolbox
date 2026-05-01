@@ -14,13 +14,10 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
     QProgressBar,
     QSpinBox,
     QSplitter,
@@ -35,6 +32,14 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHeaderView,
     QStyle,
+)
+
+from Main_App.PySide6_App.widgets import (
+    PathPickerRow,
+    SectionCard,
+    StatusBanner,
+    make_action_button,
+    make_form_layout,
 )
 
 from .constants import RatioCalculatorSettings
@@ -121,30 +126,23 @@ class RatioCalculatorWindow(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        cond_group = QGroupBox("Conditions")
-        self._apply_groupbox_title_style(cond_group)
-        cond_group_layout = QVBoxLayout(cond_group)
-        cond_group_layout.setContentsMargins(6, 8, 6, 6)
-        cond_group_layout.setSpacing(6)
-        cond_layout = QFormLayout()
-        cond_layout.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        cond_layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
-        cond_layout.setHorizontalSpacing(10)
-        cond_layout.setVerticalSpacing(6)
+        cond_group = SectionCard("Conditions", object_name="ratio_calculator_conditions")
+        cond_group_layout = cond_group.content_layout
+        cond_layout = make_form_layout()
 
         self.condition_a_combo = QComboBox()
         self.condition_a_combo.currentTextChanged.connect(self._on_condition_a_selected)
-        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn = make_action_button("Refresh", compact=True, parent=cond_group)
         self.refresh_btn.clicked.connect(self._refresh_conditions)
-        self.swap_btn = QPushButton("Swap A/B")
+        self.swap_btn = make_action_button("Swap A/B", compact=True, parent=cond_group)
         self.swap_btn.clicked.connect(self._swap_conditions)
 
         self.input_a_edit = QLineEdit()
         self.input_a_edit.setReadOnly(True)
         self.input_a_edit.setPlaceholderText("Select condition A folder")
-        self.input_a_open_btn = QPushButton("Open")
+        self.input_a_open_btn = make_action_button("Open", compact=True, parent=cond_group)
         self.input_a_open_btn.clicked.connect(lambda: self._open_folder_from_edit(self.input_a_edit))
-        self.input_a_btn = QPushButton("Browse…")
+        self.input_a_btn = make_action_button("Browse...", compact=True, parent=cond_group)
         self.input_a_btn.clicked.connect(
             lambda: self._browse_folder(self.input_a_edit, is_output=False, condition_key="a")
         )
@@ -160,9 +158,9 @@ class RatioCalculatorWindow(QWidget):
         self.input_b_edit = QLineEdit()
         self.input_b_edit.setReadOnly(True)
         self.input_b_edit.setPlaceholderText("Select condition B folder")
-        self.input_b_open_btn = QPushButton("Open")
+        self.input_b_open_btn = make_action_button("Open", compact=True, parent=cond_group)
         self.input_b_open_btn.clicked.connect(lambda: self._open_folder_from_edit(self.input_b_edit))
-        self.input_b_btn = QPushButton("Browse…")
+        self.input_b_btn = make_action_button("Browse...", compact=True, parent=cond_group)
         self.input_b_btn.clicked.connect(
             lambda: self._browse_folder(self.input_b_edit, is_output=False, condition_key="b")
         )
@@ -175,18 +173,17 @@ class RatioCalculatorWindow(QWidget):
         self.output_edit = QLineEdit()
         self.output_edit.setReadOnly(True)
         self.output_edit.setPlaceholderText("Select output folder")
-        self.output_open_btn = QPushButton("Open")
+        self.output_open_btn = make_action_button("Open", compact=True, parent=cond_group)
         self.output_open_btn.clicked.connect(lambda: self._open_folder_from_edit(self.output_edit))
-        self.output_btn = QPushButton("Browse…")
+        self.output_btn = make_action_button("Browse...", compact=True, parent=cond_group)
         self.output_btn.clicked.connect(lambda: self._browse_folder(self.output_edit, is_output=True))
 
         self.run_label_edit = QLineEdit()
         self.run_label_edit.setPlaceholderText("Run label")
         self.run_label_edit.textEdited.connect(self._mark_run_label_dirty)
 
-        self.validation_label = QLabel("")
-        self.validation_label.setWordWrap(True)
-        self.validation_label.setStyleSheet("color: #b00020;")
+        self.validation_label = StatusBanner("", variant="error")
+        self.validation_label.setVisible(False)
 
         a_path_row = QWidget()
         a_path_layout = QHBoxLayout(a_path_row)
@@ -232,12 +229,12 @@ class RatioCalculatorWindow(QWidget):
 
         layout.addWidget(cond_group)
 
-        participants_group = QGroupBox("Participant exclusions (optional)")
+        participants_group = SectionCard(
+            "Participant exclusions (optional)",
+            object_name="ratio_calculator_participants",
+        )
         participants_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._apply_groupbox_title_style(participants_group)
-        participants_layout = QVBoxLayout(participants_group)
-        participants_layout.setContentsMargins(6, 8, 6, 6)
-        participants_layout.setSpacing(6)
+        participants_layout = participants_group.content_layout
         participants_help = QLabel(
             "Checked participants are excluded from group summaries and distribution overlays. "
             "They still appear in *_ALL* sheets and keep the excluded marker in plots."
@@ -282,11 +279,11 @@ class RatioCalculatorWindow(QWidget):
         participants_layout.addWidget(self.exclude_table)
 
         button_row = QHBoxLayout()
-        self.select_all_btn = QPushButton("Exclude all")
+        self.select_all_btn = make_action_button("Exclude all", compact=True, parent=participants_group)
         self.select_all_btn.clicked.connect(self._confirm_exclude_all)
-        self.select_none_btn = QPushButton("Exclude none")
+        self.select_none_btn = make_action_button("Exclude none", compact=True, parent=participants_group)
         self.select_none_btn.clicked.connect(lambda: self._set_all_exclusions(False))
-        self.clear_exclusions_btn = QPushButton("Clear exclusions")
+        self.clear_exclusions_btn = make_action_button("Clear exclusions", compact=True, parent=participants_group)
         self.clear_exclusions_btn.clicked.connect(lambda: self._set_all_exclusions(False))
         button_row.addWidget(self.select_all_btn)
         button_row.addWidget(self.select_none_btn)
@@ -294,12 +291,9 @@ class RatioCalculatorWindow(QWidget):
         button_row.addStretch(1)
         participants_layout.addLayout(button_row)
 
-        roi_group = QGroupBox("ROIs (read-only)")
+        roi_group = SectionCard("ROIs (read-only)", object_name="ratio_calculator_rois")
         roi_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._apply_groupbox_title_style(roi_group)
-        roi_layout = QVBoxLayout(roi_group)
-        roi_layout.setContentsMargins(6, 8, 6, 6)
-        roi_layout.setSpacing(6)
+        roi_layout = roi_group.content_layout
         self.roi_table = QTableWidget()
         self.roi_table.setColumnCount(2)
         self.roi_table.setHorizontalHeaderLabels(["ROI", "Electrodes"])
@@ -373,10 +367,6 @@ class RatioCalculatorWindow(QWidget):
         edit.setCursorPosition(0)
         edit.deselect()
         edit.setToolTip(path)
-
-    @staticmethod
-    def _apply_groupbox_title_style(group: QGroupBox) -> None:
-        group.setStyleSheet("QGroupBox::title { font-weight: 600; }")
 
     @staticmethod
     def _make_caption_label(text: str) -> QLabel:
@@ -582,9 +572,11 @@ class RatioCalculatorWindow(QWidget):
 
     def _build_advanced_tab(self) -> None:
         layout = QVBoxLayout(self.advanced_tab)
-        settings_group = QGroupBox("Harmonic settings")
-        self._apply_groupbox_title_style(settings_group)
-        form = QFormLayout(settings_group)
+        settings_group = SectionCard(
+            "Harmonic settings",
+            object_name="ratio_calculator_harmonic_settings",
+        )
+        form = make_form_layout()
 
         self.oddball_spin = QDoubleSpinBox()
         self.oddball_spin.setDecimals(3)
@@ -626,47 +618,48 @@ class RatioCalculatorWindow(QWidget):
         ]:
             edit.setPlaceholderText("auto or min,max")
 
-        form.addRow(self._make_caption_label("Oddball base (Hz)"), self.oddball_spin)
-        form.addRow(self._make_caption_label("Sum up to (Hz)"), self.sum_up_spin)
-        form.addRow(self._make_caption_label("Excluded freqs (Hz)"), self.excluded_edit)
-        form.addRow(self._make_caption_label("Palette"), self.palette_combo)
-        form.addRow(self._make_caption_label("PNG DPI"), self.png_dpi_spin)
+        form.addRow("Oddball base (Hz):", self.oddball_spin)
+        form.addRow("Sum up to (Hz):", self.sum_up_spin)
+        form.addRow("Excluded freqs (Hz):", self.excluded_edit)
+        form.addRow("Palette:", self.palette_combo)
+        form.addRow("PNG DPI:", self.png_dpi_spin)
         form.addRow(self.use_stable_ylims_check)
-        form.addRow(self._make_caption_label("YLIM raw Z"), self.ylim_raw_z_edit)
-        form.addRow(self._make_caption_label("YLIM raw SNR"), self.ylim_raw_snr_edit)
-        form.addRow(self._make_caption_label("YLIM raw BCA"), self.ylim_raw_bca_edit)
-        form.addRow(self._make_caption_label("YLIM ratio Z"), self.ylim_ratio_z_edit)
-        form.addRow(self._make_caption_label("YLIM ratio SNR"), self.ylim_ratio_snr_edit)
-        form.addRow(self._make_caption_label("YLIM ratio BCA"), self.ylim_ratio_bca_edit)
+        form.addRow("YLIM raw Z:", self.ylim_raw_z_edit)
+        form.addRow("YLIM raw SNR:", self.ylim_raw_snr_edit)
+        form.addRow("YLIM raw BCA:", self.ylim_raw_bca_edit)
+        form.addRow("YLIM ratio Z:", self.ylim_ratio_z_edit)
+        form.addRow("YLIM ratio SNR:", self.ylim_ratio_snr_edit)
+        form.addRow("YLIM ratio BCA:", self.ylim_ratio_bca_edit)
+        settings_group.content_layout.addLayout(form)
 
         layout.addWidget(settings_group)
         layout.addStretch(1)
 
     def _build_bottom_panel(self) -> QWidget:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
+        panel = SectionCard("Run", object_name="ratio_calculator_run")
+        layout = panel.content_layout
 
         run_row = QHBoxLayout()
-        self.run_btn = QPushButton("Run")
+        self.run_btn = make_action_button("Run", variant="primary", parent=panel)
         self.run_btn.clicked.connect(self._start_run)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
-        self.status_label = QLabel("Ready")
-        self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.status_label = StatusBanner("Ready", parent=panel)
         run_row.addWidget(self.run_btn)
         run_row.addWidget(self.progress, 1)
         run_row.addWidget(self.status_label)
         layout.addLayout(run_row)
 
         action_row = QHBoxLayout()
-        self.open_output_btn = QPushButton("Open output folder")
+        self.open_output_btn = make_action_button("Open output folder", compact=True, parent=panel)
         self.open_output_btn.setEnabled(False)
         self.open_output_btn.clicked.connect(self._open_output_folder)
-        self.copy_log_btn = QPushButton("Copy log")
+        self.copy_log_btn = make_action_button("Copy log", compact=True, parent=panel)
         self.copy_log_btn.clicked.connect(self._copy_log)
         self.log_toggle_btn = QToolButton()
+        self.log_toggle_btn.setProperty("variant", "tertiary")
+        self.log_toggle_btn.setProperty("tertiary", True)
+        self.log_toggle_btn.setProperty("compact", True)
         self.log_toggle_btn.setCheckable(True)
         self.log_toggle_btn.setChecked(False)
         self.log_toggle_btn.setText("Show log")
@@ -680,6 +673,7 @@ class RatioCalculatorWindow(QWidget):
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setVisible(False)
+        self.log_box.setProperty("logSurface", True)
         layout.addWidget(self.log_box)
 
         return panel
@@ -772,7 +766,7 @@ class RatioCalculatorWindow(QWidget):
             self._update_exclusion_status()
             self._update_run_state()
             if not (self._thread and self._thread.isRunning()):
-                self.status_label.setText("Ready")
+                self.status_label.set_text("Ready")
             return True
         finally:
             self._loading_participants = False
@@ -982,8 +976,10 @@ class RatioCalculatorWindow(QWidget):
     def _set_validation_errors(self, errors: list[str]) -> None:
         if errors:
             self.validation_label.setText("\n".join(f"• {err}" for err in errors))
+            self.validation_label.setVisible(True)
         else:
             self.validation_label.setText("")
+            self.validation_label.setVisible(False)
 
     def _maybe_autoload_participants(self, force: bool = False) -> None:
         if force:
@@ -1020,7 +1016,7 @@ class RatioCalculatorWindow(QWidget):
     def _set_status_message(self, message: str) -> None:
         if self._thread and self._thread.isRunning():
             return
-        self.status_label.setText(message)
+        self.status_label.set_text(message)
         self._append_log(message)
 
     def _start_run(self) -> None:
@@ -1063,7 +1059,8 @@ class RatioCalculatorWindow(QWidget):
             return
 
         self.progress.setValue(0)
-        self.status_label.setText("Running...")
+        self.status_label.set_text("Running...")
+        self.status_label.set_variant("info")
         self.log_box.clear()
         self.open_output_btn.setEnabled(False)
 
@@ -1089,7 +1086,7 @@ class RatioCalculatorWindow(QWidget):
             msg.exec()
             if msg.clickedButton() == go_back_btn:
                 self.progress.setValue(0)
-                self.status_label.setText("Ready")
+                self.status_label.set_text("Ready")
                 return
 
         self._thread = QThread()
@@ -1107,7 +1104,7 @@ class RatioCalculatorWindow(QWidget):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self.progress.setValue)
-        self._worker.status.connect(self.status_label.setText)
+        self._worker.status.connect(self.status_label.set_text)
         self._worker.log.connect(self._append_log)
         self._worker.error.connect(self._handle_error)
         self._worker.finished.connect(self._handle_finished)
@@ -1118,14 +1115,16 @@ class RatioCalculatorWindow(QWidget):
 
     def _handle_error(self, message: str) -> None:
         self._append_log(message)
-        self.status_label.setText("Error")
+        self.status_label.set_text("Error")
+        self.status_label.set_variant("error")
         QMessageBox.critical(self, "Ratio Calculator Error", message)
         self._update_run_state()
 
     def _handle_finished(self, output_dir: str, excel_path: str) -> None:
         self._output_dir = Path(output_dir)
         self._append_log(f"Excel saved to: {excel_path}")
-        self.status_label.setText("Complete")
+        self.status_label.set_text("Complete")
+        self.status_label.set_variant("success")
         self.progress.setValue(100)
         self.open_output_btn.setEnabled(True)
         self._show_completion_dialog()

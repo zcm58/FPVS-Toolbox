@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from Main_App.Legacy_App.settings_manager import SettingsManager
+from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.Performance.mp_env import get_ram_tier_recommendation
 from .roi_settings_editor import ROISettingsEditor
 from ..config.projects_root import changeProjectsRoot

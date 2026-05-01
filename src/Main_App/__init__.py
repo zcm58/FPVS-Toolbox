@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from PySide6.QtCore import QCoreApplication, QStandardPaths
+from Main_App.Shared.settings_paths import app_logs_dir
 
 # -----------------------------
 # PySide6-native utilities
@@ -20,23 +20,17 @@ from PySide6.QtCore import QCoreApplication, QStandardPaths
 class _SettingsProxy:
     """Minimal settings facade for boot-time needs."""
 
-    def __init__(self) -> None:
-        self._qs = QCoreApplication.instance()  # may be None at import
-        # QSettings works without an app instance because org/app are set in main.py
-        # but we avoid importing QtSettings directly to keep footprint minimal.
-
     def debug_enabled(self) -> bool:
-        # Env wins for easy override; else read QSettings; default False.
+        # Env wins for easy override; else read the central SettingsManager.
         env = os.getenv("FPVS_DEBUG", "").strip().lower()
         if env in {"1", "true", "yes", "on"}:
             return True
         if env in {"0", "false", "no", "off"}:
             return False
         try:
-            from PySide6.QtCore import QSettings  # local import to avoid side effects
-            qs = QSettings()
-            val = qs.value("app/debug_enabled", False, type=bool)
-            return bool(val)
+            from Main_App.Shared.settings_manager import SettingsManager
+
+            return SettingsManager().debug_enabled()
         except Exception:
             return False
 
@@ -47,10 +41,7 @@ def get_settings() -> _SettingsProxy:
 
 
 def _log_dir() -> Path:
-    base = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation) or ".")
-    p = base / "logs"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return app_logs_dir()
 
 
 def configure_logging(debug: bool) -> None:
@@ -115,7 +106,9 @@ def _lazy_import(module: str, name: Optional[str] = None) -> Any:  # pragma: no 
     return getattr(mod, name) if name else mod
 
 def SettingsManager(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    return _lazy_import("settings_manager", "SettingsManager")(*args, **kwargs)
+    from Main_App.Shared.settings_manager import SettingsManager as _SharedSettingsManager
+
+    return _SharedSettingsManager(*args, **kwargs)
 
 def SettingsWindow(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     return _lazy_import("settings_window", "SettingsWindow")(*args, **kwargs)

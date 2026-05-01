@@ -1,22 +1,20 @@
 import configparser
-import os
 from pathlib import Path
+
+from Main_App.Shared.settings_paths import app_plot_settings_file, legacy_plot_settings_file
 
 INI_NAME = "plot_settings.ini"
 
 
 def _default_ini_path() -> Path:
-    if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", Path.home()))
-    else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "FPVS_Toolbox" / INI_NAME
+    return app_plot_settings_file()
 
 
 class PlotSettingsManager:
     """Simple INI manager for storing plot tool defaults."""
 
     def __init__(self, ini_path: Path | None = None) -> None:
+        self._uses_default_path = ini_path is None
         self.ini_path = ini_path or _default_ini_path()
         self.config = configparser.ConfigParser()
         self.load()
@@ -42,7 +40,13 @@ class PlotSettingsManager:
             self.set("scalp", "scalp_max", self.get("plot", "scalp_max", "1.0"))
 
     def load(self) -> None:
-        self.config.read(self.ini_path)
+        if self.ini_path.exists():
+            self.config.read(self.ini_path)
+            return
+        if self._uses_default_path:
+            old_path = legacy_plot_settings_file()
+            if old_path and old_path.exists():
+                self.config.read(old_path)
 
     def save(self) -> None:
         self.ini_path.parent.mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 ## Test Selection
 
+- Component layer: `python -m pytest tests/test_ui_components_smoke.py -q`
 - Main window or PySide6 layout: `python -m pytest tests/test_main_window_layout_smoke.py -q`
 - Project I/O: `python -m pytest tests/test_project_settings_roundtrip.py tests/test_project_results_layout.py -q`
 - Plot generator: `python -m pytest tests/test_plot_generator_gui.py -q`

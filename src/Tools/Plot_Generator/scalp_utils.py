@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from dataclasses import dataclass
 from typing import Dict, Iterable, Sequence
 
@@ -57,11 +58,19 @@ def select_oddball_harmonics(
     return oddballs
 
 
-def _electrode_row(df: pd.DataFrame, electrode: str) -> pd.Series | None:
-    mask = df["Electrode"].astype(str).str.upper() == electrode
-    if not mask.any():
-        return None
-    return df.loc[mask].iloc[0]
+def _indexed_by_electrode(df: pd.DataFrame) -> pd.DataFrame:
+    indexed = df.copy()
+    indexed["_ELECTRODE_UPPER"] = indexed["Electrode"].astype(str).str.upper()
+    indexed = indexed.drop_duplicates("_ELECTRODE_UPPER", keep="first")
+    return indexed.set_index("_ELECTRODE_UPPER", drop=False)
+
+
+@lru_cache(maxsize=1)
+def _biosemi64_info() -> mne.io.Info:
+    montage = mne.channels.make_standard_montage("biosemi64")
+    info = mne.create_info(ch_names=montage.ch_names, sfreq=100, ch_types="eeg")
+    info.set_montage(montage)
+    return info
 
 
 def summarize_subject_scalp(
@@ -73,13 +82,15 @@ def summarize_subject_scalp(
 
     freq_cols_bca = _freq_columns(df_bca)
     freq_cols_z = _freq_columns(df_z)
+    bca_by_electrode = _indexed_by_electrode(df_bca)
+    z_by_electrode = _indexed_by_electrode(df_z)
+
     values: dict[str, float] = {}
-    electrodes = df_bca["Electrode"].astype(str).str.upper()
-    for electrode in electrodes:
-        bca_row = _electrode_row(df_bca, electrode)
-        z_row = _electrode_row(df_z, electrode)
-        if bca_row is None or z_row is None:
+    for electrode in bca_by_electrode.index:
+        if electrode not in z_by_electrode.index:
             continue
+        bca_row = bca_by_electrode.loc[electrode]
+        z_row = z_by_electrode.loc[electrode]
         total = 0.0
         for freq in oddballs:
             key = round(freq, 4)
@@ -114,9 +125,7 @@ def prepare_scalp_inputs(
     if not subject_maps:
         return None
 
-    montage = mne.channels.make_standard_montage("biosemi64")
-    info = mne.create_info(ch_names=montage.ch_names, sfreq=100, ch_types="eeg")
-    info.set_montage(montage)
+    info = _biosemi64_info().copy()
     name_to_idx = {name.upper(): idx for idx, name in enumerate(info.ch_names)}
 
     data_matrix = np.full((len(subject_maps), len(info.ch_names)), np.nan)
@@ -127,7 +136,13 @@ def prepare_scalp_inputs(
                 continue
             data_matrix[row_idx, idx] = value
 
-    mean_values = np.nanmean(data_matrix, axis=0)
+    valid_counts = np.sum(~np.isnan(data_matrix), axis=0)
+    mean_values = np.divide(
+        np.nansum(data_matrix, axis=0),
+        valid_counts,
+        out=np.full(data_matrix.shape[1], np.nan),
+        where=valid_counts > 0,
+    )
     if np.isnan(mean_values).all():
         return None
 

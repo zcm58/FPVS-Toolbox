@@ -11,8 +11,6 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -35,6 +33,14 @@ from PySide6.QtWidgets import (
     QWidget,
     QFileDialog,
     QHeaderView,
+)
+
+from Main_App.PySide6_App.widgets import (
+    PathPickerRow,
+    SectionCard,
+    StatusBanner,
+    make_action_button,
+    make_form_layout,
 )
 
 from .core import (
@@ -136,39 +142,28 @@ class IndividualDetectabilityWindow(QWidget):
         layout.addWidget(splitter, 1)
 
     def _build_input_group(self, parent_layout: QVBoxLayout) -> None:
-        group = QGroupBox("Input data")
-        self._apply_groupbox_title_style(group)
-        layout = QFormLayout(group)
-        layout.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
-        layout.setHorizontalSpacing(10)
-        layout.setVerticalSpacing(6)
+        group = SectionCard("Input data", object_name="individual_detectability_input")
+        layout = make_form_layout()
 
-        self.input_root_edit = QLineEdit()
-        self.input_root_edit.setReadOnly(True)
-        self.input_root_edit.setPlaceholderText("Select Excel root folder")
-        self.input_root_btn = QPushButton("Browse…")
+        self.input_root_row = PathPickerRow(
+            "Browse...",
+            group,
+            placeholder="Select Excel root folder",
+        )
+        self.input_root_edit = self.input_root_row.line_edit
+        self.input_root_btn = self.input_root_row.button
         self.input_root_btn.clicked.connect(self._browse_input_root)
-        self.refresh_btn = QPushButton("Refresh conditions")
+        self.refresh_btn = make_action_button("Refresh conditions", compact=True, parent=group)
         self.refresh_btn.clicked.connect(self._refresh_conditions)
 
-        row = QWidget()
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(6)
-        row_layout.addWidget(self.input_root_edit, 1)
-        row_layout.addWidget(self.input_root_btn)
-
-        layout.addRow(QLabel("Excel root folder"), row)
-        layout.addRow(QLabel(""), self.refresh_btn)
+        layout.addRow("Excel root folder:", self.input_root_row)
+        layout.addRow("", self.refresh_btn)
+        group.content_layout.addLayout(layout)
         parent_layout.addWidget(group)
 
     def _build_conditions_group(self, parent_layout: QVBoxLayout) -> None:
-        group = QGroupBox("Conditions")
-        self._apply_groupbox_title_style(group)
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(6, 8, 6, 6)
-        layout.setSpacing(6)
+        group = SectionCard("Conditions", object_name="individual_detectability_conditions")
+        layout = group.content_layout
 
         self.conditions_list = QListWidget()
         self.conditions_list.setMaximumHeight(200)
@@ -179,16 +174,16 @@ class IndividualDetectabilityWindow(QWidget):
         button_layout = QHBoxLayout(button_row)
         button_layout.setContentsMargins(0, 0, 0, 0)
         button_layout.setSpacing(6)
-        self.select_all_btn = QPushButton("Select all")
+        self.select_all_btn = make_action_button("Select all", compact=True, parent=group)
         self.select_all_btn.clicked.connect(lambda: self._set_all_conditions(True))
-        self.select_none_btn = QPushButton("Select none")
+        self.select_none_btn = make_action_button("Select none", compact=True, parent=group)
         self.select_none_btn.clicked.connect(lambda: self._set_all_conditions(False))
         button_layout.addWidget(self.select_all_btn)
         button_layout.addWidget(self.select_none_btn)
         button_layout.addStretch(1)
 
         self.conditions_summary = QLabel("Selected conditions: 0 | Total files: 0")
-        self.conditions_summary.setStyleSheet("color: #666;")
+        self.conditions_summary.setProperty("caption", True)
 
         layout.addWidget(self.conditions_list)
         layout.addWidget(button_row)
@@ -196,34 +191,23 @@ class IndividualDetectabilityWindow(QWidget):
         parent_layout.addWidget(group)
 
     def _build_output_group(self, parent_layout: QVBoxLayout) -> None:
-        group = QGroupBox("Output")
-        self._apply_groupbox_title_style(group)
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(6, 8, 6, 6)
-        layout.setSpacing(6)
+        group = SectionCard("Output", object_name="individual_detectability_output")
+        layout = group.content_layout
 
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
-        form.setHorizontalSpacing(10)
-        form.setVerticalSpacing(6)
+        form = make_form_layout()
 
-        self.output_root_edit = QLineEdit()
-        self.output_root_edit.setReadOnly(True)
-        self.output_root_edit.setPlaceholderText("Select output folder")
-        self.output_root_btn = QPushButton("Browse…")
+        self.output_root_row = PathPickerRow(
+            "Browse...",
+            group,
+            placeholder="Select output folder",
+        )
+        self.output_root_edit = self.output_root_row.line_edit
+        self.output_root_btn = self.output_root_row.button
         self.output_root_btn.clicked.connect(self._browse_output_root)
-        self.output_root_open_btn = QPushButton("Open")
+        self.output_root_open_btn = make_action_button("Open", compact=True, parent=group)
         self.output_root_open_btn.clicked.connect(self._open_output_folder)
-
-        out_row = QWidget()
-        out_layout = QHBoxLayout(out_row)
-        out_layout.setContentsMargins(0, 0, 0, 0)
-        out_layout.setSpacing(6)
-        out_layout.addWidget(self.output_root_edit, 1)
-        out_layout.addWidget(self.output_root_open_btn)
-        out_layout.addWidget(self.output_root_btn)
-        form.addRow(QLabel("Output folder"), out_row)
+        self.output_root_row.row_layout.insertWidget(1, self.output_root_open_btn)
+        form.addRow("Output folder:", self.output_root_row)
 
         layout.addLayout(form)
 
@@ -235,7 +219,7 @@ class IndividualDetectabilityWindow(QWidget):
         self.output_table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed)
         self.output_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.autofill_btn = QPushButton("Auto-fill stems")
+        self.autofill_btn = make_action_button("Auto-fill stems", compact=True, parent=group)
         self.autofill_btn.clicked.connect(self._autofill_stems)
 
         format_row = QWidget()
@@ -259,17 +243,17 @@ class IndividualDetectabilityWindow(QWidget):
         parent_layout.addWidget(group)
 
     def _build_participant_group(self, parent_layout: QVBoxLayout) -> None:
-        group = QGroupBox("Participant filtering (optional)")
-        self._apply_groupbox_title_style(group)
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(6, 8, 6, 6)
-        layout.setSpacing(6)
+        group = SectionCard(
+            "Participant filtering (optional)",
+            object_name="individual_detectability_participants",
+        )
+        layout = group.content_layout
 
         help_text = QLabel(
             "Checked participants are excluded from figure generation for all selected conditions."
         )
         help_text.setWordWrap(True)
-        help_text.setStyleSheet("color: #666;")
+        help_text.setProperty("caption", True)
 
         filter_row = QWidget()
         filter_layout = QHBoxLayout(filter_row)
@@ -296,7 +280,7 @@ class IndividualDetectabilityWindow(QWidget):
         self.participant_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.participant_summary = QLabel("Excluded: 0 | Included: 0 | Total detected: 0")
-        self.participant_summary.setStyleSheet("color: #666;")
+        self.participant_summary.setProperty("caption", True)
 
         layout.addWidget(help_text)
         layout.addWidget(filter_row)
@@ -311,12 +295,11 @@ class IndividualDetectabilityWindow(QWidget):
 
         settings = DetectabilitySettings()
 
-        harmonics_group = QGroupBox("Harmonics & thresholds")
-        self._apply_groupbox_title_style(harmonics_group)
-        harm_layout = QFormLayout(harmonics_group)
-        harm_layout.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        harm_layout.setHorizontalSpacing(10)
-        harm_layout.setVerticalSpacing(6)
+        harmonics_group = SectionCard(
+            "Harmonics & thresholds",
+            object_name="individual_detectability_harmonics",
+        )
+        harm_layout = make_form_layout()
 
         self.harmonics_edit = QLineEdit(", ".join([str(h) for h in settings.oddball_harmonics_hz]))
         self.harmonics_edit.textChanged.connect(self._update_summary_text)
@@ -335,17 +318,17 @@ class IndividualDetectabilityWindow(QWidget):
         self.fdr_alpha_spin.setValue(settings.fdr_alpha)
         self.fdr_alpha_spin.valueChanged.connect(self._update_summary_text)
 
-        harm_layout.addRow(QLabel("Oddball harmonics (Hz)"), self.harmonics_edit)
-        harm_layout.addRow(QLabel("Z threshold"), self.z_threshold_spin)
-        harm_layout.addRow(QLabel(""), self.use_bh_fdr_check)
-        harm_layout.addRow(QLabel("FDR alpha"), self.fdr_alpha_spin)
+        harm_layout.addRow("Oddball harmonics (Hz):", self.harmonics_edit)
+        harm_layout.addRow("Z threshold:", self.z_threshold_spin)
+        harm_layout.addRow("", self.use_bh_fdr_check)
+        harm_layout.addRow("FDR alpha:", self.fdr_alpha_spin)
+        harmonics_group.content_layout.addLayout(harm_layout)
 
-        snr_group = QGroupBox("SNR mini-spectrum")
-        self._apply_groupbox_title_style(snr_group)
-        snr_layout = QFormLayout(snr_group)
-        snr_layout.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        snr_layout.setHorizontalSpacing(10)
-        snr_layout.setVerticalSpacing(6)
+        snr_group = SectionCard(
+            "SNR mini-spectrum",
+            object_name="individual_detectability_snr",
+        )
+        snr_layout = make_form_layout()
 
         self.half_window_spin = QDoubleSpinBox()
         self.half_window_spin.setDecimals(3)
@@ -366,17 +349,14 @@ class IndividualDetectabilityWindow(QWidget):
         self.show_mid_xtick_check.setChecked(settings.snr_show_mid_xtick)
         self.show_mid_xtick_check.stateChanged.connect(self._update_summary_text)
 
-        snr_layout.addRow(QLabel("Half window (Hz)"), self.half_window_spin)
-        snr_layout.addRow(QLabel("SNR y-min"), self.snr_ymin_spin)
-        snr_layout.addRow(QLabel("SNR y-max"), self.snr_ymax_spin)
-        snr_layout.addRow(QLabel(""), self.show_mid_xtick_check)
+        snr_layout.addRow("Half window (Hz):", self.half_window_spin)
+        snr_layout.addRow("SNR y-min:", self.snr_ymin_spin)
+        snr_layout.addRow("SNR y-max:", self.snr_ymax_spin)
+        snr_layout.addRow("", self.show_mid_xtick_check)
+        snr_group.content_layout.addLayout(snr_layout)
 
-        layout_group = QGroupBox("Layout")
-        self._apply_groupbox_title_style(layout_group)
-        layout_form = QFormLayout(layout_group)
-        layout_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        layout_form.setHorizontalSpacing(10)
-        layout_form.setVerticalSpacing(6)
+        layout_group = SectionCard("Layout", object_name="individual_detectability_layout")
+        layout_form = make_form_layout()
 
         self.grid_cols_spin = QSpinBox()
         self.grid_cols_spin.setRange(1, 10)
@@ -386,8 +366,9 @@ class IndividualDetectabilityWindow(QWidget):
         self.letter_portrait_check.setChecked(settings.use_letter_portrait)
         self.letter_portrait_check.stateChanged.connect(self._update_summary_text)
 
-        layout_form.addRow(QLabel("Grid columns"), self.grid_cols_spin)
-        layout_form.addRow(QLabel(""), self.letter_portrait_check)
+        layout_form.addRow("Grid columns:", self.grid_cols_spin)
+        layout_form.addRow("", self.letter_portrait_check)
+        layout_group.content_layout.addLayout(layout_form)
 
         self.summary_box = QTextEdit()
         self.summary_box.setReadOnly(True)
@@ -396,28 +377,27 @@ class IndividualDetectabilityWindow(QWidget):
         layout.addWidget(harmonics_group)
         layout.addWidget(snr_group)
         layout.addWidget(layout_group)
-        layout.addWidget(QLabel("Effective parameters summary"))
+        summary_label = QLabel("Effective parameters summary")
+        summary_label.setProperty("caption", True)
+        layout.addWidget(summary_label)
         layout.addWidget(self.summary_box)
         layout.addStretch(1)
         self._toggle_fdr_alpha()
         self._update_summary_text()
 
     def _build_bottom_panel(self, parent_layout: QVBoxLayout) -> None:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        panel = SectionCard("Run", object_name="individual_detectability_run")
+        layout = panel.content_layout
 
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(6)
-        self.run_btn = QPushButton("Run")
+        self.run_btn = make_action_button("Run", variant="primary", parent=panel)
         self.run_btn.clicked.connect(self._start_run)
         self.progress = QProgressBar()
         self.progress.setValue(0)
-        self.status_label = QLabel("Ready.")
-        self.status_label.setStyleSheet("color: #666;")
+        self.status_label = StatusBanner("Ready.", panel)
         row_layout.addWidget(self.run_btn)
         row_layout.addWidget(self.progress, 1)
         row_layout.addWidget(self.status_label)
@@ -426,12 +406,21 @@ class IndividualDetectabilityWindow(QWidget):
         log_layout = QHBoxLayout(log_row)
         log_layout.setContentsMargins(0, 0, 0, 0)
         log_layout.setSpacing(6)
-        self.toggle_log_btn = QPushButton("Show log")
+        self.toggle_log_btn = make_action_button(
+            "Show log",
+            variant="tertiary",
+            compact=True,
+            parent=panel,
+        )
         self.toggle_log_btn.setCheckable(True)
         self.toggle_log_btn.toggled.connect(self._toggle_log_panel)
-        self.copy_log_btn = QPushButton("Copy log")
+        self.copy_log_btn = make_action_button("Copy log", compact=True, parent=panel)
         self.copy_log_btn.clicked.connect(self._copy_log)
-        self.open_output_btn = QPushButton("Open output folder")
+        self.open_output_btn = make_action_button(
+            "Open output folder",
+            compact=True,
+            parent=panel,
+        )
         self.open_output_btn.clicked.connect(self._open_output_folder)
         log_layout.addWidget(self.toggle_log_btn)
         log_layout.addWidget(self.copy_log_btn)
@@ -442,16 +431,12 @@ class IndividualDetectabilityWindow(QWidget):
         self.log_box.setReadOnly(True)
         self.log_box.setVisible(False)
         self.log_box.setMinimumHeight(140)
+        self.log_box.setProperty("logSurface", True)
 
         layout.addWidget(row)
         layout.addWidget(log_row)
         layout.addWidget(self.log_box)
         parent_layout.addWidget(panel)
-
-    def _apply_groupbox_title_style(self, group: QGroupBox) -> None:
-        font = group.font()
-        font.setBold(True)
-        group.setFont(font)
 
     def _apply_button_styling(self) -> None:
         for btn in self.findChildren(QPushButton):
@@ -755,7 +740,7 @@ class IndividualDetectabilityWindow(QWidget):
 
     def _append_log(self, message: str) -> None:
         self.log_box.appendPlainText(message)
-        self.status_label.setText(message)
+        self.status_label.set_text(message)
 
     def _copy_log(self) -> None:
         QApplication.clipboard().setText(self.log_box.toPlainText())
@@ -796,14 +781,15 @@ class IndividualDetectabilityWindow(QWidget):
         )
         self.log_box.clear()
         self.progress.setValue(0)
-        self.status_label.setText("Starting...")
+        self.status_label.set_text("Starting...")
+        self.status_label.set_variant("info")
 
         self._thread = QThread()
         self._worker = IndividualDetectabilityWorker(request)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self.progress.setValue)
-        self._worker.status.connect(self.status_label.setText)
+        self._worker.status.connect(self.status_label.set_text)
         self._worker.log.connect(self._append_log)
         self._worker.error.connect(self._on_worker_error)
         self._worker.finished.connect(self._on_worker_finished)
@@ -814,10 +800,12 @@ class IndividualDetectabilityWindow(QWidget):
 
     def _on_worker_error(self, message: str) -> None:
         self._append_log(message)
+        self.status_label.set_variant("error")
         QMessageBox.critical(self, "Individual Detectability error", message)
 
     def _on_worker_finished(self, output_root: str) -> None:
-        self.status_label.setText("Complete.")
+        self.status_label.set_text("Complete.")
+        self.status_label.set_variant("success")
         self.progress.setValue(100)
         if self.open_on_complete_check.isChecked():
             QDesktopServices.openUrl(QUrl.fromLocalFile(output_root))

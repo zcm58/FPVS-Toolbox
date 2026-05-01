@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import re
+import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
@@ -44,6 +45,33 @@ def _infer_subject_id_from_path(excel_path: Path) -> str | None:
         return match.group(1).upper()
     cleaned = excel_path.stem.strip()
     return cleaned.upper() if cleaned else None
+
+
+def _frequency_pairs_from_columns(columns: Iterable[object]) -> list[tuple[float, str]]:
+    freq_pairs: list[tuple[float, str]] = []
+    for col in columns:
+        if isinstance(col, str) and col.endswith("_Hz"):
+            try:
+                freq_pairs.append((float(col.split("_")[0]), col))
+            except ValueError:
+                continue
+    freq_pairs.sort(key=lambda item: item[0])
+    return freq_pairs
+
+
+def _select_frequency_pairs(
+    freq_pairs: Sequence[tuple[float, str]],
+    *,
+    x_min: float,
+    x_max: float,
+) -> tuple[list[float], list[str]]:
+    tolerance = 1e-3
+    selected = [
+        (freq, col)
+        for freq, col in freq_pairs
+        if (x_min - tolerance) <= freq <= (x_max + tolerance)
+    ]
+    return [freq for freq, _ in selected], [col for _, col in selected]
 
 # Global plotting style applied after imports
 plt.rcParams.update(
@@ -172,6 +200,13 @@ class _Worker(QObject):
         self.project_root = project_root
         self.generated_paths: list[str] = []
         self.failed_items: list[dict[str, str]] = []
+        self._timings: dict[str, float] = {
+            "excel_load": 0.0,
+            "roi_aggregate": 0.0,
+            "scalp_prepare": 0.0,
+            "plot_render": 0.0,
+            "file_save": 0.0,
+        }
 
     def run(self) -> None:
         try:
@@ -193,6 +228,7 @@ class _Worker(QObject):
             )
             self._emit("SNR plot generation failed. See logs for details.", 0, 0)
         finally:
+            self._emit_timing_summary()
             self.finished.emit(
                 {
                     "condition": self.condition,
@@ -207,6 +243,45 @@ class _Worker(QObject):
 
     def _emit(self, msg: str, processed: int = 0, total: int = 0) -> None:
         self.progress.emit(msg, processed, total)
+
+    def _mark_timing(self, phase: str, started: float) -> None:
+        self._timings[phase] = self._timings.get(phase, 0.0) + (
+            time.perf_counter() - started
+        )
+
+    def _timed_call(self, phase: str, callback):
+        started = time.perf_counter()
+        try:
+            return callback()
+        finally:
+            self._mark_timing(phase, started)
+
+    def _read_excel_timed(self, *args, **kwargs) -> pd.DataFrame:
+        return self._timed_call("excel_load", lambda: pd.read_excel(*args, **kwargs))
+
+    def _emit_timing_summary(self) -> None:
+        total = sum(self._timings.values())
+        if total <= 0:
+            return
+        parts = [
+            f"{name.replace('_', ' ')}={seconds:.2f}s"
+            for name, seconds in self._timings.items()
+            if seconds > 0
+        ]
+        if not parts:
+            return
+        message = "Timing summary: " + ", ".join(parts) + f", total={total:.2f}s"
+        self._emit(message, 0, 0)
+        logger.info(
+            "SNR plot generation timing summary.",
+            extra={
+                "operation": "snr_plot_generate",
+                "project_root": self.project_root,
+                "condition": self.condition,
+                "timings": {key: round(value, 4) for key, value in self._timings.items()},
+                "timed_total_seconds": round(total, 4),
+            },
+        )
 
     def _resolve_legend_label(self, custom: str | None, default: str) -> str:
         if self.legend_custom_enabled and custom is not None and custom.strip():
@@ -265,20 +340,24 @@ class _Worker(QObject):
         subject_data: Dict[str, Dict[str, List[float]]],
         subjects: Iterable[str] | None = None,
     ) -> Dict[str, List[float]]:
-        roi_names = self._selected_roi_names()
-        filtered = set(subjects) if subjects is not None else None
-        aggregated: Dict[str, List[float]] = {}
-        for roi in roi_names:
-            rows: List[List[float]] = []
-            for pid, roi_values in subject_data.items():
-                if filtered is not None and pid not in filtered:
-                    continue
-                values = roi_values.get(roi)
-                if values:
-                    rows.append(values)
-            if rows:
-                aggregated[roi] = list(pd.DataFrame(rows).mean(axis=0))
-        return aggregated
+        started = time.perf_counter()
+        try:
+            roi_names = self._selected_roi_names()
+            filtered = set(subjects) if subjects is not None else None
+            aggregated: Dict[str, List[float]] = {}
+            for roi in roi_names:
+                rows: List[List[float]] = []
+                for pid, roi_values in subject_data.items():
+                    if filtered is not None and pid not in filtered:
+                        continue
+                    values = roi_values.get(roi)
+                    if values:
+                        rows.append(values)
+                if rows:
+                    aggregated[roi] = list(pd.DataFrame(rows).mean(axis=0))
+            return aggregated
+        finally:
+            self._mark_timing("roi_aggregate", started)
 
     def _scalp_oddball_frequencies(self) -> List[float]:
         return list(self.oddballs)
@@ -338,9 +417,12 @@ class _Worker(QObject):
         if not self.include_scalp_maps:
             return None
 
-        inputs = prepare_scalp_inputs(
-            subject_maps,
-            self.roi_map.get(self.selected_roi, []),
+        inputs = self._timed_call(
+            "scalp_prepare",
+            lambda: prepare_scalp_inputs(
+                subject_maps,
+                self.roi_map.get(self.selected_roi, []),
+            ),
         )
         if inputs is None and subject_maps:
             self._emit("No scalp map data available for plotting.")
@@ -548,77 +630,96 @@ class _Worker(QObject):
                 offset + processed_files,
                 overall_total,
             )
+            scalp_map: Dict[str, float] | None = None
             try:
-                xls = pd.ExcelFile(excel_path)
-                if "FullSNR" in xls.sheet_names:
-                    header = pd.read_excel(xls, sheet_name="FullSNR", nrows=0)
-                    freq_pairs: List[tuple[float, str]] = []
-                    for col in header.columns:
-                        if isinstance(col, str) and col.endswith("_Hz"):
-                            try:
-                                freq_pairs.append((float(col.split("_")[0]), col))
-                            except ValueError:
-                                continue
-                    freq_pairs.sort(key=lambda x: x[0])
-                    selected_pairs = [
-                        (freq, col)
-                        for freq, col in freq_pairs
-                        if self.x_min <= freq <= self.x_max
-                    ]
-                    if not selected_pairs:
-                        self._emit(
-                            f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
-                            offset + processed_files,
-                            overall_total,
+                with self._timed_call("excel_load", lambda: pd.ExcelFile(excel_path)) as xls:
+                    sheet_names = set(xls.sheet_names)
+                    if "FullSNR" in sheet_names:
+                        header = self._read_excel_timed(xls, sheet_name="FullSNR", nrows=0)
+                        freq_pairs = _frequency_pairs_from_columns(header.columns)
+                        ordered_freqs, ordered_cols = _select_frequency_pairs(
+                            freq_pairs,
+                            x_min=self.x_min,
+                            x_max=self.x_max,
                         )
-                        self._record_failure(
-                            item=excel_path.name,
-                            error="No frequencies in selected x-range",
-                        )
-                        processed_files += 1
-                        continue
-                    ordered_freqs = [f for f, _ in selected_pairs]
-                    ordered_cols = [c for _, c in selected_pairs]
-                    usecols = ["Electrode"] + ordered_cols
-                    df = pd.read_excel(xls, sheet_name="FullSNR", usecols=usecols)
-                else:
-                    df_amp = pd.read_excel(xls, sheet_name="FFT Amplitude (uV)")
-                    freq_cols_tmp = [
-                        c for c in df_amp.columns if isinstance(c, str) and c.endswith("_Hz")
-                    ]
-                    snr_vals = df_amp[freq_cols_tmp].apply(
-                        calc_snr_matlab, axis=1, result_type="expand"
-                    )
-                    snr_vals.columns = freq_cols_tmp
-                    snr_vals.insert(0, "Electrode", df_amp["Electrode"])
-                    df = snr_vals
-                    freq_pairs = []
-                    for col in freq_cols_tmp:
-                        try:
-                            freq_pairs.append((float(col.split("_")[0]), col))
-                        except ValueError:
+                        if not ordered_cols:
+                            self._emit(
+                                f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
+                                offset + processed_files,
+                                overall_total,
+                            )
+                            self._record_failure(
+                                item=excel_path.name,
+                                error="No frequencies in selected x-range",
+                            )
+                            processed_files += 1
                             continue
-                    freq_pairs.sort(key=lambda x: x[0])
-                    selected_pairs = [
-                        (freq, col)
-                        for freq, col in freq_pairs
-                        if self.x_min <= freq <= self.x_max
-                    ]
-                    if not selected_pairs:
-                        self._emit(
-                            f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
-                            offset + processed_files,
-                            overall_total,
+                        usecols = ["Electrode"] + ordered_cols
+                        df = self._read_excel_timed(xls, sheet_name="FullSNR", usecols=usecols)
+                    else:
+                        df_amp = self._read_excel_timed(xls, sheet_name="FFT Amplitude (uV)")
+                        freq_pairs = _frequency_pairs_from_columns(df_amp.columns)
+                        freq_cols_tmp = [col for _, col in freq_pairs]
+                        snr_vals = df_amp[freq_cols_tmp].apply(
+                            calc_snr_matlab, axis=1, result_type="expand"
                         )
-                        self._record_failure(
-                            item=excel_path.name,
-                            error="No frequencies in selected x-range",
+                        snr_vals.columns = freq_cols_tmp
+                        snr_vals.insert(0, "Electrode", df_amp["Electrode"])
+                        df = snr_vals
+                        ordered_freqs, ordered_cols = _select_frequency_pairs(
+                            freq_pairs,
+                            x_min=self.x_min,
+                            x_max=self.x_max,
                         )
-                        processed_files += 1
-                        continue
-                    ordered_freqs = [f for f, _ in selected_pairs]
-                    ordered_cols = [c for _, c in selected_pairs]
-                    df = df[["Electrode"] + ordered_cols]
+                        if not ordered_cols:
+                            self._emit(
+                                f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
+                                offset + processed_files,
+                                overall_total,
+                            )
+                            self._record_failure(
+                                item=excel_path.name,
+                                error="No frequencies in selected x-range",
+                            )
+                            processed_files += 1
+                            continue
+                        df = df[["Electrode"] + ordered_cols]
+
+                    if collect_scalp:
+                        has_bca = "BCA (uV)" in sheet_names
+                        has_z = "Z Score" in sheet_names
+                        if not has_bca and not warned_missing_bca:
+                            self._emit(
+                                "BCA (uV) sheet missing; scalp maps skipped.",
+                                offset + processed_files,
+                                overall_total,
+                            )
+                            warned_missing_bca = True
+                        if not has_z and not warned_missing_z:
+                            self._emit(
+                                "Z Score sheet missing; scalp maps skipped.",
+                                offset + processed_files,
+                                overall_total,
+                            )
+                            warned_missing_z = True
+                        if has_bca and has_z:
+                            try:
+                                df_bca = self._read_excel_timed(xls, sheet_name="BCA (uV)")
+                                df_z = self._read_excel_timed(xls, sheet_name="Z Score")
+                                scalp_map = self._timed_call(
+                                    "scalp_prepare",
+                                    lambda: summarize_subject_scalp(
+                                        df_bca,
+                                        df_z,
+                                        scalp_oddballs,
+                                    ),
+                                )
+                            except Exception as e:  # pragma: no cover - logged to UI
+                                self._emit(f"Failed reading scalp data in {excel_path.name}: {e}")
+                                self._record_failure(
+                                    item=excel_path.name,
+                                    error=f"Failed reading scalp data: {e}",
+                                )
             except Exception as e:  # pragma: no cover - simple logging
                 self._emit(f"Failed reading {excel_path.name}: {e}")
                 self._record_failure(item=excel_path.name, error=f"Failed reading Excel: {e}")
@@ -655,40 +756,6 @@ class _Worker(QObject):
                 and subject_id not in self.subject_groups
             ):
                 self._unknown_subject_files.add(excel_path.name)
-
-            scalp_map: Dict[str, float] | None = None
-            if collect_scalp:
-                has_bca = "BCA (uV)" in xls.sheet_names
-                has_z = "Z Score" in xls.sheet_names
-                if not has_bca and not warned_missing_bca:
-                    self._emit(
-                        "BCA (uV) sheet missing; scalp maps skipped.",
-                        offset + processed_files,
-                        overall_total,
-                    )
-                    warned_missing_bca = True
-                if not has_z and not warned_missing_z:
-                    self._emit(
-                        "Z Score sheet missing; scalp maps skipped.",
-                        offset + processed_files,
-                        overall_total,
-                    )
-                    warned_missing_z = True
-                if has_bca and has_z:
-                    try:
-                        df_bca = pd.read_excel(xls, sheet_name="BCA (uV)")
-                        df_z = pd.read_excel(xls, sheet_name="Z Score")
-                        scalp_map = summarize_subject_scalp(
-                            df_bca,
-                            df_z,
-                            scalp_oddballs,
-                        )
-                    except Exception as e:  # pragma: no cover - logged to UI
-                        self._emit(f"Failed reading scalp data in {excel_path.name}: {e}")
-                        self._record_failure(
-                            item=excel_path.name,
-                            error=f"Failed reading scalp data: {e}",
-                        )
 
             if freqs is None:
                 freqs = ordered_freqs
@@ -773,7 +840,10 @@ class _Worker(QObject):
                 return
             group_curves = self._build_group_curves(subject_data)
             scalp_inputs = self._prepare_scalp_inputs(scalp_data)
-            self._plot(freqs, averaged, group_curves, scalp_inputs)
+            if group_curves or scalp_inputs is not None:
+                self._plot(freqs, averaged, group_curves, scalp_inputs)
+            else:
+                self._plot(freqs, averaged)
 
     def _plot(
         self,
@@ -802,6 +872,7 @@ class _Worker(QObject):
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return
+            render_started = time.perf_counter()
             has_scalp = scalp_inputs is not None and self.include_scalp_maps
             if has_scalp:
                 fig = plt.figure(figsize=(10, 7), constrained_layout=True)
@@ -938,8 +1009,14 @@ class _Worker(QObject):
             if not has_scalp:
                 save_kwargs["bbox_inches"] = "tight"
             out_path = self.out_dir / fname
-            fig.savefig(out_path, **save_kwargs)
-            plt.close(fig)
+            self._mark_timing("plot_render", render_started)
+            save_started = time.perf_counter()
+            try:
+                fig.savefig(out_path, **save_kwargs)
+                fig.savefig(out_path.with_suffix(".svg"), format="svg")
+            finally:
+                self._mark_timing("file_save", save_started)
+                plt.close(fig)
             self._record_generated_path(out_path)
             self._emit(f"Saved {fname}")
 
@@ -958,6 +1035,7 @@ class _Worker(QObject):
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
                 return
+            render_started = time.perf_counter()
 
             has_scalp_a = bool(self.include_scalp_maps and scalp_a is not None)
             has_scalp_b = bool(self.include_scalp_maps and scalp_b is not None)
@@ -1122,11 +1200,21 @@ class _Worker(QObject):
 
             fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
             out_path = self.out_dir / fname
-            fig.savefig(
-                out_path,
-                dpi=300,
-                pad_inches=0.05,
-            )
-            plt.close(fig)
+            self._mark_timing("plot_render", render_started)
+            save_started = time.perf_counter()
+            try:
+                fig.savefig(
+                    out_path,
+                    dpi=300,
+                    pad_inches=0.05,
+                )
+                fig.savefig(
+                    out_path.with_suffix(".svg"),
+                    format="svg",
+                    pad_inches=0.05,
+                )
+            finally:
+                self._mark_timing("file_save", save_started)
+                plt.close(fig)
             self._record_generated_path(out_path)
             self._emit(f"Saved {fname}")

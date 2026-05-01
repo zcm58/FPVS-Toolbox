@@ -1,5 +1,4 @@
 import importlib.util
-import os
 from pathlib import Path
 
 import pytest
@@ -19,15 +18,16 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import Main_App.PySide6_App.Backend.project_manager as project_manager  # noqa: E402
 import Main_App.PySide6_App.config.projects_root as projects_root  # noqa: E402
-from Main_App.PySide6_App.utils import settings as settings_mod  # noqa: E402
+import Main_App.PySide6_App.GUI.update_manager as update_manager  # noqa: E402
+from Main_App.Shared.settings_manager import SettingsManager  # noqa: E402
 
 
 @pytest.fixture
 def main_window(tmp_path, qtbot, monkeypatch):
-    os.environ["XDG_DATA_HOME"] = str(tmp_path)
-    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
-    settings_mod._SETTINGS_INSTANCE = None
-    settings_mod._MIGRATED = False
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "fpvs_config"))
+    monkeypatch.setattr(update_manager, "check_for_updates_on_launch", lambda *args, **kwargs: None)
 
     QApplication.instance() or QApplication([])
 
@@ -74,16 +74,16 @@ def test_open_existing_project_missing_root_prompts(monkeypatch, main_window, me
         lambda *args, **kwargs: "",
     )
 
-    settings = settings_mod.get_app_settings()
-    settings.remove("paths/projectsRoot")
-    settings.sync()
+    settings = SettingsManager()
+    settings.config.remove_option("paths", "projectsRoot")
+    settings.save()
 
     main_window.open_existing_project()
 
     assert ("Projects Root", "Project root not set.") in message_spy["info"]
 
 
-def test_open_existing_project_empty_root_informs(tmp_path, main_window, monkeypatch, message_spy):
+def test_open_existing_project_empty_root_informs(tmp_path, main_window, monkeypatch, message_spy, qtbot):
     monkeypatch.setattr(
         project_manager,
         "ensure_projects_root",
@@ -92,13 +92,14 @@ def test_open_existing_project_empty_root_informs(tmp_path, main_window, monkeyp
 
     main_window.open_existing_project()
 
+    qtbot.waitUntil(lambda: bool(message_spy["info"]), timeout=5000)
     assert message_spy["info"]
     _title, text = message_spy["info"][0]
     assert "No projects" in text
     assert str(tmp_path) in text
 
 
-def test_open_existing_project_handles_iterdir_error(tmp_path, main_window, monkeypatch, message_spy, caplog):
+def test_open_existing_project_handles_iterdir_error(tmp_path, main_window, monkeypatch, message_spy, caplog, qtbot):
     monkeypatch.setattr(
         project_manager,
         "ensure_projects_root",
@@ -117,11 +118,12 @@ def test_open_existing_project_handles_iterdir_error(tmp_path, main_window, monk
     with caplog.at_level("ERROR", logger=project_manager.logger.name):
         main_window.open_existing_project()
 
+    qtbot.waitUntil(lambda: bool(message_spy["critical"]), timeout=5000)
     assert message_spy["critical"]
     assert any("Unable to enumerate projects" in rec.message for rec in caplog.records)
 
 
-def test_open_existing_project_cancel_from_dialog(tmp_path, main_window, monkeypatch, message_spy):
+def test_open_existing_project_cancel_from_dialog(tmp_path, main_window, monkeypatch, message_spy, qtbot):
     monkeypatch.setattr(
         project_manager,
         "ensure_projects_root",
@@ -142,6 +144,7 @@ def test_open_existing_project_cancel_from_dialog(tmp_path, main_window, monkeyp
 
     main_window.open_existing_project()
 
+    qtbot.waitUntil(lambda: "items" in seen, timeout=5000)
     assert "items" in seen
     assert seen["items"]
     assert not message_spy["critical"]

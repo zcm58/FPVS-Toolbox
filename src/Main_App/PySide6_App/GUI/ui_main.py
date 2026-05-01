@@ -7,9 +7,7 @@ from PySide6.QtCore import QPropertyAnimation, Qt
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QFormLayout,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -33,29 +31,17 @@ from .style_tokens import (
     EVENT_ID_COLUMN_WIDTH,
     PAGE_MARGIN,
     SECTION_GAP,
-    SECTION_PADDING,
     build_landing_page_stylesheet,
     build_main_page_stylesheet,
+)
+from Main_App.PySide6_App.widgets import (
+    SectionCard,
+    make_action_button,
+    make_form_layout,
 )
 
 
 def init_ui(self) -> None:
-    def add_card_header(parent: QWidget, title: str, object_name: str) -> QHBoxLayout:
-        header = QWidget(parent)
-        header.setObjectName(object_name)
-        header.setProperty("cardHeader", True)
-
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(8)
-
-        title_label = QLabel(title, header)
-        title_label.setProperty("cardTitle", True)
-        header_layout.addWidget(title_label)
-        header_layout.addStretch(1)
-
-        return header_layout
-
     # Menu bar
     menu = build_menu_bar(self)
     self.setMenuBar(menu)
@@ -144,8 +130,14 @@ def init_ui(self) -> None:
     header_layout.addWidget(subtitle)
     card_layout.addWidget(card_header)
 
-    self.btn_create_project = QPushButton("Create New Project", welcome_card)
-    self.btn_open_project = QPushButton("Open Existing Project", welcome_card)
+    self.btn_create_project = make_action_button(
+        "Create New Project",
+        parent=welcome_card,
+    )
+    self.btn_open_project = make_action_button(
+        "Open Existing Project",
+        parent=welcome_card,
+    )
     button_font = QFont()
     button_font.setPointSize(13)
     for btn in (self.btn_create_project, self.btn_open_project):
@@ -235,31 +227,12 @@ def init_ui(self) -> None:
     setup_layout.setSpacing(SECTION_GAP)
 
     # Processing Options
-    grp_proc = QGroupBox("", setup_panel)
-    grp_proc.setObjectName("processing_group")
-    proc_layout = QVBoxLayout(grp_proc)
-    proc_layout.setContentsMargins(
-        SECTION_PADDING,
-        SECTION_PADDING,
-        SECTION_PADDING,
-        SECTION_PADDING,
-    )
+    grp_proc = SectionCard("Processing Options", setup_panel, object_name="processing_group")
+    grp_proc.header.setObjectName("processing_card_header")
+    proc_layout = grp_proc.content_layout
     proc_layout.setSpacing(10)
 
-    proc_header_layout = add_card_header(
-        grp_proc,
-        "Processing Options",
-        "processing_card_header",
-    )
-    proc_layout.addWidget(proc_header_layout.parentWidget())
-
-    form = QFormLayout()
-    form.setContentsMargins(0, 0, 0, 0)
-    form.setSpacing(8)
-    form.setHorizontalSpacing(14)
-    form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-    form.setFormAlignment(Qt.AlignTop | Qt.AlignLeft)
+    form = make_form_layout()
 
     mode_field = QWidget(grp_proc)
     mode_field.setObjectName("mode_field")
@@ -344,9 +317,12 @@ def init_ui(self) -> None:
     )
     info_text.setWordWrap(True)
 
-    btn_open_settings = QPushButton("Open Settings", info_strip)
-    btn_open_settings.setProperty("tertiary", True)
-    btn_open_settings.setProperty("compact", True)
+    btn_open_settings = make_action_button(
+        "Open Settings",
+        variant="tertiary",
+        compact=True,
+        parent=info_strip,
+    )
     btn_open_settings.clicked.connect(self.open_settings_window)
 
     info_layout.addWidget(info_icon, 0, Qt.AlignVCenter)
@@ -373,28 +349,23 @@ def init_ui(self) -> None:
         pass
 
     # Event Map
-    grp_event = QGroupBox("", setup_panel)
-    grp_event.setObjectName("event_map_group")
-    event_group_layout = QVBoxLayout(grp_event)
-    event_group_layout.setContentsMargins(
-        SECTION_PADDING,
-        SECTION_PADDING,
-        SECTION_PADDING,
-        SECTION_PADDING,
-    )
+    grp_event = SectionCard("Event Map", setup_panel, object_name="event_map_group")
+    grp_event.header.setObjectName("event_map_card_header")
+    event_group_layout = grp_event.content_layout
     event_group_layout.setSpacing(8)
 
-    event_top_row = add_card_header(grp_event, "Event Map", "event_map_card_header")
-
-    self.btn_detect = QPushButton("Detect Trigger IDs", grp_event)
-    self.btn_detect.setProperty("secondary", True)
-    self.btn_detect.setProperty("compact", True)
-    self.btn_add_row = QPushButton("+ Add Condition", grp_event)
-    self.btn_add_row.setProperty("secondary", True)
-    self.btn_add_row.setProperty("compact", True)
-    event_top_row.addWidget(self.btn_detect)
-    event_top_row.addWidget(self.btn_add_row)
-    event_group_layout.addWidget(event_top_row.parentWidget())
+    self.btn_detect = make_action_button(
+        "Detect Trigger IDs",
+        compact=True,
+        parent=grp_event,
+    )
+    self.btn_add_row = make_action_button(
+        "+ Add Condition",
+        compact=True,
+        parent=grp_event,
+    )
+    grp_event.header.add_action_widget(self.btn_detect)
+    grp_event.header.add_action_widget(self.btn_add_row)
 
     event_header = QWidget(grp_event)
     event_header.setObjectName("event_map_header")
@@ -435,8 +406,11 @@ def init_ui(self) -> None:
     action_row.setContentsMargins(0, 0, 0, 0)
     action_row.setSpacing(10)
 
-    self.btn_start = QPushButton("Start Processing", run_panel)
-    self.btn_start.setProperty("primary", True)
+    self.btn_start = make_action_button(
+        "Start Processing",
+        variant="primary",
+        parent=run_panel,
+    )
     self.btn_start.setMinimumSize(180, 38)
     self.btn_start.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
@@ -468,20 +442,11 @@ def init_ui(self) -> None:
         self.add_event_row()
 
     # Log pane
-    grp_log = QGroupBox("", splitter)
-    grp_log.setObjectName("log_group")
+    grp_log = SectionCard("Log", splitter, object_name="log_group")
     grp_log.setProperty("diagnosticsCard", True)
-    lay_log = QVBoxLayout(grp_log)
-    lay_log.setContentsMargins(
-        SECTION_PADDING,
-        SECTION_PADDING,
-        SECTION_PADDING,
-        SECTION_PADDING,
-    )
+    grp_log.header.setObjectName("log_card_header")
+    lay_log = grp_log.content_layout
     lay_log.setSpacing(10)
-
-    log_header_layout = add_card_header(grp_log, "Log", "log_card_header")
-    lay_log.addWidget(log_header_layout.parentWidget())
 
     self.text_log = QTextEdit(grp_log)
     self.text_log.setObjectName("log_surface")

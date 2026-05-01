@@ -28,14 +28,12 @@ from PySide6.QtWidgets import (
     QComboBox,
     QAbstractItemView,
     QDoubleSpinBox,
-    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QPlainTextEdit,
     QScrollArea,
     QSplitter,
@@ -57,6 +55,11 @@ from Main_App.PySide6_App.Backend.project import (
 )
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.PySide6_App.widgets.busy_spinner import BusySpinner
+from Main_App.PySide6_App.widgets import (
+    StatusBanner,
+    make_action_button,
+    make_form_layout,
+)
 from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION, set_rois
 from Tools.Stats.Legacy.stats_export import (
     export_mixed_model_results_to_excel,
@@ -1144,8 +1147,8 @@ class StatsWindow(QMainWindow):
         if hasattr(self, "multi_group_ready_value"):
             status_text = "Ready" if result.multi_group_ready else "Not ready"
             self.multi_group_ready_value.setText(status_text)
-            self.multi_group_ready_value.setStyleSheet(
-                "color: #1b8a2f;" if result.multi_group_ready else "color: #b02a37;"
+            self.multi_group_ready_value.set_variant(
+                "success" if result.multi_group_ready else "error"
             )
         if hasattr(self, "multi_group_discovered_value"):
             self.multi_group_discovered_value.setText(str(len(result.discovered_subjects)))
@@ -2250,6 +2253,8 @@ class StatsWindow(QMainWindow):
                 self._fixed_harmonic_dv_payload.pop("prepared_multigroup_dv_payload", None)
         label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
         if label:
+            if hasattr(label, "set_variant"):
+                label.set_variant("info")
             label.setText("Running…")
         btn = self.analyze_single_btn if pipeline_id is PipelineId.SINGLE else self.analyze_between_btn
         if btn:
@@ -2289,8 +2294,12 @@ class StatsWindow(QMainWindow):
             if label:
                 if success:
                     ts = datetime.now().strftime("%H:%M:%S")
+                    if hasattr(label, "set_variant"):
+                        label.set_variant("success")
                     label.setText(f"Last run OK at {ts}")
                 else:
+                    if hasattr(label, "set_variant"):
+                        label.set_variant("error")
                     label.setText("Last run error (see log)")
             self._active_pipeline = None
             if success:
@@ -2828,11 +2837,11 @@ class StatsWindow(QMainWindow):
             layout.addWidget(QLabel("No participants were flagged."))
 
         button_row = QHBoxLayout()
-        copy_summary_btn = QPushButton("Copy summary")
-        copy_btn = QPushButton("Copy table")
-        copy_details_btn = QPushButton("Copy details")
-        edit_manual_btn = QPushButton("Edit manual exclusions")
-        close_btn = QPushButton("Close")
+        copy_summary_btn = make_action_button("Copy summary")
+        copy_btn = make_action_button("Copy table")
+        copy_details_btn = make_action_button("Copy details")
+        edit_manual_btn = make_action_button("Edit manual exclusions", variant="primary")
+        close_btn = make_action_button("Close", variant="tertiary")
         button_row.addStretch(1)
         button_row.addWidget(copy_summary_btn)
         button_row.addWidget(copy_btn)
@@ -3434,11 +3443,11 @@ class StatsWindow(QMainWindow):
         conditions_layout.setSpacing(6)
 
         conditions_button_row = QHBoxLayout()
-        self.conditions_select_all_btn = QPushButton("Select All")
+        self.conditions_select_all_btn = make_action_button("Select All", compact=True)
         self.conditions_select_all_btn.setToolTip("Include every condition in the analysis.")
         self.conditions_select_all_btn.clicked.connect(self._select_all_conditions)
         conditions_button_row.addWidget(self.conditions_select_all_btn)
-        self.conditions_select_none_btn = QPushButton("Select None")
+        self.conditions_select_none_btn = make_action_button("Select None", compact=True)
         self.conditions_select_none_btn.setToolTip("Deselect all conditions.")
         self.conditions_select_none_btn.clicked.connect(self._select_no_conditions)
         conditions_button_row.addWidget(self.conditions_select_none_btn)
@@ -3483,11 +3492,7 @@ class StatsWindow(QMainWindow):
         dv_method_row.addWidget(self.dv_policy_combo, 1)
         dv_layout.addLayout(dv_method_row)
 
-        fixed_form = QFormLayout()
-        fixed_form.setLabelAlignment(Qt.AlignLeft)
-        fixed_form.setFormAlignment(Qt.AlignLeft)
-        fixed_form.setHorizontalSpacing(10)
-        fixed_form.setVerticalSpacing(6)
+        fixed_form = make_form_layout()
 
         self.fixed_k_spinbox = QSpinBox()
         self.fixed_k_spinbox.setRange(1, 50)
@@ -3529,11 +3534,7 @@ class StatsWindow(QMainWindow):
         group_mean_layout.setContentsMargins(0, 0, 0, 0)
         group_mean_layout.setSpacing(6)
 
-        group_mean_form = QFormLayout()
-        group_mean_form.setLabelAlignment(Qt.AlignLeft)
-        group_mean_form.setFormAlignment(Qt.AlignLeft)
-        group_mean_form.setHorizontalSpacing(10)
-        group_mean_form.setVerticalSpacing(6)
+        group_mean_form = make_form_layout()
 
         self.group_mean_z_threshold = QDoubleSpinBox()
         self.group_mean_z_threshold.setRange(-10.0, 10.0)
@@ -3573,7 +3574,7 @@ class StatsWindow(QMainWindow):
 
         group_mean_layout.addLayout(group_mean_form)
 
-        self.group_mean_preview_btn = QPushButton("Preview harmonic sets")
+        self.group_mean_preview_btn = make_action_button("Preview harmonic sets")
         self.group_mean_preview_btn.setToolTip(
             "Preview the harmonics that will be used by the Rossion method."
         )
@@ -3645,11 +3646,7 @@ class StatsWindow(QMainWindow):
         self.outlier_enable_checkbox.setEnabled(False)
         outlier_layout.addWidget(self.outlier_enable_checkbox)
 
-        outlier_form = QFormLayout()
-        outlier_form.setLabelAlignment(Qt.AlignLeft)
-        outlier_form.setFormAlignment(Qt.AlignLeft)
-        outlier_form.setHorizontalSpacing(10)
-        outlier_form.setVerticalSpacing(6)
+        outlier_form = make_form_layout()
 
         self.outlier_abs_limit_spin = QDoubleSpinBox()
         self.outlier_abs_limit_spin.setRange(0.0, 1_000_000.0)
@@ -3692,8 +3689,8 @@ class StatsWindow(QMainWindow):
         manual_layout.addWidget(self.manual_exclusion_list, 1)
 
         manual_layout.addStretch(1)
-        self.manual_exclusion_edit_btn = QPushButton("Edit…")
-        self.manual_exclusion_clear_btn = QPushButton("Clear")
+        self.manual_exclusion_edit_btn = make_action_button("Edit...")
+        self.manual_exclusion_clear_btn = make_action_button("Clear", variant="danger")
         manual_layout.addWidget(self.manual_exclusion_edit_btn)
         manual_layout.addWidget(self.manual_exclusion_clear_btn)
 
@@ -3712,14 +3709,14 @@ class StatsWindow(QMainWindow):
         single_layout = QVBoxLayout(single_group_box)
 
         single_action_row = QHBoxLayout()
-        self.analyze_single_btn = QPushButton("Analyze Single Group")
+        self.analyze_single_btn = make_action_button("Analyze Single Group", variant="primary")
         self.analyze_single_btn.setToolTip(
             "Run the full single-group analysis pipeline using the selected settings."
         )
         self.analyze_single_btn.clicked.connect(self.on_analyze_single_group_clicked)
         single_action_row.addWidget(self.analyze_single_btn)
 
-        self.single_advanced_btn = QPushButton("Advanced…")
+        self.single_advanced_btn = make_action_button("Advanced...")
         self.single_advanced_btn.setToolTip(
             "Run or export individual single-group steps."
         )
@@ -3727,7 +3724,7 @@ class StatsWindow(QMainWindow):
         single_action_row.addWidget(self.single_advanced_btn)
         single_layout.addLayout(single_action_row)
 
-        self.single_status_lbl = QLabel("Idle")
+        self.single_status_lbl = StatusBanner("Idle")
         self.single_status_lbl.setWordWrap(True)
         single_layout.addWidget(self.single_status_lbl)
 
@@ -3737,14 +3734,14 @@ class StatsWindow(QMainWindow):
         between_layout = QVBoxLayout(between_box)
 
         between_action_row = QHBoxLayout()
-        self.analyze_between_btn = QPushButton("Analyze Group Differences")
+        self.analyze_between_btn = make_action_button("Analyze Group Differences", variant="primary")
         self.analyze_between_btn.setToolTip(
             "Run the full between-group analysis pipeline."
         )
         self.analyze_between_btn.clicked.connect(self.on_analyze_between_groups_clicked)
         between_action_row.addWidget(self.analyze_between_btn)
 
-        self.between_advanced_btn = QPushButton("Advanced…")
+        self.between_advanced_btn = make_action_button("Advanced...")
         self.between_advanced_btn.setToolTip(
             "Run or export individual between-group steps."
         )
@@ -3752,14 +3749,14 @@ class StatsWindow(QMainWindow):
         between_action_row.addWidget(self.between_advanced_btn)
         between_layout.addLayout(between_action_row)
 
-        self.lela_mode_btn = QPushButton("Lela Mode (Cross-Phase LMM)")
+        self.lela_mode_btn = make_action_button("Lela Mode (Cross-Phase LMM)")
         self.lela_mode_btn.setToolTip(
             "Run the cross-phase mixed model for between-group analyses."
         )
         self.lela_mode_btn.clicked.connect(self.on_run_lela_mode)
         between_layout.addWidget(self.lela_mode_btn)
 
-        self.between_status_lbl = QLabel("Idle")
+        self.between_status_lbl = StatusBanner("Idle")
         self.between_status_lbl.setWordWrap(True)
         between_layout.addWidget(self.between_status_lbl)
 
@@ -3798,10 +3795,10 @@ class StatsWindow(QMainWindow):
             "Selected folder that contains the FPVS result spreadsheets."
         )
         self.le_folder.setMinimumHeight(24)
-        btn_browse = QPushButton("Browse…")
+        btn_browse = make_action_button("Browse...")
         btn_browse.setToolTip("Choose the folder that contains FPVS results.")
         btn_browse.clicked.connect(self.on_browse_folder)
-        self.btn_copy_folder = QPushButton("Copy")
+        self.btn_copy_folder = make_action_button("Copy", compact=True)
         self.btn_copy_folder.setToolTip("Copy the data folder path.")
         self.btn_copy_folder.setEnabled(False)
         self.btn_copy_folder.clicked.connect(self._copy_data_folder_path)
@@ -3809,7 +3806,7 @@ class StatsWindow(QMainWindow):
         folder_row.addWidget(self.le_folder, 1)
         folder_row.addWidget(btn_browse)
         folder_row.addWidget(self.btn_copy_folder)
-        self.btn_open_results = QPushButton("Open Results Folder")
+        self.btn_open_results = make_action_button("Open Results Folder")
         self.btn_open_results.clicked.connect(self._open_results_folder)
         self.btn_open_results.setToolTip(
             "Open the folder where stats outputs are saved."
@@ -3817,7 +3814,7 @@ class StatsWindow(QMainWindow):
         fm = QFontMetrics(self.btn_open_results.font())
         self.btn_open_results.setMinimumWidth(fm.horizontalAdvance(self.btn_open_results.text()) + 24)
         folder_row.addWidget(self.btn_open_results)
-        self.info_button = QPushButton("Analysis Info")
+        self.info_button = make_action_button("Analysis Info")
         self.info_button.clicked.connect(self.on_show_analysis_info)
         self.info_button.setToolTip(
             "Show a short description of each analysis step."
@@ -3834,17 +3831,12 @@ class StatsWindow(QMainWindow):
 
         multigroup_status_row = QHBoxLayout()
         multigroup_status_row.addWidget(QLabel("Status:"))
-        self.multi_group_ready_value = QLabel("Not ready")
-        self.multi_group_ready_value.setStyleSheet("color: #b02a37;")
+        self.multi_group_ready_value = StatusBanner("Not ready", variant="error")
         multigroup_status_row.addWidget(self.multi_group_ready_value)
         multigroup_status_row.addStretch(1)
         multigroup_layout.addLayout(multigroup_status_row)
 
-        multigroup_counts = QFormLayout()
-        multigroup_counts.setLabelAlignment(Qt.AlignLeft)
-        multigroup_counts.setFormAlignment(Qt.AlignLeft)
-        multigroup_counts.setHorizontalSpacing(10)
-        multigroup_counts.setVerticalSpacing(3)
+        multigroup_counts = make_form_layout()
         self.multi_group_discovered_value = QLabel("0")
         self.multi_group_assigned_value = QLabel("0")
         self.multi_group_groups_value = QLabel("0")
@@ -3856,7 +3848,7 @@ class StatsWindow(QMainWindow):
         multigroup_layout.addLayout(multigroup_counts)
 
         shared_action_row = QHBoxLayout()
-        self.compute_shared_harmonics_btn = QPushButton("Compute Shared Harmonics")
+        self.compute_shared_harmonics_btn = make_action_button("Compute Shared Harmonics")
         self.compute_shared_harmonics_btn.setToolTip(
             "Compute shared harmonic sets pooled across groups and intersected across selected conditions."
         )
@@ -3864,7 +3856,7 @@ class StatsWindow(QMainWindow):
         self.compute_shared_harmonics_btn.clicked.connect(self._on_compute_shared_harmonics_clicked)
         shared_action_row.addWidget(self.compute_shared_harmonics_btn)
 
-        self.compute_fixed_harmonic_dv_btn = QPushButton("Compute Fixed-harmonic DV")
+        self.compute_fixed_harmonic_dv_btn = make_action_button("Compute Fixed-harmonic DV")
         self.compute_fixed_harmonic_dv_btn.setToolTip(
             "Compute Summed BCA DV values using the cached shared-harmonics-by-ROI mapping."
         )
@@ -3884,13 +3876,14 @@ class StatsWindow(QMainWindow):
         issues_header = QHBoxLayout()
         issues_header.addWidget(QLabel("Issues:"))
         issues_header.addStretch(1)
-        self.multi_group_issue_toggle_btn = QPushButton("Show details")
+        self.multi_group_issue_toggle_btn = make_action_button("Show details")
         self.multi_group_issue_toggle_btn.setEnabled(False)
         self.multi_group_issue_toggle_btn.clicked.connect(self._toggle_multigroup_issue_details)
         issues_header.addWidget(self.multi_group_issue_toggle_btn)
         multigroup_layout.addLayout(issues_header)
 
         self.multi_group_issue_text = QPlainTextEdit()
+        self.multi_group_issue_text.setProperty("logSurface", True)
         self.multi_group_issue_text.setReadOnly(True)
         self.multi_group_issue_text.setPlaceholderText("Issues will appear here after scan.")
         self.multi_group_issue_text.setMinimumHeight(70)
@@ -3910,7 +3903,7 @@ class StatsWindow(QMainWindow):
         self.spinner.hide()
         status_row.addWidget(self.spinner, alignment=Qt.AlignLeft)
 
-        self.lbl_status = QLabel("Select a folder containing FPVS results.")
+        self.lbl_status = StatusBanner("Select a folder containing FPVS results.")
         self.lbl_status.setWordWrap(True)
         self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         status_row.addWidget(self.lbl_status, 1)
@@ -3922,11 +3915,11 @@ class StatsWindow(QMainWindow):
         self.export_path_label = ElidedPathLabel()
         self.export_path_label.setMinimumHeight(22)
         export_row.addWidget(self.export_path_label, 1)
-        self.export_open_btn = QPushButton("Open")
+        self.export_open_btn = make_action_button("Open", compact=True)
         self.export_open_btn.setToolTip("Open the most recent export file or folder.")
         self.export_open_btn.setEnabled(False)
         self.export_open_btn.clicked.connect(self._open_export_path)
-        self.export_copy_btn = QPushButton("Copy")
+        self.export_copy_btn = make_action_button("Copy", compact=True)
         self.export_copy_btn.setToolTip("Copy the most recent export path.")
         self.export_copy_btn.setEnabled(False)
         self.export_copy_btn.clicked.connect(self._copy_export_path)
@@ -3952,6 +3945,7 @@ class StatsWindow(QMainWindow):
 
         # output pane
         self.summary_text = QTextEdit()
+        self.summary_text.setProperty("logSurface", True)
         self.summary_text.setReadOnly(True)
         self.summary_text.setAcceptRichText(True)
         self.summary_text.setPlaceholderText("Summary output")
@@ -3959,6 +3953,7 @@ class StatsWindow(QMainWindow):
         self.summary_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.log_text = QPlainTextEdit()
+        self.log_text.setProperty("logSurface", True)
         self.log_text.setReadOnly(True)
         self.log_text.setPlaceholderText("Log output")
         self.log_text.setMinimumHeight(140)
@@ -3973,6 +3968,7 @@ class StatsWindow(QMainWindow):
         reporting_layout.setContentsMargins(0, 0, 0, 0)
         reporting_layout.setSpacing(6)
         self.reporting_summary_text = QPlainTextEdit()
+        self.reporting_summary_text.setProperty("logSurface", True)
         self.reporting_summary_text.setReadOnly(True)
         self.reporting_summary_text.setPlaceholderText("Reporting Summary output")
         mono = self.reporting_summary_text.font()
@@ -3981,18 +3977,18 @@ class StatsWindow(QMainWindow):
         reporting_layout.addWidget(self.reporting_summary_text)
         reporting_btn_row = QHBoxLayout()
         reporting_btn_row.addStretch(1)
-        self.reporting_summary_copy_btn = QPushButton("Copy to Clipboard")
+        self.reporting_summary_copy_btn = make_action_button("Copy to Clipboard")
         self.reporting_summary_copy_btn.clicked.connect(self._copy_reporting_summary_text)
-        self.reporting_summary_save_btn = QPushButton("Save .txt…")
+        self.reporting_summary_save_btn = make_action_button("Save .txt...")
         self.reporting_summary_save_btn.clicked.connect(self._save_reporting_summary_text)
         reporting_btn_row.addWidget(self.reporting_summary_copy_btn)
         reporting_btn_row.addWidget(self.reporting_summary_save_btn)
         reporting_layout.addLayout(reporting_btn_row)
         self.output_tabs.addTab(reporting_tab, "Reporting Summary")
 
-        self.copy_summary_btn = QPushButton("Copy summary")
+        self.copy_summary_btn = make_action_button("Copy summary")
         self.copy_summary_btn.clicked.connect(self._copy_summary_text)
-        self.copy_log_btn = QPushButton("Copy log")
+        self.copy_log_btn = make_action_button("Copy log")
         self.copy_log_btn.clicked.connect(self._copy_log_text)
         output_header = QHBoxLayout()
         output_header.addStretch(1)
@@ -4069,7 +4065,7 @@ class StatsWindow(QMainWindow):
         dialog.setWindowTitle(title)
         layout = QVBoxLayout(dialog)
         for text, cb, enabled in actions:
-            btn = QPushButton(text)
+            btn = make_action_button(text)
             btn.setEnabled(enabled)
             if text.lower().startswith("export"):
                 btn.setToolTip("Export the results for this step to Excel.")

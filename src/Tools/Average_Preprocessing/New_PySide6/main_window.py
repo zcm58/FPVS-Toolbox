@@ -1,9 +1,7 @@
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
-    QGroupBox,
     QListWidget,
-    QPushButton,
     QHBoxLayout,
     QVBoxLayout,
     QPlainTextEdit,
@@ -22,6 +20,7 @@ from .advanced_analysis_file_ops import AdvancedAnalysisFileOpsMixin
 from .advanced_analysis_group_ops import AdvancedAnalysisGroupOpsMixin
 from .advanced_analysis_processing import AdvancedAnalysisProcessingMixin
 from .advanced_analysis_post import AdvancedAnalysisPostMixin
+from Main_App.PySide6_App.widgets import SectionCard, make_action_button
 
 
 class AdvancedAveragingWindow(
@@ -61,60 +60,11 @@ class AdvancedAveragingWindow(
         self.resize(w + 100, h + 500)
 
 
-        # Button object names and shared style tweaks
+        # Button object names used by existing callbacks and smoke checks.
         self.btn_start.setObjectName("btnStart")
         self.btn_stop.setObjectName("btnStop")
 
-        for btn in (self.btn_start, self.btn_stop, self.btn_clear, self.btn_close):
-            btn.setMinimumHeight(32)
-            f = btn.font()
-            f.setBold(True)
-            btn.setFont(f)
-
         self.btn_stop.setEnabled(False)
-
-        self.setStyleSheet(
-            """
-  /* 1) Window & GroupBoxes */
-  QMainWindow {
-    background-color: #F2F2F2;      /* light gray canvas */
-  }
-  QGroupBox {
-    background-color: #F7F7F7;      /* slightly lighter panels */
-    border: 1px solid #CCCCCC;
-    border-radius: 4px;
-  }
-
-  /* 2) Generic QPushButton styling */
-  QPushButton {
-    font-size: 9pt;
-  }
-
-  /* 3) Soft-green accent for the Start button */
-  QPushButton#btnStart {
-    background-color: #A8D5BA;      /* soft mint green */
-    color: #1F3D2E;                 /* dark contrast text */
-    border: none;
-    border-radius: 6px;
-    padding: 10px 24px;             /* vertical 10px, horizontal 24px */
-  }
-  QPushButton#btnStart:hover {
-    background-color: #92C9A3;      /* slightly darker on hover */
-  }
-
-  /* 4) Neutral gray Stop button */
-  QPushButton#btnStop {
-    background-color: #E0E0E0;
-    color: #333333;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 6px;
-  }
-  QPushButton#btnStop:hover {
-    background-color: #D5D5D5;
-  }
-  """
-        )
 
         # New signal hookups for Start/Stop behavior
         self.btn_start.clicked.connect(lambda: self.btn_stop.setEnabled(True))
@@ -127,8 +77,8 @@ class AdvancedAveragingWindow(
         main_v = QVBoxLayout(central)
 
         # Row 1: Explanatory Box
-        info_box = QGroupBox()
-        info_layout = QVBoxLayout(info_box)
+        info_box = SectionCard("Advanced Averaging")
+        info_layout = info_box.content_layout
         info_label = QLabel(
             "This tool should be used if you have multiple FPVS Conditions "
             "that are expected to elicit a similar neural response in the participant. "
@@ -141,25 +91,25 @@ class AdvancedAveragingWindow(
         main_v.addWidget(info_box)
 
         # Row 2: Side-by-Side Panels
-        src_gb = QGroupBox("Source EEG Files")
-        src_l = QVBoxLayout(src_gb)
+        src_gb = SectionCard("Source EEG Files")
+        src_l = src_gb.content_layout
         self.source_files_listbox = QListWidget()
         btn_h1 = QHBoxLayout()
-        self.btn_add = QPushButton("Add Files…")
-        self.btn_remove = QPushButton("Remove Selected")
+        self.btn_add = make_action_button("Add Files...")
+        self.btn_remove = make_action_button("Remove Selected", variant="danger")
         btn_h1.addWidget(self.btn_add)
         btn_h1.addWidget(self.btn_remove)
         src_l.addWidget(self.source_files_listbox)
         src_l.addLayout(btn_h1)
 
-        grp_gb = QGroupBox("Defined Averaging Groups")
-        grp_l = QVBoxLayout(grp_gb)
+        grp_gb = SectionCard("Defined Averaging Groups")
+        grp_l = grp_gb.content_layout
         self.groups_listbox = QListWidget()
         self.grp_list = self.groups_listbox
         btn_h2 = QHBoxLayout()
-        self.btn_new = QPushButton("Create New Group")
-        self.btn_rename = QPushButton("Rename Group")
-        self.btn_del = QPushButton("Delete Group")
+        self.btn_new = make_action_button("Create New Group")
+        self.btn_rename = make_action_button("Rename Group")
+        self.btn_del = make_action_button("Delete Group", variant="danger")
         btn_h2.addWidget(self.btn_new)
         btn_h2.addWidget(self.btn_rename)
         btn_h2.addWidget(self.btn_del)
@@ -194,17 +144,18 @@ class AdvancedAveragingWindow(
 
         # Row 4: Log + Buttons
         self.log_edit = QPlainTextEdit()
+        self.log_edit.setProperty("logSurface", True)
         self.log_edit.setReadOnly(True)
         main_v.addWidget(self.log_edit)
 
         btn_controls = QHBoxLayout()
-        self.btn_start = QPushButton("Start Advanced Processing")
-        self.btn_stop = QPushButton("Stop")
+        self.btn_start = make_action_button("Start Advanced Processing", variant="primary")
+        self.btn_stop = make_action_button("Stop", variant="danger")
         btn_controls.addWidget(self.btn_start)
         btn_controls.addWidget(self.btn_stop)
         btn_controls.addStretch(1)
-        self.btn_clear = QPushButton("Clear Log")
-        self.btn_close = QPushButton("Close")
+        self.btn_clear = make_action_button("Clear Log")
+        self.btn_close = make_action_button("Close", variant="tertiary")
         btn_controls.addWidget(self.btn_clear)
         btn_controls.addWidget(self.btn_close)
         main_v.addLayout(btn_controls)

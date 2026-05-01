@@ -12,7 +12,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from Main_App.Legacy_App.settings_manager import SettingsManager
+from Main_App import SettingsManager
 from Tools.Stats.Legacy.excel_io import safe_read_excel
 from Tools.Stats.Legacy.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,

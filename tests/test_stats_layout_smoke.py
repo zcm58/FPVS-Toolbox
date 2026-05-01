@@ -6,6 +6,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QGroupBox, QSplitter, QTabWidget  # noqa: E402
 
+from Main_App.PySide6_App.widgets import StatusBanner  # noqa: E402
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow  # noqa: E402
 
 
@@ -56,3 +57,11 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
 
     assert window.analyze_single_btn.text() == "Analyze Single Group"
     assert window.analyze_between_btn.text() == "Analyze Group Differences"
+    assert window.analyze_single_btn.property("primary") is True
+    assert window.analyze_between_btn.property("primary") is True
+    assert isinstance(window.single_status_lbl, StatusBanner)
+    assert isinstance(window.between_status_lbl, StatusBanner)
+    assert isinstance(window.lbl_status, StatusBanner)
+    assert isinstance(window.multi_group_ready_value, StatusBanner)
+    assert window.log_text.property("logSurface") is True
+    assert window.summary_text.property("logSurface") is True

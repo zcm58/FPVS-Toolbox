@@ -69,6 +69,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src"
+os.environ.setdefault("FPVS_CONFIG_HOME", str(ROOT / "test_tmp" / "fpvs_config"))
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 

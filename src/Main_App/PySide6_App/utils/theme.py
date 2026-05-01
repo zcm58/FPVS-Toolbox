@@ -8,6 +8,36 @@ from typing import Literal, Optional
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+from Main_App.PySide6_App.GUI.style_tokens import (
+    ACCENT_COLOR,
+    ACCENT_COLOR_HOVER,
+    ACCENT_COLOR_PRESSED,
+    ACCENT_SOFT_BG,
+    ACCENT_SOFT_BORDER,
+    ACCENT_TINT,
+    BORDER_COLOR,
+    BORDER_SOFT_COLOR,
+    CONTENT_BG,
+    CORNER_RADIUS,
+    DANGER_COLOR,
+    DANGER_COLOR_HOVER,
+    DANGER_SOFT_BG,
+    DANGER_SOFT_BORDER,
+    INFO_BG,
+    INFO_BORDER,
+    LOG_BG,
+    PAGE_BG,
+    SUCCESS_SOFT_BG,
+    SUCCESS_SOFT_BORDER,
+    SURFACE_ALT_BG,
+    SURFACE_BG,
+    TEXT_MUTED,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    WARNING_SOFT_BG,
+    WARNING_SOFT_BORDER,
+)
+
 try:  # qt_material is optional; we fall back to Fusion if it's missing.
     from qt_material import apply_stylesheet as _qt_material_apply_stylesheet  # type: ignore[import]
 except Exception:  # pragma: no cover - import guard
@@ -31,6 +61,267 @@ LIGHT_THEME_FUSION: LightThemeName = "fusion"
 LIGHT_THEME_MATERIAL: LightThemeName = "material"
 
 DEFAULT_LIGHT_THEME: LightThemeName = LIGHT_THEME_FUSION
+
+
+def build_fpvs_app_stylesheet() -> str:
+    """Return the shared FPVS stylesheet for app and tool windows."""
+    return f"""
+        QWidget {{
+            color: {TEXT_PRIMARY};
+        }}
+
+        QWidget[fpvsSurface="true"] {{
+            background: {PAGE_BG};
+        }}
+
+        QGroupBox {{
+            border: 1px solid {BORDER_SOFT_COLOR};
+            border-radius: {CORNER_RADIUS}px;
+            margin-top: 0;
+            background: {SURFACE_BG};
+            color: {TEXT_PRIMARY};
+            font-weight: 400;
+        }}
+
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            padding: 0 4px;
+            color: {TEXT_PRIMARY};
+            font-weight: 600;
+        }}
+
+        QWidget[cardHeader="true"] {{
+            background: transparent;
+        }}
+
+        QLabel[cardTitle="true"] {{
+            color: {TEXT_PRIMARY};
+            font-weight: 600;
+            padding: 0;
+        }}
+
+        QLabel[caption="true"] {{
+            color: {TEXT_SECONDARY};
+            font-weight: 600;
+        }}
+
+        QLineEdit,
+        QComboBox,
+        QSpinBox,
+        QDoubleSpinBox,
+        QTextEdit,
+        QPlainTextEdit,
+        QProgressBar {{
+            border: 1px solid {BORDER_COLOR};
+            border-radius: 8px;
+            padding: 6px 10px;
+            background: {SURFACE_BG};
+            color: {TEXT_PRIMARY};
+        }}
+
+        QLineEdit:focus,
+        QComboBox:focus,
+        QSpinBox:focus,
+        QDoubleSpinBox:focus,
+        QTextEdit:focus,
+        QPlainTextEdit:focus {{
+            border-color: {ACCENT_COLOR};
+        }}
+
+        QLineEdit:read-only {{
+            background: {SURFACE_ALT_BG};
+        }}
+
+        QLineEdit:disabled,
+        QComboBox:disabled,
+        QSpinBox:disabled,
+        QDoubleSpinBox:disabled,
+        QTextEdit:disabled,
+        QPlainTextEdit:disabled {{
+            background: #F1F3F6;
+            color: {TEXT_MUTED};
+        }}
+
+        QLineEdit[invalid="true"] {{
+            border: 1px solid {DANGER_COLOR};
+        }}
+
+        QProgressBar {{
+            text-align: center;
+            background: #EBEEF3;
+        }}
+
+        QProgressBar::chunk {{
+            background-color: {ACCENT_COLOR};
+            border-radius: 7px;
+        }}
+
+        QPushButton,
+        QToolButton {{
+            border: 1px solid {BORDER_COLOR};
+            border-radius: 8px;
+            padding: 7px 12px;
+            background: {SURFACE_BG};
+            color: {TEXT_PRIMARY};
+        }}
+
+        QPushButton:hover,
+        QToolButton:hover {{
+            background: {ACCENT_SOFT_BG};
+            border-color: {ACCENT_SOFT_BORDER};
+        }}
+
+        QPushButton:pressed,
+        QToolButton:pressed {{
+            background: #DDEAF7;
+        }}
+
+        QPushButton:disabled,
+        QToolButton:disabled {{
+            background: #F1F3F6;
+            border-color: {BORDER_COLOR};
+            color: {TEXT_MUTED};
+        }}
+
+        QPushButton[compact="true"],
+        QToolButton[compact="true"] {{
+            padding: 5px 10px;
+            border-radius: 7px;
+        }}
+
+        QPushButton[primary="true"],
+        QPushButton[variant="primary"] {{
+            background-color: {ACCENT_COLOR};
+            border-color: {ACCENT_COLOR};
+            color: white;
+            font-weight: 600;
+            padding: 8px 18px;
+        }}
+
+        QPushButton[primary="true"]:hover,
+        QPushButton[variant="primary"]:hover {{
+            background-color: {ACCENT_COLOR_HOVER};
+            border-color: {ACCENT_COLOR_HOVER};
+        }}
+
+        QPushButton[primary="true"]:pressed,
+        QPushButton[variant="primary"]:pressed {{
+            background-color: {ACCENT_COLOR_PRESSED};
+            border-color: {ACCENT_COLOR_PRESSED};
+        }}
+
+        QPushButton[primary="true"]:disabled,
+        QPushButton[variant="primary"]:disabled {{
+            background: #BFD5EE;
+            border-color: #BFD5EE;
+            color: white;
+        }}
+
+        QPushButton[secondary="true"],
+        QPushButton[variant="secondary"] {{
+            background: {SURFACE_ALT_BG};
+            border-color: {BORDER_SOFT_COLOR};
+            color: {TEXT_SECONDARY};
+        }}
+
+        QPushButton[secondary="true"]:hover,
+        QPushButton[variant="secondary"]:hover {{
+            background: #F2F6FA;
+            border-color: {BORDER_COLOR};
+            color: {TEXT_PRIMARY};
+        }}
+
+        QPushButton[tertiary="true"],
+        QPushButton[variant="tertiary"] {{
+            background: transparent;
+            border-color: transparent;
+            color: {ACCENT_COLOR};
+            padding-left: 6px;
+            padding-right: 6px;
+        }}
+
+        QPushButton[tertiary="true"]:hover,
+        QPushButton[variant="tertiary"]:hover {{
+            background: {ACCENT_TINT};
+            border-color: transparent;
+            color: {ACCENT_COLOR_HOVER};
+        }}
+
+        QPushButton[tertiary="true"]:pressed,
+        QPushButton[variant="tertiary"]:pressed {{
+            background: #D7E7F8;
+        }}
+
+        QPushButton[variant="danger"] {{
+            background: {DANGER_COLOR};
+            border-color: {DANGER_COLOR};
+            color: white;
+            font-weight: 600;
+        }}
+
+        QPushButton[variant="danger"]:hover {{
+            background: {DANGER_COLOR_HOVER};
+            border-color: {DANGER_COLOR_HOVER};
+        }}
+
+        QPushButton[variant="danger"]:disabled {{
+            background: {DANGER_SOFT_BORDER};
+            border-color: {DANGER_SOFT_BORDER};
+            color: white;
+        }}
+
+        QTabWidget::pane {{
+            border: 1px solid {BORDER_SOFT_COLOR};
+            border-radius: {CORNER_RADIUS}px;
+            background: {CONTENT_BG};
+        }}
+
+        QTabBar::tab {{
+            border: 1px solid {BORDER_SOFT_COLOR};
+            border-bottom: none;
+            border-top-left-radius: 7px;
+            border-top-right-radius: 7px;
+            padding: 7px 12px;
+            background: {SURFACE_ALT_BG};
+            color: {TEXT_SECONDARY};
+        }}
+
+        QTabBar::tab:selected {{
+            background: {SURFACE_BG};
+            color: {TEXT_PRIMARY};
+            font-weight: 600;
+        }}
+
+        QTextEdit[logSurface="true"],
+        QPlainTextEdit[logSurface="true"] {{
+            background: {LOG_BG};
+        }}
+
+        QWidget[statusVariant="info"] {{
+            background: {INFO_BG};
+            border: 1px solid {INFO_BORDER};
+            border-radius: 8px;
+        }}
+
+        QWidget[statusVariant="warning"] {{
+            background: {WARNING_SOFT_BG};
+            border: 1px solid {WARNING_SOFT_BORDER};
+            border-radius: 8px;
+        }}
+
+        QWidget[statusVariant="error"] {{
+            background: {DANGER_SOFT_BG};
+            border: 1px solid {DANGER_SOFT_BORDER};
+            border-radius: 8px;
+        }}
+
+        QWidget[statusVariant="success"] {{
+            background: {SUCCESS_SOFT_BG};
+            border: 1px solid {SUCCESS_SOFT_BORDER};
+            border-radius: 8px;
+        }}
+    """
 
 
 def apply_fusion_light_palette(app: QApplication) -> None:
@@ -106,8 +397,7 @@ def apply_light_palette(
     theme: Optional[LightThemeName] = None,
     material_theme: str = "light_blue.xml",
 ) -> None:
-    """
-    Apply the configured application-wide light theme.
+    """Apply the configured application-wide FPVS light theme.
 
     This is the function used by all entry points (main app, Image Resizer,
     Plot Generator). Existing callers that just do `apply_light_palette(app)`
@@ -122,9 +412,20 @@ def apply_light_palette(
     material_theme:
         The Qt-Material theme name when `theme="material"`.
     """
-    chosen: LightThemeName = theme or DEFAULT_LIGHT_THEME
+    apply_fpvs_theme(app, theme=theme, material_theme=material_theme)
 
+
+def apply_fpvs_theme(
+    app: QApplication,
+    *,
+    theme: Optional[LightThemeName] = None,
+    material_theme: str = "light_blue.xml",
+) -> None:
+    """Apply the central FPVS palette and shared stylesheet."""
+    chosen: LightThemeName = theme or DEFAULT_LIGHT_THEME
     if chosen == LIGHT_THEME_MATERIAL:
         apply_material_light_theme(app, theme=material_theme)
     else:
         apply_fusion_light_palette(app)
+
+    app.setStyleSheet(build_fpvs_app_stylesheet())

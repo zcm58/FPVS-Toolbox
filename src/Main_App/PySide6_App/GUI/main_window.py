@@ -10,6 +10,7 @@ import subprocess
 import sys
 from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
 from Main_App.PySide6_App.utils.audit import format_audit_summary, write_audit_json
+from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
 from typing import Callable
 from datetime import datetime
 from pathlib import Path
@@ -207,7 +208,7 @@ sys.modules["tkinter.filedialog"] = _tk_filedialog
 import config
 from Main_App.Legacy_App.file_selection import FileSelectionMixin
 from Main_App.Legacy_App.processing_utils import ProcessingMixin
-from Main_App.Legacy_App.settings_manager import SettingsManager
+from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.PySide6_App.Backend import Project
 from Main_App.PySide6_App.Backend.processing_controller import (
     _animate_progress_to,
@@ -2466,6 +2467,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 # ----------------------------------------------------------------------
 def main() -> None:
     app = QApplication(sys.argv)
+    apply_fpvs_theme(app)
     win = MainWindow()
     win.show()
     app.exec()

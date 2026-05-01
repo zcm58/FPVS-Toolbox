@@ -8,11 +8,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QPropertyAnimation, QSignalBlocker, QThread, Qt, QTimer
+from PySide6.QtCore import QPropertyAnimation, QSignalBlocker, QThread, Qt
 from PySide6.QtWidgets import (
     QFileDialog,
-    QGroupBox,
-    QFormLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -20,7 +18,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QTextEdit,
     QProgressBar,
-    QSplitter,
     QToolButton,
     QGridLayout,
     QWidget,
@@ -54,10 +51,17 @@ from Tools.Plot_Generator.manifest_utils import (
     normalize_participants_map,
 )
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
+from Main_App.PySide6_App.widgets import (
+    PathPickerRow,
+    SectionCard,
+    make_action_button,
+    make_form_layout,
+)
 from .worker import _Worker
 
 ALL_CONDITIONS_OPTION = "All Conditions"
 _LEGEND_LABELS_KEY_PATH = ("tools", "snr_plot", "legend_labels")
+_PLOT_SETTINGS_KEY_PATH = ("tools", "snr_plot", "plot_settings")
 _LEGEND_DEFAULT_A_PEAKS = "A-Peaks"
 _LEGEND_DEFAULT_B_PEAKS = "B-Peaks"
 
@@ -119,6 +123,25 @@ def _resolve_project_subfolder(
     return (_resolve_results_root(project_root, results_folder) / candidate).resolve()
 
 
+def _settings_bool(value: object, fallback: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return fallback
+
+
+def _settings_float(value: object, fallback: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _project_paths(
     parent: QWidget | None, project_dir: str | Path | None
 ) -> tuple[str | None, str | None]:
@@ -154,7 +177,7 @@ class _SettingsDialog(QDialog):
         row_a = QHBoxLayout()
         row_a.addWidget(QLabel("Condition A Color:"))
         self.color_a = color_a
-        pick_a = QPushButton("Custom…")
+        pick_a = make_action_button("Custom...", compact=True)
         pick_a.clicked.connect(lambda: self._choose_custom("a"))
         row_a.addWidget(pick_a)
         layout.addLayout(row_a)
@@ -162,15 +185,15 @@ class _SettingsDialog(QDialog):
         row_b = QHBoxLayout()
         row_b.addWidget(QLabel("Condition B Color:"))
         self.color_b = color_b
-        pick_b = QPushButton("Custom…")
+        pick_b = make_action_button("Custom...", compact=True)
         pick_b.clicked.connect(lambda: self._choose_custom("b"))
         row_b.addWidget(pick_b)
         layout.addLayout(row_b)
 
         btns = QHBoxLayout()
-        ok = QPushButton("OK")
+        ok = make_action_button("OK", variant="primary")
         ok.clicked.connect(self.accept)
-        cancel = QPushButton("Cancel")
+        cancel = make_action_button("Cancel")
         cancel.clicked.connect(self.reject)
         btns.addWidget(ok)
         btns.addWidget(cancel)
@@ -219,7 +242,9 @@ class PlotGeneratorWindow(QWidget):
 
         project_dir_path: Path | None = None
         proj = getattr(parent, "currentProject", None)
-        if proj and hasattr(proj, "project_root"):
+        if project_dir and Path(project_dir).is_dir():
+            project_dir_path = Path(project_dir)
+        elif proj and hasattr(proj, "project_root"):
             project_dir_path = Path(proj.project_root)
         else:
             env_dir = os.environ.get("FPVS_PROJECT_ROOT")
@@ -235,6 +260,18 @@ class PlotGeneratorWindow(QWidget):
 
         if project_dir_path is not None:
             self._project_root = project_dir_path
+            if self._project is None:
+                try:
+                    self._project = Project.load(project_dir_path)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to load project for SNR plot settings.",
+                        exc_info=exc,
+                        extra={
+                            "operation": "snr_plot_project_load",
+                            "project_root": str(project_dir_path),
+                        },
+                    )
             try:
                 results_folder, subfolders = _load_manifest(project_dir_path)
                 default_in = str(
@@ -257,6 +294,24 @@ class PlotGeneratorWindow(QWidget):
                 )
             except Exception:
                 pass
+            project_settings = self._read_project_plot_settings()
+            if project_settings:
+                default_in = str(project_settings.get("input_folder") or default_in)
+                default_out = str(project_settings.get("output_folder") or default_out)
+                self.stem_color = str(project_settings.get("stem_color") or self.stem_color)
+                self.stem_color_b = str(project_settings.get("stem_color_b") or self.stem_color_b)
+                self.include_scalp_maps = _settings_bool(
+                    project_settings.get("include_scalp_maps"),
+                    self.include_scalp_maps,
+                )
+                self.scalp_min = _settings_float(project_settings.get("scalp_min"), self.scalp_min)
+                self.scalp_max = _settings_float(project_settings.get("scalp_max"), self.scalp_max)
+                self.scalp_title_a_template = str(
+                    project_settings.get("title_a_template") or self.scalp_title_a_template
+                )
+                self.scalp_title_b_template = str(
+                    project_settings.get("title_b_template") or self.scalp_title_b_template
+                )
         else:
             main_default = mgr.get("paths", "output_folder", "")
             if not default_in:
@@ -298,10 +353,6 @@ class PlotGeneratorWindow(QWidget):
         self._available_groups: list[str] = []
         self._has_multi_groups = False
 
-        self._log_last_expanded_height: int | None = None
-        self._initial_collapsed_height: int | None = None
-
-
         self._build_ui()
         self._update_selector_columns(self.overlay_check.isChecked())
         self._load_legend_settings()
@@ -314,8 +365,6 @@ class PlotGeneratorWindow(QWidget):
             self._populate_conditions(default_in)
         if default_out:
             self.out_edit.setText(default_out)
-
-        QTimer.singleShot(0, self._record_initial_collapsed_height)
 
         self._thread: QThread | None = None
         self._worker: _Worker | None = None
@@ -364,6 +413,56 @@ class PlotGeneratorWindow(QWidget):
             "a_peaks_label": self.legend_a_peaks_edit.text(),
             "b_peaks_label": self.legend_b_peaks_edit.text(),
         }
+
+    def _read_project_plot_settings(self) -> dict[str, object]:
+        if self._project is None:
+            return {}
+        cursor: object = self._project.manifest
+        for key in _PLOT_SETTINGS_KEY_PATH:
+            if not isinstance(cursor, dict):
+                return {}
+            cursor = cursor.get(key, {})
+        return dict(cursor) if isinstance(cursor, dict) else {}
+
+    def _project_plot_settings_payload(self, *, include_paths: bool) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "stem_color": self.stem_color,
+            "stem_color_b": self.stem_color_b,
+            "include_scalp_maps": self.scalp_check.isChecked(),
+            "scalp_min": self.scalp_min_spin.value(),
+            "scalp_max": self.scalp_max_spin.value(),
+            "title_a_template": self.scalp_title_a_edit.text(),
+            "title_b_template": self.scalp_title_b_edit.text(),
+        }
+        if include_paths:
+            payload["input_folder"] = self.folder_edit.text()
+            payload["output_folder"] = self.out_edit.text()
+        return payload
+
+    def _persist_project_plot_settings(self, *, include_paths: bool) -> bool:
+        if self._project is None or self._ui_initializing:
+            return False
+        manifest = self._project.manifest
+        cursor = manifest
+        for key in _PLOT_SETTINGS_KEY_PATH:
+            if key not in cursor or not isinstance(cursor.get(key), dict):
+                cursor[key] = {}
+            cursor = cursor[key]
+        cursor.update(self._project_plot_settings_payload(include_paths=include_paths))
+        try:
+            self._project.save()
+        except Exception as exc:
+            self._append_log("Failed to save SNR plot settings to project.json.")
+            logger.warning(
+                "Failed to persist SNR plot settings.",
+                exc_info=exc,
+                extra={
+                    "operation": "snr_plot_settings_persist",
+                    "project_root": str(self._project.project_root),
+                },
+            )
+            return False
+        return True
 
     def _update_legend_group_visibility(self) -> None:
         self.legend_group.setVisible(True)
@@ -586,132 +685,63 @@ class PlotGeneratorWindow(QWidget):
     def _toggle_log_panel(self, expanded: bool) -> None:
         self.log_toggle_btn.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
         self.log_body.setVisible(expanded)
-
-        splitter = getattr(self, "_main_splitter", None)
-        if splitter is None:
-            return
-
-        sizes = splitter.sizes()
-        if len(sizes) != 2:
-            return
-
-        collapsed_h = 52  # header strip height
-
-        if not expanded:
-            if self._initial_collapsed_height is None:
-                self._initial_collapsed_height = self.height()
-            self._log_splitter_sizes = sizes
-            self._log_prev_window_height = self.height()
-            self._log_last_expanded_height = self.height()
-
-            top_h, _ = sizes[0], sizes[1]
-            splitter.setSizes([top_h, collapsed_h])
-
-            min_h = self.minimumSizeHint().height()
-            target_h = max(min_h, self._initial_collapsed_height or self.height())
-            if target_h != self.height():
-                self.resize(self.width(), target_h)
-        else:
-            if self._log_splitter_sizes and len(self._log_splitter_sizes) == 2:
-                splitter.setSizes(self._log_splitter_sizes)
-
-            target = self._log_last_expanded_height or self._log_prev_window_height
-            if target is not None and self.height() < target:
-                self.resize(self.width(), target)
-
-    def _record_initial_collapsed_height(self) -> None:
-        if not self.log_toggle_btn.isChecked():
-            if self._initial_collapsed_height is None:
-                self._initial_collapsed_height = self.height()
-            else:
-                self._initial_collapsed_height = min(
-                    self._initial_collapsed_height, self.height()
-                )
-
-    def _style_box(self, box: QGroupBox) -> None:
-        font = box.font()
-        font.setPointSize(10)
-        font.setBold(False)
-        box.setFont(font)
-        box.setStyleSheet("QGroupBox::title {font-weight: bold;}")
+        self.log.setMinimumHeight(180 if expanded else 0)
 
     def _build_ui(self) -> None:
-        self.setMinimumWidth(500)
-        self.resize(500, 750)
+        self.setMinimumWidth(980)
+        self.setMinimumHeight(600)
+        self.resize(1180, 680)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(8, 8, 8, 8)
-        root_layout.setSpacing(6)
-        self.setStyleSheet(
-            self.styleSheet()
-            + "\nQLineEdit[invalid=\"true\"] {border: 1px solid red;}"
-        )
-
-        file_box = QGroupBox("File I/O")
-        self._style_box(file_box)
+        root_layout.setSpacing(8)
+        file_box = SectionCard("File I/O")
         file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
-        file_layout = QVBoxLayout(file_box)
-        file_layout.setContentsMargins(6, 6, 6, 6)
+        file_layout = file_box.content_layout
         file_layout.setSpacing(6)
-        file_form = QFormLayout()
-        file_form.setContentsMargins(0, 0, 0, 0)
-        file_form.setSpacing(6)
-        file_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        file_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        file_form = make_form_layout()
 
-        self.folder_edit = QLineEdit()
-        self.folder_edit.setReadOnly(True)
-        self.folder_edit.setPlaceholderText("Select the folder containing your Excel sheets")
+        input_picker = PathPickerRow(
+            "Browse...",
+            placeholder="Select the folder containing your Excel sheets",
+        )
+        self.folder_edit = input_picker.line_edit
         self.folder_edit.setText(self._defaults.get("input_folder", ""))
         self.folder_edit.setToolTip("Select the folder containing your Excel sheets.")
-        browse = QPushButton("Browse…")
+        browse = input_picker.button
         browse.setToolTip(
             "Select the FOLDER that contains your results excel files"
         )
         browse.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse.clicked.connect(self._select_folder)
-        in_row_widget = QWidget()
-        in_row = QHBoxLayout(in_row_widget)
-        in_row.setContentsMargins(0, 0, 0, 0)
-        in_row.setSpacing(6)
-        in_row.addWidget(self.folder_edit)
-        in_row.addWidget(browse)
         self.folder_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        file_form.addRow(QLabel("Excel Files Folder:"), in_row_widget)
+        file_form.addRow(QLabel("Excel Files Folder:"), input_picker)
 
-        self.out_edit = QLineEdit()
-        self.out_edit.setReadOnly(True)
-        self.out_edit.setPlaceholderText("Folder where plots will be saved")
+        output_picker = PathPickerRow(
+            "Browse...",
+            placeholder="Folder where plots will be saved",
+        )
+        self.out_edit = output_picker.line_edit
         self.out_edit.setText(self._defaults.get("output_folder", ""))
         self.out_edit.setToolTip("Folder where plots will be saved")
-        browse_out = QPushButton("Browse…")
+        browse_out = output_picker.button
         browse_out.setToolTip("Browse for output folder")
         browse_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse_out.clicked.connect(self._select_output)
-        open_out = QPushButton("Open…")
+        open_out = make_action_button("Open...", compact=True)
         open_out.setToolTip("Open save directory")
         open_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         open_out.clicked.connect(self._open_output_folder)
-        out_row_widget = QWidget()
-        out_row = QHBoxLayout(out_row_widget)
-        out_row.setContentsMargins(0, 0, 0, 0)
-        out_row.setSpacing(6)
-        out_row.addWidget(self.out_edit)
-        out_row.addWidget(browse_out)
-        out_row.addWidget(open_out)
+        output_picker.row_layout.addWidget(open_out, 0)
         self.out_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        file_form.addRow(QLabel("Save Plots To:"), out_row_widget)
+        file_form.addRow(QLabel("Save Plots To:"), output_picker)
 
         file_layout.addLayout(file_form)
 
-        params_box = QGroupBox("Plot Parameters")
-        self._style_box(params_box)
+        params_box = SectionCard("Plot Parameters")
         params_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
-        params_form = QFormLayout(params_box)
-        params_form.setContentsMargins(6, 6, 6, 6)
-        params_form.setSpacing(6)
-        params_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        params_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        params_form = make_form_layout()
+        params_box.content_layout.addLayout(params_form)
 
         self.condition_combo = QComboBox()
         self.condition_combo.setToolTip("Select the condition to plot")
@@ -756,7 +786,8 @@ class PlotGeneratorWindow(QWidget):
         cond_b_layout = QVBoxLayout(self.condB_container)
         cond_b_layout.setContentsMargins(0, 0, 0, 0)
         cond_b_layout.setSpacing(4)
-        cond_b_layout.addWidget(QLabel("Condition B"))
+        self.condition_b_label = QLabel("Condition B")
+        cond_b_layout.addWidget(self.condition_b_label)
         cond_b_row = QHBoxLayout()
         cond_b_row.setContentsMargins(0, 0, 0, 0)
         cond_b_row.setSpacing(6)
@@ -811,20 +842,14 @@ class PlotGeneratorWindow(QWidget):
 
         params_form.addRow("", overlay_row)
 
-        self.legend_group = QGroupBox("Legend labels (optional)")
-        self._style_box(self.legend_group)
-        legend_layout = QVBoxLayout(self.legend_group)
-        legend_layout.setContentsMargins(6, 6, 6, 6)
+        self.legend_group = SectionCard("Legend labels (optional)")
+        legend_layout = self.legend_group.content_layout
         legend_layout.setSpacing(6)
         self.legend_custom_check = QCheckBox("Custom legend labels")
         self.legend_custom_check.toggled.connect(self._toggle_custom_legend_labels)
         legend_layout.addWidget(self.legend_custom_check)
 
-        legend_form = QFormLayout()
-        legend_form.setContentsMargins(0, 0, 0, 0)
-        legend_form.setSpacing(6)
-        legend_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        legend_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        legend_form = make_form_layout()
 
         self.legend_condition_a_edit = QLineEdit()
         self.legend_condition_a_edit.setPlaceholderText("Condition A label")
@@ -855,15 +880,13 @@ class PlotGeneratorWindow(QWidget):
         legend_form.addRow(self.legend_b_peaks_label, self.legend_b_peaks_edit)
 
         legend_layout.addLayout(legend_form)
-        self.legend_reset_btn = QPushButton("Reset to defaults")
+        self.legend_reset_btn = make_action_button("Reset to defaults")
         self.legend_reset_btn.clicked.connect(self._reset_legend_defaults)
         legend_layout.addWidget(self.legend_reset_btn, alignment=Qt.AlignRight)
         params_form.addRow(self.legend_group)
 
-        self.group_box = QGroupBox("Group Options")
-        self._style_box(self.group_box)
-        group_layout = QVBoxLayout(self.group_box)
-        group_layout.setContentsMargins(6, 6, 6, 6)
+        self.group_box = SectionCard("Group Options")
+        group_layout = self.group_box.content_layout
         group_layout.setSpacing(6)
         self.group_overlay_check = QCheckBox("Overlay groups on plots")
         self.group_overlay_check.toggled.connect(self._on_group_overlay_toggled)
@@ -904,14 +927,12 @@ class PlotGeneratorWindow(QWidget):
         self.ylabel_edit.setPlaceholderText("Metric units")
         self.ylabel_edit.setToolTip("Label for the Y axis")
 
-        ranges_box = QGroupBox("Axis Ranges")
-        self._style_box(ranges_box)
+        ranges_box = SectionCard("Axis Ranges")
         ranges_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         )
-        ranges_form = QFormLayout(ranges_box)
-        ranges_form.setContentsMargins(8, 8, 8, 8)
-        ranges_form.setSpacing(6)
+        ranges_form = make_form_layout()
+        ranges_box.content_layout.addLayout(ranges_form)
 
         self.xmin_spin = QDoubleSpinBox()
         self.xmin_spin.setRange(-9999.0, 9999.0)
@@ -977,20 +998,14 @@ class PlotGeneratorWindow(QWidget):
         scalp_row.addWidget(self.scalp_max_spin)
         ranges_form.addRow(QLabel("Scalp range (uV):"), scalp_row)
 
-        advanced_box = QGroupBox("Advanced")
-        self._style_box(advanced_box)
+        advanced_box = SectionCard("Advanced")
         advanced_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         )
-        advanced_layout = QVBoxLayout(advanced_box)
-        advanced_layout.setContentsMargins(6, 6, 6, 6)
+        advanced_layout = advanced_box.content_layout
         advanced_layout.setSpacing(6)
 
-        advanced_form = QFormLayout()
-        advanced_form.setContentsMargins(0, 0, 0, 0)
-        advanced_form.setSpacing(6)
-        advanced_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        advanced_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        advanced_form = make_form_layout()
         advanced_form.addRow(QLabel("Chart title:"), self.title_edit)
         advanced_form.addRow(QLabel("X-axis label:"), self.xlabel_edit)
         advanced_form.addRow(QLabel("Y-axis label:"), self.ylabel_edit)
@@ -998,42 +1013,17 @@ class PlotGeneratorWindow(QWidget):
         advanced_layout.addWidget(ranges_box)
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet(
-            "QProgressBar::chunk {background-color: #16C60C;}"
-        )
 
-        progress_box = QGroupBox("Progress")
-        self._style_box(progress_box)
+        progress_box = SectionCard("Progress")
         progress_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         )
-        progress_layout = QVBoxLayout(progress_box)
-        progress_layout.setContentsMargins(10, 10, 10, 10)
+        progress_layout = progress_box.content_layout
         progress_layout.setSpacing(6)
         progress_layout.addWidget(self.progress_bar)
 
-        top_content = QWidget()
-        top_content.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        )
-        top_layout = QVBoxLayout(top_content)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(10)
-        top_layout.addWidget(file_box)
-        top_layout.addWidget(params_box)
-        top_layout.addWidget(advanced_box)
-        top_layout.addWidget(progress_box)
-
-        splitter = QSplitter(Qt.Vertical)
-        self._main_splitter = splitter
-        self._log_splitter_sizes: list[int] | None = None
-        self._log_prev_window_height: int | None = None
-        splitter.addWidget(top_content)
-
-        console_box = QGroupBox()
-        self._style_box(console_box)
-        console_layout = QVBoxLayout(console_box)
-        console_layout.setContentsMargins(10, 10, 10, 10)
+        console_box = SectionCard("Log Output")
+        console_layout = console_box.content_layout
         console_layout.setSpacing(8)
 
         header = QHBoxLayout()
@@ -1048,7 +1038,7 @@ class PlotGeneratorWindow(QWidget):
         self.log_toggle_btn.toggled.connect(self._toggle_log_panel)
         header.addWidget(self.log_toggle_btn)
         header.addStretch()
-        clear_btn = QPushButton()
+        clear_btn = make_action_button("", compact=True)
         clear_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
         clear_btn.setFixedSize(22, 22)
         clear_btn.setToolTip("Clear Log")
@@ -1062,6 +1052,7 @@ class PlotGeneratorWindow(QWidget):
         log_body_layout.setSpacing(0)
 
         self.log = QTextEdit()
+        self.log.setProperty("logSurface", True)
         self.log.setReadOnly(True)
         font = self.log.font()
         font.setBold(False)
@@ -1072,27 +1063,57 @@ class PlotGeneratorWindow(QWidget):
 
         self.log_body.setVisible(False)
 
-        splitter.addWidget(console_box)
-        splitter.setChildrenCollapsible(False)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
+        left_column = QWidget()
+        left_column.setSizePolicy(
+            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        )
+        left_layout = QVBoxLayout(left_column)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+        left_layout.addWidget(file_box)
+        left_layout.addWidget(progress_box)
+        left_layout.addStretch(1)
 
-        top_h = top_content.sizeHint().height()
-        log_h = max(180, int(top_h * 0.45))
-        splitter.setSizes([top_h, log_h])
-        root_layout.addWidget(splitter)
+        center_column = QWidget()
+        center_column.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        )
+        center_layout = QVBoxLayout(center_column)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(8)
+        center_layout.addWidget(params_box)
 
-        self.save_defaults_btn = QPushButton("Save Defaults")
+        right_column = QWidget()
+        right_column.setSizePolicy(
+            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        )
+        right_layout = QVBoxLayout(right_column)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        right_layout.addWidget(advanced_box)
+        right_layout.addWidget(console_box)
+        right_layout.addStretch(1)
+
+        content_widget = QWidget()
+        content_layout = QHBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(10)
+        content_layout.addWidget(left_column, 1)
+        content_layout.addWidget(center_column, 2)
+        content_layout.addWidget(right_column, 1)
+        root_layout.addWidget(content_widget, 1)
+
+        self.save_defaults_btn = make_action_button("Save Defaults")
         self.save_defaults_btn.setToolTip("Save current folders as defaults")
         self.save_defaults_btn.clicked.connect(self._save_defaults)
-        self.load_defaults_btn = QPushButton("Reset to Default settings")
+        self.load_defaults_btn = make_action_button("Reset to Default settings")
         self.load_defaults_btn.setToolTip("Reset all values to defaults")
         self.load_defaults_btn.clicked.connect(self._load_defaults)
-        self.gen_btn = QPushButton("Generate")
+        self.gen_btn = make_action_button("Generate", variant="primary")
         self.gen_btn.setToolTip("Start plot generation")
         self.gen_btn.clicked.connect(self._generate)
         self.gen_btn.setEnabled(False)
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = make_action_button("Cancel", variant="danger")
         self.cancel_btn.setToolTip("Cancel generation")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel_generation)
@@ -1168,6 +1189,8 @@ class PlotGeneratorWindow(QWidget):
             self.out_edit.setText(folder)
 
     def _persist_scalp_settings(self, save: bool = True) -> None:
+        if self._persist_project_plot_settings(include_paths=False):
+            return
         self.plot_mgr.set_include_scalp_maps(self.scalp_check.isChecked())
         self.plot_mgr.set_scalp_bounds(
             self.scalp_min_spin.value(), self.scalp_max_spin.value()
@@ -1189,7 +1212,8 @@ class PlotGeneratorWindow(QWidget):
                 self.stem_color_b = color.name()
                 self.color_b_btn.setStyleSheet(f"background-color: {self.stem_color_b};")
                 self.plot_mgr.set_second_color(self.stem_color_b)
-            self.plot_mgr.save()
+            if not self._persist_project_plot_settings(include_paths=False):
+                self.plot_mgr.save()
 
     def _on_condition_a_changed(self, condition: str) -> None:
         self._update_chart_title_state(condition)
@@ -1269,6 +1293,9 @@ class PlotGeneratorWindow(QWidget):
             self._populating_conditions = False
 
     def _save_defaults(self) -> None:
+        if self._persist_project_plot_settings(include_paths=True):
+            QMessageBox.information(self, "Defaults", "Project plot defaults saved.")
+            return
         self.plot_mgr.set("paths", "input_folder", self.folder_edit.text())
         self.plot_mgr.set("paths", "output_folder", self.out_edit.text())
         self._persist_scalp_settings(save=False)
@@ -1623,7 +1650,10 @@ class PlotGeneratorWindow(QWidget):
                 return
             group_kwargs = self._group_worker_kwargs(overlay_groups, selected_groups)
             legend_payload = self._legend_settings_payload()
-            self._persist_scalp_settings(save=True)
+            if self._project is not None:
+                self._persist_project_plot_settings(include_paths=True)
+            else:
+                self._persist_scalp_settings(save=True)
 
             self.gen_btn.setEnabled(False)
             self.cancel_btn.setEnabled(True)
@@ -1740,7 +1770,8 @@ class PlotGeneratorWindow(QWidget):
             self.stem_color, self.stem_color_b = dlg.selected_colors()
             self.plot_mgr.set_stem_color(self.stem_color)
             self.plot_mgr.set_second_color(self.stem_color_b)
-            self.plot_mgr.save()
+            if not self._persist_project_plot_settings(include_paths=False):
+                self.plot_mgr.save()
 
     def _open_output_folder(self) -> None:
         folder = self.out_edit.text()

@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
 
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
-from Tools.Plot_Generator.worker import _infer_subject_id_from_path
+from Tools.Plot_Generator.worker import _Worker, _infer_subject_id_from_path
 
 
 def test_infer_subject_id_is_case_insensitive() -> None:
@@ -45,3 +45,35 @@ def test_finish_all_reports_no_plots_when_generated_paths_empty(qtbot, monkeypat
     window._finish_all()
 
     assert "No plots were generated" in window.log.toPlainText()
+
+
+def test_worker_timing_summary_emits_without_mutating_results(tmp_path, monkeypatch) -> None:
+    worker = _Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"ROI": ["Cz"]},
+        selected_roi="ROI",
+        title="Title",
+        xlabel="Hz",
+        ylabel="SNR",
+        x_min=0.0,
+        x_max=2.0,
+        y_min=0.0,
+        y_max=2.0,
+        out_dir=str(tmp_path),
+    )
+    messages: list[str] = []
+    worker.generated_paths.append(str(tmp_path / "plot.png"))
+    worker.failed_items.append({"item": "p01.xlsx", "error": "example"})
+    worker._timings["excel_load"] = 0.25
+    worker._timings["plot_render"] = 0.5
+
+    monkeypatch.setattr(worker, "_emit", lambda msg, *_args: messages.append(msg))
+
+    worker._emit_timing_summary()
+
+    assert messages == [
+        "Timing summary: excel load=0.25s, plot render=0.50s, total=0.75s"
+    ]
+    assert worker.generated_paths == [str(tmp_path / "plot.png")]
+    assert worker.failed_items == [{"item": "p01.xlsx", "error": "example"}]

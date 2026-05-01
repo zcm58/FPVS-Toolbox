@@ -1,19 +1,20 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 
-from PySide6.QtCore import QSettings, QThreadPool
+from PySide6.QtCore import QThreadPool
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
+from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.Shared.settings_paths import app_settings_file
 from Main_App.PySide6_App.GUI import update_manager
-from Main_App.PySide6_App.utils.settings import get_app_settings
 from Main_App.PySide6_App.utils.theme import apply_light_palette
 
 
-def test_get_app_settings_ini_format(qtbot) -> None:
+def test_settings_manager_uses_central_ini(qtbot) -> None:
     app = QApplication.instance() or QApplication([])
-    settings = get_app_settings()
-    assert settings.format() == QSettings.IniFormat
+    settings = SettingsManager()
+    assert settings.ini_path == str(app_settings_file())
     assert app is not None
     dummy = QWidget()
     qtbot.addWidget(dummy)
@@ -21,14 +22,11 @@ def test_get_app_settings_ini_format(qtbot) -> None:
 
 def test_update_check_debounce(monkeypatch, qtbot) -> None:
     QApplication.instance() or QApplication([])
-    settings = get_app_settings()
-    previous = settings.value("updates/last_checked_utc", None)
+    settings = SettingsManager()
+    previous = settings.get("updates", "last_checked_utc", "")
     try:
-        settings.setValue(
-            "updates/last_checked_utc",
-            datetime.now(timezone.utc).isoformat(),
-        )
-        settings.sync()
+        settings.set("updates", "last_checked_utc", datetime.now(timezone.utc).isoformat())
+        settings.save()
         started = False
 
         class DummyPool:
@@ -41,10 +39,10 @@ def test_update_check_debounce(monkeypatch, qtbot) -> None:
         assert started is False
     finally:
         if previous in (None, ""):
-            settings.remove("updates/last_checked_utc")
+            settings.config.remove_option("updates", "last_checked_utc")
         else:
-            settings.setValue("updates/last_checked_utc", previous)
-        settings.sync()
+            settings.set("updates", "last_checked_utc", previous)
+        settings.save()
 
 
 def test_apply_light_palette_sets_deterministic_light_theme(qtbot) -> None:

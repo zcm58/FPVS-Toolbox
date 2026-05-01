@@ -18,9 +18,9 @@ from PySide6.QtWidgets import (
 
 from .project import Project
 from .project_metadata import ProjectMetadata, read_project_metadata
+from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.PySide6_App.config.projects_root import ensure_projects_root
 from Main_App.PySide6_App.utils.op_guard import OpGuard
-from Main_App.PySide6_App.utils.settings import get_app_settings
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -86,10 +86,8 @@ class _ProjectScanJob(QRunnable):
 
 
 def select_projects_root(self) -> None:
-    settings = get_app_settings()
-    settings.beginGroup("paths")
-    saved_root = settings.value("projectsRoot", "", type=str)
-    settings.endGroup()
+    settings = SettingsManager()
+    saved_root = settings.get_project_root()
 
     if saved_root and Path(saved_root).is_dir():
         self.projectsRoot = Path(saved_root)
@@ -107,10 +105,8 @@ def select_projects_root(self) -> None:
             )
             sys.exit(1)
         self.projectsRoot = Path(root)
-        settings.beginGroup("paths")
-        settings.setValue("projectsRoot", str(self.projectsRoot))
-        settings.endGroup()
-        settings.sync()
+        settings.set_project_root(str(self.projectsRoot))
+        settings.save()
 
 
 def new_project(self) -> None:
@@ -445,13 +441,13 @@ def openProjectPath(self, folder: str) -> None:
     self.currentProject = project
     self.loadProject(project)
 
-    settings = get_app_settings()
-    recent = settings.value("recentProjects", [], type=list)
+    settings = SettingsManager()
+    recent = settings.get_recent_projects()
     if folder in recent:
         recent.remove(folder)
     recent.insert(0, folder)
-    settings.setValue("recentProjects", recent)
-    settings.sync()
+    settings.set_recent_projects(recent)
+    settings.save()
 
 
 def loadProject(self, project: Project) -> None:

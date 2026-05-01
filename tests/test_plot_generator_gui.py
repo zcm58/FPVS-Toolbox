@@ -1,5 +1,7 @@
 import pytest
 
+from PySide6.QtWidgets import QMessageBox
+
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 
@@ -16,6 +18,8 @@ def test_scalp_controls_toggle_and_persistence(qtbot, tmp_path, initial_checked)
 
     window = PlotGeneratorWindow(plot_mgr=mgr)
     qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
 
     assert window.scalp_check.isChecked() is initial_checked
     assert window.scalp_min_spin.isEnabled() is initial_checked
@@ -44,6 +48,8 @@ def test_scalp_controls_toggle_and_persistence(qtbot, tmp_path, initial_checked)
     restored_mgr = PlotSettingsManager(ini_path)
     restored_window = PlotGeneratorWindow(plot_mgr=restored_mgr)
     qtbot.addWidget(restored_window)
+    restored_window.show()
+    qtbot.waitExposed(restored_window)
 
     assert restored_window.scalp_check.isChecked() is True
     assert restored_window.scalp_min_spin.value() == pytest.approx(-2.5)
@@ -62,3 +68,25 @@ def test_scalp_controls_toggle_and_persistence(qtbot, tmp_path, initial_checked)
     assert reloaded_mgr.get_scalp_title_b_template() == "Persist B {condition}"
     assert reloaded_mgr.get_scalp_bounds() == (-4.2, 4.2)
     restored_window.close()
+
+
+def test_finish_all_prompts_to_view_generated_plots(qtbot, monkeypatch, tmp_path):
+    window = PlotGeneratorWindow()
+    qtbot.addWidget(window)
+    window.out_edit.setText(str(tmp_path))
+    window._generated_paths = [str(tmp_path / "plot.png")]
+
+    prompts: list[tuple[str, str]] = []
+    opened: list[bool] = []
+
+    def fake_question(_parent, title, message, *_args):
+        prompts.append((title, message))
+        return QMessageBox.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", fake_question)
+    monkeypatch.setattr(window, "_open_output_folder", lambda: opened.append(True))
+
+    window._finish_all()
+
+    assert prompts == [("Finished", "Plots have been successfully generated. View plots?")]
+    assert opened == [True]

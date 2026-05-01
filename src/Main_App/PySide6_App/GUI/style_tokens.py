@@ -8,6 +8,16 @@ ACCENT_COLOR_PRESSED = "#0A4978"
 ACCENT_SOFT_BG = "#EAF2FB"
 ACCENT_SOFT_BORDER = "#C8DCF4"
 ACCENT_TINT = "#E3EEF9"
+DANGER_COLOR = "#B42318"
+DANGER_COLOR_HOVER = "#912018"
+DANGER_SOFT_BG = "#FEEDEB"
+DANGER_SOFT_BORDER = "#F6C8C3"
+SUCCESS_COLOR = "#1A7F37"
+SUCCESS_SOFT_BG = "#EAF6EE"
+SUCCESS_SOFT_BORDER = "#BFE5CB"
+WARNING_COLOR = "#8A5A00"
+WARNING_SOFT_BG = "#FFF5D6"
+WARNING_SOFT_BORDER = "#E7D184"
 
 PAGE_BG = "#F3F5F8"
 CONTENT_BG = "#F6F8FB"
@@ -170,7 +180,8 @@ def build_main_page_stylesheet() -> str:
             border-radius: 7px;
         }}
 
-        QPushButton[primary="true"] {{
+        QPushButton[primary="true"],
+        QPushButton[variant="primary"] {{
             background-color: {ACCENT_COLOR};
             border-color: {ACCENT_COLOR};
             color: white;
@@ -178,35 +189,41 @@ def build_main_page_stylesheet() -> str:
             padding: 8px 18px;
         }}
 
-        QPushButton[primary="true"]:hover {{
+        QPushButton[primary="true"]:hover,
+        QPushButton[variant="primary"]:hover {{
             background-color: {ACCENT_COLOR_HOVER};
             border-color: {ACCENT_COLOR_HOVER};
         }}
 
-        QPushButton[primary="true"]:pressed {{
+        QPushButton[primary="true"]:pressed,
+        QPushButton[variant="primary"]:pressed {{
             background-color: {ACCENT_COLOR_PRESSED};
             border-color: {ACCENT_COLOR_PRESSED};
         }}
 
-        QPushButton[primary="true"]:disabled {{
+        QPushButton[primary="true"]:disabled,
+        QPushButton[variant="primary"]:disabled {{
             background: #BFD5EE;
             border-color: #BFD5EE;
             color: white;
         }}
 
-        QPushButton[secondary="true"] {{
+        QPushButton[secondary="true"],
+        QPushButton[variant="secondary"] {{
             background: {SURFACE_ALT_BG};
             border-color: {BORDER_SOFT_COLOR};
             color: {TEXT_SECONDARY};
         }}
 
-        QPushButton[secondary="true"]:hover {{
+        QPushButton[secondary="true"]:hover,
+        QPushButton[variant="secondary"]:hover {{
             background: #F2F6FA;
             border-color: {BORDER_COLOR};
             color: {TEXT_PRIMARY};
         }}
 
-        QPushButton[tertiary="true"] {{
+        QPushButton[tertiary="true"],
+        QPushButton[variant="tertiary"] {{
             background: transparent;
             border-color: transparent;
             color: {ACCENT_COLOR};
@@ -214,14 +231,58 @@ def build_main_page_stylesheet() -> str:
             padding-right: 6px;
         }}
 
-        QPushButton[tertiary="true"]:hover {{
+        QPushButton[tertiary="true"]:hover,
+        QPushButton[variant="tertiary"]:hover {{
             background: {ACCENT_TINT};
             border-color: transparent;
             color: {ACCENT_COLOR_HOVER};
         }}
 
-        QPushButton[tertiary="true"]:pressed {{
+        QPushButton[tertiary="true"]:pressed,
+        QPushButton[variant="tertiary"]:pressed {{
             background: #D7E7F8;
+        }}
+
+        QPushButton[variant="danger"] {{
+            background: {DANGER_COLOR};
+            border-color: {DANGER_COLOR};
+            color: white;
+            font-weight: 600;
+        }}
+
+        QPushButton[variant="danger"]:hover {{
+            background: {DANGER_COLOR_HOVER};
+            border-color: {DANGER_COLOR_HOVER};
+        }}
+
+        QPushButton[variant="danger"]:disabled {{
+            background: {DANGER_SOFT_BORDER};
+            border-color: {DANGER_SOFT_BORDER};
+            color: white;
+        }}
+
+        QWidget[statusVariant="info"] {{
+            background: {INFO_BG};
+            border: 1px solid {INFO_BORDER};
+            border-radius: 8px;
+        }}
+
+        QWidget[statusVariant="warning"] {{
+            background: {WARNING_SOFT_BG};
+            border: 1px solid {WARNING_SOFT_BORDER};
+            border-radius: 8px;
+        }}
+
+        QWidget[statusVariant="error"] {{
+            background: {DANGER_SOFT_BG};
+            border: 1px solid {DANGER_SOFT_BORDER};
+            border-radius: 8px;
+        }}
+
+        QWidget[statusVariant="success"] {{
+            background: {SUCCESS_SOFT_BG};
+            border: 1px solid {SUCCESS_SOFT_BORDER};
+            border-radius: 8px;
         }}
 
         #preprocessing_info_strip {{

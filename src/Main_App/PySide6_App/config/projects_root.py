@@ -5,14 +5,14 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
-from Main_App.PySide6_App.utils.settings import get_app_settings
+from Main_App.Shared.settings_manager import SettingsManager
 
 
 def ensure_projects_root(parent: QWidget | None) -> Path | None:
     """Ensure a valid projects root exists, prompting the user if necessary."""
 
-    settings = get_app_settings()
-    saved_root = settings.value("paths/projectsRoot", "", type=str)
+    settings = SettingsManager()
+    saved_root = settings.get_project_root()
     if saved_root:
         root_path = Path(saved_root)
         if root_path.is_dir():
@@ -29,22 +29,26 @@ def ensure_projects_root(parent: QWidget | None) -> Path | None:
     if not selected:
         return None
     root_path = Path(selected)
-    settings.setValue("paths/projectsRoot", selected)
-    settings.sync()
+    settings.set_project_root(selected)
+    settings.save()
     return root_path
 
 
 def changeProjectsRoot(self) -> None:
-    settings = get_app_settings()
+    settings = getattr(self, "manager", None)
+    if not isinstance(settings, SettingsManager):
+        settings = SettingsManager()
     root = QFileDialog.getExistingDirectory(
         self,
         "Select Projects Root Folder",
-        settings.value("paths/projectsRoot", ""),
+        settings.get_project_root(),
     )
     if not root:
         return
-    settings.setValue("paths/projectsRoot", root)
-    settings.sync()
+    settings.set_project_root(root)
+    settings.save()
+    if hasattr(self, "projectsRoot"):
+        self.projectsRoot = Path(root)
     QMessageBox.information(
         self,
         "Projects Root Updated",

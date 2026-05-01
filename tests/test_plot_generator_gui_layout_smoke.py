@@ -3,6 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
+from Main_App.PySide6_App.widgets import PathPickerRow, SectionCard
 
 
 def test_plot_generator_gui_layout_smoke(qtbot):
@@ -11,12 +12,20 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     window.show()
     qtbot.waitExposed(window)
 
+    assert window.minimumWidth() >= 980
+    assert window.width() > window.height()
     assert window.folder_edit is not None
     assert window.out_edit is not None
     assert window.condition_combo is not None
     assert window.roi_combo is not None
     assert window.gen_btn is not None
     assert window.log_toggle_btn is not None
+    assert isinstance(window.folder_edit.parentWidget(), PathPickerRow)
+    assert isinstance(window.out_edit.parentWidget(), PathPickerRow)
+    assert len(window.findChildren(SectionCard)) >= 7
+    assert window.gen_btn.property("primary") is True
+    assert window.cancel_btn.property("danger") is True
+    assert window.log.property("logSurface") is True
 
     initial_visible = window.condition_b_label.isVisible()
     window.overlay_check.setChecked(not window.overlay_check.isChecked())
