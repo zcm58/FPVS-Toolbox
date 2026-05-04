@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Tuple
 
-from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
+from Tools.Stats.PySide6.data.stats_subjects import canonical_subject_id
 
 # Folders to ignore during scanning (case-insensitive)
 IGNORED_FOLDERS = {".fif files", "loreta results"}

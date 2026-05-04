@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 
 from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
-from Tools.Stats.PySide6.stats_multigroup_ids import (
+from Tools.Stats.PySide6.data.stats_multigroup_ids import (
     canonical_multigroup_pid_sort_key,
     normalize_multigroup_pid,
 )

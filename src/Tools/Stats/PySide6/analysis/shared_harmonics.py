@@ -16,7 +16,7 @@ from Tools.Stats.Legacy.stats_analysis import (
     SUMMED_BCA_Z_SHEET_NAME,
     _match_freq_column,
 )
-from Tools.Stats.PySide6.group_harmonics import _build_harmonic_domain
+from Tools.Stats.PySide6.analysis.group_harmonics import _build_harmonic_domain
 
 SELECTION_RULE = "two_consecutive_z_gt_thresh"
 DEFAULT_Z_THRESH = 1.64

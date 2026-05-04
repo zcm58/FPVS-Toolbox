@@ -6,8 +6,8 @@ import pandas as pd
 
 from Tools.Stats.Legacy.group_contrasts import compute_group_contrasts
 from Tools.Stats.PySide6.dv_policies import compute_fixed_harmonic_dv_table
-from Tools.Stats.PySide6.stats_group_contrasts import normalize_group_contrasts_table
-from Tools.Stats.PySide6.stats_missingness import compute_complete_case_subjects, compute_missingness
+from Tools.Stats.PySide6.analysis.stats_group_contrasts import normalize_group_contrasts_table
+from Tools.Stats.PySide6.data.stats_missingness import compute_complete_case_subjects, compute_missingness
 from Tools.Stats.PySide6.stats_workers import run_between_group_anova, run_lmm
 
 

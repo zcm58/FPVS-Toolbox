@@ -53,9 +53,9 @@ from Tools.Stats.PySide6.dv_policies import (
     prepare_summed_bca_data,
 )
 from Tools.Stats.PySide6.analysis.dv_variants import compute_dv_variants_payload
-from Tools.Stats.PySide6.stats_group_contrasts import normalize_group_contrasts_table
-from Tools.Stats.PySide6.stats_missingness import compute_complete_case_subjects, compute_missingness
-from Tools.Stats.PySide6.stats_multigroup_ids import (
+from Tools.Stats.PySide6.analysis.stats_group_contrasts import normalize_group_contrasts_table
+from Tools.Stats.PySide6.data.stats_missingness import compute_complete_case_subjects, compute_missingness
+from Tools.Stats.PySide6.data.stats_multigroup_ids import (
     extract_multigroup_pid,
     normalize_multigroup_pid,
 )
@@ -64,7 +64,7 @@ from Tools.Stats.PySide6.analysis.shared_harmonics import (
     compute_shared_harmonics,
     export_shared_harmonics_summary,
 )
-from Tools.Stats.PySide6.stats_outlier_exclusion import (
+from Tools.Stats.PySide6.qc.stats_outlier_exclusion import (
     DvViolation,
     OutlierExclusionReport,
     OutlierExclusionSummary,
@@ -72,7 +72,7 @@ from Tools.Stats.PySide6.stats_outlier_exclusion import (
     apply_hard_dv_exclusion,
     merge_exclusion_reports,
 )
-from Tools.Stats.PySide6.stats_qc_exclusion import (
+from Tools.Stats.PySide6.qc.stats_qc_exclusion import (
     QC_DEFAULT_CRITICAL_THRESHOLD,
     QC_DEFAULT_WARN_THRESHOLD,
     QC_DEFAULT_WARN_ABS_FLOOR_MAXABS,
@@ -82,10 +82,10 @@ from Tools.Stats.PySide6.stats_qc_exclusion import (
     QcExclusionReport,
     run_qc_exclusion,
 )
-from Tools.Stats.PySide6.stats_run_report import StatsRunReport
-from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
+from Tools.Stats.PySide6.reporting.stats_run_report import StatsRunReport
+from Tools.Stats.PySide6.data.stats_subjects import canonical_subject_id
 from Tools.Stats.PySide6.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
-from Tools.Stats.PySide6.reporting_summary import build_rm_anova_report_path, build_rm_anova_text_report
+from Tools.Stats.PySide6.reporting.reporting_summary import build_rm_anova_report_path, build_rm_anova_text_report
 from Tools.Stats.PySide6.reporting.lmm_reporting import (
     attach_lmm_run_metadata,
     build_lmm_run_contract,

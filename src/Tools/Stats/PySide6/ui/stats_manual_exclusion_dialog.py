@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.PySide6_App.widgets import make_action_button
-from Tools.Stats.PySide6.stats_outlier_exclusion import outlier_reason_label
+from Tools.Stats.PySide6.qc.stats_outlier_exclusion import outlier_reason_label
 
 
 class ManualOutlierExclusionDialog(QDialog):

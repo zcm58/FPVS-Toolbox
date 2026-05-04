@@ -8,7 +8,7 @@ import pandas as pd
 
 try:
     from PySide6.QtCore import Qt
-    from Tools.Stats.PySide6.stats_controller import StepId, WORKER_FN_BY_STEP
+    from Tools.Stats.PySide6.controller.stats_controller import StepId, WORKER_FN_BY_STEP
     from Tools.Stats.PySide6.stats_main_window import HarmonicConfig
     from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
     from Tools.Stats.PySide6 import stats_workers

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
-from Tools.Stats.PySide6.stats_qc_exclusion import (
+from Tools.Stats.PySide6.qc.stats_qc_exclusion import (
     QC_REASON_MAXABS,
     QC_REASON_SUMABS,
     QcExclusionReport,

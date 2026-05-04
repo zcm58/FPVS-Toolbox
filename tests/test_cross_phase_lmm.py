@@ -28,18 +28,24 @@ pyside_pkg = sys.modules.get("Tools.Stats.PySide6") or types.ModuleType(
     "Tools.Stats.PySide6"
 )
 pyside_pkg.__path__ = getattr(pyside_pkg, "__path__", [])
+data_pkg = sys.modules.get("Tools.Stats.PySide6.data") or types.ModuleType(
+    "Tools.Stats.PySide6.data"
+)
+data_pkg.__path__ = getattr(data_pkg, "__path__", [])
 
 sys.modules.setdefault("Tools", tools_pkg)
 sys.modules.setdefault("Tools.Stats", stats_pkg)
 sys.modules.setdefault("Tools.Stats.Legacy", legacy_pkg)
 sys.modules.setdefault("Tools.Stats.PySide6", pyside_pkg)
+sys.modules.setdefault("Tools.Stats.PySide6.data", data_pkg)
 
 stats_subjects = _load_module(
-    "Tools.Stats.PySide6.stats_subjects",
-    Path(__file__).parents[1] / "src/Tools/Stats/PySide6/stats_subjects.py",
+    "Tools.Stats.PySide6.data.stats_subjects",
+    Path(__file__).parents[1] / "src/Tools/Stats/PySide6/data/stats_subjects.py",
 )
-sys.modules["Tools.Stats.PySide6.stats_subjects"] = stats_subjects
-setattr(pyside_pkg, "stats_subjects", stats_subjects)
+sys.modules["Tools.Stats.PySide6.data.stats_subjects"] = stats_subjects
+setattr(data_pkg, "stats_subjects", stats_subjects)
+setattr(pyside_pkg, "data", data_pkg)
 
 blas_limits = _load_module(
     "Tools.Stats.Legacy.blas_limits",

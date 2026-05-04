@@ -4,7 +4,7 @@ pd = pytest.importorskip("pandas")
 
 try:
     from PySide6.QtCore import Qt
-    from Tools.Stats.PySide6.stats_controller import PipelineId
+    from Tools.Stats.PySide6.controller.stats_controller import PipelineId
     from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
     from Tools.Stats.PySide6 import stats_workers
 except ModuleNotFoundError:  # pragma: no cover - optional dependency

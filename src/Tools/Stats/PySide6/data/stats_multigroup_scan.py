@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from Tools.Stats.PySide6.stats_data_loader import IGNORED_FOLDERS
-from Tools.Stats.PySide6.stats_multigroup_ids import (
+from Tools.Stats.PySide6.data.stats_data_loader import IGNORED_FOLDERS
+from Tools.Stats.PySide6.data.stats_multigroup_ids import (
     build_multigroup_pid_warning,
     canonical_multigroup_pid_sort_key,
     extract_multigroup_pid,

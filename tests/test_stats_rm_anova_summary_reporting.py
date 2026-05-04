@@ -10,10 +10,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - lightweight test env
     pytest.skip("pandas is required for stats reporting tests", allow_module_level=True)
 
-from Tools.Stats.PySide6.reporting_summary import ReportingSummaryContext, build_reporting_summary
+from Tools.Stats.PySide6.reporting.reporting_summary import ReportingSummaryContext, build_reporting_summary
 from Tools.Stats.PySide6.stats_core import PipelineId
 from Tools.Stats.PySide6.stats_workers import run_rm_anova
-from Tools.Stats.PySide6.summary_utils import StatsSummaryFrames, SummaryConfig, build_summary_from_frames
+from Tools.Stats.PySide6.reporting.summary_utils import StatsSummaryFrames, SummaryConfig, build_summary_from_frames
 
 
 def test_reporting_summary_anova_includes_interaction_gg_epsilon_and_sphericity_fields() -> None:

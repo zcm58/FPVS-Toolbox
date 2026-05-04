@@ -65,7 +65,7 @@ from Tools.Stats.Legacy.stats_export import (
     export_significance_results_to_excel as export_harmonic_results_to_excel,
 )
 from Tools.Stats.shared_rois import apply_rois_to_modules, load_rois_from_settings
-from Tools.Stats.PySide6.stats_controller import StatsController
+from Tools.Stats.PySide6.controller.stats_controller import StatsController
 from Tools.Stats.PySide6.stats_core import (
     ANOVA_BETWEEN_XLS,
     ANOVA_XLS,
@@ -94,8 +94,8 @@ from Tools.Stats.PySide6.stats_data_loader import (
     resolve_project_subfolder,
 )
 from Tools.Stats.PySide6.reporting.stats_logging import format_log_line, format_section_header
-from Tools.Stats.PySide6.stats_missingness import export_missingness_workbook
-from Tools.Stats.PySide6.stats_group_contrasts import export_group_contrasts_workbook
+from Tools.Stats.PySide6.data.stats_missingness import export_missingness_workbook
+from Tools.Stats.PySide6.analysis.stats_group_contrasts import export_group_contrasts_workbook
 from Tools.Stats.PySide6.analysis.baseline_vs_zero import export_baseline_vs_zero_results_to_excel
 from Tools.Stats.PySide6.reporting.stats_export_formatting import (
     apply_baseline_vs_zero_number_formats,
@@ -116,7 +116,7 @@ from Tools.Stats.PySide6.dv_policies import (
     ROSSION_POLICY_NAME,
 )
 from Tools.Stats.PySide6.analysis.dv_variants import export_dv_variants_workbook
-from Tools.Stats.PySide6.stats_outlier_exclusion import (
+from Tools.Stats.PySide6.qc.stats_outlier_exclusion import (
     build_flagged_details_map,
     build_flagged_participant_summary,
     collect_flagged_pid_map,
@@ -127,7 +127,7 @@ from Tools.Stats.PySide6.stats_outlier_exclusion import (
     format_worst_value_display,
 )
 from Tools.Stats.PySide6.ui.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
-from Tools.Stats.PySide6.stats_qc_exclusion import (
+from Tools.Stats.PySide6.qc.stats_qc_exclusion import (
     QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
     QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,
     QC_DEFAULT_CRITICAL_THRESHOLD,
@@ -135,8 +135,8 @@ from Tools.Stats.PySide6.stats_qc_exclusion import (
     QC_DEFAULT_WARN_ABS_FLOOR_SUMABS,
     QC_DEFAULT_WARN_THRESHOLD,
 )
-from Tools.Stats.PySide6.stats_run_report import StatsRunReport
-from Tools.Stats.PySide6.summary_utils import (
+from Tools.Stats.PySide6.reporting.stats_run_report import StatsRunReport
+from Tools.Stats.PySide6.reporting.summary_utils import (
     StatsSummaryFrames,
     SummaryConfig,
     build_between_anova_output,
@@ -144,18 +144,18 @@ from Tools.Stats.PySide6.summary_utils import (
     build_summary_from_frames,
     build_summary_frames_from_results,
 )
-from Tools.Stats.PySide6.reporting_summary import (
+from Tools.Stats.PySide6.reporting.reporting_summary import (
     ReportingSummaryContext,
     build_default_report_path,
     build_reporting_summary,
     safe_project_path_join,
 )
-from Tools.Stats.PySide6.stats_multigroup_scan import (
+from Tools.Stats.PySide6.data.stats_multigroup_scan import (
     MultiGroupScanResult,
     ScanIssue,
     run_multigroup_scan_worker,
 )
-from Tools.Stats.PySide6.stats_multigroup_ids import (
+from Tools.Stats.PySide6.data.stats_multigroup_ids import (
     MultigroupRuntimeSnapshot,
     build_multigroup_runtime_snapshot,
     normalize_multigroup_manifest_groups,

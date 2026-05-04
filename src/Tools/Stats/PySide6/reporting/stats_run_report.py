@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from Tools.Stats.PySide6.stats_outlier_exclusion import OutlierExclusionReport, DvViolation
-from Tools.Stats.PySide6.stats_qc_exclusion import QcExclusionReport
+from Tools.Stats.PySide6.qc.stats_outlier_exclusion import OutlierExclusionReport, DvViolation
+from Tools.Stats.PySide6.qc.stats_qc_exclusion import QcExclusionReport
 
 
 @dataclass(frozen=True)

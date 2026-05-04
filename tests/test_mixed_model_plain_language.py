@@ -1,6 +1,6 @@
 import pandas as pd
 
-from Tools.Stats.PySide6.summary_utils import format_mixed_model_plain_language
+from Tools.Stats.PySide6.reporting.summary_utils import format_mixed_model_plain_language
 
 
 def test_format_mixed_model_plain_language_describes_direction_and_interactions():

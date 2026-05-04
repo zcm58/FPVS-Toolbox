@@ -10,7 +10,7 @@ from Tools.Stats.PySide6.dv_policies import (  # noqa: E402
     LEGACY_POLICY_NAME,
 )
 from Tools.Stats.PySide6.stats_core import PipelineId, StepId  # noqa: E402
-from Tools.Stats.PySide6.stats_controller import (  # noqa: E402
+from Tools.Stats.PySide6.controller.stats_controller import (  # noqa: E402
     BETWEEN_PIPELINE_STEPS,
     SINGLE_PIPELINE_STEPS,
 )

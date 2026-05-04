@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.PySide6.stats_outlier_exclusion import (
+from Tools.Stats.PySide6.qc.stats_outlier_exclusion import (
     OUTLIER_REASON_LIMIT,
     OUTLIER_REASON_NONFINITE,
     OutlierExclusionReport,

@@ -5,7 +5,7 @@ try:
     from PySide6.QtCore import Qt
 
     from Tools.Stats.PySide6 import stats_workers
-    from Tools.Stats.PySide6.stats_controller import (
+    from Tools.Stats.PySide6.controller.stats_controller import (
         PipelineId,
         StepId,
         WORKER_FN_BY_STEP,

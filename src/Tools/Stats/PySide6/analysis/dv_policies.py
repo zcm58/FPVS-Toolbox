@@ -23,7 +23,7 @@ from Tools.Stats.Legacy.stats_analysis import (
     get_included_freqs,
     prepare_all_subject_summed_bca_data,
 )
-from Tools.Stats.PySide6.group_harmonics import (
+from Tools.Stats.PySide6.analysis.group_harmonics import (
     build_rossion_harmonics_summary,
     select_rossion_harmonics_by_roi,
 )

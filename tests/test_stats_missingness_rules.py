@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from Tools.Stats.PySide6.stats_missingness import (
+from Tools.Stats.PySide6.data.stats_missingness import (
     build_missingness_export_tables,
     compute_complete_case_subjects,
     compute_missingness,

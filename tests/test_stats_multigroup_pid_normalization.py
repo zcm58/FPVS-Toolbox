@@ -6,8 +6,8 @@ import pytest
 
 try:
     from Tools.Stats.PySide6.stats_core import PipelineId, StepId
-    from Tools.Stats.PySide6.stats_multigroup_scan import MultiGroupScanResult, ScanIssue
-    from Tools.Stats.PySide6.stats_multigroup_ids import build_multigroup_runtime_snapshot
+from Tools.Stats.PySide6.data.stats_multigroup_scan import MultiGroupScanResult, ScanIssue
+from Tools.Stats.PySide6.data.stats_multigroup_ids import build_multigroup_runtime_snapshot
     from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     pytest.skip("PySide6 is required for multigroup PID normalization tests", allow_module_level=True)

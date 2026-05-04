@@ -1,4 +1,4 @@
-from Tools.Stats.PySide6.stats_qc_exclusion import (
+from Tools.Stats.PySide6.qc.stats_qc_exclusion import (
     QcExclusionReport,
     QcExclusionSummary,
     QcParticipantReport,

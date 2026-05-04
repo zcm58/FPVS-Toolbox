@@ -34,7 +34,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
+from Tools.Stats.PySide6.data.stats_subjects import canonical_subject_id
 
 from .blas_limits import single_threaded_blas
 

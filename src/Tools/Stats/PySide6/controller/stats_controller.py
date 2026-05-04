@@ -22,7 +22,7 @@ from .. import stats_workers
 from ..analysis import stats_cross_phase
 from ..stats_core import PipelineId, PipelineStep, StepId
 from ..reporting.stats_logging import format_step_event
-from ..stats_data_loader import (
+from ..data.stats_data_loader import (
     LelaFilenameParseError,
     load_manifest_data,
     load_project_scan,
@@ -33,9 +33,9 @@ from ..stats_data_loader import (
     scan_lela_phase_folder,
     ScanError,
 )
-from ..stats_subjects import canonical_group_label
+from ..data.stats_subjects import canonical_group_label
 from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
-from ..stats_run_report import StatsRunReport
+from ..reporting.stats_run_report import StatsRunReport
 
 logger = logging.getLogger(__name__)
 

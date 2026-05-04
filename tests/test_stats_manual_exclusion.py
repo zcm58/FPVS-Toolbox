@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from Tools.Stats.PySide6 import stats_workers
 from Tools.Stats.PySide6.stats_core import PipelineId, StepId
 from Tools.Stats.PySide6.ui.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
-from Tools.Stats.PySide6.stats_qc_exclusion import QC_REASON_SUMABS
+from Tools.Stats.PySide6.qc.stats_qc_exclusion import QC_REASON_SUMABS
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
 
 

@@ -20,7 +20,7 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.PySide6.stats_core import (
+from Tools.Stats.PySide6.common.stats_core import (
     ANOVA_XLS,
     GROUP_CONTRAST_XLS,
     LMM_BETWEEN_XLS,

@@ -12,8 +12,8 @@ try:
     from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
     from Tools.Stats.PySide6 import stats_ui_pyside6 as stats_mod
     from Tools.Stats.PySide6 import stats_workers
-    from Tools.Stats.PySide6.stats_controller import WORKER_FN_BY_STEP, StepId
-    from Tools.Stats.PySide6.stats_multigroup_scan import MultiGroupScanResult
+    from Tools.Stats.PySide6.controller.stats_controller import WORKER_FN_BY_STEP, StepId
+from Tools.Stats.PySide6.data.stats_multigroup_scan import MultiGroupScanResult
     from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     pytest.skip("PySide6 is required for Stats smoke tests", allow_module_level=True)

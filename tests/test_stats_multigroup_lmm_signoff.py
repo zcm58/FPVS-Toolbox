@@ -11,18 +11,18 @@ try:
     from PySide6.QtCore import Qt
 
     from Tools.Stats.PySide6 import stats_workers
-    from Tools.Stats.PySide6.reporting_summary import (
+    from Tools.Stats.PySide6.reporting.reporting_summary import (
         ReportingSummaryContext,
         build_reporting_summary,
     )
-    from Tools.Stats.PySide6.stats_controller import (
+    from Tools.Stats.PySide6.controller.stats_controller import (
         PipelineId,
         StepId,
         WORKER_FN_BY_STEP,
     )
-    from Tools.Stats.PySide6.stats_run_report import StatsRunReport
+    from Tools.Stats.PySide6.reporting.stats_run_report import StatsRunReport
     from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
-    from Tools.Stats.PySide6.summary_utils import (
+    from Tools.Stats.PySide6.reporting.summary_utils import (
         StatsSummaryFrames,
         SummaryConfig,
         build_summary_from_frames,
