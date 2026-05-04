@@ -9,8 +9,8 @@ import openpyxl
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-REPORT_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "lmm_reporting.py"
-FORMAT_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "stats_export_formatting.py"
+REPORT_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "reporting" / "lmm_reporting.py"
+FORMAT_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "reporting" / "stats_export_formatting.py"
 SUMMARY_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "summary_utils.py"
 
 

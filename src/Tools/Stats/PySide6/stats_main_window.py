@@ -6,14 +6,14 @@ implementation is split across focused internal mixin modules.
 
 from __future__ import annotations
 
-from Tools.Stats.PySide6.stats_window_support import *  # noqa: F403
-from Tools.Stats.PySide6.stats_window_actions import StatsWindowActionsMixin
-from Tools.Stats.PySide6.stats_window_exclusions import StatsWindowExclusionsMixin
-from Tools.Stats.PySide6.stats_window_exports import StatsWindowExportsMixin
-from Tools.Stats.PySide6.stats_window_multigroup import StatsWindowMultigroupMixin
-from Tools.Stats.PySide6.stats_window_pipeline import StatsWindowPipelineMixin
-from Tools.Stats.PySide6.stats_window_types import HarmonicConfig
-from Tools.Stats.PySide6.stats_window_ui import StatsWindowUiMixin
+from Tools.Stats.PySide6.common.stats_window_types import HarmonicConfig
+from Tools.Stats.PySide6.ui.stats_window_support import *  # noqa: F403
+from Tools.Stats.PySide6.ui.stats_window_actions import StatsWindowActionsMixin
+from Tools.Stats.PySide6.ui.stats_window_exclusions import StatsWindowExclusionsMixin
+from Tools.Stats.PySide6.ui.stats_window_exports import StatsWindowExportsMixin
+from Tools.Stats.PySide6.ui.stats_window_multigroup import StatsWindowMultigroupMixin
+from Tools.Stats.PySide6.ui.stats_window_pipeline import StatsWindowPipelineMixin
+from Tools.Stats.PySide6.ui.stats_window_ui import StatsWindowUiMixin
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 EXPORT_MODULE_PATH = ROOT / "src" / "Tools" / "Stats" / "Legacy" / "stats_export.py"
 REPORTING_MODULE_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "reporting_summary.py"
-FORMAT_MODULE_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "stats_export_formatting.py"
+FORMAT_MODULE_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "reporting" / "stats_export_formatting.py"
 
 
 def _load_module(path: Path, name: str):

@@ -93,11 +93,11 @@ from Tools.Stats.PySide6.stats_data_loader import (
     safe_export_call,
     resolve_project_subfolder,
 )
-from Tools.Stats.PySide6.stats_logging import format_log_line, format_section_header
+from Tools.Stats.PySide6.reporting.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_missingness import export_missingness_workbook
 from Tools.Stats.PySide6.stats_group_contrasts import export_group_contrasts_workbook
 from Tools.Stats.PySide6.baseline_vs_zero import export_baseline_vs_zero_results_to_excel
-from Tools.Stats.PySide6.stats_export_formatting import (
+from Tools.Stats.PySide6.reporting.stats_export_formatting import (
     apply_baseline_vs_zero_number_formats,
     apply_lmm_number_formats_and_metadata,
     apply_rm_anova_pvalue_number_formats,
@@ -161,8 +161,8 @@ from Tools.Stats.PySide6.stats_multigroup_ids import (
     normalize_multigroup_manifest_groups,
     normalize_multigroup_pid,
 )
-from Tools.Stats.PySide6.widgets.elided_label import ElidedPathLabel
-from Tools.Stats.PySide6.stats_window_types import HarmonicConfig
+from Tools.Stats.PySide6.ui.widgets.elided_label import ElidedPathLabel
+from Tools.Stats.PySide6.common.stats_window_types import HarmonicConfig
 
 logger = logging.getLogger(__name__)
 _unused_qaction = QAction  # keep import alive for Qt resource checkers

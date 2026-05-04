@@ -18,9 +18,10 @@ from typing import Any, Callable, Dict, Optional, Sequence
 import pandas as pd
 from PySide6.QtCore import QThreadPool
 
-from .. import stats_cross_phase, stats_workers
+from .. import stats_workers
+from ..analysis import stats_cross_phase
 from ..stats_core import PipelineId, PipelineStep, StepId
-from ..stats_logging import format_step_event
+from ..reporting.stats_logging import format_step_event
 from ..stats_data_loader import (
     LelaFilenameParseError,
     load_manifest_data,

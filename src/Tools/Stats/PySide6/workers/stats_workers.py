@@ -86,7 +86,7 @@ from Tools.Stats.PySide6.stats_run_report import StatsRunReport
 from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
 from Tools.Stats.PySide6.baseline_vs_zero import run_baseline_vs_zero_tests
 from Tools.Stats.PySide6.reporting_summary import build_rm_anova_report_path, build_rm_anova_text_report
-from Tools.Stats.PySide6.lmm_reporting import (
+from Tools.Stats.PySide6.reporting.lmm_reporting import (
     attach_lmm_run_metadata,
     build_lmm_run_contract,
     build_lmm_report_path,

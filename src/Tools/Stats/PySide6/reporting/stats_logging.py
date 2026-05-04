@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Final
 
-from ..stats_core import PipelineId, StepId
+from ..common.stats_core import PipelineId, StepId
 
 
 LOG_TIMESTAMP_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
