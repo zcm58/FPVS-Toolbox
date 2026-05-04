@@ -12,7 +12,7 @@ def quarantined_stats_window_message() -> str:
     return (
         "The legacy CustomTkinter Stats UI at `Tools.Stats.Legacy.stats` has been "
         "quarantined and is no longer supported.\n"
-        "Use the PySide6 Stats tool instead.\n"
+        "Use the active Stats tool entry points instead.\n"
         "Reference source is preserved at "
         "`src/quarantine/Tools/Stats/Legacy_UI/stats.py`."
     )

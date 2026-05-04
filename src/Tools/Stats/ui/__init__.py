@@ -1,1 +1,1 @@
-"""Window mixins, dialogs, and widgets for the PySide6 Stats tool."""
+"""Window mixins, dialogs, and widgets for the Stats tool."""

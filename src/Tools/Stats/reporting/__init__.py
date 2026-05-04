@@ -1,1 +1,1 @@
-"""Reporting and export-formatting helpers for the PySide6 Stats tool."""
+"""Reporting and export-formatting helpers for the Stats tool."""

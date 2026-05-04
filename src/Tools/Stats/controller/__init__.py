@@ -1,1 +1,1 @@
-"""Controller layer for the PySide6 Stats tool."""
+"""Controller layer for the Stats tool."""

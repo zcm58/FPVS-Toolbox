@@ -1,1 +1,1 @@
-"""Small UI widgets used by the PySide6 Stats tool."""
+"""Small UI widgets used by the Stats tool."""
