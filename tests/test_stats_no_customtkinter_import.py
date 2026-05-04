@@ -27,7 +27,9 @@ def test_pyside_stats_window_does_not_import_customtkinter(qtbot, tmp_path):
 @pytest.mark.qt
 def test_main_window_stats_launch_does_not_import_legacy_stats(qtbot, tmp_path, monkeypatch):
     sys.modules.pop("customtkinter", None)
-    sys.modules.pop("Tools.Stats.Legacy.stats", None)
+    for name in list(sys.modules):
+        if name.startswith(("Tools.Stats.Legacy", "Tools.Stats.PySide6")):
+            sys.modules.pop(name, None)
 
     from PySide6.QtWidgets import QWidget, QMessageBox
 
@@ -55,7 +57,8 @@ def test_main_window_stats_launch_does_not_import_legacy_stats(qtbot, tmp_path, 
     window.open_stats_analyzer()
 
     assert "customtkinter" not in sys.modules
-    assert "Tools.Stats.Legacy.stats" not in sys.modules
+    assert not any(name.startswith("Tools.Stats.Legacy") for name in sys.modules)
+    assert not any(name.startswith("Tools.Stats.PySide6") for name in sys.modules)
     assert hasattr(window, "_child_windows")
     assert len(window._child_windows) == 1
     assert isinstance(window._child_windows[0], _DummyStatsWindow)

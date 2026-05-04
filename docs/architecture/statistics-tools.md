@@ -1,13 +1,12 @@
 # Statistics And Tool Modules
 
-Statistics and tool code is organized under one active Stats package, with old `PySide6` and `Legacy` namespaces retained only for compatibility.
+Statistics and tool code is organized under one active Stats package. Old `PySide6` and `Legacy` Stats import namespaces have been removed.
 
 Primary paths:
 
 - `src/Tools/Stats/`: active statistics GUI, controller, workers, analysis helpers, QC helpers, reporting, I/O, CLI, and shared helpers grouped by function.
-- `src/Tools/Stats/PySide6/`: temporary compatibility aliases for old PySide6 import paths.
-- `src/Tools/Stats/Legacy/`: temporary compatibility aliases for moved statistical engines plus fail-fast stubs for the removed CustomTkinter UI.
 - `src/Tools/Stats/shared_rois.py` and `src/Tools/Stats/roi_resolver.py`: shared ROI helpers.
+- `src/quarantine/Tools/Stats/Legacy_UI/`: reference-only source for the removed CustomTkinter Stats UI.
 - `src/Tools/Plot_Generator/`: plot generation GUI, workers, and manifest helpers.
 - `src/Tools/Ratio_Calculator/`: ratio calculator GUI, pipeline, exports, and plots.
 - `src/Tools/Individual_Detectability/`: detectability tool core, GUI, and worker.
@@ -30,10 +29,10 @@ Rules:
 
 - Preserve statistical output schemas and plain-language reporting unless explicitly changing them.
 - Keep GUI imports PySide6-only.
-- Keep public Stats entry points stable while compatibility shims exist.
-- New active code should import from `Tools.Stats.<functional area>`, not `Tools.Stats.Legacy` or `Tools.Stats.PySide6`.
+- Keep public Stats entry points stable: `Tools.Stats.StatsWindow`, `Tools.Stats.stats_main_window`, and `Tools.Stats.stats_ui_pyside6`.
+- New active code should import from `Tools.Stats.<functional area>`, not removed `Tools.Stats.Legacy` or `Tools.Stats.PySide6` paths.
 - Add new analysis logic under the functional subpackage that owns it, and expose stable caller-facing surfaces through the package facade when needed.
-- Run `python scripts/agent_audit.py --check stats-pyside6` after Stats structural changes; it flags unexpected compatibility usage and tkinter imports in active Stats code.
+- Run `python scripts/agent_audit.py --check stats-structure` after Stats structural changes; it flags removed namespace usage and tkinter imports in active Stats code.
 - Use focused tests around changed data transformations and exports.
 
 Useful tests:

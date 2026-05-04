@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import types
 
 
 def test_shared_rois_import_does_not_load_tkinter_or_customtkinter() -> None:
@@ -33,8 +32,10 @@ def test_load_rois_from_settings_cleans_pairs() -> None:
     }
 
 
-def test_apply_rois_to_modules_updates_loaded_modules_without_importing_stats_runners() -> None:
-    sys.modules.pop("Tools.Stats.Legacy.stats_runners", None)
+def test_apply_rois_to_modules_updates_active_analysis_only() -> None:
+    for name in list(sys.modules):
+        if name.startswith("Tools.Stats.Legacy"):
+            sys.modules.pop(name, None)
 
     from Tools.Stats import shared_rois
     from Tools.Stats.analysis import stats_analysis
@@ -43,15 +44,10 @@ def test_apply_rois_to_modules_updates_loaded_modules_without_importing_stats_ru
     original_set_rois = stats_analysis.set_rois
     stats_analysis.set_rois = lambda rois: captured.append(rois)
 
-    legacy_stats = types.ModuleType("Tools.Stats.Legacy.stats")
-    sys.modules["Tools.Stats.Legacy.stats"] = legacy_stats
-
     try:
         shared_rois.apply_rois_to_modules({"ROI": ["Cz"]})
     finally:
         stats_analysis.set_rois = original_set_rois
-        sys.modules.pop("Tools.Stats.Legacy.stats", None)
 
     assert captured == [{"ROI": ["Cz"]}]
-    assert getattr(legacy_stats, "ROIS") == {"ROI": ["Cz"]}
-    assert "Tools.Stats.Legacy.stats_runners" not in sys.modules
+    assert not any(name.startswith("Tools.Stats.Legacy") for name in sys.modules)

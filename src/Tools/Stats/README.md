@@ -1,6 +1,6 @@
 # Stats Tool Overview
 
-The Stats package is organized by function. `Legacy/` and `PySide6/` are compatibility namespaces only; active code should import from `Tools.Stats.<area>`.
+The Stats package is organized by function. Active code should import from `Tools.Stats.<area>`.
 
 ## Active Layout
 
@@ -13,11 +13,11 @@ The Stats package is organized by function. `Legacy/` and `PySide6/` are compati
 * `io/` - Excel/dataframe I/O helpers.
 * `cli/` - out-of-process and command-line entry points.
 
-## Compatibility Namespaces
+## Removed Namespaces
 
-* `PySide6/` keeps temporary aliases for old GUI import paths.
-* `Legacy/` keeps temporary aliases for moved statistical engines plus fail-fast stubs for the removed CustomTkinter UI.
-* New code should not import either namespace unless it is maintaining a compatibility shim or a quarantine test.
+* `Tools.Stats.PySide6` and `Tools.Stats.Legacy` are no longer supported import paths.
+* Reference source for the removed CustomTkinter Stats UI remains under `src/quarantine/Tools/Stats/Legacy_UI/`.
+* New code should import from the active functional packages only.
 
 ## Adding Statistical Features
 
@@ -31,5 +31,5 @@ Use the narrowest module that matches the behavior being changed:
 Structural check:
 
 ```powershell
-python scripts/agent_audit.py --check stats-pyside6
+python scripts/agent_audit.py --check stats-structure
 ```

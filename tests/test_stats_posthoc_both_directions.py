@@ -14,8 +14,8 @@ def _load_module(module_relpath: str, module_name: str):
     return module
 
 
-POSTHOC_MODULE = _load_module("Tools/Stats/Legacy/posthoc_tests.py", "posthoc_tests")
-EXPORT_MODULE = _load_module("Tools/Stats/Legacy/stats_export.py", "stats_export")
+POSTHOC_MODULE = _load_module("Tools/Stats/analysis/posthoc_tests.py", "posthoc_tests")
+EXPORT_MODULE = _load_module("Tools/Stats/reporting/stats_export.py", "stats_export")
 run_interaction_posthocs = POSTHOC_MODULE.run_interaction_posthocs
 export_posthoc_results_to_excel = EXPORT_MODULE.export_posthoc_results_to_excel
 

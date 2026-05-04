@@ -31,7 +31,7 @@ spec_anova.loader.exec_module(anova_mod)
 run_repeated_measures_anova = anova_mod.run_repeated_measures_anova
 
 spec_lmm = importlib.util.spec_from_file_location(
-    "mixed_effects_model", Path("src/Tools/Stats/Legacy/mixed_effects_model.py")
+    "mixed_effects_model", Path("src/Tools/Stats/analysis/mixed_effects_model.py")
 )
 lmm_mod = importlib.util.module_from_spec(spec_lmm)
 assert spec_lmm.loader is not None

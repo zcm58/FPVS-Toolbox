@@ -41,9 +41,9 @@ Legend:
 - `src/Tools/Stats/analysis/stats_analysis.py`
 - `src/Tools/Stats/reporting/stats_export.py`
 
-`src/Tools/Stats/Legacy/**` now contains temporary compatibility shims and
-fail-fast stubs for the removed CustomTkinter Stats UI. Do not add new active
-implementation there.
+The old `src/Tools/Stats/Legacy/**` compatibility namespace has been removed.
+The moved statistical engines now live under the active `src/Tools/Stats/`
+functional packages listed above.
 
 ## Newly quarantined after follow-up cleanup
 

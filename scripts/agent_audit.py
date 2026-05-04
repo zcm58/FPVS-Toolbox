@@ -34,7 +34,6 @@ ACTIVE_SOURCE_LOCALIZATION_REF_RE = re.compile(
 CURRENT_CODE_EXCLUDES = (
     "src/Main_App/Legacy_App/",
     "src/Tools/Average_Preprocessing/Legacy/",
-    "src/Tools/Stats/Legacy/",
     "src/quarantine/",
     "src/Standalone_Scripts/",
     "src/debug/",
@@ -46,78 +45,14 @@ PRODUCTION_EXCLUDES = CURRENT_CODE_EXCLUDES + (
     "src/Tools/Stats/cli/",
 )
 
-STATS_PYSIDE6_ROOT = "src/Tools/Stats/PySide6"
-STATS_PYSIDE6_ROOT_ALLOWED = {
-    "__init__.py",
-    "stats_core.py",
-    "stats_main_window.py",
-    "stats_ui_pyside6.py",
-    "stats_workers.py",
-}
-STATS_LEGACY_ALLOWED = {
-    "__init__.py",
-    "between_groups_cli.py",
-    "blas_limits.py",
-    "cross_phase_lmm_core.py",
-    "excel_io.py",
-    "full_snr.py",
-    "group_contrasts.py",
-    "interpretation_helpers.py",
-    "mixed_effects_model.py",
-    "mixed_group_anova.py",
-    "noise_utils.py",
-    "posthoc_tests.py",
-    "repeated_m_anova.py",
-    "stats.py",
-    "stats_analysis.py",
-    "stats_export.py",
-    "stats_file_scanner.py",
-    "stats_helpers.py",
-    "stats_runners.py",
-    "stats_ui.py",
-}
-STATS_PYSIDE6_REMOVED_ROOT_MODULES = (
-    "baseline_vs_zero",
-    "dv_policies",
-    "dv_variants",
-    "group_harmonics",
-    "lmm_reporting",
-    "reporting_summary",
-    "shared_harmonics",
-    "stats_controller",
-    "stats_data_loader",
-    "stats_export_formatting",
-    "stats_group_contrasts",
-    "stats_manual_exclusion_dialog",
-    "stats_missingness",
-    "stats_multigroup_ids",
-    "stats_multigroup_scan",
-    "stats_outlier_exclusion",
-    "stats_qc_exclusion",
-    "stats_qc_reports",
-    "stats_run_report",
-    "stats_subjects",
-    "stats_window_support",
-    "summary_utils",
-)
-STATS_PYSIDE6_PACKAGE_IMPORT_RE = re.compile(
-    r"^\s*from\s+Tools\.Stats\.PySide6\s+import\s+(?P<imports>.+)$"
+STATS_REMOVED_NAMESPACE_PREFIXES = (
+    "src/Tools/Stats/Legacy/",
+    "src/Tools/Stats/PySide6/",
 )
 STATS_COMPAT_IMPORT_RE = re.compile(
     r"^\s*(?:from|import)\s+Tools\.Stats\.(?:Legacy|PySide6)(?:\.|\b)"
 )
 TKINTER_IMPORT_RE = re.compile(r"^\s*(?:import\s+tkinter\b|from\s+tkinter\s+import\b)")
-STATS_COMPAT_IMPORT_ALLOWED_PREFIXES = (
-    "src/Main_App/Legacy_App/",
-    "src/Tools/Stats/Legacy/",
-    "src/Tools/Stats/PySide6/",
-)
-STATS_COMPAT_IMPORT_ALLOWED_FILES = {
-    "tests/test_startup_imports_no_customtkinter.py",
-    "tests/test_stats_legacy_ui_quarantine.py",
-    "tests/test_stats_no_customtkinter_import.py",
-    "tests/test_stats_shared_rois.py",
-}
 
 
 @dataclass(frozen=True)
@@ -439,12 +374,8 @@ def check_added_prints() -> list[Issue]:
     return issues
 
 
-def check_stats_pyside6_structure() -> list[Issue]:
+def check_stats_structure() -> list[Issue]:
     issues: list[Issue] = []
-    removed_root_paths = {
-        f"Tools.Stats.PySide6.{module}": module
-        for module in STATS_PYSIDE6_REMOVED_ROOT_MODULES
-    }
 
     for path in _tracked_and_untracked_files():
         normalized = _normalize(path)
@@ -452,106 +383,44 @@ def check_stats_pyside6_structure() -> list[Issue]:
         if not absolute.exists():
             continue
 
-        if (
-            normalized.startswith(f"{STATS_PYSIDE6_ROOT}/")
-            and _is_python(normalized)
-            and "/" not in normalized.removeprefix(f"{STATS_PYSIDE6_ROOT}/")
-        ):
-            filename = Path(normalized).name
-            if filename not in STATS_PYSIDE6_ROOT_ALLOWED:
-                issues.append(
-                    Issue(
-                        "stats-pyside6",
-                        normalized,
-                        None,
-                        "unexpected root Stats PySide6 module; place implementation in a functional subpackage or update the allowlist with rationale",
-                    )
+        if normalized.startswith(STATS_REMOVED_NAMESPACE_PREFIXES):
+            issues.append(
+                Issue(
+                    "stats-structure",
+                    normalized,
+                    None,
+                    "removed Stats compatibility namespace found; active code belongs in Tools.Stats functional packages",
                 )
-        elif normalized.startswith(f"{STATS_PYSIDE6_ROOT}/") and _is_python(normalized):
-            filename = Path(normalized).name
-            if filename != "__init__.py":
-                issues.append(
-                    Issue(
-                        "stats-pyside6",
-                        normalized,
-                        None,
-                        "PySide6 compatibility subpackages should contain __init__.py aliases only",
-                    )
-                )
-
-        if normalized.startswith("src/Tools/Stats/Legacy/") and _is_python(normalized):
-            filename = Path(normalized).name
-            if filename not in STATS_LEGACY_ALLOWED:
-                issues.append(
-                    Issue(
-                        "stats-pyside6",
-                        normalized,
-                        None,
-                        "unexpected Stats Legacy compatibility module; active code belongs in Tools.Stats functional packages",
-                    )
-                )
+            )
 
         if not _is_python(normalized):
             continue
         if normalized == "scripts/agent_audit.py":
             continue
-        compat_allowed = normalized.startswith(STATS_COMPAT_IMPORT_ALLOWED_PREFIXES) or (
-            normalized in STATS_COMPAT_IMPORT_ALLOWED_FILES
-        )
 
         for line_no, line in enumerate(_read_text(normalized), start=1):
             if (
                 normalized.startswith("src/Tools/Stats/")
-                and not normalized.startswith(("src/Tools/Stats/Legacy/", "src/Tools/Stats/PySide6/"))
                 and TKINTER_IMPORT_RE.search(line)
             ):
                 issues.append(
                     Issue(
-                        "stats-pyside6",
+                        "stats-structure",
                         normalized,
                         line_no,
                         "active Stats code must not import tkinter; keep GUI code PySide6-only",
                     )
                 )
 
-            if not compat_allowed and STATS_COMPAT_IMPORT_RE.search(line):
+            if STATS_COMPAT_IMPORT_RE.search(line):
                 issues.append(
                     Issue(
-                        "stats-pyside6",
+                        "stats-structure",
                         normalized,
                         line_no,
-                        "active Stats code should import canonical Tools.Stats.<area> modules, not Legacy/PySide6 compatibility namespaces",
+                        "removed Stats compatibility import; use canonical Tools.Stats.<area> modules",
                     )
                 )
-
-            for import_path, module in removed_root_paths.items():
-                if import_path in line:
-                    issues.append(
-                        Issue(
-                            "stats-pyside6",
-                            normalized,
-                            line_no,
-                            f"old root Stats PySide6 import {import_path}; import the functional subpackage module instead",
-                        )
-                    )
-
-            package_import = STATS_PYSIDE6_PACKAGE_IMPORT_RE.match(line)
-            if not package_import:
-                continue
-            imported_names = {
-                item.strip().split(" as ", 1)[0].strip()
-                for item in package_import.group("imports").split(",")
-            }
-            for module in STATS_PYSIDE6_REMOVED_ROOT_MODULES:
-                if module in imported_names:
-                    issues.append(
-                        Issue(
-                            "stats-pyside6",
-                            normalized,
-                            line_no,
-                            f"old root Stats PySide6 package import {module}; import Tools.Stats.PySide6.analysis/data/qc/reporting/ui module instead",
-                        )
-                    )
     return issues
 
 
@@ -563,7 +432,7 @@ CHECKS = {
     "gui": check_gui_imports,
     "paths": check_added_paths,
     "prints": check_added_prints,
-    "stats-pyside6": check_stats_pyside6_structure,
+    "stats-structure": check_stats_structure,
 }
 
 
