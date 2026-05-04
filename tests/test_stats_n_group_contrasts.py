@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from Tools.Stats.Legacy.group_contrasts import compute_group_contrasts
-from Tools.Stats.Legacy.stats_export import export_mixed_model_results_to_excel
-from Tools.Stats.PySide6.stats_core import GROUP_CONTRAST_XLS, LMM_BETWEEN_XLS
-from Tools.Stats.PySide6.analysis.stats_group_contrasts import (
+from Tools.Stats.analysis.group_contrasts import compute_group_contrasts
+from Tools.Stats.reporting.stats_export import export_mixed_model_results_to_excel
+from Tools.Stats.common.stats_core import GROUP_CONTRAST_XLS, LMM_BETWEEN_XLS
+from Tools.Stats.analysis.stats_group_contrasts import (
     PAIRWISE_CONTRAST_COLUMNS,
     export_group_contrasts_workbook,
     normalize_group_contrasts_table,
 )
-from Tools.Stats.PySide6.reporting.summary_utils import SummaryConfig, build_summary_from_files
+from Tools.Stats.reporting.summary_utils import SummaryConfig, build_summary_from_files
 
 
 def _build_long_df(groups: tuple[str, ...]) -> pd.DataFrame:

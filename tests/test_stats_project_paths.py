@@ -11,7 +11,7 @@ from Main_App.PySide6_App.Backend.project import (
     EXCEL_SUBFOLDER_NAME,
     STATS_SUBFOLDER_NAME,
 )
-from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.stats_ui_pyside6 import StatsWindow
 
 
 def _patch_scan(monkeypatch):

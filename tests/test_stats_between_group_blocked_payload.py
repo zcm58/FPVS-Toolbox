@@ -5,9 +5,9 @@ from pathlib import Path
 import pandas as pd
 from PySide6.QtCore import QThreadPool
 
-from Tools.Stats.PySide6.stats_core import PipelineId, PipelineStep, StepId
-from Tools.Stats.PySide6.stats_main_window import StatsWindow
-from Tools.Stats.PySide6.stats_workers import run_lmm
+from Tools.Stats.common.stats_core import PipelineId, PipelineStep, StepId
+from Tools.Stats.stats_main_window import StatsWindow
+from Tools.Stats.workers.stats_workers import run_lmm
 
 
 def test_stats_window_error_slot_does_not_raise_keyerror(qtbot, monkeypatch, tmp_path: Path) -> None:

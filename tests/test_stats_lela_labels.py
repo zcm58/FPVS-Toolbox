@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("numpy")
 
-from Tools.Stats.PySide6.controller.stats_controller import _unique_label
+from Tools.Stats.controller.stats_controller import _unique_label
 
 
 def test_unique_label_adds_suffix_when_duplicate():

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from Tools.Stats.PySide6.analysis.dv_policies import (
+from Tools.Stats.analysis.dv_policies import (
     EMPTY_LIST_FALLBACK_FIXED_K,
     apply_empty_union_policy,
 )
-from Tools.Stats.PySide6.analysis.group_harmonics import compute_union_harmonics_by_roi
+from Tools.Stats.analysis.group_harmonics import compute_union_harmonics_by_roi
 
 
 def test_group_mean_z_union_logic_and_fallback():

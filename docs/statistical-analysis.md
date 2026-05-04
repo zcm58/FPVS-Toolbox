@@ -171,6 +171,6 @@ The following details were **not found in code** while preparing this
 page:
 
 - An explicit one-sample test against zero as part of the RM-ANOVA
-  pipeline. (Searched in `src/Tools/Stats/PySide6/stats_workers.py`,
-  `src/Tools/Stats/Legacy/stats_analysis.py`, and
-  `src/Tools/Stats/Legacy/repeated_m_anova.py`.)
+  pipeline. (Searched in `src/Tools/Stats/workers/stats_workers.py`,
+  `src/Tools/Stats/analysis/stats_analysis.py`, and
+  `src/Tools/Stats/analysis/repeated_m_anova.py`.)

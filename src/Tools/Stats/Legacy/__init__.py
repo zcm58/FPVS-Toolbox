@@ -1,8 +1,8 @@
-"""Legacy statistics package for FPVS analysis workflows.
+"""Compatibility namespace for old Stats Legacy imports.
 
-Shared non-UI analysis modules in this package are still used by the PySide6
-Stats tool. The old CustomTkinter UI entry points have been quarantined and
-must fail fast if stale code tries to access them.
+Active statistical engines live under ``Tools.Stats`` functional packages.
+The old CustomTkinter UI entry points have been quarantined and must fail
+fast if stale code tries to access them.
 """
 
 from __future__ import annotations

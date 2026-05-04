@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from Tools.Stats.PySide6.qc.stats_qc_reports import (
+from Tools.Stats.qc.stats_qc_reports import (
     QC_DISTRIBUTION_COLUMNS,
     QC_SUBJECT_LEVEL_COLUMNS,
     QC_SUMMARY_COLUMNS,

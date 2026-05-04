@@ -20,7 +20,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from PySide6.QtCore import QObject, Signal
 
-from Tools.Stats.Legacy.stats_analysis import ALL_ROIS_OPTION
+from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 from Tools.Plot_Generator.scalp_utils import (
     ScalpInputs,

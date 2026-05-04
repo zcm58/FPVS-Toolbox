@@ -28,20 +28,15 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 TOOLS = SRC / "Tools"
 STATS = TOOLS / "Stats"
-PYSIDE6 = STATS / "PySide6"
-LEGACY = STATS / "Legacy"
-
 _ensure_package("Tools", TOOLS)
 _ensure_package("Tools.Stats", STATS)
-_ensure_package("Tools.Stats.PySide6", PYSIDE6)
-_ensure_package("Tools.Stats.PySide6.analysis", PYSIDE6 / "analysis")
-_ensure_package("Tools.Stats.Legacy", LEGACY)
+_ensure_package("Tools.Stats.analysis", STATS / "analysis")
 
 dv_policies = _load_module(
-    "Tools.Stats.PySide6.analysis.dv_policies", PYSIDE6 / "analysis" / "dv_policies.py"
+    "Tools.Stats.analysis.dv_policies", STATS / "analysis" / "dv_policies.py"
 )
 group_harmonics = _load_module(
-    "Tools.Stats.PySide6.analysis.group_harmonics", PYSIDE6 / "analysis" / "group_harmonics.py"
+    "Tools.Stats.analysis.group_harmonics", STATS / "analysis" / "group_harmonics.py"
 )
 
 

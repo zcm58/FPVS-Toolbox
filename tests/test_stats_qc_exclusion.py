@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from Tools.Stats.Legacy import excel_io
-from Tools.Stats.PySide6.analysis.dv_policies import prepare_summed_bca_data
-from Tools.Stats.PySide6.qc.stats_qc_exclusion import (
+from Tools.Stats.io import excel_io
+from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
+from Tools.Stats.qc.stats_qc_exclusion import (
     QC_REASON_MAXABS,
     QC_REASON_SUMABS,
     QcViolation,

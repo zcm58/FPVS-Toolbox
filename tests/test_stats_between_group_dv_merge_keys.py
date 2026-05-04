@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from Tools.Stats.PySide6.stats_workers import (
+from Tools.Stats.workers.stats_workers import (
     LMM_DIAGNOSTIC_WORKBOOK,
     run_group_contrasts,
     run_lmm,
@@ -109,7 +109,7 @@ def test_between_group_successful_merge_logs_non_nan_before_dropna_and_does_not_
         captured["rows"] = len(data)
         return pd.DataFrame({"Effect": ["condition"], "P-Value": [0.04]}), object()
 
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.run_mixed_effects_model", _fake_mixed_effects_model)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.run_mixed_effects_model", _fake_mixed_effects_model)
 
     kwargs = _base_kwargs()
     kwargs["subjects"] = ["P1BCF", "P2CGL"]
@@ -147,7 +147,7 @@ def test_between_group_execution_normalizes_zero_padded_subject_ids(monkeypatch)
         captured["subjects"] = sorted(data["subject"].astype(str).unique().tolist())
         return pd.DataFrame({"Effect": ["condition"], "P-Value": [0.04]}), object()
 
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.run_mixed_effects_model", _fake_mixed_effects_model)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.run_mixed_effects_model", _fake_mixed_effects_model)
 
     kwargs = _base_kwargs()
     kwargs["subjects"] = ["P01", "P02"]
@@ -221,8 +221,8 @@ def test_between_group_supported_path_aligns_rich_lookup_subjects_without_renami
             ]
         )
 
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.run_mixed_effects_model", _capture_lmm)
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.compute_group_contrasts", _capture_contrasts)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.run_mixed_effects_model", _capture_lmm)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.compute_group_contrasts", _capture_contrasts)
 
     kwargs = _base_kwargs()
     kwargs["subjects"] = ["P1", "P2", "P3", "P4"]
@@ -333,8 +333,8 @@ def test_between_group_supported_path_shares_prepared_contract_and_keys(monkeypa
             ]
         )
 
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.run_mixed_effects_model", _capture_lmm)
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.compute_group_contrasts", _capture_contrasts)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.run_mixed_effects_model", _capture_lmm)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.compute_group_contrasts", _capture_contrasts)
 
     kwargs = _base_kwargs()
     kwargs["subjects"] = ["P01", "P02", "P03", "P04"]
@@ -404,7 +404,7 @@ def test_between_group_supported_path_reports_subject_alignment_mismatch_samples
         )
 
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.run_mixed_effects_model",
+        "Tools.Stats.workers.stats_workers.run_mixed_effects_model",
         _unexpected_run_mixed_effects_model,
     )
 
@@ -468,7 +468,7 @@ def test_between_group_supported_path_blocks_when_authoritative_rows_are_empty_u
         )
 
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.run_mixed_effects_model",
+        "Tools.Stats.workers.stats_workers.run_mixed_effects_model",
         _unexpected_run_mixed_effects_model,
     )
 

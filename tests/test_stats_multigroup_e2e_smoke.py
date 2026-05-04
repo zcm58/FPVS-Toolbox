@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from Tools.Stats.Legacy.group_contrasts import compute_group_contrasts
-from Tools.Stats.PySide6.analysis.dv_policies import compute_fixed_harmonic_dv_table
-from Tools.Stats.PySide6.analysis.stats_group_contrasts import normalize_group_contrasts_table
-from Tools.Stats.PySide6.data.stats_missingness import compute_complete_case_subjects, compute_missingness
-from Tools.Stats.PySide6.stats_workers import run_between_group_anova, run_lmm
+from Tools.Stats.analysis.group_contrasts import compute_group_contrasts
+from Tools.Stats.analysis.dv_policies import compute_fixed_harmonic_dv_table
+from Tools.Stats.analysis.stats_group_contrasts import normalize_group_contrasts_table
+from Tools.Stats.data.stats_missingness import compute_complete_case_subjects, compute_missingness
+from Tools.Stats.workers.stats_workers import run_between_group_anova, run_lmm
 
 
 def _write_bca_excel(path: Path, value_a: float, value_b: float) -> None:
@@ -139,7 +139,7 @@ def test_single_group_fixed_dv_regression_schema_stable(tmp_path: Path) -> None:
     def _fake_lmm(**_kwargs):
         return pd.DataFrame({"Effect": ["condition"], "P-Value": [0.05]}), object()
 
-    from Tools.Stats.PySide6 import stats_workers
+    from Tools.Stats.workers import stats_workers
 
     original_prepare = stats_workers.prepare_summed_bca_data
     original_lmm = stats_workers.run_mixed_effects_model

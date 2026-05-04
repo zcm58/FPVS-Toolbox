@@ -23,8 +23,8 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 ## Tools
 
-- `src/Tools/Stats/PySide6/`: active statistics UI and pipeline. Implementation lives in `ui/`, `controller/`, `workers/`, `data/`, `analysis/`, `qc/`, `reporting/`, and `common/`; root modules preserve old import paths.
-- `src/Tools/Stats/Legacy/`: legacy statistics internals.
+- `src/Tools/Stats/`: active statistics UI, pipeline, analysis engines, reporting, I/O, CLI, and shared helpers grouped by function.
+- `src/Tools/Stats/PySide6/` and `src/Tools/Stats/Legacy/`: temporary compatibility namespaces; do not add new active implementation here.
 - `src/Tools/Plot_Generator/`: SNR/FFT plot generation.
 - `src/Tools/Ratio_Calculator/`: ratio computation, export, and plotting.
 - `src/Tools/Individual_Detectability/`: individual-level detectability workflow.

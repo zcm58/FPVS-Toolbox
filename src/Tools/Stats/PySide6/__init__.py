@@ -1,5 +1,4 @@
-"""PySide6 layer for the Stats tool.
+"""Compatibility namespace for old Stats PySide6 imports.
 
-This package contains the view (StatsWindow), controller, and supporting
-services that wrap legacy statistical routines in a Qt-friendly API.
+Active implementation lives under ``Tools.Stats`` functional packages.
 """

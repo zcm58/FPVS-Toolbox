@@ -5,13 +5,13 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QCheckBox  # noqa: E402
 
-from Tools.Stats.PySide6.analysis.dv_policies import (  # noqa: E402
+from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     FIXED_K_POLICY_NAME,
     GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
 )
-from Tools.Stats.PySide6.stats_core import PipelineId, StepId  # noqa: E402
-from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow  # noqa: E402
+from Tools.Stats.common.stats_core import PipelineId, StepId  # noqa: E402
+from Tools.Stats.stats_ui_pyside6 import StatsWindow  # noqa: E402
 
 
 def _setup_window_state(window: StatsWindow) -> None:

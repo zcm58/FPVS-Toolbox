@@ -12,9 +12,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pandas as pd
 from PySide6.QtCore import Qt
 
-from Tools.Stats.PySide6 import stats_workers
-from Tools.Stats.PySide6.stats_core import PipelineId
-from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.workers import stats_workers
+from Tools.Stats.common.stats_core import PipelineId
+from Tools.Stats.stats_ui_pyside6 import StatsWindow
 
 
 @pytest.fixture(autouse=True)

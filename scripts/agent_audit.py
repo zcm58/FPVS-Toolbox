@@ -43,6 +43,7 @@ CURRENT_CODE_EXCLUDES = (
 PRODUCTION_EXCLUDES = CURRENT_CODE_EXCLUDES + (
     "scripts/",
     "tests/",
+    "src/Tools/Stats/cli/",
 )
 
 STATS_PYSIDE6_ROOT = "src/Tools/Stats/PySide6"
@@ -52,6 +53,28 @@ STATS_PYSIDE6_ROOT_ALLOWED = {
     "stats_main_window.py",
     "stats_ui_pyside6.py",
     "stats_workers.py",
+}
+STATS_LEGACY_ALLOWED = {
+    "__init__.py",
+    "between_groups_cli.py",
+    "blas_limits.py",
+    "cross_phase_lmm_core.py",
+    "excel_io.py",
+    "full_snr.py",
+    "group_contrasts.py",
+    "interpretation_helpers.py",
+    "mixed_effects_model.py",
+    "mixed_group_anova.py",
+    "noise_utils.py",
+    "posthoc_tests.py",
+    "repeated_m_anova.py",
+    "stats.py",
+    "stats_analysis.py",
+    "stats_export.py",
+    "stats_file_scanner.py",
+    "stats_helpers.py",
+    "stats_runners.py",
+    "stats_ui.py",
 }
 STATS_PYSIDE6_REMOVED_ROOT_MODULES = (
     "baseline_vs_zero",
@@ -80,6 +103,21 @@ STATS_PYSIDE6_REMOVED_ROOT_MODULES = (
 STATS_PYSIDE6_PACKAGE_IMPORT_RE = re.compile(
     r"^\s*from\s+Tools\.Stats\.PySide6\s+import\s+(?P<imports>.+)$"
 )
+STATS_COMPAT_IMPORT_RE = re.compile(
+    r"^\s*(?:from|import)\s+Tools\.Stats\.(?:Legacy|PySide6)(?:\.|\b)"
+)
+TKINTER_IMPORT_RE = re.compile(r"^\s*(?:import\s+tkinter\b|from\s+tkinter\s+import\b)")
+STATS_COMPAT_IMPORT_ALLOWED_PREFIXES = (
+    "src/Main_App/Legacy_App/",
+    "src/Tools/Stats/Legacy/",
+    "src/Tools/Stats/PySide6/",
+)
+STATS_COMPAT_IMPORT_ALLOWED_FILES = {
+    "tests/test_startup_imports_no_customtkinter.py",
+    "tests/test_stats_legacy_ui_quarantine.py",
+    "tests/test_stats_no_customtkinter_import.py",
+    "tests/test_stats_shared_rois.py",
+}
 
 
 @dataclass(frozen=True)
@@ -429,13 +467,63 @@ def check_stats_pyside6_structure() -> list[Issue]:
                         "unexpected root Stats PySide6 module; place implementation in a functional subpackage or update the allowlist with rationale",
                     )
                 )
+        elif normalized.startswith(f"{STATS_PYSIDE6_ROOT}/") and _is_python(normalized):
+            filename = Path(normalized).name
+            if filename != "__init__.py":
+                issues.append(
+                    Issue(
+                        "stats-pyside6",
+                        normalized,
+                        None,
+                        "PySide6 compatibility subpackages should contain __init__.py aliases only",
+                    )
+                )
+
+        if normalized.startswith("src/Tools/Stats/Legacy/") and _is_python(normalized):
+            filename = Path(normalized).name
+            if filename not in STATS_LEGACY_ALLOWED:
+                issues.append(
+                    Issue(
+                        "stats-pyside6",
+                        normalized,
+                        None,
+                        "unexpected Stats Legacy compatibility module; active code belongs in Tools.Stats functional packages",
+                    )
+                )
 
         if not _is_python(normalized):
             continue
         if normalized == "scripts/agent_audit.py":
             continue
+        compat_allowed = normalized.startswith(STATS_COMPAT_IMPORT_ALLOWED_PREFIXES) or (
+            normalized in STATS_COMPAT_IMPORT_ALLOWED_FILES
+        )
 
         for line_no, line in enumerate(_read_text(normalized), start=1):
+            if (
+                normalized.startswith("src/Tools/Stats/")
+                and not normalized.startswith(("src/Tools/Stats/Legacy/", "src/Tools/Stats/PySide6/"))
+                and TKINTER_IMPORT_RE.search(line)
+            ):
+                issues.append(
+                    Issue(
+                        "stats-pyside6",
+                        normalized,
+                        line_no,
+                        "active Stats code must not import tkinter; keep GUI code PySide6-only",
+                    )
+                )
+
+            if not compat_allowed and STATS_COMPAT_IMPORT_RE.search(line):
+                issues.append(
+                    Issue(
+                        "stats-pyside6",
+                        normalized,
+                        line_no,
+                        "active Stats code should import canonical Tools.Stats.<area> modules, not Legacy/PySide6 compatibility namespaces",
+                    )
+                )
+
             for import_path, module in removed_root_paths.items():
                 if import_path in line:
                     issues.append(

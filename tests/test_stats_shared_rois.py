@@ -37,7 +37,7 @@ def test_apply_rois_to_modules_updates_loaded_modules_without_importing_stats_ru
     sys.modules.pop("Tools.Stats.Legacy.stats_runners", None)
 
     from Tools.Stats import shared_rois
-    from Tools.Stats.Legacy import stats_analysis
+    from Tools.Stats.analysis import stats_analysis
 
     captured: list[dict[str, list[str]]] = []
     original_set_rois = stats_analysis.set_rois

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from Tools.Stats.PySide6.data.stats_multigroup_scan import extract_canonical_pid, scan_multigroup_readiness
+from Tools.Stats.data.stats_multigroup_scan import extract_canonical_pid, scan_multigroup_readiness
 
 
 def _write_manifest(project_root: Path, participants: dict, groups: dict) -> None:

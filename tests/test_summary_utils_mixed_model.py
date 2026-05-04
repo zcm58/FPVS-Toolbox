@@ -13,8 +13,8 @@ class _PipelineId(Enum):
 
 
 def _load_summary_utils_module():
-    original_stats_core = sys.modules.get("Tools.Stats.PySide6.common.stats_core")
-    stats_core_stub = types.ModuleType("Tools.Stats.PySide6.common.stats_core")
+    original_stats_core = sys.modules.get("Tools.Stats.common.stats_core")
+    stats_core_stub = types.ModuleType("Tools.Stats.common.stats_core")
     stats_core_stub.ANOVA_BETWEEN_XLS = "Mixed ANOVA Between Groups.xlsx"
     stats_core_stub.ANOVA_XLS = "RM-ANOVA Results.xlsx"
     stats_core_stub.GROUP_CONTRAST_XLS = "Group Contrasts.xlsx"
@@ -39,18 +39,18 @@ def _load_summary_utils_module():
     stats_core_stub.MULTIGROUP_MIXED_MODEL_SHEET = "Mixed Model"
     stats_core_stub.POSTHOC_XLS = "Posthoc Results.xlsx"
     stats_core_stub.PipelineId = _PipelineId
-    sys.modules["Tools.Stats.PySide6.common.stats_core"] = stats_core_stub
+    sys.modules["Tools.Stats.common.stats_core"] = stats_core_stub
 
-    module_path = Path("src/Tools/Stats/PySide6/reporting/summary_utils.py")
+    module_path = Path("src/Tools/Stats/reporting/summary_utils.py")
     spec = importlib.util.spec_from_file_location("summary_utils_mixed_model_under_test", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     if original_stats_core is not None:
-        sys.modules["Tools.Stats.PySide6.common.stats_core"] = original_stats_core
+        sys.modules["Tools.Stats.common.stats_core"] = original_stats_core
     else:
-        sys.modules.pop("Tools.Stats.PySide6.common.stats_core", None)
+        sys.modules.pop("Tools.Stats.common.stats_core", None)
     return module
 
 

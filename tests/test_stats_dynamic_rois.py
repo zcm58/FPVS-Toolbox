@@ -22,7 +22,7 @@ assert spec.loader is not None
 spec.loader.exec_module(rr)
 resolve_active_rois = rr.resolve_active_rois
 spec_anova = importlib.util.spec_from_file_location(
-    "repeated_m_anova", Path("src/Tools/Stats/Legacy/repeated_m_anova.py")
+    "repeated_m_anova", Path("src/Tools/Stats/analysis/repeated_m_anova.py")
 )
 anova_mod = importlib.util.module_from_spec(spec_anova)
 assert spec_anova.loader is not None

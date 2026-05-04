@@ -10,10 +10,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - lightweight test env
     pytest.skip("pandas is required for stats reporting tests", allow_module_level=True)
 
-from Tools.Stats.PySide6.reporting.reporting_summary import ReportingSummaryContext, build_reporting_summary
-from Tools.Stats.PySide6.stats_core import PipelineId
-from Tools.Stats.PySide6.stats_workers import run_rm_anova
-from Tools.Stats.PySide6.reporting.summary_utils import StatsSummaryFrames, SummaryConfig, build_summary_from_frames
+from Tools.Stats.reporting.reporting_summary import ReportingSummaryContext, build_reporting_summary
+from Tools.Stats.common.stats_core import PipelineId
+from Tools.Stats.workers.stats_workers import run_rm_anova
+from Tools.Stats.reporting.summary_utils import StatsSummaryFrames, SummaryConfig, build_summary_from_frames
 
 
 def test_reporting_summary_anova_includes_interaction_gg_epsilon_and_sphericity_fields() -> None:
@@ -191,21 +191,21 @@ def test_rm_anova_text_report_exports_to_results_dir_used_by_stats_outputs(tmp_p
     messages: list[str] = []
     results_dir = tmp_path / "3 - Statistical Analysis"
 
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.set_rois", lambda _rois: None)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.set_rois", lambda _rois: None)
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers._apply_qc_screening",
+        "Tools.Stats.workers.stats_workers._apply_qc_screening",
         lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, None),
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers._apply_manual_exclusions",
+        "Tools.Stats.workers.stats_workers._apply_manual_exclusions",
         lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, []),
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.prepare_summed_bca_data",
+        "Tools.Stats.workers.stats_workers.prepare_summed_bca_data",
         lambda **kwargs: {"S1": {"A": {"ROI1": 1.0}, "B": {"ROI1": 2.0}}},
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers._long_format_from_bca",
+        "Tools.Stats.workers.stats_workers._long_format_from_bca",
         lambda _data: pd.DataFrame(
             [
                 {"subject": "S1", "condition": "A", "roi": "ROI1", "value": 1.0},
@@ -214,20 +214,20 @@ def test_rm_anova_text_report_exports_to_results_dir_used_by_stats_outputs(tmp_p
         ),
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers._apply_outlier_exclusion",
+        "Tools.Stats.workers.stats_workers._apply_outlier_exclusion",
         lambda df, **kwargs: (df, None),
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.merge_exclusion_reports",
+        "Tools.Stats.workers.stats_workers.merge_exclusion_reports",
         lambda a, b: None,
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers._extract_required_exclusions",
+        "Tools.Stats.workers.stats_workers._extract_required_exclusions",
         lambda _report: [],
     )
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers._diag_subject_data_structure", lambda *args, **kwargs: None)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers._diag_subject_data_structure", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.analysis_run_rm_anova",
+        "Tools.Stats.workers.stats_workers.analysis_run_rm_anova",
         lambda *args, **kwargs: (
             "ok",
             pd.DataFrame(
@@ -266,21 +266,21 @@ def test_rm_anova_text_report_exports_to_results_dir_used_by_stats_outputs(tmp_p
 def test_single_file_rm_anova_still_excludes_required_nonfinite_subjects(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.set_rois", lambda _rois: None)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.set_rois", lambda _rois: None)
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers._apply_qc_screening",
+        "Tools.Stats.workers.stats_workers._apply_qc_screening",
         lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, None),
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers._apply_manual_exclusions",
+        "Tools.Stats.workers.stats_workers._apply_manual_exclusions",
         lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, []),
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.prepare_summed_bca_data",
+        "Tools.Stats.workers.stats_workers.prepare_summed_bca_data",
         lambda **kwargs: {"P1": {"A": {"ROI1": 1.0}}, "P2": {"A": {"ROI1": 2.0}}},
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers._long_format_from_bca",
+        "Tools.Stats.workers.stats_workers._long_format_from_bca",
         lambda _data: pd.DataFrame(
             [
                 {"subject": "P1", "condition": "A", "roi": "ROI1", "value": 1.0},
@@ -293,7 +293,7 @@ def test_single_file_rm_anova_still_excludes_required_nonfinite_subjects(monkeyp
         seen["subjects"] = list(kwargs["subjects"])
         return "ok", pd.DataFrame([{"Effect": "condition", "Pr > F": 0.01}])
 
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.analysis_run_rm_anova", _capture_rm_anova)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.analysis_run_rm_anova", _capture_rm_anova)
 
     run_rm_anova(
         lambda _progress: None,

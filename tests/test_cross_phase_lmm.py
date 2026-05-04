@@ -20,47 +20,46 @@ tools_pkg = sys.modules.get("Tools") or types.ModuleType("Tools")
 tools_pkg.__path__ = getattr(tools_pkg, "__path__", [])
 stats_pkg = sys.modules.get("Tools.Stats") or types.ModuleType("Tools.Stats")
 stats_pkg.__path__ = getattr(stats_pkg, "__path__", [])
-legacy_pkg = sys.modules.get("Tools.Stats.Legacy") or types.ModuleType(
-    "Tools.Stats.Legacy"
+common_pkg = sys.modules.get("Tools.Stats.common") or types.ModuleType(
+    "Tools.Stats.common"
 )
-legacy_pkg.__path__ = getattr(legacy_pkg, "__path__", [])
-pyside_pkg = sys.modules.get("Tools.Stats.PySide6") or types.ModuleType(
-    "Tools.Stats.PySide6"
+common_pkg.__path__ = getattr(common_pkg, "__path__", [])
+analysis_pkg = sys.modules.get("Tools.Stats.analysis") or types.ModuleType(
+    "Tools.Stats.analysis"
 )
-pyside_pkg.__path__ = getattr(pyside_pkg, "__path__", [])
-data_pkg = sys.modules.get("Tools.Stats.PySide6.data") or types.ModuleType(
-    "Tools.Stats.PySide6.data"
+analysis_pkg.__path__ = getattr(analysis_pkg, "__path__", [])
+data_pkg = sys.modules.get("Tools.Stats.data") or types.ModuleType(
+    "Tools.Stats.data"
 )
 data_pkg.__path__ = getattr(data_pkg, "__path__", [])
 
 sys.modules.setdefault("Tools", tools_pkg)
 sys.modules.setdefault("Tools.Stats", stats_pkg)
-sys.modules.setdefault("Tools.Stats.Legacy", legacy_pkg)
-sys.modules.setdefault("Tools.Stats.PySide6", pyside_pkg)
-sys.modules.setdefault("Tools.Stats.PySide6.data", data_pkg)
+sys.modules.setdefault("Tools.Stats.common", common_pkg)
+sys.modules.setdefault("Tools.Stats.analysis", analysis_pkg)
+sys.modules.setdefault("Tools.Stats.data", data_pkg)
 
 stats_subjects = _load_module(
-    "Tools.Stats.PySide6.data.stats_subjects",
-    Path(__file__).parents[1] / "src/Tools/Stats/PySide6/data/stats_subjects.py",
+    "Tools.Stats.data.stats_subjects",
+    Path(__file__).parents[1] / "src/Tools/Stats/data/stats_subjects.py",
 )
-sys.modules["Tools.Stats.PySide6.data.stats_subjects"] = stats_subjects
+sys.modules["Tools.Stats.data.stats_subjects"] = stats_subjects
 setattr(data_pkg, "stats_subjects", stats_subjects)
-setattr(pyside_pkg, "data", data_pkg)
+setattr(stats_pkg, "data", data_pkg)
 
 blas_limits = _load_module(
-    "Tools.Stats.Legacy.blas_limits",
-    Path(__file__).parents[1] / "src/Tools/Stats/Legacy/blas_limits.py",
+    "Tools.Stats.common.blas_limits",
+    Path(__file__).parents[1] / "src/Tools/Stats/common/blas_limits.py",
 )
-sys.modules["Tools.Stats.Legacy.blas_limits"] = blas_limits
-setattr(legacy_pkg, "blas_limits", blas_limits)
+sys.modules["Tools.Stats.common.blas_limits"] = blas_limits
+setattr(common_pkg, "blas_limits", blas_limits)
 
 cross_phase_module = _load_module(
-    "Tools.Stats.Legacy.cross_phase_lmm_core",
-    Path(__file__).parents[1] / "src/Tools/Stats/Legacy/cross_phase_lmm_core.py",
+    "Tools.Stats.analysis.cross_phase_lmm_core",
+    Path(__file__).parents[1] / "src/Tools/Stats/analysis/cross_phase_lmm_core.py",
 )
-sys.modules["Tools.Stats.Legacy.cross_phase_lmm_core"] = cross_phase_module
-setattr(legacy_pkg, "cross_phase_lmm_core", cross_phase_module)
-setattr(stats_pkg, "Legacy", legacy_pkg)
+sys.modules["Tools.Stats.analysis.cross_phase_lmm_core"] = cross_phase_module
+setattr(analysis_pkg, "cross_phase_lmm_core", cross_phase_module)
 setattr(tools_pkg, "Stats", stats_pkg)
 
 run_cross_phase_lmm = cross_phase_module.run_cross_phase_lmm

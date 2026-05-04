@@ -3,8 +3,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from Tools.Stats.Legacy.cross_phase_lmm_core import build_cross_phase_long_df
-from Tools.Stats.PySide6.data.stats_data_loader import (
+from Tools.Stats.analysis.cross_phase_lmm_core import build_cross_phase_long_df
+from Tools.Stats.data.stats_data_loader import (
     LelaFilenameParseError,
     parse_lela_excel_filename,
     scan_lela_phase_folder,

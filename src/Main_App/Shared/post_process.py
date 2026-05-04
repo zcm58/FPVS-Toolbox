@@ -10,8 +10,8 @@ from fractions import Fraction
 import config
 from config import DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
 from typing import List, Any, Dict
-from Tools.Stats.Legacy.full_snr import compute_full_snr
-from Tools.Stats.Legacy.noise_utils import compute_noise_stats_for_bin
+from Tools.Stats.analysis.full_snr import compute_full_snr
+from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 from Main_App.Legacy_App.fft_crop_utils import compute_onbin_N, compute_onbin_step
 
 

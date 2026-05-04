@@ -4,9 +4,9 @@ import pandas as pd
 
 
 def test_export_skips_rm_anova_none(tmp_path, monkeypatch):
-    from Tools.Stats.PySide6 import stats_main_window
-    from Tools.Stats.PySide6.stats_core import PipelineId
-    from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
+    from Tools.Stats import stats_main_window
+    from Tools.Stats.common.stats_core import PipelineId
+    from Tools.Stats.stats_ui_pyside6 import StatsWindow
     from PySide6.QtWidgets import QApplication
 
     monkeypatch.setattr(

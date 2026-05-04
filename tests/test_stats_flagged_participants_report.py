@@ -3,13 +3,13 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableWidget
 
-from Tools.Stats.PySide6.stats_core import PipelineId
-from Tools.Stats.PySide6.qc.stats_outlier_exclusion import (
+from Tools.Stats.common.stats_core import PipelineId
+from Tools.Stats.qc.stats_outlier_exclusion import (
     OUTLIER_REASON_LIMIT,
     build_flagged_participant_summary,
     format_worst_value_display,
 )
-from Tools.Stats.PySide6.qc.stats_qc_exclusion import (
+from Tools.Stats.qc.stats_qc_exclusion import (
     QC_REASON_MAXABS,
     QC_REASON_SUMABS,
     QC_SEVERITY_WARNING,
@@ -19,8 +19,8 @@ from Tools.Stats.PySide6.qc.stats_qc_exclusion import (
     QcParticipantReport,
     QcViolation,
 )
-from Tools.Stats.PySide6.reporting.stats_run_report import StatsRunReport
-from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.reporting.stats_run_report import StatsRunReport
+from Tools.Stats.stats_ui_pyside6 import StatsWindow
 
 
 def test_flagged_participants_report_dialog_labels(qtbot, monkeypatch) -> None:

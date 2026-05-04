@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from Tools.Stats.PySide6 import stats_workers
-from Tools.Stats.PySide6.stats_workers import run_lmm
+from Tools.Stats.workers import stats_workers
+from Tools.Stats.workers.stats_workers import run_lmm
 
 
 def _base_kwargs(fixed_dv: pd.DataFrame, tmp_path):

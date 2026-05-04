@@ -6,7 +6,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QCheckBox  # noqa: E402
 
 from Main_App.PySide6_App.widgets import SectionCard  # noqa: E402
-from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow  # noqa: E402
+from Tools.Stats.stats_ui_pyside6 import StatsWindow  # noqa: E402
 
 
 @pytest.mark.qt

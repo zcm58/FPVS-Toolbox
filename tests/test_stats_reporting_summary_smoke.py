@@ -42,7 +42,7 @@ def test_reporting_summary_ui_copy_and_slot(tmp_path):
 
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtWidgets import QApplication
-    from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
+    from Tools.Stats.stats_ui_pyside6 import StatsWindow
 
     app = QApplication.instance() or QApplication([])
     assert app is not None

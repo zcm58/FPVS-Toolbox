@@ -3,18 +3,18 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("PySide6")
-from Tools.Stats.PySide6.analysis.dv_policies import (  # noqa: E402
+from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     EMPTY_LIST_FALLBACK_FIXED_K,
     FIXED_K_POLICY_NAME,
     GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
 )
-from Tools.Stats.PySide6.stats_core import PipelineId, StepId  # noqa: E402
-from Tools.Stats.PySide6.controller.stats_controller import (  # noqa: E402
+from Tools.Stats.common.stats_core import PipelineId, StepId  # noqa: E402
+from Tools.Stats.controller.stats_controller import (  # noqa: E402
     BETWEEN_PIPELINE_STEPS,
     SINGLE_PIPELINE_STEPS,
 )
-from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow  # noqa: E402
+from Tools.Stats.stats_ui_pyside6 import StatsWindow  # noqa: E402
 
 
 def _setup_window_state(window: StatsWindow) -> None:

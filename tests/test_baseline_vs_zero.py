@@ -2,9 +2,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from Tools.Stats.PySide6.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
-from Tools.Stats.PySide6.controller.stats_controller import SINGLE_PIPELINE_STEPS, WORKER_FN_BY_STEP
-from Tools.Stats.PySide6.stats_core import StepId
+from Tools.Stats.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
+from Tools.Stats.controller.stats_controller import SINGLE_PIPELINE_STEPS, WORKER_FN_BY_STEP
+from Tools.Stats.common.stats_core import StepId
 
 
 def _build_df() -> pd.DataFrame:

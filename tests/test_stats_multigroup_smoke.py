@@ -10,11 +10,11 @@ pd = pytest.importorskip("pandas")
 try:
     from PySide6.QtWidgets import QMessageBox
     from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
-    from Tools.Stats.PySide6 import stats_ui_pyside6 as stats_mod
-    from Tools.Stats.PySide6 import stats_workers
-    from Tools.Stats.PySide6.controller.stats_controller import WORKER_FN_BY_STEP, StepId
-from Tools.Stats.PySide6.data.stats_multigroup_scan import MultiGroupScanResult
-    from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
+    from Tools.Stats import stats_ui_pyside6 as stats_mod
+    from Tools.Stats.workers import stats_workers
+    from Tools.Stats.controller.stats_controller import WORKER_FN_BY_STEP, StepId
+    from Tools.Stats.data.stats_multigroup_scan import MultiGroupScanResult
+    from Tools.Stats.stats_ui_pyside6 import StatsWindow
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     pytest.skip("PySide6 is required for Stats smoke tests", allow_module_level=True)
 
@@ -28,7 +28,7 @@ def stats_smoke_env(monkeypatch):
     dummy_df = pd.DataFrame({"Effect": ["group"], "Pr > F": [0.5]})
 
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.prepare_summed_bca_data",
+        "Tools.Stats.workers.stats_workers.prepare_summed_bca_data",
         lambda *a, **k: store["payload"],
         raising=False,
     )

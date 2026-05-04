@@ -26,25 +26,24 @@ Legend:
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_group_ops.py`
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_post.py`
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_processing.py`
-- `src/Tools/Stats/Legacy/between_groups_cli.py`
-- `src/Tools/Stats/Legacy/blas_limits.py`
-- `src/Tools/Stats/Legacy/cross_phase_lmm_core.py`
-- `src/Tools/Stats/Legacy/excel_io.py`
-- `src/Tools/Stats/Legacy/full_snr.py`
-- `src/Tools/Stats/Legacy/group_contrasts.py`
-- `src/Tools/Stats/Legacy/interpretation_helpers.py`
-- `src/Tools/Stats/Legacy/mixed_effects_model.py`
-- `src/Tools/Stats/Legacy/mixed_group_anova.py`
-- `src/Tools/Stats/Legacy/noise_utils.py`
-- `src/Tools/Stats/Legacy/posthoc_tests.py`
-- `src/Tools/Stats/Legacy/repeated_m_anova.py`
-- `src/Tools/Stats/Legacy/stats.py`
-- `src/Tools/Stats/Legacy/stats_analysis.py`
-- `src/Tools/Stats/Legacy/stats_export.py`
-- `src/Tools/Stats/Legacy/stats_file_scanner.py`
-- `src/Tools/Stats/Legacy/stats_helpers.py`
-- `src/Tools/Stats/Legacy/stats_runners.py`
-- `src/Tools/Stats/Legacy/stats_ui.py`
+- `src/Tools/Stats/cli/between_groups_cli.py`
+- `src/Tools/Stats/common/blas_limits.py`
+- `src/Tools/Stats/analysis/cross_phase_lmm_core.py`
+- `src/Tools/Stats/io/excel_io.py`
+- `src/Tools/Stats/analysis/full_snr.py`
+- `src/Tools/Stats/analysis/group_contrasts.py`
+- `src/Tools/Stats/analysis/interpretation_helpers.py`
+- `src/Tools/Stats/analysis/mixed_effects_model.py`
+- `src/Tools/Stats/analysis/mixed_group_anova.py`
+- `src/Tools/Stats/analysis/noise_utils.py`
+- `src/Tools/Stats/analysis/posthoc_tests.py`
+- `src/Tools/Stats/analysis/repeated_m_anova.py`
+- `src/Tools/Stats/analysis/stats_analysis.py`
+- `src/Tools/Stats/reporting/stats_export.py`
+
+`src/Tools/Stats/Legacy/**` now contains temporary compatibility shims and
+fail-fast stubs for the removed CustomTkinter Stats UI. Do not add new active
+implementation there.
 
 ## Newly quarantined after follow-up cleanup
 

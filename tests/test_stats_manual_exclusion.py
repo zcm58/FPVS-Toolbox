@@ -3,11 +3,11 @@ from __future__ import annotations
 import pandas as pd
 from PySide6.QtCore import Qt
 
-from Tools.Stats.PySide6 import stats_workers
-from Tools.Stats.PySide6.stats_core import PipelineId, StepId
-from Tools.Stats.PySide6.ui.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
-from Tools.Stats.PySide6.qc.stats_qc_exclusion import QC_REASON_SUMABS
-from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.workers import stats_workers
+from Tools.Stats.common.stats_core import PipelineId, StepId
+from Tools.Stats.ui.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
+from Tools.Stats.qc.stats_qc_exclusion import QC_REASON_SUMABS
+from Tools.Stats.stats_ui_pyside6 import StatsWindow
 
 
 def test_manual_exclusion_dialog_apply_emits_and_closes(qtbot) -> None:

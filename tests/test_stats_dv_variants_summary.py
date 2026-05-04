@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from Tools.Stats.PySide6.analysis.dv_policies import FIXED_K_POLICY_NAME, LEGACY_POLICY_NAME
-from Tools.Stats.PySide6.analysis.dv_variants import build_dv_comparison_summary
+from Tools.Stats.analysis.dv_policies import FIXED_K_POLICY_NAME, LEGACY_POLICY_NAME
+from Tools.Stats.analysis.dv_variants import build_dv_comparison_summary
 
 
 def test_build_dv_comparison_summary():

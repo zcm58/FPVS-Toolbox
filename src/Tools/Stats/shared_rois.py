@@ -39,7 +39,7 @@ def load_rois_from_settings(manager: Any = None) -> dict[str, list[str]]:
 
 def apply_rois_to_modules(rois_dict: dict[str, list[str]]) -> None:
     """Propagate ROI definitions to loaded stats modules without pulling in legacy UI."""
-    from Tools.Stats.Legacy import stats_analysis as analysis_mod
+    from Tools.Stats.analysis import stats_analysis as analysis_mod
 
     analysis_mod.set_rois(rois_dict)
 

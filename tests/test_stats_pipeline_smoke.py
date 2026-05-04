@@ -4,9 +4,9 @@ pd = pytest.importorskip("pandas")
 
 try:
     from PySide6.QtCore import Qt
-    from Tools.Stats.PySide6.controller.stats_controller import PipelineId
-    from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
-    from Tools.Stats.PySide6 import stats_workers
+    from Tools.Stats.controller.stats_controller import PipelineId
+    from Tools.Stats.stats_ui_pyside6 import StatsWindow
+    from Tools.Stats.workers import stats_workers
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     pytest.skip("PySide6 is required for Stats pipeline smoke tests", allow_module_level=True)
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from Tools.Stats.PySide6.stats_workers import run_lmm
+from Tools.Stats.workers.stats_workers import run_lmm
 
 
 def test_between_group_lmm_maps_dv_value_to_value_and_does_not_block(monkeypatch) -> None:
@@ -26,7 +26,7 @@ def test_between_group_lmm_maps_dv_value_to_value_and_does_not_block(monkeypatch
         captured["data"] = data.copy()
         return pd.DataFrame({"Effect": ["condition"], "P-Value": [0.04]}), object()
 
-    monkeypatch.setattr("Tools.Stats.PySide6.stats_workers.run_mixed_effects_model", _fake_mixed_effects_model)
+    monkeypatch.setattr("Tools.Stats.workers.stats_workers.run_mixed_effects_model", _fake_mixed_effects_model)
 
     payload = run_lmm(
         lambda _progress: None,

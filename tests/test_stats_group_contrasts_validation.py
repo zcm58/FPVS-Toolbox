@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from Tools.Stats.PySide6.stats_workers import (
+from Tools.Stats.workers.stats_workers import (
     _validate_group_contrasts_input,
     run_group_contrasts,
 )
@@ -71,11 +71,11 @@ def test_run_group_contrasts_blocks_invalid_data(monkeypatch):
         raise AssertionError("Legacy compute_group_contrasts should not be called")
 
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.prepare_summed_bca_data",
+        "Tools.Stats.workers.stats_workers.prepare_summed_bca_data",
         fake_prepare_summed_bca_data,
     )
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.compute_group_contrasts",
+        "Tools.Stats.workers.stats_workers.compute_group_contrasts",
         fake_compute_group_contrasts,
     )
 
@@ -113,7 +113,7 @@ def test_run_group_contrasts_shared_contract_keeps_invalidity_downstream(monkeyp
         raise AssertionError("compute_group_contrasts should not run when validation fails")
 
     monkeypatch.setattr(
-        "Tools.Stats.PySide6.stats_workers.compute_group_contrasts",
+        "Tools.Stats.workers.stats_workers.compute_group_contrasts",
         fake_compute_group_contrasts,
     )
 

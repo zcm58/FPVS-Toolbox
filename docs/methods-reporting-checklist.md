@@ -204,7 +204,7 @@ noise bins as follows:
   mean and standard deviation.
 - Standard deviation uses population variance (`ddof=0`).
 
-(Implementation verified in: `src/Tools/Stats/Legacy/noise_utils.py` and
+(Implementation verified in: `src/Tools/Stats/analysis/noise_utils.py` and
 `src/Main_App/Legacy_App/post_process.py`.)
 
 **Formulas (applied per channel x harmonic)**
@@ -227,7 +227,7 @@ Then:
 A separate full-spectrum SNR matrix is computed for **all FFT bins** using the
 same noise-bin logic and is exported as the `FullSNR` sheet.
 
-(Implementation verified in: `src/Tools/Stats/Legacy/full_snr.py` and
+(Implementation verified in: `src/Tools/Stats/analysis/full_snr.py` and
 `src/Main_App/Legacy_App/post_process.py`.)
 
 **Background (not necessarily the toolbox implementation)**
@@ -255,7 +255,7 @@ exported Excel files.
   - Ignores ROI electrodes that are missing from the Excel file.
 
 (Implementation verified in: `src/Main_App/Legacy_App/settings_manager.py`,
-`src/Tools/Stats/PySide6/analysis/dv_policies.py`.)
+`src/Tools/Stats/analysis/dv_policies.py`.)
 
 If you perform ROI aggregation outside the Stats tool (e.g., in a custom script),
 report the exact aggregation rule you used.
