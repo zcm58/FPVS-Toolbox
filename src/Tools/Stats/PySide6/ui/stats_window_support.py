@@ -82,7 +82,7 @@ from Tools.Stats.PySide6.stats_core import (
     RESULTS_SUBFOLDER_NAME,
     StepId,
 )
-from Tools.Stats.PySide6.stats_data_loader import (
+from Tools.Stats.PySide6.data.stats_data_loader import (
     check_for_open_excel_files,
     ensure_results_dir,
     group_harmonic_results,

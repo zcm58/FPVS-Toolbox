@@ -1,7 +1,7 @@
 """User action handlers and general StatsWindow view helpers."""
 from __future__ import annotations
 
-from Tools.Stats.PySide6.stats_window_support import *  # noqa: F403
+from Tools.Stats.PySide6.ui.stats_window_support import *  # noqa: F403
 
 logger = logging.getLogger(__name__)
 
