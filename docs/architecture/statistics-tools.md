@@ -4,7 +4,7 @@ Statistics and tool code is split between active PySide6 surfaces, shared logic,
 
 Primary paths:
 
-- `src/Tools/Stats/PySide6/`: active statistics GUI, controller, workers, analysis helpers, QC helpers, and reporting. The implementation is grouped by function, while root modules preserve older import paths as compatibility shims.
+- `src/Tools/Stats/PySide6/`: active statistics GUI, controller, workers, analysis helpers, QC helpers, and reporting. The implementation is grouped by function; root modules are limited to stable entry points and intentionally retained high-coupling shims.
 - `src/Tools/Stats/Legacy/`: legacy statistical routines and compatibility modules.
 - `src/Tools/Stats/shared_rois.py` and `src/Tools/Stats/roi_resolver.py`: shared ROI helpers.
 - `src/Tools/Plot_Generator/`: plot generation GUI, workers, and manifest helpers.
@@ -29,6 +29,7 @@ Rules:
 - Preserve statistical output schemas and plain-language reporting unless explicitly changing them.
 - Keep GUI imports PySide6-only.
 - Keep public Stats entry points stable while compatibility shims exist.
+- Add new analysis logic under the functional subpackage that owns it, and expose stable caller-facing surfaces through the package facade when needed.
 - Use focused tests around changed data transformations and exports.
 
 Useful tests:

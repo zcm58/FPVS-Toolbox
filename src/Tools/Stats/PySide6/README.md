@@ -6,9 +6,9 @@ code handle the calculations.
 
 ## Internal structure (MVC-ish)
 
-The implementation is grouped by function. Root-level modules with the old names are compatibility shims for
-existing imports and tests; new internal code should import from the functional subpackages unless it needs the
-legacy public surface.
+The implementation is grouped by function. Root-level modules are limited to stable entry points and the few
+remaining high-coupling compatibility shims; new internal code should import from the functional subpackages
+unless it needs a documented public surface.
 
 * **View**
   * `stats_main_window.py` - stable root `QMainWindow` class and compatibility imports.
@@ -57,8 +57,18 @@ PySide6/
 Compatibility rules:
 
 1. Keep `stats_main_window.py`, `stats_ui_pyside6.py`, and `Tools.Stats.StatsWindow` stable.
-2. Keep root-level compatibility shims until external callers and tests no longer depend on old module names.
+2. Keep root-level compatibility shims only while active callers and tests still depend on old module names.
 3. Prefer direct subpackage imports for new internal code.
+
+## Adding DV or statistical analysis features
+
+Use the narrowest module that matches the behavior being changed:
+
+* Add new DV policy implementation details to a focused `analysis/dv_policy_*` module.
+* Re-export stable policy constants/functions through `analysis/dv_policies.py`; callers should import this facade instead of helper modules.
+* Keep worker/UI imports pointed at public facades, not private helper functions, unless a test is intentionally targeting a helper.
+* Preserve existing DataFrame columns, metadata keys, workbook sheets, and log text unless the feature explicitly changes them.
+* Put shared constants, enums, and lightweight data structures in `common/`; keep project scanning in `data/`, QC rules in `qc/`, and workbook/report text in `reporting/`.
 
 ### Pipeline flow
 
