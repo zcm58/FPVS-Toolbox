@@ -1,2 +1,5 @@
-# src/Tools/Stats/__init__.py
-from .stats_ui_pyside6 import StatsWindow
+"""Public package surface for the Stats tool."""
+
+from .ui.stats_window import StatsWindow
+
+__all__ = ["StatsWindow"]

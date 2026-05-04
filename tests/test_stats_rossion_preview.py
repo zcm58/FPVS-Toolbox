@@ -11,7 +11,7 @@ from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     ROSSION_POLICY_NAME,
 )
 from Tools.Stats.workers.stats_workers import StatsWorker  # noqa: E402
-from Tools.Stats.stats_ui_pyside6 import StatsWindow  # noqa: E402
+from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 
 def _write_z_sheet(path, values):

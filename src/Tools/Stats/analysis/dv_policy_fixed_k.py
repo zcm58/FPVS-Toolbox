@@ -22,7 +22,7 @@ def _parse_freqs_from_columns(
     all_col_names: Iterable[object],
     log_func: Callable[[str], None],
 ) -> List[float]:
-    """Handle the parse freqs from columns step for the Stats PySide6 workflow."""
+    """Handle the parse freqs from columns step for the Stats workflow."""
     numeric_freqs: List[float] = []
     for col_name in all_col_names:
         if isinstance(col_name, str) and col_name.endswith("_Hz"):
@@ -36,7 +36,7 @@ def _parse_freqs_from_columns(
 
 
 def _is_base_multiple(freq_val: float, base_freq: float, tol: float = 1e-6) -> bool:
-    """Handle the is base multiple step for the Stats PySide6 workflow."""
+    """Handle the is base multiple step for the Stats workflow."""
     return abs(freq_val / base_freq - round(freq_val / base_freq)) < tol
 
 
@@ -48,7 +48,7 @@ def _determine_fixed_k_freqs(
     log_func: Callable[[str], None],
     max_freq: float | None = None,
 ) -> List[float]:
-    """Handle the determine fixed k freqs step for the Stats PySide6 workflow."""
+    """Handle the determine fixed k freqs step for the Stats workflow."""
     if settings.exclude_base_harmonics:
         freq_candidates = get_included_freqs(
             base_freq,
@@ -89,7 +89,7 @@ def _find_first_bca_columns(
     base_freq: float,
     log_func: Callable[[str], None],
 ) -> Optional[pd.Index]:
-    """Handle the find first bca columns step for the Stats PySide6 workflow."""
+    """Handle the find first bca columns step for the Stats workflow."""
     for pid in subjects:
         for cond_name in conditions:
             file_path = subject_data.get(pid, {}).get(cond_name)
@@ -113,7 +113,7 @@ def _aggregate_bca_sum_harmonics(
     rois: Optional[Dict[str, List[str]]] = None,
     diag_meta: Optional[dict[str, object]] = None,
 ) -> float:
-    """Handle the aggregate bca sum harmonics step for the Stats PySide6 workflow."""
+    """Handle the aggregate bca sum harmonics step for the Stats workflow."""
     try:
         if diag_meta is not None:
             diag_meta.setdefault("source_file", file_path)
@@ -200,7 +200,7 @@ def _prepare_fixed_k_bca_data(
     settings: DVPolicySettings,
     max_freq: float | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
-    """Handle the prepare fixed k bca data step for the Stats PySide6 workflow."""
+    """Handle the prepare fixed k bca data step for the Stats workflow."""
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
         return None

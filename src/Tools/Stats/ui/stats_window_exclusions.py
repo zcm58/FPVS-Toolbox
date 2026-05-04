@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class StatsWindowExclusionsMixin:
     def _get_dv_policy_payload(self) -> dict[str, object]:
-        """Handle the get dv policy payload step for the Stats PySide6 workflow."""
+        """Handle the get dv policy payload step for the Stats workflow."""
         return {
             "name": self._dv_policy_name,
             "fixed_k": int(self._dv_fixed_k),
@@ -19,7 +19,7 @@ class StatsWindowExclusionsMixin:
         }
 
     def _get_between_group_dv_policy_payload(self) -> dict[str, object]:
-        """Handle the get between group dv policy payload step for the Stats PySide6 workflow."""
+        """Handle the get between group dv policy payload step for the Stats workflow."""
         payload = self._get_dv_policy_payload()
         harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
         if isinstance(harmonics_by_roi, dict) and any((harmonics_by_roi.get(k) or []) for k in harmonics_by_roi):
@@ -28,7 +28,7 @@ class StatsWindowExclusionsMixin:
         return payload
 
     def _refresh_fixed_harmonic_ui_state(self) -> None:
-        """Handle the refresh fixed harmonic ui state step for the Stats PySide6 workflow."""
+        """Handle the refresh fixed harmonic ui state step for the Stats workflow."""
         harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
         has_shared_harmonics = isinstance(harmonics_by_roi, dict) and any(
             (harmonics_by_roi.get(k) or []) for k in harmonics_by_roi
@@ -46,11 +46,11 @@ class StatsWindowExclusionsMixin:
                 summary_label.setText("Waiting for shared harmonics.")
 
     def get_dv_policy_snapshot(self) -> dict[str, object]:
-        """Handle the get dv policy snapshot step for the Stats PySide6 workflow."""
+        """Handle the get dv policy snapshot step for the Stats workflow."""
         return dict(self._get_dv_policy_payload())
 
     def _sync_selected_dv_variants(self) -> None:
-        """Handle the sync selected dv variants step for the Stats PySide6 workflow."""
+        """Handle the sync selected dv variants step for the Stats workflow."""
         self._dv_variants_selected = [
             name
             for name, checkbox in self._dv_variant_checkboxes.items()
@@ -58,13 +58,13 @@ class StatsWindowExclusionsMixin:
         ]
 
     def _get_selected_dv_variants(self) -> List[str]:
-        """Handle the get selected dv variants step for the Stats PySide6 workflow."""
+        """Handle the get selected dv variants step for the Stats workflow."""
         if self._dv_variant_checkboxes:
             return list(self._dv_variants_selected)
         return []
 
     def _get_dv_variant_payloads(self) -> list[dict[str, object]]:
-        """Handle the get dv variant payloads step for the Stats PySide6 workflow."""
+        """Handle the get dv variant payloads step for the Stats workflow."""
         selected = self._get_selected_dv_variants()
         if not selected:
             return []
@@ -77,18 +77,18 @@ class StatsWindowExclusionsMixin:
         return payloads
 
     def get_dv_variants_snapshot(self) -> list[str]:
-        """Handle the get dv variants snapshot step for the Stats PySide6 workflow."""
+        """Handle the get dv variants snapshot step for the Stats workflow."""
         return list(self._get_selected_dv_variants())
 
     def _get_outlier_exclusion_payload(self) -> dict[str, object]:
-        """Handle the get outlier exclusion payload step for the Stats PySide6 workflow."""
+        """Handle the get outlier exclusion payload step for the Stats workflow."""
         return {
             "enabled": True,
             "abs_limit": float(self._outlier_abs_limit),
         }
 
     def _get_qc_exclusion_payload(self) -> dict[str, object]:
-        """Handle the get qc exclusion payload step for the Stats PySide6 workflow."""
+        """Handle the get qc exclusion payload step for the Stats workflow."""
         return {
             "warn_threshold": float(self._qc_threshold_sumabs),
             "critical_threshold": float(self._qc_threshold_maxabs),
@@ -99,18 +99,18 @@ class StatsWindowExclusionsMixin:
         }
 
     def _on_outlier_exclusion_toggled(self, state: int) -> None:
-        """Handle the on outlier exclusion toggled step for the Stats PySide6 workflow."""
+        """Handle the on outlier exclusion toggled step for the Stats workflow."""
         self._outlier_exclusion_enabled = True
         spinbox = getattr(self, "outlier_abs_limit_spin", None)
         if spinbox is not None:
             spinbox.setEnabled(True)
 
     def _on_outlier_abs_limit_changed(self, value: float) -> None:
-        """Handle the on outlier abs limit changed step for the Stats PySide6 workflow."""
+        """Handle the on outlier abs limit changed step for the Stats workflow."""
         self._outlier_abs_limit = float(value)
 
     def _current_flagged_pid_map(self) -> dict[str, list[str]]:
-        """Handle the current flagged pid map step for the Stats PySide6 workflow."""
+        """Handle the current flagged pid map step for the Stats workflow."""
         report = None
         if self._active_pipeline is not None:
             report = self._pipeline_run_reports.get(self._active_pipeline)
@@ -124,7 +124,7 @@ class StatsWindowExclusionsMixin:
         return collect_flagged_pid_map(report.qc_report, report.dv_report)
 
     def _current_flagged_details_map(self) -> dict[str, str]:
-        """Handle the current flagged details map step for the Stats PySide6 workflow."""
+        """Handle the current flagged details map step for the Stats workflow."""
         report = None
         if self._active_pipeline is not None:
             report = self._pipeline_run_reports.get(self._active_pipeline)
@@ -138,7 +138,7 @@ class StatsWindowExclusionsMixin:
         return build_flagged_details_map(report.qc_report, report.dv_report)
 
     def _update_manual_exclusion_summary(self) -> None:
-        """Handle the update manual exclusion summary step for the Stats PySide6 workflow."""
+        """Handle the update manual exclusion summary step for the Stats workflow."""
         excluded = sorted(self.manual_excluded_pids)
         self.manual_excluded_pids = set(excluded)
         summary_label = getattr(self, "manual_exclusion_summary_label", None)
@@ -159,7 +159,7 @@ class StatsWindowExclusionsMixin:
             list_widget.setToolTip(tooltip_text)
 
     def _reconcile_manual_exclusions(self, candidates: list[str]) -> None:
-        """Handle the reconcile manual exclusions step for the Stats PySide6 workflow."""
+        """Handle the reconcile manual exclusions step for the Stats workflow."""
         self._manual_exclusion_candidates = list(candidates)
         self.manual_excluded_pids = {
             pid for pid in self.manual_excluded_pids if pid in self._manual_exclusion_candidates
@@ -167,12 +167,12 @@ class StatsWindowExclusionsMixin:
         self._update_manual_exclusion_summary()
 
     def _clear_manual_exclusions(self) -> None:
-        """Handle the clear manual exclusions step for the Stats PySide6 workflow."""
+        """Handle the clear manual exclusions step for the Stats workflow."""
         self.manual_excluded_pids.clear()
         self._update_manual_exclusion_summary()
 
     def _open_manual_exclusion_dialog(self) -> None:
-        """Handle the open manual exclusion dialog step for the Stats PySide6 workflow."""
+        """Handle the open manual exclusion dialog step for the Stats workflow."""
         dialog = ManualOutlierExclusionDialog(
             candidates=self._manual_exclusion_candidates,
             flagged_map=self._current_flagged_pid_map(),
@@ -182,7 +182,7 @@ class StatsWindowExclusionsMixin:
         )
 
         def _apply_changes(selections: set[str]) -> None:
-            """Handle the apply changes step for the Stats PySide6 workflow."""
+            """Handle the apply changes step for the Stats workflow."""
             self.manual_excluded_pids = set(selections)
             self._update_manual_exclusion_summary()
 
@@ -190,7 +190,7 @@ class StatsWindowExclusionsMixin:
         dialog.exec()
 
     def _set_fixed_k_controls_enabled(self, enabled: bool) -> None:
-        """Handle the set fixed k controls enabled step for the Stats PySide6 workflow."""
+        """Handle the set fixed k controls enabled step for the Stats workflow."""
         widgets = [
             getattr(self, "fixed_k_spinbox", None),
             getattr(self, "fixed_k_exclude_h1", None),
@@ -202,7 +202,7 @@ class StatsWindowExclusionsMixin:
                 widget.setEnabled(enabled)
 
     def _set_group_mean_controls_visible(self, visible: bool) -> None:
-        """Handle the set group mean controls visible step for the Stats PySide6 workflow."""
+        """Handle the set group mean controls visible step for the Stats workflow."""
         widget = getattr(self, "group_mean_controls", None)
         if widget is not None:
             widget.setVisible(visible)
@@ -214,15 +214,15 @@ class StatsWindowExclusionsMixin:
             preview_table.setVisible(visible)
 
     def _on_group_mean_z_threshold_changed(self, value: float) -> None:
-        """Handle the on group mean z threshold changed step for the Stats PySide6 workflow."""
+        """Handle the on group mean z threshold changed step for the Stats workflow."""
         self._dv_group_mean_z_threshold = float(value)
 
     def _on_empty_list_policy_changed(self, text: str) -> None:
-        """Handle the on empty list policy changed step for the Stats PySide6 workflow."""
+        """Handle the on empty list policy changed step for the Stats workflow."""
         self._dv_empty_list_policy = text
 
     def _clear_group_mean_preview(self) -> None:
-        """Handle the clear group mean preview step for the Stats PySide6 workflow."""
+        """Handle the clear group mean preview step for the Stats workflow."""
         table = getattr(self, "group_mean_preview_table", None)
         if table is None:
             return
@@ -235,7 +235,7 @@ class StatsWindowExclusionsMixin:
         fallback_info: dict[str, dict[str, object]],
         stop_metadata: dict[str, dict[str, object]] | None = None,
     ) -> None:
-        """Handle the update group mean preview table step for the Stats PySide6 workflow."""
+        """Handle the update group mean preview table step for the Stats workflow."""
         table = getattr(self, "group_mean_preview_table", None)
         if table is None:
             return
@@ -272,7 +272,7 @@ class StatsWindowExclusionsMixin:
         table.resizeColumnsToContents()
 
     def _on_preview_group_mean_z_clicked(self) -> None:
-        """Handle the on preview group mean z clicked step for the Stats PySide6 workflow."""
+        """Handle the on preview group mean z clicked step for the Stats workflow."""
         if self._dv_policy_name != ROSSION_POLICY_NAME:
             return
         if not self.subject_data:
@@ -310,7 +310,7 @@ class StatsWindowExclusionsMixin:
             logger.exception("Failed to track preview worker")
 
         def _release():
-            """Handle the release step for the Stats PySide6 workflow."""
+            """Handle the release step for the Stats workflow."""
             try:
                 if worker in self._active_workers:
                     self._active_workers.remove(worker)
@@ -318,7 +318,7 @@ class StatsWindowExclusionsMixin:
                 logger.exception("Failed to release preview worker")
 
         def _on_finished(payload: dict) -> None:
-            """Handle the on finished step for the Stats PySide6 workflow."""
+            """Handle the on finished step for the Stats workflow."""
             try:
                 self._group_mean_preview_data = payload or {}
                 union_map = payload.get("union_harmonics_by_roi", {}) if isinstance(payload, dict) else {}
@@ -331,7 +331,7 @@ class StatsWindowExclusionsMixin:
                 _release()
 
         def _on_error(message: str) -> None:
-            """Handle the on error step for the Stats PySide6 workflow."""
+            """Handle the on error step for the Stats workflow."""
             try:
                 self.append_log("General", f"Preview error: {message}", level="error")
                 self._set_status(message)
@@ -346,14 +346,14 @@ class StatsWindowExclusionsMixin:
         self.pool.start(worker)
 
     def _update_fixed_k_base_freq_label(self) -> None:
-        """Handle the update fixed k base freq label step for the Stats PySide6 workflow."""
+        """Handle the update fixed k base freq label step for the Stats workflow."""
         label = getattr(self, "fixed_k_base_freq_value", None)
         if label is None:
             return
         label.setText(f"{self._current_base_freq:g} Hz")
 
     def _on_dv_policy_changed(self, text: str) -> None:
-        """Handle the on dv policy changed step for the Stats PySide6 workflow."""
+        """Handle the on dv policy changed step for the Stats workflow."""
         self._dv_policy_name = text
         self._set_fixed_k_controls_enabled(text == FIXED_K_POLICY_NAME)
         self._set_group_mean_controls_visible(text == ROSSION_POLICY_NAME)
@@ -361,26 +361,26 @@ class StatsWindowExclusionsMixin:
             self._clear_group_mean_preview()
 
     def _on_fixed_k_changed(self, value: int) -> None:
-        """Handle the on fixed k changed step for the Stats PySide6 workflow."""
+        """Handle the on fixed k changed step for the Stats workflow."""
         self._dv_fixed_k = int(value)
 
     def _on_fixed_k_exclude_h1_changed(self, state: int) -> None:
-        """Handle the on fixed k exclude h1 changed step for the Stats PySide6 workflow."""
+        """Handle the on fixed k exclude h1 changed step for the Stats workflow."""
         self._dv_exclude_harmonic1 = state == Qt.Checked
 
     def _on_fixed_k_exclude_base_changed(self, state: int) -> None:
-        """Handle the on fixed k exclude base changed step for the Stats PySide6 workflow."""
+        """Handle the on fixed k exclude base changed step for the Stats workflow."""
         self._dv_exclude_base_harmonics = state == Qt.Checked
 
     def _show_outlier_exclusion_dialog(self, pipeline_id: PipelineId) -> None:
-        """Handle the show outlier exclusion dialog step for the Stats PySide6 workflow."""
+        """Handle the show outlier exclusion dialog step for the Stats workflow."""
         dialog = self._build_flagged_participants_dialog(pipeline_id)
         if dialog is None:
             return
         dialog.exec()
 
     def _build_flagged_participants_dialog(self, pipeline_id: PipelineId) -> QDialog | None:
-        """Handle the build flagged participants dialog step for the Stats PySide6 workflow."""
+        """Handle the build flagged participants dialog step for the Stats workflow."""
         report = self._pipeline_run_reports.get(pipeline_id)
         if not isinstance(report, StatsRunReport):
             return None
@@ -546,7 +546,7 @@ class StatsWindowExclusionsMixin:
             layout.addWidget(details_panel)
 
             def _update_details() -> None:
-                """Handle the update details step for the Stats PySide6 workflow."""
+                """Handle the update details step for the Stats workflow."""
                 current = table.currentRow()
                 if current < 0:
                     details_panel.clear()
@@ -577,12 +577,12 @@ class StatsWindowExclusionsMixin:
         layout.addLayout(button_row)
 
         def _copy_summary() -> None:
-            """Handle the copy summary step for the Stats PySide6 workflow."""
+            """Handle the copy summary step for the Stats workflow."""
             if summary_text:
                 QGuiApplication.clipboard().setText(summary_text)
 
         def _copy_table() -> None:
-            """Handle the copy table step for the Stats PySide6 workflow."""
+            """Handle the copy table step for the Stats workflow."""
             if not display_rows:
                 return
             display_df = pd.DataFrame(
@@ -600,7 +600,7 @@ class StatsWindowExclusionsMixin:
             QGuiApplication.clipboard().setText(display_df.to_csv(sep="\t", index=False))
 
         def _copy_details() -> None:
-            """Handle the copy details step for the Stats PySide6 workflow."""
+            """Handle the copy details step for the Stats workflow."""
             if not details_map or table is None:
                 return
             current = table.currentRow()

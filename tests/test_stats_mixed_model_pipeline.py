@@ -10,7 +10,7 @@ try:
         StepId,
         WORKER_FN_BY_STEP,
     )
-    from Tools.Stats.stats_ui_pyside6 import StatsWindow
+    from Tools.Stats.ui.stats_window import StatsWindow
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     pytest.skip("PySide6 is required for Stats mixed model tests", allow_module_level=True)
 

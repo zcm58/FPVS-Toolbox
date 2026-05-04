@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QMessageBox
 from Tools.Stats.analysis import stats_analysis
 from Tools.Stats.workers import stats_workers
 from Tools.Stats.common.stats_core import PipelineId
-from Tools.Stats.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.ui.stats_window import StatsWindow
 from Tools.Stats.workers.stats_workers import StatsWorker
 
 
@@ -39,7 +39,7 @@ def _stub_message_boxes(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _stub_legacy_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(stats_analysis, "set_rois", lambda *a, **k: None, raising=False)
-    from Tools.Stats import stats_main_window
+    from Tools.Stats.ui import stats_main_window
 
     monkeypatch.setattr(stats_main_window, "apply_rois_to_modules", lambda *a, **k: None, raising=False)
     monkeypatch.setattr(stats_main_window, "set_rois", lambda *a, **k: None, raising=False)

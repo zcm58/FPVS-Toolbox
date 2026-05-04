@@ -3,7 +3,7 @@
 StatsController orchestrates the Single and Between pipelines, owns run state,
 schedules workers, and routes progress back to the view (StatsWindow). The
 controller contains orchestration only; computational work lives in
-stats_workers and legacy analysis modules.
+stats_workers and analysis modules.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 def _subject_data_has_files(subject_data: dict | None) -> bool:
-    """Handle the subject data has files step for the Stats PySide6 workflow."""
+    """Handle the subject data has files step for the Stats workflow."""
     if not isinstance(subject_data, dict):
         return False
     return any(
@@ -143,7 +143,7 @@ class StatsViewProtocol:
 
 @dataclass
 class SectionRunState:
-    """Represent the SectionRunState part of the Stats PySide6 tool."""
+    """Represent the SectionRunState part of the Stats tool."""
     pipeline_id: PipelineId
     current_step_index: int = 0
     steps: Sequence[PipelineStep] = field(default_factory=tuple)
@@ -197,7 +197,7 @@ WORKER_FN_BY_STEP: Dict[StepId, Callable[..., Any]] = {
 
 
 class StatsController:
-    """Represent the StatsController part of the Stats PySide6 tool."""
+    """Represent the StatsController part of the Stats tool."""
     def __init__(self, view: StatsViewProtocol) -> None:
         """Set up this object so it is ready to be used by the Stats tool."""
         self._view = view
@@ -215,7 +215,7 @@ class StatsController:
         run_summary: bool = True,
         require_anova: bool = False,
     ) -> None:
-        """Handle the run single group analysis step for the Stats PySide6 workflow."""
+        """Handle the run single group analysis step for the Stats workflow."""
         self._start_pipeline(
             PipelineId.SINGLE,
             step_ids or SINGLE_PIPELINE_STEPS,
@@ -225,19 +225,19 @@ class StatsController:
         )
 
     def run_single_group_rm_anova_only(self) -> None:
-        """Handle the run single group rm anova only step for the Stats PySide6 workflow."""
+        """Handle the run single group rm anova only step for the Stats workflow."""
         self.run_single_group_analysis(
             step_ids=(StepId.RM_ANOVA,), run_exports=False, run_summary=False
         )
 
     def run_single_group_mixed_model_only(self) -> None:
-        """Handle the run single group mixed model only step for the Stats PySide6 workflow."""
+        """Handle the run single group mixed model only step for the Stats workflow."""
         self.run_single_group_analysis(
             step_ids=(StepId.MIXED_MODEL,), run_exports=False, run_summary=False
         )
 
     def run_single_group_posthoc_only(self) -> None:
-        """Handle the run single group posthoc only step for the Stats PySide6 workflow."""
+        """Handle the run single group posthoc only step for the Stats workflow."""
         self.run_single_group_analysis(
             step_ids=(StepId.INTERACTION_POSTHOCS,),
             run_exports=False,
@@ -246,7 +246,7 @@ class StatsController:
         )
 
     def run_harmonic_check_only(self) -> None:
-        """Handle the run harmonic check only step for the Stats PySide6 workflow."""
+        """Handle the run harmonic check only step for the Stats workflow."""
         self._start_pipeline(
             PipelineId.SINGLE,
             (StepId.HARMONIC_CHECK,),
@@ -261,7 +261,7 @@ class StatsController:
         run_exports: bool = True,
         run_summary: bool = True,
     ) -> None:
-        """Handle the run between group analysis step for the Stats PySide6 workflow."""
+        """Handle the run between group analysis step for the Stats workflow."""
         requested_steps = tuple(step_ids or BETWEEN_PIPELINE_STEPS)
         unsupported_steps = [step_id for step_id in requested_steps if step_id not in BETWEEN_PIPELINE_STEPS]
         if unsupported_steps:
@@ -295,7 +295,7 @@ class StatsController:
         )
 
     def run_between_group_anova_only(self) -> None:
-        """Handle the run between group anova only step for the Stats PySide6 workflow."""
+        """Handle the run between group anova only step for the Stats workflow."""
         self._view.append_log(
             self._section_label(PipelineId.BETWEEN),
             "Between-group ANOVA is paused and unavailable in the multigroup workflow.",
@@ -303,7 +303,7 @@ class StatsController:
         )
 
     def run_between_group_mixed_only(self) -> None:
-        """Handle the run between group mixed only step for the Stats PySide6 workflow."""
+        """Handle the run between group mixed only step for the Stats workflow."""
         self.run_between_group_analysis(
             step_ids=(StepId.BETWEEN_GROUP_MIXED_MODEL,),
             run_exports=False,
@@ -311,7 +311,7 @@ class StatsController:
         )
 
     def run_between_group_contrasts_only(self) -> None:
-        """Handle the run between group contrasts only step for the Stats PySide6 workflow."""
+        """Handle the run between group contrasts only step for the Stats workflow."""
         self.run_between_group_analysis(
             step_ids=(StepId.GROUP_CONTRASTS,),
             run_exports=False,
@@ -327,7 +327,7 @@ class StatsController:
         manifest: dict | None,
         selected_folder: Path,
     ) -> tuple[bool, dict]:
-        """Handle the ensure phase subject data step for the Stats PySide6 workflow."""
+        """Handle the ensure phase subject data step for the Stats workflow."""
         subjects = spec.get("subjects") or []
         conditions = spec.get("conditions") or []
         subject_data = spec.get("subject_data") or {}
@@ -571,7 +571,7 @@ class StatsController:
         QThreadPool.globalInstance().start(worker)
 
     def is_running(self, pipeline_id: PipelineId) -> bool:
-        """Handle the is running step for the Stats PySide6 workflow."""
+        """Handle the is running step for the Stats workflow."""
         return self._states[pipeline_id].running
 
     def _start_pipeline(
@@ -583,7 +583,7 @@ class StatsController:
         run_summary: bool = True,
         require_anova: bool = False,
     ) -> None:
-        """Handle the start pipeline step for the Stats PySide6 workflow."""
+        """Handle the start pipeline step for the Stats workflow."""
         state = self._states[pipeline_id]
         state.process_mode = False
         state.process_job_path = None
@@ -677,7 +677,7 @@ class StatsController:
     def _build_steps(
         self, pipeline_id: PipelineId, step_ids: Sequence[StepId]
     ) -> Sequence[PipelineStep]:
-        """Handle the build steps step for the Stats PySide6 workflow."""
+        """Handle the build steps step for the Stats workflow."""
         steps: list[PipelineStep] = []
         for step_id in step_ids:
             worker_fn = WORKER_FN_BY_STEP[step_id]
@@ -694,7 +694,7 @@ class StatsController:
         return tuple(steps)
 
     def _start_between_process_pipeline(self) -> None:
-        """Handle the start between process pipeline step for the Stats PySide6 workflow."""
+        """Handle the start between process pipeline step for the Stats workflow."""
         pipeline_id = PipelineId.BETWEEN
         message = (
             "Between-group process mode is unavailable in the supported multigroup workflow."
@@ -713,9 +713,9 @@ class StatsController:
         )
 
     def _build_between_job_spec(self, state: SectionRunState) -> tuple[Path, Path]:
-        """Handle the build between job spec step for the Stats PySide6 workflow."""
+        """Handle the build between job spec step for the Stats workflow."""
         def _find_kwargs(step_id: StepId) -> dict:
-            """Handle the find kwargs step for the Stats PySide6 workflow."""
+            """Handle the find kwargs step for the Stats workflow."""
             for step in state.steps:
                 if step.id is step_id:
                     return step.kwargs
@@ -778,7 +778,7 @@ class StatsController:
         return job_spec_path, summary_path
 
     def _resolve_stats_output_dir(self, excel_root: Path, manifest: dict | None) -> Path:
-        """Handle the resolve stats output dir step for the Stats PySide6 workflow."""
+        """Handle the resolve stats output dir step for the Stats workflow."""
         project_root = self._find_project_root(excel_root)
         results_folder, subfolders = load_manifest_data(project_root, manifest)
         return resolve_project_subfolder(
@@ -791,14 +791,14 @@ class StatsController:
 
     @staticmethod
     def _find_project_root(path: Path) -> Path:
-        """Handle the find project root step for the Stats PySide6 workflow."""
+        """Handle the find project root step for the Stats workflow."""
         for candidate in (path, *path.parents):
             if (candidate / "project.json").is_file():
                 return candidate
         return path
 
     def _run_next_step(self, pipeline_id: PipelineId) -> None:
-        """Handle the run next step step for the Stats PySide6 workflow."""
+        """Handle the run next step step for the Stats workflow."""
         try:
             state = self._states[pipeline_id]
             if not state.running:
@@ -865,7 +865,7 @@ class StatsController:
             )
 
     def _on_between_process_message(self, pipeline_id: PipelineId, message: str) -> None:
-        """Handle the on between process message step for the Stats PySide6 workflow."""
+        """Handle the on between process message step for the Stats workflow."""
         state = self._states[pipeline_id]
         section = self._section_label(pipeline_id)
         text = (message or "").strip()
@@ -894,7 +894,7 @@ class StatsController:
         self._view.append_log(section, text)
 
     def _on_lela_worker_finished(self, payload: object, excel_path: Path) -> None:
-        """Handle the on lela worker finished step for the Stats PySide6 workflow."""
+        """Handle the on lela worker finished step for the Stats workflow."""
         try:
             stats_folder: Path | None = None
             if isinstance(payload, dict):
@@ -909,7 +909,7 @@ class StatsController:
             self._view.set_busy(False)
 
     def _on_lela_worker_error(self, error_message: str) -> None:
-        """Handle the on lela worker error step for the Stats PySide6 workflow."""
+        """Handle the on lela worker error step for the Stats workflow."""
         try:
             self._view._on_lela_mode_error(error_message)
         finally:
@@ -917,9 +917,9 @@ class StatsController:
             self._view.set_busy(False)
 
     def _deserialize_between_payload(self, step_id: StepId, raw: dict) -> dict:
-        """Handle the deserialize between payload step for the Stats PySide6 workflow."""
+        """Handle the deserialize between payload step for the Stats workflow."""
         def _df(payload: Optional[dict]) -> Optional[pd.DataFrame]:
-            """Handle the df step for the Stats PySide6 workflow."""
+            """Handle the df step for the Stats workflow."""
             if not payload:
                 return None
             cols = payload.get("columns")
@@ -948,7 +948,7 @@ class StatsController:
     def _on_between_process_finished(
         self, pipeline_id: PipelineId, step_id: StepId, payload: object
     ) -> None:
-        """Handle the on between process finished step for the Stats PySide6 workflow."""
+        """Handle the on between process finished step for the Stats workflow."""
         try:
             state = self._states[pipeline_id]
             summary = payload.get("summary") if isinstance(payload, dict) else None
@@ -998,7 +998,7 @@ class StatsController:
             )
 
     def _on_between_process_error(self, pipeline_id: PipelineId, step_id: StepId, error_message: str) -> None:
-        """Handle the on between process error step for the Stats PySide6 workflow."""
+        """Handle the on between process error step for the Stats workflow."""
         state = self._states[pipeline_id]
         state.failed = True
         section = self._section_label(pipeline_id)
@@ -1254,7 +1254,7 @@ class StatsController:
             )
 
     def _on_step_error(self, pipeline_id: PipelineId, step_id: StepId, error_message: str) -> None:
-        """Handle the on step error step for the Stats PySide6 workflow."""
+        """Handle the on step error step for the Stats workflow."""
         try:
             state = self._states[pipeline_id]
             section = self._section_label(pipeline_id)
@@ -1290,7 +1290,7 @@ class StatsController:
             )
 
     def _complete_pipeline(self, pipeline_id: PipelineId) -> None:
-        """Handle the complete pipeline step for the Stats PySide6 workflow."""
+        """Handle the complete pipeline step for the Stats workflow."""
         state = self._states[pipeline_id]
         logger.info(
             "stats_pipeline_complete_enter",
@@ -1398,7 +1398,7 @@ class StatsController:
         error_message: Optional[str],
         exports_ran: bool = False,
     ) -> None:
-        """Handle the finalize pipeline step for the Stats PySide6 workflow."""
+        """Handle the finalize pipeline step for the Stats workflow."""
         state = self._states[pipeline_id]
         logger.info(
             "stats_finalize_pipeline_enter",
@@ -1475,11 +1475,11 @@ class StatsController:
         )
 
     def _section_label(self, pipeline_id: PipelineId) -> str:
-        """Handle the section label step for the Stats PySide6 workflow."""
+        """Handle the section label step for the Stats workflow."""
         return "Single" if pipeline_id is PipelineId.SINGLE else "Between"
 
     def _section_name(self, pipeline_id: PipelineId) -> str:
-        """Handle the section name step for the Stats PySide6 workflow."""
+        """Handle the section name step for the Stats workflow."""
         return "Single-Group Analysis" if pipeline_id is PipelineId.SINGLE else "Between-Group Analysis"
 
 

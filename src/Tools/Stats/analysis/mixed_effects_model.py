@@ -245,7 +245,7 @@ def _make_reduced_terms(processed_terms: List[str], drop: str) -> List[str]:
 
     def _mentions(var: str, term: str) -> bool:
         # Match both raw and C(var, ...)
-        """Run the mentions helper used by the Legacy Stats workflow."""
+        """Run the mentions helper used by the Stats workflow."""
         return re.search(rf'(?i)(?<![A-Za-z0-9_]){var}(?![A-Za-z0-9_])', term) or \
                re.search(rf'(?i)C\(\s*{var}\s*,', term)
 

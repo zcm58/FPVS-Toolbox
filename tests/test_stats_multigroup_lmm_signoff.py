@@ -21,7 +21,7 @@ try:
         WORKER_FN_BY_STEP,
     )
     from Tools.Stats.reporting.stats_run_report import StatsRunReport
-    from Tools.Stats.stats_ui_pyside6 import StatsWindow
+    from Tools.Stats.ui.stats_window import StatsWindow
     from Tools.Stats.reporting.summary_utils import (
         StatsSummaryFrames,
         SummaryConfig,

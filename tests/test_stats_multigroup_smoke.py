@@ -10,11 +10,11 @@ pd = pytest.importorskip("pandas")
 try:
     from PySide6.QtWidgets import QMessageBox
     from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
-    from Tools.Stats import stats_ui_pyside6 as stats_mod
+    from Tools.Stats.ui import stats_window as stats_mod
     from Tools.Stats.workers import stats_workers
     from Tools.Stats.controller.stats_controller import WORKER_FN_BY_STEP, StepId
     from Tools.Stats.data.stats_multigroup_scan import MultiGroupScanResult
-    from Tools.Stats.stats_ui_pyside6 import StatsWindow
+    from Tools.Stats.ui.stats_window import StatsWindow
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     pytest.skip("PySide6 is required for Stats smoke tests", allow_module_level=True)
 

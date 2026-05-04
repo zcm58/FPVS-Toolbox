@@ -14,7 +14,7 @@ from Tools.Stats.controller.stats_controller import (  # noqa: E402
     BETWEEN_PIPELINE_STEPS,
     SINGLE_PIPELINE_STEPS,
 )
-from Tools.Stats.stats_ui_pyside6 import StatsWindow  # noqa: E402
+from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 
 def _setup_window_state(window: StatsWindow) -> None:

@@ -50,17 +50,17 @@ from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
 
 
 def _print(msg: str) -> None:
-    """Run the print helper used by the Legacy Stats workflow."""
+    """Run the print helper used by the Stats workflow."""
     print(msg, flush=True)
 
 
 def _stage_marker(event: str, step: str) -> None:
-    """Run the stage marker helper used by the Legacy Stats workflow."""
+    """Run the stage marker helper used by the Stats workflow."""
     _print(f"STAGE_{event}:{step}")
 
 
 def _df_to_dict(df: Optional[pd.DataFrame]) -> Optional[dict]:
-    """Run the df to dict helper used by the Legacy Stats workflow."""
+    """Run the df to dict helper used by the Stats workflow."""
     if df is None:
         return None
     return {"columns": list(df.columns), "data": df.to_dict(orient="records")}
@@ -70,7 +70,7 @@ def _long_format_from_bca(
     all_subject_bca_data: Dict[str, Dict[str, Dict[str, float]]],
     subject_groups: dict[str, str | None] | None = None,
 ) -> pd.DataFrame:
-    """Run the long format from bca helper used by the Legacy Stats workflow."""
+    """Run the long format from bca helper used by the Stats workflow."""
     rows = []
     groups = subject_groups or {}
     for pid, cond_data in all_subject_bca_data.items():
@@ -159,7 +159,7 @@ class JobSpec:
 
 
 def _run_mixed_anova(df_long: pd.DataFrame) -> pd.DataFrame:
-    """Run the run mixed anova helper used by the Legacy Stats workflow."""
+    """Run the run mixed anova helper used by the Stats workflow."""
     return run_mixed_group_anova(
         df_long,
         dv_col="value",
@@ -170,7 +170,7 @@ def _run_mixed_anova(df_long: pd.DataFrame) -> pd.DataFrame:
 
 
 def _run_mixed_model(df_long: pd.DataFrame) -> pd.DataFrame:
-    """Run the run mixed model helper used by the Legacy Stats workflow."""
+    """Run the run mixed model helper used by the Stats workflow."""
     return run_mixed_effects_model(
         data=df_long,
         dv_col="value",
@@ -180,7 +180,7 @@ def _run_mixed_model(df_long: pd.DataFrame) -> pd.DataFrame:
 
 
 def _run_group_contrasts(df_long: pd.DataFrame) -> pd.DataFrame:
-    """Run the run group contrasts helper used by the Legacy Stats workflow."""
+    """Run the run group contrasts helper used by the Stats workflow."""
     return compute_group_contrasts(
         df_long,
         subject_col="subject",
@@ -192,7 +192,7 @@ def _run_group_contrasts(df_long: pd.DataFrame) -> pd.DataFrame:
 
 
 def _run_harmonic(spec: JobSpec, log_func: Callable[[str], None]):
-    """Run the run harmonic helper used by the Legacy Stats workflow."""
+    """Run the run harmonic helper used by the Stats workflow."""
     opts = spec.harmonic_options
     return legacy_run_harmonic_check(
         subject_data=spec.subject_data,
@@ -217,7 +217,7 @@ def _run_harmonic(spec: JobSpec, log_func: Callable[[str], None]):
 
 
 def run_between_groups_pipeline(spec: JobSpec) -> dict:
-    """Run the run between groups pipeline helper used by the Legacy Stats workflow."""
+    """Run the run between groups pipeline helper used by the Stats workflow."""
     set_rois(spec.roi_map)
 
     _stage_marker("START", "BETWEEN_GROUP_ANOVA")

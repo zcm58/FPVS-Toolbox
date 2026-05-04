@@ -1,8 +1,8 @@
-"""Cross-phase Lela Mode analysis helpers (PySide6 path).
+"""Cross-phase Lela Mode analysis helpers.
 
 This module re-implements the cross-phase linear mixed model (LMM) pipeline
-used by Lela Mode without relying on the legacy CLI. It operates entirely
-within the PySide6 Stats tooling so that behaviour changes remain scoped here.
+used by Lela Mode without relying on the between-groups CLI. It operates entirely
+within the Stats analysis package so that behaviour changes remain scoped here.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def _condition_intersection_with_order(
 def _subset_df_for_condition(
     df_long: pd.DataFrame, *, condition: str, roi: str
 ) -> pd.DataFrame:
-    """Handle the subset df for condition step for the Stats PySide6 workflow."""
+    """Handle the subset df for condition step for the Stats workflow."""
     df = df_long[df_long["condition"] == condition]
     df = df[df["roi"] == roi]
     return df.copy()
@@ -79,7 +79,7 @@ def _run_roi_condition_lmm(
     phase_labels: Sequence[str],
     message_cb=None,
 ) -> dict:
-    """Handle the run roi condition lmm step for the Stats PySide6 workflow."""
+    """Handle the run roi condition lmm step for the Stats workflow."""
     meta_warnings: list[str] = []
     backup_rows: list[dict] = []
 
@@ -165,7 +165,7 @@ def _run_roi_condition_lmm(
         backup_2x2 = _run_backup_2x2(df.rename(columns={"bca": "value"}), logger)
 
     def _append_backup_rows(backup: dict | None) -> None:
-        """Handle the append backup rows step for the Stats PySide6 workflow."""
+        """Handle the append backup rows step for the Stats workflow."""
         if not backup:
             return
         tests = backup.get("tests") or []
@@ -228,7 +228,7 @@ def _run_roi_condition_lmm(
 
 
 def _format_results_excel(results: dict, excel_path: Path) -> None:
-    """Handle the format results excel step for the Stats PySide6 workflow."""
+    """Handle the format results excel step for the Stats workflow."""
     fixed_effects_df = pd.DataFrame(results.get("fixed_effects") or [])
     if fixed_effects_df.empty:
         fixed_effects_df = pd.DataFrame(
@@ -268,7 +268,7 @@ def _format_results_excel(results: dict, excel_path: Path) -> None:
 def run_cross_phase_lmm_job(progress_cb, message_cb, *, job_spec_path: str):
     """Run the cross-phase LMM job described by ``job_spec_path``.
 
-    Mirrors the legacy CLI behaviour but iterates over every ROI × condition.
+    Mirrors the between-groups CLI behaviour but iterates over every ROI × condition.
     """
 
     job_path = Path(job_spec_path)

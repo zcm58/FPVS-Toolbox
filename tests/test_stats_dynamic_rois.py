@@ -15,7 +15,7 @@ main_app_stub.SettingsManager = DummySettingsManager
 sys.modules.setdefault("Main_App", main_app_stub)
 
 spec = importlib.util.spec_from_file_location(
-    "roi_resolver", Path("src/Tools/Stats/roi_resolver.py")
+    "roi_resolver", Path("src/Tools/Stats/data/roi_resolver.py")
 )
 rr = importlib.util.module_from_spec(spec)
 assert spec.loader is not None

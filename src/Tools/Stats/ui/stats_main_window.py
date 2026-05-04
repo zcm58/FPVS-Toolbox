@@ -1,4 +1,4 @@
-"""Root class for the PySide6 Stats tool window.
+"""Root class for the Stats tool window.
 
 StatsWindow keeps the import and construction surface stable while the
 implementation is split across focused internal mixin modules.
@@ -27,7 +27,7 @@ class StatsWindow(
     StatsWindowUiMixin,
     QMainWindow,
 ):
-    """PySide6 window wrapping the legacy FPVS Statistical Analysis Tool."""
+    """PySide6 window wrapping the FPVS Statistical Analysis Tool."""
 
     def __init__(self, parent: Optional[QMainWindow] = None, project_dir: Optional[str] = None):
         """Set up this object so it is ready to be used by the Stats tool."""
@@ -169,7 +169,7 @@ class StatsWindow(
     # --------- ROI + status helpers ---------
 
     def refresh_rois(self) -> None:
-        """Handle the refresh rois step for the Stats PySide6 workflow."""
+        """Handle the refresh rois step for the Stats workflow."""
         fresh = load_rois_from_settings() or {}
         try:
             set_rois({})
@@ -181,7 +181,7 @@ class StatsWindow(
         self._update_roi_label()
 
     def _update_roi_label(self) -> None:
-        """Handle the update roi label step for the Stats PySide6 workflow."""
+        """Handle the update roi label step for the Stats workflow."""
         names = list(self.rois.keys())
         txt = "Using {} ROI{} from Settings: {}".format(
             len(names), "" if len(names) == 1 else "s", ", ".join(names)

@@ -513,7 +513,7 @@ class SettingsDialog(QDialog):
             )
 
         try:
-            from Tools.Stats.shared_rois import (
+            from Tools.Stats.data.shared_rois import (
                 load_rois_from_settings,
                 apply_rois_to_modules,
             )

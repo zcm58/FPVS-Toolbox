@@ -11,7 +11,7 @@ from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     LEGACY_POLICY_NAME,
 )
 from Tools.Stats.common.stats_core import PipelineId, StepId  # noqa: E402
-from Tools.Stats.stats_ui_pyside6 import StatsWindow  # noqa: E402
+from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 
 def _setup_window_state(window: StatsWindow) -> None:

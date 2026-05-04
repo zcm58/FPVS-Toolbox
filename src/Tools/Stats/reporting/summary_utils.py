@@ -37,7 +37,7 @@ logger = logging.getLogger("Tools.Stats")
 
 @dataclass
 class SummaryConfig:
-    """Represent the SummaryConfig part of the Stats PySide6 tool."""
+    """Represent the SummaryConfig part of the Stats tool."""
     alpha: float = 0.05
     min_effect: float = 0.50
     max_bullets: int = 3
@@ -49,7 +49,7 @@ class SummaryConfig:
 
 @dataclass
 class StatsSummaryFrames:
-    """Represent the StatsSummaryFrames part of the Stats PySide6 tool."""
+    """Represent the StatsSummaryFrames part of the Stats tool."""
     single_posthoc: Optional[pd.DataFrame] = None
     between_contrasts: Optional[pd.DataFrame] = None
     harmonic_results: Optional[pd.DataFrame] = None
@@ -67,7 +67,7 @@ def build_summary_from_files(stats_folder: Path, config: SummaryConfig) -> str:
     """
 
     def _safe_read(path: Path, sheet: str) -> Optional[pd.DataFrame]:
-        """Handle the safe read step for the Stats PySide6 workflow."""
+        """Handle the safe read step for the Stats workflow."""
         if not path.is_file():
             return None
         try:
@@ -76,7 +76,7 @@ def build_summary_from_files(stats_folder: Path, config: SummaryConfig) -> str:
             return None
 
     def _safe_read_any(path: Path, sheets: list[str]) -> Optional[pd.DataFrame]:
-        """Handle the safe read any step for the Stats PySide6 workflow."""
+        """Handle the safe read any step for the Stats workflow."""
         for sheet in sheets:
             df = _safe_read(path, sheet)
             if df is not None:
@@ -197,7 +197,7 @@ def build_summary_from_frames(frames: StatsSummaryFrames, config: SummaryConfig)
 
 
 def to_dataframe(data) -> Optional[pd.DataFrame]:
-    """Handle the to dataframe step for the Stats PySide6 workflow."""
+    """Handle the to dataframe step for the Stats workflow."""
     if isinstance(data, pd.DataFrame):
         return data
     if isinstance(data, list) and data:
@@ -239,7 +239,7 @@ def build_summary_frames_from_results(
     between_mixed_model_results: Optional[pd.DataFrame] = None,
     harmonic_results: Optional[pd.DataFrame | list[dict]] = None,
 ) -> StatsSummaryFrames:
-    """Handle the build summary frames from results step for the Stats PySide6 workflow."""
+    """Handle the build summary frames from results step for the Stats workflow."""
     frames = StatsSummaryFrames(pipeline_id=pipeline_id)
     if pipeline_id is PipelineId.SINGLE:
         frames.single_posthoc = to_dataframe(single_posthoc)
@@ -253,14 +253,14 @@ def build_summary_frames_from_results(
 
 
 def _fmt_p(value: float) -> str:
-    """Handle the fmt p step for the Stats PySide6 workflow."""
+    """Handle the fmt p step for the Stats workflow."""
     if value != 0.0 and abs(value) < 0.001:
         return f"{value:.3e}"
     return f"{value:.6g}"
 
 
 def format_rm_anova_summary(df: pd.DataFrame, alpha: float) -> str:
-    """Handle the format rm anova summary step for the Stats PySide6 workflow."""
+    """Handle the format rm anova summary step for the Stats workflow."""
     out = []
     p_candidates = ["Pr > F", "p-value", "p_value", "p", "P", "pvalue"]
     eff_candidates = ["Effect", "Source", "Factor", "Term"]
@@ -322,7 +322,7 @@ def format_rm_anova_summary(df: pd.DataFrame, alpha: float) -> str:
 
 
 def build_rm_anova_output(anova_df_results: Optional[pd.DataFrame], alpha: float) -> str:
-    """Handle the build rm anova output step for the Stats PySide6 workflow."""
+    """Handle the build rm anova output step for the Stats workflow."""
     output_text = "============================================================\n"
     output_text += "       Repeated Measures ANOVA (RM-ANOVA) Results\n"
     output_text += "       Analysis conducted on: Summed BCA Data\n"
@@ -344,7 +344,7 @@ def build_rm_anova_output(anova_df_results: Optional[pd.DataFrame], alpha: float
 
 
 def build_between_anova_output(anova_df_results: Optional[pd.DataFrame], alpha: float) -> str:
-    """Handle the build between anova output step for the Stats PySide6 workflow."""
+    """Handle the build between anova output step for the Stats workflow."""
     output_text = "============================================================\n"
     output_text += "       Between-Group Mixed ANOVA Results\n"
     output_text += "============================================================\n\n"
@@ -364,7 +364,7 @@ def build_between_anova_output(anova_df_results: Optional[pd.DataFrame], alpha: 
 
 
 def _pick_column(df: pd.DataFrame, preferred: str, fallbacks: Iterable[str]) -> Optional[str]:
-    """Handle the pick column step for the Stats PySide6 workflow."""
+    """Handle the pick column step for the Stats workflow."""
     for name in (preferred, *fallbacks):
         if name in df.columns:
             return name
@@ -372,7 +372,7 @@ def _pick_column(df: pd.DataFrame, preferred: str, fallbacks: Iterable[str]) -> 
 
 
 def _select_rm_anova_p(row: pd.Series) -> tuple[float, str] | None:
-    """Handle the select rm anova p step for the Stats PySide6 workflow."""
+    """Handle the select rm anova p step for the Stats workflow."""
     for col, label in (("Pr > F (GG)", "GG corrected"), ("Pr > F (HF)", "HF corrected"), ("Pr > F", "uncorrected")):
         if col not in row.index:
             continue
@@ -386,12 +386,12 @@ def _select_rm_anova_p(row: pd.Series) -> tuple[float, str] | None:
 
 
 def _normalize_effect_name(raw: object) -> str:
-    """Handle the normalize effect name step for the Stats PySide6 workflow."""
+    """Handle the normalize effect name step for the Stats workflow."""
     return " ".join(str(raw).strip().lower().split())
 
 
 def _summarize_rm_anova(anova_terms: Optional[pd.DataFrame], cfg: SummaryConfig) -> list[str]:
-    """Handle the summarize rm anova step for the Stats PySide6 workflow."""
+    """Handle the summarize rm anova step for the Stats workflow."""
     if anova_terms is None or not isinstance(anova_terms, pd.DataFrame):
         return ["- No RM-ANOVA results are available."]
 
@@ -482,7 +482,7 @@ def _summarize_posthocs(
     between_contrasts: Optional[pd.DataFrame],
     cfg: SummaryConfig,
 ) -> list[str]:
-    """Handle the summarize posthocs step for the Stats PySide6 workflow."""
+    """Handle the summarize posthocs step for the Stats workflow."""
     if isinstance(single_posthoc, pd.DataFrame) and not single_posthoc.empty:
         return _summarize_single_posthocs_by_direction(single_posthoc, cfg)
 
@@ -530,7 +530,7 @@ def _summarize_posthocs(
 
 
 def _summarize_single_posthocs_by_direction(df: pd.DataFrame, cfg: SummaryConfig) -> list[str]:
-    """Handle the summarize single posthocs by direction step for the Stats PySide6 workflow."""
+    """Handle the summarize single posthocs by direction step for the Stats workflow."""
     p_col = _pick_column(df, cfg.p_col, ["p_fdr_bh", "p_value_fdr", "p_fdr"])
     eff_col = _pick_column(df, "cohens_dz", ["dz", cfg.effect_col, "effect_size"])
     diff_col = _pick_column(df, "mean_diff", ["diff", "mean_difference"])
@@ -592,7 +592,7 @@ def _summarize_single_posthocs_by_direction(df: pd.DataFrame, cfg: SummaryConfig
 
 
 def _summarize_between(between_contrasts: Optional[pd.DataFrame], cfg: SummaryConfig) -> list[str]:
-    """Handle the summarize between step for the Stats PySide6 workflow."""
+    """Handle the summarize between step for the Stats workflow."""
     if between_contrasts is None or not isinstance(between_contrasts, pd.DataFrame):
         return ["- No between-group results are available for summary."]
 
@@ -636,7 +636,7 @@ def _summarize_mixed_model(
     *,
     between_mode: bool = False,
 ) -> list[str]:
-    """Handle the summarize mixed model step for the Stats PySide6 workflow."""
+    """Handle the summarize mixed model step for the Stats workflow."""
     if mixed_model_terms is None or not isinstance(mixed_model_terms, pd.DataFrame) or mixed_model_terms.empty:
         return ["- Mixed model: NOT AVAILABLE (not computed by this run)."]
 
@@ -648,7 +648,7 @@ def _summarize_mixed_model(
 
 
 def _format_p_value(p_value: float) -> str:
-    """Handle the format p value step for the Stats PySide6 workflow."""
+    """Handle the format p value step for the Stats workflow."""
     try:
         value = float(p_value)
     except Exception:
@@ -661,7 +661,7 @@ def _format_p_value(p_value: float) -> str:
 
 
 def _direction_word(coef: float) -> str:
-    """Handle the direction word step for the Stats PySide6 workflow."""
+    """Handle the direction word step for the Stats workflow."""
     if pd.isna(coef):
         return "equal"
     if coef < 0:
@@ -672,7 +672,7 @@ def _direction_word(coef: float) -> str:
 
 
 def _extract_sum_coded_label(term: str) -> str:
-    """Handle the extract sum coded label step for the Stats PySide6 workflow."""
+    """Handle the extract sum coded label step for the Stats workflow."""
     if "[S." in term:
         start = term.find("[S.") + 3
         end = term.find("]", start)
@@ -687,7 +687,7 @@ def _extract_sum_coded_label(term: str) -> str:
 
 
 def _is_interaction_term(term: str) -> bool:
-    """Handle the is interaction term step for the Stats PySide6 workflow."""
+    """Handle the is interaction term step for the Stats workflow."""
     lowered = term.lower()
     if any(sep in term for sep in ("×", ":")):
         return "condition" in lowered and "roi" in lowered
@@ -695,19 +695,19 @@ def _is_interaction_term(term: str) -> bool:
 
 
 def _is_condition_main_effect(term: str) -> bool:
-    """Handle the is condition main effect step for the Stats PySide6 workflow."""
+    """Handle the is condition main effect step for the Stats workflow."""
     lowered = term.lower()
     return "c(condition" in lowered and not _is_interaction_term(term)
 
 
 def _is_roi_main_effect(term: str) -> bool:
-    """Handle the is roi main effect step for the Stats PySide6 workflow."""
+    """Handle the is roi main effect step for the Stats workflow."""
     lowered = term.lower()
     return "c(roi" in lowered and not _is_interaction_term(term)
 
 
 def _is_intercept(term: str) -> bool:
-    """Handle the is intercept step for the Stats PySide6 workflow."""
+    """Handle the is intercept step for the Stats workflow."""
     lowered = term.strip().lower()
     return lowered in {"intercept", "const"}
 
@@ -718,7 +718,7 @@ def format_mixed_model_plain_language(
     *,
     between_mode: bool = False,
 ) -> list[str]:
-    """Handle the format mixed model plain language step for the Stats PySide6 workflow."""
+    """Handle the format mixed model plain language step for the Stats workflow."""
     p_col = _pick_column(mixed_model_terms, "p", ["P>|z|", "p", "pvalue", "p_value"])
     raw_term_col = _pick_column(mixed_model_terms, "term", ["Effect (raw)", "Effect", "Term"])
     readable_term_col = _pick_column(mixed_model_terms, "readable_term", ["Effect (readable)"])
@@ -781,7 +781,7 @@ def format_mixed_model_plain_language(
     roi_pattern = re.compile(r"^C\(roi\s*,\s*Sum\)\[S\.(?P<level>.+)\]$")
 
     def _extract_level(row: pd.Series, match_obj: re.Match[str] | None) -> str:
-        """Handle the extract level step for the Stats PySide6 workflow."""
+        """Handle the extract level step for the Stats workflow."""
         if readable_term_col is not None:
             readable = str(row.get("_term_readable", "")).strip()
             if readable and readable.lower() != str(row.get("_term_raw", "")).strip().lower():
@@ -841,7 +841,7 @@ def format_mixed_model_plain_language(
 
 
 def _summarize_interactions(interaction_anova: Optional[pd.DataFrame], cfg: SummaryConfig) -> list[str]:
-    """Handle the summarize interactions step for the Stats PySide6 workflow."""
+    """Handle the summarize interactions step for the Stats workflow."""
     if interaction_anova is None or not isinstance(interaction_anova, pd.DataFrame):
         return []
 

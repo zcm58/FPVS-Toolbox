@@ -42,7 +42,7 @@ from Main_App.PySide6_App.Backend.project import (
     Project,
 )
 from Main_App.PySide6_App.Backend.project_metadata import read_project_metadata
-from Tools.Stats.shared_rois import load_rois_from_settings
+from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
 from Tools.Plot_Generator.manifest_utils import (
     extract_group_names,

@@ -10,13 +10,13 @@ from Main_App.PySide6_App.Backend.project import STATS_SUBFOLDER_NAME
 
 
 class PipelineId(Enum):
-    """Represent the PipelineId part of the Stats PySide6 tool."""
+    """Represent the PipelineId part of the Stats tool."""
     SINGLE = auto()
     BETWEEN = auto()
 
 
 class StepId(Enum):
-    """Represent the StepId part of the Stats PySide6 tool."""
+    """Represent the StepId part of the Stats tool."""
     RM_ANOVA = auto()
     MIXED_MODEL = auto()
     INTERACTION_POSTHOCS = auto()
@@ -69,7 +69,7 @@ MULTIGROUP_QC_CONTEXT_SHEETS: Final[tuple[str, ...]] = (
 
 @dataclass
 class PipelineStep:
-    """Represent the PipelineStep part of the Stats PySide6 tool."""
+    """Represent the PipelineStep part of the Stats tool."""
     id: StepId
     name: str
     worker_fn: Callable[..., Any]

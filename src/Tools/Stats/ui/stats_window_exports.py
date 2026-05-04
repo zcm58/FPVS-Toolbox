@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class StatsWindowExportsMixin:
     def export_results(self, kind: str, data, out_dir: str) -> list[Path]:
-        """Handle the export results step for the Stats PySide6 workflow."""
+        """Handle the export results step for the Stats workflow."""
         mapping = {
             "anova": (export_rm_anova_results_to_excel, ANOVA_XLS),
             "lmm": (export_mixed_model_results_to_excel, LMM_XLS),
@@ -34,7 +34,7 @@ class StatsWindowExportsMixin:
                 return []
 
             def _adapter(_ignored, *, save_path, log_func):
-                """Handle the adapter step for the Stats PySide6 workflow."""
+                """Handle the adapter step for the Stats workflow."""
                 export_harmonic_results_to_excel(
                     grouped,
                     save_path,
@@ -74,7 +74,7 @@ class StatsWindowExportsMixin:
         return [path]
 
     def _write_dv_metadata(self, out_dir: str, pipeline_id: PipelineId) -> None:
-        """Handle the write dv metadata step for the Stats PySide6 workflow."""
+        """Handle the write dv metadata step for the Stats workflow."""
         dv_policy = self._pipeline_dv_policy.get(pipeline_id, self._get_dv_policy_payload())
         conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
         base_freq = self._pipeline_base_freq.get(pipeline_id, self._current_base_freq)
@@ -167,7 +167,7 @@ class StatsWindowExportsMixin:
             logger.exception("Failed to write DV definition export.")
 
     def _ensure_results_dir(self) -> str:
-        """Handle the ensure results dir step for the Stats PySide6 workflow."""
+        """Handle the ensure results dir step for the Stats workflow."""
         target = ensure_results_dir(
             self._project_path,
             self._results_folder_hint,
@@ -177,12 +177,12 @@ class StatsWindowExportsMixin:
         return str(target)
 
     def _open_results_folder(self) -> None:
-        """Handle the open results folder step for the Stats PySide6 workflow."""
+        """Handle the open results folder step for the Stats workflow."""
         out_dir = self._ensure_results_dir()
         QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
     def _export_single_pipeline(self) -> bool:
-        """Handle the export single pipeline step for the Stats PySide6 workflow."""
+        """Handle the export single pipeline step for the Stats workflow."""
         section = "Single"
         exports = [
             ("anova", self.rm_anova_results_data, "RM-ANOVA"),
@@ -247,7 +247,7 @@ class StatsWindowExportsMixin:
             return False
 
     def _export_dv_variants(self, pipeline_id: PipelineId, out_dir: str) -> list[Path]:
-        """Handle the export dv variants step for the Stats PySide6 workflow."""
+        """Handle the export dv variants step for the Stats workflow."""
         selected = self._pipeline_dv_variants.get(pipeline_id, [])
         if not selected:
             return []
@@ -292,7 +292,7 @@ class StatsWindowExportsMixin:
         return [save_path]
 
     def _export_outlier_exclusions(self, pipeline_id: PipelineId, out_dir: str) -> list[Path]:
-        """Handle the export outlier exclusions step for the Stats PySide6 workflow."""
+        """Handle the export outlier exclusions step for the Stats workflow."""
         report = self._pipeline_run_reports.get(pipeline_id)
         if not isinstance(report, StatsRunReport):
             return []
@@ -314,7 +314,7 @@ class StatsWindowExportsMixin:
         return paths
 
     def _export_between_pipeline(self) -> bool:
-        """Handle the export between pipeline step for the Stats PySide6 workflow."""
+        """Handle the export between pipeline step for the Stats workflow."""
         section = "Between"
         exports = [
             ("lmm_between", self.between_mixed_model_results_data, "Between-Group Mixed Model"),
@@ -383,7 +383,7 @@ class StatsWindowExportsMixin:
             return False
 
     def _export_between_missingness(self, out_dir: str) -> Path | None:
-        """Handle the export between missingness step for the Stats PySide6 workflow."""
+        """Handle the export between missingness step for the Stats workflow."""
         payload = self._between_missingness_payload if isinstance(self._between_missingness_payload, dict) else {}
         mixed_rows = payload.get("mixed_model_missing_cells", [])
         summary = payload.get("summary", {})
@@ -410,7 +410,7 @@ class StatsWindowExportsMixin:
         return export_path
 
     def _export_qc_context_by_group(self, out_dir: str) -> Path | None:
-        """Handle the export qc context by group step for the Stats PySide6 workflow."""
+        """Handle the export qc context by group step for the Stats workflow."""
         fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
         dv_table = fixed_payload.get("dv_table")
         if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:

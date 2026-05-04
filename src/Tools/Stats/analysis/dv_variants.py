@@ -25,7 +25,7 @@ DV_POLICY_SHORT_NAMES = {
 
 @dataclass(frozen=True)
 class DVVariantPayload:
-    """Represent the DVVariantPayload part of the Stats PySide6 tool."""
+    """Represent the DVVariantPayload part of the Stats tool."""
     primary_name: str
     primary_df: pd.DataFrame
     variant_dfs: Dict[str, pd.DataFrame]
@@ -35,14 +35,14 @@ class DVVariantPayload:
 
 
 def dv_policy_short_name(policy_name: str) -> str:
-    """Handle the dv policy short name step for the Stats PySide6 workflow."""
+    """Handle the dv policy short name step for the Stats workflow."""
     return DV_POLICY_SHORT_NAMES.get(policy_name, policy_name.replace(" ", ""))
 
 
 def build_long_dv_table(
     all_subject_bca_data: Dict[str, Dict[str, Dict[str, float]]],
 ) -> pd.DataFrame:
-    """Handle the build long dv table step for the Stats PySide6 workflow."""
+    """Handle the build long dv table step for the Stats workflow."""
     rows: List[dict] = []
     for pid, cond_data in all_subject_bca_data.items():
         for cond_name, roi_data in cond_data.items():
@@ -62,7 +62,7 @@ def build_long_dv_table(
 def build_dv_comparison_summary(
     dv_tables: Dict[str, pd.DataFrame],
 ) -> pd.DataFrame:
-    """Handle the build dv comparison summary step for the Stats PySide6 workflow."""
+    """Handle the build dv comparison summary step for the Stats workflow."""
     if not dv_tables:
         return pd.DataFrame()
 
@@ -103,7 +103,7 @@ def compute_dv_variants_payload(
     log_func: Callable[[str], None],
     primary_data: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None,
 ) -> Optional[DVVariantPayload]:
-    """Handle the compute dv variants payload step for the Stats PySide6 workflow."""
+    """Handle the compute dv variants payload step for the Stats workflow."""
     if not variant_policies:
         return None
 
@@ -167,7 +167,7 @@ def compute_dv_variants_payload(
 
 
 def _sheet_name(prefix: str, policy_name: str) -> str:
-    """Handle the sheet name step for the Stats PySide6 workflow."""
+    """Handle the sheet name step for the Stats workflow."""
     short = dv_policy_short_name(policy_name)
     return f"{prefix}{short}"[:31]
 
@@ -182,7 +182,7 @@ def export_dv_variants_workbook(
     errors: List[dict],
     log_func: Callable[[str], None],
 ) -> None:
-    """Handle the export dv variants workbook step for the Stats PySide6 workflow."""
+    """Handle the export dv variants workbook step for the Stats workflow."""
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(save_path, engine="openpyxl") as writer:

@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtWidgets import QGroupBox, QPushButton, QTabWidget  # noqa: E402
 
-from Tools.Stats.stats_ui_pyside6 import StatsWindow  # noqa: E402
+from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

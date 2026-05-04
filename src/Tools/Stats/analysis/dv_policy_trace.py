@@ -11,7 +11,7 @@ _DV_TRACE_ENV = "FPVS_STATS_DV_TRACE"
 
 
 def _dv_trace_enabled() -> bool:
-    """Handle the dv trace enabled step for the Stats PySide6 workflow."""
+    """Handle the dv trace enabled step for the Stats workflow."""
     value = os.getenv(_DV_TRACE_ENV, "").strip().lower()
     return value not in ("", "0", "false", "no", "off")
 
@@ -22,7 +22,7 @@ def _log_dv_trace_empty_policy(
     final_map: dict[str, list[float]],
     fallback_info: dict[str, dict[str, object]],
 ) -> None:
-    """Handle the log dv trace empty policy step for the Stats PySide6 workflow."""
+    """Handle the log dv trace empty policy step for the Stats workflow."""
     if not _dv_trace_enabled():
         return
     for roi_name, initial_freqs in initial_map.items():
@@ -52,7 +52,7 @@ def _log_dv_trace_dv_table_summary(
     rois_map: dict[str, list[str]],
     all_subject_data: dict[str, dict[str, dict[str, float]]],
 ) -> None:
-    """Handle the log dv trace dv table summary step for the Stats PySide6 workflow."""
+    """Handle the log dv trace dv table summary step for the Stats workflow."""
     if not _dv_trace_enabled():
         return
     expected_rows = len(subjects) * len(conditions) * len(rois_map)

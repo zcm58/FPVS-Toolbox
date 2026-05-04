@@ -39,7 +39,7 @@ def apply_empty_union_policy(
     policy: str,
     fallback_freqs: list[float],
 ) -> tuple[dict[str, list[float]], dict[str, dict[str, object]]]:
-    """Handle the apply empty union policy step for the Stats PySide6 workflow."""
+    """Handle the apply empty union policy step for the Stats workflow."""
     final_map: dict[str, list[float]] = {}
     info: dict[str, dict[str, object]] = {}
     for roi, freqs in union_harmonics.items():
@@ -77,7 +77,7 @@ def build_rossion_preview_payload(
     dv_policy: dict[str, object] | None = None,
     max_freq: float | None = None,
 ) -> dict[str, object]:
-    """Handle the build rossion preview payload step for the Stats PySide6 workflow."""
+    """Handle the build rossion preview payload step for the Stats workflow."""
     settings = normalize_dv_policy(dv_policy)
     resolved_max_freq = _resolve_max_freq(max_freq)
     if settings.name != ROSSION_POLICY_NAME:
@@ -147,7 +147,7 @@ def _prepare_rossion_bca_data(
     dv_metadata: Optional[dict[str, object]] = None,
     max_freq: float | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
-    """Handle the prepare rossion bca data step for the Stats PySide6 workflow."""
+    """Handle the prepare rossion bca data step for the Stats workflow."""
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
         return None

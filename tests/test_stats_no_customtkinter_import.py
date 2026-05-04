@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from Tools.Stats.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.ui.stats_window import StatsWindow
 
 
 @pytest.mark.qt

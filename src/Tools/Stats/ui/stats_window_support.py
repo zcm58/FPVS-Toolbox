@@ -1,6 +1,6 @@
 """Shared imports for the internal StatsWindow mixin modules.
 
-This module exists to keep the first-pass split of stats_main_window.py
+This module exists to keep the split Stats window modules
 mechanical and behavior-preserving. New code should prefer direct imports.
 """
 from __future__ import annotations
@@ -64,7 +64,7 @@ from Tools.Stats.reporting.stats_export import (
     export_rm_anova_results_to_excel,
     export_significance_results_to_excel as export_harmonic_results_to_excel,
 )
-from Tools.Stats.shared_rois import apply_rois_to_modules, load_rois_from_settings
+from Tools.Stats.data.shared_rois import apply_rois_to_modules, load_rois_from_settings
 from Tools.Stats.controller.stats_controller import StatsController
 from Tools.Stats.common.stats_core import (
     ANOVA_BETWEEN_XLS,
@@ -161,7 +161,7 @@ from Tools.Stats.data.stats_multigroup_ids import (
     normalize_multigroup_manifest_groups,
     normalize_multigroup_pid,
 )
-from Tools.Stats.ui.widgets.elided_label import ElidedPathLabel
+from Tools.Stats.widgets.elided_label import ElidedPathLabel
 from Tools.Stats.common.stats_window_types import HarmonicConfig
 
 logger = logging.getLogger(__name__)

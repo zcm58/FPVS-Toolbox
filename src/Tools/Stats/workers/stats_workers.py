@@ -113,7 +113,7 @@ LMM_DIAGNOSTIC_WORKBOOK = "BetweenGroup_ModelInput_Diagnostics.xlsx"
 
 
 def _lmm_stage_snapshot(stage: str, df: pd.DataFrame) -> dict[str, object]:
-    """Handle the lmm stage snapshot step for the Stats PySide6 workflow."""
+    """Handle the lmm stage snapshot step for the Stats workflow."""
     if not isinstance(df, pd.DataFrame):
         return {
             "stage": stage,
@@ -140,7 +140,7 @@ def _lmm_stage_snapshot(stage: str, df: pd.DataFrame) -> dict[str, object]:
 
 
 def _emit_lmm_stage_diag(message_cb, snapshot: dict[str, object], *, dv_col: str) -> None:
-    """Handle the emit lmm stage diag step for the Stats PySide6 workflow."""
+    """Handle the emit lmm stage diag step for the Stats workflow."""
     message_cb(
         "[LMM DIAG] "
         f"stage={snapshot.get('stage')} dv_col={dv_col} rows={snapshot.get('rows', 0)} "
@@ -171,7 +171,7 @@ def _build_lmm_blocked_payload(
     final_before_dropna_df: pd.DataFrame | None = None,
     merge_match_stats: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Handle the build lmm blocked payload step for the Stats PySide6 workflow."""
+    """Handle the build lmm blocked payload step for the Stats workflow."""
     message = (
         f"Between-group mixed model blocked: 0 rows after {stage}. "
         "See Missingness & Exclusions report / diagnostics."
@@ -269,7 +269,7 @@ def _build_lmm_blocked_payload(
 
 
 def _build_condition_sets_df(selected_conditions: list[str], dv_conditions: list[str]) -> pd.DataFrame:
-    """Handle the build condition sets df step for the Stats PySide6 workflow."""
+    """Handle the build condition sets df step for the Stats workflow."""
     max_len = max(len(selected_conditions), len(dv_conditions), 1)
     selected = selected_conditions + [""] * (max_len - len(selected_conditions))
     dv_vals = dv_conditions + [""] * (max_len - len(dv_conditions))
@@ -282,7 +282,7 @@ def _compute_merge_key_stats(
     dv_df: pd.DataFrame,
     message_cb,
 ) -> tuple[dict[str, object], pd.DataFrame]:
-    """Handle the compute merge key stats step for the Stats PySide6 workflow."""
+    """Handle the compute merge key stats step for the Stats workflow."""
     key_cols = ["subject", "condition", "roi"]
     model_key_set = {
         tuple(row)
@@ -375,7 +375,7 @@ def _compute_merge_key_stats(
 
 
 def _build_dv_column_audit_df(df: pd.DataFrame, *, dv_col: str) -> pd.DataFrame:
-    """Handle the build dv column audit df step for the Stats PySide6 workflow."""
+    """Handle the build dv column audit df step for the Stats workflow."""
     candidate_order = ["dv_value", "value", "dv", "SummedBCA", "bca_sum"]
     rows: list[dict[str, object]] = []
     for col in candidate_order:
@@ -392,7 +392,7 @@ def _build_dv_column_audit_df(df: pd.DataFrame, *, dv_col: str) -> pd.DataFrame:
 
 
 def _normalize_between_group_merge_keys(df: pd.DataFrame) -> pd.DataFrame:
-    """Handle the normalize between group merge keys step for the Stats PySide6 workflow."""
+    """Handle the normalize between group merge keys step for the Stats workflow."""
     normalized = df.copy()
     if "subject" in normalized.columns:
         normalized["subject"] = normalized["subject"].map(
@@ -526,7 +526,7 @@ def _normalize_between_group_subject_map(
 
 
 def _serialize_dv_variants_payload(payload) -> dict | None:
-    """Handle the serialize dv variants payload step for the Stats PySide6 workflow."""
+    """Handle the serialize dv variants payload step for the Stats workflow."""
     if payload is None:
         return None
     if isinstance(payload, dict):
@@ -539,7 +539,7 @@ def _variant_error_payload(
     dv_variants: list[dict[str, object]] | None,
     exc: Exception,
 ) -> dict:
-    """Handle the variant error payload step for the Stats PySide6 workflow."""
+    """Handle the variant error payload step for the Stats workflow."""
     selected_variants = []
     for item in dv_variants or []:
         if isinstance(item, dict) and item.get("name"):
@@ -598,7 +598,7 @@ def _map_between_group_model_dv_column(
 
 
 def _dv_trace_enabled() -> bool:
-    """Handle the dv trace enabled step for the Stats PySide6 workflow."""
+    """Handle the dv trace enabled step for the Stats workflow."""
     value = os.getenv(DV_TRACE_ENV, "").strip().lower()
     return value not in ("", "0", "false", "no", "off")
 
@@ -611,7 +611,7 @@ def _log_dv_trace_policy_snapshot(
     rois: dict | None,
     subjects: list[str],
 ) -> None:
-    """Handle the log dv trace policy snapshot step for the Stats PySide6 workflow."""
+    """Handle the log dv trace policy snapshot step for the Stats workflow."""
     if not _dv_trace_enabled():
         return
     settings = normalize_dv_policy(dv_policy)
@@ -642,7 +642,7 @@ class StatsWorker(QRunnable):
     """
 
     class Signals(QObject):
-        """Represent the Signals part of the Stats PySide6 tool."""
+        """Represent the Signals part of the Stats tool."""
         progress = Signal(int)
         message = Signal(str)
         error = Signal(str)
@@ -663,7 +663,7 @@ class StatsWorker(QRunnable):
 
     @Slot()
     def run(self) -> None:
-        """Handle the run step for the Stats PySide6 workflow."""
+        """Handle the run step for the Stats workflow."""
         t0 = time.perf_counter()
         logger.info("stats_run_start", extra={"op": self._op})
         progress_emit = self.signals.progress.emit
@@ -747,7 +747,7 @@ def _apply_outlier_exclusion(
     abs_limit: float,
     message_cb,
 ) -> tuple[pd.DataFrame, OutlierExclusionReport]:
-    """Handle the apply outlier exclusion step for the Stats PySide6 workflow."""
+    """Handle the apply outlier exclusion step for the Stats workflow."""
     _ = enabled
 
     filtered_df, report = apply_hard_dv_exclusion(
@@ -815,7 +815,7 @@ def _apply_qc_screening(
     dict[str, str | None] | None,
     QcExclusionReport | None,
 ]:
-    """Handle the apply qc screening step for the Stats PySide6 workflow."""
+    """Handle the apply qc screening step for the Stats workflow."""
     if not subjects:
         return subjects, subject_data, subject_groups, None
 
@@ -902,7 +902,7 @@ def _apply_manual_exclusions(
     manual_excluded_pids: list[str] | None,
     message_cb,
 ) -> tuple[list[str], dict, dict[str, str | None] | None, list[str]]:
-    """Handle the apply manual exclusions step for the Stats PySide6 workflow."""
+    """Handle the apply manual exclusions step for the Stats workflow."""
     manual_excluded = sorted(
         {pid for pid in (manual_excluded_pids or []) if pid in set(subjects)}
     )
@@ -927,7 +927,7 @@ def _apply_manual_exclusions(
 
 
 def _extract_required_exclusions(report: OutlierExclusionReport) -> list[DvViolation]:
-    """Handle the extract required exclusions step for the Stats PySide6 workflow."""
+    """Handle the extract required exclusions step for the Stats workflow."""
     required: list[DvViolation] = []
     for participant in report.participants:
         if not participant.required_exclusion:
@@ -957,7 +957,7 @@ def _summarize_supported_multigroup_exclusion_reasons(
 
 
 def _empty_outlier_report(subjects: list[str], *, abs_limit: float) -> OutlierExclusionReport:
-    """Handle the empty outlier report step for the Stats PySide6 workflow."""
+    """Handle the empty outlier report step for the Stats workflow."""
     summary = OutlierExclusionSummary(
         n_subjects_before=len(subjects),
         n_subjects_excluded=0,
@@ -1563,7 +1563,7 @@ def _validate_group_contrasts_input(
 
 
 def _diag_subject_data_structure(subject_data, subjects, conditions, rois, message_cb) -> None:
-    """Handle the diag subject data structure step for the Stats PySide6 workflow."""
+    """Handle the diag subject data structure step for the Stats workflow."""
     if not RM_ANOVA_DIAG or not message_cb:
         return
 
@@ -1630,7 +1630,7 @@ def run_rm_anova(
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
 ):
-    """Handle the run rm anova step for the Stats PySide6 workflow."""
+    """Handle the run rm anova step for the Stats workflow."""
     set_rois(rois)
     message_cb("Preparing data for Summed BCA RM-ANOVA…")
     _log_dv_trace_policy_snapshot(
@@ -1794,7 +1794,7 @@ def run_between_group_anova(
     required_conditions: list[str] | None = None,
     subject_to_group: dict[str, str | None] | None = None,
 ):
-    """Handle the run between group anova step for the Stats PySide6 workflow."""
+    """Handle the run between group anova step for the Stats workflow."""
     set_rois(rois)
     message_cb("Preparing data for Between-Group RM-ANOVA…")
     all_subjects = list(subjects) if subjects else []
@@ -1951,7 +1951,7 @@ def run_lmm(
     prepared_multigroup_dv_payload: dict[str, object] | None = None,
     results_dir: str | None = None,
 ):
-    """Handle the run lmm step for the Stats PySide6 workflow."""
+    """Handle the run lmm step for the Stats workflow."""
     set_rois(rois)
     prep_label = "Mixed Effects Model" if not include_group else "Between-Group Mixed Model"
     message_cb(f"Preparing data for {prep_label}…")
@@ -2148,7 +2148,7 @@ def run_lmm(
             )
 
     def _record_stage(stage: str) -> dict[str, object]:
-        """Handle the record stage step for the Stats PySide6 workflow."""
+        """Handle the record stage step for the Stats workflow."""
         snapshot = _lmm_stage_snapshot(stage, df_long)
         stage_counts.append(snapshot)
         _emit_lmm_stage_diag(message_cb, snapshot, dv_col=dv_col)
@@ -2602,7 +2602,7 @@ def run_posthoc(
     manual_excluded_pids: list[str] | None = None,
     **kwargs,
 ):
-    """Handle the run posthoc step for the Stats PySide6 workflow."""
+    """Handle the run posthoc step for the Stats workflow."""
     set_rois(rois)
     message_cb("Preparing data for Interaction Post-hoc tests…")
     _log_dv_trace_policy_snapshot(
@@ -2848,7 +2848,7 @@ def run_group_contrasts(
     subject_to_group: dict[str, str | None] | None = None,
     prepared_multigroup_dv_payload: dict[str, object] | None = None,
 ):
-    """Handle the run group contrasts step for the Stats PySide6 workflow."""
+    """Handle the run group contrasts step for the Stats workflow."""
     set_rois(rois)
     _ = alpha
     message_cb("Preparing data for Between-Group Contrasts…")
@@ -2946,7 +2946,7 @@ def run_harmonics_preview(
     rois,
     dv_policy: dict | None = None,
 ):
-    """Handle the run harmonics preview step for the Stats PySide6 workflow."""
+    """Handle the run harmonics preview step for the Stats workflow."""
     settings = dv_policy or {}
     policy_name = settings.get("name")
     if policy_name == ROSSION_POLICY_NAME:
@@ -2976,7 +2976,7 @@ def run_shared_harmonics_worker(
     export_path,
     z_threshold: float = DEFAULT_Z_THRESH,
 ):
-    """Handle the run shared harmonics worker step for the Stats PySide6 workflow."""
+    """Handle the run shared harmonics worker step for the Stats workflow."""
     message_cb("Computing shared harmonics (pooled across groups)…")
     progress_cb(10)
 
@@ -3028,7 +3028,7 @@ def run_fixed_harmonic_dv_worker(
     rois,
     harmonics_by_roi,
 ):
-    """Handle the run fixed harmonic dv worker step for the Stats PySide6 workflow."""
+    """Handle the run fixed harmonic dv worker step for the Stats workflow."""
     message_cb("Computing fixed-harmonic DV table from shared harmonics…")
     progress_cb(10)
 
@@ -3066,7 +3066,7 @@ def run_harmonic_check(
     rois,
     **kwargs,
 ):
-    """Handle the run harmonic check step for the Stats PySide6 workflow."""
+    """Handle the run harmonic check step for the Stats workflow."""
     set_rois(rois)
     tail = "greater" if selected_metric in ("Z Score", "SNR") else "two-sided"
     max_freq_raw = kwargs.get("max_freq")
@@ -3098,7 +3098,7 @@ def run_harmonic_check(
 
 
 def _progress_from_stage(stage_name: str, *, done: bool) -> int:
-    """Handle the progress from stage step for the Stats PySide6 workflow."""
+    """Handle the progress from stage step for the Stats workflow."""
     try:
         idx = BETWEEN_STAGE_ORDER.index(stage_name)
     except ValueError:

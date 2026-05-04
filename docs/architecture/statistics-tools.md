@@ -4,8 +4,8 @@ Statistics and tool code is organized under one active Stats package. Old `PySid
 
 Primary paths:
 
-- `src/Tools/Stats/`: active statistics GUI, controller, workers, analysis helpers, QC helpers, reporting, I/O, CLI, and shared helpers grouped by function.
-- `src/Tools/Stats/shared_rois.py` and `src/Tools/Stats/roi_resolver.py`: shared ROI helpers.
+- `src/Tools/Stats/`: active statistics GUI, controller, workers, analysis helpers, QC helpers, reporting, I/O, CLI, and shared helpers grouped by function. The root contains only package/docs files.
+- `src/Tools/Stats/data/shared_rois.py` and `src/Tools/Stats/data/roi_resolver.py`: shared ROI helpers.
 - `src/quarantine/Tools/Stats/Legacy_UI/`: reference-only source for the removed CustomTkinter Stats UI.
 - `src/Tools/Plot_Generator/`: plot generation GUI, workers, and manifest helpers.
 - `src/Tools/Ratio_Calculator/`: ratio calculator GUI, pipeline, exports, and plots.
@@ -13,7 +13,7 @@ Primary paths:
 
 Stats grouping:
 
-- Root entry points: `stats_main_window.py`, `stats_ui_pyside6.py`, and `Tools.Stats.StatsWindow`.
+- Public entry point: `Tools.Stats.StatsWindow`; implementation lives in `ui.stats_window` and `ui.stats_main_window`.
 - `ui/`: window mixins, dialogs, widget assembly, and small widgets.
 - `controller/`: run coordination, pipeline state, and worker scheduling.
 - `workers/`: Qt worker wrappers and GUI-agnostic statistical job execution.
@@ -29,7 +29,7 @@ Rules:
 
 - Preserve statistical output schemas and plain-language reporting unless explicitly changing them.
 - Keep GUI imports PySide6-only.
-- Keep public Stats entry points stable: `Tools.Stats.StatsWindow`, `Tools.Stats.stats_main_window`, and `Tools.Stats.stats_ui_pyside6`.
+- Keep the public Stats entry point stable: `Tools.Stats.StatsWindow`.
 - New active code should import from `Tools.Stats.<functional area>`, not removed `Tools.Stats.Legacy` or `Tools.Stats.PySide6` paths.
 - Add new analysis logic under the functional subpackage that owns it, and expose stable caller-facing surfaces through the package facade when needed.
 - Run `python scripts/agent_audit.py --check stats-structure` after Stats structural changes; it flags removed namespace usage and tkinter imports in active Stats code.

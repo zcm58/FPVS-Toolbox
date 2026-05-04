@@ -20,13 +20,13 @@ logger = logging.getLogger("Tools.Stats")
 
 
 def _pid_sort_key(pid: str) -> tuple[int, str]:
-    """Handle the pid sort key step for the Stats PySide6 workflow."""
+    """Handle the pid sort key step for the Stats workflow."""
     return canonical_multigroup_pid_sort_key(pid)
 
 
 @dataclass(frozen=True)
 class ScanIssue:
-    """Represent the ScanIssue part of the Stats PySide6 tool."""
+    """Represent the ScanIssue part of the Stats tool."""
     severity: str
     message: str
     context: dict[str, str]
@@ -34,7 +34,7 @@ class ScanIssue:
 
 @dataclass(frozen=True)
 class MultiGroupScanResult:
-    """Represent the MultiGroupScanResult part of the Stats PySide6 tool."""
+    """Represent the MultiGroupScanResult part of the Stats tool."""
     subject_groups: list[str]
     group_to_subjects: dict[str, list[str]]
     unassigned_subjects: list[str]
@@ -45,12 +45,12 @@ class MultiGroupScanResult:
 
 
 def _build_issue(severity: str, message: str, context: dict[str, str] | None = None) -> ScanIssue:
-    """Handle the build issue step for the Stats PySide6 workflow."""
+    """Handle the build issue step for the Stats workflow."""
     return ScanIssue(severity=severity, message=message, context=context or {})
 
 
 def extract_canonical_pid(text: str, *, context: dict[str, str] | None = None) -> tuple[str | None, list[ScanIssue]]:
-    """Handle the extract canonical pid step for the Stats PySide6 workflow."""
+    """Handle the extract canonical pid step for the Stats workflow."""
     match, warnings = extract_multigroup_pid(text)
     if match is None:
         return None, [_build_issue("blocking", "PID parse failure.", context)]
@@ -60,7 +60,7 @@ def extract_canonical_pid(text: str, *, context: dict[str, str] | None = None) -
 
 
 def _load_manifest(project_root: Path) -> tuple[dict | None, list[ScanIssue]]:
-    """Handle the load manifest step for the Stats PySide6 workflow."""
+    """Handle the load manifest step for the Stats workflow."""
     issues: list[ScanIssue] = []
     manifest_path = project_root / "project.json"
     if not manifest_path.is_file():
@@ -99,7 +99,7 @@ def _load_manifest(project_root: Path) -> tuple[dict | None, list[ScanIssue]]:
 
 
 def _parse_manifest_participants(manifest: dict | None) -> tuple[dict[str, str], list[ScanIssue]]:
-    """Handle the parse manifest participants step for the Stats PySide6 workflow."""
+    """Handle the parse manifest participants step for the Stats workflow."""
     if not isinstance(manifest, dict):
         return {}, []
 
@@ -161,7 +161,7 @@ def _parse_manifest_participants(manifest: dict | None) -> tuple[dict[str, str],
 
 
 def _scan_excel_folder(excel_root: Path) -> tuple[list[str], list[ScanIssue]]:
-    """Handle the scan excel folder step for the Stats PySide6 workflow."""
+    """Handle the scan excel folder step for the Stats workflow."""
     issues: list[ScanIssue] = []
     discovered: set[str] = set()
     normalization_examples: dict[str, str] = {}
@@ -230,7 +230,7 @@ def _scan_excel_folder(excel_root: Path) -> tuple[list[str], list[ScanIssue]]:
 
 
 def _sorted_groups_from_mapping(group_map: dict[str, list[str]]) -> list[str]:
-    """Handle the sorted groups from mapping step for the Stats PySide6 workflow."""
+    """Handle the sorted groups from mapping step for the Stats workflow."""
     return sorted(group_map.keys())
 
 
@@ -238,7 +238,7 @@ def _build_group_to_subjects(
     discovered: Iterable[str],
     manifest_map: dict[str, str],
 ) -> dict[str, list[str]]:
-    """Handle the build group to subjects step for the Stats PySide6 workflow."""
+    """Handle the build group to subjects step for the Stats workflow."""
     group_to_subjects: dict[str, list[str]] = {}
     for pid in discovered:
         group = manifest_map.get(pid)
@@ -252,7 +252,7 @@ def _build_group_to_subjects(
 
 
 def scan_multigroup_readiness(project_root: Path, excel_root: Path) -> MultiGroupScanResult:
-    """Handle the scan multigroup readiness step for the Stats PySide6 workflow."""
+    """Handle the scan multigroup readiness step for the Stats workflow."""
     issues: list[ScanIssue] = []
 
     manifest, manifest_issues = _load_manifest(project_root)
@@ -334,7 +334,7 @@ def run_multigroup_scan_worker(
     project_root: Path,
     excel_root: Path,
 ) -> MultiGroupScanResult:
-    """Handle the run multigroup scan worker step for the Stats PySide6 workflow."""
+    """Handle the run multigroup scan worker step for the Stats workflow."""
     return scan_multigroup_readiness(project_root, excel_root)
 
 

@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class StatsWindowUiMixin:
     def _init_ui(self) -> None:
-        """Handle the init ui step for the Stats PySide6 workflow."""
+        """Handle the init ui step for the Stats workflow."""
         central = QWidget(self)
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)

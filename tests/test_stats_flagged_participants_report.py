@@ -20,7 +20,7 @@ from Tools.Stats.qc.stats_qc_exclusion import (
     QcViolation,
 )
 from Tools.Stats.reporting.stats_run_report import StatsRunReport
-from Tools.Stats.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.ui.stats_window import StatsWindow
 
 
 def test_flagged_participants_report_dialog_labels(qtbot, monkeypatch) -> None:

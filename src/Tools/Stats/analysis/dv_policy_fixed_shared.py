@@ -20,7 +20,7 @@ def _normalize_harmonics_by_roi(
     *,
     rois: dict[str, list[str]],
 ) -> dict[str, list[float]]:
-    """Handle the normalize harmonics by roi step for the Stats PySide6 workflow."""
+    """Handle the normalize harmonics by roi step for the Stats workflow."""
     normalized: dict[str, list[float]] = {}
     source = harmonics_by_roi or {}
     for roi_name in rois.keys():
@@ -41,7 +41,7 @@ def _aggregate_bca_sum_harmonics_fixed(
     rois: dict[str, list[str]],
     diag_meta: Optional[dict[str, object]] = None,
 ) -> tuple[float, list[float]]:
-    """Handle the aggregate bca sum harmonics fixed step for the Stats PySide6 workflow."""
+    """Handle the aggregate bca sum harmonics fixed step for the Stats workflow."""
     try:
         if diag_meta is not None:
             diag_meta.setdefault("source_file", file_path)
@@ -127,7 +127,7 @@ def _prepare_fixed_harmonics_by_roi_bca_data(
     dv_metadata: Optional[dict[str, object]] = None,
     settings: Optional[DVPolicySettings] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
-    """Handle the prepare fixed harmonics by roi bca data step for the Stats PySide6 workflow."""
+    """Handle the prepare fixed harmonics by roi bca data step for the Stats workflow."""
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
         return None

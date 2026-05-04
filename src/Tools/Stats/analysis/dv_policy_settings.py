@@ -20,7 +20,7 @@ EMPTY_LIST_ERROR = "Error"
 
 @dataclass(frozen=True)
 class DVPolicySettings:
-    """Represent the DVPolicySettings part of the Stats PySide6 tool."""
+    """Represent the DVPolicySettings part of the Stats tool."""
     name: str = LEGACY_POLICY_NAME
     fixed_k: int = 5
     exclude_harmonic1: bool = True
@@ -29,7 +29,7 @@ class DVPolicySettings:
     empty_list_policy: str = EMPTY_LIST_FALLBACK_FIXED_K
 
     def to_metadata(self, *, base_freq: float, selected_conditions: list[str]) -> dict:
-        """Handle the to metadata step for the Stats PySide6 workflow."""
+        """Handle the to metadata step for the Stats workflow."""
         return {
             "policy_name": self.name,
             "fixed_k": int(self.fixed_k),
@@ -43,7 +43,7 @@ class DVPolicySettings:
 
 
 def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
-    """Handle the normalize dv policy step for the Stats PySide6 workflow."""
+    """Handle the normalize dv policy step for the Stats workflow."""
     if not settings:
         return DVPolicySettings()
     name = str(settings.get("name", LEGACY_POLICY_NAME))

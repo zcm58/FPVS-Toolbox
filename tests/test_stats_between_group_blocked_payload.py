@@ -6,7 +6,7 @@ import pandas as pd
 from PySide6.QtCore import QThreadPool
 
 from Tools.Stats.common.stats_core import PipelineId, PipelineStep, StepId
-from Tools.Stats.stats_main_window import StatsWindow
+from Tools.Stats.ui.stats_main_window import StatsWindow
 from Tools.Stats.workers.stats_workers import run_lmm
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 
-from Tools.Stats.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.ui.stats_window import StatsWindow
 from Tools.Stats.workers.stats_workers import StatsWorker
 
 

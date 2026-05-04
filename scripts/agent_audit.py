@@ -49,10 +49,15 @@ STATS_REMOVED_NAMESPACE_PREFIXES = (
     "src/Tools/Stats/Legacy/",
     "src/Tools/Stats/PySide6/",
 )
+STATS_ROOT = "src/Tools/Stats"
+STATS_ROOT_ALLOWED_PYTHON = {"__init__.py"}
 STATS_COMPAT_IMPORT_RE = re.compile(
     r"^\s*(?:from|import)\s+Tools\.Stats\.(?:Legacy|PySide6)(?:\.|\b)"
 )
 TKINTER_IMPORT_RE = re.compile(r"^\s*(?:import\s+tkinter\b|from\s+tkinter\s+import\b)")
+STALE_STATS_NAMING_RE = re.compile(
+    r"(?:Stats PySide6 (?:workflow|tool|window|statistics workflow)|Legacy Stats workflow)"
+)
 
 
 @dataclass(frozen=True)
@@ -393,6 +398,21 @@ def check_stats_structure() -> list[Issue]:
                 )
             )
 
+        if (
+            normalized.startswith(f"{STATS_ROOT}/")
+            and _is_python(normalized)
+            and "/" not in normalized.removeprefix(f"{STATS_ROOT}/")
+            and Path(normalized).name not in STATS_ROOT_ALLOWED_PYTHON
+        ):
+            issues.append(
+                Issue(
+                    "stats-structure",
+                    normalized,
+                    None,
+                    "Stats root should contain package/docs files only; move implementation into a functional subpackage",
+                )
+            )
+
         if not _is_python(normalized):
             continue
         if normalized == "scripts/agent_audit.py":
@@ -419,6 +439,16 @@ def check_stats_structure() -> list[Issue]:
                         normalized,
                         line_no,
                         "removed Stats compatibility import; use canonical Tools.Stats.<area> modules",
+                    )
+                )
+
+            if normalized.startswith("src/Tools/Stats/") and STALE_STATS_NAMING_RE.search(line):
+                issues.append(
+                    Issue(
+                        "stats-structure",
+                        normalized,
+                        line_no,
+                        "stale Stats PySide6/Legacy workflow wording; use neutral Stats package naming",
                     )
                 )
     return issues

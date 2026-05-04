@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt
 
 from Tools.Stats.workers import stats_workers
 from Tools.Stats.common.stats_core import PipelineId
-from Tools.Stats.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.ui.stats_window import StatsWindow
 
 
 @pytest.fixture(autouse=True)

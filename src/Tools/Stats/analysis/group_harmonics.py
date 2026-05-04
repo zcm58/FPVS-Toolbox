@@ -25,7 +25,7 @@ _DV_TRACE_ENV = "FPVS_STATS_DV_TRACE"
 
 @dataclass(frozen=True)
 class RossionHarmonicsSummary:
-    """Represent the RossionHarmonicsSummary part of the Stats PySide6 tool."""
+    """Represent the RossionHarmonicsSummary part of the Stats tool."""
     harmonic_freqs: List[float]
     mean_z_table: pd.DataFrame
     columns: pd.Index
@@ -37,7 +37,7 @@ def _find_first_z_columns(
     subject_data: Dict[str, Dict[str, str]],
     log_func: Callable[[str], None],
 ) -> pd.Index:
-    """Handle the find first z columns step for the Stats PySide6 workflow."""
+    """Handle the find first z columns step for the Stats workflow."""
     for pid in subjects:
         for cond_name in conditions:
             file_path = subject_data.get(pid, {}).get(cond_name)
@@ -62,7 +62,7 @@ def _build_harmonic_domain(
     max_freq: float | None = None,
     trace_label: str | None = None,
 ) -> List[float]:
-    """Handle the build harmonic domain step for the Stats PySide6 workflow."""
+    """Handle the build harmonic domain step for the Stats workflow."""
     trace_enabled = _dv_trace_enabled() and trace_label
     freq_candidates = get_included_freqs(base_freq, columns, log_func, max_freq=max_freq)
     if not freq_candidates:
@@ -106,7 +106,7 @@ def _build_harmonic_domain(
 
 
 def _dv_trace_enabled() -> bool:
-    """Handle the dv trace enabled step for the Stats PySide6 workflow."""
+    """Handle the dv trace enabled step for the Stats workflow."""
     value = os.getenv(_DV_TRACE_ENV, "").strip().lower()
     return value not in ("", "0", "false", "no", "off")
 
@@ -123,7 +123,7 @@ def build_rossion_harmonics_summary(
     max_freq: float | None = None,
     log_func: Callable[[str], None],
 ) -> RossionHarmonicsSummary:
-    """Handle the build rossion harmonics summary step for the Stats PySide6 workflow."""
+    """Handle the build rossion harmonics summary step for the Stats workflow."""
     columns = _find_first_z_columns(subjects, conditions, subject_data, log_func)
     if _dv_trace_enabled():
         logger.info(
@@ -311,7 +311,7 @@ def select_rossion_harmonics_by_roi(
     z_threshold: float,
     stop_after_n: int = 2,
 ) -> tuple[dict[str, list[float]], dict[str, dict[str, object]]]:
-    """Handle the select rossion harmonics by roi step for the Stats PySide6 workflow."""
+    """Handle the select rossion harmonics by roi step for the Stats workflow."""
     selected_map: dict[str, list[float]] = {}
     meta_by_roi: dict[str, dict[str, object]] = {}
     trace_enabled = _dv_trace_enabled()
@@ -391,7 +391,7 @@ def compute_union_harmonics_by_roi(
     log_func: Callable[[str], None],
     dv_policy: dict[str, object] | None = None,
 ) -> Dict[str, List[float]]:
-    """Compatibility alias."""
+    """Return union harmonics by ROI using the Rossion preview payload."""
     from Tools.Stats.analysis import dv_policies
 
     payload = dv_policies.build_rossion_preview_payload(

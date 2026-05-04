@@ -8,17 +8,17 @@ logger = logging.getLogger(__name__)
 
 class StatsWindowActionsMixin:
     def _set_status(self, txt: str) -> None:
-        """Handle the set status step for the Stats PySide6 workflow."""
+        """Handle the set status step for the Stats workflow."""
         if hasattr(self, "lbl_status"):
             self.lbl_status.setText(txt)
 
     def _set_roi_status(self, txt: str) -> None:
-        """Handle the set roi status step for the Stats PySide6 workflow."""
+        """Handle the set roi status step for the Stats workflow."""
         if hasattr(self, "lbl_rois"):
             self.lbl_rois.setText(txt)
 
     def _set_data_folder_path(self, path: str) -> None:
-        """Handle the set data folder path step for the Stats PySide6 workflow."""
+        """Handle the set data folder path step for the Stats workflow."""
         if hasattr(self, "le_folder"):
             self.le_folder.setText(path or "")
             if not path:
@@ -29,7 +29,7 @@ class StatsWindowActionsMixin:
             self.btn_copy_folder.setEnabled(bool(path))
 
     def _set_last_export_path(self, path: str | None) -> None:
-        """Handle the set last export path step for the Stats PySide6 workflow."""
+        """Handle the set last export path step for the Stats workflow."""
         self._last_export_path = path or ""
         if hasattr(self, "export_path_label"):
             self.export_path_label.set_full_text(self._last_export_path)
@@ -40,7 +40,7 @@ class StatsWindowActionsMixin:
             self.export_copy_btn.setEnabled(bool(self._last_export_path))
 
     def _copy_text_to_clipboard(self, text: str, *, context: str) -> None:
-        """Handle the copy text to clipboard step for the Stats PySide6 workflow."""
+        """Handle the copy text to clipboard step for the Stats workflow."""
         try:
             QGuiApplication.clipboard().setText(text or "")
         except Exception as exc:  # noqa: BLE001
@@ -52,17 +52,17 @@ class StatsWindowActionsMixin:
             self._set_status(f"Copy failed ({context}).")
 
     def _copy_summary_text(self) -> None:
-        """Handle the copy summary text step for the Stats PySide6 workflow."""
+        """Handle the copy summary text step for the Stats workflow."""
         text = self.summary_text.toPlainText()
         self._copy_text_to_clipboard(text, context="summary")
 
     def _copy_reporting_summary_text(self) -> None:
-        """Handle the copy reporting summary text step for the Stats PySide6 workflow."""
+        """Handle the copy reporting summary text step for the Stats workflow."""
         text = self.reporting_summary_text.toPlainText() if hasattr(self, "reporting_summary_text") else ""
         self._copy_text_to_clipboard(text, context="reporting_summary")
 
     def _save_reporting_summary_text(self) -> None:
-        """Handle the save reporting summary text step for the Stats PySide6 workflow."""
+        """Handle the save reporting summary text step for the Stats workflow."""
         report_text = self.reporting_summary_text.toPlainText() if hasattr(self, "reporting_summary_text") else ""
         if not report_text.strip():
             self._set_status("No reporting summary available to save yet.")
@@ -103,19 +103,19 @@ class StatsWindowActionsMixin:
             self._set_status("Failed to save reporting summary text.")
 
     def _copy_log_text(self) -> None:
-        """Handle the copy log text step for the Stats PySide6 workflow."""
+        """Handle the copy log text step for the Stats workflow."""
         text = self.log_text.toPlainText()
         self._copy_text_to_clipboard(text, context="log")
 
     def _copy_data_folder_path(self) -> None:
-        """Handle the copy data folder path step for the Stats PySide6 workflow."""
+        """Handle the copy data folder path step for the Stats workflow."""
         path = self.le_folder.text()
         if not path:
             return
         self._copy_text_to_clipboard(path, context="data_folder")
 
     def _open_export_path(self) -> None:
-        """Handle the open export path step for the Stats PySide6 workflow."""
+        """Handle the open export path step for the Stats workflow."""
         path = self._last_export_path or ""
         if not path:
             self._set_status("No export path available yet.")
@@ -135,14 +135,14 @@ class StatsWindowActionsMixin:
             self._set_status(f"Failed to open export path: {path}")
 
     def _copy_export_path(self) -> None:
-        """Handle the copy export path step for the Stats PySide6 workflow."""
+        """Handle the copy export path step for the Stats workflow."""
         path = self._last_export_path or ""
         if not path:
             return
         self._copy_text_to_clipboard(path, context="export_path")
 
     def _clear_output_views(self) -> None:
-        """Handle the clear output views step for the Stats PySide6 workflow."""
+        """Handle the clear output views step for the Stats workflow."""
         self.summary_text.clear()
         self.output_text.clear()
 
@@ -155,7 +155,7 @@ class StatsWindowActionsMixin:
             self._set_status(txt)
 
     def _clear_conditions_layout(self) -> None:
-        """Handle the clear conditions layout step for the Stats PySide6 workflow."""
+        """Handle the clear conditions layout step for the Stats workflow."""
         layout = self.conditions_list_layout
         while layout.count():
             item = layout.takeAt(0)
@@ -164,7 +164,7 @@ class StatsWindowActionsMixin:
                 widget.deleteLater()
 
     def _populate_conditions_panel(self, conditions: List[str]) -> None:
-        """Handle the populate conditions panel step for the Stats PySide6 workflow."""
+        """Handle the populate conditions panel step for the Stats workflow."""
         self._clear_conditions_layout()
         self._condition_checkboxes.clear()
         if not conditions:
@@ -188,47 +188,47 @@ class StatsWindowActionsMixin:
         self._sync_selected_conditions()
 
     def _sync_selected_conditions(self) -> None:
-        """Handle the sync selected conditions step for the Stats PySide6 workflow."""
+        """Handle the sync selected conditions step for the Stats workflow."""
         self.selected_conditions = [
             name for name, checkbox in self._condition_checkboxes.items() if checkbox.isChecked()
         ]
 
     def _on_condition_toggled(self, _state: int) -> None:
-        """Handle the on condition toggled step for the Stats PySide6 workflow."""
+        """Handle the on condition toggled step for the Stats workflow."""
         self._sync_selected_conditions()
 
     def _on_dv_variant_toggled(self, _state: int) -> None:
-        """Handle the on dv variant toggled step for the Stats PySide6 workflow."""
+        """Handle the on dv variant toggled step for the Stats workflow."""
         self._sync_selected_dv_variants()
 
     def _select_all_conditions(self) -> None:
-        """Handle the select all conditions step for the Stats PySide6 workflow."""
+        """Handle the select all conditions step for the Stats workflow."""
         for checkbox in self._condition_checkboxes.values():
             checkbox.setChecked(True)
         self._sync_selected_conditions()
 
     def _select_no_conditions(self) -> None:
-        """Handle the select no conditions step for the Stats PySide6 workflow."""
+        """Handle the select no conditions step for the Stats workflow."""
         for checkbox in self._condition_checkboxes.values():
             checkbox.setChecked(False)
         self._sync_selected_conditions()
 
     def _get_selected_conditions(self) -> List[str]:
-        """Handle the get selected conditions step for the Stats PySide6 workflow."""
+        """Handle the get selected conditions step for the Stats workflow."""
         if self._condition_checkboxes:
             return list(self.selected_conditions)
         return list(self.conditions)
 
     def on_analyze_single_group_clicked(self) -> None:
-        """Handle the on analyze single group clicked step for the Stats PySide6 workflow."""
+        """Handle the on analyze single group clicked step for the Stats workflow."""
         self._controller.run_single_group_analysis()
 
     def on_analyze_between_groups_clicked(self) -> None:
-        """Handle the on analyze between groups clicked step for the Stats PySide6 workflow."""
+        """Handle the on analyze between groups clicked step for the Stats workflow."""
         self._controller.run_between_group_analysis()
 
     def _open_advanced_dialog(self, title: str, actions: list[tuple[str, Callable[[], None], bool]]) -> None:
-        """Handle the open advanced dialog step for the Stats PySide6 workflow."""
+        """Handle the open advanced dialog step for the Stats workflow."""
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
         layout = QVBoxLayout(dialog)
@@ -246,7 +246,7 @@ class StatsWindowActionsMixin:
         dialog.exec()
 
     def on_single_advanced_clicked(self) -> None:
-        """Handle the on single advanced clicked step for the Stats PySide6 workflow."""
+        """Handle the on single advanced clicked step for the Stats workflow."""
         actions = [
             ("Run RM-ANOVA", self.on_run_rm_anova, True),
             ("Run Mixed Model", self.on_run_mixed_model, True),
@@ -270,7 +270,7 @@ class StatsWindowActionsMixin:
         self._open_advanced_dialog("Single Group – Advanced", actions)
 
     def on_between_advanced_clicked(self) -> None:
-        """Handle the on between advanced clicked step for the Stats PySide6 workflow."""
+        """Handle the on between advanced clicked step for the Stats workflow."""
         actions = [
             ("Run Between-Group Mixed Model", self.on_run_between_mixed_model, True),
             ("Run Group Contrasts", self.on_run_group_contrasts, True),
@@ -355,21 +355,21 @@ class StatsWindowActionsMixin:
     # ---- run buttons ----
 
     def on_run_rm_anova(self) -> None:
-        """Handle the on run rm anova step for the Stats PySide6 workflow."""
+        """Handle the on run rm anova step for the Stats workflow."""
         self._clear_output_views()
         self.rm_anova_results_data = None
         self._update_export_buttons()
         self._controller.run_single_group_rm_anova_only()
 
     def on_run_mixed_model(self) -> None:
-        """Handle the on run mixed model step for the Stats PySide6 workflow."""
+        """Handle the on run mixed model step for the Stats workflow."""
         self._clear_output_views()
         self.mixed_model_results_data = None
         self._update_export_buttons()
         self._controller.run_single_group_mixed_model_only()
 
     def on_run_between_anova(self) -> None:
-        """Handle the on run between anova step for the Stats PySide6 workflow."""
+        """Handle the on run between anova step for the Stats workflow."""
         QMessageBox.information(
             self,
             "Between-Group ANOVA Paused",
@@ -377,7 +377,7 @@ class StatsWindowActionsMixin:
         )
 
     def on_run_between_mixed_model(self) -> None:
-        """Handle the on run between mixed model step for the Stats PySide6 workflow."""
+        """Handle the on run between mixed model step for the Stats workflow."""
         self._clear_output_views()
         self.between_mixed_model_results_data = None
         self._update_export_buttons()
@@ -405,14 +405,14 @@ class StatsWindowActionsMixin:
             raise
 
     def on_run_group_contrasts(self) -> None:
-        """Handle the on run group contrasts step for the Stats PySide6 workflow."""
+        """Handle the on run group contrasts step for the Stats workflow."""
         self._clear_output_views()
         self.group_contrasts_results_data = None
         self._update_export_buttons()
         self._controller.run_between_group_contrasts_only()
 
     def on_run_interaction_posthocs(self) -> None:
-        """Handle the on run interaction posthocs step for the Stats PySide6 workflow."""
+        """Handle the on run interaction posthocs step for the Stats workflow."""
         self._clear_output_views()
         self.posthoc_results_data = None
         our = self._update_export_buttons  # keep line short
@@ -422,7 +422,7 @@ class StatsWindowActionsMixin:
     # ---- exports ----
 
     def on_export_rm_anova(self) -> None:
-        """Handle the on export rm anova step for the Stats PySide6 workflow."""
+        """Handle the on export rm anova step for the Stats workflow."""
         if not isinstance(self.rm_anova_results_data, pd.DataFrame) or self.rm_anova_results_data.empty:
             QMessageBox.information(self, "No Results", "Run RM-ANOVA first.")
             return
@@ -438,7 +438,7 @@ class StatsWindowActionsMixin:
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_mixed_model(self) -> None:
-        """Handle the on export mixed model step for the Stats PySide6 workflow."""
+        """Handle the on export mixed model step for the Stats workflow."""
         if not isinstance(self.mixed_model_results_data, pd.DataFrame) or self.mixed_model_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Mixed Model first.")
             return
@@ -454,7 +454,7 @@ class StatsWindowActionsMixin:
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_between_anova(self) -> None:
-        """Handle the on export between anova step for the Stats PySide6 workflow."""
+        """Handle the on export between anova step for the Stats workflow."""
         QMessageBox.information(
             self,
             "Between-Group ANOVA Paused",
@@ -462,7 +462,7 @@ class StatsWindowActionsMixin:
         )
 
     def on_export_between_mixed(self) -> None:
-        """Handle the on export between mixed step for the Stats PySide6 workflow."""
+        """Handle the on export between mixed step for the Stats workflow."""
         supported, support_message = self._between_mixed_model_support_state()
         if not supported:
             QMessageBox.information(
@@ -483,7 +483,7 @@ class StatsWindowActionsMixin:
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_posthoc(self) -> None:
-        """Handle the on export posthoc step for the Stats PySide6 workflow."""
+        """Handle the on export posthoc step for the Stats workflow."""
         if not isinstance(self.posthoc_results_data, pd.DataFrame) or self.posthoc_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Interaction Post-hocs first.")
             return
@@ -499,7 +499,7 @@ class StatsWindowActionsMixin:
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_group_contrasts(self) -> None:
-        """Handle the on export group contrasts step for the Stats PySide6 workflow."""
+        """Handle the on export group contrasts step for the Stats workflow."""
         if not isinstance(self.group_contrasts_results_data, pd.DataFrame) or self.group_contrasts_results_data.empty:
             QMessageBox.information(self, "No Results", "Run Group Contrasts first.")
             return
@@ -515,7 +515,7 @@ class StatsWindowActionsMixin:
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
     def on_export_qc_context_by_group(self) -> None:
-        """Handle the on export qc context by group step for the Stats PySide6 workflow."""
+        """Handle the on export qc context by group step for the Stats workflow."""
         fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
         dv_table = fixed_payload.get("dv_table")
         if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
@@ -540,7 +540,7 @@ class StatsWindowActionsMixin:
     # ---- folder & scan ----
 
     def on_browse_folder(self) -> None:
-        """Handle the on browse folder step for the Stats PySide6 workflow."""
+        """Handle the on browse folder step for the Stats workflow."""
         start_dir = self.le_folder.text() or self.project_dir
         folder = QFileDialog.getExistingDirectory(self, "Select Data Folder", start_dir)
         if folder:
@@ -548,7 +548,7 @@ class StatsWindowActionsMixin:
             self._scan_button_clicked()
 
     def _scan_button_clicked(self) -> None:
-        """Handle the scan button clicked step for the Stats PySide6 workflow."""
+        """Handle the scan button clicked step for the Stats workflow."""
         if not self._scan_guard.start():
             return
         try:

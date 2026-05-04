@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class StatsWindowPipelineMixin:
     def append_log(self, section: str, message: str, level: str = "info") -> None:
-        """Handle the append log step for the Stats PySide6 workflow."""
+        """Handle the append log step for the Stats workflow."""
         line = format_log_line(f"[{section}] {message}", level=level)
         if hasattr(self, "output_text") and self.output_text is not None:
             self.output_text.appendPlainText(line)
@@ -18,7 +18,7 @@ class StatsWindowPipelineMixin:
         log_func(line)
 
     def _section_label(self, pipeline: PipelineId | None) -> str:
-        """Handle the section label step for the Stats PySide6 workflow."""
+        """Handle the section label step for the Stats workflow."""
         if pipeline is PipelineId.SINGLE:
             return "Single"
         if pipeline is PipelineId.BETWEEN:
@@ -33,7 +33,7 @@ class StatsWindowPipelineMixin:
         event: str,
         extra: Optional[dict] = None,
     ) -> None:
-        """Handle the log pipeline event step for the Stats PySide6 workflow."""
+        """Handle the log pipeline event step for the Stats workflow."""
         if pipeline is None:
             return
         payload = {"pipeline": pipeline.name.lower(), "event": event}
@@ -44,13 +44,13 @@ class StatsWindowPipelineMixin:
         logger.info(format_section_header("stats_pipeline_event"), extra=payload)
 
     def _focus_self(self) -> None:
-        """Handle the focus self step for the Stats PySide6 workflow."""
+        """Handle the focus self step for the Stats workflow."""
         self._focus_calls += 1
         self.raise_()
         self.activateWindow()
 
     def _set_running(self, running: bool) -> None:
-        """Handle the set running step for the Stats PySide6 workflow."""
+        """Handle the set running step for the Stats workflow."""
         buttons = [
             getattr(self, "analyze_single_btn", None),
             getattr(self, "single_advanced_btn", None),
@@ -79,7 +79,7 @@ class StatsWindowPipelineMixin:
                 spinner.hide()
 
     def _begin_run(self) -> bool:
-        """Handle the begin run step for the Stats PySide6 workflow."""
+        """Handle the begin run step for the Stats workflow."""
         if not self._guard.start():
             return False
         self._set_running(True)
@@ -87,7 +87,7 @@ class StatsWindowPipelineMixin:
         return True
 
     def _end_run(self) -> None:
-        """Handle the end run step for the Stats PySide6 workflow."""
+        """Handle the end run step for the Stats workflow."""
         self._set_running(False)
         self._guard.done()
         self._focus_self()
@@ -95,7 +95,7 @@ class StatsWindowPipelineMixin:
     # --------- settings helpers ---------
 
     def _safe_settings_get(self, section: str, key: str, default) -> Tuple[bool, object]:
-        """Handle the safe settings get step for the Stats PySide6 workflow."""
+        """Handle the safe settings get step for the Stats workflow."""
         try:
             settings = SettingsManager()
             val = settings.get(section, key, default)
@@ -105,7 +105,7 @@ class StatsWindowPipelineMixin:
             return False, default
 
     def _get_analysis_settings(self) -> Optional[Tuple[float, float]]:
-        """Handle the get analysis settings step for the Stats PySide6 workflow."""
+        """Handle the get analysis settings step for the Stats workflow."""
         ok1, bf = self._safe_settings_get("analysis", "base_freq", 6.0)
         ok2, a = self._safe_settings_get("analysis", "alpha", 0.05)
         try:
@@ -120,7 +120,7 @@ class StatsWindowPipelineMixin:
         return base_freq, alpha
 
     def _get_harmonic_settings(self) -> Optional[HarmonicConfig]:
-        """Handle the get harmonic settings step for the Stats PySide6 workflow."""
+        """Handle the get harmonic settings step for the Stats workflow."""
         ok_metric, metric = self._safe_settings_get("analysis", "harmonic_metric", "Z Score")
         ok_threshold, threshold = self._safe_settings_get("analysis", "harmonic_threshold", 1.64)
         try:
@@ -137,7 +137,7 @@ class StatsWindowPipelineMixin:
         return HarmonicConfig(metric_str, threshold_val)
 
     def _get_qc_settings(self) -> Optional[tuple[float, float]]:
-        """Handle the get qc settings step for the Stats PySide6 workflow."""
+        """Handle the get qc settings step for the Stats workflow."""
         ok_warn, warn = self._safe_settings_get(
             "analysis", "qc_warn_threshold", self._qc_threshold_sumabs
         )
@@ -166,7 +166,7 @@ class StatsWindowPipelineMixin:
     # --------- centralized pre-run guards ---------
 
     def _precheck(self, *, require_anova: bool = False, start_guard: bool = True) -> bool:
-        """Handle the precheck step for the Stats PySide6 workflow."""
+        """Handle the precheck step for the Stats workflow."""
         if self._check_for_open_excel_files(self.le_folder.text()):
             return False
         if not self.subject_data:
@@ -249,9 +249,9 @@ class StatsWindowPipelineMixin:
         return supported
 
     def _update_export_buttons(self) -> None:
-        """Handle the update export buttons step for the Stats PySide6 workflow."""
+        """Handle the update export buttons step for the Stats workflow."""
         def _maybe_enable(name: str, enabled: bool) -> None:
-            """Handle the maybe enable step for the Stats PySide6 workflow."""
+            """Handle the maybe enable step for the Stats workflow."""
             btn = getattr(self, name, None)
             if btn:
                 btn.setEnabled(enabled)
@@ -292,7 +292,7 @@ class StatsWindowPipelineMixin:
         )
 
     def _build_summary_frames(self, pipeline_id: PipelineId) -> StatsSummaryFrames:
-        """Handle the build summary frames step for the Stats PySide6 workflow."""
+        """Handle the build summary frames step for the Stats workflow."""
         return build_summary_frames_from_results(
             pipeline_id,
             single_posthoc=self.posthoc_results_data,
@@ -305,7 +305,7 @@ class StatsWindowPipelineMixin:
         )
 
     def _render_summary(self, summary_text: str) -> None:
-        """Handle the render summary step for the Stats PySide6 workflow."""
+        """Handle the render summary step for the Stats workflow."""
         lines = (summary_text or "").splitlines()
         if not lines:
             self.summary_text.append("(No summary generated.)")
@@ -330,7 +330,7 @@ class StatsWindowPipelineMixin:
             self.summary_text.append("")
 
     def _collect_excluded_reasons(self, pipeline_id: PipelineId) -> dict[str, str]:
-        """Handle the collect excluded reasons step for the Stats PySide6 workflow."""
+        """Handle the collect excluded reasons step for the Stats workflow."""
         report = self._pipeline_run_reports.get(pipeline_id)
         if not isinstance(report, StatsRunReport):
             return {}
@@ -346,7 +346,7 @@ class StatsWindowPipelineMixin:
         return reasons
 
     def _build_reporting_summary_payload(self, pipeline_id: PipelineId, elapsed_ms: int) -> dict[str, object]:
-        """Handle the build reporting summary payload step for the Stats PySide6 workflow."""
+        """Handle the build reporting summary payload step for the Stats workflow."""
         selected_conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
         selected_rois = sorted((self.rois or {}).keys())
         report = self._pipeline_run_reports.get(pipeline_id)
@@ -378,11 +378,11 @@ class StatsWindowPipelineMixin:
         }
 
     def _start_reporting_summary_worker(self, pipeline_id: PipelineId, elapsed_ms: int) -> None:
-        """Handle the start reporting summary worker step for the Stats PySide6 workflow."""
+        """Handle the start reporting summary worker step for the Stats workflow."""
         payload = self._build_reporting_summary_payload(pipeline_id, elapsed_ms)
 
         def _worker_fn(progress_emit, message_emit, *, worker_payload):
-            """Handle the worker fn step for the Stats PySide6 workflow."""
+            """Handle the worker fn step for the Stats workflow."""
             del progress_emit, message_emit
             context = worker_payload["context"]
             text = build_reporting_summary(
@@ -402,14 +402,14 @@ class StatsWindowPipelineMixin:
         worker = StatsWorker(_worker_fn, worker_payload=payload, _op="reporting_summary")
 
         def _on_finished(worker_result: dict) -> None:
-            """Handle the on finished step for the Stats PySide6 workflow."""
+            """Handle the on finished step for the Stats workflow."""
             report_path = worker_result.get("report_path") if isinstance(worker_result, dict) else None
             if report_path:
                 self._set_last_export_path(str(report_path))
                 self._set_status(f"Reporting summary exported: {report_path}")
 
         def _on_error(message: str) -> None:
-            """Handle the on error step for the Stats PySide6 workflow."""
+            """Handle the on error step for the Stats workflow."""
             logger.error(
                 "stats_reporting_summary_failed",
                 extra={
@@ -429,14 +429,14 @@ class StatsWindowPipelineMixin:
 
     @Slot(str)
     def _on_report_ready(self, report_text: str) -> None:
-        """Handle the on report ready step for the Stats PySide6 workflow."""
+        """Handle the on report ready step for the Stats workflow."""
         self._reporting_summary_text = report_text or ""
         self.reporting_summary_text.setPlainText(self._reporting_summary_text)
 
     # --------- worker signal wiring ---------
 
     def _wire_and_start(self, worker: StatsWorker, finished_slot) -> None:
-        """Handle the wire and start step for the Stats PySide6 workflow."""
+        """Handle the wire and start step for the Stats workflow."""
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.message.connect(self._on_worker_message)
         worker.signals.error.connect(self._on_worker_error)
@@ -444,7 +444,7 @@ class StatsWindowPipelineMixin:
         self.pool.start(worker)
 
     def set_busy(self, is_busy: bool) -> None:
-        """Handle the set busy step for the Stats PySide6 workflow."""
+        """Handle the set busy step for the Stats workflow."""
         try:
             self._set_running(is_busy)
         except Exception as exc:  # noqa: BLE001
@@ -549,7 +549,7 @@ class StatsWindowPipelineMixin:
 
         def _on_finished(payload, pid=pipeline_id, sid=step.id):
             # This is the first place we know the Qt finished signal reached the view.
-            """Handle the on finished step for the Stats PySide6 workflow."""
+            """Handle the on finished step for the Stats workflow."""
             try:
                 payload_type = type(payload).__name__
                 payload_keys = list(payload.keys()) if isinstance(payload, dict) else None
@@ -605,7 +605,7 @@ class StatsWindowPipelineMixin:
                 _release_worker()
 
         def _on_error(message: str, pid=pipeline_id, sid=step.id):
-            """Handle the on error step for the Stats PySide6 workflow."""
+            """Handle the on error step for the Stats workflow."""
             logger.error(
                 "stats_view_error_slot_enter",
                 extra={
@@ -660,16 +660,16 @@ class StatsWindowPipelineMixin:
             logger.exception("stats_view_start_step_worker_exit_log_failed")
 
     def ensure_results_dir(self) -> str:
-        """Handle the ensure results dir step for the Stats PySide6 workflow."""
+        """Handle the ensure results dir step for the Stats workflow."""
         return self._ensure_results_dir()
 
     def prompt_phase_folder(self, title: str, start_dir: str | None = None) -> Optional[str]:
-        """Handle the prompt phase folder step for the Stats PySide6 workflow."""
+        """Handle the prompt phase folder step for the Stats workflow."""
         folder = QFileDialog.getExistingDirectory(self, title, start_dir or self.project_dir)
         return folder or None
 
     def get_analysis_settings_snapshot(self) -> tuple[float, float, dict, list[str]]:
-        """Handle the get analysis settings snapshot step for the Stats PySide6 workflow."""
+        """Handle the get analysis settings snapshot step for the Stats workflow."""
         self.refresh_rois()
         got = self._get_analysis_settings()
         if not got:
@@ -681,7 +681,7 @@ class StatsWindowPipelineMixin:
     def ensure_pipeline_ready(
         self, pipeline_id: PipelineId, *, require_anova: bool = False
     ) -> bool:
-        """Handle the ensure pipeline ready step for the Stats PySide6 workflow."""
+        """Handle the ensure pipeline ready step for the Stats workflow."""
         self._log_pipeline_event(pipeline=pipeline_id, event="start")
         if not self._precheck(require_anova=require_anova, start_guard=False):
             self._log_pipeline_event(
@@ -718,7 +718,7 @@ class StatsWindowPipelineMixin:
         return True
 
     def on_pipeline_started(self, pipeline_id: PipelineId) -> None:
-        """Handle the on pipeline started step for the Stats PySide6 workflow."""
+        """Handle the on pipeline started step for the Stats workflow."""
         self._pipeline_start_perf[pipeline_id] = time.perf_counter()
         self._active_pipeline = pipeline_id
         self._harmonic_results[pipeline_id] = []
@@ -751,7 +751,7 @@ class StatsWindowPipelineMixin:
     def store_dv_variants_payload(
         self, pipeline_id: PipelineId, dv_variants: dict | None
     ) -> None:
-        """Handle the store dv variants payload step for the Stats PySide6 workflow."""
+        """Handle the store dv variants payload step for the Stats workflow."""
         if not isinstance(dv_variants, dict) or not dv_variants:
             return
         self._store_dv_variants(pipeline_id, {"dv_variants": dv_variants})
@@ -764,7 +764,7 @@ class StatsWindowPipelineMixin:
         *,
         exports_ran: bool,
     ) -> None:
-        """Handle the on analysis finished step for the Stats PySide6 workflow."""
+        """Handle the on analysis finished step for the Stats workflow."""
         logger.info(
             "stats_analysis_finished_enter",
             extra={
@@ -859,7 +859,7 @@ class StatsWindowPipelineMixin:
                 )
 
     def closeEvent(self, event):  # type: ignore[override]
-        """Handle the closeEvent step for the Stats PySide6 workflow."""
+        """Handle the closeEvent step for the Stats workflow."""
         logger.info(
             "stats_window_close_event",
             extra={
@@ -870,7 +870,7 @@ class StatsWindowPipelineMixin:
         super().closeEvent(event)
 
     def build_and_render_summary(self, pipeline_id: PipelineId) -> None:
-        """Handle the build and render summary step for the Stats PySide6 workflow."""
+        """Handle the build and render summary step for the Stats workflow."""
         cfg = SummaryConfig(
             alpha=0.05,
             min_effect=0.50,
@@ -884,7 +884,7 @@ class StatsWindowPipelineMixin:
         self._render_summary(summary_text)
 
     def export_pipeline_results(self, pipeline_id: PipelineId) -> bool:
-        """Handle the export pipeline results step for the Stats PySide6 workflow."""
+        """Handle the export pipeline results step for the Stats workflow."""
         if pipeline_id is PipelineId.SINGLE:
             return self._export_single_pipeline()
         if pipeline_id is PipelineId.BETWEEN:
@@ -894,7 +894,7 @@ class StatsWindowPipelineMixin:
     def _build_harmonic_kwargs(self) -> dict:
         # [SAFETY UPDATE] Load fresh ROIs from settings to ensure thread receives
         # the most up-to-date map, preventing 0xC0000005 errors.
-        """Handle the build harmonic kwargs step for the Stats PySide6 workflow."""
+        """Handle the build harmonic kwargs step for the Stats workflow."""
         fresh_rois = load_rois_from_settings() or self.rois
         _, max_freq_raw = self._safe_settings_get("analysis", "bca_upper_limit", 16.8)
         try:
@@ -922,7 +922,7 @@ class StatsWindowPipelineMixin:
     def get_step_config(
         self, pipeline_id: PipelineId, step_id: StepId
     ) -> tuple[dict, Callable[[dict], None]]:
-        """Handle the get step config step for the Stats PySide6 workflow."""
+        """Handle the get step config step for the Stats workflow."""
         dv_variants_payload = self._get_dv_variant_payloads()
         outlier_payload = self._pipeline_outlier_config.get(
             pipeline_id, self._get_outlier_exclusion_payload()
@@ -950,7 +950,7 @@ class StatsWindowPipelineMixin:
                 if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
                     kwargs["results_dir"] = self._ensure_results_dir()
                 def handler(payload):
-                    """Handle the handler step for the Stats PySide6 workflow."""
+                    """Handle the handler step for the Stats workflow."""
                     self._apply_rm_anova_results(payload, update_text=False)
 
                 return kwargs, handler
@@ -974,7 +974,7 @@ class StatsWindowPipelineMixin:
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
-                    """Handle the handler step for the Stats PySide6 workflow."""
+                    """Handle the handler step for the Stats workflow."""
                     self._apply_mixed_model_results(payload, update_text=False)
 
                 return kwargs, handler
@@ -998,7 +998,7 @@ class StatsWindowPipelineMixin:
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
                 )
                 def handler(payload):
-                    """Handle the handler step for the Stats PySide6 workflow."""
+                    """Handle the handler step for the Stats workflow."""
                     self._apply_posthoc_results(payload, update_text=True)
 
                 return kwargs, handler
@@ -1022,7 +1022,7 @@ class StatsWindowPipelineMixin:
                 )
 
                 def handler(payload):
-                    """Handle the handler step for the Stats PySide6 workflow."""
+                    """Handle the handler step for the Stats workflow."""
                     self._apply_baseline_vs_zero_results(payload, update_text=True)
 
                 return kwargs, handler
@@ -1030,7 +1030,7 @@ class StatsWindowPipelineMixin:
                 kwargs = self._build_harmonic_kwargs()
 
                 def handler(payload, *, pid=pipeline_id):
-                    """Handle the handler step for the Stats PySide6 workflow."""
+                    """Handle the handler step for the Stats workflow."""
                     self._apply_harmonic_results(payload, pipeline_id=pid, update_text=True)
 
                 return kwargs, handler
@@ -1075,7 +1075,7 @@ class StatsWindowPipelineMixin:
                     results_dir=results_dir,
                 )
                 def handler(payload):
-                    """Handle the handler step for the Stats PySide6 workflow."""
+                    """Handle the handler step for the Stats workflow."""
                     self._apply_between_mixed_results(payload, update_text=False)
                     supported, support_message = self._between_mixed_model_support_state(payload)
                     if not supported:
@@ -1106,7 +1106,7 @@ class StatsWindowPipelineMixin:
                     prepared_multigroup_dv_payload=shared_multigroup_dv_payload,
                 )
                 def handler(payload):
-                    """Handle the handler step for the Stats PySide6 workflow."""
+                    """Handle the handler step for the Stats workflow."""
                     self._apply_group_contrasts_results(payload, update_text=True)
 
                 return kwargs, handler
@@ -1117,7 +1117,7 @@ class StatsWindowPipelineMixin:
         raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
 
     def _prompt_view_results(self, section: str, stats_folder: Path) -> None:
-        """Handle the prompt view results step for the Stats PySide6 workflow."""
+        """Handle the prompt view results step for the Stats workflow."""
         msg = QMessageBox(self)
         msg.setWindowTitle("Statistical Analysis Complete")
         msg.setText("Statistical analysis complete.\nView results?")
@@ -1134,12 +1134,12 @@ class StatsWindowPipelineMixin:
 
     @Slot(int)
     def _on_worker_progress(self, val: int) -> None:
-        """Handle the on worker progress step for the Stats PySide6 workflow."""
+        """Handle the on worker progress step for the Stats workflow."""
         self._progress_updates.append(val)
 
     @Slot(str)
     def _on_worker_message(self, msg: str) -> None:
-        """Handle the on worker message step for the Stats PySide6 workflow."""
+        """Handle the on worker message step for the Stats workflow."""
         text = msg or ""
         if (
             text.startswith("[BETWEEN DV CONTRACT]")
@@ -1150,7 +1150,7 @@ class StatsWindowPipelineMixin:
 
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
-        """Handle the on worker error step for the Stats PySide6 workflow."""
+        """Handle the on worker error step for the Stats workflow."""
         self.output_text.appendPlainText(f"Error: {msg}")
         section = "General"
         try:
@@ -1164,14 +1164,14 @@ class StatsWindowPipelineMixin:
         self._end_run()
 
     def _store_dv_metadata(self, pipeline_id: PipelineId, payload: dict) -> None:
-        """Handle the store dv metadata step for the Stats PySide6 workflow."""
+        """Handle the store dv metadata step for the Stats workflow."""
         dv_meta = payload.get("dv_metadata")
         if isinstance(dv_meta, dict) and dv_meta:
             self._pipeline_dv_metadata[pipeline_id] = dv_meta
         self._store_dv_variants(pipeline_id, payload)
 
     def _store_dv_variants(self, pipeline_id: PipelineId, payload: dict) -> None:
-        """Handle the store dv variants step for the Stats PySide6 workflow."""
+        """Handle the store dv variants step for the Stats workflow."""
         dv_variants = payload.get("dv_variants")
         if not isinstance(dv_variants, dict) or not dv_variants:
             return
@@ -1192,18 +1192,18 @@ class StatsWindowPipelineMixin:
                 )
 
     def _store_run_report(self, pipeline_id: PipelineId, payload: dict) -> None:
-        """Handle the store run report step for the Stats PySide6 workflow."""
+        """Handle the store run report step for the Stats workflow."""
         report = payload.get("run_report")
         if isinstance(report, StatsRunReport):
             self._pipeline_run_reports[pipeline_id] = report
 
     def store_run_report(self, pipeline_id: PipelineId, report: StatsRunReport) -> None:
-        """Handle the store run report step for the Stats PySide6 workflow."""
+        """Handle the store run report step for the Stats workflow."""
         if isinstance(report, StatsRunReport):
             self._pipeline_run_reports[pipeline_id] = report
 
     def _apply_rm_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply rm anova results step for the Stats PySide6 workflow."""
+        """Handle the apply rm anova results step for the Stats workflow."""
         self.rm_anova_results_data = payload.get("anova_df_results")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
         self._store_run_report(PipelineId.SINGLE, payload)
@@ -1229,7 +1229,7 @@ class StatsWindowPipelineMixin:
         return output_text
 
     def _apply_between_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply between anova results step for the Stats PySide6 workflow."""
+        """Handle the apply between anova results step for the Stats workflow."""
         self.between_anova_results_data = payload.get("anova_df_results")
         self._store_dv_metadata(PipelineId.BETWEEN, payload)
         self._store_run_report(PipelineId.BETWEEN, payload)
@@ -1246,7 +1246,7 @@ class StatsWindowPipelineMixin:
         return output_text
 
     def _apply_mixed_model_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply mixed model results step for the Stats PySide6 workflow."""
+        """Handle the apply mixed model results step for the Stats workflow."""
         self.mixed_model_results_data = payload.get("mixed_results_df")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
         self._store_run_report(PipelineId.SINGLE, payload)
@@ -1257,7 +1257,7 @@ class StatsWindowPipelineMixin:
         return output_text
 
     def _apply_between_mixed_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply between mixed results step for the Stats PySide6 workflow."""
+        """Handle the apply between mixed results step for the Stats workflow."""
         if not isinstance(payload, dict):
             raise ValueError("Mixed-model payload must be a dict.")
         if "mixed_results_df" not in payload:
@@ -1277,7 +1277,7 @@ class StatsWindowPipelineMixin:
         return output_text
 
     def _apply_posthoc_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply posthoc results step for the Stats PySide6 workflow."""
+        """Handle the apply posthoc results step for the Stats workflow."""
         self.posthoc_results_data = payload.get("results_df")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
         self._store_run_report(PipelineId.SINGLE, payload)
@@ -1288,7 +1288,7 @@ class StatsWindowPipelineMixin:
         return output_text
 
     def _apply_baseline_vs_zero_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply baseline-vs-zero results step for the Stats PySide6 workflow."""
+        """Handle the apply baseline-vs-zero results step for the Stats workflow."""
         self.baseline_vs_zero_results_payload = payload
         self._store_run_report(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
@@ -1298,7 +1298,7 @@ class StatsWindowPipelineMixin:
         return output_text
 
     def _apply_group_contrasts_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply group contrasts results step for the Stats PySide6 workflow."""
+        """Handle the apply group contrasts results step for the Stats workflow."""
         self.group_contrasts_results_data = payload.get("results_df")
         self._store_dv_metadata(PipelineId.BETWEEN, payload)
         self._store_run_report(PipelineId.BETWEEN, payload)
@@ -1311,7 +1311,7 @@ class StatsWindowPipelineMixin:
     def _apply_harmonic_results(
         self, payload: dict, *, pipeline_id: PipelineId, update_text: bool = True
     ) -> str:
-        """Handle the apply harmonic results step for the Stats PySide6 workflow."""
+        """Handle the apply harmonic results step for the Stats workflow."""
         output_text = payload.get("output_text") or ""
         findings = payload.get("findings") or []
         if update_text:
@@ -1323,50 +1323,50 @@ class StatsWindowPipelineMixin:
 
     @Slot(dict)
     def _on_rm_anova_finished(self, payload: dict) -> None:
-        """Handle the on rm anova finished step for the Stats PySide6 workflow."""
+        """Handle the on rm anova finished step for the Stats workflow."""
         self._apply_rm_anova_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_between_anova_finished(self, payload: dict) -> None:
-        """Handle the on between anova finished step for the Stats PySide6 workflow."""
+        """Handle the on between anova finished step for the Stats workflow."""
         self._apply_between_anova_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_mixed_model_finished(self, payload: dict) -> None:
-        """Handle the on mixed model finished step for the Stats PySide6 workflow."""
+        """Handle the on mixed model finished step for the Stats workflow."""
         self._apply_mixed_model_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_between_mixed_finished(self, payload: dict) -> None:
-        """Handle the on between mixed finished step for the Stats PySide6 workflow."""
+        """Handle the on between mixed finished step for the Stats workflow."""
         self._apply_between_mixed_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_posthoc_finished(self, payload: dict) -> None:
-        """Handle the on posthoc finished step for the Stats PySide6 workflow."""
+        """Handle the on posthoc finished step for the Stats workflow."""
         self._apply_posthoc_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_group_contrasts_finished(self, payload: dict) -> None:
-        """Handle the on group contrasts finished step for the Stats PySide6 workflow."""
+        """Handle the on group contrasts finished step for the Stats workflow."""
         self._apply_group_contrasts_results(payload)
         self._end_run()
 
     @Slot(dict)
     def _on_harmonic_finished(self, payload: dict) -> None:
-        """Handle the on harmonic finished step for the Stats PySide6 workflow."""
+        """Handle the on harmonic finished step for the Stats workflow."""
         pipeline_id = self._active_pipeline or PipelineId.SINGLE
         self._apply_harmonic_results(payload, pipeline_id=pipeline_id)
         self._end_run()
 
     @Slot(object)
     def _on_lela_mode_finished(self, stats_folder: Path | None = None) -> None:
-        """Handle the on lela mode finished step for the Stats PySide6 workflow."""
+        """Handle the on lela mode finished step for the Stats workflow."""
         try:
             section = self._section_label(PipelineId.BETWEEN)
             self.append_log(section, "[Between] Lela Mode: complete — see Cross-Phase LMM Analysis.xlsx")
@@ -1377,7 +1377,7 @@ class StatsWindowPipelineMixin:
 
     @Slot(str)
     def _on_lela_mode_error(self, message: str) -> None:
-        """Handle the on lela mode error step for the Stats PySide6 workflow."""
+        """Handle the on lela mode error step for the Stats workflow."""
         try:
             section = self._section_label(PipelineId.BETWEEN)
             self.append_log(section, f"[Between] Lela Mode error: {message}", level="error")

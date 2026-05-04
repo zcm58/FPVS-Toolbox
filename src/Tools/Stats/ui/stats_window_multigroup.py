@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class StatsWindowMultigroupMixin:
     def _warn_unknown_excel_files(self, subject_data: Dict[str, Dict[str, str]], manifest: dict | None) -> None:
-        """Handle the warn unknown excel files step for the Stats PySide6 workflow."""
+        """Handle the warn unknown excel files step for the Stats workflow."""
         if not subject_data:
             return
         participants_map, _examples, manifest_issues = normalize_multigroup_manifest_groups(manifest)
@@ -92,7 +92,7 @@ class StatsWindowMultigroupMixin:
             self.append_log("Between", message, level="error")
 
     def _start_multigroup_scan(self, excel_root: Path | None = None) -> None:
-        """Handle the start multigroup scan step for the Stats PySide6 workflow."""
+        """Handle the start multigroup scan step for the Stats workflow."""
         if not self._multigroup_scan_guard.start():
             return
         excel_root = excel_root or Path(self.le_folder.text() or self._preferred_stats_folder())
@@ -115,7 +115,7 @@ class StatsWindowMultigroupMixin:
             logger.exception("Failed to track multigroup scan worker")
 
         def _release() -> None:
-            """Handle the release step for the Stats PySide6 workflow."""
+            """Handle the release step for the Stats workflow."""
             try:
                 if worker in self._active_workers:
                     self._active_workers.remove(worker)
@@ -125,7 +125,7 @@ class StatsWindowMultigroupMixin:
                 self._multigroup_scan_guard.done()
 
         def _on_finished(payload: dict) -> None:
-            """Handle the on finished step for the Stats PySide6 workflow."""
+            """Handle the on finished step for the Stats workflow."""
             try:
                 result = payload.get("result") if isinstance(payload, dict) else None
                 if isinstance(result, MultiGroupScanResult):
@@ -138,7 +138,7 @@ class StatsWindowMultigroupMixin:
                 _release()
 
         def _on_error(message: str) -> None:
-            """Handle the on error step for the Stats PySide6 workflow."""
+            """Handle the on error step for the Stats workflow."""
             try:
                 self._set_status(f"Multi-group scan error: {message}")
                 self.append_log("General", f"Multi-group scan error: {message}", level="error")
@@ -152,7 +152,7 @@ class StatsWindowMultigroupMixin:
         self.pool.start(worker)
 
     def _format_multigroup_issue(self, issue: ScanIssue) -> str:
-        """Handle the format multigroup issue step for the Stats PySide6 workflow."""
+        """Handle the format multigroup issue step for the Stats workflow."""
         context_bits = []
         context = issue.context or {}
         for key in ("pid", "group", "path"):
@@ -163,7 +163,7 @@ class StatsWindowMultigroupMixin:
         return f"[{issue.severity.upper()}] {issue.message}{extra}"
 
     def _render_multigroup_issues(self, issues: list[ScanIssue]) -> None:
-        """Handle the render multigroup issues step for the Stats PySide6 workflow."""
+        """Handle the render multigroup issues step for the Stats workflow."""
         if not hasattr(self, "multi_group_issue_text"):
             return
         if not issues:
@@ -190,13 +190,13 @@ class StatsWindowMultigroupMixin:
         self.multi_group_issue_text.setPlainText("\n".join(lines))
 
     def _toggle_multigroup_issue_details(self) -> None:
-        """Handle the toggle multigroup issue details step for the Stats PySide6 workflow."""
+        """Handle the toggle multigroup issue details step for the Stats workflow."""
         self._multigroup_issue_expanded = not self._multigroup_issue_expanded
         if self._multigroup_scan_result:
             self._render_multigroup_issues(self._multigroup_scan_result.issues)
 
     def _update_multigroup_summary(self, result: MultiGroupScanResult) -> None:
-        """Handle the update multigroup summary step for the Stats PySide6 workflow."""
+        """Handle the update multigroup summary step for the Stats workflow."""
         if hasattr(self, "multi_group_ready_value"):
             status_text = "Ready" if result.multi_group_ready else "Not ready"
             self.multi_group_ready_value.setText(status_text)
@@ -241,7 +241,7 @@ class StatsWindowMultigroupMixin:
             )
 
     def _on_compute_shared_harmonics_clicked(self) -> None:
-        """Handle the on compute shared harmonics clicked step for the Stats PySide6 workflow."""
+        """Handle the on compute shared harmonics clicked step for the Stats workflow."""
         between_subject_data = self._between_subject_data()
         between_subjects = self._between_subjects()
         if not between_subject_data or not between_subjects:
@@ -283,7 +283,7 @@ class StatsWindowMultigroupMixin:
         self._active_workers.append(worker)
 
         def _release() -> None:
-            """Handle the release step for the Stats PySide6 workflow."""
+            """Handle the release step for the Stats workflow."""
             if worker in self._active_workers:
                 self._active_workers.remove(worker)
             self.compute_shared_harmonics_btn.setEnabled(
@@ -291,7 +291,7 @@ class StatsWindowMultigroupMixin:
             )
 
         def _on_finished(payload: dict) -> None:
-            """Handle the on finished step for the Stats PySide6 workflow."""
+            """Handle the on finished step for the Stats workflow."""
             try:
                 result = payload if isinstance(payload, dict) else {}
                 self._shared_harmonics_payload = result
@@ -319,7 +319,7 @@ class StatsWindowMultigroupMixin:
                 _release()
 
         def _on_error(message: str) -> None:
-            """Handle the on error step for the Stats PySide6 workflow."""
+            """Handle the on error step for the Stats workflow."""
             try:
                 self._set_status(f"Shared harmonics error: {message}")
                 self.append_log("General", f"Shared harmonics error: {message}", level="error")
@@ -334,7 +334,7 @@ class StatsWindowMultigroupMixin:
         self.pool.start(worker)
 
     def _on_compute_fixed_harmonic_dv_clicked(self) -> None:
-        """Handle the on compute fixed harmonic dv clicked step for the Stats PySide6 workflow."""
+        """Handle the on compute fixed harmonic dv clicked step for the Stats workflow."""
         harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
         if not isinstance(harmonics_by_roi, dict) or not any((harmonics_by_roi.get(k) or []) for k in harmonics_by_roi):
             self._set_status("Compute shared harmonics before fixed-harmonic DV.")
@@ -360,13 +360,13 @@ class StatsWindowMultigroupMixin:
         self._active_workers.append(worker)
 
         def _release() -> None:
-            """Handle the release step for the Stats PySide6 workflow."""
+            """Handle the release step for the Stats workflow."""
             if worker in self._active_workers:
                 self._active_workers.remove(worker)
             self._refresh_fixed_harmonic_ui_state()
 
         def _on_finished(payload: dict) -> None:
-            """Handle the on finished step for the Stats PySide6 workflow."""
+            """Handle the on finished step for the Stats workflow."""
             try:
                 result = payload if isinstance(payload, dict) else {}
                 dv_table = result.get("dv_table")
@@ -388,7 +388,7 @@ class StatsWindowMultigroupMixin:
                 _release()
 
         def _on_error(message: str) -> None:
-            """Handle the on error step for the Stats PySide6 workflow."""
+            """Handle the on error step for the Stats workflow."""
             try:
                 self._set_status(f"Fixed-harmonic DV error: {message}")
                 self.append_log("General", f"Fixed-harmonic DV error: {message}", level="error")
@@ -402,11 +402,11 @@ class StatsWindowMultigroupMixin:
         self.pool.start(worker)
 
     def _known_group_labels(self) -> list[str]:
-        """Handle the known group labels step for the Stats PySide6 workflow."""
+        """Handle the known group labels step for the Stats workflow."""
         return sorted({g for g in self._between_subject_groups().values() if g})
 
     def _ensure_between_ready(self) -> bool:
-        """Handle the ensure between ready step for the Stats PySide6 workflow."""
+        """Handle the ensure between ready step for the Stats workflow."""
         snapshot = self._between_subject_snapshot if self._multi_group_manifest else None
         if snapshot is not None and snapshot.errors:
             message = f"Between-group analysis is blocked: {snapshot.errors[0]}"
@@ -436,7 +436,7 @@ class StatsWindowMultigroupMixin:
     # --------- window focus / run state ---------
 
     def _refresh_between_missingness_summary(self) -> None:
-        """Handle the refresh between missingness summary step for the Stats PySide6 workflow."""
+        """Handle the refresh between missingness summary step for the Stats workflow."""
         payload = self._between_missingness_payload
         if not isinstance(payload, dict):
             return

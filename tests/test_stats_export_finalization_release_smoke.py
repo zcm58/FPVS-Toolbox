@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QMessageBox
 import Main_App.PySide6_App.GUI.main_window as main_window_module
 from Main_App.PySide6_App.GUI.main_window import MainWindow, _should_show_no_excel_popup
 from Tools.Stats.common.stats_core import PipelineId, StepId
-from Tools.Stats.stats_ui_pyside6 import StatsWindow
+from Tools.Stats.ui.stats_window import StatsWindow
 
 
 @pytest.fixture(autouse=True)

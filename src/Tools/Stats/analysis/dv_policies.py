@@ -53,7 +53,7 @@ _DV_DATA_CACHE_MAX = 8
 
 
 def _freeze_nested_mapping(mapping: Dict[str, Dict[str, str]]) -> tuple:
-    """Handle the freeze nested mapping step for the Stats PySide6 workflow."""
+    """Handle the freeze nested mapping step for the Stats workflow."""
     frozen = []
     for key, inner in sorted(mapping.items(), key=lambda item: item[0]):
         inner_items = tuple(sorted((inner or {}).items()))
@@ -62,7 +62,7 @@ def _freeze_nested_mapping(mapping: Dict[str, Dict[str, str]]) -> tuple:
 
 
 def _freeze_rois(rois: Optional[Dict[str, List[str]]]) -> tuple:
-    """Handle the freeze rois step for the Stats PySide6 workflow."""
+    """Handle the freeze rois step for the Stats workflow."""
     if not rois:
         return tuple()
     return tuple(
@@ -81,7 +81,7 @@ def _build_cache_key(
     settings: DVPolicySettings,
     max_freq: float | None,
 ) -> tuple:
-    """Handle the build cache key step for the Stats PySide6 workflow."""
+    """Handle the build cache key step for the Stats workflow."""
     return (
         tuple(subjects),
         tuple(conditions),
@@ -111,7 +111,7 @@ def prepare_summed_bca_data(
     dv_metadata: Optional[dict[str, object]] = None,
     max_freq: float | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
-    """Handle the prepare summed bca data step for the Stats PySide6 workflow."""
+    """Handle the prepare summed bca data step for the Stats workflow."""
     settings = normalize_dv_policy(dv_policy)
     resolved_max_freq = _resolve_max_freq(max_freq)
     meta_target: dict[str, object] | None = dv_metadata if dv_metadata is not None else {}

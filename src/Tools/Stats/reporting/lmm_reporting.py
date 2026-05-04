@@ -159,7 +159,7 @@ def classify_lmm_fit_status(
 
 
 def _parse_single_term(term: str) -> dict[str, str] | None:
-    """Handle the parse single term step for the Stats PySide6 workflow."""
+    """Handle the parse single term step for the Stats workflow."""
     match = TERM_PATTERN.match(term)
     if not match:
         return None
@@ -170,7 +170,7 @@ def _parse_single_term(term: str) -> dict[str, str] | None:
 
 
 def humanize_effect_label(effect: Any) -> str:
-    """Handle the humanize effect label step for the Stats PySide6 workflow."""
+    """Handle the humanize effect label step for the Stats workflow."""
     raw = str(effect)
     if raw == "Intercept":
         return "Intercept (grand mean)"
@@ -190,7 +190,7 @@ def humanize_effect_label(effect: Any) -> str:
 
 
 def ensure_lmm_effect_columns(table: pd.DataFrame) -> pd.DataFrame:
-    """Handle the ensure lmm effect columns step for the Stats PySide6 workflow."""
+    """Handle the ensure lmm effect columns step for the Stats workflow."""
     if not isinstance(table, pd.DataFrame) or table.empty or "Effect" not in table.columns:
         return table
     out = table.copy()
@@ -251,7 +251,7 @@ def attach_lmm_run_metadata(
     contract: dict[str, Any] | None = None,
     fit_status: dict[str, Any] | None = None,
 ) -> None:
-    """Handle the attach lmm run metadata step for the Stats PySide6 workflow."""
+    """Handle the attach lmm run metadata step for the Stats workflow."""
     table.attrs["lmm_formula"] = formula
     table.attrs["lmm_processed_terms"] = fixed_effects
     table.attrs["lmm_contrast_map"] = contrast_map
@@ -289,7 +289,7 @@ def attach_lmm_run_metadata(
 
 
 def infer_lmm_diagnostics(table: pd.DataFrame, model: Any) -> tuple[bool, bool, str, list[str]]:
-    """Handle the infer lmm diagnostics step for the Stats PySide6 workflow."""
+    """Handle the infer lmm diagnostics step for the Stats workflow."""
     note_series = table.get("Note", pd.Series(dtype=str)).astype(str)
     singular = note_series.str.contains("near-singular", case=False, na=False).any()
     converged = bool(
@@ -327,7 +327,7 @@ def infer_lmm_diagnostics(table: pd.DataFrame, model: Any) -> tuple[bool, bool, 
 
 
 def fmt_p(value: Any) -> str:
-    """Handle the fmt p step for the Stats PySide6 workflow."""
+    """Handle the fmt p step for the Stats workflow."""
     if value is None:
         return NOT_AVAILABLE
     try:
@@ -342,7 +342,7 @@ def fmt_p(value: Any) -> str:
 
 
 def build_lmm_report_path(results_dir: Path | str, generated_local: datetime) -> Path:
-    """Handle the build lmm report path step for the Stats PySide6 workflow."""
+    """Handle the build lmm report path step for the Stats workflow."""
     results_path = Path(results_dir)
     results_path.mkdir(parents=True, exist_ok=True)
     return results_path / f"LMM_Report_{generated_local.strftime('%Y-%m-%d_%H%M%S')}.txt"
@@ -354,7 +354,7 @@ def build_lmm_text_report(
     generated_local: datetime,
     project_name: str | None,
 ) -> str:
-    """Handle the build lmm text report step for the Stats PySide6 workflow."""
+    """Handle the build lmm text report step for the Stats workflow."""
     lines = [
         "===================================",
         "FPVS TOOLBOX — LMM TEXT REPORT",

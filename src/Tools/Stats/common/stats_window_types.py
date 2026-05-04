@@ -1,4 +1,4 @@
-"""Small shared types for the Stats PySide6 window."""
+"""Small shared types for the Stats window."""
 from __future__ import annotations
 
 from typing import NamedTuple

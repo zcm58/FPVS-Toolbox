@@ -2,11 +2,14 @@
 
 The Stats package is organized by function. Active code should import from `Tools.Stats.<area>`.
 
+The package root contains only `__init__.py`, this README, and `AGENTS.md`.
+Implementation files belong in the functional subpackages below.
+
 ## Active Layout
 
-* `ui/`, `controller/`, `workers/`, and `widgets/` - PySide6 window, run coordination, worker wrappers, and widgets.
+* `ui/`, `controller/`, `workers/`, and `widgets/` - PySide6 window, run coordination, worker wrappers, and widgets. `Tools.Stats.StatsWindow` is the public import; the implementation lives in `ui.stats_window`.
 * `analysis/` - statistical engines and analysis helpers, including DV policies, RM-ANOVA, mixed models, post-hocs, group contrasts, cross-phase LMM, SNR/noise helpers, and harmonics.
-* `data/` - project scans, subject/group metadata, manifests, and missingness.
+* `data/` - project scans, subject/group metadata, manifests, ROI resolution, shared ROI settings, and missingness.
 * `qc/` - QC, outlier, and manual exclusion helpers.
 * `reporting/` - summaries, workbook exports, formatting, and run reports.
 * `common/` - shared enums, dataclasses, constants, window types, and runtime helpers.

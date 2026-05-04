@@ -1,4 +1,4 @@
-"""Provide the stats logging features for the Stats PySide6 statistics workflow."""
+"""Provide the stats logging features for the Stats workflow."""
 from __future__ import annotations
 
 """Shared logging utilities for the Stats tool (support layer)."""
@@ -13,21 +13,21 @@ LOG_TIMESTAMP_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 
 
 def format_log_line(message: str, *, level: str = "INFO") -> str:
-    """Handle the format log line step for the Stats PySide6 workflow."""
+    """Handle the format log line step for the Stats workflow."""
     timestamp = datetime.now().strftime(LOG_TIMESTAMP_FORMAT)
     lvl = (level or "INFO").upper()
     return f"[{timestamp}] [{lvl}] {message}"
 
 
 def format_section_header(title: str) -> str:
-    """Handle the format section header step for the Stats PySide6 workflow."""
+    """Handle the format section header step for the Stats workflow."""
     return f"==== {title} ===="
 
 
 def format_step_event(
     pipeline: PipelineId, step: StepId, *, event: str, message: str
 ) -> str:
-    """Handle the format step event step for the Stats PySide6 workflow."""
+    """Handle the format step event step for the Stats workflow."""
     return f"[{pipeline.name}] {step.name}: {event} — {message}"
 
 

@@ -48,7 +48,7 @@ OUTLIER_REASON_SENTENCE = {
 
 @dataclass(frozen=True)
 class OutlierExclusionSummary:
-    """Represent the OutlierExclusionSummary part of the Stats PySide6 tool."""
+    """Represent the OutlierExclusionSummary part of the Stats tool."""
     n_subjects_before: int
     n_subjects_excluded: int
     n_subjects_after: int
@@ -59,7 +59,7 @@ class OutlierExclusionSummary:
 
 @dataclass(frozen=True)
 class DvViolation:
-    """Represent the DvViolation part of the Stats PySide6 tool."""
+    """Represent the DvViolation part of the Stats tool."""
     participant_id: str
     condition: str
     roi: str
@@ -69,7 +69,7 @@ class DvViolation:
 
 @dataclass(frozen=True)
 class OutlierParticipantReport:
-    """Represent the OutlierParticipantReport part of the Stats PySide6 tool."""
+    """Represent the OutlierParticipantReport part of the Stats tool."""
     participant_id: str
     reasons: list[str]
     n_violations: int
@@ -92,7 +92,7 @@ class OutlierParticipantReport:
 
 @dataclass(frozen=True)
 class OutlierExclusionReport:
-    """Represent the OutlierExclusionReport part of the Stats PySide6 tool."""
+    """Represent the OutlierExclusionReport part of the Stats tool."""
     summary: OutlierExclusionSummary
     participants: list[
         OutlierParticipantReport
@@ -101,7 +101,7 @@ class OutlierExclusionReport:
 
 
 def _resolve_column_name(df: pd.DataFrame, candidates: Iterable[str], label: str) -> str:
-    """Handle the resolve column name step for the Stats PySide6 workflow."""
+    """Handle the resolve column name step for the Stats workflow."""
     for name in candidates:
         if name in df.columns:
             return name
@@ -228,7 +228,7 @@ def format_outlier_reason(
     abs_limit: float | None = None,
     threshold_used: float | None = None,
 ) -> str:
-    """Handle the format outlier reason step for the Stats PySide6 workflow."""
+    """Handle the format outlier reason step for the Stats workflow."""
     if reason == OUTLIER_REASON_LIMIT:
         limit = abs_limit if abs_limit is not None else 0.0
         return f"DV exceeded the hard cutoff (±{limit:g})."
@@ -244,7 +244,7 @@ def format_outlier_reason(
 
 
 def _format_reason_sentence(reason: str, *, abs_limit: float) -> str:
-    """Handle the format reason sentence step for the Stats PySide6 workflow."""
+    """Handle the format reason sentence step for the Stats workflow."""
     if reason == OUTLIER_REASON_LIMIT:
         return OUTLIER_REASON_SENTENCE[reason].format(abs_limit=abs_limit)
     if reason in OUTLIER_REASON_SENTENCE:
@@ -255,7 +255,7 @@ def _format_reason_sentence(reason: str, *, abs_limit: float) -> str:
 
 
 def outlier_reason_label(reason: str) -> str:
-    """Handle the outlier reason label step for the Stats PySide6 workflow."""
+    """Handle the outlier reason label step for the Stats workflow."""
     label = DISPLAY_FLAG_TYPE_LABELS.get(reason)
     if label:
         return label
@@ -265,7 +265,7 @@ def outlier_reason_label(reason: str) -> str:
 
 
 def format_flag_type_display(flag_type: str) -> str:
-    """Handle the format flag type display step for the Stats PySide6 workflow."""
+    """Handle the format flag type display step for the Stats workflow."""
     label = DISPLAY_FLAG_TYPE_LABELS.get(flag_type)
     if label:
         return label
@@ -273,7 +273,7 @@ def format_flag_type_display(flag_type: str) -> str:
 
 
 def format_flag_types_display(flag_types: Iterable[str]) -> str:
-    """Handle the format flag types display step for the Stats PySide6 workflow."""
+    """Handle the format flag types display step for the Stats workflow."""
     labels = [format_flag_type_display(flag) for flag in flag_types if flag]
     return ", ".join(labels)
 
@@ -285,7 +285,7 @@ def build_flagged_participant_summary(
     worst_text: str,
     n_flags: int,
 ) -> str:
-    """Handle the build flagged participant summary step for the Stats PySide6 workflow."""
+    """Handle the build flagged participant summary step for the Stats workflow."""
     safe_severity = str(severity).strip() or "FLAG"
     friendly_flag = format_flag_type_display(flag_type) if flag_type else "Unknown flag"
     summary = f"{safe_severity}: {friendly_flag}. Worst: {worst_text}"
@@ -301,7 +301,7 @@ def format_worst_value_display(
     dv_display_name: str | None = None,
     dv_unit: str | None = None,
 ) -> tuple[str, str | None]:
-    """Handle the format worst value display step for the Stats PySide6 workflow."""
+    """Handle the format worst value display step for the Stats workflow."""
     value_text = f"{value:.4f}" if np.isfinite(value) else "non-finite"
     if flag_type in (QC_REASON_MAXABS, QC_REASON_SUMABS):
         metric_label = (
@@ -315,7 +315,7 @@ def format_worst_value_display(
 
 
 def format_dv_violation_detail(violation: DvViolation, *, abs_limit: float) -> str:
-    """Handle the format dv violation detail step for the Stats PySide6 workflow."""
+    """Handle the format dv violation detail step for the Stats workflow."""
     value = violation.value
     value_text = f"{value:.2f}" if np.isfinite(value) else "non-finite"
     reason_text = format_outlier_reason(violation.reason, abs_limit=abs_limit)
@@ -327,7 +327,7 @@ def format_dv_violation_detail(violation: DvViolation, *, abs_limit: float) -> s
 
 
 def _join_reason_sentences(clauses: list[str]) -> str:
-    """Handle the join reason sentences step for the Stats PySide6 workflow."""
+    """Handle the join reason sentences step for the Stats workflow."""
     if not clauses:
         return "an outlier value was detected"
     if len(clauses) == 1:
@@ -338,7 +338,7 @@ def _join_reason_sentences(clauses: list[str]) -> str:
 
 
 def report_to_dataframe(report: OutlierExclusionReport) -> pd.DataFrame:
-    """Handle the report to dataframe step for the Stats PySide6 workflow."""
+    """Handle the report to dataframe step for the Stats workflow."""
     rows = []
     for item in report.participants:
         reasons = list(item.reasons)
@@ -365,7 +365,7 @@ def report_to_dataframe(report: OutlierExclusionReport) -> pd.DataFrame:
 
 
 def build_outlier_summary_text(report: OutlierExclusionReport) -> str:
-    """Handle the build outlier summary text step for the Stats PySide6 workflow."""
+    """Handle the build outlier summary text step for the Stats workflow."""
     summary = report.summary
     abs_limit = float(summary.abs_limit)
     lines = [
@@ -411,7 +411,7 @@ def build_outlier_summary_text(report: OutlierExclusionReport) -> str:
 
 
 def summary_to_dataframe(report: OutlierExclusionReport) -> pd.DataFrame:
-    """Handle the summary to dataframe step for the Stats PySide6 workflow."""
+    """Handle the summary to dataframe step for the Stats workflow."""
     summary = report.summary
     return pd.DataFrame(
         [
@@ -432,7 +432,7 @@ def export_outlier_exclusion_report(
     report: OutlierExclusionReport,
     log_func,
 ) -> None:
-    """Handle the export outlier exclusion report step for the Stats PySide6 workflow."""
+    """Handle the export outlier exclusion report step for the Stats workflow."""
     summary_df = summary_to_dataframe(report)
     participants_df = report_to_dataframe(report)
     with pd.ExcelWriter(save_path, engine="xlsxwriter") as writer:
@@ -444,7 +444,7 @@ def merge_exclusion_reports(
     dv_report: OutlierExclusionReport,
     qc_report: QcExclusionReport | None,
 ) -> OutlierExclusionReport:
-    """Handle the merge exclusion reports step for the Stats PySide6 workflow."""
+    """Handle the merge exclusion reports step for the Stats workflow."""
     if qc_report is None:
         return dv_report
 
@@ -540,7 +540,7 @@ def collect_flagged_pid_map(
     qc_report: QcExclusionReport | None,
     dv_report: OutlierExclusionReport | None,
 ) -> dict[str, list[str]]:
-    """Handle the collect flagged pid map step for the Stats PySide6 workflow."""
+    """Handle the collect flagged pid map step for the Stats workflow."""
     flagged: dict[str, set[str]] = {}
     if qc_report:
         for participant in qc_report.participants:
@@ -555,7 +555,7 @@ def build_flagged_details_map(
     qc_report: QcExclusionReport | None,
     dv_report: OutlierExclusionReport | None,
 ) -> dict[str, str]:
-    """Handle the build flagged details map step for the Stats PySide6 workflow."""
+    """Handle the build flagged details map step for the Stats workflow."""
     details: dict[str, list[str]] = {}
     if qc_report:
         for participant in qc_report.participants:
@@ -574,7 +574,7 @@ def build_flagged_details_map(
 
 
 def _qc_threshold_metadata(qc_report: QcExclusionReport | None) -> dict[str, float]:
-    """Handle the qc threshold metadata step for the Stats PySide6 workflow."""
+    """Handle the qc threshold metadata step for the Stats workflow."""
     if not qc_report:
         return {
             "warn_threshold": float("nan"),
@@ -599,7 +599,7 @@ def build_flagged_participants_tables(
     qc_report: QcExclusionReport | None,
     dv_report: OutlierExclusionReport | None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Handle the build flagged participants tables step for the Stats PySide6 workflow."""
+    """Handle the build flagged participants tables step for the Stats workflow."""
     details: list[dict[str, object]] = []
     qc_meta = _qc_threshold_metadata(qc_report)
 
@@ -739,7 +739,7 @@ def export_flagged_participants_report(
     dv_report: OutlierExclusionReport | None,
     log_func,
 ) -> None:
-    """Handle the export flagged participants report step for the Stats PySide6 workflow."""
+    """Handle the export flagged participants report step for the Stats workflow."""
     summary_df, details_df = build_flagged_participants_tables(qc_report, dv_report)
     with pd.ExcelWriter(save_path, engine="xlsxwriter") as writer:
         _auto_format_and_write_excel(writer, summary_df, "Flag Summary", log_func)
@@ -753,7 +753,7 @@ def export_excluded_participants_report(
     required_exclusions: list[DvViolation],
     log_func,
 ) -> None:
-    """Handle the export excluded participants report step for the Stats PySide6 workflow."""
+    """Handle the export excluded participants report step for the Stats workflow."""
     rows = []
     for pid in manual_excluded:
         rows.append(
