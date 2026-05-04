@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from Tools.Stats.Legacy import stats_analysis
-from Tools.Stats.PySide6 import dv_policies
+from Tools.Stats.PySide6.analysis import dv_policies
 
 
 def _make_bca_df() -> pd.DataFrame:

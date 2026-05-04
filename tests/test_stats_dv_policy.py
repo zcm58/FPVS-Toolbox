@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("PySide6")
-from Tools.Stats.PySide6.dv_policies import (  # noqa: E402
+from Tools.Stats.PySide6.analysis.dv_policies import (  # noqa: E402
     EMPTY_LIST_FALLBACK_FIXED_K,
     FIXED_K_POLICY_NAME,
     GROUP_MEAN_Z_POLICY_NAME,

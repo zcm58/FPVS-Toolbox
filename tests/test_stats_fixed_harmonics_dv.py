@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.PySide6.dv_policies import compute_fixed_harmonic_dv_table
+from Tools.Stats.PySide6.analysis.dv_policies import compute_fixed_harmonic_dv_table
 
 
 def _write_bca_excel(path: Path, rows: dict[str, dict[str, float]]) -> None:

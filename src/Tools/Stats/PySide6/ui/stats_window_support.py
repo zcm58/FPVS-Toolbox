@@ -106,7 +106,7 @@ from Tools.Stats.PySide6.reporting.stats_export_formatting import (
 from Tools.Stats.PySide6.qc.stats_qc_reports import export_qc_context_workbook
 from Tools.Stats.PySide6.stats_workers import StatsWorker
 from Tools.Stats.PySide6 import stats_workers as stats_worker_funcs
-from Tools.Stats.PySide6.dv_policies import (
+from Tools.Stats.PySide6.analysis.dv_policies import (
     EMPTY_LIST_ERROR,
     EMPTY_LIST_FALLBACK_FIXED_K,
     EMPTY_LIST_SET_ZERO,

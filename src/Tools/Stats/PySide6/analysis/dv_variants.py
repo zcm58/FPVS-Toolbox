@@ -7,7 +7,7 @@ from typing import Callable, Dict, List, Optional
 
 import pandas as pd
 
-from Tools.Stats.PySide6.dv_policies import (
+from Tools.Stats.PySide6.analysis.dv_policies import (
     FIXED_K_POLICY_NAME,
     LEGACY_POLICY_NAME,
     ROSSION_POLICY_NAME,

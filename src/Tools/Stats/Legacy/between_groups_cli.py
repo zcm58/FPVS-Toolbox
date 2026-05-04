@@ -43,7 +43,7 @@ from Tools.Stats.Legacy.stats_analysis import (
     set_rois,
 )
 from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
-from Tools.Stats.PySide6.dv_policies import prepare_summed_bca_data
+from Tools.Stats.PySide6.analysis.dv_policies import prepare_summed_bca_data
 
 
 # ------------------------------ utilities -------------------------------

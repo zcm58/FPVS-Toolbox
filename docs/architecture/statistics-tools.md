@@ -14,12 +14,12 @@ Primary paths:
 Stats PySide6 grouping:
 
 - Root entry points: `stats_main_window.py`, `stats_ui_pyside6.py`, and `Tools.Stats.StatsWindow`.
-- Root compatibility shims: old module names such as `stats_workers.py`, `dv_policies.py`, and `stats_controller.py` re-export moved implementation modules.
+- Root compatibility shims: old module names such as `stats_workers.py` re-export moved implementation modules while high-coupling callers are migrated.
 - `ui/`: window mixins, dialogs, widget assembly, and small widgets.
 - `controller/`: run coordination, pipeline state, and worker scheduling.
 - `workers/`: Qt worker wrappers and GUI-agnostic statistical job execution.
 - `data/`: project scans, manifests, subject IDs, group metadata, and missing input detection.
-- `analysis/`: DV policies, harmonics, cross-phase statistics, and group contrasts.
+- `analysis/`: DV policy facade and focused helpers, harmonics, cross-phase statistics, and group contrasts.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
 - `common/`: shared dataclasses, enums, constants, and lightweight window types.

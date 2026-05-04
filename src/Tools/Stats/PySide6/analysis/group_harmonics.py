@@ -392,7 +392,7 @@ def compute_union_harmonics_by_roi(
     dv_policy: dict[str, object] | None = None,
 ) -> Dict[str, List[float]]:
     """Compatibility alias."""
-    from Tools.Stats.PySide6 import dv_policies
+    from Tools.Stats.PySide6.analysis import dv_policies
 
     payload = dv_policies.build_rossion_preview_payload(
         subjects=subjects,

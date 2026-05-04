@@ -44,7 +44,7 @@ from Tools.Stats.Legacy.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
 )
 from Tools.Stats.Legacy.stats_export import _auto_format_and_write_excel
-from Tools.Stats.PySide6.dv_policies import (
+from Tools.Stats.PySide6.analysis.dv_policies import (
     FIXED_SHARED_POLICY_NAME,
     ROSSION_POLICY_NAME,
     build_rossion_preview_payload,

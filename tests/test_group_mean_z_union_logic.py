@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from Tools.Stats.PySide6.dv_policies import (
+from Tools.Stats.PySide6.analysis.dv_policies import (
     EMPTY_LIST_FALLBACK_FIXED_K,
     apply_empty_union_policy,
 )

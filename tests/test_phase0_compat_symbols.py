@@ -38,7 +38,7 @@ _ensure_package("Tools.Stats.PySide6.analysis", PYSIDE6 / "analysis")
 _ensure_package("Tools.Stats.Legacy", LEGACY)
 
 dv_policies = _load_module(
-    "Tools.Stats.PySide6.dv_policies", PYSIDE6 / "dv_policies.py"
+    "Tools.Stats.PySide6.analysis.dv_policies", PYSIDE6 / "analysis" / "dv_policies.py"
 )
 group_harmonics = _load_module(
     "Tools.Stats.PySide6.analysis.group_harmonics", PYSIDE6 / "analysis" / "group_harmonics.py"

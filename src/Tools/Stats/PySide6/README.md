@@ -27,7 +27,8 @@ legacy public surface.
   * `data/stats_subjects.py`, `data/stats_multigroup_ids.py`, and `data/stats_multigroup_scan.py` - subject and group metadata helpers.
   * `data/stats_missingness.py` - missingness summaries and exports.
 * **Analysis/QC/reporting**
-  * `analysis/` - DV policies, harmonic selection, cross-phase statistics, and group contrasts.
+  * `analysis/dv_policies.py` - public DV policy facade; focused `analysis/dv_policy_*` modules hold settings, fixed-K, fixed-shared, Rossion, and trace helpers.
+  * `analysis/` - harmonic selection, cross-phase statistics, and group contrasts.
   * `qc/` - outlier, manual exclusion, QC exclusion, and QC report helpers.
   * `reporting/` - plain-language summaries, workbook formatting, run reports, and logging.
 * **Support**

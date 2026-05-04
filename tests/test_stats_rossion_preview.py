@@ -7,7 +7,7 @@ pytest.importorskip("PySide6")
 pytest.importorskip("openpyxl")
 from PySide6.QtCore import Qt  # noqa: E402
 
-from Tools.Stats.PySide6.dv_policies import (  # noqa: E402
+from Tools.Stats.PySide6.analysis.dv_policies import (  # noqa: E402
     ROSSION_POLICY_NAME,
 )
 from Tools.Stats.PySide6.stats_workers import StatsWorker  # noqa: E402

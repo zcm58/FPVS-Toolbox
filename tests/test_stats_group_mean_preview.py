@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 
-from Tools.Stats.PySide6.dv_policies import (  # noqa: E402
+from Tools.Stats.PySide6.analysis.dv_policies import (  # noqa: E402
     EMPTY_LIST_FALLBACK_FIXED_K,
     GROUP_MEAN_Z_POLICY_NAME,
 )

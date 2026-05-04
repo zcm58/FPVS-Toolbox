@@ -255,7 +255,7 @@ exported Excel files.
   - Ignores ROI electrodes that are missing from the Excel file.
 
 (Implementation verified in: `src/Main_App/Legacy_App/settings_manager.py`,
-`src/Tools/Stats/PySide6/dv_policies.py`.)
+`src/Tools/Stats/PySide6/analysis/dv_policies.py`.)
 
 If you perform ROI aggregation outside the Stats tool (e.g., in a custom script),
 report the exact aggregation rule you used.
