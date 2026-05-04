@@ -5,6 +5,7 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QCheckBox  # noqa: E402
 
+from Main_App.PySide6_App.widgets import SectionCard  # noqa: E402
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow  # noqa: E402
 
 
@@ -17,7 +18,8 @@ def test_stats_condition_selection_snapshot_and_block(qtbot, tmp_path, monkeypat
     conditions = ["CondA", "CondB", "CondC"]
     window._populate_conditions_panel(conditions)
 
-    assert window.conditions_group.title() == "Included Conditions"
+    assert isinstance(window.conditions_group, SectionCard)
+    assert window.conditions_group.header.title_label.text() == "Included Conditions"
     assert window._get_selected_conditions() == conditions
 
     checkboxes = {box.text(): box for box in window.findChildren(QCheckBox)}

@@ -4,8 +4,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 pytest.importorskip("PySide6.QtWidgets")
-from PySide6.QtWidgets import QAbstractScrollArea, QGroupBox, QPlainTextEdit
+from PySide6.QtWidgets import QAbstractScrollArea, QPlainTextEdit
 
+from Main_App.PySide6_App.widgets import SectionCard
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow
 
 
@@ -22,7 +23,9 @@ def test_multigroup_scan_summary_controls_visible_at_startup(qtbot, tmp_path):
     qtbot.wait(100)
 
     summary_group = next(
-        box for box in window.findChildren(QGroupBox) if box.title() == "Multi-Group Scan Summary"
+        card
+        for card in window.findChildren(SectionCard)
+        if card.header.title_label.text() == "Multi-Group Scan Summary"
     )
     assert summary_group.isVisible()
     assert summary_group.height() > 0

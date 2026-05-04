@@ -9,15 +9,12 @@ from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QFormLayout,
     QLineEdit,
-    QPushButton,
     QLabel,
     QHBoxLayout,
     QComboBox,
     QDialog,
     QTabWidget,
-    QGroupBox,
     QGridLayout,
     QCheckBox,
     QDialogButtonBox,
@@ -27,6 +24,11 @@ from PySide6.QtWidgets import (
 
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.Performance.mp_env import get_ram_tier_recommendation
+from Main_App.PySide6_App.widgets import (
+    SectionCard,
+    make_action_button,
+    make_form_layout,
+)
 from .roi_settings_editor import ROISettingsEditor
 from ..config.projects_root import changeProjectsRoot
 from ..Backend.project import Project
@@ -46,7 +48,7 @@ class SettingsPanel(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        form = make_form_layout()
         layout.addLayout(form)
 
         self.out_edit = QLineEdit()
@@ -55,8 +57,8 @@ class SettingsPanel(QWidget):
         form.addRow(QLabel("Threshold"), self.thr_edit)
 
         btn_row = QHBoxLayout()
-        self.ok_btn = QPushButton("OK")
-        self.cancel_btn = QPushButton("Cancel")
+        self.ok_btn = make_action_button("OK", variant="primary")
+        self.cancel_btn = make_action_button("Cancel", variant="tertiary")
         btn_row.addWidget(self.ok_btn)
         btn_row.addWidget(self.cancel_btn)
         layout.addLayout(btn_row)
@@ -124,7 +126,7 @@ class SettingsDialog(QDialog):
         self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
-        self.btn_changeRoot = QPushButton("Change Projects Root…", self)
+        self.btn_changeRoot = make_action_button("Change Projects Root...", parent=self)
         self.btn_changeRoot.clicked.connect(lambda: changeProjectsRoot(self))
         layout.addWidget(self.btn_changeRoot)
 
@@ -136,7 +138,8 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------
     def _init_general_tab(self, tabs: QTabWidget) -> None:
         tab = QWidget()
-        form = QFormLayout(tab)
+        form = make_form_layout()
+        tab.setLayout(form)
 
         stim_default = (
             self._project_preprocessing().get("stim_channel", config.DEFAULT_STIM_CHANNEL)
@@ -158,8 +161,13 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        self.group_preproc = QGroupBox("Preprocessing Parameters", tab)
-        grid = QGridLayout(self.group_preproc)
+        self.group_preproc = SectionCard(
+            "Preprocessing Parameters",
+            tab,
+            object_name="preprocessing_parameters_card",
+            content_layout=QGridLayout(),
+        )
+        grid = self.group_preproc.content_layout
         params = [
             "Low Pass (Hz):",
             "High Pass (Hz):",
@@ -234,7 +242,8 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------
     def _init_stats_tab(self, tabs: QTabWidget) -> None:
         tab = QWidget()
-        form = QFormLayout(tab)
+        form = make_form_layout()
+        tab.setLayout(form)
 
         self.base_freq_edit = QLineEdit(self.manager.get("analysis", "base_freq", "6.0"))
         form.addRow(QLabel("FPVS Base Frequency (Hz)"), self.base_freq_edit)
@@ -259,7 +268,7 @@ class SettingsDialog(QDialog):
         self.roi_editor = ROISettingsEditor(self, self.manager.get_roi_pairs())
         form.addRow(QLabel("Regions of Interest"), self.roi_editor)
 
-        add_btn = QPushButton("+ Add ROI")
+        add_btn = make_action_button("+ Add ROI")
         add_btn.clicked.connect(lambda: self.roi_editor.add_entry())
         form.addRow(add_btn)
 
@@ -268,7 +277,8 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------
     def _init_oddball_tab(self, tabs: QTabWidget) -> None:
         tab = QWidget()
-        form = QFormLayout(tab)
+        form = make_form_layout()
+        tab.setLayout(form)
 
         self.oddball_freq_edit = QLineEdit(self.manager.get("analysis", "oddball_freq", "1.2"))
         form.addRow(QLabel("Oddball Frequency (Hz)"), self.oddball_freq_edit)
@@ -278,7 +288,8 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------
     def _init_loreta_tab(self) -> QWidget:
         tab = QWidget()
-        form = QFormLayout(tab)
+        form = make_form_layout()
+        tab.setLayout(form)
 
         self.mri_edit = QLineEdit(self.manager.get("loreta", "mri_path", ""))
         mri_row = self._with_browse(self.mri_edit)
@@ -359,7 +370,7 @@ class SettingsDialog(QDialog):
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(edit)
-        btn = QPushButton("Browse")
+        btn = make_action_button("Browse")
         layout.addWidget(btn)
         btn.clicked.connect(lambda: self._browse_folder(edit))
         return container

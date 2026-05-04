@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QAbstractItemView,
     QDoubleSpinBox,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -56,6 +55,7 @@ from Main_App.PySide6_App.Backend.project import (
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.PySide6_App.widgets.busy_spinner import BusySpinner
 from Main_App.PySide6_App.widgets import (
+    SectionCard,
     StatusBanner,
     make_action_button,
     make_form_layout,
@@ -3433,13 +3433,12 @@ class StatsWindow(QMainWindow):
         main_layout.setSpacing(10)
 
         # included conditions panel
-        self.conditions_group = QGroupBox("Included Conditions")
+        self.conditions_group = SectionCard("Included Conditions")
         self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
         self.conditions_group.setToolTip(
             "Choose which conditions to include in the analysis."
         )
-        conditions_layout = QVBoxLayout(self.conditions_group)
-        conditions_layout.setContentsMargins(8, 8, 8, 8)
+        conditions_layout = self.conditions_group.content_layout
         conditions_layout.setSpacing(6)
 
         conditions_button_row = QHBoxLayout()
@@ -3465,13 +3464,12 @@ class StatsWindow(QMainWindow):
         conditions_layout.addWidget(self.conditions_scroll_area)
 
         # summed BCA definition panel
-        self.dv_group = QGroupBox("Summed BCA definition")
+        self.dv_group = SectionCard("Summed BCA definition")
         self.dv_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
         self.dv_group.setToolTip(
             "Select how the primary Summed BCA DV is computed."
         )
-        dv_layout = QVBoxLayout(self.dv_group)
-        dv_layout.setContentsMargins(8, 8, 8, 8)
+        dv_layout = self.dv_group.content_layout
         dv_layout.setSpacing(6)
 
         dv_method_row = QHBoxLayout()
@@ -3599,10 +3597,9 @@ class StatsWindow(QMainWindow):
             self._dv_policy_name == ROSSION_POLICY_NAME
         )
 
-        self.dv_variants_group = QGroupBox("Optional comparison exports (do not change results)")
+        self.dv_variants_group = SectionCard("Optional comparison exports (do not change results)")
         self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred))
-        dv_variants_layout = QVBoxLayout(self.dv_variants_group)
-        dv_variants_layout.setContentsMargins(8, 8, 8, 8)
+        dv_variants_layout = self.dv_variants_group.content_layout
         dv_variants_layout.setSpacing(4)
         dv_variants_note = QLabel(
             "These exports are for consistency checks. Statistical results use the Primary DV only."
@@ -3628,13 +3625,12 @@ class StatsWindow(QMainWindow):
             self._dv_variant_checkboxes[policy_name] = checkbox
         self._sync_selected_dv_variants()
 
-        self.outlier_group = QGroupBox("Outlier Flagging")
+        self.outlier_group = SectionCard("Outlier Flagging")
         self.outlier_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred))
         self.outlier_group.setToolTip(
             "Flag participants whose DV values are outside the allowed range."
         )
-        outlier_layout = QVBoxLayout(self.outlier_group)
-        outlier_layout.setContentsMargins(8, 8, 8, 8)
+        outlier_layout = self.outlier_group.content_layout
         outlier_layout.setSpacing(6)
 
         self.outlier_enable_checkbox = QCheckBox("Enable DV flagging (always on)")
@@ -3671,12 +3667,14 @@ class StatsWindow(QMainWindow):
         )
         outlier_layout.addWidget(outlier_note)
 
-        self.manual_exclusion_group = QGroupBox("Manual Exclusions")
+        self.manual_exclusion_group = SectionCard(
+            "Manual Exclusions",
+            content_layout=QHBoxLayout(),
+        )
         self.manual_exclusion_group.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         )
-        manual_layout = QHBoxLayout(self.manual_exclusion_group)
-        manual_layout.setContentsMargins(8, 8, 8, 8)
+        manual_layout = self.manual_exclusion_group.content_layout
         manual_layout.setSpacing(8)
 
         self.manual_exclusion_summary_label = QLabel("Excluded: 0")
@@ -3697,16 +3695,15 @@ class StatsWindow(QMainWindow):
         self.manual_exclusion_edit_btn.clicked.connect(self._open_manual_exclusion_dialog)
         self.manual_exclusion_clear_btn.clicked.connect(self._clear_manual_exclusions)
 
-        analysis_box = QGroupBox("Analysis Controls")
+        analysis_box = SectionCard("Analysis Controls", content_layout=QHBoxLayout())
         analysis_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
-        analysis_layout = QHBoxLayout(analysis_box)
-        analysis_layout.setContentsMargins(8, 8, 8, 8)
+        analysis_layout = analysis_box.content_layout
         analysis_layout.setSpacing(8)
 
         # single group section
-        single_group_box = QGroupBox("Single Group Analysis")
+        single_group_box = SectionCard("Single Group Analysis")
         single_group_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
-        single_layout = QVBoxLayout(single_group_box)
+        single_layout = single_group_box.content_layout
 
         single_action_row = QHBoxLayout()
         self.analyze_single_btn = make_action_button("Analyze Single Group", variant="primary")
@@ -3729,9 +3726,9 @@ class StatsWindow(QMainWindow):
         single_layout.addWidget(self.single_status_lbl)
 
         # between-group section
-        between_box = QGroupBox("Between-Group Analysis")
+        between_box = SectionCard("Between-Group Analysis")
         between_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
-        between_layout = QVBoxLayout(between_box)
+        between_layout = between_box.content_layout
 
         between_action_row = QHBoxLayout()
         self.analyze_between_btn = make_action_button("Analyze Group Differences", variant="primary")
@@ -3823,10 +3820,9 @@ class StatsWindow(QMainWindow):
         folder_row.addStretch(1)
         data_actions_layout.addLayout(folder_row)
 
-        multigroup_box = QGroupBox("Multi-Group Scan Summary")
+        multigroup_box = SectionCard("Multi-Group Scan Summary")
         multigroup_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum))
-        multigroup_layout = QVBoxLayout(multigroup_box)
-        multigroup_layout.setContentsMargins(8, 8, 8, 8)
+        multigroup_layout = multigroup_box.content_layout
         multigroup_layout.setSpacing(4)
 
         multigroup_status_row = QHBoxLayout()

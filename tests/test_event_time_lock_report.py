@@ -9,6 +9,7 @@ from Main_App.PySide6_App.diagnostics.event_time_lock_report import (
     _epoch_stats,
     _extract_events,
 )
+from Main_App.PySide6_App.diagnostics import event_time_lock_report
 
 
 def _make_raw_with_stim_pulses(
@@ -101,3 +102,17 @@ def test_resample_integrity_flags_loss_for_too_narrow_pulses():
     assert comparison["counts_by_code_pre_vs_post"]["5"]["pre"] == 5
     assert comparison["counts_by_code_pre_vs_post"]["5"]["post"] < 5
     assert comparison["event_loss_flags"]["5"] is True
+
+
+def test_gui_entrypoint_applies_shared_theme(qapp, monkeypatch):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QDialog
+    from Main_App.PySide6_App.utils import theme
+
+    themed_apps = []
+    monkeypatch.setattr(theme, "apply_fpvs_theme", lambda app: themed_apps.append(app))
+    monkeypatch.setattr(QDialog, "show", lambda self: None)
+    monkeypatch.setattr(QApplication, "exec", lambda self: 0)
+
+    assert event_time_lock_report._run_gui() == 0
+    assert themed_apps == [qapp]

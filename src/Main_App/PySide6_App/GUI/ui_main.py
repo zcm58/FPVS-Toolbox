@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QProgressBar,
-    QPushButton,
     QRadioButton,
     QScrollArea,
     QSizePolicy,
@@ -259,7 +258,10 @@ def init_ui(self) -> None:
     self.le_input_file.setReadOnly(True)
     self.le_input_file.setPlaceholderText("Select one .bdf file for single-file mode")
 
-    self.btn_select_input_file = QPushButton("Select EEG File…", self.row_single_file)
+    self.btn_select_input_file = make_action_button(
+        "Select EEG File...",
+        parent=self.row_single_file,
+    )
     self.btn_select_input_file.setFixedWidth(BROWSE_BUTTON_WIDTH)
     self.btn_select_input_file.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
@@ -279,7 +281,10 @@ def init_ui(self) -> None:
     self.le_input_folder.setReadOnly(True)
     self.le_input_folder.setPlaceholderText("Select the project data folder for batch mode")
 
-    self.btn_select_input_folder = QPushButton("Select Data Folder...", self.row_input_folder)
+    self.btn_select_input_folder = make_action_button(
+        "Select Data Folder...",
+        parent=self.row_input_folder,
+    )
     self.btn_select_input_folder.setFixedWidth(BROWSE_BUTTON_WIDTH)
     self.btn_select_input_folder.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 

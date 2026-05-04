@@ -574,16 +574,17 @@ def _run_gui() -> int:
         QApplication,
         QDialog,
         QFileDialog,
-        QFormLayout,
         QHBoxLayout,
         QLabel,
         QLineEdit,
         QMessageBox,
-        QPushButton,
         QSpacerItem,
         QSizePolicy,
         QVBoxLayout,
     )
+    _ensure_src_on_sys_path()
+    from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
+    from Main_App.PySide6_App.widgets import make_action_button, make_form_layout
 
     class _Worker(QObject):
         progress = Signal(str)
@@ -644,12 +645,12 @@ def _run_gui() -> int:
 
             root = QVBoxLayout(self)
 
-            form = QFormLayout()
+            form = make_form_layout()
             root.addLayout(form)
 
             # BDF
             self.bdf_edit = QLineEdit()
-            bdf_browse = QPushButton("Browse…")
+            bdf_browse = make_action_button("Browse...")
             bdf_browse.clicked.connect(self._pick_bdf)
             bdf_row = QHBoxLayout()
             bdf_row.addWidget(self.bdf_edit, 1)
@@ -658,7 +659,7 @@ def _run_gui() -> int:
 
             # Output dir
             self.out_edit = QLineEdit()
-            out_browse = QPushButton("Browse…")
+            out_browse = make_action_button("Browse...")
             out_browse.clicked.connect(self._pick_out_dir)
             out_row = QHBoxLayout()
             out_row.addWidget(self.out_edit, 1)
@@ -704,9 +705,9 @@ def _run_gui() -> int:
             btn_row.addItem(
                 QSpacerItem(10, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
             )
-            self.run_btn = QPushButton("Run Report")
+            self.run_btn = make_action_button("Run Report", variant="primary")
             self.run_btn.clicked.connect(self._on_run)
-            self.close_btn = QPushButton("Close")
+            self.close_btn = make_action_button("Close", variant="tertiary")
             self.close_btn.clicked.connect(self.reject)
             btn_row.addWidget(self.run_btn)
             btn_row.addWidget(self.close_btn)
@@ -798,6 +799,7 @@ def _run_gui() -> int:
             QMessageBox.critical(self, "Report failed", tb)
 
     app = QApplication.instance() or QApplication(sys.argv)
+    apply_fpvs_theme(app)
     dlg = _Dialog()
     dlg.show()
     return int(app.exec())

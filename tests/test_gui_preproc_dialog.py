@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
 from Main_App.PySide6_App.Backend.project import Project
 from Main_App.PySide6_App.GUI.main_window import MainWindow
+from Main_App.PySide6_App.widgets import SectionCard
 import Main_App.PySide6_App.GUI.settings_panel as settings_panel
 from Main_App.PySide6_App.GUI.settings_panel import SettingsDialog
 
@@ -89,6 +90,26 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["epoch_end"] == 100.0
     assert params["stim_channel"] == "Trigger"
     assert params["save_preprocessed_fif"] is False
+
+
+def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+    project = _prep_project(tmp_path)
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.loadProject(project)
+
+    dlg = SettingsDialog(win.settings, win, project)
+    qtbot.addWidget(dlg)
+
+    cards = {
+        card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
+    }
+    assert "Preprocessing Parameters" in cards
+    assert dlg.group_preproc is cards["Preprocessing Parameters"]
+    assert dlg.btn_changeRoot.property("secondary") is True
 
 
 def test_dialog_saves_bandpass_mapping(tmp_path, qtbot, monkeypatch):

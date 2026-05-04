@@ -4,9 +4,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QGroupBox, QSplitter, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import QSplitter, QTabWidget  # noqa: E402
 
-from Main_App.PySide6_App.widgets import StatusBanner  # noqa: E402
+from Main_App.PySide6_App.widgets import SectionCard, StatusBanner  # noqa: E402
 from Tools.Stats.PySide6.stats_ui_pyside6 import StatsWindow  # noqa: E402
 
 
@@ -39,7 +39,9 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert root_splitter.widget(1) is not None
     assert root_splitter.widget(1).isAncestorOf(tab_widget)
 
-    group_boxes = {box.title(): box for box in window.findChildren(QGroupBox)}
+    group_boxes = {
+        card.header.title_label.text(): card for card in window.findChildren(SectionCard)
+    }
     for title in [
         "Included Conditions",
         "Summed BCA definition",
