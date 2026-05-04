@@ -6,6 +6,7 @@ Use this page before gathering broad context. Run the relevant command first, th
 
 ```powershell
 python scripts/agent_audit.py
+python scripts/agent_audit.py --check stats-pyside6
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
@@ -16,6 +17,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | Task | Skill | First script | Focused docs |
 | --- | --- | --- | --- |
 | PySide6 GUI, widgets, menus, workers, status UX | `pyside6-gui-cleanup` | `.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` | `docs/architecture/gui.md` |
+| Stats PySide6 structure, root shims, analysis organization | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-pyside6` | `docs/architecture/statistics-tools.md` |
 | Legacy boundary, quarantine, Source Localization status | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/legacy-boundaries.md` |
 | Project paths, dialogs, imports, exports, manifests | `project-path-audit` | `.agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` | `docs/architecture/project-io.md` |
 | GUI smoke coverage | `pytest-qt-smoke` | nearest focused pytest target | `docs/quality/test-selection.md` |

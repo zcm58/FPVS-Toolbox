@@ -45,6 +45,42 @@ PRODUCTION_EXCLUDES = CURRENT_CODE_EXCLUDES + (
     "tests/",
 )
 
+STATS_PYSIDE6_ROOT = "src/Tools/Stats/PySide6"
+STATS_PYSIDE6_ROOT_ALLOWED = {
+    "__init__.py",
+    "stats_core.py",
+    "stats_main_window.py",
+    "stats_ui_pyside6.py",
+    "stats_workers.py",
+}
+STATS_PYSIDE6_REMOVED_ROOT_MODULES = (
+    "baseline_vs_zero",
+    "dv_policies",
+    "dv_variants",
+    "group_harmonics",
+    "lmm_reporting",
+    "reporting_summary",
+    "shared_harmonics",
+    "stats_controller",
+    "stats_data_loader",
+    "stats_export_formatting",
+    "stats_group_contrasts",
+    "stats_manual_exclusion_dialog",
+    "stats_missingness",
+    "stats_multigroup_ids",
+    "stats_multigroup_scan",
+    "stats_outlier_exclusion",
+    "stats_qc_exclusion",
+    "stats_qc_reports",
+    "stats_run_report",
+    "stats_subjects",
+    "stats_window_support",
+    "summary_utils",
+)
+STATS_PYSIDE6_PACKAGE_IMPORT_RE = re.compile(
+    r"^\s*from\s+Tools\.Stats\.PySide6\s+import\s+(?P<imports>.+)$"
+)
+
 
 @dataclass(frozen=True)
 class Issue:
@@ -365,6 +401,72 @@ def check_added_prints() -> list[Issue]:
     return issues
 
 
+def check_stats_pyside6_structure() -> list[Issue]:
+    issues: list[Issue] = []
+    removed_root_paths = {
+        f"Tools.Stats.PySide6.{module}": module
+        for module in STATS_PYSIDE6_REMOVED_ROOT_MODULES
+    }
+
+    for path in _tracked_and_untracked_files():
+        normalized = _normalize(path)
+        absolute = REPO_ROOT / normalized
+        if not absolute.exists():
+            continue
+
+        if (
+            normalized.startswith(f"{STATS_PYSIDE6_ROOT}/")
+            and _is_python(normalized)
+            and "/" not in normalized.removeprefix(f"{STATS_PYSIDE6_ROOT}/")
+        ):
+            filename = Path(normalized).name
+            if filename not in STATS_PYSIDE6_ROOT_ALLOWED:
+                issues.append(
+                    Issue(
+                        "stats-pyside6",
+                        normalized,
+                        None,
+                        "unexpected root Stats PySide6 module; place implementation in a functional subpackage or update the allowlist with rationale",
+                    )
+                )
+
+        if not _is_python(normalized):
+            continue
+        if normalized == "scripts/agent_audit.py":
+            continue
+
+        for line_no, line in enumerate(_read_text(normalized), start=1):
+            for import_path, module in removed_root_paths.items():
+                if import_path in line:
+                    issues.append(
+                        Issue(
+                            "stats-pyside6",
+                            normalized,
+                            line_no,
+                            f"old root Stats PySide6 import {import_path}; import the functional subpackage module instead",
+                        )
+                    )
+
+            package_import = STATS_PYSIDE6_PACKAGE_IMPORT_RE.match(line)
+            if not package_import:
+                continue
+            imported_names = {
+                item.strip().split(" as ", 1)[0].strip()
+                for item in package_import.group("imports").split(",")
+            }
+            for module in STATS_PYSIDE6_REMOVED_ROOT_MODULES:
+                if module in imported_names:
+                    issues.append(
+                        Issue(
+                            "stats-pyside6",
+                            normalized,
+                            line_no,
+                            f"old root Stats PySide6 package import {module}; import Tools.Stats.PySide6.analysis/data/qc/reporting/ui module instead",
+                        )
+                    )
+    return issues
+
+
 CHECKS = {
     "agent-harness": check_agent_harness,
     "protected": check_protected_edits,
@@ -373,6 +475,7 @@ CHECKS = {
     "gui": check_gui_imports,
     "paths": check_added_paths,
     "prints": check_added_prints,
+    "stats-pyside6": check_stats_pyside6_structure,
 }
 
 

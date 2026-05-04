@@ -30,6 +30,7 @@ Rules:
 - Keep GUI imports PySide6-only.
 - Keep public Stats entry points stable while compatibility shims exist.
 - Add new analysis logic under the functional subpackage that owns it, and expose stable caller-facing surfaces through the package facade when needed.
+- Run `python scripts/agent_audit.py --check stats-pyside6` after Stats PySide6 structural changes; it flags unexpected root modules and imports from removed root shims.
 - Use focused tests around changed data transformations and exports.
 
 Useful tests:

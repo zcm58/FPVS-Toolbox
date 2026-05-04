@@ -70,6 +70,14 @@ Use the narrowest module that matches the behavior being changed:
 * Preserve existing DataFrame columns, metadata keys, workbook sheets, and log text unless the feature explicitly changes them.
 * Put shared constants, enums, and lightweight data structures in `common/`; keep project scanning in `data/`, QC rules in `qc/`, and workbook/report text in `reporting/`.
 
+Structural enforcement:
+
+```powershell
+python scripts/agent_audit.py --check stats-pyside6
+```
+
+This check rejects unexpected root-level Stats PySide6 modules and imports from removed root compatibility shims.
+
 ### Pipeline flow
 
 `Analyze` button -> `StatsController` launches pipeline -> `StatsWorker` executes legacy stats code ->
