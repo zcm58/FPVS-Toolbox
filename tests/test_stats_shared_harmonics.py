@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from Tools.Stats.PySide6.shared_harmonics import (
+from Tools.Stats.PySide6.analysis.shared_harmonics import (
     _select_two_consecutive_significant,
     intersect_condition_harmonics,
 )

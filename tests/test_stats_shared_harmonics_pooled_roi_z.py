@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from Tools.Stats.Legacy.stats_analysis import _match_freq_column
-from Tools.Stats.PySide6.shared_harmonics import (
+from Tools.Stats.PySide6.analysis.shared_harmonics import (
     CONDITION_COMBINATION_RULE,
     compute_shared_harmonics,
 )

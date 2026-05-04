@@ -96,14 +96,14 @@ from Tools.Stats.PySide6.stats_data_loader import (
 from Tools.Stats.PySide6.reporting.stats_logging import format_log_line, format_section_header
 from Tools.Stats.PySide6.stats_missingness import export_missingness_workbook
 from Tools.Stats.PySide6.stats_group_contrasts import export_group_contrasts_workbook
-from Tools.Stats.PySide6.baseline_vs_zero import export_baseline_vs_zero_results_to_excel
+from Tools.Stats.PySide6.analysis.baseline_vs_zero import export_baseline_vs_zero_results_to_excel
 from Tools.Stats.PySide6.reporting.stats_export_formatting import (
     apply_baseline_vs_zero_number_formats,
     apply_lmm_number_formats_and_metadata,
     apply_rm_anova_pvalue_number_formats,
     log_rm_anova_p_minima,
 )
-from Tools.Stats.PySide6.stats_qc_reports import export_qc_context_workbook
+from Tools.Stats.PySide6.qc.stats_qc_reports import export_qc_context_workbook
 from Tools.Stats.PySide6.stats_workers import StatsWorker
 from Tools.Stats.PySide6 import stats_workers as stats_worker_funcs
 from Tools.Stats.PySide6.dv_policies import (
@@ -115,7 +115,7 @@ from Tools.Stats.PySide6.dv_policies import (
     LEGACY_POLICY_NAME,
     ROSSION_POLICY_NAME,
 )
-from Tools.Stats.PySide6.dv_variants import export_dv_variants_workbook
+from Tools.Stats.PySide6.analysis.dv_variants import export_dv_variants_workbook
 from Tools.Stats.PySide6.stats_outlier_exclusion import (
     build_flagged_details_map,
     build_flagged_participant_summary,
@@ -126,7 +126,7 @@ from Tools.Stats.PySide6.stats_outlier_exclusion import (
     format_flag_types_display,
     format_worst_value_display,
 )
-from Tools.Stats.PySide6.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
+from Tools.Stats.PySide6.ui.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
 from Tools.Stats.PySide6.stats_qc_exclusion import (
     QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
     QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,

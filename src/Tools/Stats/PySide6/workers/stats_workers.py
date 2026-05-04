@@ -52,14 +52,14 @@ from Tools.Stats.PySide6.dv_policies import (
     normalize_dv_policy,
     prepare_summed_bca_data,
 )
-from Tools.Stats.PySide6.dv_variants import compute_dv_variants_payload
+from Tools.Stats.PySide6.analysis.dv_variants import compute_dv_variants_payload
 from Tools.Stats.PySide6.stats_group_contrasts import normalize_group_contrasts_table
 from Tools.Stats.PySide6.stats_missingness import compute_complete_case_subjects, compute_missingness
 from Tools.Stats.PySide6.stats_multigroup_ids import (
     extract_multigroup_pid,
     normalize_multigroup_pid,
 )
-from Tools.Stats.PySide6.shared_harmonics import (
+from Tools.Stats.PySide6.analysis.shared_harmonics import (
     DEFAULT_Z_THRESH,
     compute_shared_harmonics,
     export_shared_harmonics_summary,
@@ -84,7 +84,7 @@ from Tools.Stats.PySide6.stats_qc_exclusion import (
 )
 from Tools.Stats.PySide6.stats_run_report import StatsRunReport
 from Tools.Stats.PySide6.stats_subjects import canonical_subject_id
-from Tools.Stats.PySide6.baseline_vs_zero import run_baseline_vs_zero_tests
+from Tools.Stats.PySide6.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
 from Tools.Stats.PySide6.reporting_summary import build_rm_anova_report_path, build_rm_anova_text_report
 from Tools.Stats.PySide6.reporting.lmm_reporting import (
     attach_lmm_run_metadata,
