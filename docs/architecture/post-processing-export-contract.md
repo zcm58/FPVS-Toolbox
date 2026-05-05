@@ -1,8 +1,10 @@
 # Post-Processing Export Contract
 
-This page documents the current post-processing and Excel export behavior before direct callers are migrated away from `Legacy_App.post_process`. Refactors must preserve these outputs exactly unless a future task explicitly changes the processing pipeline.
+This page documents the current post-processing and Excel export behavior before direct callers are migrated away from historical package paths. Refactors must preserve these outputs exactly unless a future task explicitly changes the processing pipeline.
 
 ## Entry Contract
+
+Active post-export adapter imports should use `Main_App.exports.post_export_adapter`. The temporary `Main_App.PySide6_App.adapters.post_export_adapter` path is compatibility-only during folder retirement.
 
 `post_process(app, condition_labels_present)` expects an app-like object with:
 

@@ -84,7 +84,7 @@ def _install_worker_stubs(monkeypatch, raw, capture):
     fake_loader.load_eeg_file = lambda _app, _path, ref_pair: raw
     monkeypatch.setitem(sys.modules, "Main_App.io.load_utils", fake_loader)
 
-    fake_adapter = types.ModuleType("Main_App.PySide6_App.adapters.post_export_adapter")
+    fake_adapter = types.ModuleType("Main_App.exports.post_export_adapter")
 
     class LegacyCtx:
         def __init__(self, **kwargs):
@@ -96,7 +96,7 @@ def _install_worker_stubs(monkeypatch, raw, capture):
 
     fake_adapter.LegacyCtx = LegacyCtx
     fake_adapter.run_post_export = run_post_export
-    monkeypatch.setitem(sys.modules, "Main_App.PySide6_App.adapters.post_export_adapter", fake_adapter)
+    monkeypatch.setitem(sys.modules, "Main_App.exports.post_export_adapter", fake_adapter)
 
     monkeypatch.setattr(process_runner, "backend_preprocess", types.SimpleNamespace(
         begin_preproc_audit=lambda *_a, **_k: {"ok": True},

@@ -63,7 +63,7 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
         lambda _app, _filepath, ref_pair=None: raw.copy(),
     )
     monkeypatch.setattr(
-        "Main_App.PySide6_App.adapters.post_export_adapter.LegacyCtx",
+        "Main_App.exports.post_export_adapter.LegacyCtx",
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
 
@@ -72,7 +72,7 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
         return 1
 
     monkeypatch.setattr(
-        "Main_App.PySide6_App.adapters.post_export_adapter.run_post_export",
+        "Main_App.exports.post_export_adapter.run_post_export",
         _capture_post_export,
     )
     monkeypatch.setattr(process_runner, "compute_fft_crop_from_events", lambda **_kwargs: (crop_results, 4, []))

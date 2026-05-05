@@ -14,6 +14,7 @@ src/Main_App/
   projects/       # Project model, project settings, project manager workflows
   workers/        # Qt workers, multiprocessing bridge, process runner adapters
   diagnostics/    # Audits, event-time lock reports, debug/reporting helpers
+  exports/        # Post-processing/export adapters and export-facing helpers
   shared/         # Small cross-cutting helpers that do not fit a domain yet
   compatibility/  # Temporary wrappers for stale imports during migrations
 ```
@@ -57,3 +58,8 @@ update-manager implementations while GUI smoke tests protect behavior.
 import surface. It delegates preprocessing audit helpers and event-time lock
 reporting to existing implementations while repo-evaluation scripts remain in
 `scripts/` and `.agents/skills/`.
+
+`src/Main_App/exports/` is now the canonical Main App post-export adapter import
+surface. It owns the adapter that turns process/worker payloads into shared
+post-processing exports while workbook generation remains protected by the
+post-processing export contract.

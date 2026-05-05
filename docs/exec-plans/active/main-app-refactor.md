@@ -92,6 +92,19 @@ Latest GUI utility retirement slice:
 - Passed: `git grep -n "Main_App.PySide6_App.utils.op_guard\|Main_App.PySide6_App.utils.paths" -- src tests scripts` found no matches.
 - Next candidate: move post-export adapter implementation to `Main_App.exports.post_export_adapter`.
 
+Latest export adapter retirement slice:
+
+- Refactor completed: post-export adapter implementation now lives in `src/Main_App/exports/post_export_adapter.py`.
+- Temporary wrapper remains in `src/Main_App/PySide6_App/adapters/post_export_adapter.py`.
+- Runtime and tests now import `Main_App.exports.post_export_adapter` from the process runner, Qt processing worker, post-export adapter tests, postprocess worker tests, and process-runner contract tests.
+- Behavior-preservation rule: no post-processing math, workbook generation, Excel filenames, sheet names, column order, formatting, FFT-neighbor rows, worker payloads, project paths, completion behavior, or export error behavior changed.
+- Passed: `python -m py_compile src\Main_App\exports\__init__.py src\Main_App\exports\post_export_adapter.py src\Main_App\PySide6_App\adapters\post_export_adapter.py src\Main_App\Performance\process_runner.py src\Main_App\PySide6_App\workers\processing_worker.py tests\test_post_export_adapter_no_fif.py tests\test_postprocess_worker_qt.py tests\test_process_runner_epoch_contract.py src\Main_App\Performance\test_process_runner_fft_crop.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_post_export_adapter_no_fif.py tests\test_postprocess_worker_qt.py tests\test_postprocess_worker_excel_payload.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_process_runner_epoch_contract.py tests\test_main_window_processing.py tests\test_main_window_excel_popup_logic.py -q`
+- Passed: `$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'; $env:PYTHONPATH='src'; .venv\Scripts\python -m pytest src\Main_App\Performance\test_process_runner_fft_crop.py -q --basetemp=test_tmp\pytest-perf-fft`
+- Passed: `git grep -n "PySide6_App.adapters.post_export_adapter\|Main_App.PySide6_App.adapters" -- src tests scripts` found no active matches.
+- Next candidate: move lower-risk project/settings implementations behind `Main_App.projects` before touching preprocessing or processing-controller internals.
+
 Latest slice verification:
 
 - Passed: `python -m py_compile src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\event_map.py`

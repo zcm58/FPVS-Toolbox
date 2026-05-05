@@ -12,7 +12,7 @@ def app():
 
 def test_post_worker_keeps_ui_responsive(app, qtbot, monkeypatch):
     from Main_App.gui.main_window import MainWindow
-    import Main_App.PySide6_App.adapters.post_export_adapter as adapter
+    import Main_App.exports.post_export_adapter as adapter
     # Stub heavy legacy call
     monkeypatch.setattr(adapter, "run_post_export", lambda ctx, labels: (QThread.msleep(50) or 0))
 

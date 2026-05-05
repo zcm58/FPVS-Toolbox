@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from pathlib import Path
 import time
 import logging
-from Main_App.PySide6_App.adapters.post_export_adapter import LegacyCtx, run_post_export
+from Main_App.exports.post_export_adapter import LegacyCtx, run_post_export
 
 
 logger = logging.getLogger(__name__)

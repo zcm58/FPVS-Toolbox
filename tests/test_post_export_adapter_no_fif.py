@@ -1,5 +1,5 @@
-import Main_App.PySide6_App.adapters.post_export_adapter as adapter
-from Main_App.PySide6_App.adapters.post_export_adapter import LegacyCtx, run_post_export
+import Main_App.exports.post_export_adapter as adapter
+from Main_App.exports.post_export_adapter import LegacyCtx, run_post_export
 
 
 class _EpochsThatMustNotSave:
