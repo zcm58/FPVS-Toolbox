@@ -169,9 +169,23 @@ Latest Main App workers layout slice:
 - Update-check cleanup completed: launch-time update checks are skipped under pytest, deleted Qt signal sources are ignored safely, and focused GUI pytest no longer prints the proxy traceback after selected tests pass.
 - Passed: `.venv\Scripts\python -m pytest tests\test_update_manager_manual_force.py tests\test_main_window_processing.py tests\test_single_file_process_mode.py tests\test_worker_integration.py tests\test_mp_runner_bridge_full_pipeline_smoke.py tests\test_postprocess_worker_excel_payload.py -q`
 
+Latest Main App projects layout slice:
+
+- Refactor completed: `src/Main_App/projects/` was added as the canonical active project import surface.
+- Runtime/test imports now use `Main_App.projects` for the project model, project manager, project metadata, projects-root helpers, and preprocessing-settings normalization/constants.
+- Behavior-preservation rule: implementations remain in `src/Main_App/PySide6_App/Backend/` and `src/Main_App/PySide6_App/config/projects_root.py` for this slice; no project JSON schema, folder layout, settings normalization, project-root behavior, dialog behavior, preprocessing defaults, exports, or output formats are changed.
+- Passed: `python -m py_compile src\Main_App\projects\__init__.py src\Main_App\projects\project.py src\Main_App\projects\project_manager.py src\Main_App\projects\project_metadata.py src\Main_App\projects\preprocessing_settings.py src\Main_App\projects\projects_root.py src\Main_App\PySide6_App\Backend\project.py src\Main_App\PySide6_App\Backend\project_manager.py src\Main_App\PySide6_App\Backend\project_metadata.py src\Main_App\PySide6_App\Backend\preprocessing_settings.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\settings_panel.py src\Main_App\__init__.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_project_settings_roundtrip.py tests\test_project_results_layout.py tests\test_project_enumeration_io.py tests\test_project_scan_job.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_preprocessing_settings.py tests\test_preproc_persistence.py tests\test_project_bandpass_warning.py tests\test_project_legacy_bandpass_migration.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_worker_integration.py tests\test_open_existing_project_dialog.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_plot_generator_multigroup_smoke.py tests\test_stats_multigroup_smoke.py tests\test_stats_project_paths.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
+- Passed: `git diff --check` with line-ending warnings only.
+
 Next refactor slice candidate:
 
-- Continue package-layout migration with another import-surface-only slice, likely `Main_App/projects/` for project model/settings imports. Keep wrappers until imports are stable.
+- Continue package-layout migration with another import-surface-only slice, likely `Main_App/gui/` for stable GUI shell imports or `Main_App/diagnostics/` for audit/debug/reporting helpers. Keep wrappers until imports are stable.
 
 Latest processing mixin slice:
 

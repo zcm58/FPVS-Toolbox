@@ -15,7 +15,7 @@ def app():
 
 def test_project_settings_roundtrip(tmp_path, qtbot, monkeypatch, app):
     # Lazy imports to avoid import cost unless PySide6 is present
-    from Main_App.PySide6_App.Backend.project import Project
+    from Main_App.projects.project import Project
     from Main_App.PySide6_App.GUI.main_window import MainWindow
 
     # Silence dialogs

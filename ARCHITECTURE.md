@@ -30,6 +30,7 @@ Primary areas:
 - `src/Main_App/PySide6_App/`: current PySide6 application shell, GUI, project management, processing controllers, and adapters. Shell-specific GUI helpers such as `GUI/event_map.py` should stay here instead of growing `GUI/main_window.py`.
 - `src/Main_App/processing/`: canonical Main App processing import surface. It currently delegates preprocessing to the existing PySide6 backend implementation while the repo moves toward purpose-based Main App folders.
 - `src/Main_App/io/`: canonical Main App I/O import surface. It currently delegates BDF loading to the existing shared implementation while the repo moves toward purpose-based Main App folders.
+- `src/Main_App/projects/`: canonical Main App project import surface. It currently delegates project model, metadata, manager, projects-root, and preprocessing-settings behavior to existing implementations.
 - `src/Main_App/workers/`: canonical Main App worker import surface. It currently delegates Qt worker and process-runner behavior to existing PySide6 and Performance implementations.
 - `src/Main_App/Shared/`: current shared owners for cross-path behavior such as the canonical BDF loader, processing mixin, settings helpers, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.

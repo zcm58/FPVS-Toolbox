@@ -84,8 +84,8 @@ def install_messagebox_logger(debug: bool) -> None:
     # If you want QMessageBox on errors, wire it inside the PySide6 StatusBar or main window.
 
 
-# Re-export Project API from PySide6 backend
-from .PySide6_App.Backend import Project  # noqa: E402  (safe, no Legacy)
+# Re-export Project API from the canonical project import surface.
+from .projects import Project  # noqa: E402  (safe, no Legacy)
 
 __all__ = [
     # PySide6-first exports

@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import Main_App.PySide6_App.Backend.project as project_module
-from Main_App.PySide6_App.Backend.project import Project
+import Main_App.projects.project as project_module
+from Main_App.projects.project import Project
 
 
 def _write_manifest(path: Path, payload: dict) -> None:

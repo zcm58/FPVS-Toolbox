@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from Main_App.PySide6_App.Backend.preprocessing_settings import normalize_preprocessing_settings
+from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
 
 
 def test_defaults_use_expected_bandpass():

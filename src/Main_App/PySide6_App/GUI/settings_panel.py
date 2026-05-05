@@ -29,9 +29,9 @@ from Main_App.PySide6_App.widgets import (
     make_form_layout,
 )
 from .roi_settings_editor import ROISettingsEditor
-from ..config.projects_root import changeProjectsRoot
-from ..Backend.project import Project
-from ..Backend.preprocessing_settings import PREPROCESSING_DEFAULTS, normalize_preprocessing_settings
+from Main_App.projects.projects_root import changeProjectsRoot
+from Main_App.projects.project import Project
+from Main_App.projects.preprocessing_settings import PREPROCESSING_DEFAULTS, normalize_preprocessing_settings
 
 
 class SettingsPanel(QWidget):

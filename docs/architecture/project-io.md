@@ -4,6 +4,9 @@ Project-aware workflows should resolve paths from the active project root, not f
 
 Primary paths:
 
+- `src/Main_App/projects/` is the canonical active import surface for project
+  model, metadata, manager, projects-root, and preprocessing-settings behavior.
+  It delegates to existing implementations during the package-layout migration.
 - `src/Main_App/PySide6_App/Backend/project.py`
 - `src/Main_App/PySide6_App/Backend/project_manager.py`
 - `src/Main_App/PySide6_App/Backend/project_metadata.py`
@@ -24,6 +27,8 @@ FPVS Toolbox uses a strict hybrid settings model:
 Rules:
 
 - Preserve existing output formats, filenames, sheet names, and folder layout unless explicitly asked to change them.
+- Active callers should import project model/settings/manager helpers through
+  `Main_App.projects`.
 - Use `tmp_path` in tests instead of hard-coded local paths.
 - Handle `QFileDialog` Cancel without exceptions or stale UI state.
 - Treat repeated operations and existing output files as normal user behavior.

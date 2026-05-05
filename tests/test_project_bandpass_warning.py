@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from Main_App.PySide6_App.Backend.project import Project, _LEGACY_BANDPASS_WARNED
+from Main_App.projects.project import Project, _LEGACY_BANDPASS_WARNED
 
 
 def test_legacy_bandpass_warns_once_per_project(tmp_path, capsys):

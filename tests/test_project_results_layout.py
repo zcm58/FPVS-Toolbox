@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from Main_App.PySide6_App.Backend.project import (
+from Main_App.projects.project import (
     EXCEL_SUBFOLDER_NAME,
     SNR_SUBFOLDER_NAME,
     STATS_SUBFOLDER_NAME,

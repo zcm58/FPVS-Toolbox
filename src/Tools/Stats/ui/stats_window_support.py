@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 
 # Qt imports proof: QAction from PySide6.QtGui
 from Main_App import SettingsManager
-from Main_App.PySide6_App.Backend.project import (
+from Main_App.projects.project import (
     EXCEL_SUBFOLDER_NAME,
     STATS_SUBFOLDER_NAME,
 )

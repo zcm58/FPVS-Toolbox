@@ -9,7 +9,7 @@ pd = pytest.importorskip("pandas")
 
 try:
     from PySide6.QtWidgets import QMessageBox
-    from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
+    from Main_App.projects.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
     from Tools.Stats.ui import stats_window as stats_mod
     from Tools.Stats.workers import stats_workers
     from Tools.Stats.controller.stats_controller import WORKER_FN_BY_STEP, StepId

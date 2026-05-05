@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Dict
 
-from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME
+from Main_App.projects.project import EXCEL_SUBFOLDER_NAME
 
 logger = logging.getLogger(__name__)
 

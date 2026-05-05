@@ -16,8 +16,8 @@ if not _module_available("PySide6") or not _module_available("pytestqt"):
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-import Main_App.PySide6_App.Backend.project_manager as project_manager  # noqa: E402
-import Main_App.PySide6_App.config.projects_root as projects_root  # noqa: E402
+import Main_App.projects.project_manager as project_manager  # noqa: E402
+import Main_App.projects.projects_root as projects_root  # noqa: E402
 import Main_App.PySide6_App.GUI.update_manager as update_manager  # noqa: E402
 from Main_App.Shared.settings_manager import SettingsManager  # noqa: E402
 

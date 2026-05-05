@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Callable, Final
 
-from Main_App.PySide6_App.Backend.project import STATS_SUBFOLDER_NAME
+from Main_App.projects.project import STATS_SUBFOLDER_NAME
 
 
 class PipelineId(Enum):

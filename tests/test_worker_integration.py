@@ -11,7 +11,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from Main_App.PySide6_App.Backend.project import Project
+from Main_App.projects.project import Project
 import Main_App.PySide6_App.GUI.main_window as main_window_module
 from Main_App.PySide6_App.GUI.main_window import MainWindow
 from Main_App.workers.mp_runner_bridge import MpRunnerBridge

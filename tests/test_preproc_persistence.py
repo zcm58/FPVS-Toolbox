@@ -7,8 +7,8 @@ import pytest
 if importlib.util.find_spec("PySide6") is None:
     pytest.skip("PySide6 not available", allow_module_level=True)
 
-from Main_App.PySide6_App.Backend.project import Project
-from Main_App.PySide6_App.Backend.preprocessing_settings import PREPROCESSING_CANONICAL_KEYS
+from Main_App.projects.project import Project
+from Main_App.projects.preprocessing_settings import PREPROCESSING_CANONICAL_KEYS
 
 
 def test_normalization_and_roundtrip(tmp_path):

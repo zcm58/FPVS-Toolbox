@@ -103,12 +103,12 @@ def _should_show_no_excel_popup(
 import config
 from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.Shared.settings_manager import SettingsManager
-from Main_App.PySide6_App.Backend import Project
+from Main_App.projects import Project
 from Main_App.PySide6_App.Backend.processing_controller import (
     _animate_progress_to,
     prepare_batch_files,
 )
-from Main_App.PySide6_App.Backend.project_manager import (
+from Main_App.projects.project_manager import (
     edit_project_settings,
     loadProject,
     new_project,
@@ -116,7 +116,7 @@ from Main_App.PySide6_App.Backend.project_manager import (
     openProjectPath,
     select_projects_root,
 )
-from Main_App.PySide6_App.Backend.preprocessing_settings import (
+from Main_App.projects.preprocessing_settings import (
     normalize_preprocessing_settings,
     PREPROCESSING_CANONICAL_KEYS,
 )

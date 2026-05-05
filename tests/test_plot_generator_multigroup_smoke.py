@@ -8,7 +8,7 @@ import pytest
 try:
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QMessageBox
-    from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME
+    from Main_App.projects.project import EXCEL_SUBFOLDER_NAME
     from Tools.Plot_Generator import gui as plot_gui
     from Tools.Plot_Generator import worker as plot_worker
 except ModuleNotFoundError:  # pragma: no cover - optional dependency

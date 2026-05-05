@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from Main_App.PySide6_App.Backend.project import Project
-from Main_App.PySide6_App.Backend.project_metadata import enumerate_project_metadata
+from Main_App.projects.project import Project
+from Main_App.projects.project_metadata import enumerate_project_metadata
 
 
 def _write_project(root: Path, name: str) -> Path:

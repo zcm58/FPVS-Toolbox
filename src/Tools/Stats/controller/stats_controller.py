@@ -34,7 +34,7 @@ from ..data.stats_data_loader import (
     ScanError,
 )
 from ..data.stats_subjects import canonical_group_label
-from Main_App.PySide6_App.Backend.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
+from Main_App.projects.project import EXCEL_SUBFOLDER_NAME, STATS_SUBFOLDER_NAME
 from ..reporting.stats_run_report import StatsRunReport
 
 logger = logging.getLogger(__name__)

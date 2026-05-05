@@ -10,7 +10,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 
 from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
-from Main_App.PySide6_App.Backend.project import Project
+from Main_App.projects.project import Project
 from Main_App.PySide6_App.GUI.main_window import MainWindow
 from Main_App.PySide6_App.widgets import SectionCard
 import Main_App.PySide6_App.GUI.settings_panel as settings_panel

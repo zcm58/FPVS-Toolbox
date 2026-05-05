@@ -36,12 +36,12 @@ from PySide6.QtWidgets import QColorDialog
 
 
 from Main_App import SettingsManager
-from Main_App.PySide6_App.Backend.project import (
+from Main_App.projects.project import (
     EXCEL_SUBFOLDER_NAME,
     SNR_SUBFOLDER_NAME,
     Project,
 )
-from Main_App.PySide6_App.Backend.project_metadata import read_project_metadata
+from Main_App.projects.project_metadata import read_project_metadata
 from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
 from Tools.Plot_Generator.manifest_utils import (

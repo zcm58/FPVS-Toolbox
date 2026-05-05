@@ -75,8 +75,8 @@ _ensure_pyside6_stubs()
 try:
     from ..Main_App.io.load_utils import load_eeg_file
     from ..Main_App.processing.preprocess import perform_preprocessing
-    from ..Main_App.PySide6_App.Backend.project import Project
-    from ..Main_App.PySide6_App.Backend.preprocessing_settings import (
+    from ..Main_App.projects.project import Project
+    from ..Main_App.projects.preprocessing_settings import (
         normalize_preprocessing_settings,
     )
     BACKEND_IMPORT_ERROR: Exception | None = None
