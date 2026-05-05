@@ -45,6 +45,34 @@ The old `src/Tools/Stats/Legacy/**` compatibility namespace has been removed.
 The moved statistical engines now live under the active `src/Tools/Stats/`
 functional packages listed above.
 
+## Main_App Legacy_App migration inventory (2026-05-05)
+
+`src/Main_App/Legacy_App/**` is a temporary migration boundary, not a permanent architecture. Targeted edits are allowed for active refactors only when they preserve the processing pipeline, processing order, data formats, and exports.
+
+Already has current-app replacement or bridge:
+
+- `settings_manager.py`: current shared implementation exists at `src/Main_App/Shared/settings_manager.py`; keep compatibility imports stable while remaining callers are migrated.
+- `eeg_preprocessing.py`: current PySide6 preprocessing implementation exists at `src/Main_App/PySide6_App/Backend/preprocess.py`; legacy callers remain through `processing_utils`.
+- `post_process.py`: `src/Main_App/Shared/post_process.py` and `src/Main_App/PySide6_App/adapters/post_export_adapter.py` are migration bridges, but export behavior is not fully independent yet.
+
+Still directly used by current app code:
+
+- `debug_utils.py`: `main_window.py` routes legacy messagebox behavior through Qt adapters.
+- `file_selection.py`: `MainWindow` still inherits `FileSelectionMixin`.
+- `processing_utils.py`: `MainWindow` still inherits `ProcessingMixin` for the single/legacy processing path.
+- `post_process.py`: imported by `main_window.py`, `processing_controller.py`, and the post-export adapter.
+- `fft_crop_utils.py`: imported by `Performance/process_runner.py`, legacy processing, and post-processing bridges.
+- `post_process_excel.py`: workbook helper dependency for legacy and shared post-processing.
+- `load_utils.py`: still used transitively by `processing_utils.py`.
+
+Source Localization or quarantine-related:
+
+- `eloreta_launcher.py`: referenced by the PySide6 Tools menu, but Source Localization remains unavailable/quarantined unless explicitly restored.
+
+Next migration slice:
+
+- Extract event-map GUI row behavior from `src/Main_App/PySide6_App/GUI/main_window.py` into a focused current-app GUI module. This does not touch the processing pipeline and should preserve existing `MainWindow` method names used by tests.
+
 ## Newly quarantined after follow-up cleanup
 
 - `src/Main_App/Legacy_App/app_logic.py` -> moved to `src/quarantine/Main_App/Legacy_App/app_logic.py`

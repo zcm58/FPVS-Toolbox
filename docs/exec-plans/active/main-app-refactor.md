@@ -6,8 +6,8 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 
 ## Current Status
 
-- Phase: harness setup.
-- Scope: documentation and audit scaffolding only.
+- Phase: main app map refresh.
+- Scope: documentation and migration inventory only.
 - Behavior changes: none.
 - `Legacy_App` is a temporary migration boundary, not a permanent architecture. Targeted edits are allowed for active refactors only when they preserve the processing pipeline, processing order, data formats, and exports.
 
@@ -26,12 +26,14 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
    - Add this active plan and execution-plan directory map.
    - Link execution plans from `ARCHITECTURE.md`, `AGENTS.md`, and `docs/agent-index.md`.
    - Add low-noise audit coverage so the plan scaffold remains discoverable.
+   - Status: complete.
 
 2. Main app map refresh
    - Update focused architecture docs only after inspecting the current `Main_App` structure.
    - Identify small behavior-preserving refactor slices with clear tests or smoke checks.
    - Inventory which `Legacy_App` behaviors are still runtime-used and which have current `PySide6_App`, `Shared`, `Performance`, or adapter replacements.
    - Allow targeted `Legacy_App` edits only when they directly support migration and do not alter the processing pipeline.
+   - Status: active.
 
 3. Refactor slices
    - Move one responsibility at a time.
@@ -55,3 +57,11 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 - Keep documentation requirements explicit, but enforce only stable, low-noise invariants in `scripts/agent_audit.py`.
 - Do not add broad "docs changed with code" CI failures until the rule can be scoped narrowly enough to avoid false positives.
 - `Legacy_App` is a migration boundary. Do not preserve the label for its own sake once a runtime-used behavior has a clear current-app home and equivalent tests.
+- First code refactor slice: extract event-map GUI row behavior from `src/Main_App/PySide6_App/GUI/main_window.py` into a focused current-app GUI module while preserving the existing `MainWindow` public methods used by tests.
+
+## Current Findings
+
+- `src/Main_App/PySide6_App/GUI/main_window.py` is the largest organization hotspot at about 2,179 lines.
+- Direct runtime imports still point at `Legacy_App` for post-processing, processing mixins, file selection, debug messagebox shims, FFT crop utilities, and Source Localization launcher wiring.
+- `src/Main_App/Shared/post_process.py` exists, but still imports FFT crop and workbook helpers from `Legacy_App`; treat it as a migration bridge, not a completed replacement.
+- `src/Main_App/Performance/process_runner.py` imports legacy FFT crop helpers, making FFT crop utilities a later migration candidate after coverage is confirmed.

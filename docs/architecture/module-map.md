@@ -13,13 +13,25 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 ## Main App
 
-- `src/Main_App/PySide6_App/GUI/main_window.py`: main PySide6 window shell.
-- `src/Main_App/PySide6_App/GUI/menu_bar.py`: top-level menu actions.
-- `src/Main_App/PySide6_App/GUI/style_tokens.py`: shared GUI styling tokens.
-- `src/Main_App/PySide6_App/Backend/project.py`: project model and manifest behavior.
-- `src/Main_App/PySide6_App/Backend/processing.py`: processing coordination surface.
-- `src/Main_App/PySide6_App/workers/`: worker and multiprocessing bridge code.
-- `src/Main_App/Shared/source_localization_optional.py`: disabled Source Localization availability shim.
+- `src/Main_App/PySide6_App/GUI/main_window.py`: main PySide6 shell and current refactor hotspot; event-map row behavior is the next planned extraction.
+- `src/Main_App/PySide6_App/GUI/`: menus, header/sidebar assembly, settings panel, style tokens, and shell-specific widgets.
+- `src/Main_App/PySide6_App/widgets/`: reusable PySide6 presentation primitives.
+- `src/Main_App/PySide6_App/Backend/`: project model, project manager, preprocessing settings, preprocessing implementation, and processing coordination.
+- `src/Main_App/PySide6_App/adapters/`: current-app adapter layer for runtime-used migration-boundary behavior such as post-export handling.
+- `src/Main_App/PySide6_App/workers/`: Qt workers and multiprocessing bridge code.
+- `src/Main_App/PySide6_App/utils/`: audit, path, operation guard, theme, and settings helpers.
+- `src/Main_App/PySide6_App/diagnostics/`: processing diagnostics and event-time lock reporting.
+- `src/Main_App/Performance/`: process-runner and multiprocessing support; currently still imports legacy FFT crop helpers.
+- `src/Main_App/Shared/`: shared current-app settings, source-localization availability, and migration-bridge post-processing helpers.
+- `src/Main_App/Legacy_App/`: temporary migration boundary for runtime-used behavior. Targeted edits are allowed for migration only when processing order, data formats, and exports remain unchanged.
+
+Current `Legacy_App` runtime couplings to account for before renaming or deleting modules:
+
+- `post_process` and `post_process_excel`: still drive Excel export behavior directly or through adapters.
+- `processing_utils`, `file_selection`, and `debug_utils`: still consumed by the PySide6 main window shell.
+- `fft_crop_utils`: used by performance processing and post-processing bridges.
+- `eloreta_launcher`: still referenced by the Tools menu, while Source Localization remains unavailable/quarantined.
+- `eeg_preprocessing`, `load_utils`, and `settings_manager`: have current-app replacements or bridges, but compatibility imports and transitive legacy callers still need cleanup.
 
 ## Tools
 
