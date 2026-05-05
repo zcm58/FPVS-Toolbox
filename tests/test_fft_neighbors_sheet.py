@@ -1,5 +1,5 @@
 import pytest
-from Main_App.Legacy_App.post_process_excel import (
+from Main_App.Shared.post_process_excel import (
     build_fft_neighbors_rows,
     write_results_workbook,
 )

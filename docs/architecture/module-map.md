@@ -28,7 +28,6 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 Current `Legacy_App` runtime couplings to account for before renaming or deleting modules:
 
-- `post_process_excel`: still provides workbook helper behavior used by shared post-processing.
 - `processing_utils`, `file_selection`, and `debug_utils`: still consumed by the PySide6 main window shell.
 - `eeg_preprocessing`, `load_utils`, and `settings_manager`: have current-app replacements or bridges, but compatibility imports and transitive legacy callers still need cleanup.
 
@@ -36,6 +35,7 @@ Compatibility wrappers:
 
 - `fft_crop_utils.py`: thin wrapper for `Main_App.Shared.fft_crop_utils`; current runtime imports should use the shared module.
 - `post_process.py`: thin wrapper for `Main_App.Shared.post_process`; current runtime imports should use the shared module.
+- `post_process_excel.py`: thin wrapper for `Main_App.Shared.post_process_excel`; current runtime imports should use the shared module.
 
 ## Tools
 

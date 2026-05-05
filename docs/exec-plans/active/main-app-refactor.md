@@ -71,6 +71,7 @@ Latest removal slice:
 - Passed: `python scripts\agent_audit.py`
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with only line-ending warnings.
 - Passed: `.venv\Scripts\python -m pytest tests\test_gui_preproc_dialog.py tests\test_project_settings_roundtrip.py tests\test_main_window_layout_smoke.py tests\test_startup_imports_no_customtkinter.py -q`
 - Note: the focused pytest run printed an unrelated update-check network/proxy traceback after all selected tests passed with exit code 0.
 
@@ -85,9 +86,9 @@ Latest removal slice:
 ## Current Findings
 
 - `src/Main_App/PySide6_App/GUI/main_window.py` remains the largest organization hotspot, but event-map row behavior has been extracted to a focused current-app GUI module.
-- Direct runtime imports still point at `Legacy_App` for processing mixins, file selection, debug messagebox shims, and workbook helper code.
+- Direct runtime imports still point at `Legacy_App` for processing mixins, file selection, and debug messagebox shims.
 - `src/Main_App/Shared/fft_crop_utils.py` owns FFT crop behavior; `src/Main_App/Legacy_App/fft_crop_utils.py` is now only a compatibility wrapper.
-- `src/Main_App/Shared/post_process.py` owns post-processing export behavior, but still imports workbook helpers from `Legacy_App`; treat workbook helper migration as a remaining slice.
+- `src/Main_App/Shared/post_process.py` owns post-processing export behavior and imports workbook helpers from `src/Main_App/Shared/post_process_excel.py`.
 
 Latest post-processing export slice:
 
@@ -108,7 +109,22 @@ Latest post-processing export slice:
 
 Next refactor slice candidate:
 
-- Document the current workbook helper contract, then migrate `post_process_excel` ownership out of `Legacy_App` without changing workbook sheet names, columns, formatting, FFT-neighbor rows, or output file contents.
+- Extract or wrap `file_selection` behavior behind a current-app project/file-selection module without changing file dialog behavior, project-root handling, selected input paths, or user workflow.
+
+Latest workbook-helper slice:
+
+- Documentation-first requirement: `docs/architecture/post-processing-export-contract.md` now records `build_fft_neighbors_rows` and `write_results_workbook` behavior, including FFT-neighbor metadata, workbook formatting, freeze panes, column sizing, and optional sheet creation.
+- Refactor completed: `src/Main_App/Shared/post_process_excel.py` is the current-app owner; `src/Main_App/Legacy_App/post_process_excel.py` is now a temporary compatibility wrapper.
+- Runtime/test imports now use the shared owner in shared post-processing and FFT-neighbor workbook tests.
+- Behavior-preservation check: the shared implementation matched the legacy implementation before callers were migrated.
+- Passed: `cmd /c fc /N src\Main_App\Legacy_App\post_process_excel.py src\Main_App\Shared\post_process_excel.py`
+- Passed: `python -m py_compile src\Main_App\Shared\post_process_excel.py src\Main_App\Legacy_App\post_process_excel.py src\Main_App\Shared\post_process.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_fft_neighbors_sheet.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_post_export_adapter_no_fif.py tests\test_post_process_target_freqs.py tests\test_postprocess_worker_excel_payload.py -q`
+- Passed: `git grep -n "Main_App.Legacy_App.post_process_excel" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 
 Latest FFT crop slice:
 

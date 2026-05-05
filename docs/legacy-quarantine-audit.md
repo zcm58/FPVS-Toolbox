@@ -13,7 +13,6 @@ Legend:
 - `src/Main_App/Legacy_App/eeg_preprocessing.py`
 - `src/Main_App/Legacy_App/file_selection.py`
 - `src/Main_App/Legacy_App/load_utils.py`
-- `src/Main_App/Legacy_App/post_process_excel.py`
 - `src/Main_App/Legacy_App/processing_utils.py`
 - `src/Main_App/Legacy_App/settings_manager.py`
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis.py`
@@ -51,19 +50,20 @@ Already has current-app replacement or bridge:
 - `settings_manager.py`: current shared implementation exists at `src/Main_App/Shared/settings_manager.py`; keep compatibility imports stable while remaining callers are migrated.
 - `eeg_preprocessing.py`: current PySide6 preprocessing implementation exists at `src/Main_App/PySide6_App/Backend/preprocess.py`; legacy callers remain through `processing_utils`.
 - `post_process.py`: current shared implementation exists at `src/Main_App/Shared/post_process.py`; legacy module remains as a temporary compatibility wrapper.
+- `post_process_excel.py`: current shared implementation exists at `src/Main_App/Shared/post_process_excel.py`; legacy module remains as a temporary compatibility wrapper.
 
 Still directly used by current app code:
 
 - `debug_utils.py`: `main_window.py` routes legacy messagebox behavior through Qt adapters.
 - `file_selection.py`: `MainWindow` still inherits `FileSelectionMixin`.
 - `processing_utils.py`: `MainWindow` still inherits `ProcessingMixin` for the single/legacy processing path.
-- `post_process_excel.py`: workbook helper dependency for legacy and shared post-processing.
 - `load_utils.py`: still used transitively by `processing_utils.py`.
 
 Compatibility wrappers:
 
 - `fft_crop_utils.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/fft_crop_utils.py`; current runtime callers import the shared owner.
 - `post_process.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/post_process.py`; current runtime callers import the shared owner.
+- `post_process_excel.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/post_process_excel.py`; current runtime callers import the shared owner.
 
 Recent migration slices:
 

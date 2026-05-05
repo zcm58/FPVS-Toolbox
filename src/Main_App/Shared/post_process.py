@@ -15,7 +15,7 @@ from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 from Main_App.Shared.fft_crop_utils import compute_onbin_N, compute_onbin_step
 
 
-from Main_App.Legacy_App.post_process_excel import build_fft_neighbors_rows, write_results_workbook
+from Main_App.Shared.post_process_excel import build_fft_neighbors_rows, write_results_workbook
 
 
 ODDBALL_FREQ = Fraction(6, 5)
