@@ -13,7 +13,7 @@ Source Localization is no longer a protected black box. It is quarantined dead c
 
 Rules:
 
-- Do not edit `src/Main_App/Legacy_App/**` unless the user explicitly approves it.
+- Targeted edits to `src/Main_App/Legacy_App/**` are allowed for active refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
 - Prefer thin adapters or caller-side normalization outside protected legacy folders.
 - When a feature already has a current-app replacement, prefer migrating callers away from `Legacy_App` over adding new compatibility paths.
 - Do not revive Source Localization imports, tests, or UI behavior unless the user explicitly asks to restore that feature.

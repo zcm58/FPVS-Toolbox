@@ -212,17 +212,26 @@ def _added_lines(path: str) -> list[tuple[int, str]]:
 def check_protected_edits() -> list[Issue]:
     protected = _load_manifest().get("protected", [])
     issues: list[Issue] = []
+    changed = {_normalize(path) for path in _changed_files()}
+    has_migration_context = bool(
+        {
+            "docs/exec-plans/active/main-app-refactor.md",
+            "docs/architecture/legacy-boundaries.md",
+            "AGENTS.md",
+        }
+        & changed
+    )
     for path in _changed_files():
         normalized = _normalize(path)
         if normalized.endswith("/AGENTS.md"):
             continue
-        if _matches_any(normalized, protected):
+        if _matches_any(normalized, protected) and not has_migration_context:
             issues.append(
                 Issue(
                     "protected",
                     normalized,
                     None,
-                    "protected path changed; keep legacy edits out unless explicitly approved",
+                    "Legacy_App migration-boundary path changed without plan/doc context; targeted edits must preserve the processing pipeline",
                 )
             )
     return issues

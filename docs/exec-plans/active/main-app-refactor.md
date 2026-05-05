@@ -9,7 +9,7 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 - Phase: harness setup.
 - Scope: documentation and audit scaffolding only.
 - Behavior changes: none.
-- Protected legacy edits: not allowed without explicit user approval. Treat `Legacy_App` as a temporary protected boundary, not a permanent architecture.
+- `Legacy_App` is a temporary migration boundary, not a permanent architecture. Targeted edits are allowed for active refactors only when they preserve the processing pipeline, processing order, data formats, and exports.
 
 ## PR Contract
 
@@ -31,7 +31,7 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
    - Update focused architecture docs only after inspecting the current `Main_App` structure.
    - Identify small behavior-preserving refactor slices with clear tests or smoke checks.
    - Inventory which `Legacy_App` behaviors are still runtime-used and which have current `PySide6_App`, `Shared`, `Performance`, or adapter replacements.
-   - Avoid protected legacy edits unless explicitly approved.
+   - Allow targeted `Legacy_App` edits only when they directly support migration and do not alter the processing pipeline.
 
 3. Refactor slices
    - Move one responsibility at a time.
@@ -48,7 +48,7 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 - `python scripts/agent_audit.py`
 - Relevant skill-local audit scripts from `docs/agent-index.md`
 - Targeted pytest or pytest-qt smoke tests for changed behavior
-- `git diff --name-only` to confirm protected legacy paths remain untouched
+- `git diff --name-only` to identify any `Legacy_App` edits and confirm they were targeted, documented, and pipeline-preserving
 
 ## Decisions
 

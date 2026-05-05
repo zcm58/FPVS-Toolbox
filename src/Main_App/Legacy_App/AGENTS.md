@@ -9,14 +9,14 @@ Run boundary checks before reading or editing broadly:
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 ```
 
-This is protected legacy code. Do not edit files here unless the user explicitly approves it.
+This is active migration-boundary code. Targeted refactor edits are allowed, but they must preserve the processing pipeline, processing order, data formats, and exports exactly.
 
 Processing should always occur on a separate thread from the GUI
 so that it does not become unresponsive. 
 
-**The eeg_preprocessing.py file should not be edited for any reason.**
+**eeg_preprocessing.py is high-risk pipeline code. Edit only for a targeted migration/refactor task, and do not change preprocessing behavior.**
 
-**post_process.py should not be edited for any reason.**
+**post_process.py is high-risk export pipeline code. Edit only for a targeted migration/refactor task, and do not change metric calculation, output formats, filenames, sheet names, or export behavior.**
 
 The main_app.py GUI should not be altered in any way unless given specific
 instructions to do so.

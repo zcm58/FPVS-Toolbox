@@ -2,7 +2,7 @@
 
 Use `$legacy-boundary-review`.
 
-Goal: keep protected legacy behavior stable while changing caller-side code.
+Goal: keep runtime-used legacy behavior stable while migrating callers and small responsibilities toward clearer current-app modules.
 
 Checks:
 
@@ -14,6 +14,6 @@ git diff --name-only
 
 Requirements:
 
-- Do not edit `src/Main_App/Legacy_App/**` unless explicitly approved.
+- Targeted edits to `src/Main_App/Legacy_App/**` are allowed for active refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
 - Do not revive Source Localization dead code unless explicitly requested.
-- Prefer adapters outside protected folders.
+- Prefer adapters or current-app modules when they avoid unnecessary edits to migration-boundary code.

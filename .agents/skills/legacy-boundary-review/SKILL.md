@@ -7,21 +7,21 @@ description: Use before refactors that may touch src/Main_App/Legacy_App/**, qua
 
 ## Overview
 
-Use this workflow when a task is near protected legacy modules or when it is unclear whether a change requires legacy edits. The default outcome is to keep protected modules untouched.
+Use this workflow when a task is near the `Legacy_App` migration boundary or when it is unclear whether a change requires edits to runtime-used legacy modules. The default outcome is to preserve processing behavior exactly while moving callers or small responsibilities toward clearer current-app modules.
 
 ## Workflow
 
 1. Run `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` before broad manual inspection.
 2. Read only the focused docs or files needed by the task or by script failures.
-3. Identify whether the requested behavior crosses a protected or quarantined path:
+3. Identify whether the requested behavior crosses a migration-boundary or quarantined path:
    - `src/Main_App/Legacy_App/**`
    - `src/Tools/SourceLocalization/**` is dead code and should stay empty of source files
    - `src/quarantine/**` is ignored quarantine, not active runtime
    - runtime-used legacy modules listed in the quarantine audit
 4. Inspect existing public APIs, imports, adapters, and tests before proposing new boundaries.
-5. Prefer a thin adapter or caller-side normalization outside protected folders.
-6. If the needed change truly requires protected-module edits, stop and report why before editing.
-7. Preserve behavior, processing order, and data formats from legacy code.
+5. Prefer a thin adapter, caller-side normalization, or current-app module when that preserves behavior.
+6. Targeted edits inside `Legacy_App` are allowed for active refactors, but first state why the edit is needed and how the processing pipeline remains unchanged.
+7. Preserve behavior, processing order, data formats, exports, and user workflows from legacy code.
 8. After changes, rerun `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py`.
 
 ## Checks
@@ -30,10 +30,11 @@ Use this workflow when a task is near protected legacy modules or when it is unc
 - Confirm Source Localization was not revived unless explicitly requested.
 - Confirm any adapter has focused tests around the boundary behavior.
 - Confirm compatibility exports in `src/Main_App/__init__.py` are not changed accidentally.
+- Confirm any `Legacy_App` edit is covered by a targeted test or documented smoke path.
 
 ## Response Requirements
 
 - State which protected paths were evaluated.
-- State whether protected modules were changed.
+- State whether `Legacy_App` modules were changed and why the processing pipeline is unchanged.
 - List adapter or caller-side files changed.
 - Include verification commands and results.

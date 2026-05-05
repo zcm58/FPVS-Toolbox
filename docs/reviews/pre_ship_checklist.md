@@ -5,7 +5,7 @@ Use this before handing off non-trivial changes.
 - Run the relevant command from `docs/agent-index.md` before broad manual inspection.
 - The diff is limited to the requested behavior and direct support files.
 - Non-trivial refactors checked the relevant active plan in `docs/exec-plans/active/`.
-- Protected legacy folders are unchanged unless explicitly approved.
+- Any `Legacy_App` edits are targeted, documented, and preserve the processing pipeline, processing order, data formats, and exports.
 - Source Localization remains quarantined dead code unless explicitly restored.
 - GUI work uses PySide6 only and imports `QAction` from `PySide6.QtGui`.
 - Long work is off the UI thread and workers do not touch widgets directly.

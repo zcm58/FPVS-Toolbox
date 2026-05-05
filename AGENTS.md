@@ -17,7 +17,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 
 ## Non-Negotiables
 
-- Do not edit `src/Main_App/Legacy_App/**` unless the user explicitly asks.
+- `src/Main_App/Legacy_App/**` is an active migration boundary. Targeted edits are allowed for refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
 - Treat Source Localization as quarantined dead code. Do not revive `src/Tools/SourceLocalization/**` or `src/quarantine/Tools/LORETA/SourceLocalization/**` unless explicitly asked.
 - Prefer thin adapters outside protected folders when legacy behavior must be reused.
 - Use PySide6 for GUI work. Do not introduce CustomTkinter.
@@ -33,7 +33,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 Repo-local skills live in `.agents/skills/`.
 
 - `pyside6-gui-cleanup`: PySide6 widgets, layouts, dialogs, actions, status UX, workers, and theme cleanup.
-- `legacy-boundary-review`: refactors near protected legacy code or legacy API boundaries.
+- `legacy-boundary-review`: refactors near the `Legacy_App` migration boundary or legacy API boundaries.
 - `project-path-audit`: file dialogs, manifests, exports, imports, generated files, and project-root path discipline.
 - `pytest-qt-smoke`: pytest-qt smoke coverage for changed PySide6 widgets, signals, and non-blocking UI behavior.
 
@@ -74,7 +74,7 @@ If a gate cannot run locally, report the command, failure reason, and residual r
 
 ## Done Means
 
-- Protected legacy modules remain untouched or the user explicitly approved the edit.
+- `Legacy_App` edits are targeted, documented, and preserve the processing pipeline exactly.
 - Source Localization remains quarantined dead code unless explicitly restored.
 - PySide6-only GUI imports are preserved.
 - UI work remains non-blocking.
