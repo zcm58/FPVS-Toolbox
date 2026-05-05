@@ -10,6 +10,7 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 - Scope: behavior-preserving Main App organization.
 - Behavior changes: eLORETA/Source Localization has been removed from active runtime; FPVS preprocessing, post-processing, FFT/SNR outputs, project paths, and exports remain behavior-preserving.
 - `Legacy_App` is a temporary migration boundary, not a permanent architecture. Targeted edits are allowed for active refactors only when they preserve the processing pipeline, processing order, data formats, and exports.
+- Folder retirement has a dedicated active plan: `docs/exec-plans/active/main-app-folder-retirement.md`.
 
 ## PR Contract
 
@@ -52,6 +53,13 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 - Relevant skill-local audit scripts from `docs/agent-index.md`
 - Targeted pytest or pytest-qt smoke tests for changed behavior
 - `git diff --name-only` to identify any `Legacy_App` edits and confirm they were targeted, documented, and pipeline-preserving
+
+Latest folder retirement planning slice:
+
+- Added and updated `docs/exec-plans/active/main-app-folder-retirement.md` with inventory categories for every tracked `src/Main_App/Legacy_App/` and `src/Main_App/PySide6_App/` file.
+- No runtime code, protected legacy modules, preprocessing, BDF loading, worker behavior, project paths, or exports changed.
+- Next candidate: move reusable PySide6 GUI widgets/theme helpers into `Main_App.gui` / `Main_App.gui.widgets` with temporary wrappers.
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 
 Latest slice verification:
 
