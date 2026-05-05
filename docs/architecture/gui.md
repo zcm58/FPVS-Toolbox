@@ -19,6 +19,9 @@ Primary paths:
   used by `MainWindow` compatibility wrappers.
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing export
   completion handling used by `MainWindow` compatibility wrappers.
+- `src/Main_App/gui/tool_workflows.py`: settings, update-check, tool-launcher,
+  help/about, and auxiliary-window actions used by `MainWindow` compatibility
+  wrappers.
 - `src/Main_App/PySide6_App/GUI/`: main window, menus, panels, icons, and style tokens.
 - `src/Main_App/PySide6_App/widgets/`: shared PySide6 presentation primitives.
 - `src/Main_App/PySide6_App/Backend/`: project and processing coordination used by the GUI.
@@ -30,7 +33,7 @@ Shared PySide6 primitives live in `src/Main_App/PySide6_App/widgets/`. Use this 
 
 The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` and the tokens in `src/Main_App/PySide6_App/GUI/style_tokens.py`.
 
-Shell-specific implementations currently stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, and style tokens. Active callers should import them through `Main_App.gui`. Project workflow orchestration is now split into `Main_App.gui.project_workflows`, processing input orchestration is now split into `Main_App.gui.processing_inputs`, processing run orchestration is now split into `Main_App.gui.processing_workflows`, and post-export completion handling is now split into `Main_App.gui.post_export_workflows`, while `MainWindow` keeps public wrapper methods for actions and tests.
+Shell-specific implementations currently stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, and style tokens. Active callers should import them through `Main_App.gui`. Project workflow orchestration is now split into `Main_App.gui.project_workflows`, processing input orchestration is now split into `Main_App.gui.processing_inputs`, processing run orchestration is now split into `Main_App.gui.processing_workflows`, post-export completion handling is now split into `Main_App.gui.post_export_workflows`, and tool/menu action orchestration is now split into `Main_App.gui.tool_workflows`, while `MainWindow` keeps public wrapper methods for actions and tests.
 
 Widgets must not own backend processing, file export behavior, project mutation, or dialog orchestration. Keep those responsibilities in GUI controllers, backend modules, workers, or tool-specific code.
 

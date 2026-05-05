@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 import os
 import queue
-import subprocess
 import sys
 from Main_App.Shared.post_process import post_process as _shared_post_process
 from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
@@ -67,6 +66,7 @@ from Main_App.gui import project_workflows
 from Main_App.gui import processing_workflows
 from Main_App.gui import processing_inputs
 from Main_App.gui import post_export_workflows
+from Main_App.gui import tool_workflows
 from Main_App.gui.post_export_workflows import (
     excel_snapshot as _excel_snapshot,
     should_show_no_excel_popup as _should_show_no_excel_popup,
@@ -576,21 +576,10 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     # ------------------------- settings UI -------------------------- #
     def open_settings_window(self) -> None:
-        if self._settings_dialog and self._settings_dialog.isVisible():
-            self._settings_dialog.raise_()
-            self._settings_dialog.activateWindow()
-            return
-        dlg = SettingsDialog(self.settings, self, getattr(self, "currentProject", None))
-        self._settings_dialog = dlg
-        dlg.exec()
-        if hasattr(self, "lbl_debug"):
-            self.lbl_debug.setVisible(self.settings.debug_enabled())
-        self._settings_dialog = None
+        tool_workflows.open_settings_window(self, SettingsDialog)
 
     def check_for_updates(self) -> None:
-        update_manager.check_for_updates_async(
-            self, silent=False, notify_if_no_update=True, force=True
-        )
+        tool_workflows.check_for_updates(self, update_manager)
 
     def quit(self) -> None:
         self.close()
@@ -613,88 +602,29 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     # --------------------------- tools UI --------------------------- #
     def open_stats_analyzer(self) -> None:
-        QMessageBox.warning(
+        tool_workflows.open_stats_analyzer(
             self,
-            "Statistics Tool Under Development",
+            PysideStatsWindow,
             STATS_TOOL_UNDER_DEVELOPMENT_WARNING,
         )
-        window = PysideStatsWindow(self)
-        window.show()
-        if not hasattr(self, "_child_windows"):
-            self._child_windows = []
-        self._child_windows.append(window)
 
     def open_image_resizer(self) -> None:
-        cmd = [sys.executable]
-        if getattr(sys, "frozen", False):
-            cmd.append("--run-image-resizer")
-        else:
-            script = (
-                Path(__file__).resolve().parents[3]
-                / "Tools"
-                / "Image_Resizer"
-                / "pyside_resizer.py"
-            )
-            cmd.append(str(script))
-        subprocess.Popen(cmd, close_fds=True)
+        tool_workflows.open_image_resizer(Path(__file__).resolve().parents[3])
 
     def open_plot_generator(self) -> None:
-        cmd = [sys.executable]
-        if getattr(sys, "frozen", False):
-            cmd.append("--run-plot-generator")
-        else:
-            script = (
-                Path(__file__).resolve().parents[3]
-                / "Tools"
-                / "Plot_Generator"
-                / "plot_generator.py"
-            )
-            cmd.append(str(script))
-        env = os.environ.copy()
-        proj = getattr(self, "currentProject", None)
-        if proj and hasattr(proj, "project_root"):
-            env["FPVS_PROJECT_ROOT"] = str(proj.project_root)
-        subprocess.Popen(cmd, close_fds=True, env=env)
+        tool_workflows.open_plot_generator(self, Path(__file__).resolve().parents[3])
 
     def open_epoch_averaging(self) -> None:
-        if not self.currentProject:
-            QMessageBox.warning(self, "No Project", "Please load a project first.")
-            return
-
-        data_dir = self.currentProject.subfolders.get("data")
-        if data_dir is None:
-            data_dir = str(self.currentProject.input_folder)
-        else:
-            data_dir = str(self.currentProject.project_root / data_dir)
-        excel_dir = str(
-            self.currentProject.project_root
-            / self.currentProject.subfolders.get("excel", "")
-        )
-
-        if not getattr(self, "_epoch_win", None):
-            self._epoch_win = AdvancedAveragingWindow(
-                parent=self, input_dir=data_dir, output_dir=excel_dir
-            )
-        self._epoch_win.show()
-        self._epoch_win.raise_()
-        self._epoch_win.activateWindow()
+        tool_workflows.open_epoch_averaging(self, AdvancedAveragingWindow)
 
     def open_advanced_analysis_window(self) -> None:
         self.open_epoch_averaging()
 
     def show_relevant_publications(self) -> None:
-        QMessageBox.information(
-            self,
-            "Relevant Publications",
-            "This dialog is not yet implemented in the Qt interface.",
-        )
+        tool_workflows.show_relevant_publications(self)
 
     def show_about_dialog(self) -> None:
-        QMessageBox.information(
-            self,
-            "About FPVS ToolBox",
-            f"Version: {FPVS_TOOLBOX_VERSION} was developed by Zack Murphy at Mississippi State University.",
-        )
+        tool_workflows.show_about_dialog(self, FPVS_TOOLBOX_VERSION)
 
     # ------------------------- progress/rows ------------------------- #
     def _animate_progress_to(self, value: float) -> None:

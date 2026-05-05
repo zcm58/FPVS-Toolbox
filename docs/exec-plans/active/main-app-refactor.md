@@ -263,9 +263,21 @@ Latest Main App processing input workflow split:
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `git diff --check`
 
+Latest Main App tool workflow split:
+
+- Refactor completed: settings, update-check, tool-launcher, help/about, and auxiliary-window GUI orchestration moved from `src/Main_App/PySide6_App/GUI/main_window.py` to `src/Main_App/gui/tool_workflows.py`.
+- `MainWindow` keeps the existing compatibility wrappers used by menus, actions, and tests: `open_settings_window`, `check_for_updates`, `open_stats_analyzer`, `open_image_resizer`, `open_plot_generator`, `open_epoch_averaging`, `open_advanced_analysis_window`, `show_relevant_publications`, and `show_about_dialog`.
+- Behavior-preservation rule: no tool command path, project-root environment forwarding, Stats warning flow, child-window retention, settings dialog behavior, update-check behavior, project schema, processing route, output path, preprocessing, BDF loading, post-processing, or export behavior changed.
+- Passed: `python -m py_compile src\Main_App\gui\tool_workflows.py src\Main_App\PySide6_App\GUI\main_window.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_stats_no_customtkinter_import.py tests\test_update_manager_manual_force.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_settings_and_status.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with line-ending warnings only.
+
 Next refactor slice candidate:
 
-- Continue splitting `Main_App.gui.main_window` by workflow. The next candidate is tool-launcher/menu action orchestration for Stats, Plot Generator, Image Resizer, Epoch Averaging, publications/about dialogs, and update checks; keep public `MainWindow` wrappers until imports are stable.
+- Continue splitting `Main_App.gui.main_window` by workflow. The next candidate is launch/reveal/status-shell cleanup or event-map wrapper reassessment; keep public `MainWindow` wrappers until imports are stable.
 
 Latest processing mixin slice:
 
