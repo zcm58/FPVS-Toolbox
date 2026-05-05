@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Main_App.PySide6_App.GUI.style_tokens import SECTION_PADDING
+from Main_App.gui.style_tokens import SECTION_PADDING
 
 
 class CardHeader(QWidget):

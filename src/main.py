@@ -58,7 +58,7 @@ def run_app() -> int:
     install_messagebox_logger(debug)
 
     from PySide6.QtWidgets import QApplication
-    from Main_App.PySide6_App.GUI.main_window import MainWindow
+    from Main_App.gui.main_window import MainWindow
 
     app = QApplication([])
     apply_light_palette(app)

@@ -28,8 +28,8 @@ def test_ratio_calculator_present_in_ui(qtbot):
 
     from PySide6.QtWidgets import QApplication
 
-    from Main_App.PySide6_App.GUI.main_window import MainWindow
-    from Main_App.PySide6_App.GUI.sidebar import SidebarButton
+    from Main_App.gui.main_window import MainWindow
+    from Main_App.gui.sidebar import SidebarButton
 
     QApplication.instance() or QApplication([])
     window = MainWindow()

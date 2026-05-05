@@ -46,3 +46,8 @@ implementations while worker/threading tests protect behavior.
 It delegates to the existing project model, project manager, project metadata,
 projects-root, and preprocessing-settings implementations while project I/O
 tests protect behavior.
+
+`src/Main_App/gui/` is now the canonical Main App GUI import surface. It
+delegates to the existing main-window, settings-panel, menu, sidebar, icon,
+style-token, and update-manager implementations while GUI smoke tests protect
+behavior.

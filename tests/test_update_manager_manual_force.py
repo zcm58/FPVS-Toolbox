@@ -6,7 +6,7 @@ from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from config import FPVS_TOOLBOX_VERSION
-from Main_App.PySide6_App.GUI import update_manager
+from Main_App.gui import update_manager
 
 
 def test_manual_force_bypasses_debounce(monkeypatch, qtbot) -> None:

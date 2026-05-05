@@ -12,7 +12,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
 from Main_App.Shared.processing_mixin import ProcessingMixin
-from Main_App.PySide6_App.GUI.main_window import MainWindow
+from Main_App.gui.main_window import MainWindow
 import Main_App.workers.mp_runner_bridge as mp_runner_bridge
 
 

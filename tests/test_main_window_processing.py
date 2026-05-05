@@ -91,7 +91,7 @@ def test_main_window_processing_runs(tmp_path, qtbot, monkeypatch, debug):
 
     QApplication.instance() or QApplication([])
 
-    from Main_App.PySide6_App.GUI.main_window import MainWindow
+    from Main_App.gui.main_window import MainWindow
 
     win = MainWindow()
     qtbot.addWidget(win)
@@ -111,7 +111,7 @@ def test_periodic_queue_check_does_not_finalize_twice(tmp_path, qtbot, monkeypat
     _stub_processing(monkeypatch, tmp_path)
     call_count = 0
 
-    from Main_App.PySide6_App.GUI.main_window import MainWindow
+    from Main_App.gui.main_window import MainWindow
 
     orig_finalize = MainWindow._finalize_processing
 
@@ -154,7 +154,7 @@ def test_export_post_process_threadsafe(tmp_path, qtbot, monkeypatch):
 
     QApplication.instance() or QApplication([])
 
-    from Main_App.PySide6_App.GUI.main_window import MainWindow
+    from Main_App.gui.main_window import MainWindow
 
     win = MainWindow()
     qtbot.addWidget(win)

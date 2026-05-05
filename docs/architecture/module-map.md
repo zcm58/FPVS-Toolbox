@@ -15,7 +15,8 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 - `src/Main_App/PySide6_App/GUI/main_window.py`: main PySide6 shell and current refactor hotspot.
 - `src/Main_App/PySide6_App/GUI/event_map.py`: event-map row construction, binding, Enter-key handling, and entry adapters used by `MainWindow` wrappers.
-- `src/Main_App/PySide6_App/GUI/`: menus, header/sidebar assembly, settings panel, style tokens, and shell-specific widgets.
+- `src/Main_App/PySide6_App/GUI/`: menus, header/sidebar assembly, settings panel, style tokens, and shell-specific widgets. Active imports should prefer `Main_App.gui`.
+- `src/Main_App/gui/`: canonical import surface for main-window, settings-panel, menu, sidebar, icon, style-token, and update-manager GUI modules. It delegates to existing PySide6 GUI implementations during the package-layout migration.
 - `src/Main_App/PySide6_App/widgets/`: reusable PySide6 presentation primitives.
 - `src/Main_App/PySide6_App/Backend/`: project model, project manager, preprocessing settings, active preprocessing implementation, and processing coordination implementations. Active project imports should prefer `Main_App.projects`; `preprocess.py` is the active preprocessing implementation; `loader.py` is only a compatibility wrapper for the shared BDF loader.
 - `src/Main_App/PySide6_App/adapters/`: current-app adapter layer for runtime-used migration-boundary behavior such as post-export handling.

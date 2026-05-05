@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from Main_App.PySide6_App.GUI.icons import division_icon, individual_detectability_icon
+from Main_App.gui.icons import division_icon, individual_detectability_icon
 from Tools.Ratio_Calculator.launcher import open_ratio_calculator_tool
 from Tools.Individual_Detectability.launcher import open_individual_detectability_tool
 from .style_tokens import (

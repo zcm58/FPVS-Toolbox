@@ -11,11 +11,11 @@ except Exception:  # pragma: no cover - environment guard
 if QApplication is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from Main_App.PySide6_App.GUI.main_window import (
+from Main_App.gui.main_window import (
     MainWindow,
     _should_show_no_excel_popup,
 )
-import Main_App.PySide6_App.GUI.main_window as main_window_module
+import Main_App.gui.main_window as main_window_module
 
 
 @pytest.mark.parametrize(

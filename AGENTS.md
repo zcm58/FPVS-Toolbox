@@ -20,6 +20,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - `src/Main_App/Legacy_App/**` is an active migration boundary. Targeted edits are allowed for refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
 - Active EEG preprocessing imports should use `src/Main_App/processing/preprocess.py`; it delegates to the current PySide6 backend implementation while the Main App layout is migrated. Do not route active runtime code through `src/Main_App/Legacy_App/eeg_preprocessing.py`.
 - Active BDF loading imports should use `src/Main_App/io/load_utils.py`; it delegates to the current shared implementation while the Main App layout is migrated.
+- Active Main App GUI imports should use `src/Main_App/gui/`; it delegates to the current PySide6 GUI implementation while the Main App layout is migrated.
 - Active worker/process-runner imports should use `src/Main_App/workers/`; it delegates to the current PySide6 worker and Performance implementations while the Main App layout is migrated.
 - Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`; it delegates to the current implementations while the Main App layout is migrated.
 - Source Localization/eLORETA has been removed from active runtime. Do not add GUI, settings, tests, imports, or quarantine-tree dependencies for it unless the user explicitly scopes a restoration feature.
@@ -61,6 +62,7 @@ Use the script output to decide what to read next. If a script passes, do not sc
 - Protected paths: [docs/architecture/protected-paths.txt](docs/architecture/protected-paths.txt)
 - Test selection: [docs/quality/test-selection.md](docs/quality/test-selection.md)
 - Verification gates: [docs/quality/verification-gates.md](docs/quality/verification-gates.md)
+- GUI architecture: [docs/architecture/gui.md](docs/architecture/gui.md); canonical active import surface lives in `src/Main_App/gui/`.
 - BDF loading contract: [docs/architecture/eeg-loading-contract.md](docs/architecture/eeg-loading-contract.md); canonical active import surface lives in `src/Main_App/io/load_utils.py`.
 - Workers and threading: [docs/architecture/workers-threading.md](docs/architecture/workers-threading.md); canonical active import surface lives in `src/Main_App/workers/`.
 - Project I/O: [docs/architecture/project-io.md](docs/architecture/project-io.md); canonical active import surface lives in `src/Main_App/projects/`.

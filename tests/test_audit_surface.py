@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from Main_App.PySide6_App.GUI.main_window import MainWindow  # noqa: E402
+from Main_App.gui.main_window import MainWindow  # noqa: E402
 
 
 @pytest.fixture

@@ -183,9 +183,22 @@ Latest Main App projects layout slice:
 - Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
 - Passed: `git diff --check` with line-ending warnings only.
 
+Latest Main App GUI layout slice:
+
+- Refactor completed: `src/Main_App/gui/` was added as the canonical active GUI import surface.
+- Runtime/test imports now use `Main_App.gui` for the main window, settings panel, update manager, sidebar, icons, style tokens, and focused GUI smoke helpers.
+- Behavior-preservation rule: implementations remain in `src/Main_App/PySide6_App/GUI/` for this slice; no widget behavior, signal wiring, project workflow, update-check behavior, layout behavior, worker routing, processing order, or user-facing copy is changed.
+- Test harness cleanup: `tests/test_phase1_perf_hygiene.py` now stubs the root `Main_App.post_process` export when replacing the root package and uses the PySide6 6.9-compatible `QObject.receivers("2timeout()")` signal signature.
+- Passed: `python -m compileall -q src\Main_App\gui src\Main_App\PySide6_App\GUI src\Main_App\PySide6_App\utils src\Main_App\PySide6_App\widgets src\main.py scripts\gui_wave3_smoke.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_settings_and_status.py tests\test_update_manager_manual_force.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_single_file_process_mode.py tests\test_worker_integration.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_audit_json_toggle.py tests\test_audit_surface.py tests\test_gui_preproc_dialog.py tests\test_main_window_event_map_enter.py tests\test_main_window_excel_popup_logic.py tests\test_open_existing_project_dialog.py tests\test_phase1_perf_hygiene.py tests\test_postprocess_worker_qt.py tests\test_project_settings_roundtrip.py tests\test_ratio_calculator_removed_smoke.py tests\test_stats_export_finalization_release_smoke.py tests\test_stats_no_customtkinter_import.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+
 Next refactor slice candidate:
 
-- Continue package-layout migration with another import-surface-only slice, likely `Main_App/gui/` for stable GUI shell imports or `Main_App/diagnostics/` for audit/debug/reporting helpers. Keep wrappers until imports are stable.
+- Continue package-layout migration with another import-surface-only slice, likely `Main_App/diagnostics/` for audit/debug/reporting helpers or begin splitting `Main_App.gui.main_window` only after GUI import paths are stable. Keep wrappers until imports are stable.
 
 Latest processing mixin slice:
 

@@ -10,8 +10,8 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSplitter, QWidget
 
-from Main_App.PySide6_App.GUI import main_window as main_window_module
-import Main_App.PySide6_App.GUI.update_manager as update_manager
+from Main_App.gui import main_window as main_window_module
+import Main_App.gui.update_manager as update_manager
 
 
 def _build_window(tmp_path: Path, qtbot, monkeypatch) -> main_window_module.MainWindow:

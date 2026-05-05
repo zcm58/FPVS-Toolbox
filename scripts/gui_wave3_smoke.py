@@ -84,7 +84,7 @@ def install_gui_only_stubs() -> None:
         prepare_batch_files=lambda project: [],
     )
     install_stub_module(
-        "Main_App.PySide6_App.GUI.update_manager",
+        "Main_App.gui.update_manager",
         cleanup_old_executable=lambda: None,
         check_for_updates_on_launch=lambda *args, **kwargs: None,
         check_for_updates_async=lambda *args, **kwargs: None,
@@ -123,7 +123,7 @@ def main() -> int:
         os.environ["XDG_CONFIG_HOME"] = str(config_root)
         install_gui_only_stubs()
 
-        from Main_App.PySide6_App.GUI import main_window as main_window_module
+        from Main_App.gui import main_window as main_window_module
 
         projects_root = config_root
         main_window_module.select_projects_root = (

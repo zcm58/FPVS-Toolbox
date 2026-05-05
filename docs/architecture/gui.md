@@ -4,6 +4,10 @@ The active desktop UI is PySide6.
 
 Primary paths:
 
+- `src/Main_App/gui/`: canonical active import surface for main-window,
+  settings-panel, menu, sidebar, icon, style-token, and update-manager imports.
+  It delegates to existing PySide6 GUI implementations during the package
+  layout migration.
 - `src/Main_App/PySide6_App/GUI/`: main window, menus, panels, icons, and style tokens.
 - `src/Main_App/PySide6_App/widgets/`: shared PySide6 presentation primitives.
 - `src/Main_App/PySide6_App/Backend/`: project and processing coordination used by the GUI.
@@ -15,7 +19,7 @@ Shared PySide6 primitives live in `src/Main_App/PySide6_App/widgets/`. Use this 
 
 The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` and the tokens in `src/Main_App/PySide6_App/GUI/style_tokens.py`.
 
-Shell-specific components stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, and style tokens.
+Shell-specific implementations currently stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, and style tokens. Active callers should import them through `Main_App.gui`.
 
 Widgets must not own backend processing, file export behavior, project mutation, or dialog orchestration. Keep those responsibilities in GUI controllers, backend modules, workers, or tool-specific code.
 

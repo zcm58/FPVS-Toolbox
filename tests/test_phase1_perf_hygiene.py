@@ -34,6 +34,9 @@ def test_phase1_perf_hygiene(qtbot):
     class _SettingsManager:
         def __init__(self, *a, **k):
             pass
+
+        def debug_enabled(self):
+            return False
     stub.SettingsManager = _SettingsManager
     sys.modules["Main_App"] = stub
     shared_stub = types.ModuleType("Main_App.Shared")
@@ -42,11 +45,12 @@ def test_phase1_perf_hygiene(qtbot):
     pp_stub = types.ModuleType("Main_App.Shared.post_process")
     def _pp(*a, **k):
         return None
+    stub.post_process = _pp
     pp_stub.post_process = _pp
     sys.modules["Main_App.Shared.post_process"] = pp_stub
 
     try:
-        from Main_App.PySide6_App.GUI.main_window import MainWindow
+        from Main_App.gui.main_window import MainWindow
     except Exception as e:  # pragma: no cover - env missing deps
         pytest.skip(f"MainWindow import skipped: {e}")
 
@@ -58,4 +62,4 @@ def test_phase1_perf_hygiene(qtbot):
     assert timer.interval() >= 100
 
     assert callable(window._periodic_queue_check)
-    assert timer.receivers(timer.timeout) > 0
+    assert timer.receivers("2timeout()") > 0

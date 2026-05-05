@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import Main_App.projects.project_manager as project_manager  # noqa: E402
 import Main_App.projects.projects_root as projects_root  # noqa: E402
-import Main_App.PySide6_App.GUI.update_manager as update_manager  # noqa: E402
+import Main_App.gui.update_manager as update_manager  # noqa: E402
 from Main_App.Shared.settings_manager import SettingsManager  # noqa: E402
 
 
@@ -37,7 +37,7 @@ def main_window(tmp_path, qtbot, monkeypatch):
         lambda self: setattr(self, "projectsRoot", tmp_path),
     )
 
-    from Main_App.PySide6_App.GUI.main_window import MainWindow
+    from Main_App.gui.main_window import MainWindow
 
     window = MainWindow()
     qtbot.addWidget(window)

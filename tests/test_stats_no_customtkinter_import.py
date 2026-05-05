@@ -33,8 +33,8 @@ def test_main_window_stats_launch_does_not_import_legacy_stats(qtbot, tmp_path, 
 
     from PySide6.QtWidgets import QWidget, QMessageBox
 
-    from Main_App.PySide6_App.GUI import main_window as main_window_module
-    import Main_App.PySide6_App.GUI.update_manager as update_manager
+    from Main_App.gui import main_window as main_window_module
+    import Main_App.gui.update_manager as update_manager
 
     class _DummyStatsWindow(QWidget):
         def __init__(self, parent=None):

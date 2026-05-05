@@ -8,7 +8,7 @@ from typing import Literal, Optional
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
-from Main_App.PySide6_App.GUI.style_tokens import (
+from Main_App.gui.style_tokens import (
     ACCENT_COLOR,
     ACCENT_COLOR_HOVER,
     ACCENT_COLOR_PRESSED,
