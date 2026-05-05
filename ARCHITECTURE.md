@@ -33,17 +33,20 @@ Primary areas:
 - `src/Main_App/io/`: canonical Main App I/O import surface. It currently delegates BDF loading to the existing shared implementation while the repo moves toward purpose-based Main App folders.
 - `src/Main_App/projects/`: canonical Main App project import surface. It currently delegates project model, metadata, manager, projects-root, and preprocessing-settings behavior to existing implementations.
 - `src/Main_App/workers/`: canonical Main App worker import surface. It currently delegates Qt worker and process-runner behavior to existing PySide6 and Performance implementations.
+- `src/Main_App/diagnostics/`: canonical Main App runtime diagnostics import surface. It delegates preprocessing audit helpers and event-time lock reporting to existing implementations while keeping repo-evaluation scripts outside runtime code.
 - `src/Main_App/Shared/`: current shared owners for cross-path behavior such as the canonical BDF loader, processing mixin, settings helpers, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
 - `src/Main_App/Legacy_App/`: temporary protected boundary for runtime-used legacy processing modules. Migrate callers toward clearer current-app modules or thin adapters before renaming or removing this designation.
 - `src/Tools/`: standalone and integrated tools for preprocessing, plotting, ratios, statistics, image resizing, and detectability.
 - `src/quarantine/`: quarantined legacy code retained for reference or compatibility checks.
 - `tests/`: unit, integration, and pytest-qt smoke coverage.
+- `scripts/manual_diagnostics/`: developer-run project/data investigation utilities. These are not runtime toolbox APIs.
 - `docs/`: user docs, statistical method docs, processing docs, and agent-facing verification notes.
 
 Focused architecture pages:
 
 - [GUI](docs/architecture/gui.md)
+- [Diagnostics](docs/architecture/diagnostics.md)
 - [Main App Target Layout](docs/architecture/main-app-target-layout.md)
 - [Project I/O](docs/architecture/project-io.md)
 - [Legacy Boundaries](docs/architecture/legacy-boundaries.md)

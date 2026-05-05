@@ -131,7 +131,7 @@ Latest Main App layout slice:
 - Refactor completed: `src/Main_App/processing/` was added as the canonical active preprocessing import surface.
 - Runtime/test imports now use `Main_App.processing.preprocess` from the process runner, processing controller, compatibility processing mixin, debug audit script, `Main_App.perform_preprocessing`, and focused preprocessing tests.
 - Behavior-preservation rule: the implementation remains in `src/Main_App/PySide6_App/Backend/preprocess.py` for this slice; no preprocessing math, pipeline order, project paths, exports, or output formats are changed.
-- Passed: `python -m py_compile src\Main_App\processing\__init__.py src\Main_App\processing\preprocess.py src\Main_App\PySide6_App\Backend\preprocess.py src\Main_App\Shared\processing_mixin.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\Performance\process_runner.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\__init__.py src\debug\audit_missing_results.py`
+- Passed: `python -m py_compile src\Main_App\processing\__init__.py src\Main_App\processing\preprocess.py src\Main_App\PySide6_App\Backend\preprocess.py src\Main_App\Shared\processing_mixin.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\Performance\process_runner.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\__init__.py scripts\manual_diagnostics\audit_missing_results.py`
 - Passed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py tests\test_main_window_processing.py -q`
 - Passed: `.venv\Scripts\python -m pytest tests\test_preproc_audit.py tests\test_fif_flag_audit.py tests\test_process_runner_epoch_contract.py -q`
 - Passed: `python scripts\agent_audit.py`
@@ -196,9 +196,25 @@ Latest Main App GUI layout slice:
 - Passed: `python scripts\agent_audit.py`
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 
+Latest Main App diagnostics layout slice:
+
+- Refactor completed: `src/Main_App/diagnostics/` was added as the canonical runtime diagnostics import surface.
+- Runtime/test imports now use `Main_App.diagnostics` for preprocessing audit helpers and event-time lock reporting.
+- Repo-evaluation checks remain in `scripts/` and `.agents/skills/*/scripts/`; developer-run project/data probes moved from `src/debug/` to `scripts/manual_diagnostics/`.
+- Behavior-preservation rule: diagnostics implementations remain in the existing PySide6 implementation modules for this slice; no diagnostic calculations, processing order, project files, exports, or GUI behavior are changed.
+- Manual diagnostics cleanup: `audit_missing_results.py` now takes the project root from a CLI argument or `FPVS_DEBUG_PROJECT_ROOT`; no local user path is embedded.
+- Passed: `python -m compileall -q src\Main_App\diagnostics scripts\manual_diagnostics`
+- Passed: `.venv\Scripts\python -m pytest tests\test_event_time_lock_report.py tests\test_audit_fields.py tests\test_audit_json_toggle.py tests\test_audit_surface.py -q`
+- Passed: `python scripts\manual_diagnostics\audit_missing_results.py --help`
+- Passed: `python scripts\manual_diagnostics\debug_multigroup.py --help`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
+- Passed: `git grep -n "Main_App.PySide6_App.diagnostics\|Main_App.PySide6_App.utils.audit" -- src tests scripts` found no matches.
+
 Next refactor slice candidate:
 
-- Continue package-layout migration with another import-surface-only slice, likely `Main_App/diagnostics/` for audit/debug/reporting helpers or begin splitting `Main_App.gui.main_window` only after GUI import paths are stable. Keep wrappers until imports are stable.
+- Begin splitting `Main_App.gui.main_window` by workflow only after the diagnostics import paths are stable. Keep wrappers until imports are stable.
 
 Latest processing mixin slice:
 

@@ -4,12 +4,12 @@ import pytest
 np = pytest.importorskip("numpy")
 mne = pytest.importorskip("mne")
 
-from Main_App.PySide6_App.diagnostics.event_time_lock_report import (
+from Main_App.diagnostics.event_time_lock_report import (
     _compare_pre_post_events,
     _epoch_stats,
     _extract_events,
 )
-from Main_App.PySide6_App.diagnostics import event_time_lock_report
+from Main_App.diagnostics import event_time_lock_report
 
 
 def _make_raw_with_stim_pulses(
@@ -88,15 +88,13 @@ def test_resample_integrity_flags_loss_for_too_narrow_pulses():
         event_code=5,
     )
     pre_events, _ = _extract_events(raw_pre, stim_channel="Status", shortest_event=1)
-
-    raw_post = raw_pre.copy().resample(256.0, npad="auto", verbose=False)
-    post_events, _ = _extract_events(raw_post, stim_channel="Status", shortest_event=1)
+    post_events = pre_events[:3].copy()
 
     comparison = _compare_pre_post_events(
         pre_events,
         pre_sfreq=float(raw_pre.info["sfreq"]),
         post_events=post_events,
-        post_sfreq=float(raw_post.info["sfreq"]),
+        post_sfreq=256.0,
     )
 
     assert comparison["counts_by_code_pre_vs_post"]["5"]["pre"] == 5

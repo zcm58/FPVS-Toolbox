@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from Main_App.PySide6_App.utils.audit import format_audit_summary
+from Main_App.diagnostics.audit import format_audit_summary
 
 
 def test_format_audit_summary_includes_req_act():

@@ -3,14 +3,14 @@ Event/epoch time-lock verification utility for FPVS BDF recordings.
 
 Why your terminal command failed:
 - This repo uses a "src/" layout. Running with:
-    python -m Main_App.PySide6_App.diagnostics.event_time_lock_report
+    python -m Main_App.diagnostics.event_time_lock_report
   only works if "src" is on PYTHONPATH (or the project is installed as a package).
 - In PyCharm, the easiest path is to run THIS FILE directly. If no CLI args are
   provided, a small PySide6 GUI will open to select a .BDF and an output folder.
 
 CLI examples (requires PYTHONPATH to include src):
     set PYTHONPATH=%CD%\\src
-    python -m Main_App.PySide6_App.diagnostics.event_time_lock_report --bdf "C:\\Data\\subject01.bdf" --out "C:\\Data\\EventQC"
+    python -m Main_App.diagnostics.event_time_lock_report --bdf "C:\\Data\\subject01.bdf" --out "C:\\Data\\EventQC"
 
 Direct-script examples (no PYTHONPATH needed):
     python .\\src\\Main_App\\PySide6_App\\diagnostics\\event_time_lock_report.py --bdf "C:\\Data\\subject01.bdf" --out "C:\\Data\\EventQC"
@@ -53,7 +53,7 @@ def _ensure_src_on_sys_path() -> None:
     Does NOT fix 'python -m Main_App....' because that import happens before code runs.
     """
     this_file = Path(__file__).resolve()
-    # src/Main_App/PySide6_App/diagnostics/event_time_lock_report.py
+    # canonical wrapper: src/Main_App/diagnostics/event_time_lock_report.py
     # parents: diagnostics(0) -> PySide6_App(1) -> Main_App(2) -> src(3)
     src_dir = this_file.parents[3]
     if src_dir.is_dir():

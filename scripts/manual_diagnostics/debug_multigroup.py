@@ -13,9 +13,6 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from Main_App.projects.project import Project  # noqa: E402
-from Main_App.PySide6_App.Backend.processing_controller import discover_raw_files  # noqa: E402
-
 
 def parse_args() -> Path:
     parser = argparse.ArgumentParser(
@@ -41,6 +38,9 @@ def parse_args() -> Path:
 
 def main() -> None:
     project_root = parse_args()
+
+    from Main_App.projects.project import Project
+    from Main_App.PySide6_App.Backend.processing_controller import discover_raw_files
 
     print("=== Multigroup Debug ===")
     print(f"REPO_ROOT   : {REPO_ROOT}")

@@ -7,9 +7,10 @@ file.
 
 Usage
 -----
-Edit :data:`PROJECT_ROOT` to point at the target project directory and run::
+Pass the target project directory on the command line or set
+``FPVS_DEBUG_PROJECT_ROOT``::
 
-    python -m src.debug.audit_missing_results
+    python scripts/manual_diagnostics/audit_missing_results.py C:/Data/MyProject
 
 The output lists, for every target file, whether the file exists on disk, the
 stage that failed (if any), and a short error/traceback summary.
@@ -17,6 +18,8 @@ stage that failed (if any), and a short error/traceback summary.
 
 from __future__ import annotations
 
+import argparse
+import os
 import sys
 import types
 import traceback
@@ -27,7 +30,8 @@ from typing import Dict, Iterable, List, Optional, Tuple
 # Ensure that src/ is on sys.path so backend modules that do
 # absolute imports like "import Main_App" can resolve correctly.
 _THIS_FILE = Path(__file__).resolve()
-_SRC_ROOT = _THIS_FILE.parents[1]  # .../src
+_REPO_ROOT = _THIS_FILE.parents[2]
+_SRC_ROOT = _REPO_ROOT / "src"
 if str(_SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(_SRC_ROOT))
 
@@ -73,10 +77,10 @@ def _ensure_pyside6_stubs() -> None:
 _ensure_pyside6_stubs()
 
 try:
-    from ..Main_App.io.load_utils import load_eeg_file
-    from ..Main_App.processing.preprocess import perform_preprocessing
-    from ..Main_App.projects.project import Project
-    from ..Main_App.projects.preprocessing_settings import (
+    from Main_App.io.load_utils import load_eeg_file
+    from Main_App.processing.preprocess import perform_preprocessing
+    from Main_App.projects.project import Project
+    from Main_App.projects.preprocessing_settings import (
         normalize_preprocessing_settings,
     )
     BACKEND_IMPORT_ERROR: Exception | None = None
@@ -85,15 +89,31 @@ except Exception as exc:  # pragma: no cover - dependency missing in diagnostics
     BACKEND_IMPORT_ERROR = exc
 
 # ---------------------------------------------------------------------------
-# User configuration
+# Target files
 # ---------------------------------------------------------------------------
-
-# TODO: Update this path to the Semantic Categories (or other) project root
-# before running the diagnostic locally.
-PROJECT_ROOT = Path("C:/Users/zackm/OneDrive - Mississippi State University/NERD/2 - Results/1 - FPVS Toolbox Projects/Semantic Categories")
 
 # Configure recording filenames privately before running this manual diagnostic.
 TARGET_FILES = []
+
+DEFAULT_PROJECT_ROOT = os.environ.get("FPVS_DEBUG_PROJECT_ROOT")
+
+
+def _parse_project_root(argv: list[str] | None = None) -> Path:
+    parser = argparse.ArgumentParser(
+        description="Audit missing batch-processing results for a project directory."
+    )
+    parser.add_argument(
+        "project_root",
+        nargs="?",
+        default=DEFAULT_PROJECT_ROOT,
+        help="Path to the project directory. Defaults to FPVS_DEBUG_PROJECT_ROOT if set.",
+    )
+    args = parser.parse_args(argv)
+    if not args.project_root:
+        parser.error(
+            "project_root is required. Pass it on the command line or set FPVS_DEBUG_PROJECT_ROOT."
+        )
+    return Path(args.project_root).expanduser().resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +293,9 @@ def _diagnose_file(
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    project_root = _parse_project_root(argv)
+
     if BACKEND_IMPORT_ERROR is not None:
         print("ERROR: Could not import PySide6 backend modules.")
         print(f"Reason: {BACKEND_IMPORT_ERROR}")
@@ -283,9 +305,9 @@ def main() -> None:
             print("  status: \"dependency_missing\"")
         return
 
-    print(f"PROJECT_ROOT: {PROJECT_ROOT}")
-    if not PROJECT_ROOT.exists():
-        print("WARNING: Project root does not exist. Edit PROJECT_ROOT and rerun.")
+    print(f"PROJECT_ROOT: {project_root}")
+    if not project_root.exists():
+        print("WARNING: Project root does not exist.")
         for name in TARGET_FILES:
             print(f"FILE {name}:")
             print("  exists_on_disk: False (project root missing)")
@@ -293,10 +315,10 @@ def main() -> None:
         return
 
     try:
-        project = Project.load(PROJECT_ROOT)
+        project = Project.load(project_root)
     except Exception as exc:  # pragma: no cover - defensive guard
         tb = traceback.format_exc()
-        print(f"ERROR: Failed to load project at {PROJECT_ROOT}: {exc}")
+        print(f"ERROR: Failed to load project at {project_root}: {exc}")
         print(_format_traceback_head(tb))
         return
 

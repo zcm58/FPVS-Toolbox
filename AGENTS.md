@@ -23,6 +23,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Active Main App GUI imports should use `src/Main_App/gui/`; it delegates to the current PySide6 GUI implementation while the Main App layout is migrated.
 - Active worker/process-runner imports should use `src/Main_App/workers/`; it delegates to the current PySide6 worker and Performance implementations while the Main App layout is migrated.
 - Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`; it delegates to the current implementations while the Main App layout is migrated.
+- Active runtime diagnostics imports should use `src/Main_App/diagnostics/`; repo-evaluation checks belong in `scripts/` or `.agents/skills/`, and manual project probes belong in `scripts/manual_diagnostics/`.
 - Source Localization/eLORETA has been removed from active runtime. Do not add GUI, settings, tests, imports, or quarantine-tree dependencies for it unless the user explicitly scopes a restoration feature.
 - Prefer thin adapters outside protected folders when legacy behavior must be reused.
 - Use PySide6 for GUI work. Do not introduce Tkinter, CustomTkinter, or CTkMessagebox imports anywhere in repo code.
@@ -63,6 +64,7 @@ Use the script output to decide what to read next. If a script passes, do not sc
 - Test selection: [docs/quality/test-selection.md](docs/quality/test-selection.md)
 - Verification gates: [docs/quality/verification-gates.md](docs/quality/verification-gates.md)
 - GUI architecture: [docs/architecture/gui.md](docs/architecture/gui.md); canonical active import surface lives in `src/Main_App/gui/`.
+- Diagnostics: [docs/architecture/diagnostics.md](docs/architecture/diagnostics.md); canonical runtime import surface lives in `src/Main_App/diagnostics/`.
 - BDF loading contract: [docs/architecture/eeg-loading-contract.md](docs/architecture/eeg-loading-contract.md); canonical active import surface lives in `src/Main_App/io/load_utils.py`.
 - Workers and threading: [docs/architecture/workers-threading.md](docs/architecture/workers-threading.md); canonical active import surface lives in `src/Main_App/workers/`.
 - Project I/O: [docs/architecture/project-io.md](docs/architecture/project-io.md); canonical active import surface lives in `src/Main_App/projects/`.

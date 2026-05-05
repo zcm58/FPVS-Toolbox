@@ -20,6 +20,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | PySide6 GUI, widgets, menus, workers, status UX | `pyside6-gui-cleanup` | `.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` | `docs/architecture/gui.md`; canonical import: `src/Main_App/gui/` |
 | Qt workers, process runner, multiprocessing bridge | `pyside6-gui-cleanup` | `.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` | `docs/architecture/workers-threading.md`; canonical import: `src/Main_App/workers/` |
 | Main App package layout, ownership, or folder naming | `legacy-boundary-review` | `scripts/agent_audit.py` | `docs/architecture/main-app-target-layout.md`; `docs/exec-plans/active/main-app-refactor.md` |
+| Runtime diagnostics, repo audits, or manual project probes | `project-path-audit` when paths are involved | `scripts/agent_audit.py` | `docs/architecture/diagnostics.md`; canonical runtime import: `src/Main_App/diagnostics/` |
 | Stats package structure and analysis organization | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-structure` | `docs/architecture/statistics-tools.md` |
 | Stats reporting summaries and legibility | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-reporting-legibility` | `docs/architecture/statistics-tools.md` |
 | Legacy boundary and removed-feature status | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/legacy-boundaries.md` |

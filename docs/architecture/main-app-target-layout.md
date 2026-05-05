@@ -51,3 +51,8 @@ tests protect behavior.
 delegates to the existing main-window, settings-panel, menu, sidebar, icon,
 style-token, and update-manager implementations while GUI smoke tests protect
 behavior.
+
+`src/Main_App/diagnostics/` is now the canonical Main App runtime diagnostics
+import surface. It delegates preprocessing audit helpers and event-time lock
+reporting to existing implementations while repo-evaluation scripts remain in
+`scripts/` and `.agents/skills/`.

@@ -40,7 +40,6 @@ CURRENT_CODE_EXCLUDES = (
     "src/Tools/Average_Preprocessing/Legacy/",
     "src/quarantine/",
     "src/Standalone_Scripts/",
-    "src/debug/",
 )
 
 PRODUCTION_EXCLUDES = CURRENT_CODE_EXCLUDES + (

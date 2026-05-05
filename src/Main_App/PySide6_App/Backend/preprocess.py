@@ -26,7 +26,7 @@ import mne
 import numpy as np
 from scipy.stats import kurtosis
 
-from Main_App.PySide6_App.utils.audit import (
+from Main_App.diagnostics.audit import (
     start_preproc_audit,
     end_preproc_audit,
     compare_preproc,
