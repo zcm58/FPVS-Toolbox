@@ -227,9 +227,21 @@ Latest Main App project workflow split:
 - Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
 - Passed: `git diff --check` with line-ending warnings only.
 
+Latest Main App post-export workflow split:
+
+- Refactor completed: GUI-side post-processing/export completion handling moved from `src/Main_App/PySide6_App/GUI/main_window.py` to `src/Main_App/gui/post_export_workflows.py`.
+- `MainWindow` keeps the existing compatibility wrappers and helper exports used by tests: `_on_post_finished`, `_refresh_run_excel_success_from_disk`, `_export_with_post_process`, `_excel_snapshot`, and `_should_show_no_excel_popup`.
+- Behavior-preservation rule: no workbook generation, Excel filenames, sheet names, column order, formatting, FFT-neighbor rows, post-processing math, project paths, worker payloads, dialogs, or export success classification changed.
+- Passed: `python -m py_compile src\Main_App\gui\post_export_workflows.py src\Main_App\PySide6_App\GUI\main_window.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_excel_popup_logic.py tests\test_postprocess_worker_qt.py tests\test_stats_export_finalization_release_smoke.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_main_window_layout_smoke.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with line-ending warnings only.
+
 Next refactor slice candidate:
 
-- Continue splitting `Main_App.gui.main_window` by workflow. The next candidates are processing start/finalization UI orchestration or post-processing/export completion UI handling; keep public `MainWindow` wrappers until imports are stable.
+- Continue splitting `Main_App.gui.main_window` by workflow. The next candidate is processing start/finalization UI orchestration; keep public `MainWindow` wrappers until imports are stable.
 
 Latest processing mixin slice:
 
