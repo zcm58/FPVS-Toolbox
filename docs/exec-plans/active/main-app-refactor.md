@@ -275,9 +275,33 @@ Latest Main App tool workflow split:
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `git diff --check` with line-ending warnings only.
 
+Latest Main App shell/status workflow split:
+
+- Refactor completed: launch reveal, status bar, busy indicator, GUI log routing, and processing-start notice behavior moved from `src/Main_App/PySide6_App/GUI/main_window.py` to `src/Main_App/gui/shell_status.py`.
+- `MainWindow` keeps the existing compatibility wrappers used by Qt lifecycle hooks, processing workflows, and tests: `_launch_reveal_widget`, `_start_launch_reveal`, `_finish_launch_reveal`, `_emit_backend_log`, `log`, `_show_processing_started_notice`, `_busy_start`, `_busy_stop`, and `_tick_busy`.
+- Behavior-preservation rule: no status-bar text, landing version text, busy frame set, timer interval, busy label styling, processing-start notice text/title/modality/auto-close timing, log timestamp format, debug filtering, processing route, project I/O, worker behavior, post-processing, or export behavior changed.
+- Passed: `python -m py_compile src\Main_App\gui\shell_status.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\gui\processing_workflows.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_main_window_processing.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py tests\test_settings_and_status.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with line-ending warnings only.
+
+Latest Main App post-worker launcher split:
+
+- Refactor completed: GUI-side post-processing worker launch and worker error routing moved from `src/Main_App/PySide6_App/GUI/main_window.py` to `src/Main_App/gui/post_export_workflows.py`.
+- `MainWindow` keeps the existing compatibility wrappers used by processing workflows and tests: `_start_post_worker` and `_on_worker_error`.
+- Behavior-preservation rule: no post-processing worker class, thread wiring, queue/backlog behavior, worker signal routing, save-folder resolution, worker payload, log routing, finalization, project I/O, processing route, post-processing math, or export behavior changed.
+- Passed: `python -m py_compile src\Main_App\gui\post_export_workflows.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\gui\processing_workflows.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_postprocess_worker_qt.py tests\test_postprocess_worker_excel_payload.py tests\test_main_window_excel_popup_logic.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_main_window_layout_smoke.py tests\test_single_file_process_mode.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with line-ending warnings only.
+
 Next refactor slice candidate:
 
-- Continue splitting `Main_App.gui.main_window` by workflow. The next candidate is launch/reveal/status-shell cleanup or event-map wrapper reassessment; keep public `MainWindow` wrappers until imports are stable.
+- Continue splitting `Main_App.gui.main_window` by workflow only if it improves clarity. The next candidate is reassessing event-map wrappers or Qt lifecycle/timer compatibility helpers; otherwise pause extraction and evaluate whether `main_window.py` is simple enough for this phase.
 
 Latest processing mixin slice:
 

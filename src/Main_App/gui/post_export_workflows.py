@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Callable
+
+from PySide6.QtCore import QThread
+
+from Main_App.workers.processing_worker import PostProcessWorker
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -120,6 +125,50 @@ def on_post_finished(
     if getattr(host, "_pending_finalize", False):
         host._pending_finalize = False
         host._finalize_processing(True)
+
+
+def start_post_worker(host: Any, file_name: str, epochs_dict: dict, labels: list[str]) -> None:
+    """Queue-aware launcher for post-processing jobs."""
+    payload = (file_name, epochs_dict, labels)
+
+    # If a worker is active, enqueue and return
+    if host._post_thread and host._post_thread.isRunning():
+        host._post_backlog.append(payload)
+        base = os.path.basename(str(file_name))
+        host.log(f"Queued post-processing for {base}")
+        return
+
+    save_folder = (
+        host.save_folder_path.get()
+        if hasattr(host.save_folder_path, "get")
+        else host.save_folder_path
+    )
+
+    worker = PostProcessWorker(
+        file_name,
+        epochs_dict,
+        labels,
+        save_folder=save_folder,
+        data_paths=[file_name],
+        settings=getattr(host, "settings", None),
+        logger=lambda m: host.gui_queue.put({"type": "log", "message": m}),
+    )
+
+    thread = QThread(host)
+    worker.moveToThread(thread)
+    worker.error.connect(host._on_worker_error)
+    worker.finished.connect(host._on_post_finished)   # will drain backlog
+    thread.started.connect(worker.run)
+    worker.finished.connect(thread.quit)
+    worker.finished.connect(worker.deleteLater)
+    thread.finished.connect(thread.deleteLater)
+    host._post_worker = worker
+    host._post_thread = thread
+    thread.start()
+
+
+def on_worker_error(host: Any, message: str) -> None:
+    host.log(message, level=logging.ERROR)
 
 
 def refresh_run_excel_success_from_disk(host: Any) -> None:

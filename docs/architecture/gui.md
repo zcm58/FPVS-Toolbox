@@ -17,11 +17,15 @@ Primary paths:
   single/batch mode UI state, `.bdf` file selection, start-button readiness,
   trigger-detection placeholder behavior, and preprocessing parameter assembly
   used by `MainWindow` compatibility wrappers.
-- `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing export
-  completion handling used by `MainWindow` compatibility wrappers.
+- `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
+  launch, worker error routing, and export completion handling used by
+  `MainWindow` compatibility wrappers.
 - `src/Main_App/gui/tool_workflows.py`: settings, update-check, tool-launcher,
   help/about, and auxiliary-window actions used by `MainWindow` compatibility
   wrappers.
+- `src/Main_App/gui/shell_status.py`: launch reveal, status bar, busy
+  indicator, GUI log routing, and processing-start notice helpers used by
+  `MainWindow` compatibility wrappers.
 - `src/Main_App/PySide6_App/GUI/`: main window, menus, panels, icons, and style tokens.
 - `src/Main_App/PySide6_App/widgets/`: shared PySide6 presentation primitives.
 - `src/Main_App/PySide6_App/Backend/`: project and processing coordination used by the GUI.
@@ -33,7 +37,9 @@ Shared PySide6 primitives live in `src/Main_App/PySide6_App/widgets/`. Use this 
 
 The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` and the tokens in `src/Main_App/PySide6_App/GUI/style_tokens.py`.
 
-Shell-specific implementations currently stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, and style tokens. Active callers should import them through `Main_App.gui`. Project workflow orchestration is now split into `Main_App.gui.project_workflows`, processing input orchestration is now split into `Main_App.gui.processing_inputs`, processing run orchestration is now split into `Main_App.gui.processing_workflows`, post-export completion handling is now split into `Main_App.gui.post_export_workflows`, and tool/menu action orchestration is now split into `Main_App.gui.tool_workflows`, while `MainWindow` keeps public wrapper methods for actions and tests.
+`src/Main_App/PySide6_App/GUI/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size or move wrappers. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
+
+Shell-specific implementations currently stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, and style tokens. Active callers should import them through `Main_App.gui`. Project workflow orchestration is now split into `Main_App.gui.project_workflows`, processing input orchestration is now split into `Main_App.gui.processing_inputs`, processing run orchestration is now split into `Main_App.gui.processing_workflows`, post-export completion handling is now split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is now split into `Main_App.gui.tool_workflows`, and shell/status feedback is now split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
 
 Widgets must not own backend processing, file export behavior, project mutation, or dialog orchestration. Keep those responsibilities in GUI controllers, backend modules, workers, or tool-specific code.
 

@@ -10,7 +10,6 @@ import sys
 from Main_App.Shared.post_process import post_process as _shared_post_process
 from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
 from typing import Callable
-from datetime import datetime
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 from collections import deque
@@ -18,17 +17,13 @@ from collections import deque
 import psutil
 
 # Qt / PySide6
-from PySide6.QtCore import QObject, QEvent, QEasingCurve, QPropertyAnimation, QTimer, Signal, QThread, Slot, Qt
+from PySide6.QtCore import QObject, QEvent, QTimer, Signal, Slot
 from PySide6.QtGui import QFont, QCloseEvent, QAction, QShowEvent  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
-    QGraphicsOpacityEffect,
-    QLabel,
     QLineEdit,
     QMainWindow,
-    QMessageBox,
-    QStatusBar,
     QWidget,
 )
 
@@ -67,12 +62,12 @@ from Main_App.gui import processing_workflows
 from Main_App.gui import processing_inputs
 from Main_App.gui import post_export_workflows
 from Main_App.gui import tool_workflows
+from Main_App.gui import shell_status
 from Main_App.gui.post_export_workflows import (
     excel_snapshot as _excel_snapshot,
     should_show_no_excel_popup as _should_show_no_excel_popup,
 )
 from Main_App.PySide6_App.utils.op_guard import OpGuard
-from Main_App.workers.processing_worker import PostProcessWorker
 
 STATS_TOOL_UNDER_DEVELOPMENT_WARNING = (
     "The Statistics Tool is currently under development. Certain features, like "
@@ -195,10 +190,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
         # Build UI
         init_ui(self)
         self._bind_existing_event_map_rows()
-        self._launch_reveal_done = False
-        self._launch_reveal_animation: QPropertyAnimation | None = None
-        self._launch_reveal_effect: QGraphicsOpacityEffect | None = None
-        self._launch_reveal_target: QWidget | None = None
+        shell_status.init_launch_reveal_state(self)
 
         # Poll the worker queue so the GUI stays responsive
         self._processing_timer = QTimer(self)
@@ -240,32 +232,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
         select_projects_root(self)
         init_file_menu(self)
 
-        # Status bar
-        status = QStatusBar(self)
-        self.setStatusBar(status)
-        status.showMessage(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
-        if hasattr(self, "landing_version_label"):
-            self.landing_version_label.setText(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
-
-        # --- Busy spinner (ENLARGED) ---
-        self.statusBar().setSizeGripEnabled(False)
-        self.statusBar().setMinimumHeight(36)
-        self.statusBar().setContentsMargins(8, 0, 8, 0)
-
-        self._busyFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        self._busyIdx = 0
-        self._busyTimer = QTimer(self)
-        self._busyTimer.setInterval(120)
-        self._busyTimer.timeout.connect(self._tick_busy)
-
-        self._busyLabel = QLabel("")
-        _big = self._busyLabel.font()
-        _big.setPointSize(max(_big.pointSize() + 4, 14))
-        self._busyLabel.setFont(_big)
-        self._busyLabel.setStyleSheet("padding: 0 10px;")
-        self._busyLabel.setVisible(False)
-        self.statusBar().addPermanentWidget(self._busyLabel)
-        # --------------------------------
+        shell_status.init_status_bar(self, FPVS_TOOLBOX_VERSION)
 
         # Wire landing page buttons if present
         if hasattr(self, "btn_create_project"):
@@ -332,7 +299,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self._queue_job_id: int | None = None
         self.post_process = MethodType(MainWindow._export_with_post_process, self)
         self._post_thread = None
-        self._post_worker: PostProcessWorker | None = None
+        self._post_worker = None
         self._post_backlog: deque[tuple[str, dict, list[str]]] = deque()
         self._pending_finalize = False
         self._op_guard = OpGuard()
@@ -353,96 +320,23 @@ class MainWindow(QMainWindow, ProcessingMixin):
             QTimer.singleShot(0, self._start_launch_reveal)
 
     def _launch_reveal_widget(self) -> QWidget | None:
-        if not hasattr(self, "stacked"):
-            return None
-        if self.stacked.currentWidget() is getattr(self, "landing_page", None):
-            return getattr(self, "landing_card", None)
-        return getattr(self, "page1_container", None)
+        return shell_status.launch_reveal_widget(self)
 
     def _start_launch_reveal(self) -> None:
-        target = self._launch_reveal_widget()
-        if target is None or not target.isVisible():
-            return
-
-        effect = QGraphicsOpacityEffect(target)
-        effect.setOpacity(0.0)
-        target.setGraphicsEffect(effect)
-
-        animation = QPropertyAnimation(effect, b"opacity", self)
-        animation.setDuration(180)
-        animation.setStartValue(0.0)
-        animation.setEndValue(1.0)
-        animation.setEasingCurve(QEasingCurve.OutCubic)
-        animation.finished.connect(self._finish_launch_reveal)
-
-        self._launch_reveal_target = target
-        self._launch_reveal_effect = effect
-        self._launch_reveal_animation = animation
-        animation.start()
+        shell_status.start_launch_reveal(self)
 
     def _finish_launch_reveal(self) -> None:
-        if self._launch_reveal_target is not None:
-            self._launch_reveal_target.setGraphicsEffect(None)
-        self._launch_reveal_target = None
-        self._launch_reveal_effect = None
-        self._launch_reveal_animation = None
+        shell_status.finish_launch_reveal(self)
 
     # ---------------------------- logging --------------------------- #
     def _emit_backend_log(self, level: int, message: str) -> None:
-        """
-        Emit to the Python logging backend only when:
-          * Debug mode is enabled, or
-          * Level is WARNING or higher.
-        Prevents noisy INFO logs in the IDE/console during normal runs.
-        """
-        try:
-            debug_on = self.settings.debug_enabled()
-        except Exception:
-            debug_on = False
-        if debug_on or level >= logging.WARNING:
-            logger.log(level, message)
+        shell_status.emit_backend_log(self, logger, level, message)
 
     def log(self, message: str, level: int = logging.INFO) -> None:
-        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        formatted = f"{ts} [GUI]: {message}"
-        if hasattr(self, "text_log") and self.text_log:
-            self.text_log.append(formatted)
-        # Do not emit INFO-level messages to backend unless Debug is on.
-        self._emit_backend_log(level, message)
+        shell_status.log_message(self, logger, message, level)
 
     def _show_processing_started_notice(self) -> None:
-        existing = getattr(self, "_processing_notice", None)
-        if existing is not None:
-            try:
-                existing.close()
-            except Exception:
-                pass
-            finally:
-                self._processing_notice = None
-
-        box = QMessageBox(self)
-        box.setWindowTitle("Processing Started")
-        box.setIcon(QMessageBox.Information)
-        box.setText(
-            "Processing Data has begun. Please be patient - your computer may "
-            "become slow or unresponsive until processing is complete."
-        )
-        box.addButton("Dismiss", QMessageBox.AcceptRole)
-        box.setWindowModality(Qt.NonModal)
-
-        def _clear_notice(_: int | None = None) -> None:
-            if getattr(self, "_processing_notice", None) is box:
-                self._processing_notice = None
-
-        box.finished.connect(_clear_notice)
-
-        def _auto_close() -> None:
-            if getattr(self, "_processing_notice", None) is box and box.isVisible():
-                box.close()
-
-        self._processing_notice = box
-        box.show()
-        QTimer.singleShot(10000, _auto_close)
+        shell_status.show_processing_started_notice(self)
 
     # -------------------------- processing -------------------------- #
 
@@ -455,20 +349,13 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     # --- Busy spinner helpers ---
     def _busy_start(self) -> None:
-        if not self._busyTimer.isActive():
-            self._busyIdx = 0
-            self._busyLabel.setText(f"{self._busyFrames[0]} Processing…")
-            self._busyLabel.setVisible(True)
-            self._busyTimer.start()
+        shell_status.busy_start(self)
 
     def _busy_stop(self) -> None:
-        if self._busyTimer.isActive():
-            self._busyTimer.stop()
-        self._busyLabel.setVisible(False)
+        shell_status.busy_stop(self)
 
     def _tick_busy(self) -> None:
-        self._busyIdx = (self._busyIdx + 1) % len(self._busyFrames)
-        self._busyLabel.setText(f"{self._busyFrames[self._busyIdx]} Processing…")
+        shell_status.tick_busy(self)
 
     # --------------------------------
 
@@ -483,46 +370,10 @@ class MainWindow(QMainWindow, ProcessingMixin):
         processing_workflows.periodic_queue_check(self)
 
     def _start_post_worker(self, file_name: str, epochs_dict: dict, labels: list[str]) -> None:
-        """Queue-aware launcher for post-processing jobs."""
-        payload = (file_name, epochs_dict, labels)
-
-        # If a worker is active, enqueue and return
-        if self._post_thread and self._post_thread.isRunning():
-            self._post_backlog.append(payload)
-            base = os.path.basename(str(file_name))
-            self.log(f"Queued post-processing for {base}")
-            return
-
-        save_folder = (
-            self.save_folder_path.get()
-            if hasattr(self.save_folder_path, "get")
-            else self.save_folder_path
-        )
-
-        worker = PostProcessWorker(
-            file_name,
-            epochs_dict,
-            labels,
-            save_folder=save_folder,
-            data_paths=[file_name],
-            settings=getattr(self, "settings", None),
-            logger=lambda m: self.gui_queue.put({"type": "log", "message": m}),
-        )
-
-        thread = QThread(self)
-        worker.moveToThread(thread)
-        worker.error.connect(self._on_worker_error)
-        worker.finished.connect(self._on_post_finished)   # will drain backlog
-        thread.started.connect(worker.run)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        self._post_worker = worker
-        self._post_thread = thread
-        thread.start()
+        post_export_workflows.start_post_worker(self, file_name, epochs_dict, labels)
 
     def _on_worker_error(self, message: str) -> None:
-        self.log(message, level=logging.ERROR)
+        post_export_workflows.on_worker_error(self, message)
 
     def _on_post_finished(self, payload: dict | None = None) -> None:
         post_export_workflows.on_post_finished(self, payload, log=logger)
