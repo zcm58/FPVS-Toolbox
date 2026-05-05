@@ -17,7 +17,7 @@ Read [docs/agent-index.md](docs/agent-index.md) for the compact skill/script/tes
 
 ## Execution Plans
 
-Durable refactor plans live under [docs/exec-plans](docs/exec-plans/). Read active plans before changing the areas they cover, then keep the plan's progress, decisions, and verification notes current as work lands.
+Durable refactor and feature plans live under [docs/exec-plans](docs/exec-plans/). Read active plans before changing the areas they cover, then keep the plan's progress, decisions, and verification notes current as work lands. Future plans record approved ideas that are not active work yet; read them only when scoping or starting the matching effort.
 
 Structural refactors must update this file, the relevant focused architecture page, or the nearest scoped `AGENTS.md` in the same PR when they change ownership, module boundaries, workflows, or verification expectations. If no architecture or agent doc changes are needed, record that in the PR handoff or active execution plan.
 

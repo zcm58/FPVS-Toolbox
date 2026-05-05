@@ -35,6 +35,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ## Execution Plans
 
 - Active refactor plans live in `docs/exec-plans/active/`.
+- Future plans live in `docs/exec-plans/future/`; read them only when scoping or starting the matching effort.
 - Read `docs/exec-plans/active/main-app-refactor.md` before non-trivial `Main_App` refactors.
 - Keep active plans current with phase status, touched areas, doc updates, verification commands, and decisions.
 - Move finished plans to `docs/exec-plans/completed/` when the tracked work is complete.
