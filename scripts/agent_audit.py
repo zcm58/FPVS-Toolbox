@@ -14,6 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = REPO_ROOT / "docs" / "architecture" / "protected-paths.txt"
 ACTIVE_SOURCE_LOCALIZATION = "src/Tools/SourceLocalization"
 AGENT_INDEX = REPO_ROOT / "docs" / "agent-index.md"
+ARCHITECTURE_MAP = REPO_ROOT / "ARCHITECTURE.md"
+EXEC_PLANS_README = REPO_ROOT / "docs" / "exec-plans" / "README.md"
+MAIN_APP_REFACTOR_PLAN = REPO_ROOT / "docs" / "exec-plans" / "active" / "main-app-refactor.md"
 SKILL_SCRIPT_PATHS = (
     ".agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py",
     ".agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py",
@@ -248,6 +251,36 @@ def check_agent_harness() -> list[Issue]:
                         f"agent index does not mention {script_path}",
                     )
                 )
+        if "docs/exec-plans/active/main-app-refactor.md" not in text:
+            issues.append(
+                Issue(
+                    "agent-harness",
+                    _repo_path(AGENT_INDEX),
+                    None,
+                    "agent index does not mention the active Main_App refactor plan",
+                )
+            )
+
+    if not ARCHITECTURE_MAP.exists():
+        issues.append(
+            Issue(
+                "agent-harness",
+                _repo_path(ARCHITECTURE_MAP),
+                None,
+                "missing top-level architecture map",
+            )
+        )
+    else:
+        text = ARCHITECTURE_MAP.read_text(encoding="utf-8", errors="replace")
+        if "docs/exec-plans" not in text:
+            issues.append(
+                Issue(
+                    "agent-harness",
+                    _repo_path(ARCHITECTURE_MAP),
+                    None,
+                    "architecture map does not mention execution plans",
+                )
+            )
 
     for script_path in SKILL_SCRIPT_PATHS:
         if not (REPO_ROOT / script_path).exists():
@@ -257,6 +290,19 @@ def check_agent_harness() -> list[Issue]:
                     script_path,
                     None,
                     "missing skill-local audit wrapper",
+                )
+            )
+    for plan_path, message in (
+        (EXEC_PLANS_README, "missing execution-plan directory README"),
+        (MAIN_APP_REFACTOR_PLAN, "missing active Main_App refactor plan"),
+    ):
+        if not plan_path.exists():
+            issues.append(
+                Issue(
+                    "agent-harness",
+                    _repo_path(plan_path),
+                    None,
+                    message,
                 )
             )
     return issues

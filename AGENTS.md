@@ -13,6 +13,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Prefer executable checks over broad reading. Run the relevant skill script or `python scripts/agent_audit.py` first, then read only the focused docs needed for failures or context.
 - Treat [ARCHITECTURE.md](ARCHITECTURE.md) as the repo map before structural changes; do not read every architecture page by default.
 - Start with [docs/agent-index.md](docs/agent-index.md) when choosing skills, scripts, and focused tests.
+- For non-trivial refactors, read the active execution plan first. Update architecture docs or the nearest scoped `AGENTS.md` when structure, ownership, boundaries, or workflows change; otherwise state why no doc update was needed.
 
 ## Non-Negotiables
 
@@ -50,6 +51,7 @@ Use the script output to decide what to read next. If a script passes, do not sc
 
 - Architecture map: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Agent command index: [docs/agent-index.md](docs/agent-index.md)
+- Active execution plans: [docs/exec-plans/active/](docs/exec-plans/active/)
 - Module map: [docs/architecture/module-map.md](docs/architecture/module-map.md)
 - Protected paths: [docs/architecture/protected-paths.txt](docs/architecture/protected-paths.txt)
 - Test selection: [docs/quality/test-selection.md](docs/quality/test-selection.md)
@@ -79,3 +81,4 @@ If a gate cannot run locally, report the command, failure reason, and residual r
 - Project-path discipline is preserved.
 - Errors are logged and surfaced without freezing the app.
 - Tests or documented manual smoke checks cover changed behavior.
+- Architecture or agent docs reflect any changed structure, or the handoff explains why no doc update was needed.

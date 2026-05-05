@@ -24,6 +24,13 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | Project paths, dialogs, imports, exports, manifests | `project-path-audit` | `.agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` | `docs/architecture/project-io.md` |
 | GUI smoke coverage | `pytest-qt-smoke` | nearest focused pytest target | `docs/quality/test-selection.md` |
 
+## Execution Plans
+
+- Active refactor plans live in `docs/exec-plans/active/`.
+- Read `docs/exec-plans/active/main-app-refactor.md` before non-trivial `Main_App` refactors.
+- Keep active plans current with phase status, touched areas, doc updates, verification commands, and decisions.
+- Move finished plans to `docs/exec-plans/completed/` when the tracked work is complete.
+
 ## Test Selection
 
 - Component layer: `python -m pytest tests/test_ui_components_smoke.py -q`
