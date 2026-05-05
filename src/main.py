@@ -13,7 +13,7 @@ from ctypes import windll
 from PySide6.QtCore import QCoreApplication
 
 from config import FPVS_TOOLBOX_VERSION
-from Main_App.PySide6_App.utils.theme import apply_light_palette
+from Main_App.gui.theme import apply_light_palette
 
 try:
     windll.shcore.SetProcessDpiAwareness(1)  # type: ignore[attr-defined]

@@ -1,9 +1,18 @@
-from .brain_pulse import BrainPulseWidget
-from .busy_spinner import BusySpinner
-from .buttons import make_action_button
-from .cards import CardHeader, SectionCard
-from .forms import PathPickerRow, make_form_layout
-from .status import StatusBanner
+"""Compatibility wrapper for shared GUI widgets.
+
+Implementations live in :mod:`Main_App.gui.widgets`.
+"""
+
+from Main_App.gui.widgets import (  # noqa: F401
+    BrainPulseWidget,
+    BusySpinner,
+    CardHeader,
+    PathPickerRow,
+    SectionCard,
+    StatusBanner,
+    make_action_button,
+    make_form_layout,
+)
 
 __all__ = [
     "BrainPulseWidget",

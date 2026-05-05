@@ -8,7 +8,7 @@ import os
 import queue
 import sys
 from Main_App.Shared.post_process import post_process as _shared_post_process
-from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
+from Main_App.gui.theme import apply_fpvs_theme
 from typing import Callable
 from pathlib import Path
 from types import MethodType, SimpleNamespace

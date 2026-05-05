@@ -50,8 +50,8 @@ from Main_App.projects.project import (
     STATS_SUBFOLDER_NAME,
 )
 from Main_App.PySide6_App.utils.op_guard import OpGuard
-from Main_App.PySide6_App.widgets.busy_spinner import BusySpinner
-from Main_App.PySide6_App.widgets import (
+from Main_App.gui.widgets.busy_spinner import BusySpinner
+from Main_App.gui.widgets import (
     SectionCard,
     StatusBanner,
     make_action_button,

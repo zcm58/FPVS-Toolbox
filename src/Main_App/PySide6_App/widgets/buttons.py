@@ -1,25 +1,5 @@
-"""Shared button factories for PySide6 UI surfaces."""
+"""Compatibility wrapper for :mod:`Main_App.gui.widgets.buttons`."""
 
-from __future__ import annotations
+from Main_App.gui.widgets.buttons import make_action_button  # noqa: F401
 
-from PySide6.QtWidgets import QPushButton, QWidget
-
-_SUPPORTED_VARIANTS = {"primary", "secondary", "tertiary", "danger"}
-
-
-def make_action_button(
-    text: str,
-    *,
-    variant: str = "secondary",
-    compact: bool = False,
-    parent: QWidget | None = None,
-) -> QPushButton:
-    """Create a presentation-only action button styled by Qt properties."""
-    if variant not in _SUPPORTED_VARIANTS:
-        raise ValueError(f"Unsupported action button variant: {variant!r}")
-
-    button = QPushButton(text, parent)
-    button.setProperty("variant", variant)
-    button.setProperty(variant, True)
-    button.setProperty("compact", compact)
-    return button
+__all__ = ["make_action_button"]

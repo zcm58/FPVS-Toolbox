@@ -20,7 +20,7 @@ from .advanced_analysis_file_ops import AdvancedAnalysisFileOpsMixin
 from .advanced_analysis_group_ops import AdvancedAnalysisGroupOpsMixin
 from .advanced_analysis_processing import AdvancedAnalysisProcessingMixin
 from .advanced_analysis_post import AdvancedAnalysisPostMixin
-from Main_App.PySide6_App.widgets import SectionCard, make_action_button
+from Main_App.gui.widgets import SectionCard, make_action_button
 
 
 class AdvancedAveragingWindow(

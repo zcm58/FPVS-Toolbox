@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
-from Main_App.PySide6_App.widgets import (
+from Main_App.gui.widgets import (
     PathPickerRow,
     SectionCard,
     StatusBanner,

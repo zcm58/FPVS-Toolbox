@@ -2,7 +2,7 @@ import sys
 
 import pytest
 from PySide6.QtWidgets import QApplication
-from Main_App.PySide6_App.widgets.busy_spinner import BusySpinner
+from Main_App.gui.widgets.busy_spinner import BusySpinner
 
 @pytest.fixture(scope="session")
 def app():

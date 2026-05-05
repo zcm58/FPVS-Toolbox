@@ -12,7 +12,7 @@ This plan governs package ownership and file moves only. The existing `docs/exec
 - Scope: behavior-preserving package ownership moves and old-folder deletion gates.
 - Canonical import surfaces now exist for `Main_App.gui`, `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, and `Main_App.diagnostics`.
 - `Legacy_App` is mostly compatibility wrappers or inactive legacy code.
-- `PySide6_App` still owns many implementation modules.
+- `PySide6_App` still owns many implementation modules, but reusable widgets and theme helpers have moved to canonical GUI ownership.
 - Next work is moving implementations into purpose-based packages and deleting wrappers only after import and test gates pass.
 
 ## Target Layout
@@ -36,7 +36,7 @@ Canonical packages should become implementation owners, not only forwarding wrap
 - `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, `Main_App.diagnostics`, and `Main_App.gui` are present.
 - Several canonical modules still wrap or delegate to old implementation paths under `PySide6_App`.
 - `Legacy_App` references in active code are already mostly wrappers, inactive legacy modules, docs, or smoke-test stubs.
-- Active imports still remain for reusable widgets/theme helpers, `op_guard` and runtime utilities, post-export adapter code, backend processing/project modules, and GUI implementation wrappers.
+- Active imports still remain for `op_guard` and runtime utilities, post-export adapter code, backend processing/project modules, and GUI implementation wrappers.
 
 ## Classification Categories
 
@@ -110,18 +110,19 @@ The first slice under this plan is documentation-only and now complete:
 | `Backend/project.py`, `Backend/project_manager.py`, `Backend/project_metadata.py`, `config/projects_root.py` | Active project implementation | Move to `Main_App.projects` | project settings, project scan, project paths tests |
 | `adapters/post_export_adapter.py` | Active export adapter | Move to `Main_App.exports.post_export_adapter` | post-export adapter and worker Excel payload tests |
 | `diagnostics/event_time_lock_report.py`, `utils/audit.py` | Active runtime diagnostics | Move to `Main_App.diagnostics` | event-time lock and audit field/json tests |
-| `utils/op_guard.py`, `utils/paths.py`, `utils/theme.py` | Active shared GUI/runtime utilities | Move to `Main_App.gui` or `Main_App.gui.utils` by usage | GUI smoke, settings/status, tool smoke tests |
+| `utils/op_guard.py`, `utils/paths.py` | Active shared GUI/runtime utilities | Move to `Main_App.gui` or `Main_App.gui.utils` by usage | GUI smoke, settings/status, tool smoke tests |
+| `utils/theme.py` | Compatibility wrapper | Delete after stale callers migrate to `Main_App.gui.theme` | GUI smoke, settings/status, tool smoke tests |
 | `GUI/event_map.py`, `GUI/file_menu.py`, `GUI/header_bar.py`, `GUI/icons.py`, `GUI/menu_bar.py`, `GUI/roi_settings_editor.py`, `GUI/settings_panel.py`, `GUI/sidebar.py`, `GUI/style_tokens.py`, `GUI/ui_main.py`, `GUI/update_manager.py` | Active GUI implementation | Move to `Main_App.gui`; keep wrappers only during the migration slice | main-window layout, settings/status, startup import, focused GUI tests |
 | `GUI/main_window.py` | Active GUI shell; already downsized | Move path to `Main_App.gui.main_window` without new internal refactor | main-window layout/processing/startup tests |
 | `GUI/icons/snr_plots.svg` | GUI asset | Move with the GUI module that loads it, likely under `Main_App.gui/icons/` | GUI smoke tests that load icons |
-| `widgets/brain_pulse.py`, `widgets/busy_spinner.py`, `widgets/buttons.py`, `widgets/cards.py`, `widgets/forms.py`, `widgets/status.py`, `widgets/__init__.py` | Active reusable GUI widgets | Move to `Main_App.gui.widgets`; this is the likely first code-move slice | widget smoke tests; tool GUI smoke tests |
+| `widgets/brain_pulse.py`, `widgets/busy_spinner.py`, `widgets/buttons.py`, `widgets/cards.py`, `widgets/forms.py`, `widgets/status.py`, `widgets/__init__.py` | Compatibility wrappers | Delete after stale callers migrate to `Main_App.gui.widgets` | widget smoke tests; tool GUI smoke tests |
 | `workers/mp_runner_bridge.py`, `workers/processing_worker.py` | Active Qt worker implementations | Move to `Main_App.workers` after lower-risk GUI moves | worker integration, postprocess worker, multiprocessing smoke tests |
 
 ## Current Import Findings
 
 - `Legacy_App` imports in active source are already mostly removed; remaining direct references are documentation strings, compatibility wrappers, and a GUI smoke script stub.
 - `PySide6_App` still owns many active implementations. Current top-level packages such as `Main_App.gui`, `Main_App.projects`, `Main_App.workers`, `Main_App.processing`, and `Main_App.diagnostics` often delegate into `PySide6_App`.
-- Tool packages and tests still import `Main_App.PySide6_App.widgets` and `Main_App.PySide6_App.utils.theme`; moving widgets/theme utilities to `Main_App.gui` should be the first code-move slice because it is low-risk and reduces many stale imports.
+- Tool packages, tests, and active source now import reusable widgets/theme helpers from `Main_App.gui.widgets` and `Main_App.gui.theme`. The old `PySide6_App` widget/theme paths are temporary wrappers only.
 
 ## Verification
 
@@ -142,7 +143,7 @@ For future movement slices, also run the focused tests for the touched domain an
 
 ## Execution Queue
 
-1. Move reusable GUI widgets and theme helpers into `Main_App.gui.widgets` and `Main_App.gui.theme`.
+1. Move reusable GUI widgets and theme helpers into `Main_App.gui.widgets` and `Main_App.gui.theme`. Status: complete.
 2. Move GUI/runtime utilities such as `op_guard` and path helpers to canonical GUI or shared homes.
 3. Move post-export adapter implementation to `Main_App.exports`.
 4. Move backend processing and project implementations behind the existing canonical packages.
@@ -150,8 +151,15 @@ For future movement slices, also run the focused tests for the touched domain an
 6. Delete `Legacy_App` wrappers after grep and focused tests prove no active imports remain.
 7. Delete `PySide6_App` package markers after all implementation ownership has moved.
 
+Latest executable slice:
+
+- Moved reusable widget implementations to `src/Main_App/gui/widgets/`.
+- Moved theme implementation to `src/Main_App/gui/theme.py`.
+- Replaced old `src/Main_App/PySide6_App/widgets/` and `src/Main_App/PySide6_App/utils/theme.py` modules with temporary compatibility wrappers.
+- Updated active source, tools, tests, and scripts to import `Main_App.gui.widgets` and `Main_App.gui.theme`.
+- Passed focused widget/theme, main-window, and selected tool smoke tests.
+- Passed `python scripts/agent_audit.py`, GUI import audit, legacy-boundary audit, and `git diff --check` with line-ending warnings only.
+
 Next executable slice:
 
-- Move `src/Main_App/PySide6_App/widgets/*` to `src/Main_App/gui/widgets/`.
-- Move `src/Main_App/PySide6_App/utils/theme.py` to `src/Main_App/gui/theme.py`.
-- Preserve widget behavior and keep temporary wrappers until active source, tools, and tests import the canonical paths.
+- Move GUI/runtime utilities such as `src/Main_App/PySide6_App/utils/op_guard.py` and `src/Main_App/PySide6_App/utils/paths.py` to canonical GUI or shared homes.

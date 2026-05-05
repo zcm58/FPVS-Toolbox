@@ -583,8 +583,8 @@ def _run_gui() -> int:
         QVBoxLayout,
     )
     _ensure_src_on_sys_path()
-    from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
-    from Main_App.PySide6_App.widgets import make_action_button, make_form_layout
+    from Main_App.gui.theme import apply_fpvs_theme
+    from Main_App.gui.widgets import make_action_button, make_form_layout
 
     class _Worker(QObject):
         progress = Signal(str)

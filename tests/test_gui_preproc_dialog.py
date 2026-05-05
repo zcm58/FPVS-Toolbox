@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
-from Main_App.PySide6_App.widgets import SectionCard
+from Main_App.gui.widgets import SectionCard
 import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
 

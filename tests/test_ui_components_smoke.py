@@ -7,8 +7,8 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 
 from PySide6.QtWidgets import QApplication, QLabel
 
-from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
-from Main_App.PySide6_App.widgets import (
+from Main_App.gui.theme import apply_fpvs_theme
+from Main_App.gui.widgets import (
     PathPickerRow,
     SectionCard,
     StatusBanner,

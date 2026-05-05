@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.Shared.settings_paths import app_settings_file
 from Main_App.gui import update_manager
-from Main_App.PySide6_App.utils.theme import apply_light_palette
+from Main_App.gui.theme import apply_light_palette
 
 
 def test_settings_manager_uses_central_ini(qtbot) -> None:

@@ -61,6 +61,24 @@ Latest folder retirement planning slice:
 - Next candidate: move reusable PySide6 GUI widgets/theme helpers into `Main_App.gui` / `Main_App.gui.widgets` with temporary wrappers.
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 
+Latest folder retirement implementation slice:
+
+- Refactor completed: reusable GUI widgets now live in `src/Main_App/gui/widgets/`, and shared theme helpers now live in `src/Main_App/gui/theme.py`.
+- Temporary wrappers remain in `src/Main_App/PySide6_App/widgets/` and `src/Main_App/PySide6_App/utils/theme.py`.
+- Runtime, tools, tests, and scripts now import widgets/theme helpers through `Main_App.gui.widgets` and `Main_App.gui.theme`.
+- Behavior-preservation rule: no GUI workflow, signal wiring, processing path, project I/O, preprocessing, BDF loading, worker behavior, post-processing, or export behavior changed.
+- Passed: `python -m py_compile src\Main_App\gui\theme.py src\Main_App\gui\widgets\__init__.py src\Main_App\gui\widgets\brain_pulse.py src\Main_App\gui\widgets\busy_spinner.py src\Main_App\gui\widgets\buttons.py src\Main_App\gui\widgets\cards.py src\Main_App\gui\widgets\forms.py src\Main_App\gui\widgets\status.py src\Main_App\PySide6_App\utils\theme.py src\Main_App\PySide6_App\widgets\__init__.py src\Main_App\PySide6_App\widgets\brain_pulse.py src\Main_App\PySide6_App\widgets\busy_spinner.py src\Main_App\PySide6_App\widgets\buttons.py src\Main_App\PySide6_App\widgets\cards.py src\Main_App\PySide6_App\widgets\forms.py src\Main_App\PySide6_App\widgets\status.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_ui_components_smoke.py tests\test_busy_spinner.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_settings_and_status.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_average_preprocessing_gui_smoke.py tests\test_image_resizer_gui.py tests\test_individual_detectability_gui_smoke.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_stats_multigroup_layout_visibility.py -q`
+- Passed: `git grep -n "Main_App.PySide6_App.widgets\|Main_App.PySide6_App.utils.theme" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `git diff --check` with line-ending warnings only.
+- Note: an exploratory combined run with Plot Generator and Stats multigroup smoke tests still exposes an order-sensitive Stats button-height assertion after Plot Generator runs first; the Stats multigroup test passes alone and with Stats-only layout tests.
+
 Latest slice verification:
 
 - Passed: `python -m py_compile src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\event_map.py`

@@ -5,9 +5,14 @@ The active desktop UI is PySide6.
 Primary paths:
 
 - `src/Main_App/gui/`: canonical active import surface for main-window,
-  settings-panel, menu, sidebar, icon, style-token, and update-manager imports.
-  It delegates to existing PySide6 GUI implementations during the package
-  layout migration.
+  settings-panel, menu, sidebar, icon, style-token, theme, widget, and
+  update-manager imports. Some modules still delegate to existing PySide6 GUI
+  implementations during the package layout migration.
+- `src/Main_App/gui/widgets/`: shared PySide6 presentation primitives for
+  reusable buttons, cards, form rows, the busy spinner, the welcome brain
+  animation, and inline status widgets.
+- `src/Main_App/gui/theme.py`: shared FPVS light palette and stylesheet helpers
+  used by the main app and tool windows.
 - `src/Main_App/gui/project_workflows.py`: project open/create/load/save GUI
   orchestration used by `MainWindow` compatibility wrappers.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
@@ -27,15 +32,15 @@ Primary paths:
   indicator, GUI log routing, and processing-start notice helpers used by
   `MainWindow` compatibility wrappers.
 - `src/Main_App/PySide6_App/GUI/`: main window, menus, panels, icons, and style tokens.
-- `src/Main_App/PySide6_App/widgets/`: shared PySide6 presentation primitives.
+- `src/Main_App/PySide6_App/widgets/`: temporary compatibility wrappers for `Main_App.gui.widgets`.
 - `src/Main_App/PySide6_App/Backend/`: project and processing coordination used by the GUI.
 - `src/Tools/*/`: tool-specific PySide6 windows and launchers.
 
 ## Component Layer
 
-Shared PySide6 primitives live in `src/Main_App/PySide6_App/widgets/`. Use this layer for reusable buttons, cards, form rows, and inline status widgets that are presentation-only.
+Shared PySide6 primitives live in `src/Main_App/gui/widgets/`. Use this layer for reusable buttons, cards, form rows, animation widgets, the busy spinner, and inline status widgets that are presentation-only.
 
-The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` and the tokens in `src/Main_App/PySide6_App/GUI/style_tokens.py`.
+The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
 
 `src/Main_App/PySide6_App/GUI/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size or move wrappers. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
 

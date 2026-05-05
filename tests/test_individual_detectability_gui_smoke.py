@@ -11,7 +11,7 @@ if not hasattr(QtCore, "QThread"):
 from Tools.Individual_Detectability.main_window import (  # noqa: E402
     IndividualDetectabilityWindow,
 )
-from Main_App.PySide6_App.widgets import PathPickerRow, SectionCard, StatusBanner  # noqa: E402
+from Main_App.gui.widgets import PathPickerRow, SectionCard, StatusBanner  # noqa: E402
 
 
 def test_individual_detectability_window_smoke(qtbot, tmp_path: Path) -> None:

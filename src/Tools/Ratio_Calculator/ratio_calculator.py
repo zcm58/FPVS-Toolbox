@@ -9,7 +9,7 @@ if __package__ is None:  # pragma: no cover - executed when run as script
 
 from PySide6.QtWidgets import QApplication
 
-from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
+from Main_App.gui.theme import apply_fpvs_theme
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 
 

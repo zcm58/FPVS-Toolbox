@@ -48,7 +48,7 @@ def test_ratio_calculator_window_smoke(qtbot):
 
     from PySide6.QtWidgets import QApplication
 
-    from Main_App.PySide6_App.widgets import SectionCard, StatusBanner
+    from Main_App.gui.widgets import SectionCard, StatusBanner
     from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 
     QApplication.instance() or QApplication([])

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from Main_App.PySide6_App.widgets import make_action_button
+from Main_App.gui.widgets import make_action_button
 from Tools.Stats.qc.stats_outlier_exclusion import outlier_reason_label
 
 

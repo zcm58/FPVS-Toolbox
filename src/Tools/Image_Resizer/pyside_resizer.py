@@ -28,8 +28,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
-from Main_App.PySide6_App.widgets import (
+from Main_App.gui.theme import apply_fpvs_theme
+from Main_App.gui.widgets import (
     PathPickerRow,
     SectionCard,
     StatusBanner,

@@ -6,7 +6,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QSplitter, QTabWidget  # noqa: E402
 
-from Main_App.PySide6_App.widgets import SectionCard, StatusBanner  # noqa: E402
+from Main_App.gui.widgets import SectionCard, StatusBanner  # noqa: E402
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 

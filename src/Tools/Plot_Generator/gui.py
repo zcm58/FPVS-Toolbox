@@ -51,7 +51,7 @@ from Tools.Plot_Generator.manifest_utils import (
     normalize_participants_map,
 )
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
-from Main_App.PySide6_App.widgets import (
+from Main_App.gui.widgets import (
     PathPickerRow,
     SectionCard,
     make_action_button,
