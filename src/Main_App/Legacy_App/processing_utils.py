@@ -15,9 +15,8 @@ import mne
 import numpy as np
 import pandas as pd
 import re
-from tkinter import messagebox
-import tkinter as tk
 import config
+from Main_App.Shared import user_messages
 from Main_App.Shared.post_process import post_process as _external_post_process
 from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
 from Main_App.Legacy_App.load_utils import load_eeg_file
@@ -37,7 +36,7 @@ class ProcessingMixin:
         # Guard against re-entrant calls only when a real thread is active
         if getattr(self, "_processing_thread", None) and self._processing_thread.is_alive():
             print("!!! GUARD IS TRUE: Blocking start.")
-            messagebox.showerror("Error", "Processing already started")
+            user_messages.show_error("Error", "Processing already started", self)
             return
 
         print("--> GUARD IS FALSE: Proceeding to start a new run.")
@@ -46,7 +45,7 @@ class ProcessingMixin:
         self._set_controls_enabled(False)
 
         if self.detection_thread and self.detection_thread.is_alive():
-            messagebox.showwarning("Busy", "Event detection is running. Please wait.")
+            user_messages.show_warning("Busy", "Event detection is running. Please wait.", self)
             return
 
         self.log("=" * 50)
@@ -148,21 +147,24 @@ class ProcessingMixin:
             if self.validated_params and self.data_paths:
                 output_folder = self.save_folder_path.get()
                 n = len(self.data_paths)
-                messagebox.showinfo(
+                user_messages.show_info(
                     "Processing Complete",
                     f"Analysis finished for {n} file{'s' if n!=1 else ''}.\n"\
-                    f"Excel files saved to:\n{output_folder}"
+                    f"Excel files saved to:\n{output_folder}",
+                    self,
                 )
             else:
-                messagebox.showinfo(
+                user_messages.show_info(
                     "Processing Finished",
-                    "Processing run finished. Check logs for details."
+                    "Processing run finished. Check logs for details.",
+                    self,
                 )
         else:
             self.log("--- Processing Run Finished with ERRORS ---")
-            messagebox.showerror(
+            user_messages.show_error(
                 "Processing Error",
-                "An error occurred during processing. Please check the log for details."
+                "An error occurred during processing. Please check the log for details.",
+                self,
             )
 
         self.busy = False
@@ -186,8 +188,8 @@ class ProcessingMixin:
                 f"{pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]} [GUI]: "
                 "Ready for next file selection...\n"
             )
-            self.log_text.insert(tk.END, ready_msg)
-            self.log_text.see(tk.END)
+            self.log_text.insert("end", ready_msg)
+            self.log_text.see("end")
             self.log_text.configure(state="disabled")
 
         self.processing_thread = None

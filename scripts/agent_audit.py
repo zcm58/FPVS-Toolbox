@@ -373,13 +373,15 @@ def check_gui_imports() -> list[Issue]:
                         "import QAction from PySide6.QtGui, not QtWidgets or QtCore",
                     )
                 )
-            if _is_current_code(normalized) and CUSTOMTK_IMPORT_RE.search(line):
+            if normalized != "scripts/agent_audit.py" and (
+                CUSTOMTK_IMPORT_RE.search(line) or TKINTER_IMPORT_RE.search(line)
+            ):
                 issues.append(
                     Issue(
                         "gui",
                         normalized,
                         line_no,
-                        "current runtime code must not import CustomTkinter or CTkMessagebox",
+                        "repo code must not import Tkinter, CustomTkinter, or CTkMessagebox; use PySide6",
                     )
                 )
     return issues

@@ -147,7 +147,6 @@ class AdvancedAnalysisGroupOpsMixin:
     def _clear_group_config_display(self) -> None:
         """Placeholder for config UI clearing in PySide6 version."""
 
-        # The PySide6 GUI builds configuration widgets differently than the
-        # legacy customtkinter version, so this function intentionally does
-        # nothing here.
+        # The PySide6 GUI builds configuration widgets in other helpers, so
+        # this function intentionally does nothing here.
         return

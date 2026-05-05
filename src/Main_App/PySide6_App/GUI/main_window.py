@@ -14,7 +14,7 @@ from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
 from typing import Callable
 from datetime import datetime
 from pathlib import Path
-from types import MethodType, SimpleNamespace, ModuleType
+from types import MethodType, SimpleNamespace
 from collections import deque
 
 import psutil
@@ -100,109 +100,7 @@ def _should_show_no_excel_popup(
         return False
     return len(_excel_paths_in_output_root(output_root)) == 0
 
-# ----------------------------------------------------------------------
-# Canonical Qt messagebox adapters (used for both tk and legacy debug utils)
-# ----------------------------------------------------------------------
-
-def _qt_showerror(title, message, **options):
-    if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
-        return
-    parent = QApplication.activeWindow()
-    # Suppress *all* legacy error popups when the main window says
-    # completion dialogs should be hidden, or when the run was cancelled.
-    if parent and (
-        getattr(parent, "_suppress_completion_dialogs", False)
-        or getattr(parent, "_cancel_requested", False)
-    ):
-        return
-    QMessageBox.critical(parent, title, message)
-
-
-def _qt_showwarning(title, message, **options):
-    if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
-        return
-    parent = QApplication.activeWindow()
-    QMessageBox.warning(parent, title, message)
-
-
-def _qt_showinfo(title, message, **options):
-    if os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
-        return
-    parent = QApplication.activeWindow()
-    # Same suppression rules for info dialogs (used by legacy completion paths).
-    if parent and (
-        getattr(parent, "_suppress_completion_dialogs", False)
-        or getattr(parent, "_cancel_requested", False)
-    ):
-        return
-
-    # If a run just finished, only show the "Processing Complete" info dialog
-    # when the window reports a successful export (set by our post-process wrapper).
-    if str(title).lower().startswith("processing complete"):
-        ok = getattr(parent, "_last_job_success", True)
-        if not ok:
-            # Downgrade to a warning with a clearer message and skip the legacy text.
-            QMessageBox.warning(
-                parent,
-                "Processing Finished",
-                "No Excel files were generated. Check the log for details.",
-            )
-            return
-    QMessageBox.information(parent, title, message)
-
-def _qt_askyesno(title, message, **options):
-    parent = QApplication.activeWindow()
-    result = QMessageBox.question(
-        parent, title, message,
-        QMessageBox.Yes | QMessageBox.No,
-        QMessageBox.No
-    )
-    return result == QMessageBox.Yes
-
-
-# Provide a tkinter.messagebox shim without importing Tk
-_tk_module = ModuleType("tkinter")
-_tk_msg_module = ModuleType("tkinter.messagebox")
-_tk_msg_module.showerror = _qt_showerror
-_tk_msg_module.showwarning = _qt_showwarning
-_tk_msg_module.showinfo = _qt_showinfo
-_tk_msg_module.askyesno = _qt_askyesno
-_tk_module.messagebox = _tk_msg_module
-_tk_module.END = "end"
-
-_tk_filedialog = ModuleType("tkinter.filedialog")
-
-class _DummyVar:
-    def __init__(self, value=None):
-        self._value = value
-
-    def get(self):
-        return self._value
-
-    def set(self, value):
-        self._value = value
-
-_tk_module.Variable = _DummyVar
-_tk_module.StringVar = _DummyVar
-_tk_module.IntVar = _DummyVar
-_tk_module.DoubleVar = _DummyVar
-_tk_module.BooleanVar = _DummyVar
-
-def _noop_dialog(*_args, **_kwargs):
-    return ""
-
-_tk_filedialog.askopenfilename = _noop_dialog
-_tk_filedialog.askdirectory = _noop_dialog
-_tk_filedialog.asksaveasfilename = _noop_dialog
-_tk_module.filedialog = _tk_filedialog
-sys.modules["tkinter"] = _tk_module
-sys.modules["tkinter.messagebox"] = _tk_msg_module
-sys.modules["tkinter.filedialog"] = _tk_filedialog
-
-
-# Import after stubbing tkinter to avoid loading the real toolkit
 import config
-from Main_App.Legacy_App.file_selection import FileSelectionMixin
 from Main_App.Legacy_App.processing_utils import ProcessingMixin
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.PySide6_App.Backend import Project
@@ -238,14 +136,9 @@ from .file_menu import init_file_menu
 from .settings_panel import SettingsDialog
 from .sidebar import init_sidebar
 from .ui_main import init_ui
-import Main_App.Legacy_App.debug_utils as debug_utils
 
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.PySide6_App.workers.processing_worker import PostProcessWorker
-
-# Route legacy debug utils through Qt adapters
-debug_utils.messagebox._qt_showinfo = _qt_showinfo
-debug_utils.messagebox._qt_showerror = _qt_showerror
 
 STATS_TOOL_UNDER_DEVELOPMENT_WARNING = (
     "The Statistics Tool is currently under development. Certain features, like "
@@ -315,7 +208,7 @@ class _QtEntryAdapter:
                 self.log("_set_controls_enabled: child toggle failed", level=logging.DEBUG)
 
 
-class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
+class MainWindow(QMainWindow, ProcessingMixin):
     """Main application window implemented with PySide6.
 
     Notes
@@ -1283,7 +1176,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     # ------------------------ Tk-style scheduling ------------------------ #
     def after(self, delay_ms: int, callback: Callable[[], None]) -> int:
-        """Tkinter-compatible .after() backed by QTimer.singleShot.
+        """Schedule a callback with QTimer.singleShot.
         Returns a job id usable with after_cancel.
         """
         timer = QTimer(self)

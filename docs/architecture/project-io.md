@@ -27,6 +27,8 @@ Rules:
 - Use `tmp_path` in tests instead of hard-coded local paths.
 - Handle `QFileDialog` Cancel without exceptions or stale UI state.
 - Treat repeated operations and existing output files as normal user behavior.
+- File-selection dialogs must use PySide6 `QFileDialog`. Single-file mode accepts only `.bdf` files inside the active project's input folder and updates `data_paths`, `_selected_bdf`, the input line edit, logs, and Start enabled state without changing project paths.
+- User-facing warnings/errors must use PySide6-safe message helpers, not Tk dialogs. Worker/background callers should log rather than block on a GUI popup.
 
 Useful checks:
 

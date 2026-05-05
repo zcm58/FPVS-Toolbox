@@ -24,7 +24,7 @@ Rules:
 - Keep widgets, layouts, signals, and user feedback in GUI modules.
 - Keep processing and file format logic in backend, worker, or tool-core modules.
 - Import `QAction` from `PySide6.QtGui`.
-- Do not introduce CustomTkinter in current PySide6 code.
+- Do not introduce Tkinter, CustomTkinter, or CTkMessagebox imports in repo code; the active UI toolkit is PySide6.
 - Do not run long work in slots on the UI thread.
 
 Useful checks:

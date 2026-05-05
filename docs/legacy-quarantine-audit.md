@@ -9,19 +9,11 @@ Legend:
 
 ## Runtime-used (do not quarantine yet)
 
-- `src/Main_App/Legacy_App/debug_utils.py`
 - `src/Main_App/Legacy_App/eeg_preprocessing.py`
-- `src/Main_App/Legacy_App/file_selection.py`
 - `src/Main_App/Legacy_App/load_utils.py`
 - `src/Main_App/Legacy_App/processing_utils.py`
 - `src/Main_App/Legacy_App/settings_manager.py`
-- `src/Tools/Average_Preprocessing/Legacy/advanced_analysis.py`
-- `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_base.py`
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`
-- `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_file_ops.py`
-- `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_group_ops.py`
-- `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_post.py`
-- `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_processing.py`
 - `src/Tools/Stats/cli/between_groups_cli.py`
 - `src/Tools/Stats/common/blas_limits.py`
 - `src/Tools/Stats/analysis/cross_phase_lmm_core.py`
@@ -51,11 +43,11 @@ Already has current-app replacement or bridge:
 - `eeg_preprocessing.py`: current PySide6 preprocessing implementation exists at `src/Main_App/PySide6_App/Backend/preprocess.py`; legacy callers remain through `processing_utils`.
 - `post_process.py`: current shared implementation exists at `src/Main_App/Shared/post_process.py`; legacy module remains as a temporary compatibility wrapper.
 - `post_process_excel.py`: current shared implementation exists at `src/Main_App/Shared/post_process_excel.py`; legacy module remains as a temporary compatibility wrapper.
+- `debug_utils.py`: no longer imported by `MainWindow`; retained for logging/settings compatibility without Tk messagebox imports.
+- `file_selection.py`: no longer inherited by `MainWindow`; retained for stale compatibility and now uses PySide6 dialogs.
 
 Still directly used by current app code:
 
-- `debug_utils.py`: `main_window.py` routes legacy messagebox behavior through Qt adapters.
-- `file_selection.py`: `MainWindow` still inherits `FileSelectionMixin`.
 - `processing_utils.py`: `MainWindow` still inherits `ProcessingMixin` for the single/legacy processing path.
 - `load_utils.py`: still used transitively by `processing_utils.py`.
 
@@ -69,6 +61,7 @@ Recent migration slices:
 
 - Event-map GUI row behavior was extracted from `src/Main_App/PySide6_App/GUI/main_window.py` into `src/Main_App/PySide6_App/GUI/event_map.py`.
 - eLORETA/Source Localization was removed from active runtime because it has no working GUI access path and is not part of the current app.
+- Tkinter/CustomTkinter runtime code was removed from active Main App paths; user dialogs now route through PySide6-safe helpers.
 
 ## Newly quarantined after follow-up cleanup
 

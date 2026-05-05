@@ -23,12 +23,12 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/PySide6_App/utils/`: audit, path, operation guard, theme, and settings helpers.
 - `src/Main_App/PySide6_App/diagnostics/`: processing diagnostics and event-time lock reporting.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
-- `src/Main_App/Shared/`: shared current-app settings, FFT crop helpers, and post-processing export behavior.
+- `src/Main_App/Shared/`: shared current-app settings, user-message helpers, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Legacy_App/`: temporary migration boundary for runtime-used behavior. Targeted edits are allowed for migration only when processing order, data formats, and exports remain unchanged.
 
 Current `Legacy_App` runtime couplings to account for before renaming or deleting modules:
 
-- `processing_utils`, `file_selection`, and `debug_utils`: still consumed by the PySide6 main window shell.
+- `processing_utils`: still consumed by the PySide6 main window shell for the single/legacy processing path.
 - `eeg_preprocessing`, `load_utils`, and `settings_manager`: have current-app replacements or bridges, but compatibility imports and transitive legacy callers still need cleanup.
 
 Compatibility wrappers:
@@ -36,6 +36,7 @@ Compatibility wrappers:
 - `fft_crop_utils.py`: thin wrapper for `Main_App.Shared.fft_crop_utils`; current runtime imports should use the shared module.
 - `post_process.py`: thin wrapper for `Main_App.Shared.post_process`; current runtime imports should use the shared module.
 - `post_process_excel.py`: thin wrapper for `Main_App.Shared.post_process_excel`; current runtime imports should use the shared module.
+- `file_selection.py`: no longer inherited by `MainWindow`; retained only for stale compatibility and uses PySide6 dialogs.
 
 ## Tools
 
@@ -44,7 +45,7 @@ Compatibility wrappers:
 - `src/Tools/Ratio_Calculator/`: ratio computation, export, and plotting.
 - `src/Tools/Individual_Detectability/`: individual-level detectability workflow.
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
-- `src/Tools/Average_Preprocessing/Legacy/`: legacy average-preprocessing behavior.
+- `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`: UI-agnostic average-preprocessing behavior used by the PySide6 tool.
 - `src/Tools/Image_Resizer/`: image resizing utility.
 
 ## Dead Or Quarantined

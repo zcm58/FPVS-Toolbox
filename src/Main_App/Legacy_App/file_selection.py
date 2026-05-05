@@ -4,11 +4,12 @@ It opens standard selection dialogs, stores the chosen paths and
 updates progress details before processing starts."""
 import os
 import glob
-from tkinter import filedialog, messagebox
+from PySide6.QtWidgets import QFileDialog
+from Main_App.Shared import user_messages
 
 class FileSelectionMixin:
     def select_save_folder(self):
-        folder = filedialog.askdirectory(title="Select Parent Folder for Excel Output")
+        folder = QFileDialog.getExistingDirectory(self, "Select Parent Folder for Excel Output")
         if folder:
             self.save_folder_path.set(folder)
             self.log(f"Output folder: {folder}")
@@ -32,14 +33,22 @@ class FileSelectionMixin:
             if self.file_mode.get() == "Single":
                 ftypes = [(f"{file_type_desc} files", file_ext)]
 
-                file_path = filedialog.askopenfilename(title="Select EEG File", filetypes=ftypes)
+                file_path, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "Select EEG File",
+                    "",
+                    f"{ftypes[0][0]} ({file_ext})",
+                )
                 if file_path:
                     self.data_paths = [file_path]
                     self.log(f"Selected file: {os.path.basename(file_path)}")
                 else:
                     self.log("No file selected.")
             else:
-                folder = filedialog.askdirectory(title=f"Select Folder with {file_type_desc} Files")
+                folder = QFileDialog.getExistingDirectory(
+                    self,
+                    f"Select Folder with {file_type_desc} Files",
+                )
                 if folder:
                     search_path = os.path.join(folder, file_ext)
                     found_files = sorted(glob.glob(search_path))
@@ -48,12 +57,12 @@ class FileSelectionMixin:
                         self.log(f"Selected folder: {folder}, Found {len(found_files)} '{file_ext}' file(s).")
                     else:
                         self.log(f"No '{file_ext}' files found in {folder}.")
-                        messagebox.showwarning("No Files Found", f"No '{file_type_desc}' files found in:\n{folder}")
+                        user_messages.show_warning("No Files Found", f"No '{file_type_desc}' files found in:\n{folder}", self)
                 else:
                     self.log("No folder selected.")
         except Exception as e:
             self.log(f"Error selecting data: {e}")
-            messagebox.showerror("Selection Error", f"Error during selection:\n{e}")
+            user_messages.show_error("Selection Error", f"Error during selection:\n{e}", self)
 
         self._max_progress = len(self.data_paths) if self.data_paths else 1
         self.progress_bar.set(0)

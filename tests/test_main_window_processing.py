@@ -16,9 +16,9 @@ import Main_App.PySide6_App.Backend.loader as load_utils
 import Main_App.Legacy_App.eeg_preprocessing as eeg_preprocessing
 import Main_App.PySide6_App.Backend.processing as processing
 import Main_App.Shared.post_process as post_process
+from Main_App.Shared import user_messages
 import Main_App.Legacy_App.processing_utils as processing_utils
 import threading
-import tkinter.messagebox as tk_messagebox
 
 
 # ---------------------- helpers ----------------------
@@ -40,8 +40,8 @@ def _stub_processing(monkeypatch, projects_root: Path) -> None:
 
     monkeypatch.setattr(processing_utils.ProcessingMixin, "start_processing", dummy_start)
 
-    for name in ("showerror", "showwarning", "showinfo", "askyesno"):
-        monkeypatch.setattr(tk_messagebox, name, lambda *a, **k: True)
+    for name in ("show_error", "show_warning", "show_info", "ask_yes_no"):
+        monkeypatch.setattr(user_messages, name, lambda *a, **k: True)
 
 
 def _create_project(root: Path) -> Project:

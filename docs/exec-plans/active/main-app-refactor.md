@@ -86,7 +86,7 @@ Latest removal slice:
 ## Current Findings
 
 - `src/Main_App/PySide6_App/GUI/main_window.py` remains the largest organization hotspot, but event-map row behavior has been extracted to a focused current-app GUI module.
-- Direct runtime imports still point at `Legacy_App` for processing mixins, file selection, and debug messagebox shims.
+- Direct runtime imports still point at `Legacy_App` for `ProcessingMixin`, which keeps the single/legacy processing path active.
 - `src/Main_App/Shared/fft_crop_utils.py` owns FFT crop behavior; `src/Main_App/Legacy_App/fft_crop_utils.py` is now only a compatibility wrapper.
 - `src/Main_App/Shared/post_process.py` owns post-processing export behavior and imports workbook helpers from `src/Main_App/Shared/post_process_excel.py`.
 
@@ -109,7 +109,24 @@ Latest post-processing export slice:
 
 Next refactor slice candidate:
 
-- Extract or wrap `file_selection` behavior behind a current-app project/file-selection module without changing file dialog behavior, project-root handling, selected input paths, or user workflow.
+- Split the remaining `ProcessingMixin` responsibilities into current-app processing orchestration without changing processing order, event handling, progress semantics, outputs, or export behavior.
+
+Latest PySide6-only GUI toolkit slice:
+
+- Documentation-first requirement: `docs/architecture/project-io.md` records PySide6 file-selection behavior and the rule that user-facing warnings/errors use PySide6-safe message helpers.
+- Refactor completed: `MainWindow` no longer inherits `FileSelectionMixin`, and active Main App paths no longer install or import Tk messagebox/filedialog shims.
+- Added `src/Main_App/Shared/user_messages.py` so legacy-boundary processing and loader code can surface messages through PySide6 when safe, or log without blocking in worker/background contexts.
+- Removed tracked CustomTkinter/Tk legacy Average Preprocessing UI files and removed `customtkinter`, `CTkMessagebox`, and `darkdetect` from `requirements.txt`; the PySide6 Average Preprocessing tool still uses the UI-agnostic `advanced_analysis_core.py`.
+- Strengthened `scripts/agent_audit.py --check gui` so repo code cannot import Tkinter, CustomTkinter, or CTkMessagebox.
+- Passed: `python -m py_compile scripts\agent_audit.py src\Main_App\Shared\user_messages.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\Legacy_App\processing_utils.py src\Main_App\Legacy_App\file_selection.py src\Main_App\Legacy_App\load_utils.py src\Main_App\Legacy_App\debug_utils.py src\Main_App\PySide6_App\Backend\loader.py src\Main_App\Performance\process_runner.py src\Tools\Average_Preprocessing\__init__.py src\Tools\Average_Preprocessing\New_PySide6\advanced_analysis_group_ops.py src\config.py`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_project_settings_roundtrip.py tests\test_main_window_processing.py tests\test_startup_imports_no_customtkinter.py tests\test_average_preprocessing_gui_smoke.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_stats_no_customtkinter_import.py tests\test_stats_shared_rois.py tests\test_fpvs_app_quarantine.py -q`
+- Passed: `git grep -n -E "^\s*(import tkinter|from tkinter|import customtkinter|from customtkinter|import CTkMessagebox|from CTkMessagebox)" -- src tests scripts` found no matches.
+- Ignored for this slice: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py -q` still fails before this refactor path because its fixture sets low-pass `0.1` and high-pass `50.0`.
 
 Latest workbook-helper slice:
 

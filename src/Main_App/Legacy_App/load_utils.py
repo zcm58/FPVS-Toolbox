@@ -12,8 +12,8 @@ import os
 import tempfile
 from functools import lru_cache
 from pathlib import Path
-from tkinter import messagebox
 from typing import Tuple, Optional, Iterable, Dict, Set
+from Main_App.Shared import user_messages
 
 import mne
 
@@ -134,7 +134,7 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
                     raw = mne.io.read_raw_eeglab(filepath, preload=True, verbose=False)
             app.log("EEGLAB file loaded successfully.")
         else:
-            messagebox.showwarning(
+            user_messages.show_warning(
                 "Unsupported File",
                 f"Format '{ext}' not supported. Only '.bdf' and '.set' are supported.",
             )
@@ -185,7 +185,7 @@ def load_eeg_file(app, filepath: str, ref_pair: Optional[Tuple[str, str]] = None
     except Exception as e:
         app.log(f"!!! Load Error {base}: {e}")
         try:
-            messagebox.showerror("Loading Error", f"Could not load: {base}\nError: {e}")
+            user_messages.show_error("Loading Error", f"Could not load: {base}\nError: {e}")
         except Exception:
             pass
         return None

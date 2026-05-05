@@ -1,5 +1,5 @@
 """
-FPVS Toolbox configuration (PySide6-safe) with legacy CTk shims.
+FPVS Toolbox configuration for the PySide6 app.
 
 Exposes:
 - FPVS_TOOLBOX_VERSION
@@ -67,7 +67,7 @@ DEFAULT_ELECTRODE_NAMES_64 = [
 ]
 DEFAULT_STIM_CHANNEL = "Status"
 
-# — UI sizing tokens (no CTk) —
+# — UI sizing tokens —
 CORNER_RADIUS         = 8
 PAD_X                 = 5
 PAD_Y                 = 5
@@ -82,7 +82,7 @@ def get_ui_constants() -> tuple[int, int, int, int, int]:
     """Return common UI dimension constants used throughout the app."""
     return PAD_X, PAD_Y, CORNER_RADIUS, ENTRY_WIDTH, LABEL_ID_ENTRY_WIDTH
 
-# — Legacy CustomTkinter compatibility shims (do not import CTk) —
+# — UI font compatibility tokens —
 FONT_FAMILY = "Segoe UI"
 FONT_MAIN = None
 FONT_BOLD = None

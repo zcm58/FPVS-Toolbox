@@ -1,7 +1,7 @@
 import logging
 
 from .settings_manager import SettingsManager
-from tkinter import messagebox
+from Main_App.Shared import user_messages
 
 import mne
 
@@ -51,18 +51,18 @@ def get_settings() -> SettingsManager:
 
 
 def install_messagebox_logger(debug_enabled: bool) -> None:
-    """Wrap tkinter messagebox functions to emit debug logs when called."""
+    """Wrap shared user message helpers to emit debug logs when called."""
     if not debug_enabled:
         return
 
     logger = logging.getLogger(__name__)
 
-    def _wrap(func):
+    def _wrap(func, name: str):
         def inner(*args, **kwargs):
-            logger.debug("messagebox.%s called args=%s kwargs=%s", func.__name__, args, kwargs)
+            logger.debug("user_messages.%s called args=%s kwargs=%s", name, args, kwargs)
             return func(*args, **kwargs)
         return inner
 
-    for name in ("showerror", "showinfo", "showwarning", "askyesno"):
-        if hasattr(messagebox, name):
-            setattr(messagebox, name, _wrap(getattr(messagebox, name)))
+    for name in ("show_error", "show_info", "show_warning", "ask_yes_no"):
+        if hasattr(user_messages, name):
+            setattr(user_messages, name, _wrap(getattr(user_messages, name), name))

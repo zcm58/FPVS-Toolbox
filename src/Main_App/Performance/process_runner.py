@@ -6,7 +6,7 @@ Process-based per-file runner.
 - Caps BLAS to 1 thread per worker to avoid oversubscription.
 - Uses the PySide6 loader + preprocessing backend (no direct Legacy deps).
 - Extracts events using the project's stim channel (e.g., "Status").
-- Suppresses any legacy tkinter.messagebox calls inside workers.
+- Suppresses any worker GUI popups.
 - Calls the existing post-export adapter (no Legacy edits).
 - Adds RAM-aware backpressure: staged submissions + system memory soft-cap.
 """
@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
 from Main_App.PySide6_App.Backend import preprocess as backend_preprocess
@@ -53,28 +53,8 @@ class RunParams:
 
 
 def _worker_init() -> None:
-    """Configure per-process environment and stub GUI popups."""
+    """Configure per-process environment."""
     set_blas_threads_multiprocess()
-
-    # Subprocesses must never show blocking dialogs (legacy may use tkinter.messagebox).
-    import sys  # local to keep worker clean
-
-    tk = ModuleType("tkinter")
-    msg = ModuleType("tkinter.messagebox")
-
-    def _noop(*_a, **_k) -> None:
-        return None
-
-    msg.showerror = _noop
-    msg.showwarning = _noop
-    msg.showinfo = _noop
-    msg.askyesno = lambda *_a, **_k: False  # type: ignore[assignment]
-    tk.messagebox = msg  # type: ignore[attr-defined]
-    tk.END = "end"       # some legacy code references tkinter.END
-
-    # Register stubs
-    sys.modules.setdefault("tkinter", tk)
-    sys.modules["tkinter.messagebox"] = msg
 
     # --- Memmap cleanup on worker exit ---
     from pathlib import Path as _Path

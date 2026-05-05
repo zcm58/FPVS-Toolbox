@@ -16,7 +16,7 @@ Use this workflow when changing PySide6 widgets, dialogs, menus, toolbar actions
 3. Identify the smallest GUI cleanup that satisfies the task.
 4. Preserve existing user flows, processing order, object names used by tests, and data formats.
 5. Keep UI code separate from processing logic.
-6. Use PySide6 only. Do not introduce CustomTkinter or PyQt.
+6. Use PySide6 only. Do not introduce other GUI toolkits or PyQt.
 7. Import `QAction` only from `PySide6.QtGui`.
 8. Do not run long work on the UI thread.
 9. Use `QThread` or `QRunnable` with `QThreadPool` for long work.
