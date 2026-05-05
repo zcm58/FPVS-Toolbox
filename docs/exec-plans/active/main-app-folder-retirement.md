@@ -8,10 +8,12 @@ This plan governs package ownership and file moves only. The existing `docs/exec
 
 ## Current Status
 
-- Phase: inventory complete; ready for first low-risk movement slice.
-- Scope: documentation and future behavior-preserving package moves.
-- Latest slice: classified tracked files under `src/Main_App/Legacy_App/` and `src/Main_App/PySide6_App/`.
-- No code movement has started under this plan.
+- Phase: canonical import surfaces exist; implementation-owner retirement is active.
+- Scope: behavior-preserving package ownership moves and old-folder deletion gates.
+- Canonical import surfaces now exist for `Main_App.gui`, `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, and `Main_App.diagnostics`.
+- `Legacy_App` is mostly compatibility wrappers or inactive legacy code.
+- `PySide6_App` still owns many implementation modules.
+- Next work is moving implementations into purpose-based packages and deleting wrappers only after import and test gates pass.
 
 ## Target Layout
 
@@ -27,7 +29,14 @@ Active Main App code should land in purpose-based folders:
 - `Main_App.exports`
 - `Main_App.shared`
 
-Temporary compatibility wrappers are allowed only when needed to keep a slice behavior-preserving. The final goal is to remove active imports of `Main_App.Legacy_App` and `Main_App.PySide6_App`.
+Canonical packages should become implementation owners, not only forwarding wrappers. Temporary compatibility wrappers are allowed only when needed to keep a slice behavior-preserving, and each slice should reduce active dependence on `Main_App.Legacy_App` or `Main_App.PySide6_App`. The final goal is to remove active imports of both historical package names.
+
+## Progress Snapshot
+
+- `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, `Main_App.diagnostics`, and `Main_App.gui` are present.
+- Several canonical modules still wrap or delegate to old implementation paths under `PySide6_App`.
+- `Legacy_App` references in active code are already mostly wrappers, inactive legacy modules, docs, or smoke-test stubs.
+- Active imports still remain for reusable widgets/theme helpers, `op_guard` and runtime utilities, post-export adapter code, backend processing/project modules, and GUI implementation wrappers.
 
 ## Classification Categories
 
@@ -52,6 +61,16 @@ Folder retirement must not change:
 - post-processing math, Excel workbook names, sheet names, columns, formatting, FFT-neighbor rows, or export success behavior
 
 Do not add new `Main_App.Legacy_App` or `Main_App.PySide6_App` imports. Existing compatibility imports should be migrated toward canonical purpose-based packages before old folders are removed.
+
+## Deletion Gates
+
+Before deleting any old-folder wrapper, implementation module, package marker, or scoped `AGENTS.md` file:
+
+- `git grep` must show no active imports from the old package being deleted, except docs or intentionally retained compatibility tests.
+- Focused tests for the touched domain must pass.
+- `python scripts/agent_audit.py` must pass.
+- `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` must pass.
+- Useful scoped guidance from old `AGENTS.md` files must be moved to top-level guidance or focused architecture docs before the old folders are removed.
 
 ## Initial Inventory Slice
 
@@ -121,11 +140,18 @@ For future movement slices, also run the focused tests for the touched domain an
 - `PySide6_App` is the current implementation source for many modules, but the package name should not remain the long-term architecture boundary.
 - `main_window.py` has already been appropriately downsized. It may move to a new package path as part of folder retirement, but it should not be the target of another internal refactor unless explicitly requested.
 
-## Next Slice Candidate
+## Execution Queue
 
-Move reusable PySide6 GUI widgets and theme helpers into the canonical GUI package:
+1. Move reusable GUI widgets and theme helpers into `Main_App.gui.widgets` and `Main_App.gui.theme`.
+2. Move GUI/runtime utilities such as `op_guard` and path helpers to canonical GUI or shared homes.
+3. Move post-export adapter implementation to `Main_App.exports`.
+4. Move backend processing and project implementations behind the existing canonical packages.
+5. Move remaining GUI implementation modules, including `main_window.py`, after wrapper dependencies are thin.
+6. Delete `Legacy_App` wrappers after grep and focused tests prove no active imports remain.
+7. Delete `PySide6_App` package markers after all implementation ownership has moved.
 
-- `src/Main_App/PySide6_App/widgets/*` to `src/Main_App/gui/widgets/`
-- `src/Main_App/PySide6_App/utils/theme.py` to `src/Main_App/gui/theme.py` or `src/Main_App/gui/utils/theme.py`
+Next executable slice:
 
-Preserve widget behavior and keep temporary wrappers until active source, tools, and tests import the canonical paths.
+- Move `src/Main_App/PySide6_App/widgets/*` to `src/Main_App/gui/widgets/`.
+- Move `src/Main_App/PySide6_App/utils/theme.py` to `src/Main_App/gui/theme.py`.
+- Preserve widget behavior and keep temporary wrappers until active source, tools, and tests import the canonical paths.
