@@ -6,7 +6,7 @@ Use this before handing off non-trivial changes.
 - The diff is limited to the requested behavior and direct support files.
 - Non-trivial refactors checked the relevant active plan in `docs/exec-plans/active/`.
 - Any `Legacy_App` edits are targeted, documented, and preserve the processing pipeline, processing order, data formats, and exports.
-- Source Localization remains quarantined dead code unless explicitly restored.
+- Source Localization/eLORETA remains removed from active runtime unless explicitly restored.
 - GUI work uses PySide6 only and imports `QAction` from `PySide6.QtGui`.
 - Long work is off the UI thread and workers do not touch widgets directly.
 - Project file I/O uses the active project root and handles dialog Cancel paths.

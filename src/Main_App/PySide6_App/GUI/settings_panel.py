@@ -5,7 +5,7 @@ from typing import Any, Dict
 import config
 import psutil
 
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QCheckBox,
     QDialogButtonBox,
-    QFileDialog,
     QMessageBox,
 )
 
@@ -92,8 +91,6 @@ class SettingsDialog(QDialog):
         self.manager = manager
         self.project = project
         self._project_cache: Dict[str, Any] | None = None
-        self._loreta_tab_index: int = -1
-        self._loreta_warning_shown: bool = False
         # Stub attributes for pruned settings to avoid AttributeError if referenced
         self.data_edit = None
         self.out_edit = None
@@ -120,8 +117,6 @@ class SettingsDialog(QDialog):
         self._preproc_tab_index = self.tabs.indexOf(preproc_tab)
         self._init_stats_tab(self.tabs)
         self._init_oddball_tab(self.tabs)
-        self.loreta_tab = self._init_loreta_tab()
-        self._loreta_tab_index = self.tabs.addTab(self.loreta_tab, "LORETA")
         self._last_tab_index = self.tabs.currentIndex()
         self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -285,53 +280,7 @@ class SettingsDialog(QDialog):
 
         tabs.addTab(tab, "Oddball")
 
-    # ------------------------------------------------------------------
-    def _init_loreta_tab(self) -> QWidget:
-        tab = QWidget()
-        form = make_form_layout()
-        tab.setLayout(form)
-
-        self.mri_edit = QLineEdit(self.manager.get("loreta", "mri_path", ""))
-        mri_row = self._with_browse(self.mri_edit)
-        form.addRow(QLabel("MRI Directory"), mri_row)
-
-        self.low_freq_edit = QLineEdit(self.manager.get("loreta", "loreta_low_freq", "1.1"))
-        form.addRow(QLabel("Low Freq (Hz)"), self.low_freq_edit)
-
-        self.high_freq_edit = QLineEdit(self.manager.get("loreta", "loreta_high_freq", "1.3"))
-        form.addRow(QLabel("High Freq (Hz)"), self.high_freq_edit)
-
-        self.snr_edit = QLineEdit(self.manager.get("loreta", "loreta_snr", "3.0"))
-        form.addRow(QLabel("SNR"), self.snr_edit)
-
-        self.thr_edit = QLineEdit(self.manager.get("loreta", "loreta_threshold", "0.3"))
-        form.addRow(QLabel("Threshold"), self.thr_edit)
-
-        self.t_start_edit = QLineEdit(self.manager.get("loreta", "time_window_start_ms", "-1000"))
-        self.t_end_edit = QLineEdit(self.manager.get("loreta", "time_window_end_ms", "1000"))
-        t_row = QWidget()
-        t_layout = QHBoxLayout(t_row)
-        t_layout.setContentsMargins(0, 0, 0, 0)
-        t_layout.addWidget(self.t_start_edit)
-        t_layout.addWidget(self.t_end_edit)
-        form.addRow(QLabel("Time Window (ms)"), t_row)
-
-        self.display_time_edit = QLineEdit(self.manager.get("visualization", "time_index_ms", "100"))
-        form.addRow(QLabel("Display Time (ms)"), self.display_time_edit)
-
-        auto_default = self.manager.get("loreta", "auto_oddball_localization", "False").lower() == "true"
-        self.auto_loc_check = QCheckBox("Auto Oddball Localization")
-        self.auto_loc_check.setChecked(auto_default)
-        form.addRow(self.auto_loc_check)
-
-        return tab
-
-    @Slot(int)
     def _on_tab_changed(self, index: int) -> None:
-        """
-        Show a one-time warning when the LORETA tab is opened.
-        The user must acknowledge the dialog before interacting with that tab.
-        """
         if getattr(self, "_tab_change_guard", False):
             return
 
@@ -347,39 +296,9 @@ class SettingsDialog(QDialog):
                 self._last_tab_index = getattr(self, "_preproc_tab_index", 0)
                 return
 
-        if (
-            index == getattr(self, "_loreta_tab_index", -1)
-            and not getattr(self, "_loreta_warning_shown", False)
-        ):
-            self._loreta_warning_shown = True
-            QMessageBox.warning(
-                self,
-                "LORETA Source Localization",
-                (
-                    "Warning: LORETA Source localization is not currently functional.\n\n"
-                    "Changing these settings and/or attempting to use the LORETA module "
-                    "is not recommended at this time."
-                ),
-                QMessageBox.Ok,
-            )
         self._last_tab_index = index
 
     # ------------------------------------------------------------------
-    def _with_browse(self, edit: QLineEdit) -> QWidget:
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(edit)
-        btn = make_action_button("Browse")
-        layout.addWidget(btn)
-        btn.clicked.connect(lambda: self._browse_folder(edit))
-        return container
-
-    def _browse_folder(self, edit: QLineEdit) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder", edit.text() or "")
-        if folder:
-            edit.setText(folder)
-
     def _focus_invalid_preproc_field(self, message: str) -> None:
         msg_lower = message.lower()
         target_idx = None
@@ -491,16 +410,6 @@ class SettingsDialog(QDialog):
             except Exception as exc:  # pragma: no cover - disk I/O error path
                 QMessageBox.critical(self, "Save Error", str(exc))
                 return
-        self.manager.set("loreta", "mri_path", self.mri_edit.text())
-        self.manager.set("loreta", "loreta_low_freq", self.low_freq_edit.text())
-        self.manager.set("loreta", "loreta_high_freq", self.high_freq_edit.text())
-        self.manager.set("loreta", "loreta_snr", self.snr_edit.text())
-        self.manager.set("loreta", "loreta_threshold", self.thr_edit.text())
-        self.manager.set("loreta", "time_window_start_ms", self.t_start_edit.text())
-        self.manager.set("loreta", "time_window_end_ms", self.t_end_edit.text())
-        self.manager.set("visualization", "time_index_ms", self.display_time_edit.text())
-        self.manager.set("loreta", "auto_oddball_localization", str(self.auto_loc_check.isChecked()))
-
         prev_debug = self.manager.debug_enabled()
         self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
         self.manager.save()

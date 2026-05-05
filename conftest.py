@@ -52,16 +52,6 @@ _AUTO_MARK_RULES = {
     ),
     "plot_generator": ("plot_generator",),
     "ratio": ("ratio_calculator",),
-    "source_localization": (
-        "brain",
-        "covariance",
-        "forward",
-        "loreta",
-        "source_localization",
-        "stc",
-        "subjects_dir",
-        "visualization",
-    ),
     "smoke": ("smoke",),
     "integration": ("e2e", "integration", "pipeline"),
 }

@@ -51,7 +51,7 @@ Focused architecture pages:
 - Long-running EEG, plotting, export, and statistics work must run outside the UI thread.
 - Legacy modules should be consumed through existing public APIs or thin adapters outside protected folders while runtime-used behavior is migrated out of the `Legacy_App` designation.
 - Project-aware workflows should resolve files through the active project root and preserve existing generated formats.
-- Source Localization is quarantined dead code, not an active black box. Keep `src/Tools/SourceLocalization/**` empty of source files and do not import from the quarantine tree unless explicitly restoring the feature.
+- Source Localization/eLORETA has been removed from active runtime. Keep `src/Tools/SourceLocalization/**` empty of source files and do not add GUI, settings, tests, or quarantine-tree imports for it unless restoration is explicitly scoped as a new feature.
 
 ## Verification Strategy
 

@@ -44,19 +44,6 @@ DEFAULTS = {
         'names': 'Frontal Lobe;Central Lobe;Parietal Lobe;Occipital Lobe',
         'electrodes': 'F3,F4,Fz;C3,C4,Cz;P3,P4,Pz;O1,O2,Oz'
     },
-    'loreta': {
-        'mri_path': '',
-        'loreta_low_freq': '1.1',
-        'loreta_high_freq': '1.3',
-        'loreta_threshold': '0.3',
-        'oddball_harmonics': '1.2,2.4,3.6,4.8,7.2,8.4,9.6,10.8',
-        'loreta_snr': '3.0',
-        'auto_oddball_localization': 'False',
-        'baseline_tmin': '-0.2',
-        'baseline_tmax': '0.0',
-        'time_window_start_ms': '-1000',
-        'time_window_end_ms': '1000'
-    },
     'visualization': {
         'threshold': '0.0',
         'surface_opacity': '0.5',
@@ -98,29 +85,10 @@ class SettingsManager:
     def load(self) -> None:
         """Load settings from disk, applying defaults where needed."""
         self.config.read_dict(DEFAULTS)
-        missing_loreta = False
         if os.path.exists(self.ini_path):
             existing = configparser.ConfigParser()
             existing.read(self.ini_path)
-            if not existing.has_section('loreta') or not existing.has_option('loreta', 'mri_path'):
-                missing_loreta = True
-            for opt in (
-                'loreta_low_freq',
-                'loreta_high_freq',
-                'loreta_threshold',
-                'oddball_harmonics',
-                'loreta_snr',
-                'auto_oddball_localization',
-                'baseline_tmin',
-                'baseline_tmax',
-                'time_window_start_ms',
-                'time_window_end_ms',
-            ):
-                if not existing.has_option('loreta', opt):
-                    missing_loreta = True
             self.config.read(self.ini_path)
-        if missing_loreta:
-            self.save()
 
     def save(self) -> None:
         """Write the current settings to disk."""

@@ -97,39 +97,6 @@ def _safe_test_name(nodeid: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in nodeid)[-120:]
 
 
-_SOURCE_LOCALIZATION_TESTS = {
-    "test_average_stc_directory.py",
-    "test_average_stc_files.py",
-    "test_brain_utils.py",
-    "test_covariance_helper.py",
-    "test_eloreta_runner.py",
-    "test_loreta_defaults.py",
-    "test_loreta_viewer_focus.py",
-    "test_oddball_crop_tmax.py",
-    "test_prepare_forward_cache.py",
-    "test_pyqt_viewer_single_hemi.py",
-    "test_subjects_dir_normalization.py",
-    "test_time_window_crop.py",
-    "test_visualization_show_mesh.py",
-    "test_visualization_subjects_dir.py",
-}
-
-
-def pytest_collection_modifyitems(config, items):  # noqa: ARG001
-    """Skip tests for quarantined Source Localization modules when absent."""
-
-    source_loc_dir = SRC_ROOT / "Tools" / "SourceLocalization"
-    source_loc_available = any(source_loc_dir.glob("*.py"))
-    if source_loc_available:
-        return
-    skip_source_loc = pytest.mark.skip(
-        reason="Source Localization implementation is quarantined in this repo"
-    )
-    for item in items:
-        if Path(str(item.path)).name in _SOURCE_LOCALIZATION_TESTS:
-            item.add_marker(skip_source_loc)
-
-
 @pytest.fixture
 def tmp_path(request):
     """

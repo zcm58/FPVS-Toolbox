@@ -80,8 +80,6 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
     shim.save_condition_fif = False
 
     # Other common knobs
-    if not hasattr(shim, "run_loreta_var") or not hasattr(getattr(shim, "run_loreta_var"), "get"):
-        shim.run_loreta_var = SimpleNamespace(get=lambda: False)
     if not hasattr(shim, "file_mode"):
         shim.file_mode = SimpleNamespace(get=lambda: "Batch")
     if not hasattr(shim, "file_type"):

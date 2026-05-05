@@ -1,6 +1,6 @@
 ---
 name: legacy-boundary-review
-description: Use before refactors that may touch src/Main_App/Legacy_App/**, quarantined dead code, or code that must consume legacy behavior through public APIs or adapters only.
+description: Use before refactors that may touch src/Main_App/Legacy_App/**, removed/dead feature boundaries, or code that must consume legacy behavior through public APIs or adapters only.
 ---
 
 # Legacy Boundary Review
@@ -13,9 +13,9 @@ Use this workflow when a task is near the `Legacy_App` migration boundary or whe
 
 1. Run `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` before broad manual inspection.
 2. Read only the focused docs or files needed by the task or by script failures.
-3. Identify whether the requested behavior crosses a migration-boundary or quarantined path:
+3. Identify whether the requested behavior crosses a migration-boundary or removed-feature path:
    - `src/Main_App/Legacy_App/**`
-   - `src/Tools/SourceLocalization/**` is dead code and should stay empty of source files
+   - Source Localization/eLORETA is removed from active runtime; `src/Tools/SourceLocalization/**` should stay empty of source files
    - `src/quarantine/**` is ignored quarantine, not active runtime
    - runtime-used legacy modules listed in the quarantine audit
 4. Inspect existing public APIs, imports, adapters, and tests before proposing new boundaries.
@@ -27,7 +27,7 @@ Use this workflow when a task is near the `Legacy_App` migration boundary or whe
 ## Checks
 
 - Use `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` instead of manually scanning all protected paths.
-- Confirm Source Localization was not revived unless explicitly requested.
+- Confirm Source Localization/eLORETA was not revived unless explicitly requested.
 - Confirm any adapter has focused tests around the boundary behavior.
 - Confirm compatibility exports in `src/Main_App/__init__.py` are not changed accidentally.
 - Confirm any `Legacy_App` edit is covered by a targeted test or documented smoke path.

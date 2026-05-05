@@ -310,7 +310,6 @@ def start_processing(self) -> None:
     try:
         project: Project = self.currentProject
         input_dir = Path(project.input_folder)
-        run_loreta = False
 
         batch_mode = bool(getattr(self, "rb_batch", None) and self.rb_batch.isChecked())
 
@@ -321,7 +320,6 @@ def start_processing(self) -> None:
                     "project_root": str(getattr(project, "project_root", "")),
                     "input_folder": str(input_dir),
                     "batch_mode": batch_mode,
-                    "run_loreta": run_loreta,
                 },
             )
         except Exception:
@@ -477,14 +475,12 @@ def start_processing(self) -> None:
                 self.currentProject.project_root
                 / self.currentProject.subfolders["excel"]
             )
-            self.log(
-                f"Running main processing (run_loreta={run_loreta}; LORETA disabled in GUI)"
-            )
+            self.log("Running main processing")
             logger.debug(
                 "start_processing_call_process_data",
-                extra={"file": str(fp), "out_dir": out_dir, "run_loreta": run_loreta},
+                extra={"file": str(fp), "out_dir": out_dir},
             )
-            process_data(raw, out_dir, run_loreta)
+            process_data(raw, out_dir)
 
             condition_labels = list(self.currentProject.event_map.keys())
             self.log(f"Post-process condition labels: {condition_labels}")
@@ -499,7 +495,6 @@ def start_processing(self) -> None:
                     "start_processing_file_done",
                     extra={
                         "file": str(fp),
-                        "run_loreta": run_loreta,
                         "n_condition_labels": len(condition_labels),
                     },
                 )

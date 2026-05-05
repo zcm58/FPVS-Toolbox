@@ -23,7 +23,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/PySide6_App/utils/`: audit, path, operation guard, theme, and settings helpers.
 - `src/Main_App/PySide6_App/diagnostics/`: processing diagnostics and event-time lock reporting.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; currently still imports legacy FFT crop helpers.
-- `src/Main_App/Shared/`: shared current-app settings, source-localization availability, and migration-bridge post-processing helpers.
+- `src/Main_App/Shared/`: shared current-app settings and migration-bridge post-processing helpers.
 - `src/Main_App/Legacy_App/`: temporary migration boundary for runtime-used behavior. Targeted edits are allowed for migration only when processing order, data formats, and exports remain unchanged.
 
 Current `Legacy_App` runtime couplings to account for before renaming or deleting modules:
@@ -31,7 +31,6 @@ Current `Legacy_App` runtime couplings to account for before renaming or deletin
 - `post_process` and `post_process_excel`: still drive Excel export behavior directly or through adapters.
 - `processing_utils`, `file_selection`, and `debug_utils`: still consumed by the PySide6 main window shell.
 - `fft_crop_utils`: used by performance processing and post-processing bridges.
-- `eloreta_launcher`: still referenced by the Tools menu, while Source Localization remains unavailable/quarantined.
 - `eeg_preprocessing`, `load_utils`, and `settings_manager`: have current-app replacements or bridges, but compatibility imports and transitive legacy callers still need cleanup.
 
 ## Tools
@@ -46,5 +45,5 @@ Current `Legacy_App` runtime couplings to account for before renaming or deletin
 
 ## Dead Or Quarantined
 
-- `src/Tools/SourceLocalization/**`: must not contain active source files.
+- Source Localization/eLORETA: removed from active runtime; `src/Tools/SourceLocalization/**` must remain empty of source files unless restoration is explicitly scoped.
 - `src/quarantine/**`: ignored quarantine tree retained outside active runtime.

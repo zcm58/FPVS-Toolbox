@@ -10,9 +10,9 @@ FPVS Toolbox is a Windows desktop application for preprocessing, cleaning, and a
 - Support for single-group and multi-group FPVS datasets
 
 
-## Quarantined Features
+## Removed Features
 
-- LORETA source localization and 3D visualization are quarantined dead code and are not active runtime features.
+- LORETA/eLORETA source localization and 3D visualization were removed from the active app. Restoring them would require a new explicitly scoped feature with fresh architecture, tests, and verification.
 
 
 ## Installation

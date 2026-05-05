@@ -15,5 +15,5 @@ git diff --name-only
 Requirements:
 
 - Targeted edits to `src/Main_App/Legacy_App/**` are allowed for active refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
-- Do not revive Source Localization dead code unless explicitly requested.
+- Do not revive Source Localization/eLORETA unless explicitly requested as a new restoration feature.
 - Prefer adapters or current-app modules when they avoid unnecessary edits to migration-boundary code.

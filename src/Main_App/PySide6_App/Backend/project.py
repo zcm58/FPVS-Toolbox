@@ -22,7 +22,6 @@ DEFAULTS: Dict[str, Any] = {
     "results_folder": ".",
     "options": {
         "mode": "single",
-        "loreta": False,
     },
     # Friendly label; UI falls back to folder name if None/missing
     "name": None,

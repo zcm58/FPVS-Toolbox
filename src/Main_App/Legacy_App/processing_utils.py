@@ -22,27 +22,6 @@ from Main_App.Legacy_App.post_process import post_process as _external_post_proc
 from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
 from Main_App.Legacy_App.load_utils import load_eeg_file
 from Main_App.Legacy_App.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step, ODDBALL_FREQ
-from Main_App.Shared.source_localization_optional import (
-    SourceLocalizationUnavailableError,
-    get_source_model_module,
-)
-
-
-def _sanitize_folder_name(label: str) -> str:
-    """Return a filesystem-safe folder name without underscores."""
-    sanitized = label.replace('_', ' ').replace('/', '-').replace('\\', '-')
-    sanitized = sanitized.strip()
-    sanitized = re.sub(r'^\d+\s*-\s*', '', sanitized)
-    return sanitized
-
-
-def _stc_basename_from_fif(path: str) -> str:
-    """Generate a SourceEstimate base filename from a FIF file path."""
-    name = os.path.splitext(os.path.basename(path))[0]
-    name = re.sub(r'[\s_-]*epo$', '', name, flags=re.IGNORECASE)
-    name = re.sub(r'\s+', '_', name.strip())
-    name = re.sub(r'_+', '_', name)
-    return name
 
 
 class ProcessingMixin:
@@ -72,27 +51,6 @@ class ProcessingMixin:
 
         self.log("=" * 50)
         self.log("START PROCESSING Initiated...")
-        if getattr(self, 'run_loreta_var', None) and getattr(self.run_loreta_var, 'get', lambda: False)():
-            try:
-                get_source_model_module(operation="start_processing_source_localization_preflight")
-            except SourceLocalizationUnavailableError as exc:
-                self.log(exc.user_message, level=logging.WARNING)
-                notifier = getattr(self, "notify_source_localization_unavailable", None)
-                if callable(notifier):
-                    notifier(exc.user_message)
-                else:
-                    messagebox.showwarning("Source Localization Unavailable", exc.user_message)
-                self._set_controls_enabled(True)
-                return
-            if not messagebox.askyesno(
-                    "Run LORETA",
-                    (
-                            "WARNING: Enabling LORETA will significantly increase the "
-                            "processing time of your dataset. Do you wish to continue?"
-                    ),
-            ):
-                self.log("User canceled processing after LORETA warning.")
-                return
 
         if not self._validate_inputs():
             return
@@ -292,10 +250,6 @@ class ProcessingMixin:
             with open(fft_crop_log_path, "a", encoding="utf-8") as fp:
                 fp.write(f"{datetime.now().isoformat()} {prefix} {message}\n")
         max_bad_channels_alert_thresh = params.get('max_bad_channels_alert_thresh', 9999)
-        run_loreta_enabled = (
-            getattr(self, 'run_loreta_var', None)
-            and getattr(self.run_loreta_var, 'get', lambda: False)()
-        )
 
         original_app_data_paths = list(self.data_paths)
         original_app_preprocessed_data = dict(self.preprocessed_data)
@@ -668,48 +622,6 @@ class ProcessingMixin:
                         finally:
                             self.data_paths = temp_original_data_paths
                             self.preprocessed_data = temp_original_preprocessed_data
-
-                        # === Source localization ===
-                        if run_loreta_enabled:
-                            try:
-                                source_model = get_source_model_module(
-                                    operation="processing_thread_source_localization"
-                                )
-                                fwd, subj, subj_dir = source_model.prepare_head_model(raw_proc)
-                                noise_cov = source_model.estimate_noise_cov(raw_proc)
-                                inv = source_model.make_inverse_operator(raw_proc, fwd, noise_cov)
-                                stc_dict = source_model.apply_sloreta(file_epochs, inv)
-
-                                for cond_label, stc in stc_dict.items():
-                                    cond_folder = os.path.join(
-                                        save_folder,
-                                        "LORETA RESULTS",
-                                        _sanitize_folder_name(cond_label),
-                                    )
-                                    os.makedirs(cond_folder, exist_ok=True)
-                                    base_name = _stc_basename_from_fif(
-                                        f"{os.path.splitext(f_name)[0]} {cond_label}.fif"
-                                    )
-                                    stc_base = os.path.join(cond_folder, base_name)
-                                    stc.save(stc_base)
-
-
-                                    excel_name = f"{extracted_pid_for_flagging}_{cond_label.replace(' ', '_')}_Results.xlsx"
-                                    excel_path = os.path.join(cond_folder, excel_name)
-                                    try:
-                                        df = source_model.source_to_dataframe(stc)
-                                        source_model.append_source_to_excel(excel_path, f"{cond_label}_Source", df)
-                                    except Exception as e_xl:
-                                        gui_queue.put({'type': 'log', 'message': f"Error appending source results: {e_xl}"})
-                            except SourceLocalizationUnavailableError as exc:
-                                gui_queue.put(
-                                    {
-                                        'type': 'log',
-                                        'message': f"Source Localization unavailable for {f_name}: {exc.user_message}",
-                                    }
-                                )
-                            except Exception as e_src:
-                                gui_queue.put({'type': 'log', 'message': f"Source localization error for {f_name}: {e_src}"})
                     gui_queue.put({'type': 'log', 'message': f"Cleaning up memory for {f_name}..."})
                     if isinstance(file_epochs, dict):
                         for epochs_list_to_del in file_epochs.values():

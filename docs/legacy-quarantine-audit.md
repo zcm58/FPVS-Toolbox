@@ -11,7 +11,6 @@ Legend:
 
 - `src/Main_App/Legacy_App/debug_utils.py`
 - `src/Main_App/Legacy_App/eeg_preprocessing.py`
-- `src/Main_App/Legacy_App/eloreta_launcher.py`
 - `src/Main_App/Legacy_App/fft_crop_utils.py`
 - `src/Main_App/Legacy_App/file_selection.py`
 - `src/Main_App/Legacy_App/load_utils.py`
@@ -65,13 +64,10 @@ Still directly used by current app code:
 - `post_process_excel.py`: workbook helper dependency for legacy and shared post-processing.
 - `load_utils.py`: still used transitively by `processing_utils.py`.
 
-Source Localization or quarantine-related:
+Recent migration slices:
 
-- `eloreta_launcher.py`: referenced by the PySide6 Tools menu, but Source Localization remains unavailable/quarantined unless explicitly restored.
-
-Next migration slice:
-
-- Extract event-map GUI row behavior from `src/Main_App/PySide6_App/GUI/main_window.py` into a focused current-app GUI module. This does not touch the processing pipeline and should preserve existing `MainWindow` method names used by tests.
+- Event-map GUI row behavior was extracted from `src/Main_App/PySide6_App/GUI/main_window.py` into `src/Main_App/PySide6_App/GUI/event_map.py`.
+- eLORETA/Source Localization was removed from active runtime because it has no working GUI access path and is not part of the current app.
 
 ## Newly quarantined after follow-up cleanup
 
@@ -81,15 +77,20 @@ Next migration slice:
 - `src/Tools/Stats/Quarantined/Legacy_UI/stats_ui.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/stats_ui.py`
 - `src/Tools/Stats/Quarantined/Legacy_UI/__init__.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/__init__.py`
 
-## Source Localization dead-code quarantine
+## Source Localization/eLORETA removal
 
-- `src/Tools/SourceLocalization/**` is no longer an active black-box module and must remain empty of source files.
-- The ignored reference copy under `src/quarantine/Tools/LORETA/SourceLocalization/**` is quarantined dead code.
-- Do not revive imports from `Tools.SourceLocalization` or `quarantine.Tools.LORETA.SourceLocalization` unless Source Localization is explicitly restored.
+- Source Localization/eLORETA has been removed from active runtime, GUI menus, settings, tracked tests, and active migration shims.
+- `src/Tools/SourceLocalization/**` must remain empty of source files.
+- Do not revive imports from `Tools.SourceLocalization` or quarantine-tree Source Localization code unless restoration is explicitly scoped as a new feature.
+
+Removed from active runtime after the Main App refactor slice:
+
+- `src/Main_App/Legacy_App/eloreta_launcher.py`
+- `src/Main_App/Shared/source_localization_optional.py`
+- Source Localization/eLORETA branches in `src/Main_App/Legacy_App/processing_utils.py`
 
 ## Quarantine candidates (no runtime/test import references found)
 
-- `src/Main_App/Legacy_App/eloreta_gui.py` -> moved to `src/quarantine/Main_App/Legacy_App/eloreta_gui.py`
 - `src/Main_App/Legacy_App/event_detection.py` -> moved to `src/quarantine/Main_App/Legacy_App/event_detection.py`
 - `src/Main_App/Legacy_App/event_map_utils.py` -> moved to `src/quarantine/Main_App/Legacy_App/event_map_utils.py`
 - `src/Main_App/Legacy_App/fpvs_app_legacy.py` -> moved to `src/quarantine/Main_App/Legacy_App/fpvs_app_legacy.py`

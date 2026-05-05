@@ -134,7 +134,7 @@ def test_dialog_saves_bandpass_mapping(tmp_path, qtbot, monkeypatch):
     assert saved["preprocessing"]["high_pass"] == 0.2
 
 
-def test_preproc_tab_blocks_invalid_bandpass(tmp_path, qtbot, monkeypatch):
+def test_preproc_tab_blocks_invalid_bandpass_when_leaving_tab(tmp_path, qtbot, monkeypatch):
     os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
     project = _prep_project(tmp_path)
 
@@ -154,19 +154,22 @@ def test_preproc_tab_blocks_invalid_bandpass(tmp_path, qtbot, monkeypatch):
     dlg.show()
     qtbot.waitExposed(dlg)
 
+    stats_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Stats"
+    )
     dlg.tabs.setCurrentIndex(dlg._preproc_tab_index)
     dlg.preproc_edits[0].setText("0.1")
     dlg.preproc_edits[1].setText("50")
-    dlg.tabs.setCurrentIndex(dlg._loreta_tab_index)
+    dlg.tabs.setCurrentIndex(stats_tab_index)
 
     assert dlg.tabs.currentIndex() == dlg._preproc_tab_index
     assert warnings
 
     dlg.preproc_edits[0].setText("60")
     dlg.preproc_edits[1].setText("0.5")
-    dlg.tabs.setCurrentIndex(dlg._loreta_tab_index)
+    dlg.tabs.setCurrentIndex(stats_tab_index)
 
-    assert dlg.tabs.currentIndex() == dlg._loreta_tab_index
+    assert dlg.tabs.currentIndex() == stats_tab_index
 
 
 def test_parallel_worker_override_warning_blocks_save_on_no(tmp_path, qtbot, monkeypatch):

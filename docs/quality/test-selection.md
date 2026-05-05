@@ -8,7 +8,7 @@ The repository auto-applies common pytest markers from test filenames during
 collection. Use these for quick local selection:
 
 ```powershell
-python -m pytest -m "not slow and not source_localization" -q
+python -m pytest -m "not slow" -q
 python -m pytest -m gui -q
 python -m pytest -m stats -q
 python -m pytest -m project_io -q
@@ -17,8 +17,8 @@ python -m pytest -m smoke -q
 ```
 
 Available markers are declared in `pytest.ini`: `gui`, `stats`, `project_io`,
-`processing`, `plot_generator`, `ratio`, `source_localization`, `smoke`,
-`integration`, `slow`, and `qt`.
+`processing`, `plot_generator`, `ratio`, `smoke`, `integration`, `slow`, and
+`qt`.
 
 Markers are selection aids, not a substitute for the focused test lists below.
 When changing a specific module, run the nearest named test first.
@@ -67,11 +67,6 @@ When changing a specific module, run the nearest named test first.
 - Reporting audit guardrails: `tests/test_agent_audit_stats_reporting_legibility.py`
 - CustomTkinter quarantine: `tests/test_stats_no_customtkinter_import.py`, `tests/test_stats_legacy_ui_quarantine.py`
 
-## Source Localization
+## Removed Source Localization
 
-Source Localization is quarantined dead code. Prefer availability-shim tests only:
-
-- `tests/test_source_localization_optional_smoke.py`
-- `tests/test_source_localization_import.py`
-
-Do not add new tests that import active `Tools.SourceLocalization` unless the feature is explicitly restored.
+Source Localization/eLORETA has been removed from active runtime. Do not add tests that import `Tools.SourceLocalization`, restore availability shims, or assert GUI/settings behavior unless restoration is explicitly scoped as a new feature.

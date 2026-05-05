@@ -21,7 +21,7 @@ mypy src --strict
 - GUI changes: run the nearest pytest-qt smoke test, usually a `tests/test_*gui*` or `tests/test_*window*` target.
 - Project path or file I/O changes: add or run tests with `tmp_path`; do not depend on a developer machine path.
 - Legacy-boundary changes: run `python scripts/agent_audit.py --check protected` and confirm any `Legacy_App` edits are targeted, documented, and preserve the processing pipeline.
-- Source Localization changes: run `python scripts/agent_audit.py --check source-localization`; it should remain quarantined dead code unless explicitly restored.
+- Source Localization/eLORETA changes: run `python scripts/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.
 - Processing pipeline changes: verify processing order, output filenames, sheets, and formats remain compatible.
 
 ## Reporting Failures

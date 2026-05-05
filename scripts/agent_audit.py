@@ -329,7 +329,7 @@ def check_source_localization_quarantine() -> list[Issue]:
                     "source-localization",
                     normalized,
                     None,
-                    "active SourceLocalization files are not allowed; keep this code quarantined",
+                    "active SourceLocalization files are not allowed; the feature is removed from active runtime",
                 )
             )
 
@@ -348,7 +348,7 @@ def check_source_localization_quarantine() -> list[Issue]:
                 "source-localization",
                 _repo_path(file_path),
                 None,
-                "non-cache file found in active SourceLocalization; quarantine or remove it",
+                "non-cache file found in active SourceLocalization; remove it unless restoring the feature explicitly",
             )
         )
     return issues
@@ -420,7 +420,7 @@ def check_added_source_localization_refs() -> list[Issue]:
                         "source-localization",
                         normalized,
                         line_no,
-                        "new active SourceLocalization reference detected; keep Source Localization quarantined",
+                        "new active SourceLocalization reference detected; the feature is removed from active runtime",
                     )
                 )
     return issues

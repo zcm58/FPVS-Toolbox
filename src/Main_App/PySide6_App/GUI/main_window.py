@@ -495,7 +495,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._start_guard = OpGuard()
 
         # Flags/vars the mixin expects
-        self.run_loreta_var = SimpleNamespace(get=lambda: False)
         self.save_fif_var = SimpleNamespace(get=lambda: False)
         self.save_folder_path = SimpleNamespace(get=lambda: "", set=lambda v: None)
         self.file_mode = SimpleNamespace(get=lambda: "Batch")
@@ -512,7 +511,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         self._op_guard = OpGuard()
         self._selected_bdf: str | None = None
         self._processing_notice = None
-        self._source_localization_notice = None
         self._event_row_return_in_progress = False
         self._run_had_successful_export = False
         self._run_excel_output_root = ""
@@ -616,39 +614,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 box.close()
 
         self._processing_notice = box
-        box.show()
-        QTimer.singleShot(10000, _auto_close)
-
-    def notify_source_localization_unavailable(self, message: str) -> None:
-        status_bar = self.statusBar()
-        if status_bar is not None:
-            status_bar.showMessage(message, 10000)
-
-        existing = getattr(self, "_source_localization_notice", None)
-        if existing is not None and existing.isVisible():
-            existing.setText(message)
-            existing.raise_()
-            existing.activateWindow()
-            return
-
-        box = QMessageBox(self)
-        box.setWindowTitle("Source Localization Unavailable")
-        box.setIcon(QMessageBox.Warning)
-        box.setText(message)
-        box.addButton("Dismiss", QMessageBox.AcceptRole)
-        box.setWindowModality(Qt.NonModal)
-
-        def _clear_notice(_: int | None = None) -> None:
-            if getattr(self, "_source_localization_notice", None) is box:
-                self._source_localization_notice = None
-
-        box.finished.connect(_clear_notice)
-
-        def _auto_close() -> None:
-            if getattr(self, "_source_localization_notice", None) is box and box.isVisible():
-                box.close()
-
-        self._source_localization_notice = box
         box.show()
         QTimer.singleShot(10000, _auto_close)
 
@@ -2019,8 +1984,6 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 if getattr(self, "rb_single", None) and self.rb_single.isChecked()
                 else "batch"
             )
-            # Keep existing schema key but hard-disable LORETA in the PySide6 GUI
-            opts["run_loreta"] = False
             self.currentProject.options = opts
 
             # Build event map in one pass: {label: int(id)}

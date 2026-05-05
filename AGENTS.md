@@ -18,7 +18,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 ## Non-Negotiables
 
 - `src/Main_App/Legacy_App/**` is an active migration boundary. Targeted edits are allowed for refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
-- Treat Source Localization as quarantined dead code. Do not revive `src/Tools/SourceLocalization/**` or `src/quarantine/Tools/LORETA/SourceLocalization/**` unless explicitly asked.
+- Source Localization/eLORETA has been removed from active runtime. Do not add GUI, settings, tests, imports, or quarantine-tree dependencies for it unless the user explicitly scopes a restoration feature.
 - Prefer thin adapters outside protected folders when legacy behavior must be reused.
 - Use PySide6 for GUI work. Do not introduce CustomTkinter.
 - Import `QAction` from `PySide6.QtGui` only.
@@ -75,7 +75,7 @@ If a gate cannot run locally, report the command, failure reason, and residual r
 ## Done Means
 
 - `Legacy_App` edits are targeted, documented, and preserve the processing pipeline exactly.
-- Source Localization remains quarantined dead code unless explicitly restored.
+- Source Localization/eLORETA remains removed from active runtime unless explicitly restored as a new feature.
 - PySide6-only GUI imports are preserved.
 - UI work remains non-blocking.
 - Project-path discipline is preserved.
