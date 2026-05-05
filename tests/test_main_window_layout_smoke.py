@@ -40,15 +40,16 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
     assert win.landing_card.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
     assert win.landing_card.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert win.landing_card.maximumWidth() >= 10_000
+    assert not hasattr(win, "landing_brain_animation")
 
     labels = {label.text() for label in win.landing_page.findChildren(QLabel)}
     assert "FPVS Toolbox" in labels
-    assert "Welcome to FPVS Toolbox" in labels
+    assert "Welcome to FPVS Toolbox!" in labels
     assert "Create a new FPVS project or open an existing one." in labels
     title = next(
         label
         for label in win.landing_page.findChildren(QLabel)
-        if label.text() == "Welcome to FPVS Toolbox"
+        if label.text() == "Welcome to FPVS Toolbox!"
     )
     assert not title.wordWrap()
     assert title.minimumHeight() >= 58

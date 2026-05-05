@@ -98,13 +98,13 @@ def init_ui(self) -> None:
 
     center_layout = QVBoxLayout(center_content)
     center_layout.setContentsMargins(0, 0, 0, 0)
-    center_layout.setSpacing(20)
+    center_layout.setSpacing(18)
 
     badge = QLabel("FPVS Toolbox", center_content)
     badge.setObjectName("landing_badge")
     badge.setAlignment(Qt.AlignCenter)
 
-    title = QLabel("Welcome to FPVS Toolbox", center_content)
+    title = QLabel("Welcome to FPVS Toolbox!", center_content)
     title.setObjectName("landing_title")
     title_font = QFont()
     title_font.setPointSize(28)
