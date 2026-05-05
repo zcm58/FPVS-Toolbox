@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Main_App.Legacy_App.post_process import _resolve_target_frequencies
+from Main_App.Shared.post_process import _resolve_target_frequencies
 
 
 def test_resolve_target_frequencies_from_nested_analysis_dict() -> None:

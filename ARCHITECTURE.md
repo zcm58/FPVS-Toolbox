@@ -43,6 +43,7 @@ Focused architecture pages:
 - [Workers And Threading](docs/architecture/workers-threading.md)
 - [Statistics And Tools](docs/architecture/statistics-tools.md)
 - [FFT Crop Method](docs/architecture/fft-crop-method.md)
+- [Post-Processing Export Contract](docs/architecture/post-processing-export-contract.md)
 - [Module Map](docs/architecture/module-map.md)
 - [Protected Paths](docs/architecture/protected-paths.txt)
 

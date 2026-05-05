@@ -175,7 +175,7 @@ its parameter is unset/disabled.
   `abs(FFT) / N * 2` for bins from 0 to Nyquist.
 - Frequency bins are linearly spaced from 0 to `sfreq / 2`.
 
-(Implementation verified in: `src/Main_App/Legacy_App/post_process.py`.)
+(Implementation verified in: `src/Main_App/Shared/post_process.py`.)
 
 ---
 
@@ -205,7 +205,7 @@ noise bins as follows:
 - Standard deviation uses population variance (`ddof=0`).
 
 (Implementation verified in: `src/Tools/Stats/analysis/noise_utils.py` and
-`src/Main_App/Legacy_App/post_process.py`.)
+`src/Main_App/Shared/post_process.py`.)
 
 **Formulas (applied per channel x harmonic)**
 
@@ -220,7 +220,7 @@ Then:
 - **BCA** = `A - noise_mean`
 - **Z-score** = `(A - noise_mean) / noise_std` (set to 0 when `noise_std <= 1e-12`)
 
-(Implementation verified in: `src/Main_App/Legacy_App/post_process.py`.)
+(Implementation verified in: `src/Main_App/Shared/post_process.py`.)
 
 **Full-spectrum SNR**
 
@@ -228,7 +228,7 @@ A separate full-spectrum SNR matrix is computed for **all FFT bins** using the
 same noise-bin logic and is exported as the `FullSNR` sheet.
 
 (Implementation verified in: `src/Tools/Stats/analysis/full_snr.py` and
-`src/Main_App/Legacy_App/post_process.py`.)
+`src/Main_App/Shared/post_process.py`.)
 
 **Background (not necessarily the toolbox implementation)**
 
@@ -271,7 +271,7 @@ report the exact aggregation rule you used.
 - A subfolder is created per condition label (label is sanitized for filenames).
 
 (Implementation verified in: `src/Main_App/PySide6_App/Backend/project.py`,
-`src/Main_App/Legacy_App/post_process.py`.)
+`src/Main_App/Shared/post_process.py`.)
 
 **Excel file names**
 
@@ -279,7 +279,7 @@ report the exact aggregation rule you used.
 - `PID` is extracted from the raw filename using `P\d+`, `Sub\d+`, or `S\d+`
   patterns; otherwise a cleaned filename stem is used.
 
-(Implementation verified in: `src/Main_App/Legacy_App/post_process.py`.)
+(Implementation verified in: `src/Main_App/Shared/post_process.py`.)
 
 **Excel sheet names and contents**
 
@@ -295,7 +295,7 @@ Target-harmonic columns are formatted as `"{freq:.4f}_Hz"`.
 The `FullSNR` sheet is interpolated from 0.5 Hz up to the configured
 `bca_upper_limit` in 0.01 Hz steps.
 
-(Implementation verified in: `src/Main_App/Legacy_App/post_process.py`.)
+(Implementation verified in: `src/Main_App/Shared/post_process.py`.)
 
 ---
 
@@ -312,7 +312,7 @@ Key log entries you can cite for reproducibility include:
 
 (Implementation verified in: `src/Main_App/PySide6_App/Backend/preprocess.py`,
 `src/Main_App/Performance/process_runner.py`,
-`src/Main_App/Legacy_App/post_process.py`.)
+`src/Main_App/Shared/post_process.py`.)
 
 For manuscript archiving, keep:
 - The project settings/manifest (event map, preprocessing settings, ROI list).

@@ -15,7 +15,7 @@ import Main_App.PySide6_App.Backend.project_manager as project_manager
 import Main_App.PySide6_App.Backend.loader as load_utils
 import Main_App.Legacy_App.eeg_preprocessing as eeg_preprocessing
 import Main_App.PySide6_App.Backend.processing as processing
-import Main_App.Legacy_App.post_process as post_process
+import Main_App.Shared.post_process as post_process
 import Main_App.Legacy_App.processing_utils as processing_utils
 import threading
 import tkinter.messagebox as tk_messagebox

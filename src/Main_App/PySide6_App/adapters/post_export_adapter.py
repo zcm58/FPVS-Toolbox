@@ -6,14 +6,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
 
-from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
+from Main_App.Shared.post_process import post_process as _shared_post_process
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class LegacyCtx:
-    """Data-only context for legacy post_process (no QWidget, no Qt)."""
+    """Data-only context for shared post_process (no QWidget, no Qt)."""
     preprocessed_data: Dict[str, Any]
     save_folder_path: Any | None = None  # may expose .get()
     data_paths: List[str] | None = None
@@ -107,7 +107,7 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
 
 def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
     """
-    Execute legacy post-processing exports.
+    Execute post-processing exports through the shared migration bridge.
     """
     try:
         logger.info(
@@ -135,17 +135,17 @@ def run_post_export(ctx: LegacyCtx, labels: List[str]) -> int:
         )
         raise
 
-    # Run legacy (Excel, etc.)
+    # Run shared post-processing (Excel, etc.)
     try:
         logger.debug(
-            "post_export_call_legacy",
+            "post_export_call_shared",
             extra={"save_root": str(save_root), "labels": labels},
         )
-        _legacy_post_process(shim, labels)
+        _shared_post_process(shim, labels)
     except Exception as e:
-        shim.log(f"[adapter] legacy post_process failed: {e}")
+        shim.log(f"[adapter] post_process failed: {e}")
         logger.error(
-            "post_export_legacy_failed",
+            "post_export_failed",
             extra={"error": str(e)},
         )
         raise

@@ -67,7 +67,7 @@ def install_gui_only_stubs() -> None:
     sys.modules.setdefault("numpy", NumpyStub("numpy"))
     sys.modules.setdefault("psutil", PsutilStub("psutil"))
     install_stub_module(
-        "Main_App.Legacy_App.post_process",
+        "Main_App.Shared.post_process",
         post_process=lambda *args, **kwargs: None,
     )
     install_stub_module(

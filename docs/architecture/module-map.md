@@ -23,18 +23,19 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/PySide6_App/utils/`: audit, path, operation guard, theme, and settings helpers.
 - `src/Main_App/PySide6_App/diagnostics/`: processing diagnostics and event-time lock reporting.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
-- `src/Main_App/Shared/`: shared current-app settings, FFT crop helpers, and migration-bridge post-processing helpers.
+- `src/Main_App/Shared/`: shared current-app settings, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Legacy_App/`: temporary migration boundary for runtime-used behavior. Targeted edits are allowed for migration only when processing order, data formats, and exports remain unchanged.
 
 Current `Legacy_App` runtime couplings to account for before renaming or deleting modules:
 
-- `post_process` and `post_process_excel`: still drive Excel export behavior directly or through adapters.
+- `post_process_excel`: still provides workbook helper behavior used by shared post-processing.
 - `processing_utils`, `file_selection`, and `debug_utils`: still consumed by the PySide6 main window shell.
 - `eeg_preprocessing`, `load_utils`, and `settings_manager`: have current-app replacements or bridges, but compatibility imports and transitive legacy callers still need cleanup.
 
 Compatibility wrappers:
 
 - `fft_crop_utils.py`: thin wrapper for `Main_App.Shared.fft_crop_utils`; current runtime imports should use the shared module.
+- `post_process.py`: thin wrapper for `Main_App.Shared.post_process`; current runtime imports should use the shared module.
 
 ## Tools
 

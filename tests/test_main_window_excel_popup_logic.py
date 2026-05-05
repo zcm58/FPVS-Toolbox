@@ -106,14 +106,14 @@ def test_export_with_post_process_keeps_prior_success_when_later_file_has_no_exc
     def _fake_success(_app, _labels):
         target_file.write_text("ok", encoding="utf-8")
 
-    monkeypatch.setattr(main_window_module, "_legacy_post_process", _fake_success)
+    monkeypatch.setattr(main_window_module, "_shared_post_process", _fake_success)
     win._export_with_post_process(["CondA"])
     assert win._last_job_success is True
 
     def _fake_no_output(app, _labels):
         app.log("Warning: Post-processing completed, but no Excel files were saved.")
 
-    monkeypatch.setattr(main_window_module, "_legacy_post_process", _fake_no_output)
+    monkeypatch.setattr(main_window_module, "_shared_post_process", _fake_no_output)
     win._export_with_post_process(["CondB"])
 
     assert win._last_job_success is True

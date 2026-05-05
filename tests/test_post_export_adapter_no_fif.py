@@ -13,13 +13,13 @@ def test_run_post_export_ignores_legacy_fif_flag(tmp_path, monkeypatch):
 
     called = {}
 
-    def _fake_legacy_post_process(shim, labels):
+    def _fake_shared_post_process(shim, labels):
         called["labels"] = labels
         called["save_fif_var"] = shim.save_fif_var.get()
         called["save_condition_fif"] = shim.save_condition_fif
         (save_root / "P01_results.xlsx").write_text("ok", encoding="utf-8")
 
-    monkeypatch.setattr(adapter, "_legacy_post_process", _fake_legacy_post_process)
+    monkeypatch.setattr(adapter, "_shared_post_process", _fake_shared_post_process)
 
     ctx = LegacyCtx(
         preprocessed_data={"CondA": [_EpochsThatMustNotSave()]},

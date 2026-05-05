@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class PostProcessWorker(QObject):
-    """Run legacy post_process off the UI thread."""
+    """Run shared post_process off the UI thread."""
 
     progress = Signal(int)
     error = Signal(str)

@@ -36,14 +36,14 @@ def test_phase1_perf_hygiene(qtbot):
             pass
     stub.SettingsManager = _SettingsManager
     sys.modules["Main_App"] = stub
-    legacy_stub = types.ModuleType("Main_App.Legacy_App")
-    legacy_stub.__path__ = [str(Path(__file__).resolve().parents[1] / "src" / "Main_App" / "Legacy_App")]
-    sys.modules["Main_App.Legacy_App"] = legacy_stub
-    pp_stub = types.ModuleType("Main_App.Legacy_App.post_process")
+    shared_stub = types.ModuleType("Main_App.Shared")
+    shared_stub.__path__ = [str(Path(__file__).resolve().parents[1] / "src" / "Main_App" / "Shared")]
+    sys.modules["Main_App.Shared"] = shared_stub
+    pp_stub = types.ModuleType("Main_App.Shared.post_process")
     def _pp(*a, **k):
         return None
     pp_stub.post_process = _pp
-    sys.modules["Main_App.Legacy_App.post_process"] = pp_stub
+    sys.modules["Main_App.Shared.post_process"] = pp_stub
 
     try:
         from Main_App.PySide6_App.GUI.main_window import MainWindow

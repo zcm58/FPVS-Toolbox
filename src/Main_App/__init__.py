@@ -154,7 +154,9 @@ def preprocess_raw(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     raise RuntimeError("Legacy preprocess_raw has been quarantined; use the PySide6 preprocessing path.")
 
 def post_process(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    return _lazy_import("post_process", "post_process")(*args, **kwargs)
+    from Main_App.Shared.post_process import post_process as _shared_post_process
+
+    return _shared_post_process(*args, **kwargs)
 
 # Maintain legacy names in __all__ for external imports, but keep them lazy.
 __all__ += [

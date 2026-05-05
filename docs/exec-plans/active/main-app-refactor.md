@@ -85,13 +85,30 @@ Latest removal slice:
 ## Current Findings
 
 - `src/Main_App/PySide6_App/GUI/main_window.py` remains the largest organization hotspot, but event-map row behavior has been extracted to a focused current-app GUI module.
-- Direct runtime imports still point at `Legacy_App` for post-processing, processing mixins, file selection, and debug messagebox shims.
+- Direct runtime imports still point at `Legacy_App` for processing mixins, file selection, debug messagebox shims, and workbook helper code.
 - `src/Main_App/Shared/fft_crop_utils.py` owns FFT crop behavior; `src/Main_App/Legacy_App/fft_crop_utils.py` is now only a compatibility wrapper.
-- `src/Main_App/Shared/post_process.py` exists, but still imports workbook helpers from `Legacy_App`; treat it as a migration bridge, not a completed replacement.
+- `src/Main_App/Shared/post_process.py` owns post-processing export behavior, but still imports workbook helpers from `Legacy_App`; treat workbook helper migration as a remaining slice.
+
+Latest post-processing export slice:
+
+- Documentation-first requirement: `docs/architecture/post-processing-export-contract.md` records the pre-refactor export contract, output naming, sheet names, column order, metric behavior, and preservation constraints.
+- Refactor completed: `src/Main_App/Shared/post_process.py` is the current-app owner; `src/Main_App/Legacy_App/post_process.py` is now a temporary compatibility wrapper.
+- Runtime/test imports now use the shared owner in processing, GUI export, the post-export adapter, and target-frequency tests.
+- Behavior-preservation check: the shared implementation matched the pre-refactor legacy implementation before callers were migrated.
+- Passed: `python -m py_compile src\Main_App\Shared\post_process.py src\Main_App\Legacy_App\post_process.py src\Main_App\Legacy_App\processing_utils.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\adapters\post_export_adapter.py src\Main_App\PySide6_App\workers\processing_worker.py src\Main_App\__init__.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_post_export_adapter_no_fif.py tests\test_post_process_target_freqs.py tests\test_fft_neighbors_sheet.py tests\test_main_window_processing.py tests\test_main_window_excel_popup_logic.py tests\test_stats_export_finalization_release_smoke.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_postprocess_worker_qt.py tests\test_postprocess_worker_excel_payload.py tests\test_process_runner_epoch_contract.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python -m py_compile scripts\gui_wave3_smoke.py tests\test_phase1_perf_hygiene.py`
+- Skipped by existing environment guard: `.venv\Scripts\python -m pytest tests\test_phase1_perf_hygiene.py -q`
+- Passed: `git diff --check` with only line-ending warnings.
+- Note: focused pytest runs printed existing post-test Qt/update-check tracebacks after selected tests passed with exit code 0.
 
 Next refactor slice candidate:
 
-- Document the current post-processing/Excel export contract, then migrate direct callers from `Legacy_App.post_process` toward the shared post-processing bridge without changing generated filenames, sheets, workbook columns, FFT/SNR values, or completion/error behavior.
+- Document the current workbook helper contract, then migrate `post_process_excel` ownership out of `Legacy_App` without changing workbook sheet names, columns, formatting, FFT-neighbor rows, or output file contents.
 
 Latest FFT crop slice:
 

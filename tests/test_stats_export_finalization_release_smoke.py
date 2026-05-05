@@ -52,7 +52,7 @@ def test_stats_export_finalization_release_smoke(
     def fake_no_output(app, _labels):
         app.log("Warning: Post-processing completed, but no Excel files were saved.")
 
-    monkeypatch.setattr(main_window_module, "_legacy_post_process", fake_no_output)
+    monkeypatch.setattr(main_window_module, "_shared_post_process", fake_no_output)
 
     MainWindow._export_with_post_process(app_stub, ["CondA"])
 

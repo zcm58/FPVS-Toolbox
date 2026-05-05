@@ -8,7 +8,7 @@ import os
 import queue
 import subprocess
 import sys
-from Main_App.Legacy_App.post_process import post_process as _legacy_post_process
+from Main_App.Shared.post_process import post_process as _shared_post_process
 from Main_App.PySide6_App.utils.audit import format_audit_summary, write_audit_json
 from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
 from typing import Callable
@@ -1800,7 +1800,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
 
     def _export_with_post_process(self, labels: list[str]) -> None:
         """
-        Run legacy post_process then classify whether Excel output was produced.
+        Run shared post_process then classify whether Excel output was produced.
 
         Uses a snapshot of files with mtime_ns+size to detect writes/overwrites.
         If no deltas are detectable but the exporter did not report "no files saved"
@@ -1830,7 +1830,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         pre_snapshot = _excel_snapshot(out_path)
 
         try:
-            _legacy_post_process(self, labels)
+            _shared_post_process(self, labels)
 
             post_snapshot = _excel_snapshot(out_path)
             created = len(set(post_snapshot) - set(pre_snapshot))
@@ -1910,7 +1910,7 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
                 level=logging.WARNING,
             )
 
-        # Provide legacy post_process with a .get() for the Excel output folder
+        # Provide post_process with a .get() for the Excel output folder
         excel_subfolder = project.subfolders.get("excel")
         if excel_subfolder:
             excel_dir = project.project_root / excel_subfolder
