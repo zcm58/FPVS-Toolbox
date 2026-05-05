@@ -212,9 +212,24 @@ Latest Main App diagnostics layout slice:
 - Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
 - Passed: `git grep -n "Main_App.PySide6_App.diagnostics\|Main_App.PySide6_App.utils.audit" -- src tests scripts` found no matches.
 
+Latest Main App project workflow split:
+
+- Refactor completed: project open/create/load/save GUI orchestration moved from `src/Main_App/PySide6_App/GUI/main_window.py` to `src/Main_App/gui/project_workflows.py`.
+- `MainWindow` keeps the existing public wrapper methods for actions, tests, and compatibility: `new_project`, `open_existing_project`, `openProjectPath`, `edit_project_settings`, `loadProject`, `saveProjectSettings`, `_sync_input_folder_display`, `update_select_button_text`, and `_update_select_button_text`.
+- Behavior-preservation rule: no project JSON shape, dialog flow, event-map save behavior, input-folder display behavior, loaded project state, save-folder setup, preprocessing, BDF loading, worker routing, output folders, or export formats changed.
+- Circular-import rule: `project_workflows.py` does not import `main_window.py`; `MainWindow.loadProject()` passes `_QtEntryAdapter` into the helper.
+- Passed: `python -m py_compile src\Main_App\gui\project_workflows.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\file_menu.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_open_existing_project_dialog.py tests\test_project_settings_roundtrip.py tests\test_gui_preproc_dialog.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_worker_integration.py tests\test_main_window_layout_smoke.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
+- Passed: `git diff --check` with line-ending warnings only.
+
 Next refactor slice candidate:
 
-- Begin splitting `Main_App.gui.main_window` by workflow only after the diagnostics import paths are stable. Keep wrappers until imports are stable.
+- Continue splitting `Main_App.gui.main_window` by workflow. The next candidates are processing start/finalization UI orchestration or post-processing/export completion UI handling; keep public `MainWindow` wrappers until imports are stable.
 
 Latest processing mixin slice:
 

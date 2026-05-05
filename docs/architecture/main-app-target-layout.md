@@ -48,9 +48,9 @@ projects-root, and preprocessing-settings implementations while project I/O
 tests protect behavior.
 
 `src/Main_App/gui/` is now the canonical Main App GUI import surface. It
-delegates to the existing main-window, settings-panel, menu, sidebar, icon,
-style-token, and update-manager implementations while GUI smoke tests protect
-behavior.
+owns project workflow orchestration and delegates remaining main-window,
+settings-panel, menu, sidebar, icon, style-token, and update-manager
+implementations while GUI smoke tests protect behavior.
 
 `src/Main_App/diagnostics/` is now the canonical Main App runtime diagnostics
 import surface. It delegates preprocessing audit helpers and event-time lock

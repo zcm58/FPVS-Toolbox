@@ -43,14 +43,6 @@ logger = logging.getLogger(__name__)
 # Keep this module quiet unless the app configures handlers; avoids accidental console output.
 logger.addHandler(logging.NullHandler())
 
-WINDOWS_FORBIDDEN_CONDITION_CHARS = set('<>:"/\\|?*')
-WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT = '< > : " / \\ | ? *'
-
-
-def _illegal_condition_chars(label: str) -> list[str]:
-    return sorted({ch for ch in label if ch in WINDOWS_FORBIDDEN_CONDITION_CHARS})
-
-
 def _excel_paths_in_output_root(output_root: Path | str | None) -> list[Path]:
     if not output_root:
         return []
@@ -108,14 +100,7 @@ from Main_App.PySide6_App.Backend.processing_controller import (
     _animate_progress_to,
     prepare_batch_files,
 )
-from Main_App.projects.project_manager import (
-    edit_project_settings,
-    loadProject,
-    new_project,
-    open_existing_project,
-    openProjectPath,
-    select_projects_root,
-)
+from Main_App.projects.project_manager import select_projects_root
 from Main_App.projects.preprocessing_settings import (
     normalize_preprocessing_settings,
     PREPROCESSING_CANONICAL_KEYS,
@@ -135,6 +120,11 @@ from .file_menu import init_file_menu
 from .settings_panel import SettingsDialog
 from .sidebar import init_sidebar
 from .ui_main import init_ui
+from Main_App.gui import project_workflows
+from Main_App.gui.project_workflows import (
+    WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT,
+    _illegal_condition_chars,
+)
 
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.workers.processing_worker import PostProcessWorker
@@ -1480,31 +1470,19 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     # --------------------------- projects --------------------------- #
     def new_project(self) -> None:
-        new_project(self)
-        self._on_project_ready()
+        project_workflows.new_project(self)
 
     def open_existing_project(self) -> None:
-        open_existing_project(self, self)
-        self._on_project_ready()
+        project_workflows.open_existing_project(self)
 
     def openProjectPath(self, folder: str) -> None:  # noqa: N802 (compat)
-        openProjectPath(self, folder)
-        self._on_project_ready()
+        project_workflows.open_project_path(self, folder)
 
     def edit_project_settings(self) -> None:
-        edit_project_settings(self)
-        self._sync_input_folder_display()
-        self._update_start_enabled()
+        project_workflows.edit_project_settings(self)
 
     def _on_project_ready(self) -> None:
-        if not getattr(self, "currentProject", None):
-            return
-        opts = getattr(self.currentProject, "options", {})
-        self.parallel_mode = opts.get("parallel_mode", self.parallel_mode)
-        self._sync_input_folder_display()
-        self.update_select_button_text()
-        if hasattr(self, "stacked"):
-            self.stacked.setCurrentIndex(1)
+        project_workflows.on_project_ready(self)
 
     # --------------------------- tools UI --------------------------- #
     def open_stats_analyzer(self) -> None:
@@ -1756,204 +1734,17 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     # ------------------------ project load hook --------------------- #
     def loadProject(self, project: Project) -> None:  # pragma: no cover - GUI stub
-        loadProject(self, project)
-
-        # Auto-populate data_paths from the project's input folder(s). For
-        # multi-group projects, this uses all configured group folders via
-        # prepare_batch_files; for legacy single-group projects, it falls back
-        # to the original input_folder behavior.
-        file_paths = prepare_batch_files(project)
-        self.data_paths = [str(p) for p in file_paths]
-
-        groups = getattr(project, "groups", {}) or {}
-        input_dir = Path(project.input_folder)
-        self._sync_input_folder_display()
-
-        if self.data_paths:
-            if isinstance(groups, dict) and len(groups) >= 2:
-                self.log(
-                    f"Project data folders set ({len(groups)} groups, {len(self.data_paths)} .bdf files)"
-                )
-            else:
-                self.log(
-                    f"Project data folder set: {input_dir} ({len(self.data_paths)} .bdf files)"
-                )
-        else:
-            self.log(
-                f"Warning: no .bdf files found in project input folder(s): {input_dir}",
-                level=logging.WARNING,
-            )
-
-        # Provide post_process with a .get() for the Excel output folder
-        excel_subfolder = project.subfolders.get("excel")
-        if excel_subfolder:
-            excel_dir = project.project_root / excel_subfolder
-            excel_dir.mkdir(parents=True, exist_ok=True)
-            self.save_folder_path = SimpleNamespace(get=lambda: str(excel_dir))
-            self.log(f"Save folder path set: {self.save_folder_path.get()}")
-        else:
-            QMessageBox.warning(
-                self,
-                "Missing Excel Folder",
-                "No 'excel' subfolder configured. Please update the project settings.",
-            )
-            self.log(
-                "Project missing 'excel' subfolder; save folder path not set.",
-                level=logging.WARNING,
-            )
-            self.save_folder_path = None
-
-        # Build ephemeral entry adapters for legacy helpers that expect .get()
-        def make_entry(value: str | float | int | None):
-            edit = QLineEdit(str(value) if value is not None else "")
-            return _QtEntryAdapter(edit)
-
-        p = normalize_preprocessing_settings(self.currentProject.preprocessing)
-        self.low_pass_entry = make_entry(p.get("low_pass"))
-        self.high_pass_entry = make_entry(p.get("high_pass"))
-        self.downsample_entry = make_entry(p.get("downsample"))
-        self.epoch_start_entry = make_entry(p.get("epoch_start_s"))
-        self.epoch_end_entry = make_entry(p.get("epoch_end_s"))
-        self.reject_thresh_entry = make_entry(p.get("rejection_z"))
-        self.ref_channel1_entry = make_entry(p.get("ref_chan1"))
-        self.ref_channel2_entry = make_entry(p.get("ref_chan2"))
-        self.max_idx_keep_entry = make_entry(p.get("max_chan_idx_keep"))
-        self.max_bad_channels_alert_entry = make_entry(p.get("max_bad_chans"))
+        project_workflows.load_project(self, project, _QtEntryAdapter)
 
     def saveProjectSettings(self) -> None:
-        """Persist project options and event map. Non-blocking, idempotent."""
-        # Guard: require an open project
-        if not getattr(self, "currentProject", None):
-            QMessageBox.warning(self, "No Project", "Please open or create a project first.")
-            return
-
-        # Re-entrancy guard (cheap): reuse the existing OpGuard if available
-        guard = getattr(self, "_save_guard", None)
-        if guard is None:
-            # Lazy-create once; avoids coupling to other guards
-            self._save_guard = OpGuard()
-            guard = self._save_guard
-        if not guard.start():
-            QMessageBox.information(self, "Busy", "Save already in progress.")
-            return
-
-        try:
-            # Flush any active editors so .text() reads include the latest keystrokes
-            try:
-                self.clearFocus()
-                QApplication.processEvents()
-            except Exception:
-                pass
-
-            # Capture prior state for change detection
-            old_map: dict[str, int] = dict(getattr(self.currentProject, "event_map", {}) or {})
-            old_opts: dict = dict(getattr(self.currentProject, "options", {}) or {})
-
-            # Update options from UI without changing other keys
-            opts = getattr(self.currentProject, "options", {})
-            if not isinstance(opts, dict):
-                opts = {}
-            opts["mode"] = (
-                "single"
-                if getattr(self, "rb_single", None) and self.rb_single.isChecked()
-                else "batch"
-            )
-            self.currentProject.options = opts
-
-            # Build event map in one pass: {label: int(id)}
-            mapping: dict[str, int] = {}
-            for row in getattr(self, "event_rows", []):
-                edits = row.findChildren(QLineEdit)
-                if len(edits) < 2:
-                    continue
-                label_edit = edits[0]
-                label = label_edit.text().strip()
-                ident = edits[1].text().strip()
-                if not label:
-                    continue
-                illegal_chars = _illegal_condition_chars(label)
-                if illegal_chars:
-                    bad = " ".join(illegal_chars)
-                    QMessageBox.warning(
-                        self,
-                        "Invalid Condition Name",
-                        (
-                            "Condition names cannot contain characters that are invalid for "
-                            "Windows file/folder names.\n\n"
-                            f"Condition: {label}\n"
-                            f"Illegal character(s): {bad}\n\n"
-                            "Please rename this condition using only allowed characters.\n"
-                            f"Not allowed: {WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT}"
-                        ),
-                    )
-                    try:
-                        label_edit.setFocus()
-                        label_edit.selectAll()
-                    except Exception:
-                        pass
-                    return
-                try:
-                    mapping[label] = int(ident)
-                except Exception:
-                    # Ignore non-integer IDs silently to match prior behavior
-                    continue
-
-            # If nothing changed, skip disk I/O silently (no dialog)
-            if mapping == old_map and opts == old_opts:
-                return
-
-            # Persist live state
-            self.currentProject.event_map = mapping
-            self.currentProject.save()
-
-            QMessageBox.information(self, "Project Saved", "All settings written to project.json.")
-        except Exception as e:
-            QMessageBox.critical(self, "Save Error", str(e))
-        finally:
-            # Always release guard
-            try:
-                guard.end()
-            except Exception:
-                pass
+        project_workflows.save_project_settings(self)
 
     # --------------------------- UI helpers --------------------------- #
     def _sync_input_folder_display(self) -> None:
-        folder_text = ""
-        if getattr(self, "currentProject", None):
-            folder_text = str(self.currentProject.input_folder)
-        line_edit = getattr(self, "le_input_folder", None)
-        if isinstance(line_edit, QLineEdit):
-            line_edit.setText(folder_text)
+        project_workflows.sync_input_folder_display(self)
 
     def update_select_button_text(self) -> None:
-        """
-        Ensure the file/folder select button(s) reflect the active mode.
-        Safe if widgets are missing; no behavior changes.
-        """
-        try:
-            mode = "Batch"
-            if hasattr(self, "file_mode") and callable(getattr(self.file_mode, "get", None)):
-                mode = self.file_mode.get()
-
-            if mode == "Single":
-                # Prefer file button text when present
-                btn_file = getattr(self, "btn_select_input_file", None)
-                if btn_file and hasattr(btn_file, "setText"):
-                    btn_file.setText("Select EEG File…")
-                # If only a generic button exists, set that
-                btn_generic = getattr(self, "btn_select_input", None)
-                if btn_generic and hasattr(btn_generic, "setText"):
-                    btn_generic.setText("Select EEG File…")
-            else:
-                # Batch
-                btn_folder = getattr(self, "btn_select_input_folder", None)
-                if btn_folder and hasattr(btn_folder, "setText"):
-                    btn_folder.setText("Select Data Folder…")
-                btn_generic = getattr(self, "btn_select_input", None)
-                if btn_generic and hasattr(btn_generic, "setText"):
-                    btn_generic.setText("Select Data Folder…")
-        except Exception as e:
-            self.log(f"update_select_button_text failed: {e}", level=logging.WARNING)
+        project_workflows.update_select_button_text(self)
 
     # Alias for ui_main.py which calls the underscored name
     def _update_select_button_text(self) -> None:
