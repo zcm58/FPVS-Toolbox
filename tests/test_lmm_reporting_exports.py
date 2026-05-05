@@ -1,32 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-import importlib.util
 from pathlib import Path
-import sys
 
 import openpyxl
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[1]
-REPORT_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "reporting" / "lmm_reporting.py"
-FORMAT_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "reporting" / "stats_export_formatting.py"
-SUMMARY_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "summary_utils.py"
-
-
-def _load_module(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Failed to load {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-lmm_reporting = _load_module(REPORT_PATH, "lmm_reporting_under_test")
-export_formatting = _load_module(FORMAT_PATH, "lmm_export_formatting_under_test")
-summary_utils = _load_module(SUMMARY_PATH, "lmm_summary_utils_under_test")
+from Tools.Stats.reporting import lmm_reporting
+from Tools.Stats.reporting import stats_export_formatting as export_formatting
+from Tools.Stats.reporting import summary as summary_utils
 
 
 def test_humanize_effect_labels() -> None:

@@ -63,6 +63,8 @@ When changing a specific module, run the nearest named test first.
 - Pipeline smoke: `tests/test_stats_pipeline_smoke.py`, `tests/test_stats_multigroup_smoke.py`
 - File scanning and project paths: `tests/test_stats_file_scanner.py`, `tests/test_stats_project_paths.py`
 - DV and reporting rules: `tests/test_stats_dv_policy.py`, `tests/test_stats_reporting_summary_smoke.py`
+- Summary reporting: `tests/test_summary_utils_mixed_model.py`, `tests/test_summary_utils_posthoc_directions.py`, `tests/test_lmm_reporting_exports.py`, `tests/test_stats_rm_anova_summary_reporting.py`
+- Reporting audit guardrails: `tests/test_agent_audit_stats_reporting_legibility.py`
 - CustomTkinter quarantine: `tests/test_stats_no_customtkinter_import.py`, `tests/test_stats_legacy_ui_quarantine.py`
 
 ## Source Localization

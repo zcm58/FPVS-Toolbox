@@ -1,31 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-import importlib.util
-from pathlib import Path
-import sys
 
 import pytest
 pd = pytest.importorskip("pandas")
 
-
-ROOT = Path(__file__).resolve().parents[1]
-RM_ANOVA_MODULE_PATH = ROOT / "src" / "Tools" / "Stats" / "Legacy" / "repeated_m_anova.py"
-REPORTING_MODULE_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "reporting_summary.py"
-
-
-def _load_module(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load module at {path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-rm_mod = _load_module(RM_ANOVA_MODULE_PATH, "rm_anova_legacy_mod")
-report_mod = _load_module(REPORTING_MODULE_PATH, "rm_anova_report_mod")
+from Tools.Stats.analysis import repeated_m_anova as rm_mod
+from Tools.Stats.reporting import reporting_summary as report_mod
 
 
 def test_tidy_from_pingouin_maps_eps_and_sphericity_fields():

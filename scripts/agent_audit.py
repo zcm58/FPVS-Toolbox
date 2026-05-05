@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import re
 import subprocess
@@ -54,10 +55,20 @@ STATS_ROOT_ALLOWED_PYTHON = {"__init__.py"}
 STATS_COMPAT_IMPORT_RE = re.compile(
     r"^\s*(?:from|import)\s+Tools\.Stats\.(?:Legacy|PySide6)(?:\.|\b)"
 )
+STATS_REMOVED_NAMESPACE_PATH_RE = re.compile(
+    r"(?:"
+    r"src[/\\]Tools[/\\]Stats[/\\](?:Legacy|PySide6)"
+    r"|Stats[/\\](?:Legacy|PySide6)"
+    r"|[\"']Stats[\"']\s*/\s*[\"'](?:Legacy|PySide6)[\"']"
+    r")"
+)
 TKINTER_IMPORT_RE = re.compile(r"^\s*(?:import\s+tkinter\b|from\s+tkinter\s+import\b)")
 STALE_STATS_NAMING_RE = re.compile(
     r"(?:Stats PySide6 (?:workflow|tool|window|statistics workflow)|Legacy Stats workflow)"
 )
+STATS_REPORTING_ROOT = "src/Tools/Stats/reporting"
+STATS_REPORTING_MAX_MODULE_LINES = 600
+STATS_REPORTING_MAX_SYMBOL_LINES = 160
 
 
 @dataclass(frozen=True)
@@ -442,6 +453,16 @@ def check_stats_structure() -> list[Issue]:
                     )
                 )
 
+            if STATS_REMOVED_NAMESPACE_PATH_RE.search(line):
+                issues.append(
+                    Issue(
+                        "stats-structure",
+                        normalized,
+                        line_no,
+                        "removed Stats compatibility path reference; use canonical src/Tools/Stats/<area> paths",
+                    )
+                )
+
             if normalized.startswith("src/Tools/Stats/") and STALE_STATS_NAMING_RE.search(line):
                 issues.append(
                     Issue(
@@ -454,6 +475,63 @@ def check_stats_structure() -> list[Issue]:
     return issues
 
 
+def check_stats_reporting_legibility() -> list[Issue]:
+    issues: list[Issue] = []
+
+    for path in _tracked_and_untracked_files():
+        normalized = _normalize(path)
+        if not (
+            normalized.startswith(f"{STATS_REPORTING_ROOT}/")
+            and _is_python(normalized)
+            and Path(normalized).name != "__init__.py"
+        ):
+            continue
+        absolute = REPO_ROOT / normalized
+        if not absolute.exists():
+            continue
+
+        lines = _read_text(normalized)
+        if len(lines) > STATS_REPORTING_MAX_MODULE_LINES:
+            issues.append(
+                Issue(
+                    "stats-reporting-legibility",
+                    normalized,
+                    None,
+                    "Stats reporting module is oversized; split summary/reporting logic into focused modules by responsibility",
+                )
+            )
+
+        try:
+            tree = ast.parse("\n".join(lines), filename=normalized)
+        except SyntaxError as exc:
+            issues.append(
+                Issue(
+                    "stats-reporting-legibility",
+                    normalized,
+                    exc.lineno,
+                    f"could not parse reporting module while checking legibility: {exc.msg}",
+                )
+            )
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            end_lineno = getattr(node, "end_lineno", node.lineno) or node.lineno
+            span = end_lineno - node.lineno + 1
+            if span <= STATS_REPORTING_MAX_SYMBOL_LINES:
+                continue
+            issues.append(
+                Issue(
+                    "stats-reporting-legibility",
+                    normalized,
+                    node.lineno,
+                    f"oversized {type(node).__name__} {node.name!r} spans {span} lines; split reporting summary logic by responsibility",
+                )
+            )
+    return issues
+
+
 CHECKS = {
     "agent-harness": check_agent_harness,
     "protected": check_protected_edits,
@@ -462,6 +540,7 @@ CHECKS = {
     "gui": check_gui_imports,
     "paths": check_added_paths,
     "prints": check_added_prints,
+    "stats-reporting-legibility": check_stats_reporting_legibility,
     "stats-structure": check_stats_structure,
 }
 

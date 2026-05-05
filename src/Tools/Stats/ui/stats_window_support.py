@@ -136,7 +136,7 @@ from Tools.Stats.qc.stats_qc_exclusion import (
     QC_DEFAULT_WARN_THRESHOLD,
 )
 from Tools.Stats.reporting.stats_run_report import StatsRunReport
-from Tools.Stats.reporting.summary_utils import (
+from Tools.Stats.reporting.summary import (
     StatsSummaryFrames,
     SummaryConfig,
     build_between_anova_output,

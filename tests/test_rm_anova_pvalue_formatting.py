@@ -1,31 +1,13 @@
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-import sys
 
 import openpyxl
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[1]
-EXPORT_MODULE_PATH = ROOT / "src" / "Tools" / "Stats" / "Legacy" / "stats_export.py"
-REPORTING_MODULE_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "reporting_summary.py"
-FORMAT_MODULE_PATH = ROOT / "src" / "Tools" / "Stats" / "PySide6" / "reporting" / "stats_export_formatting.py"
-
-
-def _load_module(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Failed to load module at {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-stats_export = _load_module(EXPORT_MODULE_PATH, "stats_export_under_test")
-reporting_summary = _load_module(REPORTING_MODULE_PATH, "reporting_summary_under_test")
-export_formatting = _load_module(FORMAT_MODULE_PATH, "stats_export_formatting_under_test")
+from Tools.Stats.reporting import reporting_summary
+from Tools.Stats.reporting import stats_export
+from Tools.Stats.reporting import stats_export_formatting as export_formatting
 
 
 def test_rm_anova_excel_preserves_small_p_values(tmp_path: Path) -> None:

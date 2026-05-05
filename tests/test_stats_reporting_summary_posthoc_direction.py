@@ -1,25 +1,9 @@
 from datetime import datetime
-import importlib.util
 from pathlib import Path
-import sys
 
 import pandas as pd
 
-
-def _load_reporting_module():
-    module_path = Path(__file__).resolve().parents[1] / "src" / "Tools" / "Stats" / "PySide6" / "reporting_summary.py"
-    spec = importlib.util.spec_from_file_location("reporting_summary", module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError("Failed to load reporting_summary module.")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-REPORTING_MODULE = _load_reporting_module()
-ReportingSummaryContext = REPORTING_MODULE.ReportingSummaryContext
-build_reporting_summary = REPORTING_MODULE.build_reporting_summary
+from Tools.Stats.reporting.reporting_summary import ReportingSummaryContext, build_reporting_summary
 
 
 def test_reporting_summary_includes_posthoc_direction_and_slice_labels():

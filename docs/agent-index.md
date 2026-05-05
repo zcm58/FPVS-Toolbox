@@ -7,6 +7,7 @@ Use this page before gathering broad context. Run the relevant command first, th
 ```powershell
 python scripts/agent_audit.py
 python scripts/agent_audit.py --check stats-structure
+python scripts/agent_audit.py --check stats-reporting-legibility
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
@@ -18,6 +19,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | --- | --- | --- | --- |
 | PySide6 GUI, widgets, menus, workers, status UX | `pyside6-gui-cleanup` | `.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` | `docs/architecture/gui.md` |
 | Stats package structure and analysis organization | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-structure` | `docs/architecture/statistics-tools.md` |
+| Stats reporting summaries and legibility | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-reporting-legibility` | `docs/architecture/statistics-tools.md` |
 | Legacy boundary, quarantine, Source Localization status | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/legacy-boundaries.md` |
 | Project paths, dialogs, imports, exports, manifests | `project-path-audit` | `.agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` | `docs/architecture/project-io.md` |
 | GUI smoke coverage | `pytest-qt-smoke` | nearest focused pytest target | `docs/quality/test-selection.md` |
@@ -30,6 +32,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - Plot generator: `python -m pytest tests/test_plot_generator_gui.py -q`
 - Ratio calculator: `python -m pytest tests/test_ratio_calculator_plots.py -q`
 - Stats GUI/pipeline: `python -m pytest tests/test_stats_layout_smoke.py tests/test_stats_pipeline_smoke.py -q`
+- Stats reporting summaries: `python -m pytest tests/test_summary_utils_mixed_model.py tests/test_summary_utils_posthoc_directions.py tests/test_lmm_reporting_exports.py -q`
 - Source Localization availability shim: `python -m pytest tests/test_source_localization_import.py tests/test_source_localization_optional_smoke.py -q`
 
 ## Reading Rule

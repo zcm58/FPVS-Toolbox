@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-import importlib.util
 from pathlib import Path
 import sys
 import types
 
 import pytest
 
-REPORTING_MODULE_PATH = Path(__file__).resolve().parents[1] / "src" / "Tools" / "Stats" / "PySide6" / "reporting_summary.py"
 if "pandas" not in sys.modules:
     try:
         import pandas  # noqa: F401
@@ -21,18 +19,11 @@ if "pandas" not in sys.modules:
         pandas_stub.DataFrame = _DataFrame
         sys.modules["pandas"] = pandas_stub
 
-_spec = importlib.util.spec_from_file_location("reporting_summary", REPORTING_MODULE_PATH)
-assert _spec and _spec.loader
-_reporting_summary = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _reporting_summary
-_spec.loader.exec_module(_reporting_summary)
-
-build_default_report_path = _reporting_summary.build_default_report_path
-safe_project_path_join = _reporting_summary.safe_project_path_join
+from Tools.Stats.reporting.reporting_summary import build_default_report_path, safe_project_path_join
 
 
 @pytest.mark.qt
-def test_reporting_summary_ui_copy_and_slot(tmp_path):
+def test_reporting_summary_ui_copy_and_slot(tmp_path, monkeypatch):
     pytest.importorskip("pytestqt")
     pytest.importorskip("numpy")
     pytest.importorskip("pandas")
@@ -47,6 +38,7 @@ def test_reporting_summary_ui_copy_and_slot(tmp_path):
     app = QApplication.instance() or QApplication([])
     assert app is not None
 
+    monkeypatch.setattr(StatsWindow, "refresh_rois", lambda self: setattr(self, "rois", {"ROI": ["Cz"]}), raising=False)
     window = StatsWindow(project_dir=str(tmp_path))
     window.show()
 

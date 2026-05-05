@@ -1,62 +1,7 @@
-from enum import Enum, auto
-import importlib.util
-from pathlib import Path
-import sys
-import types
-
 import pandas as pd
 
-
-class _PipelineId(Enum):
-    SINGLE = auto()
-    BETWEEN = auto()
-
-
-def _load_summary_utils_module():
-    original_stats_core = sys.modules.get("Tools.Stats.common.stats_core")
-    stats_core_stub = types.ModuleType("Tools.Stats.common.stats_core")
-    stats_core_stub.ANOVA_BETWEEN_XLS = "Mixed ANOVA Between Groups.xlsx"
-    stats_core_stub.ANOVA_XLS = "RM-ANOVA Results.xlsx"
-    stats_core_stub.GROUP_CONTRAST_XLS = "Group Contrasts.xlsx"
-    stats_core_stub.LMM_BETWEEN_XLS = "Mixed Model Between Groups.xlsx"
-    stats_core_stub.LMM_XLS = "Mixed Model Results.xlsx"
-    stats_core_stub.MULTIGROUP_GROUP_CONTRAST_COLUMNS = (
-        "ModelType",
-        "ROI",
-        "Condition",
-        "GroupA",
-        "GroupB",
-        "Estimate",
-        "SE",
-        "TestStat",
-        "DF",
-        "P",
-        "P_corrected",
-        "Method",
-    )
-    stats_core_stub.MULTIGROUP_GROUP_CONTRAST_LEGACY_SHEETS = ("Post-hoc Results",)
-    stats_core_stub.MULTIGROUP_GROUP_CONTRAST_SHEET = "Pairwise_Contrasts"
-    stats_core_stub.MULTIGROUP_MIXED_MODEL_SHEET = "Mixed Model"
-    stats_core_stub.POSTHOC_XLS = "Posthoc Results.xlsx"
-    stats_core_stub.PipelineId = _PipelineId
-    sys.modules["Tools.Stats.common.stats_core"] = stats_core_stub
-
-    module_path = Path("src/Tools/Stats/reporting/summary_utils.py")
-    spec = importlib.util.spec_from_file_location("summary_utils_under_test", module_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    if original_stats_core is not None:
-        sys.modules["Tools.Stats.common.stats_core"] = original_stats_core
-    else:
-        sys.modules.pop("Tools.Stats.common.stats_core", None)
-    return module
-
-
-summary_utils = _load_summary_utils_module()
-_summarize_posthocs = summary_utils._summarize_posthocs
-SummaryConfig = summary_utils.SummaryConfig
+from Tools.Stats.reporting.summary import SummaryConfig
+from Tools.Stats.reporting.summary.posthoc import _summarize_posthocs
 
 
 def test_posthoc_summary_includes_both_directions_when_significant():

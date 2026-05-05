@@ -21,6 +21,7 @@ Stats grouping:
 - `analysis/`: DV policy facade and focused helpers, statistical engines, harmonics, cross-phase statistics, SNR/noise helpers, and group contrasts.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
+- `reporting/summary/`: focused rule-based summary builders split by models, frame/file loading, ANOVA, posthoc/group contrasts, and mixed-model language. `reporting/summary_utils.py` is a compatibility facade only.
 - `common/`: shared dataclasses, enums, constants, and lightweight window types.
 - `io/`: Excel/dataframe I/O helpers.
 - `cli/`: command-line and out-of-process job entry points.
@@ -31,13 +32,16 @@ Rules:
 - Keep GUI imports PySide6-only.
 - Keep the public Stats entry point stable: `Tools.Stats.StatsWindow`.
 - New active code should import from `Tools.Stats.<functional area>`, not removed `Tools.Stats.Legacy` or `Tools.Stats.PySide6` paths.
+- New summary-reporting code should import from `Tools.Stats.reporting.summary`; keep `Tools.Stats.reporting.summary_utils` as a compatibility facade.
 - Add new analysis logic under the functional subpackage that owns it, and expose stable caller-facing surfaces through the package facade when needed.
 - Run `python scripts/agent_audit.py --check stats-structure` after Stats structural changes; it flags removed namespace usage and tkinter imports in active Stats code.
+- Run `python scripts/agent_audit.py --check stats-reporting-legibility` after Stats reporting changes; it flags oversized reporting modules and large function/class spans.
 - Use focused tests around changed data transformations and exports.
 
 Useful tests:
 
 ```powershell
 python -m pytest tests/test_stats_pipeline_smoke.py tests/test_stats_layout_smoke.py -q
+python -m pytest tests/test_summary_utils_mixed_model.py tests/test_summary_utils_posthoc_directions.py tests/test_lmm_reporting_exports.py -q
 python -m pytest tests/test_ratio_calculator_plots.py tests/test_plot_generator_gui.py -q
 ```
