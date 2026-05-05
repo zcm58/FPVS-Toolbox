@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
-    QFileDialog,
     QStatusBar,
     QWidget,
 )
@@ -42,19 +41,13 @@ logger = logging.getLogger(__name__)
 # Keep this module quiet unless the app configures handlers; avoids accidental console output.
 logger.addHandler(logging.NullHandler())
 
-import config
 from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.projects import Project
 from Main_App.PySide6_App.Backend.processing_controller import (
     _animate_progress_to,
-    prepare_batch_files,
 )
 from Main_App.projects.project_manager import select_projects_root
-from Main_App.projects.preprocessing_settings import (
-    normalize_preprocessing_settings,
-    PREPROCESSING_CANONICAL_KEYS,
-)
 from Main_App.workers.mp_env import (
     compute_effective_max_workers,
     get_ram_tier_recommendation,
@@ -72,16 +65,12 @@ from .sidebar import init_sidebar
 from .ui_main import init_ui
 from Main_App.gui import project_workflows
 from Main_App.gui import processing_workflows
+from Main_App.gui import processing_inputs
 from Main_App.gui import post_export_workflows
 from Main_App.gui.post_export_workflows import (
     excel_snapshot as _excel_snapshot,
     should_show_no_excel_popup as _should_show_no_excel_popup,
 )
-from Main_App.gui.project_workflows import (
-    WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT,
-    _illegal_condition_chars,
-)
-
 from Main_App.PySide6_App.utils.op_guard import OpGuard
 from Main_App.workers.processing_worker import PostProcessWorker
 
@@ -580,276 +569,10 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     # The ProcessingMixin looks for this. We replace legacy ValidationMixin.
     def _validate_inputs(self) -> bool:  # called inside ProcessingMixin.start_processing
-        """Modern input validation + parameter collection.
-
-        Returns
-        -------
-        bool
-            True if everything looks good and ``self.validated_params`` is set.
-        """
-        if not getattr(self, "currentProject", None):
-            QMessageBox.warning(self, "No Project", "Please open or create a project first.")
-            return False
-
-        # File selection rules differ in Single vs Batch
-        mode_now = (self.file_mode.get() if hasattr(self, "file_mode") else "Batch")
-        if mode_now == "Single":
-            # In single mode, require an explicit .bdf selection
-            if not self.data_paths:
-                QMessageBox.warning(self, "No File Selected", "Please choose one .bdf file first.")
-                return False
-
-        # Batch: always build the file list from the project definition
-        # (multi-group aware via prepare_batch_files). This ensures that
-        # all .bdf files from all configured group input folders are used.
-        if mode_now == "Batch":
-            file_paths = prepare_batch_files(self.currentProject)
-            if not file_paths:
-                QMessageBox.warning(
-                    self,
-                    "No Data",
-                    "No .bdf files found in the configured input folder(s).",
-                )
-                return False
-            self.data_paths = [str(p) for p in file_paths]
-            self.log(f"Processing: {len(self.data_paths)} file(s) selected.")
-
-        # Single: if we somehow have no data_paths at this point, fall back to
-        # the legacy input_folder glob (defensive-only; normal flow requires an
-        # explicit file selection above).
-        elif not self.data_paths:
-            input_dir = Path(self.currentProject.input_folder)
-            if not input_dir.is_dir():
-                QMessageBox.critical(self, "Input Folder Missing", str(input_dir))
-                return False
-            bdf_files = sorted(str(p) for p in input_dir.glob("*.bdf"))
-            if not bdf_files:
-                QMessageBox.warning(
-                    self,
-                    "No Data",
-                    "No .bdf files found in the input folder.",
-                )
-                return False
-            self.data_paths = bdf_files
-            self.log(f"Processing: {len(self.data_paths)} file(s) selected.")
-
-        # Save/output folder from project
-        excel_sub = self.currentProject.subfolders.get("excel")
-        if not excel_sub:
-            QMessageBox.critical(self, "Project Error", "Excel subfolder not configured in project.json.")
-            return False
-        excel_dir = Path(self.currentProject.project_root) / excel_sub
-        excel_dir.mkdir(parents=True, exist_ok=True)
-        self.save_folder_path = SimpleNamespace(get=lambda: str(excel_dir))
-
-        # Build params from project + settings + event-map UI
-        params = self._build_validated_params()
-        if params is None:
-            return False
-        self.validated_params = params
-        debug_enabled = bool(self.settings.debug_enabled()) if hasattr(self, "settings") else False
-        project_preproc = getattr(self.currentProject, "preprocessing", {}) or {}
-        project_snapshot = {key: project_preproc.get(key) for key in PREPROCESSING_CANONICAL_KEYS}
-        settings_snapshot = None
-        if hasattr(self, "settings") and hasattr(self.settings, "config"):
-            settings_snapshot = {}
-            preproc_options = (
-                "low_pass",
-                "high_pass",
-                "downsample",
-                "epoch_start",
-                "reject_thresh",
-                "epoch_end",
-                "ref_chan1",
-                "ref_chan2",
-                "max_idx_keep",
-                "max_bad_chans",
-            )
-            for opt in preproc_options:
-                if self.settings.config.has_option("preprocessing", opt):
-                    settings_snapshot[opt] = self.settings.get("preprocessing", opt, "")
-            if self.settings.config.has_option("stim", "channel"):
-                settings_snapshot["stim_channel"] = self.settings.get("stim", "channel", "")
-        dialog_snapshot = None
-        if getattr(self, "_settings_dialog", None):
-            try:
-                dialog_preproc_keys = (
-                    "low_pass",
-                    "high_pass",
-                    "downsample",
-                    "epoch_start",
-                    "reject_thresh",
-                    "epoch_end",
-                    "ref_chan1",
-                    "ref_chan2",
-                    "max_idx_keep",
-                    "max_bad_chans",
-                )
-                dialog_snapshot = {
-                    key: edit.text()
-                    for key, edit in zip(dialog_preproc_keys, self._settings_dialog.preproc_edits)
-                }
-            except Exception:
-                dialog_snapshot = {"error": "unavailable"}
-        if debug_enabled:
-            logger.debug(
-                "PREPROC_SOURCE_SNAPSHOT project=%s settings=%s dialog=%s",
-                project_snapshot,
-                settings_snapshot,
-                dialog_snapshot,
-            )
-        else:
-            logger.debug(
-                "PREPROC_SOURCE_SNAPSHOT project_keys=%s settings_keys=%s dialog_present=%s",
-                list(project_snapshot.keys()),
-                list(settings_snapshot.keys()) if settings_snapshot else [],
-                bool(dialog_snapshot),
-            )
-        fp_hp = params.get("high_pass")
-        fp_lp = params.get("low_pass")
-        fp_ds = params.get("downsample")
-        fp_rz = params.get("reject_thresh")
-        fp_r1 = params.get("ref_channel1")
-        fp_r2 = params.get("ref_channel2")
-        fp_stim = params.get("stim_channel")
-        validated_fingerprint = (
-            f"hp={fp_hp}|lp={fp_lp}|ds={fp_ds}|rz={fp_rz}|"
-            f"ref={fp_r1},{fp_r2}|stim={fp_stim}"
-        )
-        logger.debug("PREPROC_FINGERPRINT_VALIDATED %s", validated_fingerprint)
-        self._preproc_fingerprint_validated = validated_fingerprint
-
-        # We show a concise summary (not noisy) so users see what's about to run
-        lp = params.get("low_pass")
-        hp = params.get("high_pass")
-        ds = params.get("downsample")
-        rz = params.get("reject_thresh")
-        r1, r2 = params.get("ref_channel1"), params.get("ref_channel2")
-        ep = (params.get("epoch_start"), params.get("epoch_end"))
-        stim = params.get("stim_channel")
-        self.log(
-            f"Preproc params → HPF={hp if hp is not None else 'DC'}Hz, "
-            f"LPF={lp if lp is not None else 'Nyq'}Hz, DS={ds}Hz, "
-            f"Zreject={rz}, ref=({r1},{r2}), epoch=[{ep[0]}, {ep[1]}], stim='{stim}', "
-            f"events={len(params.get('event_id_map', {}))}"
-        )
-        return True
+        return processing_inputs.validate_inputs(self)
 
     def _build_validated_params(self) -> dict | None:
-        normalized = normalize_preprocessing_settings(self.currentProject.preprocessing)
-        logger.debug(
-            "NORMALIZED_PREPROC_SNAPSHOT file_mode=%s normalized.high_pass=%r "
-            "normalized.low_pass=%r normalized.downsample=%r",
-            getattr(self, "file_mode", None).get() if hasattr(self, "file_mode") else "UNKNOWN",
-            normalized.get("high_pass"),
-            normalized.get("low_pass"),
-            normalized.get("downsample"),
-        )
-
-        # Event map from UI rows → {label: int_id}
-        event_map: dict[str, int] = {}
-        for row in self.event_rows:
-            edits = row.findChildren(QLineEdit)
-            if len(edits) >= 2:
-                label_edit = edits[0]
-                label = label_edit.text().strip()
-                ident = edits[1].text().strip()
-                if label:
-                    illegal_chars = _illegal_condition_chars(label)
-                    if illegal_chars:
-                        bad = " ".join(illegal_chars)
-                        QMessageBox.warning(
-                            self,
-                            "Invalid Condition Name",
-                            (
-                                "Condition names cannot contain characters that are invalid for "
-                                "Windows file/folder names.\n\n"
-                                f"Condition: {label}\n"
-                                f"Illegal character(s): {bad}\n\n"
-                                "Please rename this condition using only allowed characters.\n"
-                                f"Not allowed: {WINDOWS_FORBIDDEN_CONDITION_CHARS_TEXT}"
-                            ),
-                        )
-                        try:
-                            label_edit.setFocus()
-                            label_edit.selectAll()
-                        except Exception:
-                            pass
-                        return None
-                if label and ident.isdigit():
-                    event_map[label] = int(ident)
-        if not event_map:
-            QMessageBox.warning(self, "No Events", "Please add at least one event map entry.")
-            return None
-
-        epoch_start = float(normalized.get("epoch_start_s", -1.0))
-        epoch_end = float(normalized.get("epoch_end_s", 125.0))
-        if epoch_end <= epoch_start:
-            QMessageBox.warning(
-                self,
-                "Invalid Epoch Window",
-                "Epoch end must be greater than epoch start.",
-            )
-            return None
-
-        stim_channel = normalized.get("stim_channel") or config.DEFAULT_STIM_CHANNEL
-        try:
-            base_freq = float(self.settings.get("analysis", "base_freq", "6.0"))
-        except Exception:
-            base_freq = 6.0
-        try:
-            oddball_freq = float(
-                self.settings.get("analysis", "oddball_freq", str(config.DEFAULT_ODDBALL_FREQ))
-            )
-        except Exception:
-            oddball_freq = float(config.DEFAULT_ODDBALL_FREQ)
-        try:
-            bca_upper_limit = float(
-                self.settings.get(
-                    "analysis",
-                    "bca_upper_limit",
-                    str(config.DEFAULT_BCA_UPPER_LIMIT),
-                )
-            )
-        except Exception:
-            bca_upper_limit = float(config.DEFAULT_BCA_UPPER_LIMIT)
-
-        params = {
-            "low_pass": float(normalized.get("low_pass")),
-            "high_pass": float(normalized.get("high_pass")),
-            "downsample": int(normalized.get("downsample")),
-            "downsample_rate": int(normalized.get("downsample")),
-            "reject_thresh": float(normalized.get("rejection_z")),
-            "ref_channel1": (normalized.get("ref_chan1") or None),
-            "ref_channel2": (normalized.get("ref_chan2") or None),
-            "max_idx_keep": int(normalized.get("max_chan_idx_keep")),
-            "max_bad_channels_alert_thresh": int(normalized.get("max_bad_chans")),
-            "epoch_start": epoch_start,
-            "epoch_end": epoch_end,
-            "stim_channel": stim_channel,
-            "save_preprocessed_fif": False,
-            "event_id_map": event_map,
-            "base_freq": base_freq,
-            "oddball_freq": oddball_freq,
-            "bca_upper_limit": bca_upper_limit,
-            "analysis": {
-                "base_freq": base_freq,
-                "oddball_freq": oddball_freq,
-                "bca_upper_limit": bca_upper_limit,
-            },
-        }
-        logger.debug(
-            "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "
-            "reject_thresh=%r ref=(%r,%r) stim=%r",
-            params.get("high_pass"),
-            params.get("low_pass"),
-            params.get("downsample_rate"),
-            params.get("reject_thresh"),
-            params.get("ref_channel1"),
-            params.get("ref_channel2"),
-            params.get("stim_channel"),
-        )
-        return params
+        return processing_inputs.build_validated_params(self)
 
     # ------------------------- settings UI -------------------------- #
     def open_settings_window(self) -> None:
@@ -1058,118 +781,10 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     # --------------------------- mode + detect --------------------------- #
     def _on_mode_changed(self, mode: str) -> None:
-        """
-        Adapter for UI radio buttons (wired in ui_main.py).
-        Keeps legacy-compatible mode string and toggles any present selectors.
-        """
-        mode_norm = (mode or "").strip().lower()
-        if mode_norm not in ("single", "batch"):
-            self.log(f"Unknown mode '{mode}'; ignoring.", level=logging.WARNING)
-            return
+        processing_inputs.on_mode_changed(self, mode)
 
-        # Maintain legacy-readable getter that some helpers expect
-        pretty = "Single" if mode_norm == "single" else "Batch"
-        self.file_mode = SimpleNamespace(get=lambda p=pretty: p)
-        self.log(f"File mode changed to {pretty}")
-
-        # Opportunistically toggle common widgets if they exist; no-ops otherwise
-        def _safe_set_enabled(obj_name: str, enabled: bool) -> None:
-            w = getattr(self, obj_name, None)
-            if w and hasattr(w, "setEnabled"):
-                try:
-                    w.setEnabled(enabled)
-                except Exception:
-                    pass
-
-        # Typical names used in our UI builder; harmless if missing
-        is_single = (mode_norm == "single")
-
-        self.parallel_mode = "single" if is_single else "process"
-
-        _safe_set_enabled("btn_select_input_file", is_single)
-        _safe_set_enabled("le_input_file", is_single)
-        _safe_set_enabled("btn_select_input_folder", not is_single)
-        _safe_set_enabled("le_input_folder", not is_single)
-
-        # Toggle visibility of the single-file row, if present
-        row = getattr(self, "row_single_file", None)
-        if row and hasattr(row, "setVisible"):
-            try:
-                row.setVisible(is_single)
-            except Exception:
-                pass
-        file_label = getattr(self, "lbl_single_file", None)
-        if file_label and hasattr(file_label, "setVisible"):
-            try:
-                file_label.setVisible(is_single)
-            except Exception:
-                pass
-
-        folder_row = getattr(self, "row_input_folder", None)
-        if folder_row and hasattr(folder_row, "setVisible"):
-            try:
-                folder_row.setVisible(not is_single)
-            except Exception:
-                pass
-        folder_label = getattr(self, "lbl_input_folder", None)
-        if folder_label and hasattr(folder_label, "setVisible"):
-            try:
-                folder_label.setVisible(not is_single)
-            except Exception:
-                pass
-
-        self._sync_input_folder_display()
-        self.update_select_button_text()
-
-        # Optional label feedback
-        lbl = getattr(self, "lbl_mode", None)
-        if isinstance(lbl, QLabel):
-            try:
-                lbl.setText(f"Mode: {pretty}")
-            except Exception:
-                pass
-
-        self._update_start_enabled()
-
-    # ---------- legacy mixin hook: enable/disable controls during run ---------- #
     def _set_controls_enabled(self, enabled: bool) -> None:
-        """
-        Required by Main_App.Shared.processing_mixin.
-        Disables common inputs while a run is active. No-ops if widgets missing.
-
-        The main Start/Stop button is intentionally left enabled so the user can
-        always request a stop.
-        """
-        self.busy = not enabled
-
-        def _safe_enable(name: str) -> None:
-            w = getattr(self, name, None)
-            if w and hasattr(w, "setEnabled"):
-                try:
-                    w.setEnabled(enabled)
-                except Exception:
-                    self.log(f"_set_controls_enabled: could not toggle {name}", level=logging.DEBUG)
-
-        # Common controls (exists-if-present).
-        # NOTE: 'btn_start' is deliberately omitted.
-        for n in (
-                "btn_select_input_file", "le_input_file",
-                "btn_select_input_folder", "le_input_folder",
-                "btn_add_event", "btn_add_row", "btn_detect",
-                "btn_create_project", "btn_open_project",
-        ):
-            _safe_enable(n)
-
-        # Event-map row edits/buttons (query per-type; Qt doesn't accept tuple here)
-        for row in getattr(self, "event_rows", []):
-            try:
-                for child in row.findChildren(QLineEdit):
-                    child.setEnabled(enabled)
-                for child in row.findChildren(QAbstractButton):
-                    child.setEnabled(enabled)
-            except Exception:
-                # Be quiet but safe
-                self.log("_set_controls_enabled: child toggle failed", level=logging.DEBUG)
+        processing_inputs.set_controls_enabled(self, enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._post_worker and self._post_thread:
@@ -1179,90 +794,13 @@ class MainWindow(QMainWindow, ProcessingMixin):
         super().closeEvent(event)
 
     def detect_trigger_ids(self) -> None:
-        """
-        Non-blocking placeholder so the Detect button works without crashing.
-        If/when a public legacy API is exposed for trigger detection, call it here.
-        """
-        try:
-            # If we already have any event-map entries, just inform the user.
-            has_entries = any(
-                bool(edits.get("label").get() and edits.get("id").get())
-                for edits in self.event_map_entries
-            )
-            if has_entries:
-                self.log("Detect: event map already has entries; no changes made.")
-                QMessageBox.information(self, "Detect Triggers",
-                                        "Event map already contains entries.\nEdit as needed and Save Project.")
-                return
-            # Graceful notice; real detection can be wired to a worker later.
-            self.log("Detect: auto trigger detection not available in Qt UI yet.")
-            QMessageBox.information(self, "Detect Triggers",
-                                    "Automatic trigger detection is not available yet in the Qt interface.\n"
-                                    "Please enter event labels/IDs manually for now.")
-        except Exception as e:
-            self.log(f"Detect triggers failed: {e}", level=logging.ERROR)
-            QMessageBox.warning(self, "Detect Triggers", f"Could not run detection: {e}")
+        processing_inputs.detect_trigger_ids(self)
 
-    # --------------------------- single-file helpers --------------------------- #
     def _update_start_enabled(self) -> None:
-        """Enable Start only when valid selection exists in Single mode."""
-        btn = getattr(self, "btn_start", None)
-        if not btn:
-            return
-        try:
-            mode = self.file_mode.get()
-        except Exception:
-            mode = "Batch"
-        if mode == "Single":
-            txt = getattr(self, "le_input_file", None).text() if hasattr(self, "le_input_file") else ""
-            ok = bool(txt) and Path(txt).suffix.lower() == ".bdf" and Path(txt).exists()
-            btn.setEnabled(ok)
-        else:
-            btn.setEnabled(True)
+        processing_inputs.update_start_enabled(self)
 
     def select_single_file(self) -> None:
-        """Windows-native file dialog to pick one .bdf under the project's input folder."""
-        if not getattr(self, "currentProject", None):
-            QMessageBox.warning(self, "No Project", "Please open or create a project first.")
-            return
-        start_dir = str(Path(self.currentProject.input_folder))
-        fname, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select EEG File (.bdf)",
-            start_dir,
-            "EEG BioSemi (*.bdf)",
-        )
-        if not fname:
-            self.log("Single-file selection canceled.")
-            self._update_start_enabled()
-            return
-        p = Path(fname)
-        if p.suffix.lower() != ".bdf":
-            QMessageBox.warning(self, "Invalid File", "Please select a .bdf file.")
-            self._update_start_enabled()
-            return
-        # Must be inside the project's input folder
-        in_root = Path(self.currentProject.input_folder).resolve()
-        try:
-            inside = in_root in p.resolve().parents
-        except Exception:
-            inside = False
-        if not inside:
-            QMessageBox.warning(
-                self,
-                "Outside Project",
-                "Please choose a .bdf inside this project's input folder.\n"
-                f"Input folder:\n{in_root}",
-            )
-            self._update_start_enabled()
-            return
-        # Accept
-        if hasattr(self, "le_input_file"):
-            self.le_input_file.setText(str(p))
-        self._selected_bdf = str(p)
-        self.data_paths = [str(p)]
-        self.log(f"Single-file selected: {p.name}")
-        self._update_start_enabled()
+        processing_inputs.select_single_file(self)
 
 # ----------------------------------------------------------------------
 def main() -> None:
@@ -1275,4 +813,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

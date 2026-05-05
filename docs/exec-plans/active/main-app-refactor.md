@@ -251,9 +251,21 @@ Latest Main App processing workflow split:
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `git diff --check` with line-ending warnings only.
 
+Latest Main App processing input workflow split:
+
+- Refactor completed: processing input GUI orchestration moved from `src/Main_App/PySide6_App/GUI/main_window.py` to `src/Main_App/gui/processing_inputs.py`.
+- `MainWindow` keeps the existing compatibility wrappers used by UI wiring and tests: `_validate_inputs`, `_build_validated_params`, `_on_mode_changed`, `_set_controls_enabled`, `detect_trigger_ids`, `_update_start_enabled`, and `select_single_file`.
+- Behavior-preservation rule: no `validated_params` shape, single-file `.bdf` restrictions, batch file discovery, warning/dialog text, log message, `parallel_mode` behavior, start-button behavior, preprocessing, BDF loading, worker routing, project schema, output folder, post-processing, or Excel export behavior changed.
+- Passed: `python -m py_compile src\Main_App\gui\processing_inputs.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\gui\processing_workflows.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_gui_preproc_dialog.py tests\test_single_file_process_mode.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_main_window_layout_smoke.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check`
+
 Next refactor slice candidate:
 
-- Continue splitting `Main_App.gui.main_window` by workflow. The next candidate is either single-file selection UI helpers or tool-launcher/menu action orchestration; keep public `MainWindow` wrappers until imports are stable.
+- Continue splitting `Main_App.gui.main_window` by workflow. The next candidate is tool-launcher/menu action orchestration for Stats, Plot Generator, Image Resizer, Epoch Averaging, publications/about dialogs, and update checks; keep public `MainWindow` wrappers until imports are stable.
 
 Latest processing mixin slice:
 
