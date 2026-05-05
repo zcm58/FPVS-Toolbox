@@ -123,7 +123,6 @@ from Main_App.PySide6_App.Backend.preprocessing_settings import (
 from Main_App.Performance.mp_env import (
     compute_effective_max_workers,
     get_ram_tier_recommendation,
-    set_blas_threads_single_process,
 )
 from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
@@ -527,8 +526,8 @@ class MainWindow(QMainWindow, ProcessingMixin):
             QMessageBox.information(
                 self,
                 "Stop Processing",
-                "Stopping an in-progress run is currently only supported in Batch/process mode.\n"
-                "This Single/legacy-mode run will finish normally.",
+                "Stopping an in-progress run requires the PySide6 process runner.\n"
+                "This run will finish normally.",
             )
             self.log("Stop requested but no MpRunnerBridge instance is active.", level=logging.WARNING)
             return
@@ -573,8 +572,9 @@ class MainWindow(QMainWindow, ProcessingMixin):
     # -------------------------- processing -------------------------- #
     def start_processing(self) -> None:
         """
-        Begin a processing run. In 'process' mode we use a per-file process pool;
-        in 'single' mode we defer to the legacy path. Spinner hooks included.
+        Begin a processing run through the PySide6 process runner.
+
+        Single-file runs use the same runner with one worker.
         """
         if not self._start_guard.start():
             QMessageBox.warning(self, "Busy", "Processing already started")
@@ -704,11 +704,18 @@ class MainWindow(QMainWindow, ProcessingMixin):
                     is_single_ui = self.file_mode.get() == "Single"
                 except Exception:
                     is_single_ui = False
-            is_mp_run = (self.parallel_mode == "process") or is_single_ui
+            if self.parallel_mode != "process" and not is_single_ui:
+                logger.info(
+                    "Routing parallel_mode=%r through PySide6 process runner.",
+                    self.parallel_mode,
+                )
+            is_mp_run = True
 
-            # ---------- Process mode (multiprocessing) ----------
+            # ---------- PySide6 process runner path ----------
             if is_mp_run:
-                # Do NOT kick legacy path. We stop the legacy poll timer here.
+                # Do NOT kick the compatibility ProcessingMixin path. We stop the
+                # compatibility poll timer here and keep preprocessing on the
+                # PySide6 backend owner.
                 if self._processing_timer.isActive():
                     self._processing_timer.stop()
 
@@ -779,33 +786,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
                     self.btn_start.setEnabled(True)
                 return  # IMPORTANT: do not fall through to legacy
 
-            # ---------- Single mode (legacy path) ----------
-            set_blas_threads_single_process()
-            if not self._validate_inputs():
-                try:
-                    if hasattr(self, "_busy_stop"):
-                        self._busy_stop()
-                except Exception:
-                    pass
-                self._run_active = False
-                self._cancel_requested = False
-                self._start_guard.end()
-                if hasattr(self, "btn_start"):
-                    self.btn_start.setText("Start Processing")
-                    self._update_start_enabled()
-                return
-
-            if not self._processing_timer.isActive():
-                self._processing_timer.start(self._POLL_INTERVAL_MS)
-
-            # From here on, a run is active (single/legacy mode).
-            self._run_active = True
-            self._show_processing_started_notice()
-            if hasattr(self, "btn_start"):
-                self.btn_start.setText("Stop Processing")
-                self.btn_start.setEnabled(True)
-
-            super().start_processing()
+            raise RuntimeError("Processing did not enter the PySide6 process runner path.")
 
         except Exception as e:
             logger.exception(e)

@@ -8,12 +8,14 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from Main_App.PySide6_App.Backend.project import Project
+import Main_App.PySide6_App.Backend.preprocess as backend_preprocess
 import Main_App.PySide6_App.Backend.project_manager as project_manager
+import Main_App.PySide6_App.workers.mp_runner_bridge as mp_runner_bridge
 import Main_App.Shared.load_utils as load_utils
-import Main_App.Legacy_App.eeg_preprocessing as eeg_preprocessing
 import Main_App.PySide6_App.Backend.processing as processing
 import Main_App.Shared.post_process as post_process
 from Main_App.Shared import user_messages
@@ -30,15 +32,38 @@ def _stub_processing(monkeypatch, projects_root: Path) -> None:
         lambda self: setattr(self, "projectsRoot", projects_root),
     )
     monkeypatch.setattr(load_utils, "load_eeg_file", lambda *a, **k: object())
-    monkeypatch.setattr(eeg_preprocessing, "perform_preprocessing", lambda *a, **k: (object(), 0))
+    monkeypatch.setattr(backend_preprocess, "perform_preprocessing", lambda *a, **k: (object(), 0))
     monkeypatch.setattr(processing, "process_data", lambda *a, **k: None)
     monkeypatch.setattr(post_process, "post_process", lambda *a, **k: None)
 
-    def dummy_start(self):
-        self._run_active = True
-        self._finalize_processing(True)
+    def fail_compat_start(self):
+        raise AssertionError("Compatibility ProcessingMixin.start_processing was called")
 
-    monkeypatch.setattr(processing_mixin.ProcessingMixin, "start_processing", dummy_start)
+    monkeypatch.setattr(processing_mixin.ProcessingMixin, "start_processing", fail_compat_start)
+
+    class FakeMpRunnerBridge(QObject):
+        progress = Signal(int)
+        error = Signal(str)
+        finished = Signal(object)
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.start_calls = []
+
+        def start(self, **kwargs):
+            self.start_calls.append(kwargs)
+            QTimer.singleShot(
+                0,
+                lambda: self.finished.emit(
+                    {
+                        "files": len(kwargs.get("data_files", [])),
+                        "results": [],
+                        "cancelled": False,
+                    }
+                ),
+            )
+
+    monkeypatch.setattr(mp_runner_bridge, "MpRunnerBridge", FakeMpRunnerBridge)
 
     for name in ("show_error", "show_warning", "show_info", "ask_yes_no"):
         monkeypatch.setattr(user_messages, name, lambda *a, **k: True)

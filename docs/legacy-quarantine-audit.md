@@ -9,7 +9,6 @@ Legend:
 
 ## Runtime-used (do not quarantine yet)
 
-- `src/Main_App/Legacy_App/eeg_preprocessing.py`
 - `src/Main_App/Legacy_App/settings_manager.py`
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`
 - `src/Tools/Stats/cli/between_groups_cli.py`
@@ -38,7 +37,7 @@ functional packages listed above.
 Already has current-app replacement or bridge:
 
 - `settings_manager.py`: current shared implementation exists at `src/Main_App/Shared/settings_manager.py`; keep compatibility imports stable while remaining callers are migrated.
-- `eeg_preprocessing.py`: current PySide6 preprocessing implementation exists at `src/Main_App/PySide6_App/Backend/preprocess.py`; legacy callers remain through `Main_App.Shared.processing_mixin`.
+- `eeg_preprocessing.py`: current PySide6 preprocessing implementation exists at `src/Main_App/PySide6_App/Backend/preprocess.py`; active runtime and tests no longer import the legacy module. Keep the legacy file untouched until a later deletion or wrapper slice is explicitly scoped.
 - `post_process.py`: current shared implementation exists at `src/Main_App/Shared/post_process.py`; legacy module remains as a temporary compatibility wrapper.
 - `post_process_excel.py`: current shared implementation exists at `src/Main_App/Shared/post_process_excel.py`; legacy module remains as a temporary compatibility wrapper.
 - `debug_utils.py`: no longer imported by `MainWindow`; retained for logging/settings compatibility without Tk messagebox imports.
@@ -61,6 +60,7 @@ Recent migration slices:
 - Tkinter/CustomTkinter runtime code was removed from active Main App paths; user dialogs now route through PySide6-safe helpers.
 - Processing mixin ownership moved to `src/Main_App/Shared/processing_mixin.py`; `src/Main_App/Legacy_App/processing_utils.py` is now a compatibility wrapper.
 - BDF loader ownership moved to `src/Main_App/Shared/load_utils.py`; `src/Main_App/Legacy_App/load_utils.py` and `src/Main_App/PySide6_App/Backend/loader.py` are now compatibility wrappers.
+- Preprocessing ownership for active runtime was locked to `src/Main_App/PySide6_App/Backend/preprocess.py`; GUI processing routes through the PySide6 process runner and no active runtime/test imports point at `src/Main_App/Legacy_App/eeg_preprocessing.py`.
 
 ## Newly quarantined after follow-up cleanup
 

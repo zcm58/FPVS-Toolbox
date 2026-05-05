@@ -17,7 +17,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/PySide6_App/GUI/event_map.py`: event-map row construction, binding, Enter-key handling, and entry adapters used by `MainWindow` wrappers.
 - `src/Main_App/PySide6_App/GUI/`: menus, header/sidebar assembly, settings panel, style tokens, and shell-specific widgets.
 - `src/Main_App/PySide6_App/widgets/`: reusable PySide6 presentation primitives.
-- `src/Main_App/PySide6_App/Backend/`: project model, project manager, preprocessing settings, preprocessing implementation, and processing coordination. `loader.py` is only a compatibility wrapper for the shared BDF loader.
+- `src/Main_App/PySide6_App/Backend/`: project model, project manager, preprocessing settings, active preprocessing implementation, and processing coordination. `preprocess.py` is the active preprocessing owner; `loader.py` is only a compatibility wrapper for the shared BDF loader.
 - `src/Main_App/PySide6_App/adapters/`: current-app adapter layer for runtime-used migration-boundary behavior such as post-export handling.
 - `src/Main_App/PySide6_App/workers/`: Qt workers and multiprocessing bridge code.
 - `src/Main_App/PySide6_App/utils/`: audit, path, operation guard, theme, and settings helpers.
@@ -28,7 +28,11 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 Current `Legacy_App` runtime couplings to account for before renaming or deleting modules:
 
-- `eeg_preprocessing` and `settings_manager`: have current-app replacements or bridges, but compatibility imports and transitive shared processing callers still need cleanup.
+- `settings_manager`: has a current-app shared implementation, but compatibility imports still need cleanup.
+
+Inactive legacy code:
+
+- `eeg_preprocessing.py`: active runtime callers now use `src/Main_App/PySide6_App/Backend/preprocess.py`; keep the legacy file untouched until a later deletion or wrapper slice is explicitly scoped.
 
 Compatibility wrappers:
 

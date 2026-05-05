@@ -152,7 +152,11 @@ def load_eeg_file(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     return _shared_load_eeg_file(*args, **kwargs)
 
 def perform_preprocessing(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    return _lazy_import("eeg_preprocessing", "perform_preprocessing")(*args, **kwargs)
+    from Main_App.PySide6_App.Backend.preprocess import (
+        perform_preprocessing as _perform_preprocessing,
+    )
+
+    return _perform_preprocessing(*args, **kwargs)
 
 def preprocess_raw(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     raise RuntimeError("Legacy preprocess_raw has been quarantined; use the PySide6 preprocessing path.")

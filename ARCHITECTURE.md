@@ -44,6 +44,7 @@ Focused architecture pages:
 - [Workers And Threading](docs/architecture/workers-threading.md)
 - [Statistics And Tools](docs/architecture/statistics-tools.md)
 - [FFT Crop Method](docs/architecture/fft-crop-method.md)
+- [Preprocessing Contract](docs/architecture/preprocessing-contract.md)
 - [Post-Processing Export Contract](docs/architecture/post-processing-export-contract.md)
 - [Processing Mixin Contract](docs/architecture/processing-mixin-contract.md)
 - [BDF Loading Contract](docs/architecture/eeg-loading-contract.md)

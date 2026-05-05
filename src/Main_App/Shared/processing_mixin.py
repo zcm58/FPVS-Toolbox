@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Mixin that drives the background processing workflow.
 
-This is the current-app owner for the single/legacy processing path.
+This is the current-app owner for the compatibility processing path.
 `Main_App.Legacy_App.processing_utils` remains as a thin compatibility wrapper.
 
 They start worker threads, load each file, call preprocessing and
@@ -22,7 +22,7 @@ import re
 import config
 from Main_App.Shared import user_messages
 from Main_App.Shared.post_process import post_process as _external_post_process
-from Main_App.Legacy_App.eeg_preprocessing import perform_preprocessing
+from Main_App.PySide6_App.Backend.preprocess import perform_preprocessing
 from Main_App.Shared.load_utils import load_eeg_file
 from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step, ODDBALL_FREQ
 

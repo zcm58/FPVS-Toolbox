@@ -10,6 +10,11 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 Use script output to decide what to read next.
 
+`preprocess.py` is the active EEG preprocessing owner. Refactors may reorganize
+files only when they preserve the documented pipeline order and verification in
+`docs/architecture/preprocessing-contract.md`; do not route active runtime code
+through the legacy `eeg_preprocessing.py` module.
+
 []: # 
 []: # The backend code should be modular and easy to read. 
 []: # 

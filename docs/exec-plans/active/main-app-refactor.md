@@ -108,9 +108,26 @@ Latest post-processing export slice:
 - Passed: `git diff --check` with only line-ending warnings.
 - Note: focused pytest runs printed existing post-test Qt/update-check tracebacks after selected tests passed with exit code 0.
 
+Latest preprocessing ownership slice:
+
+- Documentation-first requirement: `docs/architecture/preprocessing-contract.md` records the active PySide6 preprocessing owner, fixed pipeline order, preservation rules, and focused verification commands.
+- Refactor completed: active runtime preprocessing ownership is locked to `src/Main_App/PySide6_App/Backend/preprocess.py`.
+- `src/Main_App/Shared/processing_mixin.py` and `Main_App.perform_preprocessing` now delegate to the PySide6 preprocessing owner instead of `src/Main_App/Legacy_App/eeg_preprocessing.py`.
+- GUI processing no longer falls through to `ProcessingMixin.start_processing()` from `MainWindow.start_processing()`; single-file runs and internal non-process modes route through the PySide6 process runner path.
+- `src/Main_App/Legacy_App/eeg_preprocessing.py` remains on disk as inactive legacy code until a later deletion or wrapper slice is explicitly scoped.
+- Passed: `python -m py_compile src\Main_App\PySide6_App\Backend\preprocess.py src\Main_App\Shared\processing_mixin.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\__init__.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py tests\test_main_window_processing.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_preproc_audit.py tests\test_fif_flag_audit.py tests\test_process_runner_epoch_contract.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git grep -n "Main_App.Legacy_App.eeg_preprocessing" -- src tests scripts` found no matches.
+- Passed: `git diff --check` with only existing line-ending normalization warnings.
+- Note: preprocessing audit tests emitted expected MNE short-signal FIR warnings from synthetic test data.
+
 Next refactor slice candidate:
 
-- Move `eeg_preprocessing` ownership out of `Legacy_App` or route the processing mixin through the current PySide6 preprocessing owner, after documenting preprocessing order and proving filtering, referencing, event handling, output data shapes, and export inputs are unchanged.
+- Decide whether to delete `src/Main_App/Legacy_App/eeg_preprocessing.py` or convert it into a temporary compatibility wrapper after adding stronger preprocessing equivalence coverage for filtering, referencing, event handling, output data shapes, and export inputs.
 
 Latest processing mixin slice:
 
