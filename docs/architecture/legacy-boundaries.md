@@ -4,6 +4,8 @@ Protected active legacy path:
 
 - `src/Main_App/Legacy_App/**`
 
+This designation is temporary. The long-term simplification goal is to remove or rename the confusing `Legacy_App` boundary after runtime-used behavior has been migrated to clearer current-app modules, thin adapters, or shared services with equivalent coverage.
+
 Source Localization is no longer a protected black box. It is quarantined dead code:
 
 - active path that must stay empty of source files: `src/Tools/SourceLocalization/**`
@@ -13,6 +15,7 @@ Rules:
 
 - Do not edit `src/Main_App/Legacy_App/**` unless the user explicitly approves it.
 - Prefer thin adapters or caller-side normalization outside protected legacy folders.
+- When a feature already has a current-app replacement, prefer migrating callers away from `Legacy_App` over adding new compatibility paths.
 - Do not revive Source Localization imports, tests, or UI behavior unless the user explicitly asks to restore that feature.
 - Keep compatibility exports in `src/Main_App/__init__.py` stable unless the task is specifically about imports.
 

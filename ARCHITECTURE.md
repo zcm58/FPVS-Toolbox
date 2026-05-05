@@ -29,7 +29,7 @@ Primary areas:
 
 - `src/Main_App/PySide6_App/`: current PySide6 application shell, GUI, project management, processing controllers, and adapters.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
-- `src/Main_App/Legacy_App/`: protected legacy processing modules that remain runtime-used. Treat as black-box behavior unless the user approves edits.
+- `src/Main_App/Legacy_App/`: temporary protected boundary for runtime-used legacy processing modules. Migrate callers toward clearer current-app modules or thin adapters before renaming or removing this designation.
 - `src/Tools/`: standalone and integrated tools for preprocessing, plotting, ratios, statistics, image resizing, and detectability.
 - `src/quarantine/`: quarantined legacy code retained for reference or compatibility checks.
 - `tests/`: unit, integration, and pytest-qt smoke coverage.
@@ -49,7 +49,7 @@ Focused architecture pages:
 
 - GUI code should orchestrate widgets, signals, and user feedback; processing logic belongs in backend, worker, or tool modules.
 - Long-running EEG, plotting, export, and statistics work must run outside the UI thread.
-- Legacy modules should be consumed through existing public APIs or thin adapters outside protected folders.
+- Legacy modules should be consumed through existing public APIs or thin adapters outside protected folders while runtime-used behavior is migrated out of the `Legacy_App` designation.
 - Project-aware workflows should resolve files through the active project root and preserve existing generated formats.
 - Source Localization is quarantined dead code, not an active black box. Keep `src/Tools/SourceLocalization/**` empty of source files and do not import from the quarantine tree unless explicitly restoring the feature.
 

@@ -2,14 +2,14 @@
 
 ## Goal
 
-Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, architecture docs, and mechanical checks synchronized with each change.
+Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, architecture docs, and mechanical checks synchronized with each change. The long-term target is to retire the confusing `Legacy_App` designation after runtime-used behavior has been migrated, wrapped, or renamed behind clearer current-app modules.
 
 ## Current Status
 
 - Phase: harness setup.
 - Scope: documentation and audit scaffolding only.
 - Behavior changes: none.
-- Protected legacy edits: not allowed without explicit user approval.
+- Protected legacy edits: not allowed without explicit user approval. Treat `Legacy_App` as a temporary protected boundary, not a permanent architecture.
 
 ## PR Contract
 
@@ -30,11 +30,13 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 2. Main app map refresh
    - Update focused architecture docs only after inspecting the current `Main_App` structure.
    - Identify small behavior-preserving refactor slices with clear tests or smoke checks.
+   - Inventory which `Legacy_App` behaviors are still runtime-used and which have current `PySide6_App`, `Shared`, `Performance`, or adapter replacements.
    - Avoid protected legacy edits unless explicitly approved.
 
 3. Refactor slices
    - Move one responsibility at a time.
    - Preserve processing order, output formats, project paths, and existing workflows.
+   - Prefer migrating callers to current-app modules or thin adapters before renaming or deleting legacy modules.
    - Update this plan with completed slices, decisions, and verification results.
 
 4. Completion
@@ -52,3 +54,4 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 
 - Keep documentation requirements explicit, but enforce only stable, low-noise invariants in `scripts/agent_audit.py`.
 - Do not add broad "docs changed with code" CI failures until the rule can be scoped narrowly enough to avoid false positives.
+- `Legacy_App` is a migration boundary. Do not preserve the label for its own sake once a runtime-used behavior has a clear current-app home and equivalent tests.
