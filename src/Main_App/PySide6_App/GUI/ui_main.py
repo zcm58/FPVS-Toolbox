@@ -67,7 +67,7 @@ def init_ui(self) -> None:
     self.landing_page = landing
 
     lay0 = QVBoxLayout(landing)
-    lay0.setContentsMargins(36, 32, 36, 28)
+    lay0.setContentsMargins(26, 26, 26, 24)
     lay0.setSpacing(0)
 
     landing_content = QWidget(landing)
@@ -78,97 +78,89 @@ def init_ui(self) -> None:
     landing_layout = QVBoxLayout(landing_content)
     landing_layout.setContentsMargins(0, 0, 0, 0)
     landing_layout.setSpacing(0)
-    landing_layout.addStretch(3)
-
-    card_row = QHBoxLayout()
-    card_row.setContentsMargins(0, 0, 0, 0)
-    card_row.setSpacing(0)
-    card_row.addStretch(1)
 
     welcome_card = QFrame(landing_content)
     welcome_card.setObjectName("landing_welcome_card")
     welcome_card.setAttribute(Qt.WA_StyledBackground, True)
-    welcome_card.setMinimumWidth(560)
-    welcome_card.setMaximumWidth(760)
-    welcome_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    welcome_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     self.landing_card = welcome_card
 
     card_layout = QVBoxLayout(welcome_card)
-    card_layout.setContentsMargins(28, 28, 28, 18)
-    card_layout.setSpacing(18)
+    card_layout.setContentsMargins(32, 32, 32, 32)
+    card_layout.setSpacing(0)
+    card_layout.addStretch(1)
 
-    card_header = QFrame(welcome_card)
-    card_header.setObjectName("landing_card_header")
-    card_header.setAttribute(Qt.WA_StyledBackground, True)
-    header_layout = QVBoxLayout(card_header)
-    header_layout.setContentsMargins(20, 18, 20, 18)
-    header_layout.setSpacing(14)
+    center_content = QWidget(welcome_card)
+    center_content.setObjectName("landing_center_content")
+    center_content.setMinimumWidth(620)
+    center_content.setMaximumWidth(760)
+    center_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    badge = QLabel("FPVS Toolbox", card_header)
+    center_layout = QVBoxLayout(center_content)
+    center_layout.setContentsMargins(0, 0, 0, 0)
+    center_layout.setSpacing(20)
+
+    badge = QLabel("FPVS Toolbox", center_content)
     badge.setObjectName("landing_badge")
     badge.setAlignment(Qt.AlignCenter)
-    badge.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-    title = QLabel("Welcome to the FPVS Toolbox!", card_header)
+    title = QLabel("Welcome to FPVS Toolbox", center_content)
     title.setObjectName("landing_title")
     title_font = QFont()
-    title_font.setPointSize(26)
+    title_font.setPointSize(28)
     title_font.setBold(True)
     title.setFont(title_font)
-    title.setWordWrap(True)
+    title.setAlignment(Qt.AlignCenter)
+    title.setWordWrap(False)
+    title.setMinimumHeight(58)
+    title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     subtitle = QLabel(
-        "Create a new project or open an existing one to continue in the current workspace.",
-        card_header,
+        "Create a new FPVS project or open an existing one.",
+        center_content,
     )
     subtitle.setObjectName("landing_subtitle")
+    subtitle.setAlignment(Qt.AlignCenter)
     subtitle.setWordWrap(True)
 
-    header_layout.addWidget(badge, 0, Qt.AlignLeft)
-    header_layout.addWidget(title)
-    header_layout.addWidget(subtitle)
-    card_layout.addWidget(card_header)
+    center_layout.addWidget(badge)
+    center_layout.addWidget(title)
+    center_layout.addWidget(subtitle)
 
     self.btn_create_project = make_action_button(
-        "Create New Project",
+        "New Project",
+        variant="primary",
         parent=welcome_card,
     )
     self.btn_open_project = make_action_button(
-        "Open Existing Project",
+        "Open Project",
+        variant="secondary",
         parent=welcome_card,
     )
     button_font = QFont()
-    button_font.setPointSize(13)
+    button_font.setPointSize(11)
     for btn in (self.btn_create_project, self.btn_open_project):
         btn.setProperty("landingAction", True)
         btn.setFont(button_font)
-        btn.setFixedHeight(50)
-        btn.setMinimumWidth(230)
-        btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn.setFixedSize(220, 52)
+        btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
     btn_row = QHBoxLayout()
     btn_row.setContentsMargins(0, 0, 0, 0)
-    btn_row.setSpacing(14)
-    btn_row.addWidget(self.btn_create_project, 1)
-    btn_row.addWidget(self.btn_open_project, 1)
-    card_layout.addLayout(btn_row)
+    btn_row.setSpacing(12)
+    btn_row.addStretch(1)
+    btn_row.addWidget(self.btn_create_project)
+    btn_row.addWidget(self.btn_open_project)
+    btn_row.addStretch(1)
+    center_layout.addLayout(btn_row)
 
-    footer = QFrame(welcome_card)
-    footer.setObjectName("landing_footer")
-    footer_layout = QHBoxLayout(footer)
-    footer_layout.setContentsMargins(0, 10, 0, 0)
-    footer_layout.setSpacing(8)
-
-    self.landing_version_label = QLabel("", footer)
+    self.landing_version_label = QLabel("", welcome_card)
     self.landing_version_label.setObjectName("landing_version_label")
-    footer_layout.addWidget(self.landing_version_label)
-    footer_layout.addStretch(1)
-    card_layout.addWidget(footer)
+    self.landing_version_label.setVisible(False)
 
-    card_row.addWidget(welcome_card)
-    card_row.addStretch(1)
-    landing_layout.addLayout(card_row)
-    landing_layout.addStretch(2)
+    card_layout.addWidget(center_content, 0, Qt.AlignCenter)
+    card_layout.addStretch(1)
+    landing_layout.addWidget(welcome_card)
     lay0.addWidget(landing_content, 1)
 
     self.stacked.addWidget(landing)

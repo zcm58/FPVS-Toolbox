@@ -474,19 +474,8 @@ def build_landing_page_stylesheet() -> str:
             border-radius: 14px;
         }}
 
-        #landing_card_header {{
-            background: {LANDING_CARD_ACCENT_BG};
-            border: 1px solid transparent;
-            border-radius: 10px;
-        }}
-
         #landing_badge {{
-            background: {LANDING_BADGE_BG};
-            border: 1px solid {LANDING_BADGE_BORDER};
-            border-radius: 11px;
-            color: {ACCENT_COLOR_HOVER};
-            font-weight: 600;
-            padding: 4px 10px;
+            color: {TEXT_SECONDARY};
         }}
 
         #landing_title {{
@@ -497,19 +486,10 @@ def build_landing_page_stylesheet() -> str:
             color: {TEXT_SECONDARY};
         }}
 
-        #landing_footer {{
-            border-top: 1px solid {BORDER_SOFT_COLOR};
-        }}
-
-        #landing_version_label {{
-            color: {TEXT_MUTED};
-        }}
-
         QPushButton[landingAction="true"] {{
-            background: {SURFACE_ALT_BG};
+            background: {SURFACE_BG};
             border: 1px solid {BORDER_COLOR};
-            border-radius: 10px;
-            padding: 12px 24px;
+            border-radius: 8px;
             color: {TEXT_PRIMARY};
             font-weight: 600;
         }}
@@ -525,5 +505,27 @@ def build_landing_page_stylesheet() -> str:
 
         QPushButton[landingAction="true"]:focus {{
             border-color: {ACCENT_SOFT_BORDER};
+        }}
+
+        QPushButton[landingAction="true"][variant="primary"] {{
+            background: {ACCENT_COLOR};
+            border-color: {ACCENT_COLOR};
+            color: white;
+        }}
+
+        QPushButton[landingAction="true"][variant="primary"]:hover {{
+            background: {ACCENT_COLOR_HOVER};
+            border-color: {ACCENT_COLOR_HOVER};
+        }}
+
+        QPushButton[landingAction="true"][variant="primary"]:pressed {{
+            background: {ACCENT_COLOR_PRESSED};
+            border-color: {ACCENT_COLOR_PRESSED};
+        }}
+
+        QPushButton[landingAction="true"][variant="secondary"] {{
+            background: {SURFACE_BG};
+            border-color: {BORDER_COLOR};
+            color: {TEXT_PRIMARY};
         }}
     """

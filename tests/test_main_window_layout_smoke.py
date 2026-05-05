@@ -8,7 +8,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QSplitter, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QWidget
 
 from Main_App.gui import main_window as main_window_module
 import Main_App.gui.update_manager as update_manager
@@ -30,6 +30,34 @@ def _build_window(tmp_path: Path, qtbot, monkeypatch) -> main_window_module.Main
     win.show()
     qtbot.wait(50)
     return win
+
+
+def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypatch) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+
+    assert win.stacked.currentIndex() == 0
+    assert win.landing_page is win.stacked.currentWidget()
+    assert win.landing_card.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
+    assert win.landing_card.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
+    assert win.landing_card.maximumWidth() >= 10_000
+
+    labels = {label.text() for label in win.landing_page.findChildren(QLabel)}
+    assert "FPVS Toolbox" in labels
+    assert "Welcome to FPVS Toolbox" in labels
+    assert "Create a new FPVS project or open an existing one." in labels
+    title = next(
+        label
+        for label in win.landing_page.findChildren(QLabel)
+        if label.text() == "Welcome to FPVS Toolbox"
+    )
+    assert not title.wordWrap()
+    assert title.minimumHeight() >= 58
+    assert title.sizeHint().height() <= title.minimumHeight()
+
+    assert win.btn_create_project.text() == "New Project"
+    assert win.btn_open_project.text() == "Open Project"
+    assert win.btn_create_project.isVisibleTo(win)
+    assert win.btn_open_project.isVisibleTo(win)
 
 
 def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
