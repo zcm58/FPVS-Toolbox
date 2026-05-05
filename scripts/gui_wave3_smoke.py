@@ -71,7 +71,7 @@ def install_gui_only_stubs() -> None:
         post_process=lambda *args, **kwargs: None,
     )
     install_stub_module(
-        "Main_App.Legacy_App.processing_utils",
+        "Main_App.Shared.processing_mixin",
         ProcessingMixin=ProcessingMixin,
     )
     install_stub_module(

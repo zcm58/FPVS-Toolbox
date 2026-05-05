@@ -59,7 +59,7 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
         lambda *args, **kwargs: ({"n_rejected": 0}, []),
     )
     monkeypatch.setattr(
-        "Main_App.PySide6_App.Backend.loader.load_eeg_file",
+        "Main_App.Shared.load_utils.load_eeg_file",
         lambda _app, _filepath, ref_pair=None: raw.copy(),
     )
     monkeypatch.setattr(

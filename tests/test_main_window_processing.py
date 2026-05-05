@@ -12,12 +12,12 @@ from PySide6.QtWidgets import QApplication
 
 from Main_App.PySide6_App.Backend.project import Project
 import Main_App.PySide6_App.Backend.project_manager as project_manager
-import Main_App.PySide6_App.Backend.loader as load_utils
+import Main_App.Shared.load_utils as load_utils
 import Main_App.Legacy_App.eeg_preprocessing as eeg_preprocessing
 import Main_App.PySide6_App.Backend.processing as processing
 import Main_App.Shared.post_process as post_process
 from Main_App.Shared import user_messages
-import Main_App.Legacy_App.processing_utils as processing_utils
+import Main_App.Shared.processing_mixin as processing_mixin
 import threading
 
 
@@ -38,7 +38,7 @@ def _stub_processing(monkeypatch, projects_root: Path) -> None:
         self._run_active = True
         self._finalize_processing(True)
 
-    monkeypatch.setattr(processing_utils.ProcessingMixin, "start_processing", dummy_start)
+    monkeypatch.setattr(processing_mixin.ProcessingMixin, "start_processing", dummy_start)
 
     for name in ("show_error", "show_warning", "show_info", "ask_yes_no"):
         monkeypatch.setattr(user_messages, name, lambda *a, **k: True)

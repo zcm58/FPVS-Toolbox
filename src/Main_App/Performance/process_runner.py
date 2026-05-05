@@ -181,7 +181,7 @@ def _run_full_pipeline_for_file(
         crop_logger.info("file=%s stage=start", file_path.name)
 
         # Lazy imports (inside worker only)
-        from Main_App.PySide6_App.Backend.loader import load_eeg_file  # type: ignore
+        from Main_App.Shared.load_utils import load_eeg_file  # type: ignore
         from Main_App.PySide6_App.adapters.post_export_adapter import (  # type: ignore
             LegacyCtx,
             run_post_export,

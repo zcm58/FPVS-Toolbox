@@ -40,21 +40,25 @@ you to the exact modules that define each step.
 **What happens**
 
 - **Supported input types:** `.bdf` (BioSemi). Other formats
-  are rejected. (Implementation verified in: `src/Main_App/PySide6_App/Backend/loader.py`.)
+  are rejected. (Implementation verified in: `src/Main_App/Shared/load_utils.py`.)
 - **Disk-backed memory mapping:** the loader requests a disk-backed `preload` path
-  for `.bdf` and (when supported) `.set` files, then materializes the memmap with
+  for `.bdf` files, then materializes the memmap with
   `raw.load_data()` to keep RAM use bounded. (Implementation verified in:
-  `src/Main_App/PySide6_App/Backend/loader.py`.)
+  `src/Main_App/Shared/load_utils.py`.)
 - **Channel typing policy:**
   - The **stimulus/trigger channel** is explicitly typed as `stim`.
   - The **reference pair** (e.g., EXG1/EXG2) is preserved as `eeg` so it can be
     used for re-referencing.
   - Other EXG channels (EXG1-EXG8 not in the reference pair) are demoted to
     `misc`.
-  (Implementation verified in: `src/Main_App/PySide6_App/Backend/loader.py`.)
-- **Montage:** a standard 10-20 montage (`standard_1020`) is applied with
+  (Implementation verified in: `src/Main_App/Shared/load_utils.py`.)
+- **Montage:** BioSemi ActiveTwo 64-channel BDF recordings are treated as
+  10-10-positioned recordings. BioSemi's own cap table labels standard
+  64-channel caps as `1020`, while Brainstorm documents a one-to-one mapping
+  from BioSemi 16/32/64 cap labels to standard 10-10 labels. The loader applies
+  MNE's `standard_1005` montage, which includes the needed 10-10 positions, with
   `on_missing="warn"` and case-insensitive matching. (Implementation verified in:
-  `src/Main_App/PySide6_App/Backend/loader.py`.)
+  `src/Main_App/Shared/load_utils.py`.)
 
 **Key parameters**
 
@@ -63,7 +67,7 @@ you to the exact modules that define each step.
 | `stim_channel` | `Status` | Project settings / global settings | Used for event detection and typed as `stim`. |
 | `ref_channel1`, `ref_channel2` | `EXG1`, `EXG2` | Project settings / global settings | Kept as `eeg` during loading. |
 
-(Defaults verified in: `src/Main_App/PySide6_App/Backend/loader.py`,
+(Defaults verified in: `src/Main_App/Shared/load_utils.py`,
 `src/Main_App/PySide6_App/Backend/preprocessing_settings.py`.)
 
 ---
@@ -162,7 +166,7 @@ its parameter is unset/disabled.
 - **Epoch rejection thresholds (e.g., voltage limits):** no explicit `reject`
   or `flat` criteria are passed to `mne.Epochs`. Search locations:
   - `src/Main_App/Performance/process_runner.py` (keywords: `Epochs`, `reject`, `flat`)
-  - `src/Main_App/Legacy_App/processing_utils.py` (keywords: `Epochs`, `reject`, `flat`)
+  - `src/Main_App/Shared/processing_mixin.py` (keywords: `Epochs`, `reject`, `flat`)
 
 ---
 
@@ -352,7 +356,7 @@ unknown:
 - **Epoch rejection thresholds (amplitude/flat criteria)**
   - Searched in:
     - `src/Main_App/Performance/process_runner.py` (keywords: `Epochs`, `reject`, `flat`)
-    - `src/Main_App/Legacy_App/processing_utils.py` (keywords: `Epochs`, `reject`, `flat`)
+    - `src/Main_App/Shared/processing_mixin.py` (keywords: `Epochs`, `reject`, `flat`)
 
 If you know where these are configured in your local deployment, add them to
 this documentation and cite the exact configuration source.

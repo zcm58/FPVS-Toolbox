@@ -17,19 +17,18 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/PySide6_App/GUI/event_map.py`: event-map row construction, binding, Enter-key handling, and entry adapters used by `MainWindow` wrappers.
 - `src/Main_App/PySide6_App/GUI/`: menus, header/sidebar assembly, settings panel, style tokens, and shell-specific widgets.
 - `src/Main_App/PySide6_App/widgets/`: reusable PySide6 presentation primitives.
-- `src/Main_App/PySide6_App/Backend/`: project model, project manager, preprocessing settings, preprocessing implementation, and processing coordination.
+- `src/Main_App/PySide6_App/Backend/`: project model, project manager, preprocessing settings, preprocessing implementation, and processing coordination. `loader.py` is only a compatibility wrapper for the shared BDF loader.
 - `src/Main_App/PySide6_App/adapters/`: current-app adapter layer for runtime-used migration-boundary behavior such as post-export handling.
 - `src/Main_App/PySide6_App/workers/`: Qt workers and multiprocessing bridge code.
 - `src/Main_App/PySide6_App/utils/`: audit, path, operation guard, theme, and settings helpers.
 - `src/Main_App/PySide6_App/diagnostics/`: processing diagnostics and event-time lock reporting.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
-- `src/Main_App/Shared/`: shared current-app settings, user-message helpers, FFT crop helpers, and post-processing export behavior.
+- `src/Main_App/Shared/`: shared current-app settings, user-message helpers, BDF loader, processing mixin, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Legacy_App/`: temporary migration boundary for runtime-used behavior. Targeted edits are allowed for migration only when processing order, data formats, and exports remain unchanged.
 
 Current `Legacy_App` runtime couplings to account for before renaming or deleting modules:
 
-- `processing_utils`: still consumed by the PySide6 main window shell for the single/legacy processing path.
-- `eeg_preprocessing`, `load_utils`, and `settings_manager`: have current-app replacements or bridges, but compatibility imports and transitive legacy callers still need cleanup.
+- `eeg_preprocessing` and `settings_manager`: have current-app replacements or bridges, but compatibility imports and transitive shared processing callers still need cleanup.
 
 Compatibility wrappers:
 
@@ -37,6 +36,9 @@ Compatibility wrappers:
 - `post_process.py`: thin wrapper for `Main_App.Shared.post_process`; current runtime imports should use the shared module.
 - `post_process_excel.py`: thin wrapper for `Main_App.Shared.post_process_excel`; current runtime imports should use the shared module.
 - `file_selection.py`: no longer inherited by `MainWindow`; retained only for stale compatibility and uses PySide6 dialogs.
+- `processing_utils.py`: thin wrapper for `Main_App.Shared.processing_mixin`; current runtime imports should use the shared module.
+- `load_utils.py`: thin wrapper for `Main_App.Shared.load_utils`; current runtime imports should use the shared module.
+- `src/Main_App/PySide6_App/Backend/loader.py`: thin wrapper for `Main_App.Shared.load_utils`; current runtime imports should use the shared module.
 
 ## Tools
 

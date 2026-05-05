@@ -101,7 +101,7 @@ def _should_show_no_excel_popup(
     return len(_excel_paths_in_output_root(output_root)) == 0
 
 import config
-from Main_App.Legacy_App.processing_utils import ProcessingMixin
+from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.PySide6_App.Backend import Project
 from Main_App.PySide6_App.Backend.processing_controller import (
@@ -173,7 +173,7 @@ class _QtEntryAdapter:
     # ---------- legacy mixin hook: enable/disable controls during run ---------- #
     def _set_controls_enabled(self, enabled: bool) -> None:
         """
-        Required by Main_App.Legacy_App.processing_utils.
+        Required by Main_App.Shared.processing_mixin.
         Disables common inputs while a run is active. No-ops if widgets missing.
         """
         self.busy = not enabled
@@ -373,7 +373,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
             except Exception:
                 pass
 
-        # Legacy compat fields used by ProcessingMixin
+        # Compatibility fields used by ProcessingMixin
         self.gui_queue: queue.Queue = queue.Queue()
         self.processing_thread = None
         self.detection_thread = None
@@ -2056,7 +2056,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
     # ---------- legacy mixin hook: enable/disable controls during run ---------- #
     def _set_controls_enabled(self, enabled: bool) -> None:
         """
-        Required by Main_App.Legacy_App.processing_utils.
+        Required by Main_App.Shared.processing_mixin.
         Disables common inputs while a run is active. No-ops if widgets missing.
 
         The main Start/Stop button is intentionally left enabled so the user can

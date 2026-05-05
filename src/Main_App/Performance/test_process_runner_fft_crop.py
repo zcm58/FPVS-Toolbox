@@ -80,9 +80,9 @@ class _Capture:
 
 
 def _install_worker_stubs(monkeypatch, raw, capture):
-    fake_loader = types.ModuleType("Main_App.PySide6_App.Backend.loader")
+    fake_loader = types.ModuleType("Main_App.Shared.load_utils")
     fake_loader.load_eeg_file = lambda _app, _path, ref_pair: raw
-    monkeypatch.setitem(sys.modules, "Main_App.PySide6_App.Backend.loader", fake_loader)
+    monkeypatch.setitem(sys.modules, "Main_App.Shared.load_utils", fake_loader)
 
     fake_adapter = types.ModuleType("Main_App.PySide6_App.adapters.post_export_adapter")
 

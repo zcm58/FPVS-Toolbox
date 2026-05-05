@@ -60,7 +60,7 @@ Latest slice verification:
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Passed: `.venv\Scripts\python -m pytest tests\test_main_window_event_map_enter.py tests\test_project_settings_roundtrip.py tests\test_main_window_layout_smoke.py -q`
-- Ignored for this slice: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py -q` currently fails before event-map code because its fixture sets low-pass `0.1` and high-pass `50.0`.
+- Later fixed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py -q` now passes after the fixture was updated to canonical bandpass settings.
 
 Latest removal slice:
 
@@ -86,9 +86,10 @@ Latest removal slice:
 ## Current Findings
 
 - `src/Main_App/PySide6_App/GUI/main_window.py` remains the largest organization hotspot, but event-map row behavior has been extracted to a focused current-app GUI module.
-- Direct runtime imports still point at `Legacy_App` for `ProcessingMixin`, which keeps the single/legacy processing path active.
+- Direct runtime imports no longer point at `Legacy_App` for GUI mixins; `MainWindow` now imports the shared processing mixin owner.
 - `src/Main_App/Shared/fft_crop_utils.py` owns FFT crop behavior; `src/Main_App/Legacy_App/fft_crop_utils.py` is now only a compatibility wrapper.
 - `src/Main_App/Shared/post_process.py` owns post-processing export behavior and imports workbook helpers from `src/Main_App/Shared/post_process_excel.py`.
+- `src/Main_App/Shared/load_utils.py` owns BDF loader behavior; `src/Main_App/Legacy_App/load_utils.py` and `src/Main_App/PySide6_App/Backend/loader.py` are now only compatibility wrappers.
 
 Latest post-processing export slice:
 
@@ -109,7 +110,48 @@ Latest post-processing export slice:
 
 Next refactor slice candidate:
 
-- Split the remaining `ProcessingMixin` responsibilities into current-app processing orchestration without changing processing order, event handling, progress semantics, outputs, or export behavior.
+- Move `eeg_preprocessing` ownership out of `Legacy_App` or route the processing mixin through the current PySide6 preprocessing owner, after documenting preprocessing order and proving filtering, referencing, event handling, output data shapes, and export inputs are unchanged.
+
+Latest processing mixin slice:
+
+- Documentation-first requirement: `docs/architecture/processing-mixin-contract.md` records the current `ProcessingMixin` host contract, processing order, queue message behavior, finalization behavior, and preservation rules.
+- Refactor completed: `src/Main_App/Shared/processing_mixin.py` is the current-app owner; `src/Main_App/Legacy_App/processing_utils.py` is now a temporary compatibility wrapper.
+- Runtime/test/smoke imports now use the shared owner in `MainWindow`, main-window processing tests, single-file mode tests, `Main_App.__init__`, and GUI smoke stubs.
+- Intentional non-behavioral cleanup: production debug `print` calls in `start_processing()` became structured debug logging to satisfy repo audit rules.
+- Passed: `python -m py_compile src\Main_App\Shared\processing_mixin.py src\Main_App\Legacy_App\processing_utils.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\__init__.py scripts\gui_wave3_smoke.py tests\test_main_window_processing.py tests\test_single_file_process_mode.py`
+- Passed: `git grep -n "from Main_App.Legacy_App.processing_utils\|import Main_App.Legacy_App.processing_utils" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_main_window_layout_smoke.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_post_export_adapter_no_fif.py tests\test_post_process_target_freqs.py tests\test_postprocess_worker_excel_payload.py tests\test_process_runner_epoch_contract.py -q`
+- Note: the focused GUI pytest run printed the existing update-check network/proxy traceback after selected tests passed with exit code 0.
+- Later fixed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py -q` now passes after the fixture was updated to canonical bandpass settings.
+
+Latest BDF loader contract slice:
+
+- Documentation-first requirement: `docs/architecture/eeg-loading-contract.md` records the BDF-only contract, memmap path shape, reference/stim resolution, EXG typing, `standard_1005` 10-10 coverage, `on_missing="warn"`, logging, and return semantics.
+- Refactor completed: `src/Main_App/Shared/load_utils.py` is the current-app owner; `src/Main_App/Legacy_App/load_utils.py` is now a temporary compatibility wrapper.
+- Runtime imports now use the shared owner from `src/Main_App/Shared/processing_mixin.py` and `src/Main_App/__init__.py`.
+- Duplicate implementation removed: `src/Main_App/PySide6_App/Backend/loader.py` is now a thin wrapper around `src/Main_App/Shared/load_utils.py`.
+- Runtime imports now use the shared owner from the processing mixin, PySide6 processing controller, performance runner, debug audit script, and `Main_App.__init__`.
+- `.set`/EEGLAB loading is intentionally unsupported unless restored as a new explicitly scoped feature.
+- Online verification added: BioSemi's cap table lists 64-channel caps as `1020`, Brainstorm maps BioSemi 16/32/64 cap labels one-to-one to standard 10-10, and MNE `standard_1005` is used as the 10-10-covering dense standard montage.
+- Bandpass cleanup completed: `tests/test_single_file_process_mode.py` now uses canonical `low_pass=50.0` and `high_pass=0.1`, and `tests/test_project_bandpass_warning.py` now asserts the current one-time legacy inversion warning.
+- Passed: `python -m py_compile src\Main_App\Shared\load_utils.py src\Main_App\PySide6_App\Backend\loader.py src\Main_App\Legacy_App\load_utils.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\Performance\process_runner.py tests\test_shared_load_utils.py tests\test_loader_warning_suppression.py`
+- Passed: `git grep -n "from Main_App.Legacy_App.load_utils\|import Main_App.Legacy_App.load_utils" -- src tests scripts` found no matches.
+- Passed: `git grep -n "PySide6_App.Backend.loader import load_eeg_file" -- src tests scripts` found no active imports.
+- Passed: stale loader string grep found no EEGLAB reader, old unsupported-file message, old montage, or `ignore` montage policy matches in `src`, `tests`, or `docs`.
+- Passed: `.venv\Scripts\python -m pytest tests\test_shared_load_utils.py tests\test_loader_warning_suppression.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_shared_load_utils.py tests\test_single_file_process_mode.py tests\test_preprocessing_settings.py tests\test_preproc_persistence.py tests\test_project_legacy_bandpass_migration.py tests\test_project_bandpass_warning.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_loader_warning_suppression.py tests\test_process_runner_epoch_contract.py tests\test_postprocess_worker_excel_payload.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_main_window_layout_smoke.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
+- Passed: `git diff --check` with only line-ending warnings.
+- Note: the focused GUI pytest run printed the existing update-check network/proxy traceback after selected tests passed with exit code 0.
 
 Latest PySide6-only GUI toolkit slice:
 
@@ -126,7 +168,7 @@ Latest PySide6-only GUI toolkit slice:
 - Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_project_settings_roundtrip.py tests\test_main_window_processing.py tests\test_startup_imports_no_customtkinter.py tests\test_average_preprocessing_gui_smoke.py -q`
 - Passed: `.venv\Scripts\python -m pytest tests\test_stats_no_customtkinter_import.py tests\test_stats_shared_rois.py tests\test_fpvs_app_quarantine.py -q`
 - Passed: `git grep -n -E "^\s*(import tkinter|from tkinter|import customtkinter|from customtkinter|import CTkMessagebox|from CTkMessagebox)" -- src tests scripts` found no matches.
-- Ignored for this slice: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py -q` still fails before this refactor path because its fixture sets low-pass `0.1` and high-pass `50.0`.
+- Later fixed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py -q` now passes after the fixture was updated to canonical bandpass settings.
 
 Latest workbook-helper slice:
 

@@ -23,6 +23,8 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | Legacy boundary and removed-feature status | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/legacy-boundaries.md` |
 | FFT crop helper ownership or behavior | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/fft-crop-method.md` |
 | Post-processing or Excel export behavior | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/post-processing-export-contract.md` |
+| Main App processing mixin behavior | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/processing-mixin-contract.md` |
+| BDF loading behavior, memmap paths, EXG typing | `legacy-boundary-review` + `project-path-audit` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/eeg-loading-contract.md`; canonical code: `src/Main_App/Shared/load_utils.py` |
 | Project paths, dialogs, imports, exports, manifests | `project-path-audit` | `.agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` | `docs/architecture/project-io.md` |
 | GUI smoke coverage | `pytest-qt-smoke` | nearest focused pytest target | `docs/quality/test-selection.md` |
 

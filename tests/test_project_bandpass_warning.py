@@ -23,12 +23,12 @@ def test_legacy_bandpass_warns_once_per_project(tmp_path, capsys):
 
         assert project.preprocessing["low_pass"] == 50.0
         assert project.preprocessing["high_pass"] == 0.1
-        assert "Invalid preprocessing bandpass detected" in first
+        assert "Legacy preprocessing bandpass inverted" in first
 
         Project.load(tmp_path)
         second = capsys.readouterr().out
 
-        assert "Invalid preprocessing bandpass detected" not in second
+        assert "Legacy preprocessing bandpass inverted" not in second
     finally:
         _LEGACY_BANDPASS_WARNED.clear()
         _LEGACY_BANDPASS_WARNED.update(previous)

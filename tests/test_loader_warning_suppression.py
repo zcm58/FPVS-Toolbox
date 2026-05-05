@@ -4,7 +4,8 @@ import logging
 import warnings
 from types import SimpleNamespace
 
-import Main_App.PySide6_App.Backend.loader as loader
+import Main_App.PySide6_App.Backend.loader as backend_loader
+import Main_App.Shared.load_utils as loader
 
 
 class _FakeRaw:
@@ -24,14 +25,14 @@ class _FakeRaw:
             )
 
     def set_montage(self, montage, on_missing="warn", match_case=False, verbose=False):
-        assert on_missing == "ignore"
+        assert on_missing == "warn"
 
 
 def test_load_eeg_file_suppresses_expected_channel_and_montage_warnings(monkeypatch, tmp_path):
     fake_raw = _FakeRaw()
 
     monkeypatch.setattr(loader, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(loader, "_cached_1020", lambda: object())
+    monkeypatch.setattr(loader, "_cached_1010", lambda: object())
     monkeypatch.setattr(
         loader.mne.io,
         "read_raw_bdf",
@@ -67,7 +68,7 @@ def test_load_eeg_file_logs_header_mismatch_with_exact_file(monkeypatch, tmp_pat
         return fake_raw
 
     monkeypatch.setattr(loader, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(loader, "_cached_1020", lambda: object())
+    monkeypatch.setattr(loader, "_cached_1010", lambda: object())
     monkeypatch.setattr(loader.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
 
     app = SimpleNamespace(
@@ -86,3 +87,47 @@ def test_load_eeg_file_logs_header_mismatch_with_exact_file(monkeypatch, tmp_pat
     assert "problem_sample.bdf" in caplog.text
     assert str(bdf_path) in caplog.text
     assert "Number of records from the header does not match the file size" in caplog.text
+
+
+def test_load_eeg_file_rejects_set_files(monkeypatch, tmp_path):
+    warnings_seen = []
+    monkeypatch.setattr(
+        loader.user_messages,
+        "show_warning",
+        lambda title, message: warnings_seen.append((title, message)),
+    )
+
+    app = SimpleNamespace(
+        currentProject=SimpleNamespace(preprocessing={}),
+        settings=SimpleNamespace(get=lambda *args, **kwargs: "Status"),
+        log=lambda *args, **kwargs: None,
+    )
+
+    raw = loader.load_eeg_file(app, str(tmp_path / "sample.set"))
+
+    assert raw is None
+    assert warnings_seen == [
+        ("Unsupported File", "Format '.set' not supported. Only '.bdf' is supported.")
+    ]
+
+
+def test_loader_uses_standard_1005_for_1010_coverage(monkeypatch):
+    montage_calls = []
+
+    def _fake_make_standard_montage(name):
+        montage_calls.append(name)
+        return object()
+
+    loader._cached_1010.cache_clear()
+    monkeypatch.setattr(loader.mne.channels, "make_standard_montage", _fake_make_standard_montage)
+
+    try:
+        assert loader._cached_1010() is not None
+    finally:
+        loader._cached_1010.cache_clear()
+
+    assert montage_calls == ["standard_1005"]
+
+
+def test_backend_loader_is_compatibility_wrapper():
+    assert backend_loader.load_eeg_file is loader.load_eeg_file

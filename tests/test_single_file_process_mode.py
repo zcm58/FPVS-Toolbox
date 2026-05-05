@@ -11,7 +11,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
-from Main_App.Legacy_App.processing_utils import ProcessingMixin
+from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.PySide6_App.GUI.main_window import MainWindow
 import Main_App.PySide6_App.workers.mp_runner_bridge as mp_runner_bridge
 
@@ -28,8 +28,8 @@ def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monk
     (project_root / excel_subfolder).mkdir(parents=True)
 
     preprocessing = {
-        "low_pass": 0.1,
-        "high_pass": 50.0,
+        "low_pass": 50.0,
+        "high_pass": 0.1,
         "downsample": 256,
         "rejection_z": 5.0,
         "epoch_start_s": -1.0,

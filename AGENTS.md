@@ -56,6 +56,7 @@ Use the script output to decide what to read next. If a script passes, do not sc
 - Protected paths: [docs/architecture/protected-paths.txt](docs/architecture/protected-paths.txt)
 - Test selection: [docs/quality/test-selection.md](docs/quality/test-selection.md)
 - Verification gates: [docs/quality/verification-gates.md](docs/quality/verification-gates.md)
+- BDF loading contract: [docs/architecture/eeg-loading-contract.md](docs/architecture/eeg-loading-contract.md); canonical code lives in `src/Main_App/Shared/load_utils.py`.
 - Pre-ship checklist: [docs/reviews/pre_ship_checklist.md](docs/reviews/pre_ship_checklist.md)
 - Legacy quarantine audit: [docs/legacy-quarantine-audit.md](docs/legacy-quarantine-audit.md)
 
