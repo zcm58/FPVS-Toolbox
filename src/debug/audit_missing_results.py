@@ -73,7 +73,7 @@ def _ensure_pyside6_stubs() -> None:
 _ensure_pyside6_stubs()
 
 try:
-    from ..Main_App.Shared.load_utils import load_eeg_file
+    from ..Main_App.io.load_utils import load_eeg_file
     from ..Main_App.processing.preprocess import perform_preprocessing
     from ..Main_App.PySide6_App.Backend.project import Project
     from ..Main_App.PySide6_App.Backend.preprocessing_settings import (

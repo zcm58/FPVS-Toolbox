@@ -147,9 +147,9 @@ def ProcessingMixin(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     return _SharedProcessingMixin(*args, **kwargs)
 
 def load_eeg_file(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    from Main_App.Shared.load_utils import load_eeg_file as _shared_load_eeg_file
+    from Main_App.io.load_utils import load_eeg_file as _load_eeg_file
 
-    return _shared_load_eeg_file(*args, **kwargs)
+    return _load_eeg_file(*args, **kwargs)
 
 def perform_preprocessing(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     from Main_App.processing.preprocess import (

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import Main_App.Shared.load_utils as load_utils
+import Main_App.Shared.load_utils as shared_load_utils
+import Main_App.io.load_utils as load_utils
 
 
 class _FakeRaw:
@@ -45,9 +46,9 @@ def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeyp
         captured.update(kwargs)
         return fake_raw
 
-    monkeypatch.setattr(load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(load_utils, "_cached_1010", lambda: object())
-    monkeypatch.setattr(load_utils.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
+    monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(shared_load_utils, "_cached_1010", lambda: object())
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
 
     logs: list[str] = []
     path = tmp_path / "sample.bdf"
@@ -74,7 +75,7 @@ def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeyp
 def test_shared_load_eeg_file_unsupported_extension_warns_and_returns_none(monkeypatch, tmp_path):
     warnings = []
     monkeypatch.setattr(
-        load_utils.user_messages,
+        shared_load_utils.user_messages,
         "show_warning",
         lambda title, message: warnings.append((title, message)),
     )
@@ -94,12 +95,16 @@ def test_shared_loader_uses_standard_1005_for_1010_coverage(monkeypatch):
         montage_calls.append(name)
         return object()
 
-    load_utils._cached_1010.cache_clear()
-    monkeypatch.setattr(load_utils.mne.channels, "make_standard_montage", _fake_make_standard_montage)
+    shared_load_utils._cached_1010.cache_clear()
+    monkeypatch.setattr(
+        shared_load_utils.mne.channels,
+        "make_standard_montage",
+        _fake_make_standard_montage,
+    )
 
     try:
         assert load_utils._cached_1010() is not None
     finally:
-        load_utils._cached_1010.cache_clear()
+        shared_load_utils._cached_1010.cache_clear()
 
     assert montage_calls == ["standard_1005"]

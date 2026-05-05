@@ -33,3 +33,7 @@ src/Main_App/
 `src/Main_App/processing/` is now the canonical Main App preprocessing import
 surface. It delegates to the existing PySide6 backend implementation while the
 preprocessing contract and tests protect behavior.
+
+`src/Main_App/io/` is now the canonical Main App BDF loader import surface. It
+delegates to the existing shared loader implementation while the BDF loading
+contract and tests protect behavior.

@@ -5,7 +5,8 @@ import warnings
 from types import SimpleNamespace
 
 import Main_App.PySide6_App.Backend.loader as backend_loader
-import Main_App.Shared.load_utils as loader
+import Main_App.Shared.load_utils as shared_loader
+import Main_App.io.load_utils as loader
 
 
 class _FakeRaw:
@@ -31,10 +32,10 @@ class _FakeRaw:
 def test_load_eeg_file_suppresses_expected_channel_and_montage_warnings(monkeypatch, tmp_path):
     fake_raw = _FakeRaw()
 
-    monkeypatch.setattr(loader, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(loader, "_cached_1010", lambda: object())
+    monkeypatch.setattr(shared_loader, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(shared_loader, "_cached_1010", lambda: object())
     monkeypatch.setattr(
-        loader.mne.io,
+        shared_loader.mne.io,
         "read_raw_bdf",
         lambda *args, **kwargs: fake_raw,
     )
@@ -67,9 +68,9 @@ def test_load_eeg_file_logs_header_mismatch_with_exact_file(monkeypatch, tmp_pat
         )
         return fake_raw
 
-    monkeypatch.setattr(loader, "_memmap_dir_for_pid", lambda: tmp_path)
-    monkeypatch.setattr(loader, "_cached_1010", lambda: object())
-    monkeypatch.setattr(loader.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
+    monkeypatch.setattr(shared_loader, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(shared_loader, "_cached_1010", lambda: object())
+    monkeypatch.setattr(shared_loader.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
 
     app = SimpleNamespace(
         currentProject=SimpleNamespace(preprocessing={"ref_chan1": "EXG1", "ref_chan2": "EXG2"}),
@@ -79,7 +80,7 @@ def test_load_eeg_file_logs_header_mismatch_with_exact_file(monkeypatch, tmp_pat
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        with caplog.at_level(logging.WARNING, logger=loader.__name__):
+        with caplog.at_level(logging.WARNING, logger=shared_loader.__name__):
             raw = loader.load_eeg_file(app, str(bdf_path))
 
     assert raw is fake_raw
@@ -92,7 +93,7 @@ def test_load_eeg_file_logs_header_mismatch_with_exact_file(monkeypatch, tmp_pat
 def test_load_eeg_file_rejects_set_files(monkeypatch, tmp_path):
     warnings_seen = []
     monkeypatch.setattr(
-        loader.user_messages,
+        shared_loader.user_messages,
         "show_warning",
         lambda title, message: warnings_seen.append((title, message)),
     )
@@ -118,16 +119,20 @@ def test_loader_uses_standard_1005_for_1010_coverage(monkeypatch):
         montage_calls.append(name)
         return object()
 
-    loader._cached_1010.cache_clear()
-    monkeypatch.setattr(loader.mne.channels, "make_standard_montage", _fake_make_standard_montage)
+    shared_loader._cached_1010.cache_clear()
+    monkeypatch.setattr(shared_loader.mne.channels, "make_standard_montage", _fake_make_standard_montage)
 
     try:
         assert loader._cached_1010() is not None
     finally:
-        loader._cached_1010.cache_clear()
+        shared_loader._cached_1010.cache_clear()
 
     assert montage_calls == ["standard_1005"]
 
 
 def test_backend_loader_is_compatibility_wrapper():
     assert backend_loader.load_eeg_file is loader.load_eeg_file
+
+
+def test_shared_loader_is_compatibility_wrapper():
+    assert shared_loader.load_eeg_file is loader.load_eeg_file

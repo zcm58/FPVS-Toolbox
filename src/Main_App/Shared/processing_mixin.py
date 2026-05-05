@@ -23,7 +23,7 @@ import config
 from Main_App.Shared import user_messages
 from Main_App.Shared.post_process import post_process as _external_post_process
 from Main_App.processing.preprocess import perform_preprocessing
-from Main_App.Shared.load_utils import load_eeg_file
+from Main_App.io.load_utils import load_eeg_file
 from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step, ODDBALL_FREQ
 
 logger = logging.getLogger(__name__)

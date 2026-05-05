@@ -24,6 +24,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/PySide6_App/diagnostics/`: processing diagnostics and event-time lock reporting.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
 - `src/Main_App/processing/`: canonical import surface for active EEG preprocessing. It delegates to the existing PySide6 backend implementation during the package-layout migration.
+- `src/Main_App/io/`: canonical import surface for active BDF loading. It delegates to the existing shared loader implementation during the package-layout migration.
 - `src/Main_App/Shared/`: shared current-app settings, user-message helpers, BDF loader, processing mixin, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Legacy_App/`: temporary migration boundary for runtime-used behavior. Targeted edits are allowed for migration only when processing order, data formats, and exports remain unchanged.
 
@@ -42,8 +43,8 @@ Compatibility wrappers:
 - `post_process_excel.py`: thin wrapper for `Main_App.Shared.post_process_excel`; current runtime imports should use the shared module.
 - `file_selection.py`: no longer inherited by `MainWindow`; retained only for stale compatibility and uses PySide6 dialogs.
 - `processing_utils.py`: thin wrapper for `Main_App.Shared.processing_mixin`; current runtime imports should use the shared module.
-- `load_utils.py`: thin wrapper for `Main_App.Shared.load_utils`; current runtime imports should use the shared module.
-- `src/Main_App/PySide6_App/Backend/loader.py`: thin wrapper for `Main_App.Shared.load_utils`; current runtime imports should use the shared module.
+- `load_utils.py`: thin wrapper for `Main_App.Shared.load_utils`; current runtime imports should use `Main_App.io.load_utils`.
+- `src/Main_App/PySide6_App/Backend/loader.py`: thin wrapper for `Main_App.Shared.load_utils`; current runtime imports should use `Main_App.io.load_utils`.
 
 ## Tools
 

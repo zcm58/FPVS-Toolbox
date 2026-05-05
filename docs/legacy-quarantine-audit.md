@@ -43,7 +43,7 @@ Already has current-app replacement or bridge:
 - `debug_utils.py`: no longer imported by `MainWindow`; retained for logging/settings compatibility without Tk messagebox imports.
 - `file_selection.py`: no longer inherited by `MainWindow`; retained for stale compatibility and now uses PySide6 dialogs.
 - `processing_utils.py`: current shared implementation exists at `src/Main_App/Shared/processing_mixin.py`; legacy module remains as a temporary compatibility wrapper.
-- `load_utils.py`: current shared implementation exists at `src/Main_App/Shared/load_utils.py`; legacy module remains as a temporary compatibility wrapper.
+- `load_utils.py`: current import surface exists at `src/Main_App/io/load_utils.py` and delegates to `src/Main_App/Shared/load_utils.py`; legacy module remains as a temporary compatibility wrapper.
 
 Compatibility wrappers:
 
@@ -51,7 +51,7 @@ Compatibility wrappers:
 - `post_process.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/post_process.py`; current runtime callers import the shared owner.
 - `post_process_excel.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/post_process_excel.py`; current runtime callers import the shared owner.
 - `processing_utils.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/processing_mixin.py`; current runtime callers import the shared owner.
-- `load_utils.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/load_utils.py`; current runtime callers import the shared owner.
+- `load_utils.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/load_utils.py`; current runtime callers import `Main_App.io.load_utils`.
 
 Recent migration slices:
 
@@ -59,7 +59,7 @@ Recent migration slices:
 - eLORETA/Source Localization was removed from active runtime because it has no working GUI access path and is not part of the current app.
 - Tkinter/CustomTkinter runtime code was removed from active Main App paths; user dialogs now route through PySide6-safe helpers.
 - Processing mixin ownership moved to `src/Main_App/Shared/processing_mixin.py`; `src/Main_App/Legacy_App/processing_utils.py` is now a compatibility wrapper.
-- BDF loader ownership moved to `src/Main_App/Shared/load_utils.py`; `src/Main_App/Legacy_App/load_utils.py` and `src/Main_App/PySide6_App/Backend/loader.py` are now compatibility wrappers.
+- BDF loader import ownership moved to `src/Main_App/io/load_utils.py`; implementation still lives in `src/Main_App/Shared/load_utils.py`, and `src/Main_App/Legacy_App/load_utils.py` plus `src/Main_App/PySide6_App/Backend/loader.py` remain compatibility wrappers.
 - Preprocessing ownership for active runtime was locked to `src/Main_App/processing/preprocess.py`; GUI processing routes through the PySide6 process runner and no active runtime/test imports point at `src/Main_App/Legacy_App/eeg_preprocessing.py`.
 
 ## Newly quarantined after follow-up cleanup

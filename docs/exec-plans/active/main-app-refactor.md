@@ -140,9 +140,23 @@ Latest Main App layout slice:
 - Passed: `git diff --check` with only line-ending normalization warnings.
 - Note: focused GUI pytest still prints the known update-check proxy traceback after selected tests pass, and preprocessing audit tests still emit expected synthetic short-signal FIR warnings.
 
+Latest Main App I/O layout slice:
+
+- Refactor completed: `src/Main_App/io/` was added as the canonical active BDF loader import surface.
+- Runtime/test imports now use `Main_App.io.load_utils` from the process runner, processing controller, compatibility processing mixin, debug audit script, `Main_App.load_eeg_file`, and focused loader tests.
+- Behavior-preservation rule: the implementation remains in `src/Main_App/Shared/load_utils.py` for this slice; no supported file type, memmap path shape, EXG typing, montage policy, diagnostics, project paths, exports, or return behavior is changed.
+- Passed: `python -m py_compile src\Main_App\io\__init__.py src\Main_App\io\load_utils.py src\Main_App\Shared\load_utils.py src\Main_App\Performance\process_runner.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\Shared\processing_mixin.py src\Main_App\__init__.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_shared_load_utils.py tests\test_loader_warning_suppression.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_process_runner_epoch_contract.py tests\test_main_window_processing.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
+- Passed: `git diff --check` with only line-ending normalization warnings.
+- Passed: `git grep -n "Main_App.Shared.load_utils" -- src tests scripts` found only compatibility wrappers and wrapper-identity tests.
+
 Next refactor slice candidate:
 
-- Continue package-layout migration with another import-surface-only slice, likely `Main_App/io/` for the BDF loader and project-path helpers or `Main_App/workers/` for process runner/bridge ownership. Keep wrappers until imports are stable.
+- Continue package-layout migration with another import-surface-only slice, likely `Main_App/workers/` for process runner/bridge ownership or `Main_App/projects/` for project model/settings imports. Keep wrappers until imports are stable.
 
 Latest processing mixin slice:
 

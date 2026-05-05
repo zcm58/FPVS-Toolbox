@@ -15,12 +15,18 @@ provide:
   `ref_channel2`, and `stim_channel` values.
 - Optional `settings.get(section, key, default)` fallback access.
 
-The canonical implementation and preferred import path is
-`Main_App.Shared.load_utils.load_eeg_file`.
+The canonical active import path is
+`Main_App.io.load_utils.load_eeg_file`.
+
+The implementation still lives in `Main_App.Shared.load_utils` during this
+layout migration slice. Do not change that implementation as part of
+import-surface moves.
 
 `src/Main_App/Legacy_App/load_utils.py` and
 `src/Main_App/PySide6_App/Backend/loader.py` are temporary compatibility
-wrappers for stale imports. They must not contain duplicate loading logic.
+wrappers for stale imports. `src/Main_App/Shared/load_utils.py` is also kept as
+the temporary implementation module. These wrappers must not contain duplicate
+loading logic.
 
 ## File And Path Behavior
 
@@ -69,8 +75,9 @@ wrappers for stale imports. They must not contain duplicate loading logic.
 - Do not restore `.set` support unless it is a new explicitly scoped feature.
 - Do not introduce Tkinter, CustomTkinter, or CTkMessagebox; user warnings and
   errors must use `Main_App.Shared.user_messages`.
-- Keep all active runtime callers loading through the shared owner unless the
-  loader contract is intentionally replaced and covered by focused tests.
+- Keep all active runtime callers loading through `Main_App.io.load_utils`
+  unless the loader contract is intentionally replaced and covered by focused
+  tests.
 
 ## Online Verification
 
