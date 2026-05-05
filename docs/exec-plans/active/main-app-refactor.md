@@ -239,9 +239,21 @@ Latest Main App post-export workflow split:
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `git diff --check` with line-ending warnings only.
 
+Latest Main App processing workflow split:
+
+- Refactor completed: processing run GUI orchestration moved from `src/Main_App/PySide6_App/GUI/main_window.py` to `src/Main_App/gui/processing_workflows.py`.
+- `MainWindow` keeps the existing compatibility wrappers and signal targets: `start_processing`, `stop_processing`, `_on_start_stop_clicked`, `_on_processing_finished`, `_on_processing_error`, `_periodic_queue_check`, and `_finalize_processing`.
+- Behavior-preservation rule: no preprocessing math, BDF loading, multiprocessing implementation, worker signal payloads, post-processing export behavior, project paths, output formats, processing order, or GUI user flow changed.
+- Passed: `python -m py_compile src\Main_App\gui\processing_workflows.py src\Main_App\PySide6_App\GUI\main_window.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_single_file_process_mode.py tests\test_worker_integration.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_startup_imports_no_customtkinter.py tests\test_postprocess_worker_qt.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with line-ending warnings only.
+
 Next refactor slice candidate:
 
-- Continue splitting `Main_App.gui.main_window` by workflow. The next candidate is processing start/finalization UI orchestration; keep public `MainWindow` wrappers until imports are stable.
+- Continue splitting `Main_App.gui.main_window` by workflow. The next candidate is either single-file selection UI helpers or tool-launcher/menu action orchestration; keep public `MainWindow` wrappers until imports are stable.
 
 Latest processing mixin slice:
 

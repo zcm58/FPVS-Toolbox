@@ -9,7 +9,6 @@ import queue
 import subprocess
 import sys
 from Main_App.Shared.post_process import post_process as _shared_post_process
-from Main_App.diagnostics.audit import format_audit_summary, write_audit_json
 from Main_App.PySide6_App.utils.theme import apply_fpvs_theme
 from typing import Callable
 from datetime import datetime
@@ -72,6 +71,7 @@ from .settings_panel import SettingsDialog
 from .sidebar import init_sidebar
 from .ui_main import init_ui
 from Main_App.gui import project_workflows
+from Main_App.gui import processing_workflows
 from Main_App.gui import post_export_workflows
 from Main_App.gui.post_export_workflows import (
     excel_snapshot as _excel_snapshot,
@@ -458,296 +458,11 @@ class MainWindow(QMainWindow, ProcessingMixin):
     # -------------------------- processing -------------------------- #
 
     def stop_processing(self) -> None:
-        """Cooperatively request cancellation for a process-mode run."""
-        if not getattr(self, "_run_active", False):
-            self.log("Stop requested but no processing run is active.", level=logging.INFO)
-            return
-
-        if self._cancel_requested:
-            self.log("Cancellation already requested; ignoring Stop click.", level=logging.INFO)
-            return
-
-        mp = getattr(self, "_mp", None)
-        if mp is None:
-            QMessageBox.information(
-                self,
-                "Stop Processing",
-                "Stopping an in-progress run requires the PySide6 process runner.\n"
-                "This run will finish normally.",
-            )
-            self.log("Stop requested but no MpRunnerBridge instance is active.", level=logging.WARNING)
-            return
-
-        cancel_callable = getattr(mp, "cancel", None)
-        if not callable(cancel_callable):
-            self.log(
-                "MpRunnerBridge.cancel() is unavailable; processing will finish normally.",
-                level=logging.WARNING,
-            )
-            return
-
-        self._cancel_requested = True
-        if hasattr(self, "btn_start") and self.btn_start:
-            try:
-                self.btn_start.setText("Stopping…")
-                self.btn_start.setEnabled(False)
-            except Exception:
-                pass
-
-        self.log("Stop requested; attempting to cancel processing…", level=logging.INFO)
-        try:
-            cancel_callable()
-        except Exception as exc:
-            self._cancel_requested = False
-            if hasattr(self, "btn_start") and self.btn_start:
-                try:
-                    self.btn_start.setText("Stop Processing")
-                    self.btn_start.setEnabled(True)
-                except Exception:
-                    pass
-            self.log(
-                f"Failed to request cancel from MpRunnerBridge: {exc}",
-                level=logging.ERROR,
-            )
-            QMessageBox.warning(
-                self,
-                "Stop Processing",
-                "Unable to halt processing automatically. Please allow the current run to finish.",
-            )
+        processing_workflows.stop_processing(self)
 
     # -------------------------- processing -------------------------- #
     def start_processing(self) -> None:
-        """
-        Begin a processing run through the PySide6 process runner.
-
-        Single-file runs use the same runner with one worker.
-        """
-        if not self._start_guard.start():
-            QMessageBox.warning(self, "Busy", "Processing already started")
-            return
-
-        # Reset run state for a *new* run
-        self._last_job_success = False
-        self._cancel_requested = False
-        self._run_active = False
-        self._snr_tick = 0
-        self._run_had_successful_export = False
-        self._run_excel_output_root = (
-            self.save_folder_path.get()
-            if hasattr(self.save_folder_path, "get")
-            else str(getattr(self, "save_folder_path", "") or "")
-        )
-        self._run_excel_snapshot_before = _excel_snapshot(self._run_excel_output_root)
-
-        # Start spinner immediately (if present)
-        try:
-            if hasattr(self, "_busy_start"):
-                self._busy_start()
-        except Exception:
-            pass
-
-        # Default: timer on; we'll stop it in process mode
-        if not self._processing_timer.isActive():
-            self._processing_timer.start(self._POLL_INTERVAL_MS)
-
-        try:
-            if not getattr(self, "_n_jobs_ignored_logged", False):
-                logger.debug(
-                    "n_jobs is ignored in this version; using parallel_mode=%s",
-                    self.parallel_mode,
-                )
-                self._n_jobs_ignored_logged = True
-
-            project_max_workers: int | None = None
-            allow_ram_cap_bypass = False
-            override_source = "none"
-            if getattr(self, "currentProject", None):
-                opts = getattr(self.currentProject, "options", {})
-                self.parallel_mode = opts.get(
-                    "parallel_mode", getattr(self, "parallel_mode", "process")
-                )
-
-                normalized_preproc = normalize_preprocessing_settings(
-                    getattr(self.currentProject, "preprocessing", {})
-                )
-                raw_override = normalized_preproc.get("max_parallel_workers_override")
-                if raw_override is not None:
-                    try:
-                        override_value = int(raw_override)
-                    except (TypeError, ValueError):
-                        logger.warning(
-                            "Preprocessing max_parallel_workers_override must be an integer; received %r",
-                            raw_override,
-                        )
-                    else:
-                        if override_value > 0:
-                            project_max_workers = override_value
-                            allow_ram_cap_bypass = True
-                            override_source = "preprocessing.max_parallel_workers_override"
-                        else:
-                            allow_ram_cap_bypass = False
-
-                if project_max_workers is None:
-                    raw_override = opts.get("max_workers")
-                    if raw_override is not None:
-                        try:
-                            override_value = int(raw_override)
-                        except (TypeError, ValueError):
-                            logger.warning(
-                                "Project max_workers override must be an integer; received %r",
-                                raw_override,
-                            )
-                        else:
-                            if override_value > 0:
-                                project_max_workers = override_value
-                                override_source = "options.max_workers"
-                            else:
-                                logger.warning(
-                                    "Project max_workers override must be positive; received %r",
-                                    raw_override,
-                                )
-
-            total_ram_bytes = psutil.virtual_memory().total
-            cpu_count = os.cpu_count() or 1
-            ram_tier, ram_cap, total_ram_gib = get_ram_tier_recommendation(total_ram_bytes)
-
-            effective_max_workers = compute_effective_max_workers(
-                total_ram_bytes=total_ram_bytes,
-                cpu_count=cpu_count,
-                project_max_workers=project_max_workers,
-                allow_ram_cap_bypass=allow_ram_cap_bypass,
-            )
-            if (
-                project_max_workers is not None
-                and effective_max_workers != project_max_workers
-            ):
-                logger.warning(
-                    "Clamped project max_workers from %s to %s (cpu_count=%s, ram_tier=%s, ram_cap=%s, ram_cap_bypass=%s)",
-                    project_max_workers,
-                    effective_max_workers,
-                    cpu_count,
-                    ram_tier,
-                    ram_cap if ram_cap is not None else "none",
-                    allow_ram_cap_bypass,
-                )
-
-            logger.info(
-                "Resolved max_workers=%s (cpu_count=%s, ram_gib=%.1f, ram_tier=%s, ram_cap=%s, project_override=%s, override_source=%s, ram_cap_bypass=%s)",
-                effective_max_workers,
-                cpu_count,
-                total_ram_gib,
-                ram_tier,
-                ram_cap if ram_cap is not None else "none",
-                project_max_workers,
-                override_source,
-                allow_ram_cap_bypass,
-            )
-            self.max_workers = effective_max_workers
-
-            is_single_ui = False
-            if hasattr(self, "file_mode"):
-                try:
-                    is_single_ui = self.file_mode.get() == "Single"
-                except Exception:
-                    is_single_ui = False
-            if self.parallel_mode != "process" and not is_single_ui:
-                logger.info(
-                    "Routing parallel_mode=%r through PySide6 process runner.",
-                    self.parallel_mode,
-                )
-            is_mp_run = True
-
-            # ---------- PySide6 process runner path ----------
-            if is_mp_run:
-                # Do NOT kick the compatibility ProcessingMixin path. We stop the
-                # compatibility poll timer here and keep preprocessing on the
-                # PySide6 backend owner.
-                if self._processing_timer.isActive():
-                    self._processing_timer.stop()
-
-                if not self._validate_inputs():
-                    # Validation failed; clean up and return to idle.
-                    try:
-                        if hasattr(self, "_busy_stop"):
-                            self._busy_stop()
-                    except Exception:
-                        pass
-                    self._run_active = False
-                    self._cancel_requested = False
-                    self._start_guard.end()
-                    if hasattr(self, "btn_start"):
-                        self.btn_start.setText("Start Processing")
-                        self._update_start_enabled()
-                    return
-
-                self._set_controls_enabled(False)
-                if hasattr(self, "progress_bar"):
-                    self.progress_bar.setRange(0, 100)
-                    self.progress_bar.setValue(0)
-                self._processed_count = 0
-                self.busy = True
-
-                from pathlib import Path
-                from Main_App.workers.mp_runner_bridge import MpRunnerBridge
-
-                project_root = Path(self.currentProject.project_root)
-                save_folder = Path(self.save_folder_path.get())
-                if is_single_ui:
-                    files = [Path(self.data_paths[0])]
-                else:
-                    files = [Path(p) for p in self.data_paths]
-                self._max_progress = len(files)
-                settings = self.validated_params.copy()
-                event_map = settings.pop("event_id_map", {})
-
-                self._mp = MpRunnerBridge(self)
-                self._mp.validated_fingerprint = getattr(
-                    self, "_preproc_fingerprint_validated", None
-                )
-
-                # Smooth progress if available
-                self._mp.progress.connect(
-                    lambda pct: (
-                        self._animate_progress_to(pct / 100.0)
-                        if hasattr(self, "_animate_progress_to")
-                        else self.progress_bar.setValue(int(pct))
-                    )
-                )
-                # Use a dedicated error handler so we can finalize correctly.
-                self._mp.error.connect(self._on_processing_error)
-                self._mp.finished.connect(self._on_processing_finished)
-
-                self._mp.start(
-                    project_root=project_root,
-                    data_files=files,
-                    settings=settings,
-                    event_map=event_map,
-                    save_folder=save_folder,
-                    max_workers=1 if is_single_ui else self.max_workers,
-                )
-                self._run_active = True
-                self._show_processing_started_notice()
-                if hasattr(self, "btn_start"):
-                    self.btn_start.setText("Stop Processing")
-                    self.btn_start.setEnabled(True)
-                return  # IMPORTANT: do not fall through to legacy
-
-            raise RuntimeError("Processing did not enter the PySide6 process runner path.")
-
-        except Exception as e:
-            logger.exception(e)
-            QMessageBox.critical(self, "Processing Error", str(e))
-            try:
-                if hasattr(self, "_busy_stop"):
-                    self._busy_stop()
-            except Exception:
-                pass
-            self._run_active = False
-            self._cancel_requested = False
-            self._start_guard.end()
-            if hasattr(self, "btn_start"):
-                self.btn_start.setText("Start Processing")
-                self._update_start_enabled()
+        processing_workflows.start_processing(self, log=logger)
 
     # --- Busy spinner helpers ---
     def _busy_start(self) -> None:
@@ -769,136 +484,14 @@ class MainWindow(QMainWindow, ProcessingMixin):
     # --------------------------------
 
     def _on_processing_finished(self, payload: dict | None = None) -> None:
-        # Process-mode completion with audit logging
-        results: list[dict] = []
-        cancelled = False
-        if isinstance(payload, dict):
-            results = payload.get("results") or []
-            cancelled = bool(payload.get("cancelled", False))
-
-        try:
-            debug_on = self.settings.debug_enabled()
-        except Exception:
-            debug_on = False
-
-        params_snapshot = dict(getattr(self, "validated_params", {}))
-        audit_root: Path | None = None
-        if debug_on and hasattr(self, "save_folder_path"):
-            try:
-                save_root = Path(self.save_folder_path.get()).resolve()
-                audit_root = save_root.parent / "audit"
-            except Exception:
-                audit_root = None
-
-        # Batch-level aggregation for rejected-channel counts
-        total_rejected = 0
-        files_with_reject_info = 0
-
-        for result in results:
-            audit = result.get("audit") or {}
-            problems = result.get("problems") or []
-            line, is_warning = format_audit_summary(audit, problems)
-            self.log(line, level=logging.WARNING if is_warning else logging.INFO)
-
-            if debug_on and audit_root and audit:
-                try:
-                    raw_file = audit.get("file") or result.get("file", "")
-                    basename = Path(raw_file).stem if raw_file else "unknown"
-                    write_audit_json(
-                        audit_root,
-                        basename=basename,
-                        audit=audit,
-                        params=params_snapshot,
-                        problems=problems,
-                    )
-                except Exception as exc:
-                    self.log(f"Audit JSON write failed: {exc}", level=logging.WARNING)
-
-            # Aggregate per-file n_rejected if present
-            n_rejected = audit.get("n_rejected")
-            if isinstance(n_rejected, (int, float)):
-                total_rejected += int(n_rejected)
-                files_with_reject_info += 1
-
-        # Emit a single batch-level summary line to the GUI log
-        if files_with_reject_info:
-            avg_rejected = total_rejected / files_with_reject_info
-            self.log(
-                f"[AUDIT] Average number of channels rejected per file: "
-                f"{avg_rejected:.2f} (n={files_with_reject_info}, total={total_rejected})"
-            )
-
-        self._busy_stop()
-        success = not cancelled
-        self._finalize_processing(success, cancelled=cancelled)
-        if cancelled:
-            self.log("Processing run cancelled by user.", level=logging.INFO)
+        processing_workflows.on_processing_finished(self, payload)
 
     def _on_processing_error(self, message: str) -> None:
-        """
-        Process-mode error handler wired to MpRunnerBridge.error.
-
-        If the user has already requested cancellation, treat the error as part of
-        the cancelled run and *do not* show the GUI error dialog.
-        """
-        self._busy_stop()
-
-        if getattr(self, "_cancel_requested", False):
-            # We were in the middle of a user-initiated cancel; don't scare them
-            # with a generic "Processing Error" popup.
-            self.log(
-                f"Processing error received after cancellation request; "
-                f"suppressing dialog. Details: {message}",
-                level=logging.INFO,
-            )
-            self._finalize_processing(False, cancelled=True)
-            return
-
-        # Genuine error in a normal run: show the dialog and finalize as failure.
-        QMessageBox.critical(self, "Processing Error", message)
-        self._finalize_processing(False)
+        processing_workflows.on_processing_error(self, message)
 
     @Slot()
     def _periodic_queue_check(self) -> None:
-        if not self._run_active:
-            return
-
-        processed = 0
-        while processed < 50:
-            try:
-                msg = self.gui_queue.get_nowait()
-            except queue.Empty:
-                break
-
-            processed += 1
-            t = msg.get("type")
-            if t == "log":
-                self.log(msg.get("message", ""))
-            elif t == "progress":
-                self._processed_count = msg["value"]
-                frac = msg["value"] / self._max_progress if self._max_progress else 0
-                self._animate_progress_to(frac)
-            elif t == "post":
-                fname = msg["file"]
-                epochs_dict = msg["epochs_dict"]
-                labels = msg["labels"]
-                self._start_post_worker(fname, epochs_dict, labels)
-            elif t == "error":
-                self.log("!!! THREAD ERROR: " + msg["message"])
-                if (tb := msg.get("traceback")):
-                    self.log(tb)
-                self._finalize_processing(False)
-                return
-            elif t == "done":
-                if self._post_worker or self._post_backlog:
-                    self._pending_finalize = True
-                else:
-                    self._finalize_processing(True)
-                return
-
-        # Adaptive follow-up: quicker after activity, moderate when idle
-        delay = self._BURST_FOLLOWUP_MS if processed else self._IDLE_FOLLOWUP_MS
-        QTimer.singleShot(delay, self._periodic_queue_check)
+        processing_workflows.periodic_queue_check(self)
 
     def _start_post_worker(self, file_name: str, epochs_dict: dict, labels: list[str]) -> None:
         """Queue-aware launcher for post-processing jobs."""
@@ -949,90 +542,12 @@ class MainWindow(QMainWindow, ProcessingMixin):
         post_export_workflows.refresh_run_excel_success_from_disk(self)
 
     def _finalize_processing(self, *args, **kwargs) -> None:
-        """
-        Common finalization hook for both legacy and process modes.
-
-        Ensures flags, spinner, progress bar, and Start/Stop button state are reset.
-        When `cancelled=True` is passed, legacy completion/error dialogs are
-        suppressed and the run is logged as user-cancelled rather than "error".
-        """
-        # Cancellation flag propagated from process-mode or queue workers.
-        cancelled = bool(kwargs.pop("cancelled", False))
-
-        # Infer success flag if provided (legacy mixin passes a bool).
-        success = True
-        if args and isinstance(args[0], bool):
-            success = args[0]
-        if "success" in kwargs and isinstance(kwargs["success"], bool):
-            success = kwargs["success"]
-        if cancelled:
-            success = False  # cancelled runs are not "successful", but not fatal either.
-
-        # Reset per-run state
-        self._run_active = False
-        # Keep _cancel_requested True during legacy finalization so shims can see it;
-        # we reset it *after* calling the parent hook.
-        # (We still guard against double-end on the start guard.)
-        try:
-            self._start_guard.end()
-        except Exception:
-            pass
-
-        try:
-            self._busy_stop()
-        except Exception:
-            pass
-
-        # Re-enable form controls (Single/Batch radio, event map, etc.)
-        try:
-            self._set_controls_enabled(True)
-        except Exception as exc:
-            self.log(
-                f"_set_controls_enabled(True) failed during finalize: {exc}",
-                level=logging.DEBUG,
-            )
-
-        # Reset the progress bar for the next run
-        if hasattr(self, "progress_bar"):
-            try:
-                self.progress_bar.setValue(0)
-            except Exception:
-                pass
-
-        # Restore Start button label/state in all cases
-        if hasattr(self, "btn_start"):
-            try:
-                self.btn_start.setText("Start Processing")
-                self.btn_start.setEnabled(True)
-                # Re-apply normal enable/disable logic (e.g., Single mode file checks)
-                self._update_start_enabled()
-            except Exception:
-                pass
-
-        # Call into the legacy finalization path, optionally suppressing its dialogs
-        test_suppress = bool(os.getenv("FPVS_TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"))
-        if success and not cancelled:
-            self._refresh_run_excel_success_from_disk()
-
-        if cancelled:
-            self._suppress_completion_dialogs = True
-            try:
-                super()._finalize_processing(success)
-            finally:
-                self._suppress_completion_dialogs = False
-                # Now that legacy code is done and shims have seen the cancel flag,
-                # we can clear it.
-                self._cancel_requested = False
-        else:
-            # Normal success/error path
-            try:
-                if test_suppress:
-                    self._suppress_completion_dialogs = True
-                super()._finalize_processing(success)
-            finally:
-                if test_suppress:
-                    self._suppress_completion_dialogs = False
-                self._cancel_requested = False
+        processing_workflows.finalize_processing(
+            self,
+            *args,
+            parent_finalize=super()._finalize_processing,
+            **kwargs,
+        )
 
     # ------------------------ Tk-style scheduling ------------------------ #
     def after(self, delay_ms: int, callback: Callable[[], None]) -> int:
@@ -1512,31 +1027,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
         return event_map.event_map_entries(self, _QtEntryAdapter)
 
     def _on_start_stop_clicked(self) -> None:
-        """Handle Start/Stop button clicks with confirmation on stop."""
-        if not getattr(self, "_run_active", False):
-            self.start_processing()
-            if getattr(self, "_run_active", False) and hasattr(self, "btn_start"):
-                try:
-                    self.btn_start.setText("Stop Processing")
-                except Exception:
-                    pass
-            return
-
-        if self._cancel_requested:
-            self.log("Cancellation already requested; ignoring Stop click.", level=logging.INFO)
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "Confirm Halt",
-            "Data processing is still in progress. Are you sure you want to halt processing?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if reply == QMessageBox.No:
-            return
-
-        self.stop_processing()
+        processing_workflows.on_start_stop_clicked(self)
 
 
     def _export_with_post_process(self, labels: list[str]) -> None:
