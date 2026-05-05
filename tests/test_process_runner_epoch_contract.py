@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import mne
 import numpy as np
 
-from Main_App.Legacy_App.fft_crop_utils import CropResult
+from Main_App.Shared.fft_crop_utils import CropResult
 from Main_App.Performance import process_runner
 
 

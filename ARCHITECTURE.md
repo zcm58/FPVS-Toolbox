@@ -42,6 +42,7 @@ Focused architecture pages:
 - [Legacy Boundaries](docs/architecture/legacy-boundaries.md)
 - [Workers And Threading](docs/architecture/workers-threading.md)
 - [Statistics And Tools](docs/architecture/statistics-tools.md)
+- [FFT Crop Method](docs/architecture/fft-crop-method.md)
 - [Module Map](docs/architecture/module-map.md)
 - [Protected Paths](docs/architecture/protected-paths.txt)
 

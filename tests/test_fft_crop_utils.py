@@ -1,6 +1,6 @@
 import numpy as np
 
-from Main_App.Legacy_App.fft_crop_utils import compute_fft_crop_from_events
+from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events
 
 
 def _build_events(fs: int, onset_ids=(1,), reps=1, cycles=10, include_dups=False, missing_gap=False):

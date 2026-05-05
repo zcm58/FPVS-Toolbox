@@ -85,10 +85,25 @@ Latest removal slice:
 ## Current Findings
 
 - `src/Main_App/PySide6_App/GUI/main_window.py` remains the largest organization hotspot, but event-map row behavior has been extracted to a focused current-app GUI module.
-- Direct runtime imports still point at `Legacy_App` for post-processing, processing mixins, file selection, debug messagebox shims, and FFT crop utilities.
-- `src/Main_App/Shared/post_process.py` exists, but still imports FFT crop and workbook helpers from `Legacy_App`; treat it as a migration bridge, not a completed replacement.
-- `src/Main_App/Performance/process_runner.py` imports legacy FFT crop helpers, making FFT crop utilities a later migration candidate after coverage is confirmed.
+- Direct runtime imports still point at `Legacy_App` for post-processing, processing mixins, file selection, and debug messagebox shims.
+- `src/Main_App/Shared/fft_crop_utils.py` owns FFT crop behavior; `src/Main_App/Legacy_App/fft_crop_utils.py` is now only a compatibility wrapper.
+- `src/Main_App/Shared/post_process.py` exists, but still imports workbook helpers from `Legacy_App`; treat it as a migration bridge, not a completed replacement.
 
 Next refactor slice candidate:
 
-- Extract FFT crop helper ownership out of `Legacy_App` into a current-app shared or performance module, then update `Performance/process_runner.py`, `Shared/post_process.py`, and legacy bridge callers to import that current-app helper without changing crop decisions, diagnostics, or exported files.
+- Document the current post-processing/Excel export contract, then migrate direct callers from `Legacy_App.post_process` toward the shared post-processing bridge without changing generated filenames, sheets, workbook columns, FFT/SNR values, or completion/error behavior.
+
+Latest FFT crop slice:
+
+- Documentation-first requirement: `docs/architecture/fft-crop-method.md` records the pre-refactor FFT crop method, constants, fallback reasons, warnings, result fields, and preservation constraints.
+- Refactor completed: `src/Main_App/Shared/fft_crop_utils.py` is the current-app owner; `src/Main_App/Legacy_App/fft_crop_utils.py` is now a temporary compatibility wrapper.
+- Runtime/test imports now use the shared owner in processing, performance runner, post-processing, and FFT crop tests.
+- Behavior-preservation check: the shared implementation matched the pre-refactor legacy implementation before imports were migrated.
+- Passed: `python -m py_compile src\Main_App\Shared\fft_crop_utils.py src\Main_App\Legacy_App\fft_crop_utils.py src\Main_App\Legacy_App\processing_utils.py src\Main_App\Legacy_App\post_process.py src\Main_App\Shared\post_process.py src\Main_App\Performance\process_runner.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_fft_crop_utils.py tests\test_process_runner_epoch_contract.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_postprocess_worker_qt.py tests\test_postprocess_worker_excel_payload.py tests\test_process_runner_epoch_contract.py tests\test_fft_crop_utils.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_post_export_adapter_no_fif.py tests\test_post_process_target_freqs.py tests\test_fft_neighbors_sheet.py tests\test_main_window_processing.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Note: one pytest run printed the existing update-check network/proxy traceback after all selected tests passed with exit code 0.

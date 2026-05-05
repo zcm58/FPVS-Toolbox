@@ -11,7 +11,6 @@ Legend:
 
 - `src/Main_App/Legacy_App/debug_utils.py`
 - `src/Main_App/Legacy_App/eeg_preprocessing.py`
-- `src/Main_App/Legacy_App/fft_crop_utils.py`
 - `src/Main_App/Legacy_App/file_selection.py`
 - `src/Main_App/Legacy_App/load_utils.py`
 - `src/Main_App/Legacy_App/post_process.py`
@@ -60,9 +59,12 @@ Still directly used by current app code:
 - `file_selection.py`: `MainWindow` still inherits `FileSelectionMixin`.
 - `processing_utils.py`: `MainWindow` still inherits `ProcessingMixin` for the single/legacy processing path.
 - `post_process.py`: imported by `main_window.py`, `processing_controller.py`, and the post-export adapter.
-- `fft_crop_utils.py`: imported by `Performance/process_runner.py`, legacy processing, and post-processing bridges.
 - `post_process_excel.py`: workbook helper dependency for legacy and shared post-processing.
 - `load_utils.py`: still used transitively by `processing_utils.py`.
+
+Compatibility wrappers:
+
+- `fft_crop_utils.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/fft_crop_utils.py`; current runtime callers import the shared owner.
 
 Recent migration slices:
 

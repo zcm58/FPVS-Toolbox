@@ -12,7 +12,7 @@ from config import DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
 from typing import List, Any, Dict
 from Tools.Stats.analysis.full_snr import compute_full_snr
 from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
-from Main_App.Legacy_App.fft_crop_utils import compute_onbin_N, compute_onbin_step
+from Main_App.Shared.fft_crop_utils import compute_onbin_N, compute_onbin_step
 
 
 from Main_App.Legacy_App.post_process_excel import build_fft_neighbors_rows, write_results_workbook

@@ -29,7 +29,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
 from Main_App.PySide6_App.Backend import preprocess as backend_preprocess
-from Main_App.Legacy_App.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step
+from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step
 
 import psutil  # soft memory cap
 from .mp_env import set_blas_threads_multiprocess
