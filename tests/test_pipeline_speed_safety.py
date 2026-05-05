@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from Main_App.Performance import process_runner
+from Main_App.workers import process_runner
 
 
 class _FakeFuture:

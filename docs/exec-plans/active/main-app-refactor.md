@@ -154,9 +154,24 @@ Latest Main App I/O layout slice:
 - Passed: `git diff --check` with only line-ending normalization warnings.
 - Passed: `git grep -n "Main_App.Shared.load_utils" -- src tests scripts` found only compatibility wrappers and wrapper-identity tests.
 
+Latest Main App workers layout slice:
+
+- Refactor completed: `src/Main_App/workers/` was added as the canonical active worker import surface.
+- Runtime/test imports now use `Main_App.workers` for `MpRunnerBridge`, post-processing workers, process-runner module access, and multiprocessing environment helpers.
+- Behavior-preservation rule: implementations remain in `src/Main_App/PySide6_App/workers/` and `src/Main_App/Performance/` for this slice; no worker signal payloads, threading behavior, process-runner scheduling, cancellation behavior, preprocessing order, project paths, exports, or output formats are changed.
+- Passed: `python -m py_compile src\Main_App\workers\__init__.py src\Main_App\workers\mp_runner_bridge.py src\Main_App\workers\processing_worker.py src\Main_App\workers\process_runner.py src\Main_App\workers\mp_env.py src\Main_App\PySide6_App\workers\mp_runner_bridge.py src\Main_App\PySide6_App\workers\processing_worker.py src\Main_App\Performance\process_runner.py src\Main_App\Performance\mp_env.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\settings_panel.py src\main.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_mp_runner_bridge_full_pipeline_smoke.py tests\test_worker_integration.py tests\test_postprocess_worker_excel_payload.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_process_runner_epoch_contract.py tests\test_pipeline_speed_safety.py tests\test_preproc_settings_snapshot.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_single_file_process_mode.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with only line-ending normalization warnings.
+- Update-check cleanup completed: launch-time update checks are skipped under pytest, deleted Qt signal sources are ignored safely, and focused GUI pytest no longer prints the proxy traceback after selected tests pass.
+- Passed: `.venv\Scripts\python -m pytest tests\test_update_manager_manual_force.py tests\test_main_window_processing.py tests\test_single_file_process_mode.py tests\test_worker_integration.py tests\test_mp_runner_bridge_full_pipeline_smoke.py tests\test_postprocess_worker_excel_payload.py -q`
+
 Next refactor slice candidate:
 
-- Continue package-layout migration with another import-surface-only slice, likely `Main_App/workers/` for process runner/bridge ownership or `Main_App/projects/` for project model/settings imports. Keep wrappers until imports are stable.
+- Continue package-layout migration with another import-surface-only slice, likely `Main_App/projects/` for project model/settings imports. Keep wrappers until imports are stable.
 
 Latest processing mixin slice:
 

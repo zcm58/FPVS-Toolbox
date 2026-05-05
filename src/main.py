@@ -2,7 +2,7 @@
 # ruff: noqa: E402
 """Entry point for launching the FPVS Toolbox GUI application (PySide6 only)."""
 
-from Main_App.Performance.mp_env import set_blas_threads_single_process
+from Main_App.workers.mp_env import set_blas_threads_single_process
 
 set_blas_threads_single_process()
 

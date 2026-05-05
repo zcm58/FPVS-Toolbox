@@ -18,6 +18,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | Task | Skill | First script | Focused docs |
 | --- | --- | --- | --- |
 | PySide6 GUI, widgets, menus, workers, status UX | `pyside6-gui-cleanup` | `.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` | `docs/architecture/gui.md` |
+| Qt workers, process runner, multiprocessing bridge | `pyside6-gui-cleanup` | `.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` | `docs/architecture/workers-threading.md`; canonical import: `src/Main_App/workers/` |
 | Main App package layout, ownership, or folder naming | `legacy-boundary-review` | `scripts/agent_audit.py` | `docs/architecture/main-app-target-layout.md`; `docs/exec-plans/active/main-app-refactor.md` |
 | Stats package structure and analysis organization | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-structure` | `docs/architecture/statistics-tools.md` |
 | Stats reporting summaries and legibility | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-reporting-legibility` | `docs/architecture/statistics-tools.md` |

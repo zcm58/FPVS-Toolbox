@@ -11,8 +11,8 @@ from queue import Empty  # <-- important: handle queue.Empty separately
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
-from Main_App.Performance.mp_env import set_blas_threads_single_process
-from Main_App.Performance.process_runner import RunParams, run_project_parallel
+from Main_App.workers.mp_env import set_blas_threads_single_process
+from Main_App.workers.process_runner import RunParams, run_project_parallel
 
 logger = logging.getLogger(__name__)
 

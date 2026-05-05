@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.Shared.settings_manager import SettingsManager
-from Main_App.Performance.mp_env import get_ram_tier_recommendation
+from Main_App.workers.mp_env import get_ram_tier_recommendation
 from Main_App.PySide6_App.widgets import (
     SectionCard,
     make_action_button,

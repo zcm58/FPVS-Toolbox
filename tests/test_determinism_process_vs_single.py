@@ -8,8 +8,8 @@ import pytest
 @pytest.mark.skipif("FPVS_TEST_DATA" not in os.environ, reason="no sample data")
 def test_single_vs_process_outputs_identical(tmp_path):
     sys.path.append("src")
-    from Main_App.Performance.process_runner import RunParams, run_project_parallel
-    from Main_App.Performance.mp_env import set_blas_threads_multiprocess
+    from Main_App.workers.process_runner import RunParams, run_project_parallel
+    from Main_App.workers.mp_env import set_blas_threads_multiprocess
 
     data_root = Path(os.environ["FPVS_TEST_DATA"])
     files = sorted(p for p in data_root.glob("**/*.bdf"))[:1]

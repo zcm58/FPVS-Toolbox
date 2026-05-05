@@ -37,3 +37,7 @@ preprocessing contract and tests protect behavior.
 `src/Main_App/io/` is now the canonical Main App BDF loader import surface. It
 delegates to the existing shared loader implementation while the BDF loading
 contract and tests protect behavior.
+
+`src/Main_App/workers/` is now the canonical Main App worker import surface. It
+delegates to the existing PySide6 worker and Performance process-runner
+implementations while worker/threading tests protect behavior.

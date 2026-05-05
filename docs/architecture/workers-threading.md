@@ -2,6 +2,10 @@
 
 Long-running work must not block the UI thread.
 
+The canonical active import surface for Main App workers is
+`src/Main_App/workers/`. During the package-layout migration it delegates to the
+existing PySide6 worker and Performance process-runner implementations.
+
 Common long-running work:
 
 - EEG preprocessing and post-processing.
@@ -11,6 +15,8 @@ Common long-running work:
 
 Rules:
 
+- Active callers should import Qt workers, `MpRunnerBridge`, process-runner
+  helpers, and multiprocessing environment helpers through `Main_App.workers`.
 - Use `QThread` or `QRunnable` with `QThreadPool`.
 - Workers must not touch widgets directly.
 - Communicate progress, errors, and completion through signals.

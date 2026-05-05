@@ -2,8 +2,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from Main_App.Performance import process_runner
-from Main_App.PySide6_App.workers import mp_runner_bridge
+from Main_App.workers import mp_runner_bridge, process_runner
 
 
 def test_process_mode_modules_import() -> None:

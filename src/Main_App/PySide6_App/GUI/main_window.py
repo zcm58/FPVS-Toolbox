@@ -120,7 +120,7 @@ from Main_App.PySide6_App.Backend.preprocessing_settings import (
     normalize_preprocessing_settings,
     PREPROCESSING_CANONICAL_KEYS,
 )
-from Main_App.Performance.mp_env import (
+from Main_App.workers.mp_env import (
     compute_effective_max_workers,
     get_ram_tier_recommendation,
 )
@@ -137,7 +137,7 @@ from .sidebar import init_sidebar
 from .ui_main import init_ui
 
 from Main_App.PySide6_App.utils.op_guard import OpGuard
-from Main_App.PySide6_App.workers.processing_worker import PostProcessWorker
+from Main_App.workers.processing_worker import PostProcessWorker
 
 STATS_TOOL_UNDER_DEVELOPMENT_WARNING = (
     "The Statistics Tool is currently under development. Certain features, like "
@@ -742,7 +742,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
                 self.busy = True
 
                 from pathlib import Path
-                from Main_App.PySide6_App.workers.mp_runner_bridge import MpRunnerBridge
+                from Main_App.workers.mp_runner_bridge import MpRunnerBridge
 
                 project_root = Path(self.currentProject.project_root)
                 save_folder = Path(self.save_folder_path.get())

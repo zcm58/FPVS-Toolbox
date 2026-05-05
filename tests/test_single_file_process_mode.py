@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.PySide6_App.GUI.main_window import MainWindow
-import Main_App.PySide6_App.workers.mp_runner_bridge as mp_runner_bridge
+import Main_App.workers.mp_runner_bridge as mp_runner_bridge
 
 
 def test_single_file_process_mode_routes_through_mp_runner(qtbot, tmp_path, monkeypatch):

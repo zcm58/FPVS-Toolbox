@@ -32,7 +32,7 @@ if "PySide6" not in sys.modules and importlib.util.find_spec("PySide6") is None:
 if "mne" not in sys.modules and importlib.util.find_spec("mne") is None:
     sys.modules["mne"] = types.ModuleType("mne")
 
-from Main_App.Performance import process_runner
+from Main_App.workers import process_runner
 
 
 class _FakeRaw:

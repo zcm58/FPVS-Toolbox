@@ -7,7 +7,7 @@ import mne
 import numpy as np
 
 from Main_App.Shared.fft_crop_utils import CropResult
-from Main_App.Performance import process_runner
+from Main_App.workers import process_runner
 
 
 def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp_path: Path) -> None:

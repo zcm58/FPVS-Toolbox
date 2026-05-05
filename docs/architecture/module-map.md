@@ -19,12 +19,13 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/PySide6_App/widgets/`: reusable PySide6 presentation primitives.
 - `src/Main_App/PySide6_App/Backend/`: project model, project manager, preprocessing settings, active preprocessing implementation, and processing coordination. `preprocess.py` is the active preprocessing owner; `loader.py` is only a compatibility wrapper for the shared BDF loader.
 - `src/Main_App/PySide6_App/adapters/`: current-app adapter layer for runtime-used migration-boundary behavior such as post-export handling.
-- `src/Main_App/PySide6_App/workers/`: Qt workers and multiprocessing bridge code.
+- `src/Main_App/PySide6_App/workers/`: Qt worker and multiprocessing bridge implementations. Active imports should prefer `Main_App.workers`.
 - `src/Main_App/PySide6_App/utils/`: audit, path, operation guard, theme, and settings helpers.
 - `src/Main_App/PySide6_App/diagnostics/`: processing diagnostics and event-time lock reporting.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
 - `src/Main_App/processing/`: canonical import surface for active EEG preprocessing. It delegates to the existing PySide6 backend implementation during the package-layout migration.
 - `src/Main_App/io/`: canonical import surface for active BDF loading. It delegates to the existing shared loader implementation during the package-layout migration.
+- `src/Main_App/workers/`: canonical import surface for Qt workers, process runner, and multiprocessing environment helpers. It delegates to existing PySide6 worker and Performance implementations during the package-layout migration.
 - `src/Main_App/Shared/`: shared current-app settings, user-message helpers, BDF loader, processing mixin, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Legacy_App/`: temporary migration boundary for runtime-used behavior. Targeted edits are allowed for migration only when processing order, data formats, and exports remain unchanged.
 

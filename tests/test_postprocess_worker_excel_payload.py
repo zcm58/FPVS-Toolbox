@@ -1,8 +1,8 @@
 import pytest
 
 try:
-    from Main_App.PySide6_App.workers.processing_worker import PostProcessWorker
-    import Main_App.PySide6_App.workers.processing_worker as worker_module
+    from Main_App.workers.processing_worker import PostProcessWorker
+    import Main_App.workers.processing_worker as worker_module
 except Exception:  # pragma: no cover - environment guard
     pytest.skip("PySide6 not available", allow_module_level=True)
 

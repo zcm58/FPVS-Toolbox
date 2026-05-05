@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication
 from Main_App.PySide6_App.Backend.project import Project
 import Main_App.PySide6_App.GUI.main_window as main_window_module
 from Main_App.PySide6_App.GUI.main_window import MainWindow
-from Main_App.PySide6_App.workers.mp_runner_bridge import MpRunnerBridge
+from Main_App.workers.mp_runner_bridge import MpRunnerBridge
 
 
 def _build_worker_project(root: Path) -> Project:

@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
+from typing import Any
 
 import requests
 from packaging import version
@@ -55,6 +56,9 @@ def check_for_updates_async(
 
 def check_for_updates_on_launch(app: QWidget) -> None:
     """Startup check: never show a dialog if up-to-date or on error."""
+    if _running_under_pytest():
+        _log(app, "Skipping update check during pytest.")
+        return
     if _should_skip_update_check():
         _log(app, "Skipping update check (checked recently).")
         return
@@ -99,9 +103,9 @@ class _CheckJob(QRunnable):
                 raise ValueError("Missing tag_name in release response.")
             _record_successful_check()
             if _is_newer(latest, f"v{FPVS_TOOLBOX_VERSION}"):
-                self.sigs.available.emit(_UpdateInfo(latest=latest, url=url))
+                _safe_emit(self.sigs.available, _UpdateInfo(latest=latest, url=url))
             else:
-                self.sigs.none.emit(FPVS_TOOLBOX_VERSION)
+                _safe_emit(self.sigs.none, FPVS_TOOLBOX_VERSION)
         except Exception as e:
             elapsed = int((perf_counter() - start) * 1000)
             _LOG.warning(
@@ -113,7 +117,19 @@ class _CheckJob(QRunnable):
                     "exc": repr(e),
                 },
             )
-            self.sigs.error.emit(str(e))
+            _safe_emit(self.sigs.error, str(e))
+
+
+def _safe_emit(signal: Any, *args: object) -> bool:
+    """Emit a Qt signal unless its QObject has already been deleted."""
+    try:
+        signal.emit(*args)
+        return True
+    except RuntimeError as exc:
+        if "deleted" in str(exc).lower():
+            _LOG.debug("Skipped update-check signal emit after QObject deletion.")
+            return False
+        raise
 
 
 # ---------- UI-thread handlers ----------
@@ -193,3 +209,7 @@ def _record_successful_check() -> None:
     settings = SettingsManager()
     settings.set("updates", "last_checked_utc", datetime.now(timezone.utc).isoformat())
     settings.save()
+
+
+def _running_under_pytest() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ

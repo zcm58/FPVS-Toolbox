@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication
 
-import Main_App.PySide6_App.workers.mp_runner_bridge as mp_runner_bridge
-from Main_App.PySide6_App.workers.mp_runner_bridge import MpRunnerBridge
+import Main_App.workers.mp_runner_bridge as mp_runner_bridge
+from Main_App.workers.mp_runner_bridge import MpRunnerBridge
 
 
 @pytest.fixture(scope="session")

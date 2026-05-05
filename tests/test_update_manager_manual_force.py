@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
@@ -51,3 +53,39 @@ def test_manual_force_bypasses_debounce(monkeypatch, qtbot) -> None:
     qtbot.waitUntil(lambda: "title" in captured, timeout=1000)
     assert captured["title"] == "Up to Date"
     assert f"v{FPVS_TOOLBOX_VERSION}" in captured["text"]
+
+
+def test_update_check_ignores_deleted_signal_source(monkeypatch) -> None:
+    class BrokenSignal:
+        def emit(self, *_args):
+            raise RuntimeError("Signal source has been deleted")
+
+    class BrokenResponse:
+        def raise_for_status(self) -> None:
+            raise RuntimeError("network unavailable")
+
+    monkeypatch.setattr(update_manager.requests, "get", lambda *_args, **_kwargs: BrokenResponse())
+
+    job = update_manager._CheckJob()
+    job.sigs = SimpleNamespace(error=BrokenSignal())
+
+    job.run()
+
+
+def test_launch_update_check_is_skipped_under_pytest(monkeypatch, qtbot) -> None:
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    qtbot.addWidget(parent)
+
+    started = False
+
+    class DummyPool:
+        def start(self, job) -> None:  # noqa: ANN001
+            nonlocal started
+            started = True
+
+    monkeypatch.setattr(QThreadPool, "globalInstance", lambda: DummyPool())
+
+    update_manager.check_for_updates_on_launch(parent)
+
+    assert started is False

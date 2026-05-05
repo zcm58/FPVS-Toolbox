@@ -94,6 +94,10 @@ def install_gui_only_stubs() -> None:
         PostProcessWorker=PostProcessWorker,
     )
     install_stub_module(
+        "Main_App.workers.processing_worker",
+        PostProcessWorker=PostProcessWorker,
+    )
+    install_stub_module(
         "Tools.Average_Preprocessing.New_PySide6.main_window",
         AdvancedAveragingWindow=DummyToolWindow,
     )

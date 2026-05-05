@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication
 from Main_App.PySide6_App.Backend.project import Project
 import Main_App.processing.preprocess as backend_preprocess
 import Main_App.PySide6_App.Backend.project_manager as project_manager
-import Main_App.PySide6_App.workers.mp_runner_bridge as mp_runner_bridge
+import Main_App.workers.mp_runner_bridge as mp_runner_bridge
 import Main_App.io.load_utils as load_utils
 import Main_App.PySide6_App.Backend.processing as processing
 import Main_App.Shared.post_process as post_process
