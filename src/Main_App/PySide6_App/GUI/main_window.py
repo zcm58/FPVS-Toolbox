@@ -21,21 +21,17 @@ import psutil
 
 # Qt / PySide6
 from PySide6.QtCore import QObject, QEvent, QEasingCurve, QPropertyAnimation, QTimer, Signal, QThread, Slot, Qt
-from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QAction, QShowEvent, QValidator  # noqa: F401
+from PySide6.QtGui import QFont, QCloseEvent, QAction, QShowEvent  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
-    QHBoxLayout,
     QAbstractButton,
     QGraphicsOpacityEffect,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QFileDialog,
-    QScrollArea,
     QStatusBar,
-    QToolButton,
     QWidget,
 )
 
@@ -237,10 +233,10 @@ from Tools.Average_Preprocessing.New_PySide6.main_window import (
 from Tools.Stats import StatsWindow as PysideStatsWindow
 from config import FPVS_TOOLBOX_VERSION
 from . import update_manager
+from . import event_map
 from .file_menu import init_file_menu
 from .settings_panel import SettingsDialog
 from .sidebar import init_sidebar
-from .style_tokens import EVENT_ID_COLUMN_WIDTH, EVENT_REMOVE_BUTTON_SIZE
 from .ui_main import init_ui
 import Main_App.Legacy_App.debug_utils as debug_utils
 
@@ -1761,183 +1757,53 @@ class MainWindow(QMainWindow, FileSelectionMixin, ProcessingMixin):
         _animate_progress_to(self, int(value * 100))
 
     def _live_event_map_rows(self) -> list[QWidget]:
-        layout = getattr(self, "event_layout", None)
-        if layout is None:
-            return []
-        rows: list[QWidget] = []
-        for index in range(layout.count()):
-            item = layout.itemAt(index)
-            row = item.widget() if item is not None else None
-            if isinstance(row, QWidget):
-                rows.append(row)
-        return rows
+        return event_map.live_event_map_rows(self)
 
     def _event_row_edits(self, row: QWidget) -> tuple[QLineEdit | None, QLineEdit | None]:
-        edits = [child for child in row.children() if isinstance(child, QLineEdit)]
-        if len(edits) < 2:
-            return None, None
-        label_edit = next((edit for edit in edits if edit.property("event_map_role") == "label"), edits[0])
-        id_edit = next((edit for edit in edits if edit.property("event_map_role") == "id"), edits[1])
-        return label_edit, id_edit
+        return event_map.event_row_edits(row)
 
     def _ensure_event_row_registered(self, row: QWidget) -> None:
-        if row not in self.event_rows:
-            self.event_rows.append(row)
+        event_map.ensure_event_row_registered(self, row)
 
     def _bind_event_map_row_widgets(self, row: QWidget) -> None:
-        row.setAttribute(Qt.WA_StyledBackground, True)
-        row.setProperty("event_map_row", True)
-        label_edit, id_edit = self._event_row_edits(row)
-        if label_edit is None or id_edit is None:
-            return
-        label_edit.setProperty("event_map_role", "label")
-        id_edit.setProperty("event_map_role", "id")
-        id_edit.setValidator(QIntValidator(1, 999999, id_edit))
-        if not id_edit.property("event_map_enter_bound"):
-            id_edit.installEventFilter(self)
-            id_edit.setProperty("event_map_enter_bound", True)
-        self._ensure_event_row_registered(row)
+        event_map.bind_event_map_row_widgets(self, row)
 
     def _bind_existing_event_map_rows(self) -> None:
-        for row in self._live_event_map_rows():
-            self._bind_event_map_row_widgets(row)
+        event_map.bind_existing_event_map_rows(self)
 
     def _event_row_label_edit(self, row: QWidget) -> QLineEdit | None:
-        return self._event_row_edits(row)[0]
+        return event_map.event_row_label_edit(row)
 
     def _event_row_id_edit(self, row: QWidget) -> QLineEdit | None:
-        return self._event_row_edits(row)[1]
+        return event_map.event_row_id_edit(row)
 
     def _resolve_event_map_row(self, widget: QWidget) -> QWidget | None:
-        live_rows = tuple(self._live_event_map_rows())
-        current: QWidget | None = widget
-        while current is not None:
-            if current in live_rows or current.property("event_map_row"):
-                self._bind_event_map_row_widgets(current)
-                return current
-            current = current.parentWidget()
-        return None
+        return event_map.resolve_event_map_row(self, widget)
 
-    def _event_map_scroll_area(self) -> QScrollArea | None:
-        parent = self.event_container.parentWidget() if hasattr(self, "event_container") else None
-        while parent is not None:
-            if isinstance(parent, QScrollArea):
-                return parent
-            parent = parent.parentWidget()
-        return None
+    def _event_map_scroll_area(self):
+        return event_map.event_map_scroll_area(self)
 
     def _focus_event_row_label(self, row: QWidget) -> None:
-        label_edit = self._event_row_label_edit(row)
-        if label_edit is None or not label_edit.isEnabled():
-            return
-        scroll_area = self._event_map_scroll_area()
-        if scroll_area is not None:
-            scroll_area.ensureWidgetVisible(label_edit)
-        label_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        event_map.focus_event_row_label(self, row)
 
     def _is_valid_event_map_id(self, id_edit: QLineEdit) -> bool:
-        text = id_edit.text().strip()
-        if not text:
-            return False
-        validator = id_edit.validator()
-        if validator is None:
-            return text.isdigit()
-        state, _, _ = validator.validate(text, len(text))
-        return state == QValidator.State.Acceptable
+        return event_map.is_valid_event_map_id(id_edit)
 
     def _handle_event_map_id_enter(self, id_edit: QLineEdit) -> bool:
-        if self._event_row_return_in_progress:
-            return True
-        if self._resolve_event_map_row(id_edit) is None:
-            return False
-        if not id_edit.isEnabled() or not self._is_valid_event_map_id(id_edit):
-            return False
-
-        btn_add_row = getattr(self, "btn_add_row", None)
-        if not isinstance(btn_add_row, QPushButton) or not btn_add_row.isEnabled():
-            return False
-
-        existing_rows = tuple(self._live_event_map_rows())
-        self._event_row_return_in_progress = True
-        btn_add_row.click()
-
-        def _finish_focus() -> None:
-            try:
-                current_rows = tuple(self._live_event_map_rows())
-                new_row = next((row for row in current_rows if row not in existing_rows), None)
-                if new_row is not None:
-                    self._bind_event_map_row_widgets(new_row)
-                    self._focus_event_row_label(new_row)
-            finally:
-                self._event_row_return_in_progress = False
-
-        QTimer.singleShot(0, _finish_focus)
-        return True
+        return event_map.handle_event_map_id_enter(self, id_edit)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if (
-            isinstance(watched, QLineEdit)
-            and watched.property("event_map_role") == "id"
-            and event.type() == QEvent.Type.KeyPress
-        ):
-            key_event = event
-            if key_event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                if key_event.isAutoRepeat():
-                    return True
-                return self._handle_event_map_id_enter(watched)
+        handled = event_map.handle_event_filter(self, watched, event)
+        if handled is not None:
+            return handled
         return super().eventFilter(watched, event)
 
     def add_event_row(self, label: str = "", id: str = "") -> None:
-        row = QWidget(self.event_container)
-        row.setObjectName("event_map_row")
-        row.setAttribute(Qt.WA_StyledBackground, True)
-        row.setProperty("event_map_row", True)
-        hl = QHBoxLayout(row)
-        hl.setContentsMargins(10, 6, 6, 6)
-        hl.setSpacing(8)
-
-        le_label = QLineEdit(label, row)
-        le_label.setPlaceholderText("Condition")
-        le_label.setProperty("event_map_role", "label")
-        le_id = QLineEdit(id, row)
-        le_id.setPlaceholderText("ID")
-        le_id.setProperty("event_map_role", "id")
-        le_id.setFixedWidth(EVENT_ID_COLUMN_WIDTH)
-        le_id.setAlignment(Qt.AlignCenter)
-
-        btn_rm = QToolButton(row)
-        btn_rm.setObjectName("event_map_remove_button")
-        btn_rm.setText("✕")
-        btn_rm.setAutoRaise(True)
-        btn_rm.setToolTip("Remove condition")
-        btn_rm.setCursor(Qt.PointingHandCursor)
-        btn_rm.setFixedSize(EVENT_REMOVE_BUTTON_SIZE, EVENT_REMOVE_BUTTON_SIZE)
-        btn_rm.setText("x")
-
-        def _remove() -> None:
-            self.event_layout.removeWidget(row)
-            if row in self.event_rows:
-                self.event_rows.remove(row)
-            row.deleteLater()
-            self.log("Event map row removed.")
-        btn_rm.clicked.connect(_remove)
-
-        hl.addWidget(le_label, 1)
-        hl.addWidget(le_id, 0)
-        hl.addWidget(btn_rm, 0, Qt.AlignVCenter)
-        self.event_layout.addWidget(row)
-        self._bind_event_map_row_widgets(row)
-        self.log("Added event map row")
+        event_map.add_event_row(self, label, id)
 
     @property
     def event_map_entries(self) -> list[dict[str, _QtEntryAdapter]]:
-        entries: list[dict[str, _QtEntryAdapter]] = []
-        for row in self.event_rows:
-            label_edit = self._event_row_label_edit(row)
-            id_edit = self._event_row_id_edit(row)
-            if label_edit is not None and id_edit is not None:
-                entries.append({"label": _QtEntryAdapter(label_edit), "id": _QtEntryAdapter(id_edit)})
-        return entries
+        return event_map.event_map_entries(self, _QtEntryAdapter)
 
     def _on_start_stop_clicked(self) -> None:
         """Handle Start/Stop button clicks with confirmation on stop."""

@@ -15,7 +15,7 @@ Shared PySide6 primitives live in `src/Main_App/PySide6_App/widgets/`. Use this 
 
 The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` and the tokens in `src/Main_App/PySide6_App/GUI/style_tokens.py`.
 
-Shell-specific components stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, header bar, sidebar, menus, navigation icons, and style tokens.
+Shell-specific components stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, and style tokens.
 
 Widgets must not own backend processing, file export behavior, project mutation, or dialog orchestration. Keep those responsibilities in GUI controllers, backend modules, workers, or tool-specific code.
 

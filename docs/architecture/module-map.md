@@ -13,7 +13,8 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 ## Main App
 
-- `src/Main_App/PySide6_App/GUI/main_window.py`: main PySide6 shell and current refactor hotspot; event-map row behavior is the next planned extraction.
+- `src/Main_App/PySide6_App/GUI/main_window.py`: main PySide6 shell and current refactor hotspot.
+- `src/Main_App/PySide6_App/GUI/event_map.py`: event-map row construction, binding, Enter-key handling, and entry adapters used by `MainWindow` wrappers.
 - `src/Main_App/PySide6_App/GUI/`: menus, header/sidebar assembly, settings panel, style tokens, and shell-specific widgets.
 - `src/Main_App/PySide6_App/widgets/`: reusable PySide6 presentation primitives.
 - `src/Main_App/PySide6_App/Backend/`: project model, project manager, preprocessing settings, preprocessing implementation, and processing coordination.
