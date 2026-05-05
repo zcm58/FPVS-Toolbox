@@ -19,7 +19,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | --- | --- | --- | --- |
 | PySide6 GUI, widgets, menus, workers, processing run orchestration, status UX | `pyside6-gui-cleanup` | `.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` | `docs/architecture/gui.md`; canonical import: `src/Main_App/gui/` |
 | Qt workers, process runner, multiprocessing bridge | `pyside6-gui-cleanup` | `.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` | `docs/architecture/workers-threading.md`; canonical import: `src/Main_App/workers/` |
-| Main App package layout, ownership, or folder naming | `legacy-boundary-review` | `scripts/agent_audit.py` | `docs/architecture/main-app-target-layout.md`; `docs/exec-plans/active/main-app-refactor.md` |
+| Main App package layout, ownership, or folder naming | `legacy-boundary-review` | `scripts/agent_audit.py` | `docs/architecture/main-app-target-layout.md`; `docs/exec-plans/active/main-app-refactor.md`; `docs/exec-plans/active/main-app-folder-retirement.md` |
 | Runtime diagnostics, repo audits, or manual project probes | `project-path-audit` when paths are involved | `scripts/agent_audit.py` | `docs/architecture/diagnostics.md`; canonical runtime import: `src/Main_App/diagnostics/` |
 | Stats package structure and analysis organization | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-structure` | `docs/architecture/statistics-tools.md` |
 | Stats reporting summaries and legibility | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-reporting-legibility` | `docs/architecture/statistics-tools.md` |
@@ -37,6 +37,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - Active refactor plans live in `docs/exec-plans/active/`.
 - Future plans live in `docs/exec-plans/future/`; read them only when scoping or starting the matching effort.
 - Read `docs/exec-plans/active/main-app-refactor.md` before non-trivial `Main_App` refactors.
+- Read `docs/exec-plans/active/main-app-folder-retirement.md` before touching `Legacy_App`, `PySide6_App`, or Main App package ownership.
 - Keep active plans current with phase status, touched areas, doc updates, verification commands, and decisions.
 - Move finished plans to `docs/exec-plans/completed/` when the tracked work is complete.
 
