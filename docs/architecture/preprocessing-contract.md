@@ -5,18 +5,22 @@ stable during Main App refactors.
 
 ## Active Owner
 
-`src/Main_App/PySide6_App/Backend/preprocess.py` owns active EEG
-preprocessing.
+`src/Main_App/processing/preprocess.py` is the canonical active import surface
+for EEG preprocessing.
+
+The implementation still lives in
+`src/Main_App/PySide6_App/Backend/preprocess.py` during this layout migration
+slice. Do not change that implementation as part of import-surface moves.
 
 Current app processing must call:
 
 ```python
-from Main_App.PySide6_App.Backend.preprocess import perform_preprocessing
+from Main_App.processing.preprocess import perform_preprocessing
 ```
 
 Compatibility paths such as `Main_App.perform_preprocessing` and
-`Main_App.Shared.processing_mixin` may delegate to this owner, but active
-runtime code must not import `Main_App.Legacy_App.eeg_preprocessing`.
+`Main_App.Shared.processing_mixin` may delegate to this import surface, but
+active runtime code must not import `Main_App.Legacy_App.eeg_preprocessing`.
 
 `src/Main_App/Legacy_App/eeg_preprocessing.py` remains on disk only as inactive
 legacy code until a later deletion or compatibility-wrapper slice is explicitly

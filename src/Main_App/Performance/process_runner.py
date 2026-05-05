@@ -4,7 +4,7 @@ Process-based per-file runner.
 
 - Spawns one subprocess per EEG file (Windows-safe via "spawn").
 - Caps BLAS to 1 thread per worker to avoid oversubscription.
-- Uses the PySide6 loader + preprocessing backend (no direct Legacy deps).
+- Uses the shared loader and canonical Main App preprocessing surface.
 - Extracts events using the project's stim channel (e.g., "Status").
 - Suppresses any worker GUI popups.
 - Calls the existing post-export adapter (no Legacy edits).
@@ -28,7 +28,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
-from Main_App.PySide6_App.Backend import preprocess as backend_preprocess
+import Main_App.processing.preprocess as backend_preprocess
 from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step
 
 import psutil  # soft memory cap

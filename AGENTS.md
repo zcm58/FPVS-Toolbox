@@ -18,7 +18,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 ## Non-Negotiables
 
 - `src/Main_App/Legacy_App/**` is an active migration boundary. Targeted edits are allowed for refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
-- Active EEG preprocessing is owned by `src/Main_App/PySide6_App/Backend/preprocess.py`; do not route active runtime code through `src/Main_App/Legacy_App/eeg_preprocessing.py`.
+- Active EEG preprocessing imports should use `src/Main_App/processing/preprocess.py`; it delegates to the current PySide6 backend implementation while the Main App layout is migrated. Do not route active runtime code through `src/Main_App/Legacy_App/eeg_preprocessing.py`.
 - Source Localization/eLORETA has been removed from active runtime. Do not add GUI, settings, tests, imports, or quarantine-tree dependencies for it unless the user explicitly scopes a restoration feature.
 - Prefer thin adapters outside protected folders when legacy behavior must be reused.
 - Use PySide6 for GUI work. Do not introduce Tkinter, CustomTkinter, or CTkMessagebox imports anywhere in repo code.
@@ -53,12 +53,13 @@ Use the script output to decide what to read next. If a script passes, do not sc
 - Architecture map: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Agent command index: [docs/agent-index.md](docs/agent-index.md)
 - Active execution plans: [docs/exec-plans/active/](docs/exec-plans/active/)
+- Main App target layout: [docs/architecture/main-app-target-layout.md](docs/architecture/main-app-target-layout.md)
 - Module map: [docs/architecture/module-map.md](docs/architecture/module-map.md)
 - Protected paths: [docs/architecture/protected-paths.txt](docs/architecture/protected-paths.txt)
 - Test selection: [docs/quality/test-selection.md](docs/quality/test-selection.md)
 - Verification gates: [docs/quality/verification-gates.md](docs/quality/verification-gates.md)
 - BDF loading contract: [docs/architecture/eeg-loading-contract.md](docs/architecture/eeg-loading-contract.md); canonical code lives in `src/Main_App/Shared/load_utils.py`.
-- Preprocessing contract: [docs/architecture/preprocessing-contract.md](docs/architecture/preprocessing-contract.md); canonical active code lives in `src/Main_App/PySide6_App/Backend/preprocess.py`.
+- Preprocessing contract: [docs/architecture/preprocessing-contract.md](docs/architecture/preprocessing-contract.md); canonical active import surface lives in `src/Main_App/processing/preprocess.py`.
 - Pre-ship checklist: [docs/reviews/pre_ship_checklist.md](docs/reviews/pre_ship_checklist.md)
 - Legacy quarantine audit: [docs/legacy-quarantine-audit.md](docs/legacy-quarantine-audit.md)
 

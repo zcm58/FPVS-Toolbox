@@ -346,10 +346,10 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self.log("Appearance Mode: Light (PySide6 fixed light theme)")
         # Announce the active preprocessor (visibility only)
         logger.info(
-            "Using PySide6 preprocessing module: Main_App.PySide6_App.Backend.preprocess.perform_preprocessing"
+            "Using Main App preprocessing module: Main_App.processing.preprocess.perform_preprocessing"
         )
 
-        self.log("Preprocessor: PySide6 module active")
+        self.log("Preprocessor: Main App processing module active")
 
         # Wire Start/Stop button – handler decides whether to start or stop
         if hasattr(self, "btn_start"):

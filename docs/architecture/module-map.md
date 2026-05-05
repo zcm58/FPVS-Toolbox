@@ -23,6 +23,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/PySide6_App/utils/`: audit, path, operation guard, theme, and settings helpers.
 - `src/Main_App/PySide6_App/diagnostics/`: processing diagnostics and event-time lock reporting.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
+- `src/Main_App/processing/`: canonical import surface for active EEG preprocessing. It delegates to the existing PySide6 backend implementation during the package-layout migration.
 - `src/Main_App/Shared/`: shared current-app settings, user-message helpers, BDF loader, processing mixin, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Legacy_App/`: temporary migration boundary for runtime-used behavior. Targeted edits are allowed for migration only when processing order, data formats, and exports remain unchanged.
 
@@ -32,7 +33,7 @@ Current `Legacy_App` runtime couplings to account for before renaming or deletin
 
 Inactive legacy code:
 
-- `eeg_preprocessing.py`: active runtime callers now use `src/Main_App/PySide6_App/Backend/preprocess.py`; keep the legacy file untouched until a later deletion or wrapper slice is explicitly scoped.
+- `eeg_preprocessing.py`: active runtime callers now use `src/Main_App/processing/preprocess.py`; keep the legacy file untouched until a later deletion or wrapper slice is explicitly scoped.
 
 Compatibility wrappers:
 

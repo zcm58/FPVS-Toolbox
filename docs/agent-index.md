@@ -18,10 +18,11 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | Task | Skill | First script | Focused docs |
 | --- | --- | --- | --- |
 | PySide6 GUI, widgets, menus, workers, status UX | `pyside6-gui-cleanup` | `.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` | `docs/architecture/gui.md` |
+| Main App package layout, ownership, or folder naming | `legacy-boundary-review` | `scripts/agent_audit.py` | `docs/architecture/main-app-target-layout.md`; `docs/exec-plans/active/main-app-refactor.md` |
 | Stats package structure and analysis organization | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-structure` | `docs/architecture/statistics-tools.md` |
 | Stats reporting summaries and legibility | `pyside6-gui-cleanup` | `scripts/agent_audit.py --check stats-reporting-legibility` | `docs/architecture/statistics-tools.md` |
 | Legacy boundary and removed-feature status | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/legacy-boundaries.md` |
-| EEG preprocessing ownership, processing order, or GUI processing route | `legacy-boundary-review` + `pyside6-gui-cleanup` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/preprocessing-contract.md`; canonical code: `src/Main_App/PySide6_App/Backend/preprocess.py` |
+| EEG preprocessing ownership, processing order, or GUI processing route | `legacy-boundary-review` + `pyside6-gui-cleanup` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/preprocessing-contract.md`; canonical import: `src/Main_App/processing/preprocess.py` |
 | FFT crop helper ownership or behavior | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/fft-crop-method.md` |
 | Post-processing or Excel export behavior | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/post-processing-export-contract.md` |
 | Main App processing mixin behavior | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/processing-mixin-contract.md` |

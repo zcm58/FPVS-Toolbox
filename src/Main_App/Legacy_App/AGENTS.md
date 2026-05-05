@@ -14,7 +14,7 @@ This is migration-boundary code. Targeted refactor edits are allowed, but they m
 Processing should always occur on a separate thread from the GUI
 so that it does not become unresponsive. 
 
-**eeg_preprocessing.py is inactive legacy pipeline code. Active runtime preprocessing is owned by `src/Main_App/PySide6_App/Backend/preprocess.py`; do not route active callers back through this legacy module. Edit only for a targeted migration/deletion/wrapper task, and do not change preprocessing behavior.**
+**eeg_preprocessing.py is inactive legacy pipeline code. Active runtime preprocessing imports should use `src/Main_App/processing/preprocess.py`; do not route active callers back through this legacy module. Edit only for a targeted migration/deletion/wrapper task, and do not change preprocessing behavior.**
 
 **post_process.py is high-risk export pipeline code. Edit only for a targeted migration/refactor task, and do not change metric calculation, output formats, filenames, sheet names, or export behavior.**
 

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Dict, Iterable, List, Sequence
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from Main_App.Shared.load_utils import load_eeg_file
-from Main_App.PySide6_App.Backend.preprocess import (
+from Main_App.processing.preprocess import (
     perform_preprocessing,
     begin_preproc_audit,
     finalize_preproc_audit,
@@ -304,7 +304,7 @@ def _promote_refs_to_eeg(self, raw, ref1: str, ref2: str, filename: str) -> None
 
 def start_processing(self) -> None:
     """
-    Run the pipeline on one or more .bdf files using the PySide6 preprocessing module ONLY.
+    Run the pipeline on one or more .bdf files using the active preprocessing owner.
     Preserves the rest of the pipeline and adds structured audit logging.
     """
     try:
@@ -410,11 +410,11 @@ def start_processing(self) -> None:
         }
 
         self.log(
-            "Using PySide6 preprocessing: "
-            "Main_App.PySide6_App.Backend.preprocess.perform_preprocessing"
+            "Using Main App preprocessing: "
+            "Main_App.processing.preprocess.perform_preprocessing"
         )
         logger.info(
-            "Preproc route: PySide6 module with params=%s",
+            "Preproc route: Main_App.processing.preprocess with params=%s",
             {k: v for k, v in params.items() if k not in {"reject_thresh"}},
         )
 

@@ -28,6 +28,7 @@ FPVS Toolbox is a Windows-oriented desktop application built around PySide6 GUI 
 Primary areas:
 
 - `src/Main_App/PySide6_App/`: current PySide6 application shell, GUI, project management, processing controllers, and adapters. Shell-specific GUI helpers such as `GUI/event_map.py` should stay here instead of growing `GUI/main_window.py`.
+- `src/Main_App/processing/`: canonical Main App processing import surface. It currently delegates preprocessing to the existing PySide6 backend implementation while the repo moves toward purpose-based Main App folders.
 - `src/Main_App/Shared/`: current shared owners for cross-path behavior such as the canonical BDF loader, processing mixin, settings helpers, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
 - `src/Main_App/Legacy_App/`: temporary protected boundary for runtime-used legacy processing modules. Migrate callers toward clearer current-app modules or thin adapters before renaming or removing this designation.
@@ -39,6 +40,7 @@ Primary areas:
 Focused architecture pages:
 
 - [GUI](docs/architecture/gui.md)
+- [Main App Target Layout](docs/architecture/main-app-target-layout.md)
 - [Project I/O](docs/architecture/project-io.md)
 - [Legacy Boundaries](docs/architecture/legacy-boundaries.md)
 - [Workers And Threading](docs/architecture/workers-threading.md)

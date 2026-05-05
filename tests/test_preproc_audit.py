@@ -4,7 +4,7 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("PySide6")
 mne = pytest.importorskip("mne")
 
-from Main_App.PySide6_App.Backend.preprocess import (  # noqa: E402
+from Main_App.processing.preprocess import (  # noqa: E402
     begin_preproc_audit,
     finalize_preproc_audit,
     perform_preprocessing,

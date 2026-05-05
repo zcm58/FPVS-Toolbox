@@ -17,7 +17,7 @@ The mixin prevents duplicate active processing threads, blocks processing while 
 For each selected data file, the worker thread preserves this order:
 
 1. Load the EEG file through `Main_App.Shared.load_utils.load_eeg_file(self, file_path)`.
-2. Preprocess a raw copy with `Main_App.PySide6_App.Backend.preprocess.perform_preprocessing(...)`.
+2. Preprocess a raw copy with `Main_App.processing.preprocess.perform_preprocessing(...)`.
 3. Extract events from annotations for `.set` files or `mne.find_events(...)` for other files.
 4. Compute FFT crop diagnostics with `compute_fft_crop_from_events(...)`.
 5. Build per-condition `mne.EpochsArray` objects using 55-on-bin crops when available, otherwise fixed-epoch fallback.

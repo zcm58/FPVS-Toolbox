@@ -152,7 +152,7 @@ def load_eeg_file(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     return _shared_load_eeg_file(*args, **kwargs)
 
 def perform_preprocessing(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    from Main_App.PySide6_App.Backend.preprocess import (
+    from Main_App.processing.preprocess import (
         perform_preprocessing as _perform_preprocessing,
     )
 

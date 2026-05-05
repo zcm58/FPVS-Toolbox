@@ -125,9 +125,24 @@ Latest preprocessing ownership slice:
 - Passed: `git diff --check` with only existing line-ending normalization warnings.
 - Note: preprocessing audit tests emitted expected MNE short-signal FIR warnings from synthetic test data.
 
+Latest Main App layout slice:
+
+- Target direction recorded: `docs/architecture/main-app-target-layout.md` defines the long-term purpose-based `Main_App` package shape without permanent `Legacy_App`/`PySide6_App` distinctions.
+- Refactor completed: `src/Main_App/processing/` was added as the canonical active preprocessing import surface.
+- Runtime/test imports now use `Main_App.processing.preprocess` from the process runner, processing controller, compatibility processing mixin, debug audit script, `Main_App.perform_preprocessing`, and focused preprocessing tests.
+- Behavior-preservation rule: the implementation remains in `src/Main_App/PySide6_App/Backend/preprocess.py` for this slice; no preprocessing math, pipeline order, project paths, exports, or output formats are changed.
+- Passed: `python -m py_compile src\Main_App\processing\__init__.py src\Main_App\processing\preprocess.py src\Main_App\PySide6_App\Backend\preprocess.py src\Main_App\Shared\processing_mixin.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\Performance\process_runner.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\__init__.py src\debug\audit_missing_results.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py tests\test_main_window_processing.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_preproc_audit.py tests\test_fif_flag_audit.py tests\test_process_runner_epoch_contract.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with only line-ending normalization warnings.
+- Note: focused GUI pytest still prints the known update-check proxy traceback after selected tests pass, and preprocessing audit tests still emit expected synthetic short-signal FIR warnings.
+
 Next refactor slice candidate:
 
-- Decide whether to delete `src/Main_App/Legacy_App/eeg_preprocessing.py` or convert it into a temporary compatibility wrapper after adding stronger preprocessing equivalence coverage for filtering, referencing, event handling, output data shapes, and export inputs.
+- Continue package-layout migration with another import-surface-only slice, likely `Main_App/io/` for the BDF loader and project-path helpers or `Main_App/workers/` for process runner/bridge ownership. Keep wrappers until imports are stable.
 
 Latest processing mixin slice:
 
