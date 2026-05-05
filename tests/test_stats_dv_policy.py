@@ -8,6 +8,7 @@ from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     FIXED_K_POLICY_NAME,
     GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
+    ROSSION_POLICY_NAME,
 )
 from Tools.Stats.common.stats_core import PipelineId, StepId  # noqa: E402
 from Tools.Stats.controller.stats_controller import (  # noqa: E402
@@ -30,8 +31,8 @@ def test_stats_dv_policy_defaults(qtbot):
     qtbot.addWidget(window)
     window.show()
 
-    assert window.dv_policy_combo.currentText() == LEGACY_POLICY_NAME
-    assert window.get_dv_policy_snapshot()["name"] == LEGACY_POLICY_NAME
+    assert window.dv_policy_combo.currentText() == ROSSION_POLICY_NAME
+    assert window.get_dv_policy_snapshot()["name"] == ROSSION_POLICY_NAME
 
 
 @pytest.mark.qt
@@ -74,8 +75,9 @@ def test_stats_dv_policy_does_not_change_step_queue(qtbot):
     window.show()
     _setup_window_state(window)
 
-    legacy_steps = window._controller._build_steps(PipelineId.SINGLE, SINGLE_PIPELINE_STEPS)
-    legacy_ids = [step.id for step in legacy_steps]
+    default_steps = window._controller._build_steps(PipelineId.SINGLE, SINGLE_PIPELINE_STEPS)
+    default_ids = [step.id for step in default_steps]
+    default_policy_name = window.get_dv_policy_snapshot()["name"]
 
     window.dv_policy_combo.setCurrentText(FIXED_K_POLICY_NAME)
     window.fixed_k_spinbox.setValue(9)
@@ -83,10 +85,10 @@ def test_stats_dv_policy_does_not_change_step_queue(qtbot):
     fixed_steps = window._controller._build_steps(PipelineId.SINGLE, SINGLE_PIPELINE_STEPS)
     fixed_ids = [step.id for step in fixed_steps]
 
-    assert legacy_ids == fixed_ids
-    for legacy_step, fixed_step in zip(legacy_steps, fixed_steps):
-        if "dv_policy" in legacy_step.kwargs:
-            assert legacy_step.kwargs["dv_policy"]["name"] == LEGACY_POLICY_NAME
+    assert default_ids == fixed_ids
+    for default_step, fixed_step in zip(default_steps, fixed_steps):
+        if "dv_policy" in default_step.kwargs:
+            assert default_step.kwargs["dv_policy"]["name"] == default_policy_name
             assert fixed_step.kwargs["dv_policy"]["name"] == FIXED_K_POLICY_NAME
 
     window.dv_policy_combo.setCurrentText(LEGACY_POLICY_NAME)

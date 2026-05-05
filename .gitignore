@@ -34,9 +34,11 @@ coverage.xml
 
 # Pytest cache
 .pytest_cache/
+.ruff_cache/
 .tmp/
 .codex-tmp/
 .codex-pytest-tmp/
+.codex_pytest*/
 codex_pytest_tmp/
 test_tmp/
 .tmp_pytest_local/
@@ -78,6 +80,9 @@ venv/
 
 # Static site output (MkDocs build artifact)
 site/
+
+# Local tool output folders
+3 - Statistical Analysis Results/
 
 # Local fsaverage template/data caches
 src/fsaverage/

@@ -1,17 +1,6 @@
-import importlib.util
-import pytest
+import pandas as pd
 
-if importlib.util.find_spec("pandas") is None:
-    pytest.skip("pandas not available", allow_module_level=True)
-else:
-    import pandas as pd
-
-spec = importlib.util.spec_from_file_location(
-    'stats_analysis',
-    str(__import__('pathlib').Path(__file__).resolve().parent.parent / 'src' / 'Tools' / 'Stats' / 'stats_analysis.py')
-)
-stats_analysis = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(stats_analysis)
+from Tools.Stats.analysis import stats_analysis
 
 
 def test_aggregate_bca_sum_four_decimals(tmp_path):
@@ -22,8 +11,15 @@ def test_aggregate_bca_sum_four_decimals(tmp_path):
     df = pd.DataFrame(data, index=idx, columns=cols)
     df.insert(0, 'Electrode', df.index)
     file_path = tmp_path / 'data.xlsx'
+    df_z = pd.DataFrame(
+        [[0.0, 2.0, 0.0], [0.0, 2.0, 0.0], [0.0, 2.0, 0.0]],
+        index=idx,
+        columns=cols,
+    )
+    df_z.insert(0, 'Electrode', df_z.index)
     with pd.ExcelWriter(file_path) as writer:
         df.to_excel(writer, sheet_name='BCA (uV)', index=False)
+        df_z.to_excel(writer, sheet_name=stats_analysis.SUMMED_BCA_Z_SHEET_NAME, index=False)
     stats_analysis.set_rois({'TestROI': idx})
     logs = []
     result = stats_analysis.aggregate_bca_sum(str(file_path), 'TestROI', base_freq='6.0', log_func=logs.append)

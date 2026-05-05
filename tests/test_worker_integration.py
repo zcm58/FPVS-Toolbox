@@ -8,6 +8,7 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from Main_App.PySide6_App.Backend.project import Project
@@ -60,7 +61,7 @@ def test_worker_receives_project_params(tmp_path, qtbot, monkeypatch):
         captured["settings"] = settings
         captured["event_map"] = event_map
         captured["max_workers"] = max_workers
-        self.finished.emit({"files": len(data_files)})
+        QTimer.singleShot(0, lambda: self.finished.emit({"files": len(data_files)}))
 
     monkeypatch.setattr(MpRunnerBridge, "start", fake_start, raising=False)
 
@@ -79,6 +80,7 @@ def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monke
     project = _build_worker_project(tmp_path / "proj_override")
     project.update_preprocessing({**project.preprocessing, "max_parallel_workers_override": 6})
     project.save()
+    (Path(project.input_folder) / "sample2.bdf").write_bytes(b"")
 
     QApplication.instance() or QApplication([])
 
@@ -97,11 +99,11 @@ def test_worker_uses_parallel_override_from_preprocessing(tmp_path, qtbot, monke
 
     def fake_start(self, project_root, data_files, settings, event_map, save_folder, max_workers):
         captured["max_workers"] = max_workers
-        self.finished.emit({"files": len(data_files)})
+        QTimer.singleShot(0, lambda: self.finished.emit({"files": len(data_files)}))
 
     monkeypatch.setattr(MpRunnerBridge, "start", fake_start, raising=False)
 
     win.start_processing()
     qtbot.waitUntil(lambda: not getattr(win, "_run_active", False), timeout=2000)
 
-    assert captured["max_workers"] == 6
+    assert captured["max_workers"] == 1

@@ -4,7 +4,7 @@ pd = pytest.importorskip("pandas")
 
 try:
     from PySide6.QtCore import Qt
-    from Tools.Stats.controller.stats_controller import PipelineId
+    from Tools.Stats.controller.stats_controller import PipelineId, StepId, WORKER_FN_BY_STEP
     from Tools.Stats.ui.stats_window import StatsWindow
     from Tools.Stats.workers import stats_workers
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
@@ -14,6 +14,12 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
 @pytest.fixture(autouse=True)
 def _stub_default_loader(monkeypatch):
     monkeypatch.setattr(StatsWindow, "_load_default_data_folder", lambda self: None, raising=False)
+    monkeypatch.setattr(StatsWindow, "refresh_rois", lambda self: setattr(self, "rois", {"ROI": ["Cz"]}), raising=False)
+    monkeypatch.setattr(
+        "Tools.Stats.ui.stats_window_pipeline.load_rois_from_settings",
+        lambda: {"ROI": ["Cz"]},
+        raising=False,
+    )
 
 
 @pytest.fixture
@@ -32,11 +38,27 @@ def patched_workers(monkeypatch):
     def fake_contrasts(*_args, **_kwargs):
         return {"results_df": dummy_df.copy(), "output_text": "contrasts"}
 
+    def fake_baseline(*_args, **_kwargs):
+        return {"results_df": dummy_df.copy(), "output_text": "baseline"}
+
+    def fake_harmonic(*_args, **_kwargs):
+        return {"harmonic_results": [], "output_text": "harmonic"}
+
     monkeypatch.setattr(stats_workers, "run_rm_anova", fake_rm_anova, raising=False)
     monkeypatch.setattr(stats_workers, "run_lmm", fake_lmm, raising=False)
     monkeypatch.setattr(stats_workers, "run_posthoc", fake_posthoc, raising=False)
     monkeypatch.setattr(stats_workers, "run_between_group_anova", fake_rm_anova, raising=False)
     monkeypatch.setattr(stats_workers, "run_group_contrasts", fake_contrasts, raising=False)
+    monkeypatch.setattr(stats_workers, "run_baseline_vs_zero", fake_baseline, raising=False)
+    monkeypatch.setattr(stats_workers, "run_harmonic_check", fake_harmonic, raising=False)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.RM_ANOVA, fake_rm_anova)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.MIXED_MODEL, fake_lmm)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.INTERACTION_POSTHOCS, fake_posthoc)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BETWEEN_GROUP_ANOVA, fake_rm_anova)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BETWEEN_GROUP_MIXED_MODEL, fake_lmm)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.GROUP_CONTRASTS, fake_contrasts)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BASELINE_VS_ZERO, fake_baseline)
+    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.HARMONIC_CHECK, fake_harmonic)
     return dummy_df
 
 
@@ -63,6 +85,8 @@ def synced_window(monkeypatch, qtbot, tmp_path, patched_workers):
     monkeypatch.setattr(StatsWindow, "start_step_worker", start_immediate, raising=False)
     monkeypatch.setattr(StatsWindow, "export_pipeline_results", lambda self, pid: True, raising=False)
     monkeypatch.setattr(StatsWindow, "build_and_render_summary", lambda self, pid: None, raising=False)
+    monkeypatch.setattr(StatsWindow, "_start_reporting_summary_worker", lambda self, pid, elapsed_ms: None, raising=False)
+    monkeypatch.setattr(StatsWindow, "_show_outlier_exclusion_dialog", lambda self, pid: None, raising=False)
 
     win = StatsWindow(project_dir=str(tmp_path))
     qtbot.addWidget(win)

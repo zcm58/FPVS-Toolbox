@@ -87,6 +87,7 @@ def test_newly_added_event_id_field_is_bound(tmp_path, qtbot, monkeypatch):
     second_rows = _live_rows(win)
     second_row = next(row for row in second_rows if row not in first_rows)
     second_label, second_id = _row_fields(win, second_row)
+    qtbot.waitUntil(second_label.hasFocus)
     second_label.setText("Cond B")
     _type_valid_id(second_id, qtbot, "20")
     qtbot.keyClick(second_id, Qt.Key_Return)

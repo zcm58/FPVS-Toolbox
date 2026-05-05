@@ -5,6 +5,7 @@ import pytest
 
 from Tools.Stats.analysis import stats_analysis
 from Tools.Stats.analysis import dv_policies
+from Tools.Stats.analysis import dv_policy_settings
 
 
 def _make_bca_df() -> pd.DataFrame:
@@ -22,6 +23,11 @@ def _make_bca_df() -> pd.DataFrame:
     return df
 
 
+def _make_z_df() -> pd.DataFrame:
+    df = _make_bca_df()
+    return df.map(lambda _value: 2.0)
+
+
 def _common_kwargs() -> dict[str, object]:
     return {
         "subjects": ["P1"],
@@ -36,13 +42,17 @@ def _common_kwargs() -> dict[str, object]:
 
 def test_prepare_summed_bca_data_respects_explicit_max_freq(monkeypatch) -> None:
     df = _make_bca_df()
+    z_df = _make_z_df()
 
     def _fake_read_excel(path, sheet_name, *, index_col=None, use_cache=True):
         _ = path, index_col, use_cache
+        if sheet_name == stats_analysis.SUMMED_BCA_Z_SHEET_NAME:
+            return z_df.copy()
         assert sheet_name == "BCA (uV)"
         return df.copy()
 
     monkeypatch.setattr(stats_analysis, "safe_read_excel", _fake_read_excel)
+    monkeypatch.setattr(stats_analysis.os.path, "exists", lambda _path: True)
     dv_policies._DV_DATA_CACHE.clear()
 
     low = dv_policies.prepare_summed_bca_data(
@@ -66,9 +76,12 @@ def test_prepare_summed_bca_data_uses_settings_upper_limit_when_missing_max_freq
     monkeypatch,
 ) -> None:
     df = _make_bca_df()
+    z_df = _make_z_df()
 
     def _fake_read_excel(path, sheet_name, *, index_col=None, use_cache=True):
         _ = path, index_col, use_cache
+        if sheet_name == stats_analysis.SUMMED_BCA_Z_SHEET_NAME:
+            return z_df.copy()
         assert sheet_name == "BCA (uV)"
         return df.copy()
 
@@ -80,7 +93,8 @@ def test_prepare_summed_bca_data_uses_settings_upper_limit_when_missing_max_freq
             return fallback
 
     monkeypatch.setattr(stats_analysis, "safe_read_excel", _fake_read_excel)
-    monkeypatch.setattr(dv_policies, "SettingsManager", _FakeSettingsManager)
+    monkeypatch.setattr(stats_analysis.os.path, "exists", lambda _path: True)
+    monkeypatch.setattr(dv_policy_settings, "SettingsManager", _FakeSettingsManager)
     dv_policies._DV_DATA_CACHE.clear()
 
     meta: dict[str, object] = {}

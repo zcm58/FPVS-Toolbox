@@ -8,12 +8,15 @@ mode.
 
 import json
 import configparser
+import logging
 import os
 import ast
 from pathlib import Path
 from typing import List, Tuple
 
 from Main_App.Shared.settings_paths import app_settings_dir, app_settings_file, legacy_settings_file
+
+logger = logging.getLogger(__name__)
 
 DEFAULTS = {
     'appearance': {
@@ -117,13 +120,28 @@ def _read_legacy_qt_value(path: Path | None, key: str):
     except Exception:
         return None
     stores = [QSettings()]
-    if path and path.exists():
+    if _path_exists_for_migration(path):
         stores.append(QSettings(str(path), QSettings.IniFormat))
     for store in stores:
         value = store.value(key, None)
         if value not in (None, ""):
             return value
     return None
+
+
+def _path_exists_for_migration(path: Path | None) -> bool:
+    """Return whether a legacy settings path exists without failing startup."""
+
+    if path is None:
+        return False
+    try:
+        return path.exists()
+    except OSError as exc:
+        logger.warning(
+            "legacy_settings_probe_failed",
+            extra={"path": str(path), "error": str(exc)},
+        )
+        return False
 
 class SettingsManager:
     """Handles loading and saving user preferences to an INI file."""
@@ -168,7 +186,7 @@ class SettingsManager:
             self.config.read(self.ini_path)
         elif self._uses_default_path:
             old_path = legacy_settings_file()
-            if old_path and old_path.exists():
+            if _path_exists_for_migration(old_path):
                 self.config.read(old_path)
                 migrated = True
         if self._uses_default_path:

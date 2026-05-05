@@ -54,6 +54,7 @@ def _configure_window(
 
     win = plot_gui.PlotGeneratorWindow(project_dir=str(project_root))
     qtbot.addWidget(win)
+    win.show()
 
     win.folder_edit.setText(str(tmp_path / "excel"))
     win.out_edit.setText(str(tmp_path / "out"))
@@ -157,9 +158,14 @@ def test_legend_group_visibility_retains_values(qtbot, tmp_path, monkeypatch):
     win.legend_b_peaks_edit.setText("Custom B Peaks")
 
     win.overlay_check.setChecked(False)
-    assert win.legend_group.isVisible() is False
+    qtbot.wait(50)
+    assert win.legend_condition_b_edit.isVisible() is False
+    assert win.legend_b_peaks_edit.isVisible() is False
 
     win.overlay_check.setChecked(True)
+    qtbot.wait(50)
     assert win.legend_group.isVisible() is True
+    assert win.legend_condition_b_edit.isVisible() is True
+    assert win.legend_b_peaks_edit.isVisible() is True
     assert win.legend_condition_a_edit.text() == "Custom A"
     assert win.legend_condition_b_edit.text() == "Custom B"

@@ -3,8 +3,6 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QCheckBox  # noqa: E402
-
 from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     FIXED_K_POLICY_NAME,
     GROUP_MEAN_Z_POLICY_NAME,
@@ -30,9 +28,7 @@ def test_stats_dv_variants_ui_defaults(qtbot):
     qtbot.addWidget(window)
     window.show()
 
-    checkboxes = {box.text(): box for box in window.findChildren(QCheckBox)}
-    assert checkboxes[FIXED_K_POLICY_NAME].isChecked() is False
-    assert checkboxes[GROUP_MEAN_Z_POLICY_NAME].isChecked() is False
+    assert window._dv_variant_checkboxes[FIXED_K_POLICY_NAME].isChecked() is False
     assert window.get_dv_variants_snapshot() == []
 
 

@@ -35,14 +35,14 @@ def plot_smoke_env(monkeypatch):
                 if pid not in self.subject_groups:
                     self._unknown_subject_files.add(f"{pid}.xlsx")
         if not subject_map:
-            return [], {}
-        return list(data_store["freqs"]), subject_map
+            return [], {}, {}
+        return list(data_store["freqs"]), subject_map, {}
 
     monkeypatch.setattr(plot_worker._Worker, "_collect_data", fake_collect, raising=False)
 
     plot_records: list[dict] = []
 
-    def fake_plot(self, freqs, roi_data, group_curves=None):  # noqa: ANN001
+    def fake_plot(self, freqs, roi_data, group_curves=None, scalp_inputs=None):  # noqa: ANN001, ARG001
         plot_records.append({
             "freqs": list(freqs),
             "roi_data": roi_data,
@@ -64,7 +64,21 @@ def plot_smoke_env(monkeypatch):
         if not self._conditions_queue:
             self._finish_all()
             return
-        folder, out_dir, x_min, x_max, y_min, y_max, group_kwargs = self._gen_params
+        (
+            folder,
+            out_dir,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            group_kwargs,
+            include_scalp,
+            scalp_min,
+            scalp_max,
+            scalp_title_a,
+            scalp_title_b,
+            legend_payload,
+        ) = self._gen_params
         condition = self._conditions_queue.pop(0)
         self._current_condition += 1
         cond_out = Path(out_dir)
@@ -83,6 +97,17 @@ def plot_smoke_env(monkeypatch):
             y_max,
             str(cond_out),
             self.stem_color,
+            include_scalp_maps=include_scalp,
+            scalp_vmin=scalp_min,
+            scalp_vmax=scalp_max,
+            scalp_title_a_template=scalp_title_a,
+            scalp_title_b_template=scalp_title_b,
+            legend_custom_enabled=bool(legend_payload["custom_labels_enabled"]),
+            legend_condition_a=str(legend_payload["condition_a_label"]),
+            legend_condition_b=str(legend_payload["condition_b_label"]),
+            legend_a_peaks=str(legend_payload["a_peaks_label"]),
+            legend_b_peaks=str(legend_payload["b_peaks_label"]),
+            project_root=str(self._project_root) if self._project_root else None,
             **group_kwargs,
         )
         self._worker = worker
@@ -134,6 +159,7 @@ def test_plot_generator_single_group_defaults(qtbot, tmp_path, monkeypatch, plot
 
     win = plot_gui.PlotGeneratorWindow(project_dir=str(project_root))
     qtbot.addWidget(win)
+    win.show()
     win.folder_edit.setText(str(excel_root))
     win._populate_conditions(str(excel_root))
     win.out_edit.setText(str(output_dir))
@@ -168,6 +194,7 @@ def test_plot_generator_multigroup_overlay(qtbot, tmp_path, monkeypatch, plot_sm
 
     win = plot_gui.PlotGeneratorWindow(project_dir=str(project_root))
     qtbot.addWidget(win)
+    win.show()
     win.folder_edit.setText(str(excel_root))
     win._populate_conditions(str(excel_root))
     win.out_edit.setText(str(output_dir))
@@ -209,6 +236,7 @@ def test_plot_generator_unassigned_subjects_logged(qtbot, tmp_path, monkeypatch,
 
     win = plot_gui.PlotGeneratorWindow(project_dir=str(project_root))
     qtbot.addWidget(win)
+    win.show()
     win.folder_edit.setText(str(excel_root))
     win._populate_conditions(str(excel_root))
     win.out_edit.setText(str(output_dir))

@@ -1,13 +1,30 @@
 import configparser
+import logging
 from pathlib import Path
 
 from Main_App.Shared.settings_paths import app_plot_settings_file, legacy_plot_settings_file
 
 INI_NAME = "plot_settings.ini"
+logger = logging.getLogger(__name__)
 
 
 def _default_ini_path() -> Path:
     return app_plot_settings_file()
+
+
+def _path_exists_for_migration(path: Path | None) -> bool:
+    """Return whether a legacy plot settings path exists without failing startup."""
+
+    if path is None:
+        return False
+    try:
+        return path.exists()
+    except OSError as exc:
+        logger.warning(
+            "legacy_plot_settings_probe_failed",
+            extra={"path": str(path), "error": str(exc)},
+        )
+        return False
 
 
 class PlotSettingsManager:
@@ -45,7 +62,7 @@ class PlotSettingsManager:
             return
         if self._uses_default_path:
             old_path = legacy_plot_settings_file()
-            if old_path and old_path.exists():
+            if _path_exists_for_migration(old_path):
                 self.config.read(old_path)
 
     def save(self) -> None:

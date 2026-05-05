@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import sys
 import types
+import importlib.util
 from pathlib import Path
 
 import numpy as np
 
 # Minimal Qt stubs for importing Main_App package in test environment.
-if "PySide6" not in sys.modules:
+if "PySide6" not in sys.modules and importlib.util.find_spec("PySide6") is None:
     qtcore = types.ModuleType("PySide6.QtCore")
 
     class _QCoreApplication:
@@ -28,7 +29,7 @@ if "PySide6" not in sys.modules:
     sys.modules["PySide6"] = pyside
     sys.modules["PySide6.QtCore"] = qtcore
 
-if "mne" not in sys.modules:
+if "mne" not in sys.modules and importlib.util.find_spec("mne") is None:
     sys.modules["mne"] = types.ModuleType("mne")
 
 from Main_App.Performance import process_runner

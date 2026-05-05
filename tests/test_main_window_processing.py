@@ -86,24 +86,25 @@ def test_periodic_queue_check_does_not_finalize_twice(tmp_path, qtbot, monkeypat
     _stub_processing(monkeypatch, tmp_path)
     call_count = 0
 
-    orig_finalize = processing_utils.ProcessingMixin._finalize_processing
+    from Main_App.PySide6_App.GUI.main_window import MainWindow
+
+    orig_finalize = MainWindow._finalize_processing
 
     def counting_finalize(self, *args, **kwargs):
         nonlocal call_count
         call_count += 1
         return orig_finalize(self, *args, **kwargs)
 
-    monkeypatch.setattr(
-        processing_utils.ProcessingMixin,
-        "_finalize_processing",
-        counting_finalize,
-    )
+    def dummy_start(self):
+        self._run_active = True
+        self._finalize_processing(True)
+
+    monkeypatch.setattr(MainWindow, "_finalize_processing", counting_finalize)
+    monkeypatch.setattr(MainWindow, "start_processing", dummy_start)
 
     project = _create_project(tmp_path)
 
     QApplication.instance() or QApplication([])
-
-    from Main_App.PySide6_App.GUI.main_window import MainWindow
 
     win = MainWindow()
     qtbot.addWidget(win)

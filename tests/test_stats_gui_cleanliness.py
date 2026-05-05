@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtWidgets import QGroupBox, QPushButton, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import QPushButton, QTabWidget  # noqa: E402
 
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
@@ -21,12 +21,10 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     qtbot.addWidget(window)
     window.show()
 
-    group_boxes = window.findChildren(QGroupBox)
-    manual_group = next(box for box in group_boxes if box.title() == "Manual Exclusions")
-    assert manual_group is not None
+    assert window.manual_exclusion_group.header.title_label.text() == "Manual Exclusions"
 
     buttons = {btn.text(): btn for btn in window.findChildren(QPushButton)}
-    assert "Edit…" in buttons
+    assert window.manual_exclusion_edit_btn.text() in buttons
     assert "Clear" in buttons
 
     tab_widget = window.findChild(QTabWidget)

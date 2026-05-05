@@ -49,6 +49,31 @@ def test_shared_settings_manager_migrates_roaming_appdata_ini(tmp_path, monkeypa
     assert (old_root / "settings.ini").is_file()
 
 
+def test_settings_manager_skips_inaccessible_legacy_settings(tmp_path, monkeypatch) -> None:
+    class InaccessibleLegacyPath:
+        def exists(self) -> bool:
+            raise PermissionError("legacy settings not readable")
+
+        def __str__(self) -> str:
+            return "inaccessible/legacy/settings.ini"
+
+    config_home = tmp_path / "local-config"
+    monkeypatch.setenv(settings_paths.ENV_CONFIG_HOME, str(config_home))
+    monkeypatch.setattr(
+        "Main_App.Shared.settings_manager.legacy_settings_file",
+        lambda: InaccessibleLegacyPath(),
+    )
+    monkeypatch.setattr(
+        "Main_App.Shared.settings_manager._legacy_qt_settings_file",
+        lambda: None,
+    )
+
+    manager = SettingsManager()
+
+    assert manager.ini_path == str(config_home / "settings" / "settings.ini")
+    assert manager.get("analysis", "base_freq") == "6.0"
+
+
 def test_settings_manager_uses_config_home_ini(tmp_path, monkeypatch, qtbot) -> None:
     config_home = tmp_path / "qt-config"
     monkeypatch.setenv(settings_paths.ENV_CONFIG_HOME, str(config_home))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog
 
 from Tools.Stats.workers import stats_workers
 from Tools.Stats.common.stats_core import PipelineId, StepId
@@ -23,7 +24,7 @@ def test_manual_exclusion_dialog_apply_emits_and_closes(qtbot) -> None:
         qtbot.mouseClick(dialog.apply_button, Qt.LeftButton)
 
     assert blocker.args[0] == {"P1"}
-    assert dialog.result() == dialog.Accepted
+    assert dialog.result() == QDialog.DialogCode.Accepted
 
 
 def test_manual_exclusion_dialog_flag_labels_and_tooltips(qtbot) -> None:
@@ -94,8 +95,12 @@ def test_manual_exclusion_filters_before_dv_compute(monkeypatch) -> None:
     def _fake_run_rm_anova(*_args, **_kwargs):
         return "ok", pd.DataFrame()
 
+    def _skip_qc_screening(*, subjects, subject_data, subject_groups, **_kwargs):
+        return list(subjects), subject_data, subject_groups, None
+
     monkeypatch.setattr(stats_workers, "prepare_summed_bca_data", _fake_prepare_summed_bca_data)
     monkeypatch.setattr(stats_workers, "analysis_run_rm_anova", _fake_run_rm_anova)
+    monkeypatch.setattr(stats_workers, "_apply_qc_screening", _skip_qc_screening)
 
     stats_workers.run_rm_anova(
         progress_cb=lambda *_args: None,

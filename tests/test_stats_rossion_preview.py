@@ -16,6 +16,7 @@ from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 def _write_z_sheet(path, values):
     df = pd.DataFrame(values, index=["Fz"])
+    df.index.name = "Electrode"
     df.to_excel(path, sheet_name="Z Score")
 
 

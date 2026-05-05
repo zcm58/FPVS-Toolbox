@@ -49,9 +49,16 @@ def test_log_collapse_keeps_top_height(qtbot):
     win.show()
     qtbot.waitForWindowShown(win)
 
-    top_height_before = win._top_controls.height()
+    height_before = win.height()
+    assert win.log_body.isVisible() is False
+
+    win.log_toggle_btn.setChecked(True)
+    qtbot.wait(100)
+    assert win.log_body.isVisible() is True
+
     win.log_toggle_btn.setChecked(False)
     qtbot.wait(100)
-    top_height_after = win._top_controls.height()
+    height_after = win.height()
 
-    assert top_height_after <= top_height_before + 10
+    assert win.log_body.isVisible() is False
+    assert height_after <= height_before + 10
