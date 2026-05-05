@@ -13,6 +13,8 @@ Primary paths:
   animation, and inline status widgets.
 - `src/Main_App/gui/theme.py`: shared FPVS light palette and stylesheet helpers
   used by the main app and tool windows.
+- `src/Main_App/gui/op_guard.py`: non-blocking re-entrancy guard for
+  GUI-triggered operations.
 - `src/Main_App/gui/project_workflows.py`: project open/create/load/save GUI
   orchestration used by `MainWindow` compatibility wrappers.
 - `src/Main_App/gui/processing_workflows.py`: processing run start/stop,
@@ -45,6 +47,8 @@ The main app shell is the visual source of truth. Shared component defaults shou
 `src/Main_App/PySide6_App/GUI/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size or move wrappers. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
 
 Shell-specific implementations currently stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, and style tokens. Active callers should import them through `Main_App.gui`. Project workflow orchestration is now split into `Main_App.gui.project_workflows`, processing input orchestration is now split into `Main_App.gui.processing_inputs`, processing run orchestration is now split into `Main_App.gui.processing_workflows`, post-export completion handling is now split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is now split into `Main_App.gui.tool_workflows`, and shell/status feedback is now split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
+
+General GUI utilities should live under `Main_App.gui` when they coordinate UI-facing behavior. Non-GUI resource/path helpers should live under `Main_App.Shared`.
 
 Widgets must not own backend processing, file export behavior, project mutation, or dialog orchestration. Keep those responsibilities in GUI controllers, backend modules, workers, or tool-specific code.
 

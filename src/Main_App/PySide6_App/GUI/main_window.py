@@ -67,7 +67,7 @@ from Main_App.gui.post_export_workflows import (
     excel_snapshot as _excel_snapshot,
     should_show_no_excel_popup as _should_show_no_excel_popup,
 )
-from Main_App.PySide6_App.utils.op_guard import OpGuard
+from Main_App.gui.op_guard import OpGuard
 
 STATS_TOOL_UNDER_DEVELOPMENT_WARNING = (
     "The Statistics Tool is currently under development. Certain features, like "

@@ -79,6 +79,19 @@ Latest folder retirement implementation slice:
 - Passed: `git diff --check` with line-ending warnings only.
 - Note: an exploratory combined run with Plot Generator and Stats multigroup smoke tests still exposes an order-sensitive Stats button-height assertion after Plot Generator runs first; the Stats multigroup test passes alone and with Stats-only layout tests.
 
+Latest GUI utility retirement slice:
+
+- Refactor completed: `OpGuard` now lives in `src/Main_App/gui/op_guard.py`, and bundled resource path helpers now live in `src/Main_App/Shared/paths.py`.
+- Temporary wrappers remain in `src/Main_App/PySide6_App/utils/op_guard.py` and `src/Main_App/PySide6_App/utils/paths.py`.
+- Runtime imports now use `Main_App.gui.op_guard` from project manager, main window, project workflows, and Stats support code.
+- Behavior-preservation rule: no operation-guard behavior, project workflow, Stats workflow, GUI signal wiring, project I/O, preprocessing, BDF loading, worker behavior, post-processing, or export behavior changed.
+- Passed: `python -m py_compile src\Main_App\gui\op_guard.py src\Main_App\Shared\paths.py src\Main_App\PySide6_App\utils\op_guard.py src\Main_App\PySide6_App\utils\paths.py src\Main_App\PySide6_App\Backend\project_manager.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\gui\project_workflows.py src\Tools\Stats\ui\stats_window_support.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_open_existing_project_dialog.py tests\test_project_settings_roundtrip.py tests\test_main_window_layout_smoke.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_settings_and_status.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_stats_layout_smoke.py tests\test_stats_condition_selection.py tests\test_stats_multigroup_layout_visibility.py -q`
+- Passed: `git grep -n "Main_App.PySide6_App.utils.op_guard\|Main_App.PySide6_App.utils.paths" -- src tests scripts` found no matches.
+- Next candidate: move post-export adapter implementation to `Main_App.exports.post_export_adapter`.
+
 Latest slice verification:
 
 - Passed: `python -m py_compile src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\event_map.py`

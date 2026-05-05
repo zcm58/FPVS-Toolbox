@@ -36,7 +36,7 @@ Canonical packages should become implementation owners, not only forwarding wrap
 - `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, `Main_App.diagnostics`, and `Main_App.gui` are present.
 - Several canonical modules still wrap or delegate to old implementation paths under `PySide6_App`.
 - `Legacy_App` references in active code are already mostly wrappers, inactive legacy modules, docs, or smoke-test stubs.
-- Active imports still remain for `op_guard` and runtime utilities, post-export adapter code, backend processing/project modules, and GUI implementation wrappers.
+- Active imports still remain for post-export adapter code, backend processing/project modules, and GUI implementation wrappers.
 
 ## Classification Categories
 
@@ -110,7 +110,7 @@ The first slice under this plan is documentation-only and now complete:
 | `Backend/project.py`, `Backend/project_manager.py`, `Backend/project_metadata.py`, `config/projects_root.py` | Active project implementation | Move to `Main_App.projects` | project settings, project scan, project paths tests |
 | `adapters/post_export_adapter.py` | Active export adapter | Move to `Main_App.exports.post_export_adapter` | post-export adapter and worker Excel payload tests |
 | `diagnostics/event_time_lock_report.py`, `utils/audit.py` | Active runtime diagnostics | Move to `Main_App.diagnostics` | event-time lock and audit field/json tests |
-| `utils/op_guard.py`, `utils/paths.py` | Active shared GUI/runtime utilities | Move to `Main_App.gui` or `Main_App.gui.utils` by usage | GUI smoke, settings/status, tool smoke tests |
+| `utils/op_guard.py`, `utils/paths.py` | Compatibility wrappers | Delete after stale callers migrate to `Main_App.gui.op_guard` and `Main_App.Shared.paths` | GUI smoke, settings/status, tool smoke tests |
 | `utils/theme.py` | Compatibility wrapper | Delete after stale callers migrate to `Main_App.gui.theme` | GUI smoke, settings/status, tool smoke tests |
 | `GUI/event_map.py`, `GUI/file_menu.py`, `GUI/header_bar.py`, `GUI/icons.py`, `GUI/menu_bar.py`, `GUI/roi_settings_editor.py`, `GUI/settings_panel.py`, `GUI/sidebar.py`, `GUI/style_tokens.py`, `GUI/ui_main.py`, `GUI/update_manager.py` | Active GUI implementation | Move to `Main_App.gui`; keep wrappers only during the migration slice | main-window layout, settings/status, startup import, focused GUI tests |
 | `GUI/main_window.py` | Active GUI shell; already downsized | Move path to `Main_App.gui.main_window` without new internal refactor | main-window layout/processing/startup tests |
@@ -144,7 +144,7 @@ For future movement slices, also run the focused tests for the touched domain an
 ## Execution Queue
 
 1. Move reusable GUI widgets and theme helpers into `Main_App.gui.widgets` and `Main_App.gui.theme`. Status: complete.
-2. Move GUI/runtime utilities such as `op_guard` and path helpers to canonical GUI or shared homes.
+2. Move GUI/runtime utilities such as `op_guard` and path helpers to canonical GUI or shared homes. Status: complete.
 3. Move post-export adapter implementation to `Main_App.exports`.
 4. Move backend processing and project implementations behind the existing canonical packages.
 5. Move remaining GUI implementation modules, including `main_window.py`, after wrapper dependencies are thin.
@@ -160,6 +160,15 @@ Latest executable slice:
 - Passed focused widget/theme, main-window, and selected tool smoke tests.
 - Passed `python scripts/agent_audit.py`, GUI import audit, legacy-boundary audit, and `git diff --check` with line-ending warnings only.
 
+Latest executable slice:
+
+- Moved `src/Main_App/PySide6_App/utils/op_guard.py` to `src/Main_App/gui/op_guard.py`.
+- Moved `src/Main_App/PySide6_App/utils/paths.py` to `src/Main_App/Shared/paths.py`.
+- Replaced old PySide6 utility modules with temporary compatibility wrappers.
+- Updated active imports to use `Main_App.gui.op_guard`.
+- Passed compile, project, main-window, and Stats focused checks.
+- Passed grep for old active utility imports.
+
 Next executable slice:
 
-- Move GUI/runtime utilities such as `src/Main_App/PySide6_App/utils/op_guard.py` and `src/Main_App/PySide6_App/utils/paths.py` to canonical GUI or shared homes.
+- Move `src/Main_App/PySide6_App/adapters/post_export_adapter.py` to `Main_App.exports.post_export_adapter`.

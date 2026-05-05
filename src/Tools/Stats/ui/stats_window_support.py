@@ -49,7 +49,7 @@ from Main_App.projects.project import (
     EXCEL_SUBFOLDER_NAME,
     STATS_SUBFOLDER_NAME,
 )
-from Main_App.PySide6_App.utils.op_guard import OpGuard
+from Main_App.gui.op_guard import OpGuard
 from Main_App.gui.widgets.busy_spinner import BusySpinner
 from Main_App.gui.widgets import (
     SectionCard,

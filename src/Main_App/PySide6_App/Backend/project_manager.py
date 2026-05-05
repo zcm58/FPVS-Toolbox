@@ -20,7 +20,7 @@ from .project import Project
 from .project_metadata import ProjectMetadata, read_project_metadata
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.projects.projects_root import ensure_projects_root
-from Main_App.PySide6_App.utils.op_guard import OpGuard
+from Main_App.gui.op_guard import OpGuard
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())

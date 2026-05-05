@@ -1,14 +1,5 @@
-"""Filesystem helpers for locating bundled application resources."""
-from __future__ import annotations
+"""Compatibility wrapper for :mod:`Main_App.Shared.paths`."""
 
-from pathlib import Path
-import sys
-
-
-def bundle_path(*parts: str) -> Path:
-    """Resolve a resource path for both source and frozen bundles."""
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    return (base / Path(*parts)).resolve()
-
+from Main_App.Shared.paths import bundle_path  # noqa: F401
 
 __all__ = ["bundle_path"]
