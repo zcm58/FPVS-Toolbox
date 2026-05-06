@@ -15,7 +15,7 @@ from Main_App.processing.preprocess import (
     begin_preproc_audit,
     finalize_preproc_audit,
 )
-from Main_App.PySide6_App.Backend.processing import process_data
+from Main_App.processing.processing import process_data
 from Main_App.Shared.post_process import post_process
 
 if TYPE_CHECKING:

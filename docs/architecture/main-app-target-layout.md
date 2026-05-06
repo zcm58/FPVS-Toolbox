@@ -31,8 +31,9 @@ src/Main_App/
 
 ## Current First Step
 
-`src/Main_App/processing/` is now the canonical Main App preprocessing import
-surface. It delegates to the existing PySide6 backend implementation while the
+`src/Main_App/processing/` is now the canonical Main App processing import
+surface. It owns the stable no-op `process_data` coordinator and delegates
+preprocessing to the existing PySide6 backend implementation while the
 preprocessing contract and tests protect behavior.
 
 `src/Main_App/io/` is now the canonical Main App BDF loader import surface. It

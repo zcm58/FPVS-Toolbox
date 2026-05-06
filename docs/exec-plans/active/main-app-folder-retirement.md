@@ -147,7 +147,7 @@ For future movement slices, also run the focused tests for the touched domain an
 1. Move reusable GUI widgets and theme helpers into `Main_App.gui.widgets` and `Main_App.gui.theme`. Status: complete.
 2. Move GUI/runtime utilities such as `op_guard` and path helpers to canonical GUI or shared homes. Status: complete.
 3. Move post-export adapter implementation to `Main_App.exports`. Status: complete.
-4. Move backend processing and project implementations behind the existing canonical packages.
+4. Move backend processing and project implementations behind the existing canonical packages. Status: active; project implementations and `Backend/processing.py` are complete, `processing_controller.py` remains.
 5. Move remaining GUI implementation modules, including `main_window.py`, after wrapper dependencies are thin.
 6. Delete `Legacy_App` wrappers after grep and focused tests prove no active imports remain.
 7. Delete `PySide6_App` package markers after all implementation ownership has moved.
@@ -197,6 +197,21 @@ Latest executable slice:
 - Passed compile, project settings, project results layout, project enumeration, project scan, open-project dialog, preprocessing settings, project bandpass migration, main-window processing, worker integration, Plot Generator multigroup, Stats multigroup, and Stats project-path checks.
 - Passed agent audit, project-path audit, legacy-boundary audit, old project import grep, and `git diff --check` with line-ending warnings only.
 
+Latest executable slice:
+
+- Moved `src/Main_App/PySide6_App/Backend/processing.py` to `src/Main_App/processing/processing.py`.
+- Replaced the old PySide6 backend module with a temporary compatibility wrapper.
+- Updated the active processing controller and focused main-window processing test to import `Main_App.processing.processing`.
+- Behavior-preservation rule: no processing implementation, preprocessing route, worker routing, project I/O, post-processing, export format, or GUI workflow changed; `process_data` remains the same no-op coordinator.
+- Passed: `python -m py_compile src\Main_App\processing\processing.py src\Main_App\PySide6_App\Backend\processing.py src\Main_App\processing\__init__.py src\Main_App\PySide6_App\Backend\processing_controller.py tests\test_main_window_processing.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_worker_integration.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_process_runner_epoch_contract.py tests\test_postprocess_worker_excel_payload.py -q`
+- Passed: `git grep -n "PySide6_App.Backend.processing import process_data\|Main_App.PySide6_App.Backend import processing\|import Main_App.PySide6_App.Backend.processing" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `git diff --check` with line-ending warnings only.
+
 Next executable slice:
 
-- Move remaining backend processing coordination modules in small slices. Prefer `Backend/processing.py` before `processing_controller.py`; do not move `preprocess.py` until preprocessing behavior coverage is explicitly reviewed again.
+- Move `src/Main_App/PySide6_App/Backend/processing_controller.py` to `Main_App.processing.processing_controller` in a focused slice with main-window processing and worker tests. Do not move `preprocess.py` until preprocessing behavior coverage is explicitly reviewed again.

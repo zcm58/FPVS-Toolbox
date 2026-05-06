@@ -134,7 +134,22 @@ Latest project model/manager retirement slice:
 - Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Passed: `git diff --check` with line-ending warnings only.
-- Next candidate: move remaining backend processing coordination modules in small slices, starting with `Backend/processing.py` before `processing_controller.py`.
+- Next candidate: move the remaining backend processing controller in a focused slice; `Backend/processing.py` has moved to `Main_App.processing.processing`.
+
+Latest processing entry-point retirement slice:
+
+- Refactor completed: the stable no-op `process_data` coordinator now lives in `src/Main_App/processing/processing.py`.
+- Temporary wrapper remains in `src/Main_App/PySide6_App/Backend/processing.py`.
+- Active processing controller and focused main-window processing test now import `Main_App.processing.processing`.
+- Behavior-preservation rule: no preprocessing math, BDF loading, worker routing, processing order, project I/O, post-processing, Excel exports, or GUI workflow changed.
+- Passed: `python -m py_compile src\Main_App\processing\processing.py src\Main_App\PySide6_App\Backend\processing.py src\Main_App\processing\__init__.py src\Main_App\PySide6_App\Backend\processing_controller.py tests\test_main_window_processing.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_worker_integration.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_process_runner_epoch_contract.py tests\test_postprocess_worker_excel_payload.py -q`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `git diff --check` with line-ending warnings only.
+- Next candidate: move `src/Main_App/PySide6_App/Backend/processing_controller.py` to `Main_App.processing.processing_controller` with focused processing and worker checks.
 
 Latest slice verification:
 
