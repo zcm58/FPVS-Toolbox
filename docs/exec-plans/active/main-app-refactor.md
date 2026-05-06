@@ -10,7 +10,7 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 - Scope: behavior-preserving Main App organization.
 - Behavior changes: eLORETA/Source Localization has been removed from active runtime; FPVS preprocessing, post-processing, FFT/SNR outputs, project paths, and exports remain behavior-preserving.
 - `Legacy_App` and `PySide6_App` are retired. Do not recreate `src/Main_App/Legacy_App/**` or `src/Main_App/PySide6_App/**`; use purpose-based `Main_App` packages for active behavior.
-- Folder retirement has a dedicated active plan: `docs/exec-plans/active/main-app-folder-retirement.md`. That plan is in final verification/handoff after deleting the old package tree.
+- Folder retirement is complete and archived at `docs/exec-plans/completed/main-app-folder-retirement.md`.
 
 ## PR Contract
 
@@ -56,7 +56,7 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 
 Latest folder retirement planning slice:
 
-- Added and updated `docs/exec-plans/active/main-app-folder-retirement.md` with inventory categories for every tracked `src/Main_App/Legacy_App/` and `src/Main_App/PySide6_App/` file.
+- Added and updated the folder-retirement execution plan with inventory categories for every tracked `src/Main_App/Legacy_App/` and `src/Main_App/PySide6_App/` file. That plan is now archived at `docs/exec-plans/completed/main-app-folder-retirement.md`.
 - No runtime code, protected legacy modules, preprocessing, BDF loading, worker behavior, project paths, or exports changed.
 - Next candidate: move reusable PySide6 GUI widgets/theme helpers into `Main_App.gui` / `Main_App.gui.widgets` with temporary wrappers.
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
@@ -621,7 +621,7 @@ Latest folder-retirement completion slice:
   - Qt worker and multiprocessing bridge modules to `src/Main_App/workers/`.
   - Active preprocessing implementation to `src/Main_App/processing/preprocess.py`.
 - Deleted `src/Main_App/PySide6_App/**` after active source/test/script imports were migrated.
-- Updated `ARCHITECTURE.md`, `AGENTS.md`, focused architecture docs, `docs/legacy-quarantine-audit.md`, and `docs/exec-plans/active/main-app-folder-retirement.md`.
+- Updated `ARCHITECTURE.md`, `AGENTS.md`, focused architecture docs, `docs/legacy-quarantine-audit.md`, and the folder-retirement execution plan, now archived at `docs/exec-plans/completed/main-app-folder-retirement.md`.
 - Added `PySide6_App` to the retired-path audit guard and added narrow move baselines for unchanged inherited broad-exception/print debt.
 - Behavior-preservation rule: no preprocessing math/order, BDF loading behavior, worker routing, project I/O, post-processing/export format, GUI workflow, or user-facing behavior changed.
 - Latest passed: `python -m py_compile src\Main_App\gui\style_tokens.py src\Main_App\gui\event_map.py src\Main_App\gui\roi_settings_editor.py src\Main_App\gui\settings_panel.py src\Main_App\gui\update_manager.py src\Main_App\workers\mp_runner_bridge.py src\Main_App\workers\processing_worker.py src\Main_App\processing\preprocess.py src\Main_App\gui\main_window.py src\main.py tests\test_loader_warning_suppression.py scripts\gui_wave3_smoke.py`
