@@ -105,6 +105,19 @@ Latest export adapter retirement slice:
 - Passed: `git grep -n "PySide6_App.adapters.post_export_adapter\|Main_App.PySide6_App.adapters" -- src tests scripts` found no active matches.
 - Next candidate: move lower-risk project/settings implementations behind `Main_App.projects` before touching preprocessing or processing-controller internals.
 
+Latest project helper retirement slice:
+
+- Refactor completed: preprocessing settings normalization, project metadata scanning, and projects-root helpers now live in `src/Main_App/projects/`.
+- Temporary wrappers remain in `src/Main_App/PySide6_App/Backend/preprocessing_settings.py`, `src/Main_App/PySide6_App/Backend/project_metadata.py`, and `src/Main_App/PySide6_App/config/projects_root.py`.
+- Active source, tests, and scripts already use canonical `Main_App.projects` imports for these helpers.
+- Behavior-preservation rule: no project JSON schema, settings normalization behavior, project-root prompt/save behavior, project enumeration behavior, project paths, preprocessing defaults, BDF loading, processing, workers, post-processing, or exports changed.
+- Passed: `python -m py_compile src\Main_App\projects\preprocessing_settings.py src\Main_App\projects\project_metadata.py src\Main_App\projects\projects_root.py src\Main_App\PySide6_App\Backend\preprocessing_settings.py src\Main_App\PySide6_App\Backend\project_metadata.py src\Main_App\PySide6_App\config\projects_root.py src\Main_App\PySide6_App\Backend\project_manager.py src\Main_App\PySide6_App\GUI\settings_panel.py src\Main_App\gui\processing_inputs.py src\Main_App\gui\processing_workflows.py src\Main_App\gui\project_workflows.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_preprocessing_settings.py tests\test_preproc_persistence.py tests\test_project_bandpass_warning.py tests\test_project_legacy_bandpass_migration.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_project_settings_roundtrip.py tests\test_project_enumeration_io.py tests\test_project_scan_job.py tests\test_open_existing_project_dialog.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_worker_integration.py tests\test_plot_generator_multigroup_smoke.py tests\test_stats_project_paths.py -q`
+- Passed: `git grep -n "PySide6_App.Backend.preprocessing_settings\|PySide6_App.Backend.project_metadata\|PySide6_App.config.projects_root\|Main_App.PySide6_App.Backend import preprocessing_settings\|Main_App.PySide6_App.Backend import project_metadata\|Main_App.PySide6_App.config import projects_root" -- src tests scripts` found no matches.
+- Next candidate: move `project.py` and then `project_manager.py` behind `Main_App.projects`, with wrappers and project I/O checks.
+
 Latest slice verification:
 
 - Passed: `python -m py_compile src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\event_map.py`

@@ -105,9 +105,10 @@ The first slice under this plan is documentation-only and now complete:
 | `Backend/AGENTS.md`, `GUI/AGENTS.md` | Scoped guidance | Merge any still-relevant guidance into `AGENTS.md` or architecture docs before deleting folders | `python scripts/agent_audit.py` |
 | `Backend/loader.py` | Compatibility wrapper | Delete after all imports use `Main_App.io.load_utils` | loader warning/suppression tests |
 | `Backend/preprocess.py` | Active implementation; high-risk pipeline code | Move to `Main_App.processing.preprocess` only with contract tests proving identical behavior | preprocessing audit/FIF/process-runner tests |
-| `Backend/preprocessing_settings.py` | Active project/settings implementation | Move to `Main_App.projects.preprocessing_settings` | preprocessing settings and persistence tests |
+| `Backend/preprocessing_settings.py` | Compatibility wrapper | Delete after stale callers migrate to `Main_App.projects.preprocessing_settings` | preprocessing settings and persistence tests |
 | `Backend/processing.py`, `Backend/processing_controller.py` | Active processing orchestration | Move to `Main_App.processing` | main-window processing, process-runner, worker integration tests |
-| `Backend/project.py`, `Backend/project_manager.py`, `Backend/project_metadata.py`, `config/projects_root.py` | Active project implementation | Move to `Main_App.projects` | project settings, project scan, project paths tests |
+| `Backend/project_metadata.py`, `config/projects_root.py` | Compatibility wrappers | Delete after stale callers migrate to `Main_App.projects.project_metadata` and `Main_App.projects.projects_root` | project enumeration, project settings, project paths tests |
+| `Backend/project.py`, `Backend/project_manager.py` | Active project implementation | Move to `Main_App.projects` | project settings, project scan, project paths tests |
 | `adapters/post_export_adapter.py` | Compatibility wrapper | Delete after stale callers migrate to `Main_App.exports.post_export_adapter` | post-export adapter and worker Excel payload tests |
 | `diagnostics/event_time_lock_report.py`, `utils/audit.py` | Active runtime diagnostics | Move to `Main_App.diagnostics` | event-time lock and audit field/json tests |
 | `utils/op_guard.py`, `utils/paths.py` | Compatibility wrappers | Delete after stale callers migrate to `Main_App.gui.op_guard` and `Main_App.Shared.paths` | GUI smoke, settings/status, tool smoke tests |
@@ -177,6 +178,16 @@ Latest executable slice:
 - Passed compile, post-export adapter, worker, main-window export, process-runner contract, and source-local FFT crop process-runner checks.
 - Passed grep for old active adapter imports.
 
+Latest project helper slice:
+
+- Moved `src/Main_App/PySide6_App/Backend/preprocessing_settings.py` to `src/Main_App/projects/preprocessing_settings.py`.
+- Moved `src/Main_App/PySide6_App/Backend/project_metadata.py` to `src/Main_App/projects/project_metadata.py`.
+- Moved `src/Main_App/PySide6_App/config/projects_root.py` to `src/Main_App/projects/projects_root.py`.
+- Replaced the old PySide6 backend/config modules with temporary compatibility wrappers.
+- Active source, tests, and scripts already use the canonical `Main_App.projects` imports for these helpers.
+- Passed compile, preprocessing settings, project persistence, project enumeration, project scan, project open-dialog, main-window processing, worker integration, Plot Generator project, and Stats project-path checks.
+- Passed grep for old active project-helper imports.
+
 Next executable slice:
 
-- Move backend processing/project implementations behind the existing canonical packages. Prefer project/settings modules before preprocessing or processing-controller internals.
+- Move `src/Main_App/PySide6_App/Backend/project.py` and then `project_manager.py` behind `Main_App.projects`, keeping wrappers and project I/O checks.

@@ -28,7 +28,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
 - `src/Main_App/processing/`: canonical import surface for active EEG preprocessing. It delegates to the existing PySide6 backend implementation during the package-layout migration.
 - `src/Main_App/io/`: canonical import surface for active BDF loading. It delegates to the existing shared loader implementation during the package-layout migration.
-- `src/Main_App/projects/`: canonical import surface for project model, project manager, project metadata, projects-root, and preprocessing settings. It delegates to existing implementations during the package-layout migration.
+- `src/Main_App/projects/`: canonical import surface for project model, project manager, project metadata, projects-root, and preprocessing settings. It owns project metadata scanning, projects-root helpers, and preprocessing-settings normalization; project model and manager modules still delegate during the package-layout migration.
 - `src/Main_App/workers/`: canonical import surface for Qt workers, process runner, and multiprocessing environment helpers. It delegates to existing PySide6 worker and Performance implementations during the package-layout migration.
 - `src/Main_App/diagnostics/`: canonical import surface for runtime toolbox diagnostics such as preprocessing audit summaries and event-time lock reports. It observes/reports app state and must not own repo-evaluation checks.
 - `src/Main_App/Shared/`: shared current-app settings, user-message helpers, BDF loader, processing mixin, FFT crop helpers, and post-processing export behavior.
