@@ -316,7 +316,22 @@ Latest executable slice:
 - Passed: `python -m py_compile src\Main_App\gui\icons.py src\Main_App\gui\header_bar.py src\Main_App\gui\file_menu.py src\Main_App\gui\menu_bar.py src\Main_App\PySide6_App\GUI\icons.py src\Main_App\PySide6_App\GUI\header_bar.py src\Main_App\PySide6_App\GUI\file_menu.py src\Main_App\PySide6_App\GUI\menu_bar.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\ui_main.py`
 - Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_settings_and_status.py tests\test_startup_imports_no_customtkinter.py -q`
 - Passed: `git grep -n "PySide6_App.GUI.\(icons\|header_bar\|file_menu\|menu_bar\)\|from Main_App.PySide6_App.GUI import \(icons\|header_bar\|file_menu\|menu_bar\)\|from \.\(icons\|header_bar\|file_menu\|menu_bar\)" -- src tests scripts` found no matches.
-- Next executable slice: move another small GUI presentation group, likely `sidebar.py` plus any direct shell imports, with focused layout/settings smoke tests.
+- Next executable slice: move another small GUI presentation group, likely `sidebar.py` plus any direct shell imports, with focused layout/settings smoke tests. Status: complete.
+
+Latest executable slice:
+
+- Moved `src/Main_App/PySide6_App/GUI/sidebar.py` to `src/Main_App/gui/sidebar.py`.
+- Replaced the old PySide6 GUI sidebar module with a temporary compatibility wrapper.
+- Updated active `main_window.py` imports to use `Main_App.gui.sidebar`.
+- Behavior-preservation rule: no sidebar labels, buttons, icons, documentation link, signal wiring, launch layout, project workflow, processing route, worker routing, project I/O, post-processing, or exports changed.
+- Passed: `python -m py_compile src\Main_App\gui\sidebar.py src\Main_App\PySide6_App\GUI\sidebar.py src\Main_App\PySide6_App\GUI\main_window.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_settings_and_status.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `git grep -n "PySide6_App.GUI.sidebar\|from Main_App.PySide6_App.GUI import sidebar\|from \.sidebar" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `git diff --check` with line-ending warnings only.
+- Next executable slice: move another small GUI presentation module, likely `ui_main.py` only after confirming landing-page/layout smoke tests cover the move.
 
 Latest Legacy_App wrapper deletion slice:
 
