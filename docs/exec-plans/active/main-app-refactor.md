@@ -569,3 +569,14 @@ Latest PySide6_App diagnostics slice:
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Next refactor direction: move remaining lower-risk GUI implementation modules from `PySide6_App/GUI` into `Main_App.gui`, one small group at a time, with wrappers and focused GUI smoke tests.
+
+Latest PySide6_App GUI shell-helper slice:
+
+- Moved `src/Main_App/PySide6_App/GUI/icons.py`, `header_bar.py`, `file_menu.py`, and `menu_bar.py` to `src/Main_App/gui/`.
+- Replaced the old PySide6 GUI modules with temporary compatibility wrappers.
+- Updated active `main_window.py` and `ui_main.py` imports to use the canonical `Main_App.gui` helper modules.
+- Behavior-preservation rule: no menu labels, actions, icons, signal wiring, launch layout, project workflow, processing route, worker routing, project I/O, post-processing, or exports changed.
+- Passed: `python -m py_compile src\Main_App\gui\icons.py src\Main_App\gui\header_bar.py src\Main_App\gui\file_menu.py src\Main_App\gui\menu_bar.py src\Main_App\PySide6_App\GUI\icons.py src\Main_App\PySide6_App\GUI\header_bar.py src\Main_App\PySide6_App\GUI\file_menu.py src\Main_App\PySide6_App\GUI\menu_bar.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\ui_main.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_settings_and_status.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `git grep -n "PySide6_App.GUI.\(icons\|header_bar\|file_menu\|menu_bar\)\|from Main_App.PySide6_App.GUI import \(icons\|header_bar\|file_menu\|menu_bar\)\|from \.\(icons\|header_bar\|file_menu\|menu_bar\)" -- src tests scripts` found no matches.
+- Next refactor direction: move another small GUI presentation group, likely `sidebar.py` plus any direct shell imports, with focused layout/settings smoke tests.

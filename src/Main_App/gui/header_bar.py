@@ -1,9 +1,29 @@
-"""Import surface for header-bar GUI helpers."""
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
-from __future__ import annotations
+from .style_tokens import build_header_bar_stylesheet
 
-import sys
+class HeaderBar(QWidget):
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
 
-from Main_App.PySide6_App.GUI import header_bar as _impl
+        # Give it a stable object name and ensure the background gets painted.
+        self.setObjectName("HeaderBar")
+        self.setAttribute(Qt.WA_StyledBackground, True)  # <- ensures bg color is drawn
 
-sys.modules[__name__] = _impl
+        # Style just this widget (not every QWidget)
+        self.setStyleSheet(build_header_bar_stylesheet())
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(18, 8, 18, 8)
+        layout.setSpacing(0)
+
+        self.titleLabel = QLabel(title, self)
+        font = QFont()
+        font.setPointSize(12)
+        font.setWeight(QFont.DemiBold)
+        self.titleLabel.setFont(font)
+
+        layout.addWidget(self.titleLabel)
+        layout.addStretch(1)

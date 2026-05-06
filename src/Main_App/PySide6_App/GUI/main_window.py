@@ -53,7 +53,7 @@ from Tools.Stats import StatsWindow as PysideStatsWindow
 from config import FPVS_TOOLBOX_VERSION
 from . import update_manager
 from . import event_map
-from .file_menu import init_file_menu
+from Main_App.gui.file_menu import init_file_menu
 from .settings_panel import SettingsDialog
 from .sidebar import init_sidebar
 from .ui_main import init_ui

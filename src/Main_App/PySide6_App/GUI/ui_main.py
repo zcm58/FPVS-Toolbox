@@ -23,8 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .header_bar import HeaderBar
-from .menu_bar import build_menu_bar
+from Main_App.gui.header_bar import HeaderBar
+from Main_App.gui.menu_bar import build_menu_bar
 from .style_tokens import (
     BROWSE_BUTTON_WIDTH,
     EVENT_ID_COLUMN_WIDTH,

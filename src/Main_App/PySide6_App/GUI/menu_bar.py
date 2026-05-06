@@ -1,62 +1,10 @@
+"""Compatibility wrapper for :mod:`Main_App.gui.menu_bar`."""
+
 from __future__ import annotations
-from PySide6.QtWidgets import QMenuBar, QMainWindow
-from PySide6.QtGui import QAction
-from Main_App.gui.icons import division_icon, individual_detectability_icon
-from Tools.Ratio_Calculator.launcher import open_ratio_calculator_tool
-from Tools.Individual_Detectability.launcher import open_individual_detectability_tool
-from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow  # noqa: F401
 
+import sys
+from importlib import import_module
 
-def build_menu_bar(parent: QMainWindow) -> QMenuBar:
-    """
-    Returns a QMenuBar with File, Tools, and Help menus.
-    """
-    menu_bar = QMenuBar(parent)
+_impl = import_module("Main_App.gui.menu_bar")
 
-    # File
-    file_menu = menu_bar.addMenu("File")
-    file_menu.setObjectName("fileMenu")
-    for text, slot in [
-        ("Settings",         parent.open_settings_window),
-        ("Check for Updates", parent.check_for_updates),
-        ("Exit",              parent.quit),
-    ]:
-        action = QAction(text, parent)
-        action.triggered.connect(slot)
-        file_menu.addAction(action)
-        file_menu.addSeparator()
-    file_menu.removeAction(file_menu.actions()[-1])  # drop trailing separator
-
-    # Tools
-    tools_menu = menu_bar.addMenu("Tools")
-    items = [
-        ("Stats Toolbox",                              parent.open_stats_analyzer, None),
-        ("Image Resizer",                              parent.open_image_resizer, None),
-        ("Generate SNR Plots",                         parent.open_plot_generator, None),
-        ("Ratio Calculator",                           lambda: open_ratio_calculator_tool(parent), division_icon()),
-        ("Individual Detectability",                   lambda: open_individual_detectability_tool(parent),
-         individual_detectability_icon()),
-        ("Average Epochs in Pre-Processing Phase",     parent.open_epoch_averaging, None),
-    ]
-    for text, slot, icon in items:
-        action = QAction(text, parent)
-        if icon:
-            action.setIcon(icon)
-        action.triggered.connect(slot)
-        tools_menu.addAction(action)
-        tools_menu.addSeparator()
-    tools_menu.removeAction(tools_menu.actions()[-1])
-
-    # Help
-    help_menu = menu_bar.addMenu("Help")
-    for text, slot in [
-        ("Relevant Publications", parent.show_relevant_publications),
-        ("About…",                parent.show_about_dialog),
-    ]:
-        action = QAction(text, parent)
-        action.triggered.connect(slot)
-        help_menu.addAction(action)
-        help_menu.addSeparator()
-    help_menu.removeAction(help_menu.actions()[-1])
-
-    return menu_bar
+sys.modules[__name__] = _impl
