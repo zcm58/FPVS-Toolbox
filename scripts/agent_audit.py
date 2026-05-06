@@ -119,6 +119,7 @@ BROAD_EXCEPTION_BASELINES = {
     "src/Main_App/diagnostics/event_time_lock_report.py": (
         "src/Main_App/PySide6_App/diagnostics/event_time_lock_report.py"
     ),
+    "src/Main_App/gui/ui_main.py": "src/Main_App/PySide6_App/GUI/ui_main.py",
 }
 
 

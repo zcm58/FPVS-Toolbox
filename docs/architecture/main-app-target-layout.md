@@ -52,10 +52,11 @@ I/O tests protect behavior during the package-layout migration.
 
 `src/Main_App/gui/` is now the canonical Main App GUI import surface. It
 owns project workflow orchestration, processing run start/stop/finalization
-orchestration, GUI-side post-export completion handling, and shell/menu
-presentation helpers such as icons, header bar, file menu, menu bar, and
-sidebar. It delegates remaining main-window, settings-panel, style-token, and
-update-manager implementations while GUI smoke tests protect behavior.
+orchestration, GUI-side post-export completion handling, landing/main page
+assembly, and shell/menu presentation helpers such as icons, header bar, file
+menu, menu bar, and sidebar. It delegates remaining main-window, settings-panel,
+style-token, and update-manager implementations while GUI smoke tests protect
+behavior.
 
 `src/Main_App/diagnostics/` is now the canonical Main App runtime diagnostics
 owner. It contains preprocessing audit helpers and event-time lock reporting

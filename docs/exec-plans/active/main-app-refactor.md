@@ -594,4 +594,22 @@ Latest PySide6_App sidebar slice:
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Passed: `git diff --check` with line-ending warnings only.
-- Next refactor direction: move another small GUI presentation module, likely `ui_main.py` only after confirming landing-page/layout smoke tests cover the move.
+- Next refactor direction: move another small GUI presentation module, likely `ui_main.py` only after confirming landing-page/layout smoke tests cover the move. Status: complete.
+
+Latest PySide6_App UI assembly slice:
+
+- Moved `src/Main_App/PySide6_App/GUI/ui_main.py` to `src/Main_App/gui/ui_main.py`.
+- Replaced the old PySide6 GUI UI module with a temporary compatibility wrapper.
+- Updated active `main_window.py` imports to use `Main_App.gui.ui_main`.
+- Added a narrow garbage-collection audit baseline so the moved UI assembly module keeps its inherited broad exception count from the old path but fails if new broad handlers are added.
+- Behavior-preservation rule: no landing page layout, main page layout, widget object names, signal wiring, project workflow, processing route, worker routing, project I/O, post-processing, or exports changed.
+- Passed: `python -m py_compile src\Main_App\gui\ui_main.py src\Main_App\PySide6_App\GUI\ui_main.py src\Main_App\PySide6_App\GUI\main_window.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_settings_and_status.py tests\test_startup_imports_no_customtkinter.py -q`
+- Passed: `git grep -n "PySide6_App.GUI.ui_main\|from Main_App.PySide6_App.GUI import ui_main\|from \.ui_main" -- src tests scripts` found no matches.
+- Passed: `python -m py_compile scripts\agent_audit.py src\Main_App\gui\ui_main.py src\Main_App\PySide6_App\GUI\ui_main.py src\Main_App\PySide6_App\GUI\main_window.py`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python scripts\agent_audit.py --check garbage-collection`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `git diff --check` with line-ending warnings only.
+- Next refactor direction: move another focused GUI module such as `style_tokens.py` only if style-token smoke coverage stays stable.

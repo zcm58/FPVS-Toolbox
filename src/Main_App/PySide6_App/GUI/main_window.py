@@ -56,7 +56,7 @@ from . import event_map
 from Main_App.gui.file_menu import init_file_menu
 from .settings_panel import SettingsDialog
 from Main_App.gui.sidebar import init_sidebar
-from .ui_main import init_ui
+from Main_App.gui.ui_main import init_ui
 from Main_App.gui import project_workflows
 from Main_App.gui import processing_workflows
 from Main_App.gui import processing_inputs
