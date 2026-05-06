@@ -1,9 +1,481 @@
-"""Import surface for settings-panel GUI helpers."""
-
 from __future__ import annotations
 
-import sys
+from typing import Any, Dict
 
-from Main_App.PySide6_App.GUI import settings_panel as _impl
+import config
+import psutil
 
-sys.modules[__name__] = _impl
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QLineEdit,
+    QLabel,
+    QHBoxLayout,
+    QComboBox,
+    QDialog,
+    QTabWidget,
+    QGridLayout,
+    QCheckBox,
+    QDialogButtonBox,
+    QMessageBox,
+)
+
+from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.workers.mp_env import get_ram_tier_recommendation
+from Main_App.gui.widgets import (
+    SectionCard,
+    make_action_button,
+    make_form_layout,
+)
+from Main_App.gui.roi_settings_editor import ROISettingsEditor
+from Main_App.projects.projects_root import changeProjectsRoot
+from Main_App.projects.project import Project
+from Main_App.projects.preprocessing_settings import PREPROCESSING_DEFAULTS, normalize_preprocessing_settings
+
+
+class SettingsPanel(QWidget):
+    """Simple settings editor using PySide6 widgets."""
+
+    settings_saved = Signal()
+    settings_canceled = Signal()
+
+    def __init__(self, controller, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.controller = controller
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        form = make_form_layout()
+        layout.addLayout(form)
+
+        self.out_edit = QLineEdit()
+        self.thr_edit = QLineEdit()
+        form.addRow(QLabel("Output Folder"), self.out_edit)
+        form.addRow(QLabel("Threshold"), self.thr_edit)
+
+        btn_row = QHBoxLayout()
+        self.ok_btn = make_action_button("OK", variant="primary")
+        self.cancel_btn = make_action_button("Cancel", variant="tertiary")
+        btn_row.addWidget(self.ok_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
+
+        self.ok_btn.clicked.connect(self._on_ok)
+        self.cancel_btn.clicked.connect(self._on_cancel)
+
+    def _on_ok(self) -> None:
+        values = {
+            "output_folder": self.out_edit.text(),
+            "threshold": self.thr_edit.text(),
+        }
+        if hasattr(self.controller, "save_settings"):
+            self.controller.save_settings(values)
+        self.settings_saved.emit()
+
+    def _on_cancel(self) -> None:
+        self.settings_canceled.emit()
+
+
+class SettingsDialog(QDialog):
+    """Dialog for editing application settings via :class:`SettingsManager`."""
+
+    def __init__(
+        self,
+        manager: SettingsManager,
+        parent: QWidget | None = None,
+        project: Project | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.manager = manager
+        self.project = project
+        self._project_cache: Dict[str, Any] | None = None
+        # Stub attributes for pruned settings to avoid AttributeError if referenced
+        self.data_edit = None
+        self.out_edit = None
+        self.main_size_edit = None
+        self.stats_size_edit = None
+        self.resize_size_edit = None
+        self.adv_size_edit = None
+        self.cond_edit = None
+        self.id_edit = None
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+    # UI Construction
+    # ------------------------------------------------------------------
+    def _build_ui(self) -> None:
+        self.setWindowTitle("Settings")
+        layout = QVBoxLayout(self)
+
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
+
+        self._init_general_tab(self.tabs)
+        preproc_tab = self._init_preproc_tab(self.tabs)
+        self._preproc_tab_index = self.tabs.indexOf(preproc_tab)
+        self._init_stats_tab(self.tabs)
+        self._init_oddball_tab(self.tabs)
+        self._last_tab_index = self.tabs.currentIndex()
+        self._tab_change_guard = False
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+
+        self.btn_changeRoot = make_action_button("Change Projects Root...", parent=self)
+        self.btn_changeRoot.clicked.connect(lambda: changeProjectsRoot(self))
+        layout.addWidget(self.btn_changeRoot)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        layout.addWidget(btn_box)
+        btn_box.accepted.connect(self._save)
+        btn_box.rejected.connect(self.reject)
+
+    # ------------------------------------------------------------------
+    def _init_general_tab(self, tabs: QTabWidget) -> None:
+        tab = QWidget()
+        form = make_form_layout()
+        tab.setLayout(form)
+
+        stim_default = (
+            self._project_preprocessing().get("stim_channel", config.DEFAULT_STIM_CHANNEL)
+            if self.project
+            else self.manager.get("stim", "channel", config.DEFAULT_STIM_CHANNEL)
+        )
+        self.stim_edit = QLineEdit(stim_default)
+        form.addRow(QLabel("Stim Channel"), self.stim_edit)
+
+        debug_default = self.manager.get("debug", "enabled", "False").lower() == "true"
+        self.debug_check = QCheckBox("Enable Debug")
+        self.debug_check.setChecked(debug_default)
+        form.addRow(QLabel("Debug Mode"), self.debug_check)
+
+        tabs.addTab(tab, "General")
+
+    # ------------------------------------------------------------------
+    def _init_preproc_tab(self, tabs: QTabWidget) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        self.group_preproc = SectionCard(
+            "Preprocessing Parameters",
+            tab,
+            object_name="preprocessing_parameters_card",
+            content_layout=QGridLayout(),
+        )
+        grid = self.group_preproc.content_layout
+        params = [
+            "Low Pass (Hz):",
+            "High Pass (Hz):",
+            "Downsample (Hz):",
+            "Epoch Start (s):",
+            "Rejection Z-Thresh:",
+            "Epoch End (s):",
+            "Ref Chan 1:",
+            "Ref Chan 2:",
+            "Max Chan Idx Keep:",
+            "Max Bad Chans (Flag):",
+            "Max Parallel Workers Override (0=Auto):",
+        ]
+        self.preproc_edits: list[QLineEdit] = []
+        for i, label_text in enumerate(params):
+            row, col = divmod(i, 2)
+            lbl = QLabel(label_text, self.group_preproc)
+            edit = QLineEdit(self.group_preproc)
+            self.preproc_edits.append(edit)
+            grid.addWidget(lbl, row, col * 2)
+            grid.addWidget(edit, row, col * 2 + 1)
+
+        pre_keys = [
+            ("preprocessing", "low_pass", str(PREPROCESSING_DEFAULTS["low_pass"]), "low_pass"),
+            ("preprocessing", "high_pass", str(PREPROCESSING_DEFAULTS["high_pass"]), "high_pass"),
+            ("preprocessing", "downsample", str(PREPROCESSING_DEFAULTS["downsample"]), "downsample"),
+            ("preprocessing", "epoch_start", str(PREPROCESSING_DEFAULTS["epoch_start_s"]), "epoch_start_s"),
+            ("preprocessing", "reject_thresh", str(PREPROCESSING_DEFAULTS["rejection_z"]), "rejection_z"),
+            ("preprocessing", "epoch_end", str(PREPROCESSING_DEFAULTS["epoch_end_s"]), "epoch_end_s"),
+            ("preprocessing", "ref_chan1", str(PREPROCESSING_DEFAULTS["ref_chan1"]), "ref_chan1"),
+            ("preprocessing", "ref_chan2", str(PREPROCESSING_DEFAULTS["ref_chan2"]), "ref_chan2"),
+            ("preprocessing", "max_idx_keep", str(PREPROCESSING_DEFAULTS["max_chan_idx_keep"]), "max_chan_idx_keep"),
+            ("preprocessing", "max_bad_chans", str(PREPROCESSING_DEFAULTS["max_bad_chans"]), "max_bad_chans"),
+            (
+                "preprocessing",
+                "max_parallel_workers",
+                str(PREPROCESSING_DEFAULTS["max_parallel_workers_override"]),
+                "max_parallel_workers_override",
+            ),
+        ]
+        project_pp = self._project_preprocessing() if self.project else None
+        for edit, (sec, opt, fallback, canonical) in zip(self.preproc_edits, pre_keys):
+            if project_pp is not None:
+                value = project_pp.get(canonical)
+                edit.setText("" if value is None else str(value))
+            else:
+                edit.setText(self.manager.get(sec, opt, fallback))
+
+        layout.addWidget(self.group_preproc)
+        layout.addStretch(1)
+        tabs.addTab(tab, "Preprocessing")
+        canonical_keys = [
+            "low_pass",
+            "high_pass",
+            "downsample",
+            "epoch_start_s",
+            "rejection_z",
+            "epoch_end_s",
+            "ref_chan1",
+            "ref_chan2",
+            "max_chan_idx_keep",
+            "max_bad_chans",
+            "max_parallel_workers_override",
+        ]
+        for edit, canonical in zip(self.preproc_edits, canonical_keys):
+            edit.editingFinished.connect(
+                lambda canon=canonical, field=edit: self._on_preproc_edit_finished(canon, field)
+            )
+
+        return tab
+
+    # ------------------------------------------------------------------
+    def _init_stats_tab(self, tabs: QTabWidget) -> None:
+        tab = QWidget()
+        form = make_form_layout()
+        tab.setLayout(form)
+
+        self.base_freq_edit = QLineEdit(self.manager.get("analysis", "base_freq", "6.0"))
+        form.addRow(QLabel("FPVS Base Frequency (Hz)"), self.base_freq_edit)
+
+        self.bca_limit_edit = QLineEdit(self.manager.get("analysis", "bca_upper_limit", "16.8"))
+        form.addRow(QLabel("BCA Harmonic Upper Limit"), self.bca_limit_edit)
+
+        self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"))
+        form.addRow(QLabel("Alpha value for ANOVA"), self.alpha_edit)
+
+        self.harm_metric_combo = QComboBox()
+        self.harm_metric_combo.addItems(["Z Score"])
+        current_metric = self.manager.get("analysis", "harmonic_metric", "Z Score")
+        idx = self.harm_metric_combo.findText(current_metric)
+        if idx >= 0:
+            self.harm_metric_combo.setCurrentIndex(idx)
+        form.addRow(QLabel("Harmonic Detection Metric"), self.harm_metric_combo)
+
+        self.harm_threshold_edit = QLineEdit(self.manager.get("analysis", "harmonic_threshold", "1.64"))
+        form.addRow(QLabel("Harmonic Threshold"), self.harm_threshold_edit)
+
+        self.roi_editor = ROISettingsEditor(self, self.manager.get_roi_pairs())
+        form.addRow(QLabel("Regions of Interest"), self.roi_editor)
+
+        add_btn = make_action_button("+ Add ROI")
+        add_btn.clicked.connect(lambda: self.roi_editor.add_entry())
+        form.addRow(add_btn)
+
+        tabs.addTab(tab, "Stats")
+
+    # ------------------------------------------------------------------
+    def _init_oddball_tab(self, tabs: QTabWidget) -> None:
+        tab = QWidget()
+        form = make_form_layout()
+        tab.setLayout(form)
+
+        self.oddball_freq_edit = QLineEdit(self.manager.get("analysis", "oddball_freq", "1.2"))
+        form.addRow(QLabel("Oddball Frequency (Hz)"), self.oddball_freq_edit)
+
+        tabs.addTab(tab, "Oddball")
+
+    def _on_tab_changed(self, index: int) -> None:
+        if getattr(self, "_tab_change_guard", False):
+            return
+
+        previous = getattr(self, "_last_tab_index", 0)
+        if (
+            previous == getattr(self, "_preproc_tab_index", -1)
+            and index != getattr(self, "_preproc_tab_index", -1)
+        ):
+            if not self._validate_preproc_fields():
+                self._tab_change_guard = True
+                self.tabs.setCurrentIndex(getattr(self, "_preproc_tab_index", 0))
+                self._tab_change_guard = False
+                self._last_tab_index = getattr(self, "_preproc_tab_index", 0)
+                return
+
+        self._last_tab_index = index
+
+    # ------------------------------------------------------------------
+    def _focus_invalid_preproc_field(self, message: str) -> None:
+        msg_lower = message.lower()
+        target_idx = None
+        if "low-pass" in msg_lower or "'low_pass'" in msg_lower:
+            target_idx = 0
+        elif "high-pass" in msg_lower or "'high_pass'" in msg_lower:
+            target_idx = 1
+        elif "'max_parallel_workers_override'" in msg_lower:
+            target_idx = 10
+        if target_idx is not None and target_idx < len(self.preproc_edits):
+            edit = self.preproc_edits[target_idx]
+            edit.setFocus()
+            edit.selectAll()
+
+    def _validated_preproc_payload(self) -> Dict[str, Any] | None:
+        try:
+            return normalize_preprocessing_settings(self._collect_project_preprocessing_inputs())
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Settings", str(exc))
+            self._focus_invalid_preproc_field(str(exc))
+            return None
+
+    def _validate_preproc_fields(self) -> bool:
+        return self._validated_preproc_payload() is not None
+
+    def _on_preproc_edit_finished(self, canonical: str, field: QLineEdit) -> None:  # noqa: ARG002
+        if not self._validate_preproc_fields():
+            field.setFocus()
+            field.selectAll()
+
+    def _confirm_parallel_worker_override(self, normalized: Dict[str, Any]) -> bool:
+        override = int(normalized.get("max_parallel_workers_override", 0))
+        if override <= 0:
+            return True
+
+        try:
+            total_ram_bytes = int(psutil.virtual_memory().total)
+        except Exception:
+            return True
+
+        _tier, recommended_cap, _ram_gib = get_ram_tier_recommendation(total_ram_bytes)
+        if recommended_cap is None or override <= recommended_cap:
+            return True
+
+        message = (
+            f"The maximum amount of workers recommended for your RAM tier is [{recommended_cap}]. "
+            "Selecting a value higher than this could cause your system to become slow or "
+            "completely unresponsive for a time. Do you wish to continue?"
+        )
+        choice = QMessageBox.question(
+            self,
+            "High Worker Count Warning",
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if choice != QMessageBox.Yes:
+            if len(self.preproc_edits) > 10:
+                field = self.preproc_edits[10]
+                field.setFocus()
+                field.selectAll()
+            return False
+        return True
+
+    # ------------------------------------------------------------------
+    def _save(self) -> None:
+        using_project = self.project is not None
+
+        validated_preproc = self._validated_preproc_payload()
+        if validated_preproc is None:
+            return
+        if not self._confirm_parallel_worker_override(validated_preproc):
+            return
+
+        if not using_project:
+            self.manager.set("stim", "channel", validated_preproc.get("stim_channel", self.stim_edit.text()))
+        self.manager.set("analysis", "base_freq", self.base_freq_edit.text())
+        self.manager.set("analysis", "oddball_freq", self.oddball_freq_edit.text())
+        self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
+        self.manager.set("analysis", "alpha", self.alpha_edit.text())
+        self.manager.set("analysis", "harmonic_metric", self.harm_metric_combo.currentText())
+        self.manager.set("analysis", "harmonic_threshold", self.harm_threshold_edit.text())
+        self.manager.set_roi_pairs(self.roi_editor.get_pairs())
+        pre_keys = [
+            ("preprocessing", "low_pass", "low_pass"),
+            ("preprocessing", "high_pass", "high_pass"),
+            ("preprocessing", "downsample", "downsample"),
+            ("preprocessing", "epoch_start", "epoch_start_s"),
+            ("preprocessing", "reject_thresh", "rejection_z"),
+            ("preprocessing", "epoch_end", "epoch_end_s"),
+            ("preprocessing", "ref_chan1", "ref_chan1"),
+            ("preprocessing", "ref_chan2", "ref_chan2"),
+            ("preprocessing", "max_idx_keep", "max_chan_idx_keep"),
+            ("preprocessing", "max_bad_chans", "max_bad_chans"),
+            ("preprocessing", "max_parallel_workers", "max_parallel_workers_override"),
+        ]
+        if not using_project:
+            for _edit, (sec, opt, canonical) in zip(self.preproc_edits, pre_keys):
+                value = validated_preproc.get(canonical, "")
+                self.manager.set(sec, opt, str(value))
+        else:
+            try:
+                normalized = self.project.update_preprocessing(validated_preproc)
+                self._project_cache = normalized
+                self.project.save()
+            except ValueError as exc:
+                QMessageBox.warning(self, "Invalid Settings", str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - disk I/O error path
+                QMessageBox.critical(self, "Save Error", str(exc))
+                return
+        prev_debug = self.manager.debug_enabled()
+        self.manager.set("debug", "enabled", str(self.debug_check.isChecked()))
+        self.manager.save()
+
+        if not prev_debug and self.manager.debug_enabled():
+            QMessageBox.information(
+                self,
+                "Debug Mode Enabled",
+                "Debug mode enabled. Please close and reopen FPVS Toolbox for changes to take effect.",
+            )
+
+        try:
+            from Tools.Stats.data.shared_rois import (
+                load_rois_from_settings,
+                apply_rois_to_modules,
+            )
+            from Tools.Stats.stats import StatsAnalysisWindow
+
+            rois = load_rois_from_settings(self.manager)
+            apply_rois_to_modules(rois)
+
+            for window in StatsAnalysisWindow.get_instances():
+                window.reload_rois(rois)
+        except Exception:
+            pass
+
+        try:
+            from config import update_target_frequencies
+
+            update_target_frequencies(
+                float(self.oddball_freq_edit.text()),
+                float(self.bca_limit_edit.text()),
+            )
+        except Exception:
+            pass
+
+        self.accept()
+
+    # ------------------------------------------------------------------
+    def _project_preprocessing(self) -> Dict[str, Any]:
+        if self.project is None:
+            return {}
+        if self._project_cache is None:
+            try:
+                self._project_cache = normalize_preprocessing_settings(self.project.preprocessing)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Invalid Settings", str(exc))
+                self._project_cache = normalize_preprocessing_settings({})
+        return self._project_cache
+
+    def _collect_project_preprocessing_inputs(self) -> Dict[str, Any]:
+        values: Dict[str, Any] = {}
+        canonical_keys = [
+            "low_pass",
+            "high_pass",
+            "downsample",
+            "epoch_start_s",
+            "rejection_z",
+            "epoch_end_s",
+            "ref_chan1",
+            "ref_chan2",
+            "max_chan_idx_keep",
+            "max_bad_chans",
+            "max_parallel_workers_override",
+        ]
+        for edit, canonical in zip(self.preproc_edits, canonical_keys):
+            values[canonical] = edit.text()
+        values["stim_channel"] = self.stim_edit.text()
+        return values

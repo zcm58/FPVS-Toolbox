@@ -68,7 +68,7 @@ you to the exact modules that define each step.
 | `ref_channel1`, `ref_channel2` | `EXG1`, `EXG2` | Project settings / global settings | Kept as `eeg` during loading. |
 
 (Defaults verified in: `src/Main_App/Shared/load_utils.py`,
-`src/Main_App/PySide6_App/Backend/preprocessing_settings.py`.)
+`src/Main_App/projects/preprocessing_settings.py`.)
 
 ---
 
@@ -78,7 +78,7 @@ Preprocessing is applied in a fixed sequence. Each operation is optional only if
 its parameter is unset/disabled.
 
 **Fixed order** (implementation verified in
-`src/Main_App/PySide6_App/Backend/preprocess.py`):
+`src/Main_App/processing/preprocess.py`):
 
 1. **Initial re-reference** to the user-selected EXG pair (if both channels are
    present). The reference pair is applied using `raw.set_eeg_reference(...)`.
@@ -114,7 +114,7 @@ its parameter is unset/disabled.
 | `max_idx_keep` | 64 | Max channel index to keep |
 | `ref_channel1`, `ref_channel2` | EXG1 / EXG2 | Initial reference pair |
 
-(Defaults verified in: `src/Main_App/PySide6_App/Backend/preprocessing_settings.py`.)
+(Defaults verified in: `src/Main_App/projects/preprocessing_settings.py`.)
 
 **Logged/audited items**
 
@@ -123,7 +123,7 @@ its parameter is unset/disabled.
 - Number of bad channels rejected by kurtosis.
 - Final sampling rate and channel count.
 
-(Logging verified in: `src/Main_App/PySide6_App/Backend/preprocess.py`.)
+(Logging verified in: `src/Main_App/processing/preprocess.py`.)
 
 ---
 
@@ -274,7 +274,7 @@ report the exact aggregation rule you used.
   `1 - Excel Data Files` under the project's results directory).
 - A subfolder is created per condition label (label is sanitized for filenames).
 
-(Implementation verified in: `src/Main_App/PySide6_App/Backend/project.py`,
+(Implementation verified in: `src/Main_App/projects/project.py`,
 `src/Main_App/Shared/post_process.py`.)
 
 **Excel file names**
@@ -314,7 +314,7 @@ Key log entries you can cite for reproducibility include:
 - Warnings for labels with zero events or zero epochs.
 - Confirmation of Excel export completion.
 
-(Implementation verified in: `src/Main_App/PySide6_App/Backend/preprocess.py`,
+(Implementation verified in: `src/Main_App/processing/preprocess.py`,
 `src/Main_App/Performance/process_runner.py`,
 `src/Main_App/Shared/post_process.py`.)
 

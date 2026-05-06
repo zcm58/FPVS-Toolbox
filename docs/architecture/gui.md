@@ -6,8 +6,7 @@ Primary paths:
 
 - `src/Main_App/gui/`: canonical active import surface for main-window,
   settings-panel, menu, sidebar, icon, style-token, theme, widget, and
-  update-manager imports. Some modules still delegate to existing PySide6 GUI
-  implementations during the package layout migration.
+  update-manager imports.
 - `src/Main_App/gui/widgets/`: shared PySide6 presentation primitives for
   reusable buttons, cards, form rows, the busy spinner, the welcome brain
   animation, and inline status widgets.
@@ -33,9 +32,6 @@ Primary paths:
 - `src/Main_App/gui/shell_status.py`: launch reveal, status bar, busy
   indicator, GUI log routing, and processing-start notice helpers used by
   `MainWindow` compatibility wrappers.
-- `src/Main_App/PySide6_App/GUI/`: main window, menus, panels, icons, and style tokens.
-- `src/Main_App/PySide6_App/widgets/`: temporary compatibility wrappers for `Main_App.gui.widgets`.
-- `src/Main_App/PySide6_App/Backend/`: project and processing coordination used by the GUI.
 - `src/Tools/*/`: tool-specific PySide6 windows and launchers.
 
 ## Component Layer
@@ -44,9 +40,9 @@ Shared PySide6 primitives live in `src/Main_App/gui/widgets/`. Use this layer fo
 
 The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
 
-`src/Main_App/PySide6_App/GUI/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size or move wrappers. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
+`src/Main_App/gui/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
 
-Shell-specific implementations currently stay in `src/Main_App/PySide6_App/GUI/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, and style tokens. Active callers should import them through `Main_App.gui`. Project workflow orchestration is now split into `Main_App.gui.project_workflows`, processing input orchestration is now split into `Main_App.gui.processing_inputs`, processing run orchestration is now split into `Main_App.gui.processing_workflows`, post-export completion handling is now split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is now split into `Main_App.gui.tool_workflows`, and shell/status feedback is now split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
+Shell-specific implementations live under `src/Main_App/gui/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, style tokens, and update manager. Project workflow orchestration is split into `Main_App.gui.project_workflows`, processing input orchestration is split into `Main_App.gui.processing_inputs`, processing run orchestration is split into `Main_App.gui.processing_workflows`, post-export completion handling is split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is split into `Main_App.gui.tool_workflows`, and shell/status feedback is split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
 
 General GUI utilities should live under `Main_App.gui` when they coordinate UI-facing behavior. Non-GUI resource/path helpers should live under `Main_App.Shared`.
 

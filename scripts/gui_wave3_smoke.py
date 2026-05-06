@@ -85,16 +85,6 @@ def install_gui_only_stubs() -> None:
         check_for_updates_async=lambda *args, **kwargs: None,
     )
     install_stub_module(
-        "Main_App.PySide6_App.GUI.update_manager",
-        cleanup_old_executable=lambda: None,
-        check_for_updates_on_launch=lambda *args, **kwargs: None,
-        check_for_updates_async=lambda *args, **kwargs: None,
-    )
-    install_stub_module(
-        "Main_App.PySide6_App.workers.processing_worker",
-        PostProcessWorker=PostProcessWorker,
-    )
-    install_stub_module(
         "Main_App.workers.processing_worker",
         PostProcessWorker=PostProcessWorker,
     )

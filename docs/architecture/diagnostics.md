@@ -20,8 +20,6 @@ arguments or environment variables, not hardcoded local user paths.
 Rules:
 
 - Active runtime imports should use `Main_App.diagnostics`.
-- `src/Main_App/PySide6_App/diagnostics/event_time_lock_report.py` and
-  `src/Main_App/PySide6_App/utils/audit.py` are compatibility wrappers only.
 - Keep app/run diagnostics behavior-preserving and read/report oriented.
 - Keep repo-quality checks out of runtime packages.
 - Keep Stats-specific diagnostics inside `src/Tools/Stats/` unless a Stats

@@ -2,15 +2,15 @@
 
 ## Goal
 
-Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, architecture docs, and mechanical checks synchronized with each change. `Legacy_App` has been retired; the remaining long-term target is to retire the confusing `PySide6_App` designation after active implementations move behind purpose-based current-app modules.
+Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, architecture docs, and mechanical checks synchronized with each change. The historical `Legacy_App` and `PySide6_App` package designations have both been retired; active Main App code now belongs in purpose-based packages.
 
 ## Current Status
 
 - Phase: refactor slices.
 - Scope: behavior-preserving Main App organization.
 - Behavior changes: eLORETA/Source Localization has been removed from active runtime; FPVS preprocessing, post-processing, FFT/SNR outputs, project paths, and exports remain behavior-preserving.
-- `Legacy_App` is retired. Do not recreate `src/Main_App/Legacy_App/**`; use purpose-based `Main_App` packages for active behavior.
-- Folder retirement has a dedicated active plan: `docs/exec-plans/active/main-app-folder-retirement.md`. That plan is now resuming `PySide6_App` implementation-owner moves.
+- `Legacy_App` and `PySide6_App` are retired. Do not recreate `src/Main_App/Legacy_App/**` or `src/Main_App/PySide6_App/**`; use purpose-based `Main_App` packages for active behavior.
+- Folder retirement has a dedicated active plan: `docs/exec-plans/active/main-app-folder-retirement.md`. That plan is in final verification/handoff after deleting the old package tree.
 
 ## PR Contract
 
@@ -613,3 +613,18 @@ Latest PySide6_App UI assembly slice:
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Passed: `git diff --check` with line-ending warnings only.
 - Next refactor direction: move another focused GUI module such as `style_tokens.py` only if style-token smoke coverage stays stable.
+
+Latest folder-retirement completion slice:
+
+- Moved the remaining active PySide6 implementation owners into purpose-based Main App packages:
+  - GUI shell/settings/event-map/style/update/main-window modules to `src/Main_App/gui/`.
+  - Qt worker and multiprocessing bridge modules to `src/Main_App/workers/`.
+  - Active preprocessing implementation to `src/Main_App/processing/preprocess.py`.
+- Deleted `src/Main_App/PySide6_App/**` after active source/test/script imports were migrated.
+- Updated `ARCHITECTURE.md`, `AGENTS.md`, focused architecture docs, `docs/legacy-quarantine-audit.md`, and `docs/exec-plans/active/main-app-folder-retirement.md`.
+- Added `PySide6_App` to the retired-path audit guard and added narrow move baselines for unchanged inherited broad-exception/print debt.
+- Behavior-preservation rule: no preprocessing math/order, BDF loading behavior, worker routing, project I/O, post-processing/export format, GUI workflow, or user-facing behavior changed.
+- Latest passed: `python -m py_compile src\Main_App\gui\style_tokens.py src\Main_App\gui\event_map.py src\Main_App\gui\roi_settings_editor.py src\Main_App\gui\settings_panel.py src\Main_App\gui\update_manager.py src\Main_App\workers\mp_runner_bridge.py src\Main_App\workers\processing_worker.py src\Main_App\processing\preprocess.py src\Main_App\gui\main_window.py src\main.py tests\test_loader_warning_suppression.py scripts\gui_wave3_smoke.py`
+- Latest passed: `.venv\Scripts\python -m pytest tests\test_loader_warning_suppression.py tests\test_shared_load_utils.py -q`
+- Latest passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_main_window_processing.py tests\test_startup_imports_no_customtkinter.py -q`
+- Latest passed: `python scripts\agent_audit.py`

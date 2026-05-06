@@ -16,7 +16,6 @@ src/Main_App/
   diagnostics/    # Audits, event-time lock reports, debug/reporting helpers
   exports/        # Post-processing/export adapters and export-facing helpers
   shared/         # Small cross-cutting helpers that do not fit a domain yet
-  compatibility/  # Temporary wrappers for stale imports during migrations
 ```
 
 ## Migration Rules
@@ -29,21 +28,21 @@ src/Main_App/
 - Update `ARCHITECTURE.md`, this target layout page, the focused contract page,
   and the active execution plan when ownership changes.
 
-## Current First Step
+## Current State
 
 `src/Main_App/processing/` is now the canonical Main App processing import
 surface. It owns the stable no-op `process_data` coordinator plus raw-file
 discovery, batch-file preparation, and compatibility processing-controller
-helpers. It still delegates preprocessing to the existing PySide6 backend
-implementation while the preprocessing contract and tests protect behavior.
+helpers. It also owns the active preprocessing implementation while the
+preprocessing contract and tests protect behavior.
 
 `src/Main_App/io/` is now the canonical Main App BDF loader import surface. It
 delegates to the existing shared loader implementation while the BDF loading
 contract and tests protect behavior.
 
 `src/Main_App/workers/` is now the canonical Main App worker import surface. It
-delegates to the existing PySide6 worker and Performance process-runner
-implementations while worker/threading tests protect behavior.
+owns the Qt worker and multiprocessing bridge implementations while
+worker/threading tests protect behavior.
 
 `src/Main_App/projects/` is now the canonical Main App project import surface.
 It owns the project model, project manager workflows, project metadata scanning,
@@ -54,9 +53,9 @@ I/O tests protect behavior during the package-layout migration.
 owns project workflow orchestration, processing run start/stop/finalization
 orchestration, GUI-side post-export completion handling, landing/main page
 assembly, and shell/menu presentation helpers such as icons, header bar, file
-menu, menu bar, and sidebar. It delegates remaining main-window, settings-panel,
-style-token, and update-manager implementations while GUI smoke tests protect
-behavior.
+menu, menu bar, and sidebar. It also owns the main-window shell, settings panel,
+event-map behavior, style tokens, update manager, and reusable widgets while GUI
+smoke tests protect behavior.
 
 `src/Main_App/diagnostics/` is now the canonical Main App runtime diagnostics
 owner. It contains preprocessing audit helpers and event-time lock reporting

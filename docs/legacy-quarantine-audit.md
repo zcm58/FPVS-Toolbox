@@ -36,7 +36,7 @@ functional packages listed above.
 Already has current-app replacement or bridge:
 
 - `settings_manager.py`: deleted after current shared implementation ownership moved to `src/Main_App/Shared/settings_manager.py`.
-- `eeg_preprocessing.py`: deleted after confirming active preprocessing imports use `src/Main_App/processing/preprocess.py`, which delegates to the PySide6 backend implementation.
+- `eeg_preprocessing.py`: deleted after confirming active preprocessing imports use `src/Main_App/processing/preprocess.py`.
 - `post_process.py`: deleted after current shared implementation ownership moved to `src/Main_App/Shared/post_process.py`.
 - `post_process_excel.py`: deleted after current shared implementation ownership moved to `src/Main_App/Shared/post_process_excel.py`.
 - `processing_utils.py`: deleted after current shared implementation ownership moved to `src/Main_App/Shared/processing_mixin.py`.
@@ -52,12 +52,26 @@ Recent migration slices:
 - Legacy settings/loader/mixin wrapper cleanup removed `src/Main_App/Legacy_App/settings_manager.py`, `src/Main_App/Legacy_App/load_utils.py`, and `src/Main_App/Legacy_App/processing_utils.py` after grep confirmed no active callers.
 - Legacy FFT/post-processing wrapper cleanup removed `src/Main_App/Legacy_App/fft_crop_utils.py`, `src/Main_App/Legacy_App/post_process.py`, and `src/Main_App/Legacy_App/post_process_excel.py` after grep confirmed no active callers.
 - Final Legacy_App cleanup removed inactive `src/Main_App/Legacy_App/eeg_preprocessing.py`, `src/Main_App/Legacy_App/AGENTS.md`, and `src/Main_App/Legacy_App/__init__.py` after preprocessing ownership checks confirmed no active callers.
-- Event-map GUI row behavior was extracted from `src/Main_App/PySide6_App/GUI/main_window.py` into `src/Main_App/PySide6_App/GUI/event_map.py`.
+- Event-map GUI row behavior now lives in `src/Main_App/gui/event_map.py`.
 - eLORETA/Source Localization was removed from active runtime because it has no working GUI access path and is not part of the current app.
 - Tkinter/CustomTkinter runtime code was removed from active Main App paths; user dialogs now route through PySide6-safe helpers.
 - Processing mixin ownership moved to `src/Main_App/Shared/processing_mixin.py`; the legacy wrapper has been deleted.
-- BDF loader import ownership moved to `src/Main_App/io/load_utils.py`; implementation still lives in `src/Main_App/Shared/load_utils.py`, and `src/Main_App/PySide6_App/Backend/loader.py` remains a compatibility wrapper.
-- Preprocessing ownership for active runtime was locked to `src/Main_App/processing/preprocess.py`; GUI processing routes through the PySide6 process runner and no active runtime/test imports point at retired Legacy_App preprocessing paths.
+- BDF loader import ownership moved to `src/Main_App/io/load_utils.py`; implementation still lives in `src/Main_App/Shared/load_utils.py`.
+- Preprocessing ownership for active runtime was locked to `src/Main_App/processing/preprocess.py`; GUI processing routes through the active process runner and no active runtime/test imports point at retired Legacy_App preprocessing paths.
+
+## Main_App PySide6_App retirement inventory (2026-05-06)
+
+`src/Main_App/PySide6_App/**` has been retired. Do not recreate this directory; PySide6 runtime behavior now belongs in purpose-based `Main_App` packages such as `gui`, `processing`, `projects`, `workers`, `io`, `diagnostics`, and `exports`.
+
+Recent migration slices:
+
+- GUI shell, settings, event-map, sidebar, UI assembly, style-token, update-manager, and widget implementations moved to `src/Main_App/gui/`.
+- Processing-controller and preprocessing implementations moved to `src/Main_App/processing/`.
+- Qt worker and multiprocessing bridge implementations moved to `src/Main_App/workers/`.
+- Runtime diagnostics moved to `src/Main_App/diagnostics/`.
+- Project model/manager/settings/root helpers moved to `src/Main_App/projects/`.
+- Post-export adapter ownership moved to `src/Main_App/exports/`.
+- Final cleanup deleted the old `src/Main_App/PySide6_App/**` package tree after active source/test/script imports were migrated.
 
 ## Newly quarantined after follow-up cleanup
 

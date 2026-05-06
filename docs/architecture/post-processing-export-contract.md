@@ -4,7 +4,7 @@ This page documents the current post-processing and Excel export behavior before
 
 ## Entry Contract
 
-Active post-export adapter imports should use `Main_App.exports.post_export_adapter`. The temporary `Main_App.PySide6_App.adapters.post_export_adapter` path is compatibility-only during folder retirement.
+Active post-export adapter imports should use `Main_App.exports.post_export_adapter`.
 
 `post_process(app, condition_labels_present)` expects an app-like object with:
 

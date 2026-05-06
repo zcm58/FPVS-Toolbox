@@ -17,12 +17,12 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 
 ## Non-Negotiables
 
-- `src/Main_App/Legacy_App/**` has been retired. Do not recreate it; use purpose-based `Main_App` packages instead.
-- Active EEG preprocessing imports should use `src/Main_App/processing/preprocess.py`; it delegates to the current PySide6 backend implementation while the Main App layout is migrated.
+- `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` have been retired. Do not recreate them; use purpose-based `Main_App` packages instead.
+- Active EEG preprocessing imports should use `src/Main_App/processing/preprocess.py`; this is the current implementation owner.
 - Active BDF loading imports should use `src/Main_App/io/load_utils.py`; it delegates to the current shared implementation while the Main App layout is migrated.
-- Active Main App GUI imports should use `src/Main_App/gui/`; focused workflow helpers such as project workflows, processing run orchestration, and post-export completion live there while remaining GUI modules delegate to the current PySide6 implementation during the layout migration.
-- Active worker/process-runner imports should use `src/Main_App/workers/`; it delegates to the current PySide6 worker and Performance implementations while the Main App layout is migrated.
-- Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`; it delegates to the current implementations while the Main App layout is migrated.
+- Active Main App GUI imports should use `src/Main_App/gui/`; the main window shell, focused workflow helpers, reusable widgets, style tokens, update manager, and GUI presentation helpers live there.
+- Active worker/process-runner imports should use `src/Main_App/workers/`.
+- Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`.
 - Active runtime diagnostics imports should use `src/Main_App/diagnostics/`; repo-evaluation checks belong in `scripts/` or `.agents/skills/`, and manual project probes belong in `scripts/manual_diagnostics/`.
 - Source Localization/eLORETA has been removed from active runtime. Do not add GUI, settings, tests, imports, or quarantine-tree dependencies for it unless the user explicitly scopes a restoration feature.
 - Prefer thin adapters outside protected folders when legacy behavior must be reused.
@@ -90,7 +90,7 @@ If a gate cannot run locally, report the command, failure reason, and residual r
 
 ## Done Means
 
-- Retired `Legacy_App` paths are not recreated.
+- Retired `Legacy_App` and `PySide6_App` paths are not recreated.
 - Source Localization/eLORETA remains removed from active runtime unless explicitly restored as a new feature.
 - PySide6-only GUI imports are preserved.
 - UI work remains non-blocking.

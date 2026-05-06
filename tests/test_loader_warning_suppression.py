@@ -4,7 +4,6 @@ import logging
 import warnings
 from types import SimpleNamespace
 
-import Main_App.PySide6_App.Backend.loader as backend_loader
 import Main_App.Shared.load_utils as shared_loader
 import Main_App.io.load_utils as loader
 
@@ -128,10 +127,6 @@ def test_loader_uses_standard_1005_for_1010_coverage(monkeypatch):
         shared_loader._cached_1010.cache_clear()
 
     assert montage_calls == ["standard_1005"]
-
-
-def test_backend_loader_is_compatibility_wrapper():
-    assert backend_loader.load_eeg_file is loader.load_eeg_file
 
 
 def test_shared_loader_is_compatibility_wrapper():

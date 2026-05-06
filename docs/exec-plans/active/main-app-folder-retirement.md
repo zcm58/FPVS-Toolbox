@@ -8,12 +8,12 @@ This plan governs package ownership and file moves only. The existing `docs/exec
 
 ## Current Status
 
-- Phase: Legacy_App retirement complete; PySide6_App implementation-owner retirement can resume.
-- Scope: behavior-preserving old-folder deletion gates and remaining PySide6_App package ownership moves.
-- Canonical import surfaces now exist for `Main_App.gui`, `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, and `Main_App.diagnostics`.
-- `Legacy_App` has been deleted from tracked Main App source.
-- `PySide6_App` still owns many implementation modules, but reusable widgets, theme helpers, project helpers, and processing-controller ownership have moved to canonical packages.
-- Next work is continuing PySide6_App implementation moves after processing-controller ownership; the next low-risk candidate is runtime diagnostics ownership.
+- Phase: folder retirement implementation complete; verification and final handoff are active.
+- Scope: behavior-preserving deletion of the remaining historical package tree and final docs/audit updates.
+- Canonical packages now own the active Main App implementation for `gui`, `processing`, `io`, `projects`, `workers`, `diagnostics`, and `exports`.
+- `Legacy_App` and `PySide6_App` have both been deleted from tracked Main App source.
+- `scripts/agent_audit.py` now treats both historical package paths as retired paths so they cannot be quietly recreated.
+- Next work after final verification is not more folder retirement; it is reassessing remaining oversized canonical modules as separate, behavior-covered cleanup.
 
 ## Target Layout
 
@@ -33,20 +33,20 @@ Canonical packages should become implementation owners, not only forwarding wrap
 
 ## Progress Snapshot
 
-- `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, `Main_App.diagnostics`, and `Main_App.gui` are present.
-- Several canonical modules still wrap or delegate to old implementation paths under `PySide6_App`.
+- `Main_App.gui`, `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, `Main_App.diagnostics`, and `Main_App.exports` are present.
 - `Legacy_App` has no tracked Main App source files and must not be recreated.
-- Active imports still remain for backend preprocessing, worker, diagnostics, and GUI implementation wrappers.
+- `PySide6_App` has no tracked Main App source files and must not be recreated.
+- Active source and tests should not import `Main_App.Legacy_App` or `Main_App.PySide6_App`.
 
 ## Classification Categories
 
 Each tracked file under `src/Main_App/Legacy_App/` and `src/Main_App/PySide6_App/` must be classified before movement:
 
-- Active implementation to move to a purpose-based package.
-- Compatibility wrapper to delete after canonical imports are migrated.
-- Replaced legacy code that should stay inactive until deletion is explicitly scoped.
-- Dead code to remove after grep and focused checks prove it is unused.
-- High-risk pipeline code that needs focused tests and contract docs before movement.
+- Active implementation moved to a purpose-based package.
+- Compatibility wrapper deleted after canonical imports were migrated.
+- Replaced legacy code deleted after focused checks proved it was inactive.
+- Dead code removed after grep and focused checks proved it was unused.
+- High-risk pipeline code moved only with focused tests and contract docs.
 
 Record the chosen destination package, preservation checks, and any deletion rationale in this plan before implementing each move.
 
@@ -122,8 +122,8 @@ The first slice under this plan is documentation-only and now complete:
 ## Current Import Findings
 
 - `Legacy_App` imports in active source are removed; remaining direct references should be docs, audits, or historical plan notes only.
-- `PySide6_App` still owns many active implementations. Current top-level packages such as `Main_App.gui`, `Main_App.workers`, and `Main_App.diagnostics` often delegate into `PySide6_App`; `Main_App.projects` and processing-controller ownership have moved to canonical packages.
-- Tool packages, tests, and active source now import reusable widgets/theme helpers from `Main_App.gui.widgets` and `Main_App.gui.theme`. The old `PySide6_App` widget/theme paths are temporary wrappers only.
+- `PySide6_App` imports in active source are removed; remaining direct references should be docs, audits, or historical plan notes only.
+- Tool packages, tests, and active source now import Main App behavior from purpose-based packages.
 
 ## Verification
 
@@ -139,7 +139,7 @@ For future movement slices, also run the focused tests for the touched domain an
 
 - Retiring the old folder names is a package-ownership refactor, not a behavior rewrite.
 - `Legacy_App` has been retired; do not recreate it.
-- `PySide6_App` is the current implementation source for many modules, but the package name should not remain the long-term architecture boundary.
+- `PySide6_App` has been retired; do not recreate it.
 - `main_window.py` has already been appropriately downsized. It may move to a new package path as part of folder retirement, but it should not be the target of another internal refactor unless explicitly requested.
 
 ## Execution Queue
@@ -151,8 +151,25 @@ For future movement slices, also run the focused tests for the touched domain an
 5. Delete stale `Legacy_App` GUI/debug compatibility after grep and focused tests prove no active imports remain. Status: complete.
 6. Delete `Legacy_App` wrappers after grep and focused tests prove no active imports remain. Status: complete.
 7. Delete inactive `Legacy_App/eeg_preprocessing.py` only after preprocessing ownership and contract checks pass. Status: complete.
-8. Resume PySide6_App implementation moves after `processing_controller.py`. Status: active; diagnostics ownership is next.
-9. Delete `PySide6_App` package markers after all implementation ownership has moved.
+8. Resume PySide6_App implementation moves after `processing_controller.py`. Status: complete.
+9. Delete `PySide6_App` package markers after all implementation ownership has moved. Status: complete.
+
+Final PySide6_App retirement slice:
+
+- Moved the remaining active GUI, worker, and preprocessing implementation owners to purpose-based packages:
+  - `style_tokens.py`, `event_map.py`, `roi_settings_editor.py`, `settings_panel.py`, `update_manager.py`, and `main_window.py` to `src/Main_App/gui/`.
+  - `mp_runner_bridge.py` and `processing_worker.py` to `src/Main_App/workers/`.
+  - `preprocess.py` to `src/Main_App/processing/`.
+- Migrated the final active test import away from `Main_App.PySide6_App.Backend.loader`.
+- Deleted the remaining `src/Main_App/PySide6_App/**` package tree after grep confirmed no active source/test/script imports remained.
+- Updated `scripts/agent_audit.py` so `src/Main_App/PySide6_App/**` is a retired path and so moved unchanged broad-exception/print debt is tracked against old-path baselines without behavior edits.
+- Behavior-preservation rule: no preprocessing math/order, BDF loading behavior, worker routing, project I/O, post-processing/export format, GUI workflow, or user-facing behavior changed.
+- Passed per-file focused checks during the migration slices, including loader, GUI, settings, worker, and preprocessing pytest targets.
+- Latest passed: `python -m py_compile src\Main_App\gui\style_tokens.py src\Main_App\gui\event_map.py src\Main_App\gui\roi_settings_editor.py src\Main_App\gui\settings_panel.py src\Main_App\gui\update_manager.py src\Main_App\workers\mp_runner_bridge.py src\Main_App\workers\processing_worker.py src\Main_App\processing\preprocess.py src\Main_App\gui\main_window.py src\main.py tests\test_loader_warning_suppression.py scripts\gui_wave3_smoke.py`
+- Latest passed: `.venv\Scripts\python -m pytest tests\test_loader_warning_suppression.py tests\test_shared_load_utils.py -q`
+- Latest passed: `.venv\Scripts\python -m pytest tests\test_main_window_layout_smoke.py tests\test_main_window_processing.py tests\test_startup_imports_no_customtkinter.py -q`
+- Latest passed: `git grep -n "Main_App.PySide6_App\|PySide6_App" -- src tests scripts` found no active imports, except audit baseline strings and the explicit retired-path rule.
+- Latest passed: `python scripts\agent_audit.py`
 
 Latest executable slice:
 

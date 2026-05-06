@@ -5,12 +5,8 @@ stable during Main App refactors.
 
 ## Active Owner
 
-`src/Main_App/processing/preprocess.py` is the canonical active import surface
-for EEG preprocessing.
-
-The implementation still lives in
-`src/Main_App/PySide6_App/Backend/preprocess.py` during this layout migration
-slice. Do not change that implementation as part of import-surface moves.
+`src/Main_App/processing/preprocess.py` is the canonical active implementation
+owner for EEG preprocessing.
 
 Current app processing must call:
 
@@ -41,7 +37,7 @@ Do not change this order during ownership or file-organization refactors:
 - Do not change filtering math, reference handling, rejection thresholds, event
   handling, output data shapes, export inputs, or processing order unless the
   user explicitly requests a behavior change.
-- GUI processing must route through the PySide6 process runner; single-file runs
+- GUI processing must route through the active process runner; single-file runs
   use the same runner with `max_workers=1`.
 - If an internal mode cannot use the PySide6 process runner, fail clearly rather
   than silently falling back to legacy preprocessing.
@@ -53,7 +49,7 @@ Do not change this order during ownership or file-organization refactors:
 Use these checks for preprocessing ownership/routing changes:
 
 ```powershell
-python -m py_compile src\Main_App\PySide6_App\Backend\preprocess.py src\Main_App\Shared\processing_mixin.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\__init__.py
+python -m py_compile src\Main_App\processing\preprocess.py src\Main_App\Shared\processing_mixin.py src\Main_App\gui\main_window.py src\Main_App\__init__.py
 .venv\Scripts\python -m pytest tests\test_single_file_process_mode.py tests\test_main_window_processing.py -q
 .venv\Scripts\python -m pytest tests\test_preproc_audit.py tests\test_fif_flag_audit.py tests\test_process_runner_epoch_contract.py -q
 python scripts\agent_audit.py

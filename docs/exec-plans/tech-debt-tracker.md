@@ -6,7 +6,8 @@ Use this page for known debt that is not yet an active execution plan.
 
 - `Legacy_App` has been retired under
   `docs/exec-plans/active/main-app-folder-retirement.md`.
-- `PySide6_App` retirement can resume now that the Legacy boundary is finalized.
+- `PySide6_App` has been retired under
+  `docs/exec-plans/active/main-app-folder-retirement.md`.
 - `scripts/gui_wave3_smoke.py` hung during the first Legacy cleanup slice and
   should be reassessed before it is used as a required gate again.
 - Broad exception handling is concentrated in high-risk processing/GUI
@@ -18,9 +19,9 @@ Use this page for known debt that is not yet an active execution plan.
 - Oversized modules remain in Stats workers/controllers, Plot/Ratio GUI code,
   `Main_App` processing/preprocessing, and diagnostics. Treat these as future
   focused refactors, not opportunistic cleanup during behavior-sensitive work.
-- `Main_App` still has `PySide6_App` compatibility wrappers and historical
-  package-name debt. Continue retiring these through the active
-  folder-retirement plan.
+- Retired `Main_App` package names are now guarded by `scripts/agent_audit.py`;
+  future debt should focus on oversized modules and behavior-covered cleanup,
+  not resurrecting historical package wrappers.
 
 ## Latest Garbage-Collection Scan
 

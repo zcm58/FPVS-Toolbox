@@ -3,8 +3,9 @@
 Long-running work must not block the UI thread.
 
 The canonical active import surface for Main App workers is
-`src/Main_App/workers/`. During the package-layout migration it delegates to the
-existing PySide6 worker and Performance process-runner implementations.
+`src/Main_App/workers/`. It owns the Qt worker and multiprocessing bridge
+implementations used by the main GUI, plus wrappers for Performance
+process-runner helpers.
 
 Common long-running work:
 

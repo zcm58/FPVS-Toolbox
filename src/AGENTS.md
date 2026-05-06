@@ -19,12 +19,12 @@ the AGENTS.md file in each directory for specific instructions before making maj
 In general, the app GUI should not be altered significantly unless a new button or
 toolbar option is needed when adding new features.
 
-main_app.py is the main file for the application based in PySide6.
-When suggesting changes or refactor options to this file, please do not change or edit code, just suggest ways to copy
-and paste code from main_window.py into new standalone .py files that you place in 
-the Main_App\PySide6_App directory. You can add imports into the main_window.py file where needed.
+`src/main.py` is the launcher for the PySide6 application. Active Main App code
+now belongs in purpose-based packages under `Main_App` such as `gui`,
+`processing`, `projects`, `workers`, `io`, `diagnostics`, and `exports`.
+Do not add new `PySide6_App` or `Legacy_App` imports or files.
 
 
 When adding new features, please try to keep the code modular and under 500 lines per file. You are allowed to import
-functions from other files into the main_window.py file, but please do not add new functions to the main_window.py file.
+functions from other files into the main window shell where needed, but please do not add new functions to the main_window.py file.
 Do not add Tkinter, CustomTkinter, or CTkMessagebox imports; the active UI toolkit is PySide6 only.

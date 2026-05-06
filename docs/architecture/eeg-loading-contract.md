@@ -22,11 +22,9 @@ The implementation still lives in `Main_App.Shared.load_utils` during this
 layout migration slice. Do not change that implementation as part of
 import-surface moves.
 
-`src/Main_App/Legacy_App/load_utils.py` has been deleted. The temporary
-`src/Main_App/PySide6_App/Backend/loader.py` compatibility wrapper remains for
-stale PySide6 backend imports. `src/Main_App/Shared/load_utils.py` is also kept
-as the temporary implementation module. Wrappers must not contain duplicate
-loading logic.
+`src/Main_App/Legacy_App/load_utils.py` and the old PySide6 backend loader path
+have been deleted. `src/Main_App/Shared/load_utils.py` is kept as the temporary
+implementation module and must not duplicate logic elsewhere.
 
 ## File And Path Behavior
 

@@ -58,6 +58,7 @@ CURRENT_CODE_EXCLUDES = (
 )
 RETIRED_PATH_PREFIXES = (
     "src/Main_App/Legacy_App/",
+    "src/Main_App/PySide6_App/",
 )
 
 PRODUCTION_EXCLUDES = CURRENT_CODE_EXCLUDES + (
@@ -119,7 +120,27 @@ BROAD_EXCEPTION_BASELINES = {
     "src/Main_App/diagnostics/event_time_lock_report.py": (
         "src/Main_App/PySide6_App/diagnostics/event_time_lock_report.py"
     ),
+    "src/Main_App/gui/main_window.py": "src/Main_App/PySide6_App/GUI/main_window.py",
+    "src/Main_App/gui/settings_panel.py": (
+        "src/Main_App/PySide6_App/GUI/settings_panel.py"
+    ),
+    "src/Main_App/gui/update_manager.py": (
+        "src/Main_App/PySide6_App/GUI/update_manager.py"
+    ),
     "src/Main_App/gui/ui_main.py": "src/Main_App/PySide6_App/GUI/ui_main.py",
+    "src/Main_App/processing/preprocess.py": (
+        "src/Main_App/PySide6_App/Backend/preprocess.py"
+    ),
+    "src/Main_App/workers/mp_runner_bridge.py": (
+        "src/Main_App/PySide6_App/workers/mp_runner_bridge.py"
+    ),
+}
+PRINT_BASELINES = {
+    # Pre-existing processing diagnostics moved with preprocessing ownership.
+    # Keep detecting increases without forcing behavior changes in this slice.
+    "src/Main_App/processing/preprocess.py": (
+        "src/Main_App/PySide6_App/Backend/preprocess.py"
+    ),
 }
 
 
@@ -278,6 +299,10 @@ def _broad_exception_count(text: str) -> int:
     return sum(1 for line in text.splitlines() if BROAD_EXCEPTION_RE.search(line))
 
 
+def _print_count(text: str) -> int:
+    return sum(1 for line in text.splitlines() if PRINT_RE.search(line))
+
+
 def _broad_exception_increase_allowed(path: str) -> bool:
     baseline_path = BROAD_EXCEPTION_BASELINES.get(path)
     if not baseline_path:
@@ -289,6 +314,20 @@ def _broad_exception_increase_allowed(path: str) -> bool:
         current_path.read_text(encoding="utf-8", errors="replace")
     )
     baseline_count = _broad_exception_count(_file_text_at_head(baseline_path))
+    return baseline_count > 0 and current_count <= baseline_count
+
+
+def _print_increase_allowed(path: str) -> bool:
+    baseline_path = PRINT_BASELINES.get(path)
+    if not baseline_path:
+        return False
+    current_path = REPO_ROOT / path
+    if not current_path.exists():
+        return False
+    current_count = _print_count(
+        current_path.read_text(encoding="utf-8", errors="replace")
+    )
+    baseline_count = _print_count(_file_text_at_head(baseline_path))
     return baseline_count > 0 and current_count <= baseline_count
 
 
@@ -539,6 +578,8 @@ def check_added_prints() -> list[Issue]:
     for path in _changed_files():
         normalized = _normalize(path)
         if not _is_production_code(normalized):
+            continue
+        if _print_increase_allowed(normalized):
             continue
         for line_no, line in _added_lines(normalized):
             if PRINT_RE.search(line):

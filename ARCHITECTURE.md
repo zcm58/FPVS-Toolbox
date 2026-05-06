@@ -31,17 +31,17 @@ FPVS Toolbox is a Windows-oriented desktop application built around PySide6 GUI 
 
 Primary areas:
 
-- `src/Main_App/PySide6_App/`: current PySide6 application shell, GUI, project management, and processing controllers while the old package designation is retired. `GUI/main_window.py` has been appropriately downsized into the Main Window shell/coordinator; do not target it for further refactor unless the user explicitly scopes that work. New shell-specific GUI behavior should go into focused helper modules instead of growing `main_window.py`.
-- `src/Main_App/gui/`: canonical Main App GUI import surface. It owns focused GUI workflow helpers, reusable widgets, theme helpers, and GUI operation guards, and delegates remaining main-window, settings-panel, menu, sidebar, icon, style-token, and update-manager imports to the existing PySide6 GUI implementation.
+- `src/Main_App/gui/`: canonical Main App GUI package. It owns the main-window shell/coordinator, focused GUI workflow helpers, reusable widgets, theme helpers, menu/sidebar/header helpers, icon/style-token/update-manager helpers, and GUI operation guards. `main_window.py` has been appropriately downsized; do not target it for further refactor unless the user explicitly scopes that work.
 - `src/Main_App/exports/`: canonical Main App export adapter import surface. It owns post-export adapter behavior used by workers and the process runner while shared post-processing/workbook generation remains behavior-preserving.
-- `src/Main_App/processing/`: canonical Main App processing import surface. It owns the stable `process_data` processing entry point and currently delegates preprocessing to the existing PySide6 backend implementation while the repo moves toward purpose-based Main App folders.
+- `src/Main_App/processing/`: canonical Main App processing package. It owns active EEG preprocessing, the stable `process_data` entry point, and processing-controller helpers.
 - `src/Main_App/io/`: canonical Main App I/O import surface. It currently delegates BDF loading to the existing shared implementation while the repo moves toward purpose-based Main App folders.
 - `src/Main_App/projects/`: canonical Main App project import surface. It owns the project model, project manager workflows, project metadata scanning, projects-root helpers, and preprocessing-settings normalization.
-- `src/Main_App/workers/`: canonical Main App worker import surface. It currently delegates Qt worker and process-runner behavior to existing PySide6 and Performance implementations.
-- `src/Main_App/diagnostics/`: canonical Main App runtime diagnostics import surface. It delegates preprocessing audit helpers and event-time lock reporting to existing implementations while keeping repo-evaluation scripts outside runtime code.
+- `src/Main_App/workers/`: canonical Main App worker package for Qt workers, process-runner wrappers, and multiprocessing environment helpers.
+- `src/Main_App/diagnostics/`: canonical Main App runtime diagnostics package for preprocessing audit helpers and event-time lock reporting. Repo-evaluation scripts stay in `scripts/` and `.agents/skills/`.
 - `src/Main_App/Shared/`: current shared owners for cross-path behavior such as the canonical BDF loader, processing mixin, settings helpers, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
 - `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it; active code belongs in purpose-based `Main_App` packages.
+- `src/Main_App/PySide6_App/`: retired historical package designation. Do not recreate it; PySide6 runtime code now lives under purpose-based `Main_App` packages.
 - `src/Tools/`: standalone and integrated tools for preprocessing, plotting, ratios, statistics, image resizing, and detectability.
 - `src/quarantine/`: quarantined legacy code retained for reference or compatibility checks.
 - `tests/`: unit, integration, and pytest-qt smoke coverage.
@@ -69,7 +69,7 @@ Focused architecture pages:
 
 - GUI code should orchestrate widgets, signals, and user feedback; processing logic belongs in backend, worker, or tool modules.
 - Long-running EEG, plotting, export, and statistics work must run outside the UI thread.
-- Historical legacy behavior should be consumed through existing current-app APIs or thin adapters in purpose-based packages. Do not add new `Legacy_App` modules.
+- Historical legacy behavior should be consumed through existing current-app APIs or thin adapters in purpose-based packages. Do not add new `Legacy_App` or `PySide6_App` modules.
 - Project-aware workflows should resolve files through the active project root and preserve existing generated formats.
 - Source Localization/eLORETA has been removed from active runtime. Keep `src/Tools/SourceLocalization/**` empty of source files and do not add GUI, settings, tests, or quarantine-tree imports for it unless restoration is explicitly scoped as a new feature.
 
@@ -80,7 +80,7 @@ Use focused checks for the changed area first.
 - Skill-driven checks: run the matching `.agents/skills/*/scripts/*.py` wrapper before manual grep or broad document reading.
 - GUI wiring or layout changes: pytest-qt smoke test for the changed widget or a documented manual smoke path.
 - Processing or export changes: targeted unit tests around data format, processing order, and output paths.
-- Retired-path work: confirm `src/Main_App/Legacy_App/**` is not recreated with `git diff --name-only` and `python scripts/agent_audit.py`.
+- Retired-path work: confirm `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` are not recreated with `git diff --name-only` and `python scripts/agent_audit.py`.
 - Agent invariants: run `python scripts/agent_audit.py`.
 - Broad shared behavior: run `python -m pytest -q`, then lint/type checks where configured.
 
