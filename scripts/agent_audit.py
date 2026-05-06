@@ -107,6 +107,13 @@ GARBAGE_MARKER_RE = re.compile(
     re.IGNORECASE,
 )
 BROAD_EXCEPTION_RE = re.compile(r"^\s*except\s+Exception\s*:\s*(?:pass\s*)?$")
+BROAD_EXCEPTION_BASELINES = {
+    # Moved unchanged during PySide6_App folder retirement. Keep detecting any
+    # increase while avoiding a false positive for pre-existing boundary debt.
+    "src/Main_App/processing/processing_controller.py": (
+        "src/Main_App/PySide6_App/Backend/processing_controller.py"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -242,6 +249,40 @@ def _added_lines(path: str) -> list[tuple[int, str]]:
         else:
             current_line += 1
     return added
+
+
+def _file_text_at_head(path: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "show", f"HEAD:{path}"],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout
+
+
+def _broad_exception_count(text: str) -> int:
+    return sum(1 for line in text.splitlines() if BROAD_EXCEPTION_RE.search(line))
+
+
+def _broad_exception_increase_allowed(path: str) -> bool:
+    baseline_path = BROAD_EXCEPTION_BASELINES.get(path)
+    if not baseline_path:
+        return False
+    current_path = REPO_ROOT / path
+    if not current_path.exists():
+        return False
+    current_count = _broad_exception_count(
+        current_path.read_text(encoding="utf-8", errors="replace")
+    )
+    baseline_count = _broad_exception_count(_file_text_at_head(baseline_path))
+    return baseline_count > 0 and current_count <= baseline_count
 
 
 def check_protected_edits() -> list[Issue]:
@@ -678,7 +719,11 @@ def check_garbage_collection() -> list[Issue]:
                         "new TODO/FIXME/HACK-style marker; move debt to docs/exec-plans/tech-debt-tracker.md or an active plan",
                     )
                 )
-            if _is_production_code(normalized) and BROAD_EXCEPTION_RE.search(line):
+            if (
+                _is_production_code(normalized)
+                and BROAD_EXCEPTION_RE.search(line)
+                and not _broad_exception_increase_allowed(normalized)
+            ):
                 issues.append(
                     Issue(
                         "garbage-collection",

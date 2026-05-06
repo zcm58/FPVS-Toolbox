@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 import config
-from Main_App.PySide6_App.Backend.processing_controller import prepare_batch_files
+from Main_App.processing.processing_controller import prepare_batch_files
 from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
     normalize_preprocessing_settings,

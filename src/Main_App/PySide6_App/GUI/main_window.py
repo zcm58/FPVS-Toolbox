@@ -38,7 +38,7 @@ logger.addHandler(logging.NullHandler())
 from Main_App.Shared.processing_mixin import ProcessingMixin
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.projects import Project
-from Main_App.PySide6_App.Backend.processing_controller import (
+from Main_App.processing.processing_controller import (
     _animate_progress_to,
 )
 from Main_App.projects.project_manager import select_projects_root

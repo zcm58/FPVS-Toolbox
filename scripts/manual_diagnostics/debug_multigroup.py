@@ -40,7 +40,7 @@ def main() -> None:
     project_root = parse_args()
 
     from Main_App.projects.project import Project
-    from Main_App.PySide6_App.Backend.processing_controller import discover_raw_files
+    from Main_App.processing.processing_controller import discover_raw_files
 
     print("=== Multigroup Debug ===")
     print(f"REPO_ROOT   : {REPO_ROOT}")

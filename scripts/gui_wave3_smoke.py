@@ -74,7 +74,7 @@ def install_gui_only_stubs() -> None:
         ProcessingMixin=ProcessingMixin,
     )
     install_stub_module(
-        "Main_App.PySide6_App.Backend.processing_controller",
+        "Main_App.processing.processing_controller",
         _animate_progress_to=lambda *args, **kwargs: None,
         prepare_batch_files=lambda project: [],
     )

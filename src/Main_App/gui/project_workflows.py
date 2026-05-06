@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
-from Main_App.PySide6_App.Backend.processing_controller import prepare_batch_files
+from Main_App.processing.processing_controller import prepare_batch_files
 from Main_App.gui.op_guard import OpGuard
 from Main_App.projects.project_manager import (
     edit_project_settings as _edit_project_settings,

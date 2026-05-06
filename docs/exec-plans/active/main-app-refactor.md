@@ -149,7 +149,7 @@ Latest processing entry-point retirement slice:
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Passed: `git diff --check` with line-ending warnings only.
-- Next candidate: move `src/Main_App/PySide6_App/Backend/processing_controller.py` to `Main_App.processing.processing_controller` with focused processing and worker checks.
+- Next candidate completed later: move `src/Main_App/PySide6_App/Backend/processing_controller.py` to `Main_App.processing.processing_controller` with focused processing and worker checks.
 
 Latest slice verification:
 
@@ -529,4 +529,24 @@ Final Legacy_App retirement slice:
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `git diff --check` with line-ending warnings only.
-- Next refactor direction: continue folder retirement by moving remaining `PySide6_App` implementation owners, starting with `processing_controller.py`.
+- Next refactor direction: continue folder retirement by moving remaining `PySide6_App` implementation owners after processing-controller ownership.
+
+Latest PySide6_App processing-controller slice:
+
+- Moved `src/Main_App/PySide6_App/Backend/processing_controller.py` to `src/Main_App/processing/processing_controller.py`.
+- Replaced the old PySide6 backend module with a temporary compatibility wrapper.
+- Updated active Main Window, GUI input/project workflow helpers, manual diagnostics, and smoke script imports to use `Main_App.processing.processing_controller`.
+- Kept `Main_App.processing.__init__` light; callers import processing-controller helpers from the explicit module path.
+- Added a narrow garbage-collection audit baseline so the moved controller keeps its inherited broad exception count from the old path but fails if new broad handlers are added.
+- Behavior-preservation rule: no raw-file discovery behavior, participant metadata update behavior, preprocessing route, BDF loading, worker routing, project I/O, post-processing, exports, or GUI workflow changed.
+- Passed: `python -m py_compile scripts\agent_audit.py src\Main_App\processing\processing_controller.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\processing\__init__.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\gui\processing_inputs.py src\Main_App\gui\project_workflows.py scripts\manual_diagnostics\debug_multigroup.py scripts\gui_wave3_smoke.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_worker_integration.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_process_runner_epoch_contract.py tests\test_postprocess_worker_excel_payload.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py tests\test_project_settings_roundtrip.py -q`
+- Passed: `git grep -n "PySide6_App.Backend.processing_controller\|Main_App.PySide6_App.Backend import processing_controller" -- src tests scripts` found no active imports.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python scripts\agent_audit.py --check garbage-collection`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `git diff --check` with line-ending warnings only.
+- Next refactor direction: move runtime diagnostics implementations into `Main_App.diagnostics` with compatibility wrappers and diagnostics tests.

@@ -12,8 +12,8 @@ This plan governs package ownership and file moves only. The existing `docs/exec
 - Scope: behavior-preserving old-folder deletion gates and remaining PySide6_App package ownership moves.
 - Canonical import surfaces now exist for `Main_App.gui`, `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, and `Main_App.diagnostics`.
 - `Legacy_App` has been deleted from tracked Main App source.
-- `PySide6_App` still owns many implementation modules, but reusable widgets and theme helpers have moved to canonical GUI ownership.
-- Next work is resuming PySide6_App implementation moves, starting with processing-controller ownership.
+- `PySide6_App` still owns many implementation modules, but reusable widgets, theme helpers, project helpers, and processing-controller ownership have moved to canonical packages.
+- Next work is continuing PySide6_App implementation moves after processing-controller ownership; the next low-risk candidate is runtime diagnostics ownership.
 
 ## Target Layout
 
@@ -36,7 +36,7 @@ Canonical packages should become implementation owners, not only forwarding wrap
 - `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, `Main_App.diagnostics`, and `Main_App.gui` are present.
 - Several canonical modules still wrap or delegate to old implementation paths under `PySide6_App`.
 - `Legacy_App` has no tracked Main App source files and must not be recreated.
-- Active imports still remain for backend processing/project modules and GUI implementation wrappers.
+- Active imports still remain for backend preprocessing, worker, diagnostics, and GUI implementation wrappers.
 
 ## Classification Categories
 
@@ -106,7 +106,7 @@ The first slice under this plan is documentation-only and now complete:
 | `Backend/loader.py` | Compatibility wrapper | Delete after all imports use `Main_App.io.load_utils` | loader warning/suppression tests |
 | `Backend/preprocess.py` | Active implementation; high-risk pipeline code | Move to `Main_App.processing.preprocess` only with contract tests proving identical behavior | preprocessing audit/FIF/process-runner tests |
 | `Backend/preprocessing_settings.py` | Compatibility wrapper | Delete after stale callers migrate to `Main_App.projects.preprocessing_settings` | preprocessing settings and persistence tests |
-| `Backend/processing.py`, `Backend/processing_controller.py` | Active processing orchestration | Move to `Main_App.processing` | main-window processing, process-runner, worker integration tests |
+| `Backend/processing.py`, `Backend/processing_controller.py` | Compatibility wrappers | Moved to `Main_App.processing`; old backend files remain as wrappers | main-window processing, process-runner, worker integration tests |
 | `Backend/project_metadata.py`, `config/projects_root.py` | Compatibility wrappers | Delete after stale callers migrate to `Main_App.projects.project_metadata` and `Main_App.projects.projects_root` | project enumeration, project settings, project paths tests |
 | `Backend/project.py`, `Backend/project_manager.py` | Compatibility wrappers | Delete after stale callers migrate to `Main_App.projects.project` and `Main_App.projects.project_manager` | project settings, project scan, project paths tests |
 | `adapters/post_export_adapter.py` | Compatibility wrapper | Delete after stale callers migrate to `Main_App.exports.post_export_adapter` | post-export adapter and worker Excel payload tests |
@@ -122,7 +122,7 @@ The first slice under this plan is documentation-only and now complete:
 ## Current Import Findings
 
 - `Legacy_App` imports in active source are removed; remaining direct references should be docs, audits, or historical plan notes only.
-- `PySide6_App` still owns many active implementations. Current top-level packages such as `Main_App.gui`, `Main_App.projects`, `Main_App.workers`, `Main_App.processing`, and `Main_App.diagnostics` often delegate into `PySide6_App`.
+- `PySide6_App` still owns many active implementations. Current top-level packages such as `Main_App.gui`, `Main_App.workers`, and `Main_App.diagnostics` often delegate into `PySide6_App`; `Main_App.projects` and processing-controller ownership have moved to canonical packages.
 - Tool packages, tests, and active source now import reusable widgets/theme helpers from `Main_App.gui.widgets` and `Main_App.gui.theme`. The old `PySide6_App` widget/theme paths are temporary wrappers only.
 
 ## Verification
@@ -147,11 +147,11 @@ For future movement slices, also run the focused tests for the touched domain an
 1. Move reusable GUI widgets and theme helpers into `Main_App.gui.widgets` and `Main_App.gui.theme`. Status: complete.
 2. Move GUI/runtime utilities such as `op_guard` and path helpers to canonical GUI or shared homes. Status: complete.
 3. Move post-export adapter implementation to `Main_App.exports`. Status: complete.
-4. Move backend processing and project implementations behind the existing canonical packages. Status: active; project implementations and `Backend/processing.py` are complete, `processing_controller.py` remains.
+4. Move backend processing and project implementations behind the existing canonical packages. Status: complete for project implementations, `Backend/processing.py`, and `Backend/processing_controller.py`.
 5. Delete stale `Legacy_App` GUI/debug compatibility after grep and focused tests prove no active imports remain. Status: complete.
 6. Delete `Legacy_App` wrappers after grep and focused tests prove no active imports remain. Status: complete.
 7. Delete inactive `Legacy_App/eeg_preprocessing.py` only after preprocessing ownership and contract checks pass. Status: complete.
-8. Resume PySide6_App implementation moves, starting with `processing_controller.py`. Status: next.
+8. Resume PySide6_App implementation moves after `processing_controller.py`. Status: active; diagnostics ownership is next.
 9. Delete `PySide6_App` package markers after all implementation ownership has moved.
 
 Latest executable slice:
@@ -267,6 +267,26 @@ Final Legacy_App retirement slice:
 - Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
 - Passed: `git diff --check` with line-ending warnings only.
 - Next executable slice: resume `PySide6_App` retirement by moving `processing_controller.py` behind `Main_App.processing` with wrappers and focused processing tests.
+
+Latest executable slice:
+
+- Moved `src/Main_App/PySide6_App/Backend/processing_controller.py` to `src/Main_App/processing/processing_controller.py`.
+- Replaced the old PySide6 backend module with a temporary compatibility wrapper.
+- Updated active Main Window, GUI input/project workflow helpers, manual diagnostics, and smoke script imports to use `Main_App.processing.processing_controller`.
+- Kept `Main_App.processing.__init__` light; callers import processing-controller helpers from the explicit module path.
+- Added a narrow garbage-collection audit baseline so the moved controller keeps its inherited broad exception count from the old path but fails if new broad handlers are added.
+- Behavior-preservation rule: no raw-file discovery behavior, participant metadata update behavior, preprocessing route, BDF loading, worker routing, project I/O, post-processing, exports, or GUI workflow changed.
+- Passed: `python -m py_compile scripts\agent_audit.py src\Main_App\processing\processing_controller.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\processing\__init__.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\gui\processing_inputs.py src\Main_App\gui\project_workflows.py scripts\manual_diagnostics\debug_multigroup.py scripts\gui_wave3_smoke.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_worker_integration.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_process_runner_epoch_contract.py tests\test_postprocess_worker_excel_payload.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_single_file_process_mode.py tests\test_project_settings_roundtrip.py -q`
+- Passed: `git grep -n "PySide6_App.Backend.processing_controller\|Main_App.PySide6_App.Backend import processing_controller" -- src tests scripts` found no active imports.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python scripts\agent_audit.py --check garbage-collection`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `git diff --check` with line-ending warnings only.
+- Next executable slice: move runtime diagnostics implementations (`PySide6_App/diagnostics/event_time_lock_report.py` and `PySide6_App/utils/audit.py`) into `Main_App.diagnostics` with compatibility wrappers and diagnostics tests.
 
 Latest Legacy_App wrapper deletion slice:
 
