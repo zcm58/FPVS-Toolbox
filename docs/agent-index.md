@@ -36,10 +36,19 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 - Active refactor plans live in `docs/exec-plans/active/`.
 - Future plans live in `docs/exec-plans/future/`; read them only when scoping or starting the matching effort.
+- Known debt that is not yet active work lives in `docs/exec-plans/tech-debt-tracker.md`.
 - Read `docs/exec-plans/active/main-app-refactor.md` before non-trivial `Main_App` refactors.
 - Read `docs/exec-plans/active/main-app-folder-retirement.md` before touching `Legacy_App`, `PySide6_App`, or Main App package ownership.
 - Keep active plans current with phase status, touched areas, doc updates, verification commands, and decisions.
 - Move finished plans to `docs/exec-plans/completed/` when the tracked work is complete.
+
+## Knowledge Base
+
+- `docs/README.md` is the docs directory map.
+- `docs/design-docs/` contains durable design beliefs.
+- `docs/product-specs/` contains durable user-facing behavior specs.
+- `docs/references/` contains external or copied reference material for agents.
+- `docs/generated/` contains generated reference artifacts and should not be edited by hand.
 
 ## Test Selection
 

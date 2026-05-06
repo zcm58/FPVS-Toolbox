@@ -16,11 +16,27 @@ ACTIVE_SOURCE_LOCALIZATION = "src/Tools/SourceLocalization"
 AGENT_INDEX = REPO_ROOT / "docs" / "agent-index.md"
 ARCHITECTURE_MAP = REPO_ROOT / "ARCHITECTURE.md"
 EXEC_PLANS_README = REPO_ROOT / "docs" / "exec-plans" / "README.md"
+TECH_DEBT_TRACKER = REPO_ROOT / "docs" / "exec-plans" / "tech-debt-tracker.md"
 MAIN_APP_REFACTOR_PLAN = REPO_ROOT / "docs" / "exec-plans" / "active" / "main-app-refactor.md"
 SKILL_SCRIPT_PATHS = (
     ".agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py",
     ".agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py",
     ".agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py",
+)
+KNOWLEDGE_BASE_PATHS = (
+    "docs/README.md",
+    "docs/design-docs/index.md",
+    "docs/design-docs/core-beliefs.md",
+    "docs/product-specs/index.md",
+    "docs/references/index.md",
+    "docs/generated/README.md",
+    "docs/DESIGN.md",
+    "docs/FRONTEND.md",
+    "docs/PLANS.md",
+    "docs/PRODUCT_SENSE.md",
+    "docs/QUALITY_SCORE.md",
+    "docs/RELIABILITY.md",
+    "docs/SECURITY.md",
 )
 
 QACTION_BAD_IMPORT_RE = re.compile(r"^\s*from\s+PySide6\.(?:QtWidgets|QtCore)\s+import\s+.*\bQAction\b")
@@ -302,6 +318,7 @@ def check_agent_harness() -> list[Issue]:
             )
     for plan_path, message in (
         (EXEC_PLANS_README, "missing execution-plan directory README"),
+        (TECH_DEBT_TRACKER, "missing technical debt tracker"),
         (MAIN_APP_REFACTOR_PLAN, "missing active Main_App refactor plan"),
     ):
         if not plan_path.exists():
@@ -311,6 +328,16 @@ def check_agent_harness() -> list[Issue]:
                     _repo_path(plan_path),
                     None,
                     message,
+                )
+            )
+    for required_path in KNOWLEDGE_BASE_PATHS:
+        if not (REPO_ROOT / required_path).exists():
+            issues.append(
+                Issue(
+                    "agent-harness",
+                    required_path,
+                    None,
+                    "missing structured docs knowledge-base path",
                 )
             )
     return issues

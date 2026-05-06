@@ -21,6 +21,10 @@ Durable refactor and feature plans live under [docs/exec-plans](docs/exec-plans/
 
 Structural refactors must update this file, the relevant focused architecture page, or the nearest scoped `AGENTS.md` in the same PR when they change ownership, module boundaries, workflows, or verification expectations. If no architecture or agent doc changes are needed, record that in the PR handoff or active execution plan.
 
+## Knowledge Base
+
+The repo knowledge base lives in [docs](docs/) and is indexed by [docs/README.md](docs/README.md). Keep root agent guidance compact and move durable details into focused docs such as `docs/design-docs/`, `docs/product-specs/`, `docs/references/`, `docs/quality/`, and `docs/exec-plans/`.
+
 ## Application Shape
 
 FPVS Toolbox is a Windows-oriented desktop application built around PySide6 GUI entry points, processing backends, and analysis tools under `src/`.

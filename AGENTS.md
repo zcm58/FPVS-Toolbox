@@ -56,8 +56,10 @@ Use the script output to decide what to read next. If a script passes, do not sc
 ## Useful Docs
 
 - Architecture map: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Docs knowledge-base map: [docs/README.md](docs/README.md)
 - Agent command index: [docs/agent-index.md](docs/agent-index.md)
 - Active execution plans: [docs/exec-plans/active/](docs/exec-plans/active/)
+- Technical debt tracker: [docs/exec-plans/tech-debt-tracker.md](docs/exec-plans/tech-debt-tracker.md)
 - Main App target layout: [docs/architecture/main-app-target-layout.md](docs/architecture/main-app-target-layout.md)
 - Module map: [docs/architecture/module-map.md](docs/architecture/module-map.md)
 - Protected paths: [docs/architecture/protected-paths.txt](docs/architecture/protected-paths.txt)

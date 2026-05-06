@@ -31,12 +31,25 @@ plugins:
       lang: en
 
 not_in_nav: |
+  /README.md
+  /DESIGN.md
+  /FRONTEND.md
+  /PLANS.md
+  /PRODUCT_SENSE.md
+  /QUALITY_SCORE.md
+  /RELIABILITY.md
+  /SECURITY.md
   /development.md
   /legacy-quarantine-audit.md
   /agent-index.md
   /agent-prompts/*
   /architecture/*
+  /design-docs/*
+  /exec-plans/*
+  /generated/*
+  /product-specs/*
   /quality/*
+  /references/*
   /reviews/*
 
 validation:
