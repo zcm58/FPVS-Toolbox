@@ -36,12 +36,10 @@ functional packages listed above.
 
 Already has current-app replacement or bridge:
 
-- `settings_manager.py`: current shared implementation exists at `src/Main_App/Shared/settings_manager.py`; keep compatibility imports stable while remaining callers are migrated.
+- `settings_manager.py`: current shared implementation exists at `src/Main_App/Shared/settings_manager.py`; no active runtime callers should import the legacy path.
 - `eeg_preprocessing.py`: current preprocessing import surface exists at `src/Main_App/processing/preprocess.py` and delegates to the PySide6 backend implementation; active runtime and tests no longer import the legacy module. Keep the legacy file untouched until a later deletion or wrapper slice is explicitly scoped.
 - `post_process.py`: current shared implementation exists at `src/Main_App/Shared/post_process.py`; legacy module remains as a temporary compatibility wrapper.
 - `post_process_excel.py`: current shared implementation exists at `src/Main_App/Shared/post_process_excel.py`; legacy module remains as a temporary compatibility wrapper.
-- `debug_utils.py`: no longer imported by `MainWindow`; retained for logging/settings compatibility without Tk messagebox imports.
-- `file_selection.py`: no longer inherited by `MainWindow`; retained for stale compatibility and now uses PySide6 dialogs.
 - `processing_utils.py`: current shared implementation exists at `src/Main_App/Shared/processing_mixin.py`; legacy module remains as a temporary compatibility wrapper.
 - `load_utils.py`: current import surface exists at `src/Main_App/io/load_utils.py` and delegates to `src/Main_App/Shared/load_utils.py`; legacy module remains as a temporary compatibility wrapper.
 
@@ -55,6 +53,7 @@ Compatibility wrappers:
 
 Recent migration slices:
 
+- Legacy debug/file-selection cleanup removed `src/Main_App/Legacy_App/debug_utils.py`, `src/Main_App/Legacy_App/file_selection.py`, stale top-level lazy exports for missing/quarantined Legacy GUI modules, and the GUI smoke stub for `Main_App.Legacy_App.debug_utils`.
 - Event-map GUI row behavior was extracted from `src/Main_App/PySide6_App/GUI/main_window.py` into `src/Main_App/PySide6_App/GUI/event_map.py`.
 - eLORETA/Source Localization was removed from active runtime because it has no working GUI access path and is not part of the current app.
 - Tkinter/CustomTkinter runtime code was removed from active Main App paths; user dialogs now route through PySide6-safe helpers.
@@ -98,5 +97,5 @@ Removed from active runtime after the Main App refactor slice:
 
 ## Note
 
-- `Main_App.__init__` still defines a proxy for `SettingsWindow`, but `src/Main_App/Legacy_App/settings_window.py` does not exist.
-- `Main_App.__init__` keeps fail-fast compatibility exports for quarantined `ValidationMixin` and `preprocess_raw`.
+- `Main_App.__init__` no longer defines lazy exports for missing/quarantined Legacy GUI modules.
+- `Main_App.__init__` still keeps fail-fast `preprocess_raw` compatibility while active preprocessing uses `Main_App.processing.preprocess`.

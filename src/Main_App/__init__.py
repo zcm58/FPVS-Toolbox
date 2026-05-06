@@ -1,15 +1,11 @@
-"""Top-level package for the FPVS Toolbox (PySide6-first, no Legacy on import).
-
-This module exposes PySide6-safe utilities and lazy wrappers for Legacy UI so
-that launching the PySide6 app never imports Main_App/Legacy_App/**.
-"""
+"""Top-level package for the FPVS Toolbox."""
 
 from __future__ import annotations
 
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from Main_App.Shared.settings_paths import app_logs_dir
 
@@ -95,51 +91,10 @@ __all__ = [
     "Project",
 ]
 
-# -------------------------------------------------
-# Lazy wrappers for Legacy modules (CTk UI, etc.)
-# These DO NOT import Legacy on module import.
-# They only import when called explicitly.
-# -------------------------------------------------
-
-def _lazy_import(module: str, name: Optional[str] = None) -> Any:  # pragma: no cover
-    mod = __import__(f"{__name__}.Legacy_App.{module}", fromlist=[name] if name else [])
-    return getattr(mod, name) if name else mod
-
 def SettingsManager(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     from Main_App.Shared.settings_manager import SettingsManager as _SharedSettingsManager
 
     return _SharedSettingsManager(*args, **kwargs)
-
-def SettingsWindow(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    return _lazy_import("settings_window", "SettingsWindow")(*args, **kwargs)
-
-def RelevantPublicationsWindow(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    return _lazy_import("relevant_publications_window", "RelevantPublicationsWindow")(*args, **kwargs)
-
-def AppMenuBar(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    return _lazy_import("menu_bar", "AppMenuBar")(*args, **kwargs)
-
-def SetupPanelManager(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    return _lazy_import("ui_setup_panels", "SetupPanelManager")(*args, **kwargs)
-
-def EventMapManager(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-    return _lazy_import("ui_event_map_manager", "EventMapManager")(*args, **kwargs)
-
-class EventMapMixin:  # pragma: no cover
-    def __init_subclass__(cls, **kw: Any) -> None:
-        raise RuntimeError("Legacy mixin not available at import; import explicitly from Legacy_App.event_map_utils")
-
-class FileSelectionMixin:  # pragma: no cover
-    def __init_subclass__(cls, **kw: Any) -> None:
-        raise RuntimeError("Legacy mixin not available at import; import explicitly from Legacy_App.file_selection")
-
-class EventDetectionMixin:  # pragma: no cover
-    def __init_subclass__(cls, **kw: Any) -> None:
-        raise RuntimeError("Legacy mixin not available at import; import explicitly from Legacy_App.event_detection")
-
-class ValidationMixin:  # pragma: no cover
-    def __init_subclass__(cls, **kw: Any) -> None:
-        raise RuntimeError("Legacy ValidationMixin has been quarantined; use the PySide6 validation path.")
 
 def ProcessingMixin(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
     from Main_App.Shared.processing_mixin import ProcessingMixin as _SharedProcessingMixin
@@ -166,18 +121,9 @@ def post_process(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover
 
     return _shared_post_process(*args, **kwargs)
 
-# Maintain legacy names in __all__ for external imports, but keep them lazy.
+# Maintain active compatibility names in __all__ while Legacy_App is retired.
 __all__ += [
     "SettingsManager",
-    "SettingsWindow",
-    "RelevantPublicationsWindow",
-    "AppMenuBar",
-    "SetupPanelManager",
-    "EventMapManager",
-    "EventMapMixin",
-    "FileSelectionMixin",
-    "EventDetectionMixin",
-    "ValidationMixin",
     "ProcessingMixin",
     "load_eeg_file",
     "perform_preprocessing",

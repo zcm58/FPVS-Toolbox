@@ -8,12 +8,12 @@ This plan governs package ownership and file moves only. The existing `docs/exec
 
 ## Current Status
 
-- Phase: canonical import surfaces exist; implementation-owner retirement is active.
-- Scope: behavior-preserving package ownership moves and old-folder deletion gates.
+- Phase: Legacy_App retirement is the active focus before further PySide6_App implementation moves.
+- Scope: behavior-preserving Legacy_App deletion gates, followed by remaining PySide6_App package ownership moves.
 - Canonical import surfaces now exist for `Main_App.gui`, `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, and `Main_App.diagnostics`.
-- `Legacy_App` is mostly compatibility wrappers or inactive legacy code.
+- `Legacy_App` is mostly compatibility wrappers or inactive legacy code; finish deleting this boundary before resuming PySide6_App retirement.
 - `PySide6_App` still owns many implementation modules, but reusable widgets and theme helpers have moved to canonical GUI ownership.
-- Next work is moving implementations into purpose-based packages and deleting wrappers only after import and test gates pass.
+- Next work is deleting Legacy_App stale compatibility, then wrappers, then inactive high-risk preprocessing code only after import and test gates pass.
 
 ## Target Layout
 
@@ -87,10 +87,10 @@ The first slice under this plan is documentation-only and now complete:
 | Files | Classification | Destination or disposition | Required checks before move/delete |
 | --- | --- | --- | --- |
 | `AGENTS.md`, `__init__.py` | Scoped guidance/package marker | Delete when `Legacy_App` is empty; carry any still-relevant guidance into top-level docs first | `python scripts/agent_audit.py`; grep for `Main_App.Legacy_App` |
-| `debug_utils.py` | Developer/runtime logging helper with stale script reference | Move only if still needed to `Main_App.diagnostics.debug_utils`; otherwise delete after script cleanup | compile affected scripts; `git grep -n "debug_utils" -- src tests scripts` |
+| `debug_utils.py` | Deleted stale developer/runtime logging helper | Deleted after script cleanup; no active callers remain | compile affected scripts; `git grep -n "debug_utils" -- src tests scripts` |
 | `eeg_preprocessing.py` | Replaced legacy code; high-risk inactive pipeline implementation | Delete only after active preprocessing owner remains `Main_App.processing.preprocess` and no imports remain | preprocessing contract tests; `git grep -n "Legacy_App.eeg_preprocessing" -- src tests scripts` |
 | `fft_crop_utils.py` | Compatibility wrapper | Delete after all callers use `Main_App.Shared.fft_crop_utils` or a future `Main_App.exports` owner | FFT crop tests; post-processing/export tests |
-| `file_selection.py` | Replaced legacy GUI mixin | Delete after grep confirms no active callers | GUI smoke tests; `git grep -n "FileSelectionMixin\\|file_selection" -- src tests scripts` |
+| `file_selection.py` | Deleted replaced legacy GUI mixin | Deleted after grep confirmed no active callers | GUI smoke tests; `git grep -n "FileSelectionMixin\\|file_selection" -- src tests scripts` |
 | `load_utils.py` | Compatibility wrapper | Delete after all callers use `Main_App.io.load_utils` | loader tests; process-runner tests |
 | `post_process.py` | Compatibility wrapper | Move final ownership toward `Main_App.exports`; delete wrapper after callers migrate | post-processing/export tests; workbook tests |
 | `post_process_excel.py` | Compatibility wrapper | Move final ownership toward `Main_App.exports`; delete wrapper after callers migrate | FFT-neighbor workbook tests; Excel payload tests |
@@ -147,10 +147,12 @@ For future movement slices, also run the focused tests for the touched domain an
 1. Move reusable GUI widgets and theme helpers into `Main_App.gui.widgets` and `Main_App.gui.theme`. Status: complete.
 2. Move GUI/runtime utilities such as `op_guard` and path helpers to canonical GUI or shared homes. Status: complete.
 3. Move post-export adapter implementation to `Main_App.exports`. Status: complete.
-4. Move backend processing and project implementations behind the existing canonical packages. Status: active; project implementations and `Backend/processing.py` are complete, `processing_controller.py` remains.
-5. Move remaining GUI implementation modules, including `main_window.py`, after wrapper dependencies are thin.
+4. Move backend processing and project implementations behind the existing canonical packages. Status: paused while Legacy_App retirement is finalized; project implementations and `Backend/processing.py` are complete, `processing_controller.py` remains.
+5. Delete stale `Legacy_App` GUI/debug compatibility after grep and focused tests prove no active imports remain. Status: active.
 6. Delete `Legacy_App` wrappers after grep and focused tests prove no active imports remain.
-7. Delete `PySide6_App` package markers after all implementation ownership has moved.
+7. Delete inactive `Legacy_App/eeg_preprocessing.py` only after preprocessing ownership and contract checks pass.
+8. Resume PySide6_App implementation moves, starting with `processing_controller.py`.
+9. Delete `PySide6_App` package markers after all implementation ownership has moved.
 
 Latest executable slice:
 
@@ -212,6 +214,23 @@ Latest executable slice:
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Passed: `git diff --check` with line-ending warnings only.
 
-Next executable slice:
+Current Legacy_App executable slice:
 
-- Move `src/Main_App/PySide6_App/Backend/processing_controller.py` to `Main_App.processing.processing_controller` in a focused slice with main-window processing and worker tests. Do not move `preprocess.py` until preprocessing behavior coverage is explicitly reviewed again.
+- Remove stale top-level lazy exports for missing/quarantined Legacy GUI modules from `src/Main_App/__init__.py`.
+- Remove the obsolete GUI smoke stub for `Main_App.Legacy_App.debug_utils`.
+- Delete `src/Main_App/Legacy_App/debug_utils.py` and `src/Main_App/Legacy_App/file_selection.py` after grep confirms no active callers.
+- Behavior-preservation rule: no preprocessing, BDF loading, worker routing, processing order, project I/O, post-processing, exports, or active GUI workflows may change.
+- Status: complete.
+- Passed: `python -m py_compile src\Main_App\__init__.py src\Main_App\PySide6_App\GUI\main_window.py scripts\gui_wave3_smoke.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_startup_imports_no_customtkinter.py tests\test_main_window_layout_smoke.py tests\test_main_window_processing.py -q`
+- Passed: `git grep -n "Main_App.Legacy_App.debug_utils\|Main_App.Legacy_App.file_selection\|from Main_App.Legacy_App import debug_utils\|from Main_App.Legacy_App import file_selection" -- src tests scripts` found no matches.
+- Passed: `git grep -n "SettingsWindow\|RelevantPublicationsWindow\|AppMenuBar\|SetupPanelManager\|EventMapManager\|EventMapMixin\|FileSelectionMixin\|EventDetectionMixin\|ValidationMixin\|_lazy_import" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with line-ending warnings only.
+- Skipped: `python scripts\gui_wave3_smoke.py`; after the stale debug stub was removed, this developer smoke script hung and was intentionally not used as a blocker for this Legacy_App cleanup slice.
+
+Next executable slice after this Legacy cleanup:
+
+- Delete remaining Legacy_App wrappers in grouped slices with domain tests: settings, loader/processing mixin, FFT/post-processing exports. Delete `eeg_preprocessing.py` last after preprocessing ownership checks.

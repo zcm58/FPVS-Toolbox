@@ -10,7 +10,7 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
 - Scope: behavior-preserving Main App organization.
 - Behavior changes: eLORETA/Source Localization has been removed from active runtime; FPVS preprocessing, post-processing, FFT/SNR outputs, project paths, and exports remain behavior-preserving.
 - `Legacy_App` is a temporary migration boundary, not a permanent architecture. Targeted edits are allowed for active refactors only when they preserve the processing pipeline, processing order, data formats, and exports.
-- Folder retirement has a dedicated active plan: `docs/exec-plans/active/main-app-folder-retirement.md`.
+- Folder retirement has a dedicated active plan: `docs/exec-plans/active/main-app-folder-retirement.md`. That plan is currently prioritizing `Legacy_App` retirement before further `PySide6_App` moves.
 
 ## PR Contract
 

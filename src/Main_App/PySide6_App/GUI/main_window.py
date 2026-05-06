@@ -142,7 +142,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     Notes
     -----
-    * We **do not** inherit the legacy ValidationMixin anymore.
+    * We **do not** inherit the old validation mixin anymore.
       ProcessingMixin expects ``_validate_inputs()``; we provide a
       modern implementation that collects inputs from the current
       Project + GUI and sets ``self.validated_params``.
@@ -418,7 +418,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
             t.stop()
             t.deleteLater()
 
-    # The ProcessingMixin looks for this. We replace legacy ValidationMixin.
+    # The ProcessingMixin looks for this; validation now lives in processing_inputs.
     def _validate_inputs(self) -> bool:  # called inside ProcessingMixin.start_processing
         return processing_inputs.validate_inputs(self)
 

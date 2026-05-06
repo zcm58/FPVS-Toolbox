@@ -8,7 +8,6 @@ import sys
 import tempfile
 from pathlib import Path
 from types import ModuleType
-from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
@@ -75,16 +74,18 @@ def install_gui_only_stubs() -> None:
         ProcessingMixin=ProcessingMixin,
     )
     install_stub_module(
-        "Main_App.Legacy_App.debug_utils",
-        messagebox=SimpleNamespace(),
-    )
-    install_stub_module(
         "Main_App.PySide6_App.Backend.processing_controller",
         _animate_progress_to=lambda *args, **kwargs: None,
         prepare_batch_files=lambda project: [],
     )
     install_stub_module(
         "Main_App.gui.update_manager",
+        cleanup_old_executable=lambda: None,
+        check_for_updates_on_launch=lambda *args, **kwargs: None,
+        check_for_updates_async=lambda *args, **kwargs: None,
+    )
+    install_stub_module(
+        "Main_App.PySide6_App.GUI.update_manager",
         cleanup_old_executable=lambda: None,
         check_for_updates_on_launch=lambda *args, **kwargs: None,
         check_for_updates_async=lambda *args, **kwargs: None,
