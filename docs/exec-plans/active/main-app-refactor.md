@@ -118,6 +118,24 @@ Latest project helper retirement slice:
 - Passed: `git grep -n "PySide6_App.Backend.preprocessing_settings\|PySide6_App.Backend.project_metadata\|PySide6_App.config.projects_root\|Main_App.PySide6_App.Backend import preprocessing_settings\|Main_App.PySide6_App.Backend import project_metadata\|Main_App.PySide6_App.config import projects_root" -- src tests scripts` found no matches.
 - Next candidate: move `project.py` and then `project_manager.py` behind `Main_App.projects`, with wrappers and project I/O checks.
 
+Latest project model/manager retirement slice:
+
+- Refactor completed: project model and project manager workflow implementations now live in `src/Main_App/projects/project.py` and `src/Main_App/projects/project_manager.py`.
+- Temporary wrappers remain in `src/Main_App/PySide6_App/Backend/project.py` and `src/Main_App/PySide6_App/Backend/project_manager.py`.
+- Active source and tests use canonical `Main_App.projects` imports for the project model and project-manager workflows.
+- Behavior-preservation rule: no project JSON schema, manifest write rules, relative path behavior, project-root selection, project scanning, project creation/opening dialogs, preprocessing settings behavior, BDF loading, processing, workers, post-processing, or exports changed.
+- Production logging cleanup: two legacy project warning `print` calls became structured warnings after the module moved into active ownership.
+- Passed: `python -m py_compile src\Main_App\projects\project.py src\Main_App\projects\project_manager.py src\Main_App\PySide6_App\Backend\project.py src\Main_App\PySide6_App\Backend\project_manager.py src\Main_App\projects\__init__.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\settings_panel.py src\Main_App\gui\project_workflows.py tests\test_project_scan_job.py tests\test_project_bandpass_warning.py tests\test_project_legacy_bandpass_migration.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_project_settings_roundtrip.py tests\test_project_results_layout.py tests\test_project_enumeration_io.py tests\test_project_scan_job.py tests\test_open_existing_project_dialog.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_preprocessing_settings.py tests\test_preproc_persistence.py tests\test_project_bandpass_warning.py tests\test_project_legacy_bandpass_migration.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_worker_integration.py tests\test_plot_generator_multigroup_smoke.py tests\test_stats_multigroup_smoke.py tests\test_stats_project_paths.py -q`
+- Passed: `git grep -n "PySide6_App.Backend.project\|PySide6_App.Backend.project_manager\|Main_App.PySide6_App.Backend import project\|Main_App.PySide6_App.Backend import project_manager" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `git diff --check` with line-ending warnings only.
+- Next candidate: move remaining backend processing coordination modules in small slices, starting with `Backend/processing.py` before `processing_controller.py`.
+
 Latest slice verification:
 
 - Passed: `python -m py_compile src\Main_App\PySide6_App\GUI\main_window.py src\Main_App\PySide6_App\GUI\event_map.py`

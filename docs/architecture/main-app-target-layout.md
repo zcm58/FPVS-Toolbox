@@ -44,10 +44,9 @@ delegates to the existing PySide6 worker and Performance process-runner
 implementations while worker/threading tests protect behavior.
 
 `src/Main_App/projects/` is now the canonical Main App project import surface.
-It owns project metadata scanning, projects-root helpers, and preprocessing
-settings normalization. Project model and project manager implementations still
-delegate while project I/O tests protect behavior during the package-layout
-migration.
+It owns the project model, project manager workflows, project metadata scanning,
+projects-root helpers, and preprocessing settings normalization while project
+I/O tests protect behavior during the package-layout migration.
 
 `src/Main_App/gui/` is now the canonical Main App GUI import surface. It
 owns project workflow orchestration, processing run start/stop/finalization

@@ -108,7 +108,7 @@ The first slice under this plan is documentation-only and now complete:
 | `Backend/preprocessing_settings.py` | Compatibility wrapper | Delete after stale callers migrate to `Main_App.projects.preprocessing_settings` | preprocessing settings and persistence tests |
 | `Backend/processing.py`, `Backend/processing_controller.py` | Active processing orchestration | Move to `Main_App.processing` | main-window processing, process-runner, worker integration tests |
 | `Backend/project_metadata.py`, `config/projects_root.py` | Compatibility wrappers | Delete after stale callers migrate to `Main_App.projects.project_metadata` and `Main_App.projects.projects_root` | project enumeration, project settings, project paths tests |
-| `Backend/project.py`, `Backend/project_manager.py` | Active project implementation | Move to `Main_App.projects` | project settings, project scan, project paths tests |
+| `Backend/project.py`, `Backend/project_manager.py` | Compatibility wrappers | Delete after stale callers migrate to `Main_App.projects.project` and `Main_App.projects.project_manager` | project settings, project scan, project paths tests |
 | `adapters/post_export_adapter.py` | Compatibility wrapper | Delete after stale callers migrate to `Main_App.exports.post_export_adapter` | post-export adapter and worker Excel payload tests |
 | `diagnostics/event_time_lock_report.py`, `utils/audit.py` | Active runtime diagnostics | Move to `Main_App.diagnostics` | event-time lock and audit field/json tests |
 | `utils/op_guard.py`, `utils/paths.py` | Compatibility wrappers | Delete after stale callers migrate to `Main_App.gui.op_guard` and `Main_App.Shared.paths` | GUI smoke, settings/status, tool smoke tests |
@@ -188,6 +188,15 @@ Latest project helper slice:
 - Passed compile, preprocessing settings, project persistence, project enumeration, project scan, project open-dialog, main-window processing, worker integration, Plot Generator project, and Stats project-path checks.
 - Passed grep for old active project-helper imports.
 
-Next executable slice:
+Latest executable slice:
 
 - Move `src/Main_App/PySide6_App/Backend/project.py` and then `project_manager.py` behind `Main_App.projects`, keeping wrappers and project I/O checks.
+- Replaced the old PySide6 backend modules with temporary compatibility wrappers.
+- Updated the remaining direct project-manager test import to use `Main_App.projects`.
+- Converted moved project warning `print` calls to structured logging to preserve repo production-code audit rules.
+- Passed compile, project settings, project results layout, project enumeration, project scan, open-project dialog, preprocessing settings, project bandpass migration, main-window processing, worker integration, Plot Generator multigroup, Stats multigroup, and Stats project-path checks.
+- Passed agent audit, project-path audit, legacy-boundary audit, old project import grep, and `git diff --check` with line-ending warnings only.
+
+Next executable slice:
+
+- Move remaining backend processing coordination modules in small slices. Prefer `Backend/processing.py` before `processing_controller.py`; do not move `preprocess.py` until preprocessing behavior coverage is explicitly reviewed again.

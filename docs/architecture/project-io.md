@@ -6,11 +6,9 @@ Primary paths:
 
 - `src/Main_App/projects/` is the canonical active import surface for project
   model, metadata, manager, projects-root, and preprocessing-settings behavior.
-  It owns metadata, projects-root, and preprocessing-settings helpers while
-  project model and manager modules still delegate during the package-layout
-  migration.
-- `src/Main_App/PySide6_App/Backend/project.py`
-- `src/Main_App/PySide6_App/Backend/project_manager.py`
+  It owns those implementations.
+- `src/Main_App/PySide6_App/Backend/project.py`: temporary compatibility wrapper.
+- `src/Main_App/PySide6_App/Backend/project_manager.py`: temporary compatibility wrapper.
 - `src/Main_App/PySide6_App/Backend/project_metadata.py`: temporary compatibility wrapper.
 - `src/Main_App/PySide6_App/config/projects_root.py`: temporary compatibility wrapper.
 - `src/Main_App/Shared/settings_paths.py`

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import Main_App.projects.project as project_module
@@ -11,7 +12,7 @@ def _write_manifest(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_legacy_bandpass_migration_writes_once(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_legacy_bandpass_migration_writes_once(monkeypatch, tmp_path: Path, caplog) -> None:
     project_root = tmp_path / "LegacyProject"
     project_root.mkdir()
     manifest_path = project_root / "project.json"
@@ -29,7 +30,8 @@ def test_legacy_bandpass_migration_writes_once(monkeypatch, tmp_path: Path, caps
 
     monkeypatch.setattr(project_module, "_write_manifest_if_changed", counting_write)
 
-    project = Project.load(project_root)
+    with caplog.at_level(logging.WARNING, logger=project_module.logger.name):
+        project = Project.load(project_root)
     assert project.preprocessing["low_pass"] == 50.0
     assert project.preprocessing["high_pass"] == 0.1
 
@@ -37,18 +39,23 @@ def test_legacy_bandpass_migration_writes_once(monkeypatch, tmp_path: Path, caps
     assert updated["preprocessing"]["low_pass"] == 50.0
     assert updated["preprocessing"]["high_pass"] == 0.1
 
-    output = capsys.readouterr().out
-    assert "Legacy preprocessing bandpass inverted" in output
-    assert str(manifest_path) in output
+    assert any(
+        "legacy_preprocessing_bandpass_inverted" in rec.message
+        and str(manifest_path) in getattr(rec, "manifest_path", "")
+        for rec in caplog.records
+    )
     assert len(calls) == 1
 
+    caplog.clear()
     Project.load(project_root)
-    output = capsys.readouterr().out
-    assert "Legacy preprocessing bandpass inverted" not in output
+    assert not any(
+        "legacy_preprocessing_bandpass_inverted" in rec.message
+        for rec in caplog.records
+    )
     assert len(calls) == 1
 
 
-def test_canonical_manifest_does_not_warn(tmp_path: Path, capsys) -> None:
+def test_canonical_manifest_does_not_warn(tmp_path: Path, caplog) -> None:
     project_root = tmp_path / "CanonicalProject"
     project_root.mkdir()
     manifest_path = project_root / "project.json"
@@ -57,9 +64,12 @@ def test_canonical_manifest_does_not_warn(tmp_path: Path, capsys) -> None:
         {"preprocessing": {"low_pass": 50.0, "high_pass": 0.1}},
     )
 
-    project = Project.load(project_root)
+    with caplog.at_level(logging.WARNING, logger=project_module.logger.name):
+        project = Project.load(project_root)
     assert project.preprocessing["low_pass"] == 50.0
     assert project.preprocessing["high_pass"] == 0.1
 
-    output = capsys.readouterr().out
-    assert "Legacy preprocessing bandpass inverted" not in output
+    assert not any(
+        "legacy_preprocessing_bandpass_inverted" in rec.message
+        for rec in caplog.records
+    )

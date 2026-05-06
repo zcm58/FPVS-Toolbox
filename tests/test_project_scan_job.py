@@ -16,7 +16,7 @@ if not _module_available("PySide6"):
 
 from PySide6.QtCore import QCoreApplication  # noqa: E402
 
-from Main_App.PySide6_App.Backend import project_manager  # noqa: E402
+from Main_App.projects import project_manager  # noqa: E402
 
 
 def _write_project(root: Path, name: str) -> None:
