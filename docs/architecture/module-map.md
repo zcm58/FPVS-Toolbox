@@ -32,23 +32,12 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/workers/`: canonical import surface for Qt workers, process runner, and multiprocessing environment helpers. It delegates to existing PySide6 worker and Performance implementations during the package-layout migration.
 - `src/Main_App/diagnostics/`: canonical import surface for runtime toolbox diagnostics such as preprocessing audit summaries and event-time lock reports. It observes/reports app state and must not own repo-evaluation checks.
 - `src/Main_App/Shared/`: shared current-app settings, user-message helpers, BDF loader, processing mixin, FFT crop helpers, and post-processing export behavior.
-- `src/Main_App/Legacy_App/`: temporary migration boundary now being actively retired. Targeted deletion or wrapper cleanup is allowed only when processing order, data formats, and exports remain unchanged.
+- `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it.
 
-Current `Legacy_App` runtime couplings to account for before deleting modules:
+Current `Legacy_App` runtime couplings:
 
-- No active runtime imports should point at `Main_App.Legacy_App`. Remaining tracked files are compatibility wrappers or inactive replaced code.
+- No active runtime imports should point at `Main_App.Legacy_App`; no tracked files should remain under `src/Main_App/Legacy_App/`.
 
-Inactive legacy code:
-
-- `eeg_preprocessing.py`: active runtime callers now use `src/Main_App/processing/preprocess.py`; keep the legacy file untouched until a later deletion or wrapper slice is explicitly scoped.
-
-Compatibility wrappers:
-
-- `fft_crop_utils.py`: thin wrapper for `Main_App.Shared.fft_crop_utils`; current runtime imports should use the shared module.
-- `post_process.py`: thin wrapper for `Main_App.Shared.post_process`; current runtime imports should use the shared module.
-- `post_process_excel.py`: thin wrapper for `Main_App.Shared.post_process_excel`; current runtime imports should use the shared module.
-- `processing_utils.py`: thin wrapper for `Main_App.Shared.processing_mixin`; current runtime imports should use the shared module.
-- `load_utils.py`: thin wrapper for `Main_App.Shared.load_utils`; current runtime imports should use `Main_App.io.load_utils`.
 - `src/Main_App/PySide6_App/Backend/loader.py`: thin wrapper for `Main_App.Shared.load_utils`; current runtime imports should use `Main_App.io.load_utils`.
 
 ## Tools

@@ -258,7 +258,7 @@ exported Excel files.
   - Averages the summed values across electrodes in the ROI.
   - Ignores ROI electrodes that are missing from the Excel file.
 
-(Implementation verified in: `src/Main_App/Legacy_App/settings_manager.py`,
+(Implementation verified in: `src/Main_App/Shared/settings_manager.py`,
 `src/Tools/Stats/analysis/dv_policies.py`.)
 
 If you perform ROI aggregation outside the Stats tool (e.g., in a custom script),

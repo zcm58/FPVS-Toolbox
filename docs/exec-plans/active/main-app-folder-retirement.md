@@ -8,12 +8,12 @@ This plan governs package ownership and file moves only. The existing `docs/exec
 
 ## Current Status
 
-- Phase: Legacy_App retirement is the active focus before further PySide6_App implementation moves.
-- Scope: behavior-preserving Legacy_App deletion gates, followed by remaining PySide6_App package ownership moves.
+- Phase: Legacy_App retirement complete; PySide6_App implementation-owner retirement can resume.
+- Scope: behavior-preserving old-folder deletion gates and remaining PySide6_App package ownership moves.
 - Canonical import surfaces now exist for `Main_App.gui`, `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, and `Main_App.diagnostics`.
-- `Legacy_App` is mostly compatibility wrappers or inactive legacy code; finish deleting this boundary before resuming PySide6_App retirement.
+- `Legacy_App` has been deleted from tracked Main App source.
 - `PySide6_App` still owns many implementation modules, but reusable widgets and theme helpers have moved to canonical GUI ownership.
-- Next work is deleting Legacy_App stale compatibility, then wrappers, then inactive high-risk preprocessing code only after import and test gates pass.
+- Next work is resuming PySide6_App implementation moves, starting with processing-controller ownership.
 
 ## Target Layout
 
@@ -35,7 +35,7 @@ Canonical packages should become implementation owners, not only forwarding wrap
 
 - `Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.workers`, `Main_App.diagnostics`, and `Main_App.gui` are present.
 - Several canonical modules still wrap or delegate to old implementation paths under `PySide6_App`.
-- `Legacy_App` references in active code are already mostly wrappers, inactive legacy modules, docs, or smoke-test stubs.
+- `Legacy_App` has no tracked Main App source files and must not be recreated.
 - Active imports still remain for backend processing/project modules and GUI implementation wrappers.
 
 ## Classification Categories
@@ -86,16 +86,16 @@ The first slice under this plan is documentation-only and now complete:
 
 | Files | Classification | Destination or disposition | Required checks before move/delete |
 | --- | --- | --- | --- |
-| `AGENTS.md`, `__init__.py` | Scoped guidance/package marker | Delete when `Legacy_App` is empty; carry any still-relevant guidance into top-level docs first | `python scripts/agent_audit.py`; grep for `Main_App.Legacy_App` |
+| `AGENTS.md`, `__init__.py` | Deleted scoped guidance/package marker | Deleted after relevant guidance moved to top-level and focused docs | `python scripts/agent_audit.py`; grep for `Main_App.Legacy_App` |
 | `debug_utils.py` | Deleted stale developer/runtime logging helper | Deleted after script cleanup; no active callers remain | compile affected scripts; `git grep -n "debug_utils" -- src tests scripts` |
-| `eeg_preprocessing.py` | Replaced legacy code; high-risk inactive pipeline implementation | Delete only after active preprocessing owner remains `Main_App.processing.preprocess` and no imports remain | preprocessing contract tests; `git grep -n "Legacy_App.eeg_preprocessing" -- src tests scripts` |
-| `fft_crop_utils.py` | Compatibility wrapper | Delete after all callers use `Main_App.Shared.fft_crop_utils` or a future `Main_App.exports` owner | FFT crop tests; post-processing/export tests |
+| `eeg_preprocessing.py` | Deleted replaced legacy code | Deleted after active preprocessing owner remained `Main_App.processing.preprocess` and no imports remained | preprocessing contract tests; `git grep -n "Legacy_App.eeg_preprocessing" -- src tests scripts` |
+| `fft_crop_utils.py` | Deleted compatibility wrapper | Deleted after all callers used `Main_App.Shared.fft_crop_utils` | FFT crop tests; post-processing/export tests |
 | `file_selection.py` | Deleted replaced legacy GUI mixin | Deleted after grep confirmed no active callers | GUI smoke tests; `git grep -n "FileSelectionMixin\\|file_selection" -- src tests scripts` |
-| `load_utils.py` | Compatibility wrapper | Delete after all callers use `Main_App.io.load_utils` | loader tests; process-runner tests |
-| `post_process.py` | Compatibility wrapper | Move final ownership toward `Main_App.exports`; delete wrapper after callers migrate | post-processing/export tests; workbook tests |
-| `post_process_excel.py` | Compatibility wrapper | Move final ownership toward `Main_App.exports`; delete wrapper after callers migrate | FFT-neighbor workbook tests; Excel payload tests |
-| `processing_utils.py` | Compatibility wrapper | Delete after all callers use `Main_App.Shared.processing_mixin` or a future purpose-based owner | main-window processing tests; single-file mode tests |
-| `settings_manager.py` | Replaced legacy settings implementation | Delete after confirming `Main_App.Shared.settings_manager` is canonical and no legacy imports remain | project settings roundtrip; settings/status tests |
+| `load_utils.py` | Deleted compatibility wrapper | Deleted after all callers used `Main_App.io.load_utils` | loader tests; process-runner tests |
+| `post_process.py` | Deleted compatibility wrapper | Deleted after all callers used `Main_App.Shared.post_process` | post-processing/export tests; workbook tests |
+| `post_process_excel.py` | Deleted compatibility wrapper | Deleted after all callers used `Main_App.Shared.post_process_excel` | FFT-neighbor workbook tests; Excel payload tests |
+| `processing_utils.py` | Deleted compatibility wrapper | Deleted after all callers used `Main_App.Shared.processing_mixin` | main-window processing tests; single-file mode tests |
+| `settings_manager.py` | Deleted replaced legacy settings implementation | Deleted after confirming `Main_App.Shared.settings_manager` is canonical and no legacy imports remain | project settings roundtrip; settings/status tests |
 
 ## PySide6_App Inventory
 
@@ -121,7 +121,7 @@ The first slice under this plan is documentation-only and now complete:
 
 ## Current Import Findings
 
-- `Legacy_App` imports in active source are already mostly removed; remaining direct references are documentation strings, compatibility wrappers, and a GUI smoke script stub.
+- `Legacy_App` imports in active source are removed; remaining direct references should be docs, audits, or historical plan notes only.
 - `PySide6_App` still owns many active implementations. Current top-level packages such as `Main_App.gui`, `Main_App.projects`, `Main_App.workers`, `Main_App.processing`, and `Main_App.diagnostics` often delegate into `PySide6_App`.
 - Tool packages, tests, and active source now import reusable widgets/theme helpers from `Main_App.gui.widgets` and `Main_App.gui.theme`. The old `PySide6_App` widget/theme paths are temporary wrappers only.
 
@@ -138,7 +138,7 @@ For future movement slices, also run the focused tests for the touched domain an
 ## Decisions
 
 - Retiring the old folder names is a package-ownership refactor, not a behavior rewrite.
-- `Legacy_App` is no longer a permanent protected black box; targeted edits or deletion are allowed only when documented and pipeline-preserving.
+- `Legacy_App` has been retired; do not recreate it.
 - `PySide6_App` is the current implementation source for many modules, but the package name should not remain the long-term architecture boundary.
 - `main_window.py` has already been appropriately downsized. It may move to a new package path as part of folder retirement, but it should not be the target of another internal refactor unless explicitly requested.
 
@@ -147,11 +147,11 @@ For future movement slices, also run the focused tests for the touched domain an
 1. Move reusable GUI widgets and theme helpers into `Main_App.gui.widgets` and `Main_App.gui.theme`. Status: complete.
 2. Move GUI/runtime utilities such as `op_guard` and path helpers to canonical GUI or shared homes. Status: complete.
 3. Move post-export adapter implementation to `Main_App.exports`. Status: complete.
-4. Move backend processing and project implementations behind the existing canonical packages. Status: paused while Legacy_App retirement is finalized; project implementations and `Backend/processing.py` are complete, `processing_controller.py` remains.
-5. Delete stale `Legacy_App` GUI/debug compatibility after grep and focused tests prove no active imports remain. Status: active.
-6. Delete `Legacy_App` wrappers after grep and focused tests prove no active imports remain.
-7. Delete inactive `Legacy_App/eeg_preprocessing.py` only after preprocessing ownership and contract checks pass.
-8. Resume PySide6_App implementation moves, starting with `processing_controller.py`.
+4. Move backend processing and project implementations behind the existing canonical packages. Status: active; project implementations and `Backend/processing.py` are complete, `processing_controller.py` remains.
+5. Delete stale `Legacy_App` GUI/debug compatibility after grep and focused tests prove no active imports remain. Status: complete.
+6. Delete `Legacy_App` wrappers after grep and focused tests prove no active imports remain. Status: complete.
+7. Delete inactive `Legacy_App/eeg_preprocessing.py` only after preprocessing ownership and contract checks pass. Status: complete.
+8. Resume PySide6_App implementation moves, starting with `processing_controller.py`. Status: next.
 9. Delete `PySide6_App` package markers after all implementation ownership has moved.
 
 Latest executable slice:
@@ -233,4 +233,52 @@ Current Legacy_App executable slice:
 
 Next executable slice after this Legacy cleanup:
 
-- Delete remaining Legacy_App wrappers in grouped slices with domain tests: settings, loader/processing mixin, FFT/post-processing exports. Delete `eeg_preprocessing.py` last after preprocessing ownership checks.
+- Delete inactive `Legacy_App/eeg_preprocessing.py` with preprocessing ownership checks, then remove `Legacy_App/AGENTS.md` and package markers if no files remain.
+
+Latest Legacy_App wrapper deletion slice:
+
+- Deleted `src/Main_App/Legacy_App/settings_manager.py`, `src/Main_App/Legacy_App/load_utils.py`, and `src/Main_App/Legacy_App/processing_utils.py`.
+- Updated shared owner docstrings and focused docs so `Main_App.Shared.settings_manager`, `Main_App.io.load_utils`, `Main_App.Shared.load_utils`, and `Main_App.Shared.processing_mixin` are the only documented active owners.
+- Behavior-preservation rule: no settings behavior, BDF loading behavior, preprocessing, processing order, worker routing, project I/O, post-processing, exports, or GUI workflows changed.
+- Passed: `python -m py_compile src\Main_App\Shared\settings_manager.py src\Main_App\Shared\load_utils.py src\Main_App\Shared\processing_mixin.py src\Main_App\io\load_utils.py src\Main_App\__init__.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_shared_load_utils.py tests\test_loader_warning_suppression.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_project_settings_roundtrip.py tests\test_settings_and_status.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_single_file_process_mode.py -q`
+- Passed: `git grep -n "Main_App.Legacy_App.settings_manager\|Main_App.Legacy_App.load_utils\|Main_App.Legacy_App.processing_utils\|from Main_App.Legacy_App import settings_manager\|from Main_App.Legacy_App import load_utils\|from Main_App.Legacy_App import processing_utils" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with line-ending warnings only.
+
+Final Legacy_App retirement slice:
+
+- Confirmed no active runtime, test, or script imports use `Main_App.Legacy_App.eeg_preprocessing` before deletion.
+- Deleted `src/Main_App/Legacy_App/eeg_preprocessing.py`, `src/Main_App/Legacy_App/AGENTS.md`, and `src/Main_App/Legacy_App/__init__.py`.
+- Added an agent-audit guard so recreated files under `src/Main_App/Legacy_App/**` fail the harness check.
+- Updated top-level agent, architecture, quality, and legacy-boundary docs to state that `Legacy_App` is retired, not an editable migration boundary.
+- Behavior-preservation rule: no preprocessing implementation, preprocessing math/order, BDF loading, worker routing, project I/O, post-processing, exports, or GUI workflows changed.
+- Passed: `python -m py_compile scripts\agent_audit.py src\Main_App\processing\preprocess.py src\Main_App\PySide6_App\Backend\preprocess.py src\Main_App\Shared\processing_mixin.py src\Main_App\Performance\process_runner.py src\Main_App\PySide6_App\Backend\processing_controller.py src\Main_App\__init__.py src\Main_App\Shared\post_process.py src\config.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_preproc_audit.py tests\test_fif_flag_audit.py tests\test_process_runner_epoch_contract.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_main_window_processing.py tests\test_single_file_process_mode.py -q`
+- Passed: `git grep -n "Main_App.Legacy_App.eeg_preprocessing\|from Main_App.Legacy_App import eeg_preprocessing\|Legacy_App.*perform_preprocessing\|eeg_preprocessing" -- src tests scripts` found no matches.
+- Passed: `git grep -n "from Main_App.Legacy_App\|import Main_App.Legacy_App" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with line-ending warnings only.
+- Next executable slice: resume `PySide6_App` retirement by moving `processing_controller.py` behind `Main_App.processing` with wrappers and focused processing tests.
+
+Latest Legacy_App wrapper deletion slice:
+
+- Deleted `src/Main_App/Legacy_App/fft_crop_utils.py`, `src/Main_App/Legacy_App/post_process.py`, and `src/Main_App/Legacy_App/post_process_excel.py`.
+- Updated FFT crop, post-processing export, module-map, and legacy quarantine docs so no `Legacy_App` compatibility wrappers are described as active.
+- Behavior-preservation rule: no FFT crop behavior, post-processing math, workbook generation, sheet names, columns, formatting, worker routing, project I/O, preprocessing, or exports changed.
+- Passed: `python -m py_compile src\Main_App\Shared\fft_crop_utils.py src\Main_App\Shared\post_process.py src\Main_App\Shared\post_process_excel.py src\Main_App\Performance\process_runner.py src\Main_App\exports\post_export_adapter.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_fft_crop_utils.py tests\test_fft_neighbors_sheet.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_post_export_adapter_no_fif.py tests\test_post_process_target_freqs.py tests\test_postprocess_worker_excel_payload.py -q`
+- Passed: `.venv\Scripts\python -m pytest tests\test_process_runner_epoch_contract.py tests\test_postprocess_worker_qt.py tests\test_main_window_excel_popup_logic.py -q`
+- Passed: `git grep -n "Main_App.Legacy_App.fft_crop_utils\|Main_App.Legacy_App.post_process\|Main_App.Legacy_App.post_process_excel\|from Main_App.Legacy_App import fft_crop_utils\|from Main_App.Legacy_App import post_process\|from Main_App.Legacy_App import post_process_excel" -- src tests scripts` found no matches.
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `git diff --check` with line-ending warnings only.

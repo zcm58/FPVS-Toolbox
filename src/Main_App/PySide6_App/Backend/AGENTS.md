@@ -14,7 +14,7 @@ Use script output to decide what to read next.
 active callers should import it through `Main_App.processing.preprocess`.
 Refactors may reorganize files only when they preserve the documented pipeline
 order and verification in `docs/architecture/preprocessing-contract.md`; do not
-route active runtime code through the legacy `eeg_preprocessing.py` module.
+add retired `Legacy_App` preprocessing paths.
 
 []: # 
 []: # The backend code should be modular and easy to read. 

@@ -89,5 +89,5 @@ FONT_BOLD = None
 FONT_HEADING = None
 
 def init_fonts() -> None:
-    """No-op in PySide6 build. Kept so Legacy_App imports succeed."""
+    """No-op in the PySide6 build; retained for historical import compatibility."""
     return None

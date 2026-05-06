@@ -9,7 +9,6 @@ Legend:
 
 ## Runtime-used (do not quarantine yet)
 
-- `src/Main_App/Legacy_App/settings_manager.py`
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`
 - `src/Tools/Stats/cli/between_groups_cli.py`
 - `src/Tools/Stats/common/blas_limits.py`
@@ -30,36 +29,35 @@ The old `src/Tools/Stats/Legacy/**` compatibility namespace has been removed.
 The moved statistical engines now live under the active `src/Tools/Stats/`
 functional packages listed above.
 
-## Main_App Legacy_App migration inventory (2026-05-05)
+## Main_App Legacy_App retirement inventory (2026-05-05)
 
-`src/Main_App/Legacy_App/**` is a temporary migration boundary, not a permanent architecture. Targeted edits are allowed for active refactors only when they preserve the processing pipeline, processing order, data formats, and exports.
+`src/Main_App/Legacy_App/**` has been retired. Do not recreate this directory; active behavior belongs in purpose-based `Main_App` packages.
 
 Already has current-app replacement or bridge:
 
-- `settings_manager.py`: current shared implementation exists at `src/Main_App/Shared/settings_manager.py`; no active runtime callers should import the legacy path.
-- `eeg_preprocessing.py`: current preprocessing import surface exists at `src/Main_App/processing/preprocess.py` and delegates to the PySide6 backend implementation; active runtime and tests no longer import the legacy module. Keep the legacy file untouched until a later deletion or wrapper slice is explicitly scoped.
-- `post_process.py`: current shared implementation exists at `src/Main_App/Shared/post_process.py`; legacy module remains as a temporary compatibility wrapper.
-- `post_process_excel.py`: current shared implementation exists at `src/Main_App/Shared/post_process_excel.py`; legacy module remains as a temporary compatibility wrapper.
-- `processing_utils.py`: current shared implementation exists at `src/Main_App/Shared/processing_mixin.py`; legacy module remains as a temporary compatibility wrapper.
-- `load_utils.py`: current import surface exists at `src/Main_App/io/load_utils.py` and delegates to `src/Main_App/Shared/load_utils.py`; legacy module remains as a temporary compatibility wrapper.
+- `settings_manager.py`: deleted after current shared implementation ownership moved to `src/Main_App/Shared/settings_manager.py`.
+- `eeg_preprocessing.py`: deleted after confirming active preprocessing imports use `src/Main_App/processing/preprocess.py`, which delegates to the PySide6 backend implementation.
+- `post_process.py`: deleted after current shared implementation ownership moved to `src/Main_App/Shared/post_process.py`.
+- `post_process_excel.py`: deleted after current shared implementation ownership moved to `src/Main_App/Shared/post_process_excel.py`.
+- `processing_utils.py`: deleted after current shared implementation ownership moved to `src/Main_App/Shared/processing_mixin.py`.
+- `load_utils.py`: deleted after active import surface moved to `src/Main_App/io/load_utils.py` and implementation ownership moved to `src/Main_App/Shared/load_utils.py`.
 
 Compatibility wrappers:
 
-- `fft_crop_utils.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/fft_crop_utils.py`; current runtime callers import the shared owner.
-- `post_process.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/post_process.py`; current runtime callers import the shared owner.
-- `post_process_excel.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/post_process_excel.py`; current runtime callers import the shared owner.
-- `processing_utils.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/processing_mixin.py`; current runtime callers import the shared owner.
-- `load_utils.py`: retained only as a temporary import-compatible wrapper around `src/Main_App/Shared/load_utils.py`; current runtime callers import `Main_App.io.load_utils`.
+- No `src/Main_App/Legacy_App/**` compatibility wrappers remain.
 
 Recent migration slices:
 
 - Legacy debug/file-selection cleanup removed `src/Main_App/Legacy_App/debug_utils.py`, `src/Main_App/Legacy_App/file_selection.py`, stale top-level lazy exports for missing/quarantined Legacy GUI modules, and the GUI smoke stub for `Main_App.Legacy_App.debug_utils`.
+- Legacy settings/loader/mixin wrapper cleanup removed `src/Main_App/Legacy_App/settings_manager.py`, `src/Main_App/Legacy_App/load_utils.py`, and `src/Main_App/Legacy_App/processing_utils.py` after grep confirmed no active callers.
+- Legacy FFT/post-processing wrapper cleanup removed `src/Main_App/Legacy_App/fft_crop_utils.py`, `src/Main_App/Legacy_App/post_process.py`, and `src/Main_App/Legacy_App/post_process_excel.py` after grep confirmed no active callers.
+- Final Legacy_App cleanup removed inactive `src/Main_App/Legacy_App/eeg_preprocessing.py`, `src/Main_App/Legacy_App/AGENTS.md`, and `src/Main_App/Legacy_App/__init__.py` after preprocessing ownership checks confirmed no active callers.
 - Event-map GUI row behavior was extracted from `src/Main_App/PySide6_App/GUI/main_window.py` into `src/Main_App/PySide6_App/GUI/event_map.py`.
 - eLORETA/Source Localization was removed from active runtime because it has no working GUI access path and is not part of the current app.
 - Tkinter/CustomTkinter runtime code was removed from active Main App paths; user dialogs now route through PySide6-safe helpers.
-- Processing mixin ownership moved to `src/Main_App/Shared/processing_mixin.py`; `src/Main_App/Legacy_App/processing_utils.py` is now a compatibility wrapper.
-- BDF loader import ownership moved to `src/Main_App/io/load_utils.py`; implementation still lives in `src/Main_App/Shared/load_utils.py`, and `src/Main_App/Legacy_App/load_utils.py` plus `src/Main_App/PySide6_App/Backend/loader.py` remain compatibility wrappers.
-- Preprocessing ownership for active runtime was locked to `src/Main_App/processing/preprocess.py`; GUI processing routes through the PySide6 process runner and no active runtime/test imports point at `src/Main_App/Legacy_App/eeg_preprocessing.py`.
+- Processing mixin ownership moved to `src/Main_App/Shared/processing_mixin.py`; the legacy wrapper has been deleted.
+- BDF loader import ownership moved to `src/Main_App/io/load_utils.py`; implementation still lives in `src/Main_App/Shared/load_utils.py`, and `src/Main_App/PySide6_App/Backend/loader.py` remains a compatibility wrapper.
+- Preprocessing ownership for active runtime was locked to `src/Main_App/processing/preprocess.py`; GUI processing routes through the PySide6 process runner and no active runtime/test imports point at retired Legacy_App preprocessing paths.
 
 ## Newly quarantined after follow-up cleanup
 
@@ -79,7 +77,7 @@ Removed from active runtime after the Main App refactor slice:
 
 - `src/Main_App/Legacy_App/eloreta_launcher.py`
 - `src/Main_App/Shared/source_localization_optional.py`
-- Source Localization/eLORETA branches in `src/Main_App/Legacy_App/processing_utils.py`
+- Source Localization/eLORETA branches in the deleted `src/Main_App/Legacy_App/processing_utils.py`
 
 ## Quarantine candidates (no runtime/test import references found)
 

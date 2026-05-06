@@ -17,8 +17,8 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 
 ## Non-Negotiables
 
-- `src/Main_App/Legacy_App/**` is an active migration boundary. Targeted edits are allowed for refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
-- Active EEG preprocessing imports should use `src/Main_App/processing/preprocess.py`; it delegates to the current PySide6 backend implementation while the Main App layout is migrated. Do not route active runtime code through `src/Main_App/Legacy_App/eeg_preprocessing.py`.
+- `src/Main_App/Legacy_App/**` has been retired. Do not recreate it; use purpose-based `Main_App` packages instead.
+- Active EEG preprocessing imports should use `src/Main_App/processing/preprocess.py`; it delegates to the current PySide6 backend implementation while the Main App layout is migrated.
 - Active BDF loading imports should use `src/Main_App/io/load_utils.py`; it delegates to the current shared implementation while the Main App layout is migrated.
 - Active Main App GUI imports should use `src/Main_App/gui/`; focused workflow helpers such as project workflows, processing run orchestration, and post-export completion live there while remaining GUI modules delegate to the current PySide6 implementation during the layout migration.
 - Active worker/process-runner imports should use `src/Main_App/workers/`; it delegates to the current PySide6 worker and Performance implementations while the Main App layout is migrated.
@@ -39,7 +39,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 Repo-local skills live in `.agents/skills/`.
 
 - `pyside6-gui-cleanup`: PySide6 widgets, layouts, dialogs, actions, status UX, workers, and theme cleanup.
-- `legacy-boundary-review`: refactors near the `Legacy_App` migration boundary or legacy API boundaries.
+- `legacy-boundary-review`: refactors near retired legacy paths, removed-feature boundaries, or historical API boundaries.
 - `project-path-audit`: file dialogs, manifests, exports, imports, generated files, and project-root path discipline.
 - `pytest-qt-smoke`: pytest-qt smoke coverage for changed PySide6 widgets, signals, and non-blocking UI behavior.
 
@@ -90,7 +90,7 @@ If a gate cannot run locally, report the command, failure reason, and residual r
 
 ## Done Means
 
-- `Legacy_App` edits are targeted, documented, and preserve the processing pipeline exactly.
+- Retired `Legacy_App` paths are not recreated.
 - Source Localization/eLORETA remains removed from active runtime unless explicitly restored as a new feature.
 - PySide6-only GUI imports are preserved.
 - UI work remains non-blocking.

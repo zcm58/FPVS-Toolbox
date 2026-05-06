@@ -2,6 +2,7 @@
 # Globs use forward slashes and are repo-root relative.
 
 [protected]
+# Retired Main App legacy path. Do not recreate.
 src/Main_App/Legacy_App/**
 
 [dead-code]

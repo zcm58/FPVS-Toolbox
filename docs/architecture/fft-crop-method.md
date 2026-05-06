@@ -1,6 +1,6 @@
 # FFT Crop Method
 
-This page documents the current FFT crop method before ownership is moved out of `Legacy_App`. Refactors must preserve these decisions, warning strings, result fields, and caller behavior unless a future task explicitly changes the processing method.
+This page documents the current FFT crop method now owned by `Main_App.Shared.fft_crop_utils`. Refactors must preserve these decisions, warning strings, result fields, and caller behavior unless a future task explicitly changes the processing method.
 
 ## Purpose
 
@@ -75,4 +75,4 @@ Run-level warnings are exactly `empty_events`, `no_onsets`, or `non_integer_fs:{
 
 - Do not change `ODDBALL_FREQ`, `CropResult`, function signatures, fallback reasons, warning strings, result keys, or sample arithmetic.
 - Do not change processing order, epoch metadata fields, FFT crop diagnostics, output filenames, Excel sheets, or exported values.
-- Compatibility wrappers may remain temporarily under `Legacy_App`, but new runtime imports should prefer the current-app owner.
+- Legacy compatibility wrappers have been deleted; runtime imports should use the current-app owner.

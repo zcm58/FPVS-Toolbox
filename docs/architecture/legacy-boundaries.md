@@ -1,10 +1,13 @@
 # Legacy Boundaries
 
-Protected active legacy path:
+Retired Main App legacy path:
 
 - `src/Main_App/Legacy_App/**`
 
-This designation is temporary. The long-term simplification goal is to remove or rename the confusing `Legacy_App` boundary after runtime-used behavior has been migrated to clearer current-app modules, thin adapters, or shared services with equivalent coverage.
+The historical `Legacy_App` package has been retired. Do not recreate this
+directory; active Main App behavior belongs in purpose-based packages such as
+`Main_App.processing`, `Main_App.io`, `Main_App.projects`, `Main_App.exports`,
+`Main_App.workers`, `Main_App.diagnostics`, and `Main_App.gui`.
 
 Source Localization/eLORETA is removed from active runtime, not a protected black box:
 
@@ -13,9 +16,9 @@ Source Localization/eLORETA is removed from active runtime, not a protected blac
 
 Rules:
 
-- Targeted edits to `src/Main_App/Legacy_App/**` are allowed for active refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
-- Prefer thin adapters or caller-side normalization outside protected legacy folders.
-- When a feature already has a current-app replacement, prefer migrating callers away from `Legacy_App` over adding new compatibility paths.
+- Do not add files under `src/Main_App/Legacy_App/**`.
+- Prefer thin adapters or caller-side normalization in purpose-based Main App packages.
+- When old behavior already has a current-app replacement, use that replacement rather than adding compatibility paths.
 - Do not revive Source Localization/eLORETA imports, tests, settings, or UI behavior unless the user explicitly asks to restore that feature.
 - Keep compatibility exports in `src/Main_App/__init__.py` stable unless the task is specifically about imports.
 

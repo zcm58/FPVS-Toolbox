@@ -84,4 +84,4 @@ The target label is `1.2Hz`. Neighbor amplitudes are exported for +/-11 FFT bins
 - Do not change metric formulas, FFT bin selection, noise-window logic, sheet names, column names, filename/folder naming, channel ordering, logging semantics, or completion/error behavior.
 - Do not change workbook formatting, freeze panes, writer engine behavior, or the rule that omits `FFT and neighbors` when no neighbor rows exist.
 - Do not change the 55-on-bin metadata handling; see `docs/architecture/fft-crop-method.md`.
-- Compatibility wrappers may remain under `Legacy_App`, but new runtime callers should use the current shared owner.
+- Legacy compatibility wrappers have been deleted; runtime callers should use the current shared owner.

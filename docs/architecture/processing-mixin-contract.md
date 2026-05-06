@@ -43,5 +43,5 @@ Finalization preserves the existing success/error/cancel behavior, resets proces
 - Do not change load, preprocessing, event extraction, FFT crop, epoching, post-processing, or cleanup order.
 - Do not change generated files, sheet names, output paths, quality review file format, or FFT crop log format.
 - Do not reintroduce Tkinter, CustomTkinter, or CTkMessagebox; user messages must use `Main_App.Shared.user_messages`.
-- `src/Main_App/Legacy_App/processing_utils.py` may remain as a compatibility wrapper, but active callers should import `Main_App.Shared.processing_mixin`.
+- `src/Main_App/Legacy_App/processing_utils.py` has been deleted; active callers should import `Main_App.Shared.processing_mixin`.
 - Active runtime code must not import `Main_App.Legacy_App.eeg_preprocessing`; see `docs/architecture/preprocessing-contract.md`.

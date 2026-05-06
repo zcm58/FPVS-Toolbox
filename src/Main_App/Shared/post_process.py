@@ -172,7 +172,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     Calculates metrics (FFT, SNR, Z-score, BCA) and saves results to Excel.
     Handles single-file processing (FPVSApp) and per-participant averaged results (AdvancedAnalysis).
 
-    This is migration-boundary export code. Targeted refactor edits are allowed,
+    This is pipeline-sensitive export code. Targeted refactor edits are allowed,
     but must not change metric calculation, processing order, output formats,
     filenames, sheet names, or export behavior.
     """

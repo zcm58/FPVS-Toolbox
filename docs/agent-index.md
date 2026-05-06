@@ -39,7 +39,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - Future plans live in `docs/exec-plans/future/`; read them only when scoping or starting the matching effort.
 - Known debt that is not yet active work lives in `docs/exec-plans/tech-debt-tracker.md`.
 - Read `docs/exec-plans/active/main-app-refactor.md` before non-trivial `Main_App` refactors.
-- Read `docs/exec-plans/active/main-app-folder-retirement.md` before touching `Legacy_App`, `PySide6_App`, or Main App package ownership.
+- Read `docs/exec-plans/active/main-app-folder-retirement.md` before touching retired `Legacy_App` references, `PySide6_App`, or Main App package ownership.
 - Keep active plans current with phase status, touched areas, doc updates, verification commands, and decisions.
 - Move finished plans to `docs/exec-plans/completed/` when the tracked work is complete.
 

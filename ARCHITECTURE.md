@@ -41,7 +41,7 @@ Primary areas:
 - `src/Main_App/diagnostics/`: canonical Main App runtime diagnostics import surface. It delegates preprocessing audit helpers and event-time lock reporting to existing implementations while keeping repo-evaluation scripts outside runtime code.
 - `src/Main_App/Shared/`: current shared owners for cross-path behavior such as the canonical BDF loader, processing mixin, settings helpers, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
-- `src/Main_App/Legacy_App/`: temporary protected boundary for runtime-used legacy processing modules. Migrate callers toward clearer current-app modules or thin adapters before renaming or removing this designation.
+- `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it; active code belongs in purpose-based `Main_App` packages.
 - `src/Tools/`: standalone and integrated tools for preprocessing, plotting, ratios, statistics, image resizing, and detectability.
 - `src/quarantine/`: quarantined legacy code retained for reference or compatibility checks.
 - `tests/`: unit, integration, and pytest-qt smoke coverage.
@@ -69,7 +69,7 @@ Focused architecture pages:
 
 - GUI code should orchestrate widgets, signals, and user feedback; processing logic belongs in backend, worker, or tool modules.
 - Long-running EEG, plotting, export, and statistics work must run outside the UI thread.
-- Legacy modules should be consumed through existing public APIs or thin adapters outside protected folders while runtime-used behavior is migrated out of the `Legacy_App` designation.
+- Historical legacy behavior should be consumed through existing current-app APIs or thin adapters in purpose-based packages. Do not add new `Legacy_App` modules.
 - Project-aware workflows should resolve files through the active project root and preserve existing generated formats.
 - Source Localization/eLORETA has been removed from active runtime. Keep `src/Tools/SourceLocalization/**` empty of source files and do not add GUI, settings, tests, or quarantine-tree imports for it unless restoration is explicitly scoped as a new feature.
 
@@ -80,7 +80,7 @@ Use focused checks for the changed area first.
 - Skill-driven checks: run the matching `.agents/skills/*/scripts/*.py` wrapper before manual grep or broad document reading.
 - GUI wiring or layout changes: pytest-qt smoke test for the changed widget or a documented manual smoke path.
 - Processing or export changes: targeted unit tests around data format, processing order, and output paths.
-- Legacy-boundary work: confirm protected paths remain unchanged with `git diff --name-only`.
+- Retired-path work: confirm `src/Main_App/Legacy_App/**` is not recreated with `git diff --name-only` and `python scripts/agent_audit.py`.
 - Agent invariants: run `python scripts/agent_audit.py`.
 - Broad shared behavior: run `python -m pytest -q`, then lint/type checks where configured.
 

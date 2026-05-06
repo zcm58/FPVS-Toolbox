@@ -1,7 +1,6 @@
 """BDF-only EEG loader for the shared processing path.
 
-This module owns the loader behavior previously kept in
-``Main_App.Legacy_App.load_utils``. Keep load order, channel typing, memmap
+This module owns the loader behavior previously kept in legacy loaders. Keep load order, channel typing, memmap
 paths, montage behavior, and return semantics aligned with the BDF loader
 contract unless a future task explicitly changes the processing pipeline.
 """

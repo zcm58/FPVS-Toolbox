@@ -52,10 +52,12 @@ ACTIVE_SOURCE_LOCALIZATION_REF_RE = re.compile(
 )
 
 CURRENT_CODE_EXCLUDES = (
-    "src/Main_App/Legacy_App/",
     "src/Tools/Average_Preprocessing/Legacy/",
     "src/quarantine/",
     "src/Standalone_Scripts/",
+)
+RETIRED_PATH_PREFIXES = (
+    "src/Main_App/Legacy_App/",
 )
 
 PRODUCTION_EXCLUDES = CURRENT_CODE_EXCLUDES + (
@@ -264,7 +266,7 @@ def check_protected_edits() -> list[Issue]:
                     "protected",
                     normalized,
                     None,
-                    "Legacy_App migration-boundary path changed without plan/doc context; targeted edits must preserve the processing pipeline",
+                    "retired/protected legacy path changed without plan/doc context; boundary cleanup must preserve the processing pipeline",
                 )
             )
     return issues
@@ -356,6 +358,18 @@ def check_agent_harness() -> list[Issue]:
                     required_path,
                     None,
                     "missing structured docs knowledge-base path",
+                )
+            )
+    for path in _tracked_and_untracked_files():
+        normalized = _normalize(path)
+        absolute = REPO_ROOT / normalized
+        if absolute.exists() and normalized.startswith(RETIRED_PATH_PREFIXES):
+            issues.append(
+                Issue(
+                    "agent-harness",
+                    normalized,
+                    None,
+                    "retired Legacy_App path exists; use purpose-based Main_App packages instead",
                 )
             )
     return issues

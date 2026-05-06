@@ -20,11 +20,8 @@ from Main_App.processing.preprocess import perform_preprocessing
 
 Compatibility paths such as `Main_App.perform_preprocessing` and
 `Main_App.Shared.processing_mixin` may delegate to this import surface, but
-active runtime code must not import `Main_App.Legacy_App.eeg_preprocessing`.
-
-`src/Main_App/Legacy_App/eeg_preprocessing.py` remains on disk only as inactive
-legacy code until a later deletion or compatibility-wrapper slice is explicitly
-scoped.
+active runtime code must not import retired `Main_App.Legacy_App` preprocessing
+paths.
 
 ## Pipeline Order
 

@@ -2,7 +2,7 @@
 
 Use `$legacy-boundary-review`.
 
-Goal: keep runtime-used legacy behavior stable while migrating callers and small responsibilities toward clearer current-app modules.
+Goal: keep retired or historical legacy behavior from re-entering active runtime while preserving the processing pipeline during any boundary cleanup.
 
 Checks:
 
@@ -14,6 +14,6 @@ git diff --name-only
 
 Requirements:
 
-- Targeted edits to `src/Main_App/Legacy_App/**` are allowed for active refactors, but they must preserve the processing pipeline, processing order, data formats, and exports.
+- Do not recreate `src/Main_App/Legacy_App/**`; active behavior belongs in purpose-based `Main_App` packages.
+- If historical legacy behavior must be referenced, use existing current-app APIs or a focused adapter outside the retired path.
 - Do not revive Source Localization/eLORETA unless explicitly requested as a new restoration feature.
-- Prefer adapters or current-app modules when they avoid unnecessary edits to migration-boundary code.

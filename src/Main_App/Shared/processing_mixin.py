@@ -2,7 +2,6 @@
 """Mixin that drives the background processing workflow.
 
 This is the current-app owner for the compatibility processing path.
-`Main_App.Legacy_App.processing_utils` remains as a thin compatibility wrapper.
 
 They start worker threads, load each file, call preprocessing and
 post-processing routines and update progress so the GUI stays
