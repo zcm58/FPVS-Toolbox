@@ -31,6 +31,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | BDF loading behavior, memmap paths, EXG typing | `legacy-boundary-review` + `project-path-audit` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/architecture/eeg-loading-contract.md`; canonical import: `src/Main_App/io/load_utils.py` |
 | Project paths, dialogs, imports, exports, manifests | `project-path-audit` | `.agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` | `docs/architecture/project-io.md`; canonical import: `src/Main_App/projects/` |
 | GUI smoke coverage | `pytest-qt-smoke` | nearest focused pytest target | `docs/quality/test-selection.md` |
+| Entropy or garbage-collection cleanup | use repo audit first | `python scripts/agent_audit.py --check garbage-collection` | `docs/quality/garbage-collection.md`; `docs/exec-plans/tech-debt-tracker.md` |
 
 ## Execution Plans
 

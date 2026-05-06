@@ -65,6 +65,7 @@ Use the script output to decide what to read next. If a script passes, do not sc
 - Protected paths: [docs/architecture/protected-paths.txt](docs/architecture/protected-paths.txt)
 - Test selection: [docs/quality/test-selection.md](docs/quality/test-selection.md)
 - Verification gates: [docs/quality/verification-gates.md](docs/quality/verification-gates.md)
+- Garbage collection: [docs/quality/garbage-collection.md](docs/quality/garbage-collection.md)
 - GUI architecture: [docs/architecture/gui.md](docs/architecture/gui.md); canonical active import surface lives in `src/Main_App/gui/`.
 - Diagnostics: [docs/architecture/diagnostics.md](docs/architecture/diagnostics.md); canonical runtime import surface lives in `src/Main_App/diagnostics/`.
 - BDF loading contract: [docs/architecture/eeg-loading-contract.md](docs/architecture/eeg-loading-contract.md); canonical active import surface lives in `src/Main_App/io/load_utils.py`.

@@ -8,6 +8,7 @@ For a compact command map, use `docs/agent-index.md`.
 
 ```powershell
 python scripts/agent_audit.py
+python scripts/agent_audit.py --check garbage-collection
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
@@ -23,6 +24,7 @@ mypy src --strict
 - Legacy-boundary changes: run `python scripts/agent_audit.py --check protected` and confirm any `Legacy_App` edits are targeted, documented, and preserve the processing pipeline.
 - Source Localization/eLORETA changes: run `python scripts/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.
 - Processing pipeline changes: verify processing order, output filenames, sheets, and formats remain compatible.
+- Garbage collection: run `python scripts/agent_audit.py --check garbage-collection` to catch visible cache/temp artifacts, new inline debt markers, and broad production exception handlers.
 
 ## Reporting Failures
 

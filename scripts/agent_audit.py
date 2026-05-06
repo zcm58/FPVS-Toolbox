@@ -87,6 +87,24 @@ STALE_STATS_NAMING_RE = re.compile(
 STATS_REPORTING_ROOT = "src/Tools/Stats/reporting"
 STATS_REPORTING_MAX_MODULE_LINES = 600
 STATS_REPORTING_MAX_SYMBOL_LINES = 160
+GARBAGE_PATH_PATTERNS = (
+    "*/__pycache__/*",
+    "*.pyc",
+    "*.pyo",
+    ".pytest_cache/*",
+    ".mypy_cache/*",
+    ".ruff_cache/*",
+    ".codex-tmp/*",
+    ".codex-pytest-tmp/*",
+    ".tmp/*",
+    "codex_pytest_tmp/*",
+    "test_tmp/*",
+)
+GARBAGE_MARKER_RE = re.compile(
+    r"\b(?:TODO|FIXME|HACK|YOLO)\b|quick[- ]?fix|temporary workaround",
+    re.IGNORECASE,
+)
+BROAD_EXCEPTION_RE = re.compile(r"^\s*except\s+Exception\s*:\s*(?:pass\s*)?$")
 
 
 @dataclass(frozen=True)
@@ -615,8 +633,52 @@ def check_stats_reporting_legibility() -> list[Issue]:
     return issues
 
 
+def check_garbage_collection() -> list[Issue]:
+    issues: list[Issue] = []
+
+    for path in _tracked_and_untracked_files():
+        normalized = _normalize(path)
+        if _matches_any(normalized, list(GARBAGE_PATH_PATTERNS)):
+            issues.append(
+                Issue(
+                    "garbage-collection",
+                    normalized,
+                    None,
+                    "cache, build, or temporary artifact is visible to git; keep generated garbage ignored or remove it",
+                )
+            )
+
+    for path in _changed_files():
+        normalized = _normalize(path)
+        if normalized == "scripts/agent_audit.py":
+            continue
+        if not (_is_python(normalized) or Path(normalized).suffix in {".md", ".txt"}):
+            continue
+        for line_no, line in _added_lines(normalized):
+            if GARBAGE_MARKER_RE.search(line):
+                issues.append(
+                    Issue(
+                        "garbage-collection",
+                        normalized,
+                        line_no,
+                        "new TODO/FIXME/HACK-style marker; move debt to docs/exec-plans/tech-debt-tracker.md or an active plan",
+                    )
+                )
+            if _is_production_code(normalized) and BROAD_EXCEPTION_RE.search(line):
+                issues.append(
+                    Issue(
+                        "garbage-collection",
+                        normalized,
+                        line_no,
+                        "new broad exception handler; handle a specific exception or document why the boundary is intentionally broad",
+                    )
+                )
+    return issues
+
+
 CHECKS = {
     "agent-harness": check_agent_harness,
+    "garbage-collection": check_garbage_collection,
     "protected": check_protected_edits,
     "source-localization": check_source_localization_quarantine,
     "source-localization-refs": check_added_source_localization_refs,
