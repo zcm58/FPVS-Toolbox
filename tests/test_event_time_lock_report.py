@@ -105,7 +105,7 @@ def test_resample_integrity_flags_loss_for_too_narrow_pulses():
 def test_gui_entrypoint_applies_shared_theme(qapp, monkeypatch):
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication, QDialog
-    from Main_App.PySide6_App.utils import theme
+    from Main_App.gui import theme
 
     themed_apps = []
     monkeypatch.setattr(theme, "apply_fpvs_theme", lambda app: themed_apps.append(app))

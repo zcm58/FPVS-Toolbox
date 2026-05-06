@@ -550,3 +550,22 @@ Latest PySide6_App processing-controller slice:
 - Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
 - Passed: `git diff --check` with line-ending warnings only.
 - Next refactor direction: move runtime diagnostics implementations into `Main_App.diagnostics` with compatibility wrappers and diagnostics tests.
+
+Latest PySide6_App diagnostics slice:
+
+- Moved `src/Main_App/PySide6_App/utils/audit.py` to `src/Main_App/diagnostics/audit.py`.
+- Moved `src/Main_App/PySide6_App/diagnostics/event_time_lock_report.py` to `src/Main_App/diagnostics/event_time_lock_report.py`.
+- Replaced the old PySide6 diagnostics/utility modules with temporary compatibility wrappers.
+- Updated the event-time lock report direct-script path handling for its new canonical location.
+- Updated the GUI-entrypoint test to patch `Main_App.gui.theme`, matching the moved implementation.
+- Added narrow garbage-collection audit baselines so the moved diagnostics modules keep inherited broad exception counts from the old paths but fail if new broad handlers are added.
+- Behavior-preservation rule: no preprocessing audit payload shape, event extraction logic, epoch timing checks, report filenames, report contents, GUI workflow, preprocessing route, BDF loading, project I/O, post-processing, or exports changed.
+- Passed: `python -m py_compile src\Main_App\diagnostics\audit.py src\Main_App\diagnostics\event_time_lock_report.py src\Main_App\PySide6_App\utils\audit.py src\Main_App\PySide6_App\diagnostics\event_time_lock_report.py tests\test_event_time_lock_report.py tests\test_audit_fields.py tests\test_audit_json_toggle.py tests\test_audit_surface.py`
+- Passed: `.venv\Scripts\python -m pytest tests\test_event_time_lock_report.py tests\test_audit_fields.py tests\test_audit_json_toggle.py tests\test_audit_surface.py -q`
+- Passed: `git grep -n "PySide6_App.diagnostics\|PySide6_App.utils.audit\|Main_App.PySide6_App.utils import theme" -- src tests scripts` found no matches.
+- Passed: `python -m py_compile scripts\agent_audit.py src\Main_App\diagnostics\audit.py src\Main_App\diagnostics\event_time_lock_report.py src\Main_App\PySide6_App\utils\audit.py src\Main_App\PySide6_App\diagnostics\event_time_lock_report.py`
+- Passed: `python scripts\agent_audit.py`
+- Passed: `python scripts\agent_audit.py --check garbage-collection`
+- Passed: `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`
+- Passed: `python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py`
+- Next refactor direction: move remaining lower-risk GUI implementation modules from `PySide6_App/GUI` into `Main_App.gui`, one small group at a time, with wrappers and focused GUI smoke tests.

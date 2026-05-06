@@ -113,6 +113,12 @@ BROAD_EXCEPTION_BASELINES = {
     "src/Main_App/processing/processing_controller.py": (
         "src/Main_App/PySide6_App/Backend/processing_controller.py"
     ),
+    "src/Main_App/diagnostics/audit.py": (
+        "src/Main_App/PySide6_App/utils/audit.py"
+    ),
+    "src/Main_App/diagnostics/event_time_lock_report.py": (
+        "src/Main_App/PySide6_App/diagnostics/event_time_lock_report.py"
+    ),
 }
 
 

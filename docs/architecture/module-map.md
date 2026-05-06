@@ -22,15 +22,15 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/exports/`: canonical export adapter import surface. `post_export_adapter.py` bridges process/worker payloads into shared post-processing exports.
 - `src/Main_App/PySide6_App/adapters/`: temporary compatibility wrappers for adapter imports during package retirement.
 - `src/Main_App/PySide6_App/workers/`: Qt worker and multiprocessing bridge implementations. Active imports should prefer `Main_App.workers`.
-- `src/Main_App/PySide6_App/utils/`: compatibility helpers. Theme helpers are now owned by `Main_App.gui.theme`, the GUI operation guard is owned by `Main_App.gui.op_guard`, and bundled-resource path helpers are owned by `Main_App.Shared.paths`; active preprocessing audit imports should prefer `Main_App.diagnostics`.
+- `src/Main_App/PySide6_App/utils/`: compatibility helpers. Theme helpers are now owned by `Main_App.gui.theme`, the GUI operation guard is owned by `Main_App.gui.op_guard`, bundled-resource path helpers are owned by `Main_App.Shared.paths`, and preprocessing audit helpers are owned by `Main_App.diagnostics.audit`.
 - `src/Main_App/Shared/paths.py`: resource path helper for source and frozen bundles.
-- `src/Main_App/PySide6_App/diagnostics/`: existing event-time lock implementation. Active imports should prefer `Main_App.diagnostics`.
+- `src/Main_App/PySide6_App/diagnostics/`: temporary compatibility wrappers for `Main_App.diagnostics`.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support; imports shared FFT crop helpers.
 - `src/Main_App/processing/`: canonical import surface for active EEG preprocessing and processing entry-point ownership. `processing.py` owns the stable no-op `process_data` coordinator, `processing_controller.py` owns raw-file discovery, batch-file preparation, and the compatibility processing route, while preprocessing still delegates to the existing PySide6 backend implementation during the package-layout migration.
 - `src/Main_App/io/`: canonical import surface for active BDF loading. It delegates to the existing shared loader implementation during the package-layout migration.
 - `src/Main_App/projects/`: canonical owner for project model, project manager workflows, project metadata scanning, projects-root helpers, and preprocessing settings normalization.
 - `src/Main_App/workers/`: canonical import surface for Qt workers, process runner, and multiprocessing environment helpers. It delegates to existing PySide6 worker and Performance implementations during the package-layout migration.
-- `src/Main_App/diagnostics/`: canonical import surface for runtime toolbox diagnostics such as preprocessing audit summaries and event-time lock reports. It observes/reports app state and must not own repo-evaluation checks.
+- `src/Main_App/diagnostics/`: canonical owner for runtime toolbox diagnostics such as preprocessing audit summaries and event-time lock reports. It observes/reports app state and must not own repo-evaluation checks.
 - `src/Main_App/Shared/`: shared current-app settings, user-message helpers, BDF loader, processing mixin, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it.
 

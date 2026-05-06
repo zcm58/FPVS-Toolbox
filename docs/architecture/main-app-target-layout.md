@@ -57,9 +57,8 @@ remaining main-window, settings-panel, menu, sidebar, icon, style-token, and
 update-manager implementations while GUI smoke tests protect behavior.
 
 `src/Main_App/diagnostics/` is now the canonical Main App runtime diagnostics
-import surface. It delegates preprocessing audit helpers and event-time lock
-reporting to existing implementations while repo-evaluation scripts remain in
-`scripts/` and `.agents/skills/`.
+owner. It contains preprocessing audit helpers and event-time lock reporting
+while repo-evaluation scripts remain in `scripts/` and `.agents/skills/`.
 
 `src/Main_App/exports/` is now the canonical Main App post-export adapter import
 surface. It owns the adapter that turns process/worker payloads into shared
