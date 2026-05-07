@@ -54,5 +54,6 @@ def test_plot_contains_baseline_line(tmp_path, monkeypatch):
     assert fig is not None
     ax = fig.axes[0]
     assert any(
-        getattr(line, "get_ydata", lambda: [])() == [1.0, 1.0] for line in ax.lines
+        list(getattr(line, "get_ydata", lambda: [])()) == [1.0, 1.0]
+        for line in ax.lines
     )

@@ -4,9 +4,9 @@
 
 Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, architecture docs, and mechanical checks synchronized with each change. The historical `Legacy_App` and `PySide6_App` package designations have both been retired; active Main App code now belongs in purpose-based packages.
 
-## Current Status
+## Final Status
 
-- Phase: refactor slices.
+- Phase: complete.
 - Scope: behavior-preserving Main App organization.
 - Behavior changes: eLORETA/Source Localization has been removed from active runtime; FPVS preprocessing, post-processing, FFT/SNR outputs, project paths, and exports remain behavior-preserving.
 - `Legacy_App` and `PySide6_App` are retired. Do not recreate `src/Main_App/Legacy_App/**` or `src/Main_App/PySide6_App/**`; use purpose-based `Main_App` packages for active behavior.
@@ -41,11 +41,12 @@ Prepare `Main_App` for behavior-preserving refactors by keeping agent guidance, 
    - Preserve processing order, output formats, project paths, and existing workflows.
    - Prefer migrating callers to current-app modules or thin adapters before renaming or deleting legacy modules.
    - Update this plan with completed slices, decisions, and verification results.
-   - Status: active.
+   - Status: complete.
 
 4. Completion
    - Confirm `python scripts/agent_audit.py` and relevant targeted checks pass.
    - Move this file to `docs/exec-plans/completed/` when the tracked refactor work is done.
+   - Status: complete.
 
 ## Verification
 

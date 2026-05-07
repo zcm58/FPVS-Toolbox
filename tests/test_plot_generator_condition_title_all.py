@@ -58,11 +58,17 @@ def test_all_conditions_titles(tmp_path, monkeypatch):
 
     class DummyWorker:
         def __init__(self, *args, **kwargs):
-            captured["title"] = args[5]
+            captured["title"] = args[4]
             self.progress = _DummySignal()
             self.finished = _DummySignal()
 
         def moveToThread(self, *a, **k):
+            pass
+
+        def run(self):
+            pass
+
+        def deleteLater(self):
             pass
 
     monkeypatch.setattr(module, "_Worker", DummyWorker)
