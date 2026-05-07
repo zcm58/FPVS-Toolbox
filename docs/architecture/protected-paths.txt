@@ -2,8 +2,9 @@
 # Globs use forward slashes and are repo-root relative.
 
 [protected]
-# Retired Main App legacy path. Do not recreate.
+# Retired Main App legacy paths. Do not recreate.
 src/Main_App/Legacy_App/**
+src/Main_App/PySide6_App/**
 
 [dead-code]
 src/Tools/SourceLocalization/**
