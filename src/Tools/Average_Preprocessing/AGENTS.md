@@ -6,7 +6,7 @@ GUI edits and minor bug fixes to this directory.
 Before broad manual inspection, run:
 
 ```powershell
-python scripts/agent_audit.py
+python scripts/audit/agent_audit.py
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 ```
 

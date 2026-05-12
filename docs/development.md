@@ -45,6 +45,7 @@ Updating `FPVS_TOOLBOX_VERSION` is the release version bump.
 
 Releases provide an Inno Setup installer. Running the installer creates a
 folder containing `FPVS_Toolbox.exe`, required DLLs, and configuration files.
+Release packaging definitions live in `scripts/packaging/`.
 
 Build scripts should locate the repository root automatically before running
 PyInstaller so they work even if launched from another directory.
@@ -78,7 +79,7 @@ for pytest marker guidance and focused test commands.
 Common gates:
 
 ```powershell
-python scripts/agent_audit.py
+python scripts/audit/agent_audit.py
 python -m pytest -q
 ruff check .
 mypy src --strict

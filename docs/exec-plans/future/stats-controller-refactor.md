@@ -112,7 +112,7 @@ depend on the protocol/state objects, not on concrete UI classes.
 Before editing, run:
 
 ```powershell
-python scripts/agent_audit.py --check stats-structure
+python scripts/audit/agent_audit.py --check stats-structure
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 ```
 
@@ -122,11 +122,11 @@ Run targeted controller and pipeline tests first:
 
 ```powershell
 python -m py_compile src\Tools\Stats\controller\stats_controller.py
-python -m pytest tests\test_stats_pipeline_smoke.py tests\test_stats_mixed_model_pipeline.py tests\test_stats_finalize_error_paths.py -q
-python -m pytest tests\test_stats_export_finalization_release_smoke.py tests\test_stats_window_errors_stats.py -q
-python -m pytest tests\test_stats_lela_labels.py tests\test_lela_filename_parser.py -q
-python -m pytest tests\test_baseline_vs_zero.py tests\test_stats_harmonics_integration.py tests\test_stats_multigroup_smoke.py -q
-python scripts\agent_audit.py --check stats-structure
+python -m pytest tests\stats\pipeline\test_stats_pipeline_smoke.py tests\stats\analysis\test_stats_mixed_model_pipeline.py tests\stats\pipeline\test_stats_finalize_error_paths.py -q
+python -m pytest tests\stats\pipeline\test_stats_export_finalization_release_smoke.py tests\stats\gui\test_stats_window_errors_stats.py -q
+python -m pytest tests\stats\analysis\test_stats_lela_labels.py tests\stats\analysis\test_lela_filename_parser.py -q
+python -m pytest tests\stats\analysis\test_baseline_vs_zero.py tests\stats\analysis\test_stats_harmonics_integration.py tests\stats\pipeline\test_stats_multigroup_smoke.py -q
+python scripts\audit\agent_audit.py --check stats-structure
 ```
 
 Broaden to layout smoke tests when callback wiring or view protocol assumptions

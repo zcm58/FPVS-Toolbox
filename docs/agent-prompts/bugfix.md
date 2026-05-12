@@ -7,7 +7,7 @@ Use when fixing a specific defect.
 3. State the smallest safe interpretation of the bug and any assumptions.
 4. Add or update a focused test when practical; otherwise document a manual smoke check.
 5. Implement the narrowest behavior-preserving fix.
-6. Run `python scripts/agent_audit.py` plus the focused test or check for the touched area.
+6. Run `python scripts/audit/agent_audit.py` plus the focused test or check for the touched area.
 7. Report files changed, verification, skipped checks, residual risk, and why architecture docs did or did not need updates.
 
 Preserve existing processing order, data formats, exports, project paths, and user workflows unless the bug explicitly requires changing them.

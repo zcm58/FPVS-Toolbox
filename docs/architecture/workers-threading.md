@@ -27,5 +27,5 @@ Rules:
 Useful tests:
 
 ```powershell
-python -m pytest tests/test_postprocess_worker_qt.py tests/test_stats_focus_async.py -q
+python -m pytest tests/processing/test_postprocess_worker_qt.py tests/stats/gui/test_stats_focus_async.py -q
 ```

@@ -94,3 +94,7 @@ src/quarantine/**
 
 # Agent harness manifests intentionally tracked despite the general *.txt rule.
 !docs/architecture/protected-paths.txt
+
+# Release packaging definitions live under scripts/packaging.
+!scripts/packaging/*.spec
+!scripts/packaging/*.iss

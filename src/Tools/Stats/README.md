@@ -34,5 +34,5 @@ Use the narrowest module that matches the behavior being changed:
 Structural check:
 
 ```powershell
-python scripts/agent_audit.py --check stats-structure
+python scripts/audit/agent_audit.py --check stats-structure
 ```

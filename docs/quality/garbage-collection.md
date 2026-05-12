@@ -20,7 +20,7 @@ work from compounding into technical debt.
 Run:
 
 ```powershell
-python scripts/agent_audit.py --check garbage-collection
+python scripts/audit/agent_audit.py --check garbage-collection
 ```
 
 The check is intentionally low-noise. It currently catches:
@@ -30,4 +30,4 @@ The check is intentionally low-noise. It currently catches:
 - new broad `except Exception:` handlers in production code additions.
 
 When a recurring cleanup rule becomes stable and low-noise, add it to
-`scripts/agent_audit.py` instead of relying on manual review.
+`scripts/audit/agent_audit.py` instead of relying on manual review.

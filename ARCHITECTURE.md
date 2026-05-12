@@ -7,7 +7,7 @@ This file is the top-level map for agents working in FPVS Toolbox. Keep durable 
 Use executable checks before broad reading:
 
 ```powershell
-python scripts/agent_audit.py
+python scripts/audit/agent_audit.py
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
@@ -45,7 +45,13 @@ Primary areas:
 - `src/Tools/`: standalone and integrated tools for preprocessing, plotting, ratios, statistics, image resizing, and detectability.
 - `src/quarantine/`: quarantined legacy code retained for reference or compatibility checks.
 - `tests/`: unit, integration, and pytest-qt smoke coverage.
+- `scripts/audit/`: repo-level invariant checks such as `agent_audit.py`.
+- `scripts/docs/`: documentation publishing and maintenance helpers.
+- `scripts/smoke/`: developer-run smoke checks that are not pytest tests.
+- `scripts/migration/`: one-off or repeatable local data migration helpers.
+- `scripts/debug/`: focused debugging probes.
 - `scripts/manual_diagnostics/`: developer-run project/data investigation utilities. These are not runtime toolbox APIs.
+- `scripts/packaging/`: release packaging definitions and installer/build inputs.
 - `docs/`: user docs, statistical method docs, processing docs, and agent-facing verification notes.
 
 Focused architecture pages:
@@ -80,8 +86,8 @@ Use focused checks for the changed area first.
 - Skill-driven checks: run the matching `.agents/skills/*/scripts/*.py` wrapper before manual grep or broad document reading.
 - GUI wiring or layout changes: pytest-qt smoke test for the changed widget or a documented manual smoke path.
 - Processing or export changes: targeted unit tests around data format, processing order, and output paths.
-- Retired-path work: confirm `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` are not recreated with `git diff --name-only` and `python scripts/agent_audit.py`.
-- Agent invariants: run `python scripts/agent_audit.py`.
+- Retired-path work: confirm `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` are not recreated with `git diff --name-only` and `python scripts/audit/agent_audit.py`.
+- Agent invariants: run `python scripts/audit/agent_audit.py`.
 - Broad shared behavior: run `python -m pytest -q`, then lint/type checks where configured.
 
 See [docs/quality/verification-gates.md](docs/quality/verification-gates.md) for the current command list and fallback reporting rules.

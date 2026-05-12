@@ -8,9 +8,9 @@ Checks:
 
 ```powershell
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
-python scripts/agent_audit.py --check protected
-python scripts/agent_audit.py --check source-localization
-python scripts/agent_audit.py --check source-localization-refs
+python scripts/audit/agent_audit.py --check protected
+python scripts/audit/agent_audit.py --check source-localization
+python scripts/audit/agent_audit.py --check source-localization-refs
 git diff --name-only
 ```
 

@@ -8,7 +8,7 @@ Use this page for known debt that is not yet an active execution plan.
   `docs/exec-plans/completed/main-app-folder-retirement.md`.
 - `PySide6_App` has been retired under
   `docs/exec-plans/completed/main-app-folder-retirement.md`.
-- `scripts/gui_wave3_smoke.py` hung during the first Legacy cleanup slice and
+- `scripts/smoke/gui_wave3_smoke.py` hung during the first Legacy cleanup slice and
   should be reassessed before it is used as a required gate again.
 - Broad exception handling is concentrated in high-risk processing/GUI
   orchestration modules. A read-only scan found many existing `except Exception`
@@ -19,7 +19,7 @@ Use this page for known debt that is not yet an active execution plan.
 - Oversized modules remain in Stats workers/controllers, Plot/Ratio GUI code,
   `Main_App` processing/preprocessing, and diagnostics. Treat these as future
   focused refactors, not opportunistic cleanup during behavior-sensitive work.
-- Retired `Main_App` package names are now guarded by `scripts/agent_audit.py`;
+- Retired `Main_App` package names are now guarded by `scripts/audit/agent_audit.py`;
   future debt should focus on oversized modules and behavior-covered cleanup,
   not resurrecting historical package wrappers.
 
@@ -27,8 +27,8 @@ Use this page for known debt that is not yet an active execution plan.
 
 Run after adding the mechanical garbage-collection gate:
 
-- Passed: `python scripts/agent_audit.py`
-- Passed: `python scripts/agent_audit.py --check garbage-collection`
+- Passed: `python scripts/audit/agent_audit.py`
+- Passed: `python scripts/audit/agent_audit.py --check garbage-collection`
 - Passed: tracked artifact scan for cache/build/temp patterns returned no
   matches.
 - Debt-marker grep found no repo debt markers outside the audit check itself.

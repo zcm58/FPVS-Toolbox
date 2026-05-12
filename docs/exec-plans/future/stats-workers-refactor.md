@@ -106,14 +106,14 @@ callers are migrated and tests prove behavior is unchanged.
 3. `src/Tools/Stats/workers/stats_workers.py`
 4. `src/Tools/Stats/controller/stats_controller.py`
 5. `src/Tools/Stats/ui/stats_window_pipeline.py`
-6. Relevant tests under `tests/test_stats_*`, especially DV, QC, LMM, harmonic,
+6. Relevant tests under `tests/stats/**/test_stats_*`, especially DV, QC, LMM, harmonic,
    group-contrast, and pipeline smoke tests
 
 Before editing, run:
 
 ```powershell
-python scripts/agent_audit.py --check stats-structure
-python scripts/agent_audit.py --check stats-reporting-legibility
+python scripts/audit/agent_audit.py --check stats-structure
+python scripts/audit/agent_audit.py --check stats-reporting-legibility
 ```
 
 ## Verification Plan
@@ -122,12 +122,12 @@ Run the narrowest tests for the moved slice first, then broaden:
 
 ```powershell
 python -m py_compile src\Tools\Stats\workers\stats_workers.py
-python -m pytest tests\test_stats_pipeline_smoke.py tests\test_stats_layout_smoke.py -q
-python -m pytest tests\test_stats_dv_policy.py tests\test_stats_dv_variants.py tests\test_stats_qc_exclusion.py tests\test_stats_outlier_exclusion.py -q
-python -m pytest tests\test_stats_mixed_model_pipeline.py tests\test_stats_between_group_blocked_payload.py tests\test_stats_group_contrasts_validation.py -q
-python -m pytest tests\test_stats_shared_harmonics.py tests\test_stats_fixed_harmonics_dv.py tests\test_stats_harmonics_integration.py -q
-python scripts\agent_audit.py --check stats-structure
-python scripts\agent_audit.py --check stats-reporting-legibility
+python -m pytest tests\stats\pipeline\test_stats_pipeline_smoke.py tests\stats\gui\test_stats_layout_smoke.py -q
+python -m pytest tests\stats\analysis\test_stats_dv_policy.py tests\stats\analysis\test_stats_dv_variants.py tests\stats\qc\test_stats_qc_exclusion.py tests\stats\qc\test_stats_outlier_exclusion.py -q
+python -m pytest tests\stats\analysis\test_stats_mixed_model_pipeline.py tests\stats\analysis\test_stats_between_group_blocked_payload.py tests\stats\analysis\test_stats_group_contrasts_validation.py -q
+python -m pytest tests\stats\analysis\test_stats_shared_harmonics.py tests\stats\analysis\test_stats_fixed_harmonics_dv.py tests\stats\analysis\test_stats_harmonics_integration.py -q
+python scripts\audit\agent_audit.py --check stats-structure
+python scripts\audit\agent_audit.py --check stats-reporting-legibility
 ```
 
 Use additional focused tests when the touched function already has a dedicated

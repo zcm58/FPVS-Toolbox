@@ -34,14 +34,14 @@ Rules:
 - New active code should import from `Tools.Stats.<functional area>`, not removed `Tools.Stats.Legacy` or `Tools.Stats.PySide6` paths.
 - New summary-reporting code should import from `Tools.Stats.reporting.summary`; keep `Tools.Stats.reporting.summary_utils` as a compatibility facade.
 - Add new analysis logic under the functional subpackage that owns it, and expose stable caller-facing surfaces through the package facade when needed.
-- Run `python scripts/agent_audit.py --check stats-structure` after Stats structural changes; it flags removed namespace usage and tkinter imports in active Stats code.
-- Run `python scripts/agent_audit.py --check stats-reporting-legibility` after Stats reporting changes; it flags oversized reporting modules and large function/class spans.
+- Run `python scripts/audit/agent_audit.py --check stats-structure` after Stats structural changes; it flags removed namespace usage and tkinter imports in active Stats code.
+- Run `python scripts/audit/agent_audit.py --check stats-reporting-legibility` after Stats reporting changes; it flags oversized reporting modules and large function/class spans.
 - Use focused tests around changed data transformations and exports.
 
 Useful tests:
 
 ```powershell
-python -m pytest tests/test_stats_pipeline_smoke.py tests/test_stats_layout_smoke.py -q
-python -m pytest tests/test_summary_utils_mixed_model.py tests/test_summary_utils_posthoc_directions.py tests/test_lmm_reporting_exports.py -q
-python -m pytest tests/test_ratio_calculator_plots.py tests/test_plot_generator_gui.py -q
+python -m pytest tests/stats/pipeline/test_stats_pipeline_smoke.py tests/stats/gui/test_stats_layout_smoke.py -q
+python -m pytest tests/stats/analysis/test_summary_utils_mixed_model.py tests/stats/analysis/test_summary_utils_posthoc_directions.py tests/stats/reporting/test_lmm_reporting_exports.py -q
+python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py tests/plot_generator/test_plot_generator_gui.py -q
 ```

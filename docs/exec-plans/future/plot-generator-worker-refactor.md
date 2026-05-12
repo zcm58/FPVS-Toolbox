@@ -106,12 +106,12 @@ imports are deliberately migrated.
 3. `src/Tools/Plot_Generator/gui.py` for worker construction and payload use
 4. `src/Tools/Plot_Generator/scalp_utils.py`
 5. `src/Tools/Plot_Generator/snr_utils.py`
-6. Plot Generator tests under `tests/test_plot_generator_*`
+6. Plot Generator tests under `tests/plot_generator/test_plot_generator_*`
 
 Before editing, run:
 
 ```powershell
-python scripts/agent_audit.py
+python scripts/audit/agent_audit.py
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ```
@@ -122,10 +122,10 @@ Run focused worker/plot tests first:
 
 ```powershell
 python -m py_compile src\Tools\Plot_Generator\worker.py
-python -m pytest tests\test_plot_generator_fft_snr.py tests\test_plot_generator_full_snr_roi.py tests\test_plot_generator_baseline.py -q
-python -m pytest tests\test_plot_generator_export_svg_smoke.py tests\test_plot_generator_gridlines.py tests\test_plot_generator_oddballs_from_xmax.py -q
-python -m pytest tests\test_plot_generator_generation_outcome.py tests\test_plot_generator_multigroup_smoke.py tests\test_plot_generator_scalp_utils.py -q
-python -m pytest tests\test_plot_generator_gui.py tests\test_plot_generator_gui_refactor_smoke.py -q
+python -m pytest tests\plot_generator\test_plot_generator_fft_snr.py tests\plot_generator\test_plot_generator_full_snr_roi.py tests\plot_generator\test_plot_generator_baseline.py -q
+python -m pytest tests\plot_generator\test_plot_generator_export_svg_smoke.py tests\plot_generator\test_plot_generator_gridlines.py tests\plot_generator\test_plot_generator_oddballs_from_xmax.py -q
+python -m pytest tests\plot_generator\test_plot_generator_generation_outcome.py tests\plot_generator\test_plot_generator_multigroup_smoke.py tests\plot_generator\test_plot_generator_scalp_utils.py -q
+python -m pytest tests\plot_generator\test_plot_generator_gui.py tests\plot_generator\test_plot_generator_gui_refactor_smoke.py -q
 python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
 ```
 

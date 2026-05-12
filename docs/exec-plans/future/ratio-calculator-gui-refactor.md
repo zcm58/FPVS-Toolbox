@@ -116,12 +116,12 @@ in the current purpose-named Ratio Calculator modules.
 4. `src/Tools/Ratio_Calculator/worker.py`
 5. `src/Tools/Ratio_Calculator/pipeline.py`
 6. `src/Tools/Ratio_Calculator/roi_provider.py`
-7. Ratio Calculator tests under `tests/test_ratio_calculator_*`
+7. Ratio Calculator tests under `tests/ratio_calculator/test_ratio_calculator_*`
 
 Before editing, run:
 
 ```powershell
-python scripts/agent_audit.py
+python scripts/audit/agent_audit.py
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ```
@@ -132,7 +132,7 @@ Run focused Ratio Calculator checks first:
 
 ```powershell
 python -m py_compile src\Tools\Ratio_Calculator\gui.py
-python -m pytest tests\test_ratio_calculator_plots.py tests\test_ratio_calculator_roi_dynamic.py tests\test_ratio_calculator_removed_smoke.py -q
+python -m pytest tests\ratio_calculator\test_ratio_calculator_plots.py tests\ratio_calculator\test_ratio_calculator_roi_dynamic.py tests\ratio_calculator\test_ratio_calculator_removed_smoke.py -q
 python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
 python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py
 ```

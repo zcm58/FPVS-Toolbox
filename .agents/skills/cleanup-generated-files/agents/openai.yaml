@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cleanup Generated Files"
+  short_description: "Remove generated build, cache, and temp files safely."
+  default_prompt: "Clean generated build, cache, and temp files in this repo without touching virtualenvs or preserved source folders."

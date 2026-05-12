@@ -8,7 +8,7 @@ Checks:
 
 ```powershell
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-python scripts/agent_audit.py --check paths
+python scripts/audit/agent_audit.py --check paths
 python -m pytest <nearest project/path tests> -q
 ```
 
