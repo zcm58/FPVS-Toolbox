@@ -50,10 +50,12 @@ from Main_App.projects.project import (
     STATS_SUBFOLDER_NAME,
 )
 from Main_App.gui.op_guard import OpGuard
-from Main_App.gui.widgets.busy_spinner import BusySpinner
-from Main_App.gui.widgets import (
+from Main_App.gui.components import (
+    BusySpinner,
     SectionCard,
+    SurfaceSize,
     StatusBanner,
+    configure_window_surface,
     make_action_button,
     make_form_layout,
 )

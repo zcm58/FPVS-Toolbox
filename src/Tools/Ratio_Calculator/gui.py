@@ -34,10 +34,11 @@ from PySide6.QtWidgets import (
     QStyle,
 )
 
-from Main_App.gui.widgets import (
-    PathPickerRow,
+from Main_App.gui.components import (
     SectionCard,
+    SurfaceSize,
     StatusBanner,
+    configure_window_surface,
     make_action_button,
     make_form_layout,
 )
@@ -60,8 +61,11 @@ class RatioCalculatorWindow(QWidget):
         roi_loader: Callable[[], dict[str, list[str]]] | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Ratio Calculator")
-        self.resize(980, 760)
+        configure_window_surface(
+            self,
+            title="Ratio Calculator",
+            size=SurfaceSize(width=980, height=760),
+        )
 
         self._project_root = self._resolve_project_root(project_root)
         self._last_dir: Optional[Path] = None

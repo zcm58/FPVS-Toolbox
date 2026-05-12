@@ -20,7 +20,7 @@ from .advanced_analysis_file_ops import AdvancedAnalysisFileOpsMixin
 from .advanced_analysis_group_ops import AdvancedAnalysisGroupOpsMixin
 from .advanced_analysis_processing import AdvancedAnalysisProcessingMixin
 from .advanced_analysis_post import AdvancedAnalysisPostMixin
-from Main_App.gui.widgets import SectionCard, make_action_button
+from Main_App.gui.components import SectionCard, SurfaceSize, configure_window_surface, make_action_button
 
 
 class AdvancedAveragingWindow(
@@ -38,7 +38,7 @@ class AdvancedAveragingWindow(
         output_dir: str | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Advanced Averaging Analysis")
+        configure_window_surface(self, title="Advanced Averaging Analysis")
 
         # Store project paths
         self.project_input_folder = input_dir
@@ -57,7 +57,7 @@ class AdvancedAveragingWindow(
         # Increase window height for extra spacing
         w = self.size().width()
         h = self.size().height()
-        self.resize(w + 100, h + 500)
+        configure_window_surface(self, size=SurfaceSize(width=w + 100, height=h + 500))
 
 
         # Button object names used by existing callbacks and smoke checks.

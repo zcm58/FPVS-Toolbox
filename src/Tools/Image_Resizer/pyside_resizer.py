@@ -21,21 +21,22 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QProgressBar,
     QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from Main_App.gui.theme import apply_fpvs_theme
-from Main_App.gui.widgets import (
+from Main_App.gui.components import (
     PathPickerRow,
     SectionCard,
     StatusBanner,
     make_action_button,
     make_form_layout,
+    show_error,
+    show_info,
 )
+from Main_App.gui.theme import apply_fpvs_theme
 
 try:  # pragma: no cover - fallback for running as a script
     from .image_resize_core import process_images_in_folder  # type: ignore
@@ -195,12 +196,12 @@ class FPVSImageResizerQt(QWidget):
 
     def _select_output(self) -> None:
         if not self.input_folder:
-            QMessageBox.critical(self, "Error", "Select an input folder first.")
+            show_error(self, "Error", "Select an input folder first.")
             return
         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if folder:
             if os.path.abspath(folder) == os.path.abspath(self.input_folder):
-                QMessageBox.critical(
+                show_error(
                     self,
                     "Error",
                     "Output folder cannot be the same as the input folder.",
@@ -220,10 +221,10 @@ class FPVSImageResizerQt(QWidget):
             width = int(self.width_edit.text())
             height = int(self.height_edit.text())
         except ValueError:
-            QMessageBox.critical(self, "Error", "Width and height must be integers.")
+            show_error(self, "Error", "Width and height must be integers.")
             return
         if not (self.input_folder and self.output_folder):
-            QMessageBox.critical(self, "Error", "Select both input and output folders.")
+            show_error(self, "Error", "Select both input and output folders.")
             return
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
@@ -282,12 +283,12 @@ class FPVSImageResizerQt(QWidget):
             summary += (
                 f"\nWrite failures {len(fails)} files:\n" + "\n".join(f"  - {f}: {e}" for f, e in fails)
             )
-        QMessageBox.information(self, "Processing Summary", summary)
+        show_info(self, "Processing Summary", summary)
 
     def _open_folder(self) -> None:
         if not self.output_folder:
             return
-        QMessageBox.information(self, "Reminder", "Please verify your images for quality.")
+        show_info(self, "Reminder", "Please verify your images for quality.")
         if sys.platform.startswith("win"):
             os.startfile(self.output_folder)
         elif sys.platform == "darwin":

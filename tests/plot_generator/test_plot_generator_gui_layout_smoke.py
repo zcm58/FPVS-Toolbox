@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
-from Main_App.gui.widgets import PathPickerRow, SectionCard
+from Main_App.gui.components import PathPickerRow, SectionCard
 
 
 def test_plot_generator_gui_layout_smoke(qtbot):

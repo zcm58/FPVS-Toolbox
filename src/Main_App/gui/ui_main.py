@@ -33,7 +33,7 @@ from .style_tokens import (
     build_landing_page_stylesheet,
     build_main_page_stylesheet,
 )
-from Main_App.gui.widgets import (
+from Main_App.gui.components import (
     SectionCard,
     make_action_button,
     make_form_layout,

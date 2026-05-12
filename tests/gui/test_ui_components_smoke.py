@@ -7,14 +7,19 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 
 from PySide6.QtWidgets import QApplication, QLabel
 
-from Main_App.gui.theme import apply_fpvs_theme
-from Main_App.gui.widgets import (
+from Main_App.gui.components import (
+    AppDialog,
     PathPickerRow,
     SectionCard,
     StatusBanner,
+    SurfaceSize,
+    configure_window_surface,
+    make_action_row,
     make_action_button,
     make_form_layout,
+    show_warning,
 )
+from Main_App.gui.theme import apply_fpvs_theme
 
 
 def test_make_action_button_sets_properties(qtbot) -> None:
@@ -102,3 +107,48 @@ def test_apply_fpvs_theme_sets_app_stylesheet_and_preserves_button_properties(qt
         assert button.property("compact") is True
     finally:
         app.setStyleSheet(previous_stylesheet)
+
+
+def test_component_surface_helpers_configure_top_level_widgets(qtbot) -> None:
+    dialog = AppDialog(
+        "Settings",
+        size=SurfaceSize(width=480, height=320, min_width=400),
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.windowTitle() == "Settings"
+    assert dialog.property("fpvsSurface") is True
+    assert dialog.minimumWidth() == 400
+    assert dialog.root_layout.contentsMargins().left() == 16
+
+    configure_window_surface(
+        dialog,
+        title="Updated",
+        size=SurfaceSize(width=500, height=340, min_height=300),
+    )
+
+    assert dialog.windowTitle() == "Updated"
+    assert dialog.minimumHeight() == 300
+
+
+def test_component_action_row_adds_buttons(qtbot) -> None:
+    run_button = make_action_button("Run", variant="primary")
+    cancel_button = make_action_button("Cancel")
+    row = make_action_row([run_button, cancel_button])
+    qtbot.addWidget(row)
+
+    assert row.row_layout.indexOf(run_button) >= 0
+    assert row.row_layout.indexOf(cancel_button) >= 0
+
+
+def test_component_message_helpers_delegate_to_qmessagebox(monkeypatch) -> None:
+    calls = []
+
+    def fake_warning(parent, title, message):
+        calls.append((parent, title, message))
+        return 1
+
+    monkeypatch.setattr("Main_App.gui.components.messages.QMessageBox.warning", fake_warning)
+
+    assert show_warning(None, "Invalid", "Check the fields") == 1
+    assert calls == [(None, "Invalid", "Check the fields")]

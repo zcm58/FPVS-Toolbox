@@ -7,6 +7,10 @@ Primary paths:
 - `src/Main_App/gui/`: canonical active import surface for main-window,
   settings-panel, menu, sidebar, icon, style-token, theme, widget, and
   update-manager imports.
+- `src/Main_App/gui/components/`: canonical shared component layer for new
+  and migrated GUI surfaces. It re-exports presentation widgets and adds
+  standard window/dialog shells, action rows, surface sizing, and message
+  helpers.
 - `src/Main_App/gui/widgets/`: shared PySide6 presentation primitives for
   reusable buttons, cards, form rows, the busy spinner, the welcome brain
   animation, and inline status widgets.
@@ -36,7 +40,20 @@ Primary paths:
 
 ## Component Layer
 
-Shared PySide6 primitives live in `src/Main_App/gui/widgets/`. Use this layer for reusable buttons, cards, form rows, animation widgets, the busy spinner, and inline status widgets that are presentation-only.
+New and migrated GUI surfaces should import shared UI building blocks from
+`src/Main_App/gui/components/`. This is the canonical component layer for
+windows, dialogs, action rows, message helpers, and reusable presentation
+widgets.
+
+Lower-level PySide6 primitives live in `src/Main_App/gui/widgets/`. Keep this
+package focused on presentation-only widgets such as reusable buttons, cards,
+form rows, animation widgets, the busy spinner, and inline status widgets.
+`components/` may re-export these widgets so tool windows can migrate to one
+stable import surface without duplicating style or geometry decisions.
+
+The component layer is intentionally thin. It should centralize shared shell
+and presentation conventions, not own backend processing, file export behavior,
+project mutation, or tool-specific orchestration.
 
 The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
 
@@ -51,6 +68,8 @@ Widgets must not own backend processing, file export behavior, project mutation,
 Rules:
 
 - Keep widgets, layouts, signals, and user feedback in GUI modules.
+- For new GUI surfaces, start from `Main_App.gui.components` before adding
+  local geometry, action rows, dialogs, or message boxes.
 - Keep processing and file format logic in backend, worker, or tool-core modules.
 - Import `QAction` from `PySide6.QtGui`.
 - Do not introduce Tkinter, CustomTkinter, or CTkMessagebox imports in repo code; the active UI toolkit is PySide6.

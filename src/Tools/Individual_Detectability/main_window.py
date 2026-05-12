@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QProgressBar,
     QPlainTextEdit,
@@ -35,12 +34,15 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
-from Main_App.gui.widgets import (
+from Main_App.gui.components import (
     PathPickerRow,
     SectionCard,
+    SurfaceSize,
     StatusBanner,
+    configure_window_surface,
     make_action_button,
     make_form_layout,
+    show_error,
 )
 
 from .core import (
@@ -59,9 +61,11 @@ logger = logging.getLogger(__name__)
 class IndividualDetectabilityWindow(QWidget):
     def __init__(self, parent: QWidget | None = None, project_root: str | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Individual Detectability")
-        self.resize(1200, 780)
-        self.setMinimumWidth(1050)
+        configure_window_surface(
+            self,
+            title="Individual Detectability",
+            size=SurfaceSize(width=1200, height=780, min_width=1050),
+        )
 
         self._project_root = self._resolve_project_root(project_root)
         self._last_dir: Optional[Path] = None
@@ -756,18 +760,18 @@ class IndividualDetectabilityWindow(QWidget):
         output_root = self.output_root_edit.text().strip()
         input_root = self.input_root_edit.text().strip()
         if not input_root:
-            QMessageBox.critical(self, "Error", "Select an Excel root folder.")
+            show_error(self, "Error", "Select an Excel root folder.")
             return
         if not output_root:
-            QMessageBox.critical(self, "Error", "Select an output folder.")
+            show_error(self, "Error", "Select an output folder.")
             return
         selected_conditions = self._selected_conditions()
         if not selected_conditions:
-            QMessageBox.critical(self, "Error", "Select at least one condition.")
+            show_error(self, "Error", "Select at least one condition.")
             return
         settings = self._collect_settings()
         if not settings.oddball_harmonics_hz:
-            QMessageBox.critical(self, "Error", "Provide at least one harmonic value.")
+            show_error(self, "Error", "Provide at least one harmonic value.")
             return
 
         request = RunRequest(
@@ -801,7 +805,7 @@ class IndividualDetectabilityWindow(QWidget):
     def _on_worker_error(self, message: str) -> None:
         self._append_log(message)
         self.status_label.set_variant("error")
-        QMessageBox.critical(self, "Individual Detectability error", message)
+        show_error(self, "Individual Detectability error", message)
 
     def _on_worker_finished(self, output_root: str) -> None:
         self.status_label.set_text("Complete.")

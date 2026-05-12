@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QColorDialog,
 )
 
-from Main_App.gui.widgets import make_action_button
+from Main_App.gui.components import make_action_button
 
 
 class _SettingsDialog(QDialog):

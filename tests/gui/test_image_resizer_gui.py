@@ -7,7 +7,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 
 pytest.importorskip("PIL")
 
-from Main_App.gui.widgets import PathPickerRow, SectionCard, StatusBanner
+from Main_App.gui.components import PathPickerRow, SectionCard, StatusBanner
 from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
 
 

@@ -6,7 +6,7 @@ pytest.importorskip("PySide6")
 pytest.importorskip("PySide6.QtWidgets")
 from PySide6.QtWidgets import QAbstractScrollArea, QPlainTextEdit
 
-from Main_App.gui.widgets import SectionCard
+from Main_App.gui.components import SectionCard
 from Tools.Stats.ui.stats_window import StatsWindow
 
 

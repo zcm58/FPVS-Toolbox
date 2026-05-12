@@ -21,9 +21,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from Main_App.gui.widgets import (
+from Main_App.gui.components import (
     PathPickerRow,
     SectionCard,
+    SurfaceSize,
+    configure_window_surface,
     make_action_button,
     make_form_layout,
 )
@@ -43,9 +45,10 @@ class PlotGeneratorUiSectionsMixin:
         self.log.setMinimumHeight(180 if expanded else 0)
 
     def _build_ui(self) -> None:
-        self.setMinimumWidth(980)
-        self.setMinimumHeight(600)
-        self.resize(1180, 680)
+        configure_window_surface(
+            self,
+            size=SurfaceSize(width=1180, height=680, min_width=980, min_height=600),
+        )
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(8, 8, 8, 8)

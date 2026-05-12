@@ -583,7 +583,7 @@ def _run_gui() -> int:
     )
     _ensure_src_on_sys_path()
     from Main_App.gui.theme import apply_fpvs_theme
-    from Main_App.gui.widgets import make_action_button, make_form_layout
+    from Main_App.gui.components import make_action_button, make_form_layout
 
     class _Worker(QObject):
         progress = Signal(str)

@@ -2,7 +2,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from Main_App.gui.widgets import SectionCard
+from Main_App.gui.components import SectionCard
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
 
 
