@@ -28,6 +28,7 @@ The check is intentionally low-noise. It currently catches:
 - visible cache/build/temp artifacts;
 - new unresolved inline debt markers in changed Python or Markdown files;
 - new broad `except Exception:` handlers in production code additions.
+- retired `fsaverage` MRI template caches if they reappear in active source or quarantine.
 
 When a recurring cleanup rule becomes stable and low-noise, add it to
 `scripts/audit/agent_audit.py` instead of relying on manual review.

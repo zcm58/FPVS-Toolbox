@@ -76,3 +76,4 @@ Tests are grouped by workflow under `tests/audit/`, `tests/gui/`,
 ## Removed Source Localization
 
 Source Localization/eLORETA has been removed from active runtime. Do not add tests that import `Tools.SourceLocalization`, restore availability shims, or assert GUI/settings behavior unless restoration is explicitly scoped as a new feature.
+Do not add tests that require bundled `fsaverage` MRI template data; that template is no longer retained in active source or quarantine.

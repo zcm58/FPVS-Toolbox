@@ -24,6 +24,7 @@ $rootTargets = @(
     "test_tmp",
     "__pycache__",
     "src\fsaverage",
+    "src\quarantine\Tools\LORETA\fsaverage",
     "src\fpvs_cache"
 )
 

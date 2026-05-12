@@ -84,8 +84,9 @@ site/
 # Local tool output folders
 3 - Statistical Analysis Results/
 
-# Local fsaverage template/data caches
+# Retired fsaverage template/data caches must stay local if recreated.
 src/fsaverage/
+src/quarantine/Tools/LORETA/fsaverage/
 
 # Quarantined legacy code not used by active runtime.
 src/quarantine/**
