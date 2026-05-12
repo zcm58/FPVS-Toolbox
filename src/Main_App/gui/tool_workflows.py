@@ -52,7 +52,7 @@ def open_image_resizer(source_root: Path) -> None:
     if getattr(sys, "frozen", False):
         cmd.append("--run-image-resizer")
     else:
-        script = source_root / "Tools" / "Image_Resizer" / "pyside_resizer.py"
+        script = source_root / "src" / "Tools" / "Image_Resizer" / "pyside_resizer.py"
         cmd.append(str(script))
     subprocess.Popen(cmd, close_fds=True)
 
@@ -62,7 +62,7 @@ def open_plot_generator(host: Any, source_root: Path) -> None:
     if getattr(sys, "frozen", False):
         cmd.append("--run-plot-generator")
     else:
-        script = source_root / "Tools" / "Plot_Generator" / "plot_generator.py"
+        script = source_root / "src" / "Tools" / "Plot_Generator" / "plot_generator.py"
         cmd.append(str(script))
     env = os.environ.copy()
     proj = getattr(host, "currentProject", None)
