@@ -11,32 +11,32 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MANIFEST_PATH = REPO_ROOT / "docs" / "architecture" / "protected-paths.txt"
+MANIFEST_PATH = REPO_ROOT / "docs" / "agent" / "architecture" / "protected-paths.txt"
 ACTIVE_SOURCE_LOCALIZATION = "src/Tools/SourceLocalization"
-AGENT_INDEX = REPO_ROOT / "docs" / "agent-index.md"
+AGENT_INDEX = REPO_ROOT / "docs" / "agent" / "agent-index.md"
 ARCHITECTURE_MAP = REPO_ROOT / "ARCHITECTURE.md"
-EXEC_PLANS_README = REPO_ROOT / "docs" / "exec-plans" / "README.md"
-TECH_DEBT_TRACKER = REPO_ROOT / "docs" / "exec-plans" / "tech-debt-tracker.md"
-MAIN_APP_REFACTOR_PLAN = REPO_ROOT / "docs" / "exec-plans" / "completed" / "main-app-refactor.md"
+EXEC_PLANS_README = REPO_ROOT / "docs" / "agent" / "exec-plans" / "README.md"
+TECH_DEBT_TRACKER = REPO_ROOT / "docs" / "agent" / "exec-plans" / "tech-debt-tracker.md"
+MAIN_APP_REFACTOR_PLAN = REPO_ROOT / "docs" / "agent" / "exec-plans" / "completed" / "main-app-refactor.md"
 SKILL_SCRIPT_PATHS = (
     ".agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py",
     ".agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py",
     ".agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py",
 )
 KNOWLEDGE_BASE_PATHS = (
-    "docs/README.md",
-    "docs/design-docs/index.md",
-    "docs/design-docs/core-beliefs.md",
-    "docs/product-specs/index.md",
-    "docs/references/index.md",
-    "docs/generated/README.md",
-    "docs/DESIGN.md",
-    "docs/FRONTEND.md",
-    "docs/PLANS.md",
-    "docs/PRODUCT_SENSE.md",
-    "docs/QUALITY_SCORE.md",
-    "docs/RELIABILITY.md",
-    "docs/SECURITY.md",
+    "docs/agent/README.md",
+    "docs/agent/design-docs/index.md",
+    "docs/agent/design-docs/core-beliefs.md",
+    "docs/agent/product-specs/index.md",
+    "docs/agent/references/index.md",
+    "docs/agent/generated/README.md",
+    "docs/agent/design-docs/DESIGN.md",
+    "docs/agent/design-docs/FRONTEND.md",
+    "docs/agent/exec-plans/PLANS.md",
+    "docs/agent/design-docs/PRODUCT_SENSE.md",
+    "docs/agent/quality/QUALITY_SCORE.md",
+    "docs/agent/quality/RELIABILITY.md",
+    "docs/agent/quality/SECURITY.md",
 )
 
 QACTION_BAD_IMPORT_RE = re.compile(r"^\s*from\s+PySide6\.(?:QtWidgets|QtCore)\s+import\s+.*\bQAction\b")
@@ -337,8 +337,8 @@ def check_protected_edits() -> list[Issue]:
     changed = {_normalize(path) for path in _changed_files()}
     has_migration_context = bool(
         {
-            "docs/exec-plans/completed/main-app-refactor.md",
-            "docs/architecture/legacy-boundaries.md",
+            "docs/agent/exec-plans/completed/main-app-refactor.md",
+            "docs/agent/architecture/legacy-boundaries.md",
             "AGENTS.md",
         }
         & changed
@@ -382,7 +382,7 @@ def check_agent_harness() -> list[Issue]:
                         f"agent index does not mention {script_path}",
                     )
                 )
-        if "docs/exec-plans/completed/main-app-refactor.md" not in text:
+        if "docs/agent/exec-plans/completed/main-app-refactor.md" not in text:
             issues.append(
                 Issue(
                     "agent-harness",
@@ -403,7 +403,7 @@ def check_agent_harness() -> list[Issue]:
         )
     else:
         text = ARCHITECTURE_MAP.read_text(encoding="utf-8", errors="replace")
-        if "docs/exec-plans" not in text:
+        if "docs/agent/exec-plans" not in text:
             issues.append(
                 Issue(
                     "agent-harness",
@@ -764,7 +764,7 @@ def check_garbage_collection() -> list[Issue]:
                         "garbage-collection",
                         normalized,
                         line_no,
-                        "new TODO/FIXME/HACK-style marker; move debt to docs/exec-plans/tech-debt-tracker.md or an active plan",
+                        "new TODO/FIXME/HACK-style marker; move debt to docs/agent/exec-plans/tech-debt-tracker.md or an active plan",
                     )
                 )
             if (

@@ -28,8 +28,8 @@ Please verify that you obtained the installer directly from this repository's Re
 
 ## Documentation
 
-- User documentation lives in [`docs/`](docs/).
-- Developer setup and verification notes live in [`docs/development.md`](docs/development.md).
+- User documentation lives in [`docs/user/`](docs/user/).
+- Developer setup and verification notes live in [`docs/agent/guides/development.md`](docs/agent/guides/development.md).
 - Agent-facing repo guidance lives in [`AGENTS.md`](AGENTS.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## License

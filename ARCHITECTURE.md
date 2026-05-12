@@ -13,17 +13,17 @@ python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ```
 
-Read [docs/agent-index.md](docs/agent-index.md) for the compact skill/script/test map. Read the focused architecture pages below only when the task touches that area or a check reports a relevant issue.
+Read [docs/agent/agent-index.md](docs/agent/agent-index.md) for the compact skill/script/test map. Read the focused architecture pages below only when the task touches that area or a check reports a relevant issue.
 
 ## Execution Plans
 
-Durable refactor and feature plans live under [docs/exec-plans](docs/exec-plans/). Read active plans before changing the areas they cover, then keep the plan's progress, decisions, and verification notes current as work lands. Future plans record approved ideas that are not active work yet; read them only when scoping or starting the matching effort.
+Durable refactor and feature plans live under [docs/agent/exec-plans](docs/agent/exec-plans/). Read active plans before changing the areas they cover, then keep the plan's progress, decisions, and verification notes current as work lands. Future plans record approved ideas that are not active work yet; read them only when scoping or starting the matching effort.
 
 Structural refactors must update this file, the relevant focused architecture page, or the nearest scoped `AGENTS.md` in the same PR when they change ownership, module boundaries, workflows, or verification expectations. If no architecture or agent doc changes are needed, record that in the PR handoff or active execution plan.
 
 ## Knowledge Base
 
-The repo knowledge base lives in [docs](docs/) and is indexed by [docs/README.md](docs/README.md). Keep root agent guidance compact and move durable details into focused docs such as `docs/design-docs/`, `docs/product-specs/`, `docs/references/`, `docs/quality/`, and `docs/exec-plans/`.
+The docs tree is split into [docs/agent](docs/agent/) for agent-facing guidance and [docs/user](docs/user/) for MkDocs/user documentation. Agent guidance is indexed by [docs/agent/README.md](docs/agent/README.md). Keep root agent guidance compact and move durable agent details into focused docs such as `docs/agent/design-docs/`, `docs/agent/product-specs/`, `docs/agent/references/`, `docs/agent/quality/`, and `docs/agent/exec-plans/`.
 
 ## Application Shape
 
@@ -53,24 +53,25 @@ Primary areas:
 - `scripts/debug/`: focused debugging probes.
 - `scripts/manual_diagnostics/`: developer-run project/data investigation utilities. These are not runtime toolbox APIs.
 - `scripts/packaging/`: release packaging definitions and installer/build inputs.
-- `docs/`: user docs, statistical method docs, processing docs, and agent-facing verification notes.
+- `docs/agent/`: agent-facing architecture, execution plans, quality gates, prompts, and implementation guidance.
+- `docs/user/`: user-facing MkDocs source for study workflow, statistics, tools, and reference pages.
 
 Focused architecture pages:
 
-- [GUI](docs/architecture/gui.md)
-- [Diagnostics](docs/architecture/diagnostics.md)
-- [Main App Target Layout](docs/architecture/main-app-target-layout.md)
-- [Project I/O](docs/architecture/project-io.md)
-- [Legacy Boundaries](docs/architecture/legacy-boundaries.md)
-- [Workers And Threading](docs/architecture/workers-threading.md)
-- [Statistics And Tools](docs/architecture/statistics-tools.md)
-- [FFT Crop Method](docs/architecture/fft-crop-method.md)
-- [Preprocessing Contract](docs/architecture/preprocessing-contract.md)
-- [Post-Processing Export Contract](docs/architecture/post-processing-export-contract.md)
-- [Processing Mixin Contract](docs/architecture/processing-mixin-contract.md)
-- [BDF Loading Contract](docs/architecture/eeg-loading-contract.md)
-- [Module Map](docs/architecture/module-map.md)
-- [Protected Paths](docs/architecture/protected-paths.txt)
+- [GUI](docs/agent/architecture/gui.md)
+- [Diagnostics](docs/agent/architecture/diagnostics.md)
+- [Main App Target Layout](docs/agent/architecture/main-app-target-layout.md)
+- [Project I/O](docs/agent/architecture/project-io.md)
+- [Legacy Boundaries](docs/agent/architecture/legacy-boundaries.md)
+- [Workers And Threading](docs/agent/architecture/workers-threading.md)
+- [Statistics And Tools](docs/agent/architecture/statistics-tools.md)
+- [FFT Crop Method](docs/agent/architecture/fft-crop-method.md)
+- [Preprocessing Contract](docs/agent/architecture/preprocessing-contract.md)
+- [Post-Processing Export Contract](docs/agent/architecture/post-processing-export-contract.md)
+- [Processing Mixin Contract](docs/agent/architecture/processing-mixin-contract.md)
+- [BDF Loading Contract](docs/agent/architecture/eeg-loading-contract.md)
+- [Module Map](docs/agent/architecture/module-map.md)
+- [Protected Paths](docs/agent/architecture/protected-paths.txt)
 
 ## Boundaries
 
@@ -91,4 +92,4 @@ Use focused checks for the changed area first.
 - Agent invariants: run `python .agents/scripts/audit/agent_audit.py`.
 - Broad shared behavior: run `python -m pytest -q`, then lint checks where configured.
 
-See [docs/quality/verification-gates.md](docs/quality/verification-gates.md) for the current command list and fallback reporting rules.
+See [docs/agent/quality/verification-gates.md](docs/agent/quality/verification-gates.md) for the current command list and fallback reporting rules.

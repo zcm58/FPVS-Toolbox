@@ -3,12 +3,10 @@ site_description: Documentation for processing FPVS EEG data and running publica
 site_url: https://zcm58.github.io/FPVS-Toolbox-Repo/
 repo_url: https://github.com/zcm58/FPVS-Toolbox-Repo
 repo_name: zcm58/FPVS-Toolbox-Repo
-edit_uri: edit/main/docs/
-docs_dir: docs
+edit_uri: edit/main/docs/user/
+docs_dir: docs/user
 site_dir: site
 strict: true
-exclude_docs: |
-  README.md
 theme:
   name: material
   features:
@@ -32,28 +30,6 @@ plugins:
   - search:
       lang: en
 
-not_in_nav: |
-  /README.md
-  /DESIGN.md
-  /FRONTEND.md
-  /PLANS.md
-  /PRODUCT_SENSE.md
-  /QUALITY_SCORE.md
-  /RELIABILITY.md
-  /SECURITY.md
-  /development.md
-  /legacy-quarantine-audit.md
-  /agent-index.md
-  /agent-prompts/*
-  /architecture/*
-  /design-docs/*
-  /exec-plans/*
-  /generated/*
-  /product-specs/*
-  /quality/*
-  /references/*
-  /reviews/*
-
 validation:
   omitted_files: warn
   absolute_links: warn
@@ -73,20 +49,20 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Start Here:
-      - Getting Started: getting-started.md
-      - FPVS Concepts for Non-Experts: fpvs-concepts.md
-      - First End-to-End Walkthrough: tutorial.md
-      - FAQ: faq.md
+      - Getting Started: start/getting-started.md
+      - FPVS Concepts for Non-Experts: start/fpvs-concepts.md
+      - First End-to-End Walkthrough: start/tutorial.md
+      - FAQ: start/faq.md
   - Run a Study:
-      - Overview: run-a-study.md
-      - Project Setup: project-setup.md
-      - Processing Pipeline: processing-pipeline.md
-      - Output Files: outputs-reference.md
-      - Troubleshooting: troubleshooting.md
+      - Overview: study/run-a-study.md
+      - Project Setup: study/project-setup.md
+      - Processing Pipeline: study/processing-pipeline.md
+      - Output Files: study/outputs-reference.md
+      - Troubleshooting: study/troubleshooting.md
   - Understand Results:
-      - Overview: understand-results.md
-      - FFT and Frequency-Domain Quantification (FPVS): fft-frequency-domain-quantification.md
-      - Statistical Analysis Overview: statistical-analysis.md
+      - Overview: results/understand-results.md
+      - FFT and Frequency-Domain Quantification (FPVS): results/fft-frequency-domain-quantification.md
+      - Statistical Analysis Overview: results/statistical-analysis.md
       - Which Statistical Test Should I Use?: statistics/which-test.md
       - Outliers and QC: statistics/outliers-and-qc.md
   - Statistics Reference:
@@ -97,9 +73,9 @@ nav:
       - Mixed Model: statistics/mixed-model.md
       - Baseline vs Zero Tests: statistics/baseline-vs-zero.md
   - Tools:
-      - Feature Tour: feature-tour.md
+      - Feature Tour: tools/feature-tour.md
       - Individual-level Detectability: tools/individual-level-detectability.md
   - Reference:
-      - Methods Reporting Checklist: methods-reporting-checklist.md
-      - Glossary: glossary.md
-      - Relevant Publications: relevant-publications.md
+      - Methods Reporting Checklist: reference/methods-reporting-checklist.md
+      - Glossary: reference/glossary.md
+      - Relevant Publications: reference/relevant-publications.md

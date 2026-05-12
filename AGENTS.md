@@ -12,7 +12,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Preserve existing processing order, data formats, exports, and user workflows unless the task explicitly changes them.
 - Prefer executable checks over broad reading. Run the relevant skill script or `python .agents/scripts/audit/agent_audit.py` first, then read only the focused docs needed for failures or context.
 - Treat [ARCHITECTURE.md](ARCHITECTURE.md) as the repo map before structural changes; do not read every architecture page by default.
-- Start with [docs/agent-index.md](docs/agent-index.md) when choosing skills, scripts, and focused tests.
+- Start with [docs/agent/agent-index.md](docs/agent/agent-index.md) when choosing skills, scripts, and focused tests.
 - For non-trivial refactors, read the active execution plan first. Update architecture docs or the nearest scoped `AGENTS.md` when structure, ownership, boundaries, or workflows change; otherwise state why no doc update was needed.
 
 ## Non-Negotiables
@@ -58,24 +58,24 @@ Use the script output to decide what to read next. If a script passes, do not sc
 ## Useful Docs
 
 - Architecture map: [ARCHITECTURE.md](ARCHITECTURE.md)
-- Docs knowledge-base map: [docs/README.md](docs/README.md)
-- Agent command index: [docs/agent-index.md](docs/agent-index.md)
-- Active execution plans: [docs/exec-plans/active/](docs/exec-plans/active/)
-- Technical debt tracker: [docs/exec-plans/tech-debt-tracker.md](docs/exec-plans/tech-debt-tracker.md)
-- Main App target layout: [docs/architecture/main-app-target-layout.md](docs/architecture/main-app-target-layout.md)
-- Module map: [docs/architecture/module-map.md](docs/architecture/module-map.md)
-- Protected paths: [docs/architecture/protected-paths.txt](docs/architecture/protected-paths.txt)
-- Test selection: [docs/quality/test-selection.md](docs/quality/test-selection.md)
-- Verification gates: [docs/quality/verification-gates.md](docs/quality/verification-gates.md)
-- Garbage collection: [docs/quality/garbage-collection.md](docs/quality/garbage-collection.md)
-- GUI architecture: [docs/architecture/gui.md](docs/architecture/gui.md); canonical active import surface lives in `src/Main_App/gui/`.
-- Diagnostics: [docs/architecture/diagnostics.md](docs/architecture/diagnostics.md); canonical runtime import surface lives in `src/Main_App/diagnostics/`.
-- BDF loading contract: [docs/architecture/eeg-loading-contract.md](docs/architecture/eeg-loading-contract.md); canonical active import surface lives in `src/Main_App/io/load_utils.py`.
-- Workers and threading: [docs/architecture/workers-threading.md](docs/architecture/workers-threading.md); canonical active import surface lives in `src/Main_App/workers/`.
-- Project I/O: [docs/architecture/project-io.md](docs/architecture/project-io.md); canonical active import surface lives in `src/Main_App/projects/`.
-- Preprocessing contract: [docs/architecture/preprocessing-contract.md](docs/architecture/preprocessing-contract.md); canonical active import surface lives in `src/Main_App/processing/preprocess.py`.
-- Pre-ship checklist: [docs/reviews/pre_ship_checklist.md](docs/reviews/pre_ship_checklist.md)
-- Legacy quarantine audit: [docs/legacy-quarantine-audit.md](docs/legacy-quarantine-audit.md)
+- Docs knowledge-base map: [docs/agent/README.md](docs/agent/README.md)
+- Agent command index: [docs/agent/agent-index.md](docs/agent/agent-index.md)
+- Active execution plans: [docs/agent/exec-plans/active/](docs/agent/exec-plans/active/)
+- Technical debt tracker: [docs/agent/exec-plans/tech-debt-tracker.md](docs/agent/exec-plans/tech-debt-tracker.md)
+- Main App target layout: [docs/agent/architecture/main-app-target-layout.md](docs/agent/architecture/main-app-target-layout.md)
+- Module map: [docs/agent/architecture/module-map.md](docs/agent/architecture/module-map.md)
+- Protected paths: [docs/agent/architecture/protected-paths.txt](docs/agent/architecture/protected-paths.txt)
+- Test selection: [docs/agent/quality/test-selection.md](docs/agent/quality/test-selection.md)
+- Verification gates: [docs/agent/quality/verification-gates.md](docs/agent/quality/verification-gates.md)
+- Garbage collection: [docs/agent/quality/garbage-collection.md](docs/agent/quality/garbage-collection.md)
+- GUI architecture: [docs/agent/architecture/gui.md](docs/agent/architecture/gui.md); canonical active import surface lives in `src/Main_App/gui/`.
+- Diagnostics: [docs/agent/architecture/diagnostics.md](docs/agent/architecture/diagnostics.md); canonical runtime import surface lives in `src/Main_App/diagnostics/`.
+- BDF loading contract: [docs/agent/architecture/eeg-loading-contract.md](docs/agent/architecture/eeg-loading-contract.md); canonical active import surface lives in `src/Main_App/io/load_utils.py`.
+- Workers and threading: [docs/agent/architecture/workers-threading.md](docs/agent/architecture/workers-threading.md); canonical active import surface lives in `src/Main_App/workers/`.
+- Project I/O: [docs/agent/architecture/project-io.md](docs/agent/architecture/project-io.md); canonical active import surface lives in `src/Main_App/projects/`.
+- Preprocessing contract: [docs/agent/architecture/preprocessing-contract.md](docs/agent/architecture/preprocessing-contract.md); canonical active import surface lives in `src/Main_App/processing/preprocess.py`.
+- Pre-ship checklist: [docs/agent/reviews/pre_ship_checklist.md](docs/agent/reviews/pre_ship_checklist.md)
+- Legacy quarantine audit: [docs/agent/architecture/legacy-quarantine-audit.md](docs/agent/architecture/legacy-quarantine-audit.md)
 
 ## Standard Verification
 
