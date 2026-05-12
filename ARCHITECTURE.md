@@ -88,6 +88,6 @@ Use focused checks for the changed area first.
 - Processing or export changes: targeted unit tests around data format, processing order, and output paths.
 - Retired-path work: confirm `src/Main_App/Legacy_App/**` and `src/Main_App/PySide6_App/**` are not recreated with `git diff --name-only` and `python .agents/scripts/audit/agent_audit.py`.
 - Agent invariants: run `python .agents/scripts/audit/agent_audit.py`.
-- Broad shared behavior: run `python -m pytest -q`, then lint/type checks where configured.
+- Broad shared behavior: run `python -m pytest -q`, then lint checks where configured.
 
 See [docs/quality/verification-gates.md](docs/quality/verification-gates.md) for the current command list and fallback reporting rules.

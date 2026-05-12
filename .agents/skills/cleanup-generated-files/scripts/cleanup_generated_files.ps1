@@ -21,6 +21,7 @@ $rootTargets = @(
     ".codex-tmp",
     ".tmp",
     "codex_pytest_tmp",
+    "test_tmp_processing_output.txt",
     "test_tmp",
     "__pycache__",
     "src\fsaverage",

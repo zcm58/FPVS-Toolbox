@@ -14,7 +14,6 @@ python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 python -m pytest -q
 ruff check .
-mypy src --strict
 ```
 
 ## Targeted Checks

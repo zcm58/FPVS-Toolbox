@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-from scripts.audit import agent_audit
+import importlib.util
+import sys
+
+from tests import repo_root
+
+_AGENT_AUDIT_PATH = repo_root() / ".agents" / "scripts" / "audit" / "agent_audit.py"
+_AGENT_AUDIT_SPEC = importlib.util.spec_from_file_location("agent_audit", _AGENT_AUDIT_PATH)
+agent_audit = importlib.util.module_from_spec(_AGENT_AUDIT_SPEC)
+assert _AGENT_AUDIT_SPEC.loader is not None
+sys.modules[_AGENT_AUDIT_SPEC.name] = agent_audit
+_AGENT_AUDIT_SPEC.loader.exec_module(agent_audit)
 
 
 def test_stats_reporting_legibility_flags_oversized_reporting_module(tmp_path, monkeypatch):

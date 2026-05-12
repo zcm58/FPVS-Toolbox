@@ -16,7 +16,7 @@ python -m pytest -m processing -q
 python -m pytest -m smoke -q
 ```
 
-Available markers are declared in `pytest.ini`: `gui`, `stats`, `project_io`,
+Available markers are declared in `pyproject.toml`: `gui`, `stats`, `project_io`,
 `processing`, `plot_generator`, `ratio`, `smoke`, `integration`, `slow`, and
 `qt`.
 

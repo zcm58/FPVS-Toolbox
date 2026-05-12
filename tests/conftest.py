@@ -13,6 +13,69 @@ import pytest
 
 os.environ.setdefault("FPVS_TEST_MODE", "1")
 
+_AUTO_MARK_RULES = {
+    "gui": (
+        "gui",
+        "layout",
+        "main_window",
+        "settings",
+        "status",
+        "window",
+        "dialog",
+        "qt",
+    ),
+    "stats": (
+        "anova",
+        "baseline",
+        "contrast",
+        "harmonic",
+        "lmm",
+        "mixed_model",
+        "multigroup",
+        "outlier",
+        "rm_anova",
+        "stats",
+    ),
+    "project_io": (
+        "export",
+        "file_scanner",
+        "manifest",
+        "open_existing_project",
+        "path",
+        "project",
+        "roundtrip",
+        "scan",
+    ),
+    "processing": (
+        "bca",
+        "epoch",
+        "fft",
+        "pipeline",
+        "post_process",
+        "postprocess",
+        "preproc",
+        "process",
+        "snr",
+        "worker",
+    ),
+    "plot_generator": ("plot_generator",),
+    "ratio": ("ratio_calculator",),
+    "smoke": ("smoke",),
+    "integration": ("e2e", "integration", "pipeline"),
+}
+
+_QT_HINTS = ("gui", "layout", "main_window", "qt", "window", "dialog")
+
+
+def pytest_collection_modifyitems(config, items):  # noqa: ARG001
+    for item in items:
+        node = f"{item.path.as_posix()}::{item.name}".lower()
+        for marker_name, hints in _AUTO_MARK_RULES.items():
+            if any(hint in node for hint in hints):
+                item.add_marker(getattr(pytest.mark, marker_name))
+        if any(hint in node for hint in _QT_HINTS):
+            item.add_marker(pytest.mark.qt)
+
 
 def _safe_find_spec(module_name: str):
     """Return a module spec without failing on partially initialized modules."""

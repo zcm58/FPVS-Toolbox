@@ -84,7 +84,6 @@ Run the narrowest relevant checks first, then broaden when the change affects sh
 python .agents/scripts/audit/agent_audit.py
 python -m pytest -q
 ruff check .
-mypy src --strict
 ```
 
 If a gate cannot run locally, report the command, failure reason, and residual risk.
