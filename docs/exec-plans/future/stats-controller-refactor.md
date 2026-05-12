@@ -112,7 +112,7 @@ depend on the protocol/state objects, not on concrete UI classes.
 Before editing, run:
 
 ```powershell
-python scripts/audit/agent_audit.py --check stats-structure
+python .agents/scripts/audit/agent_audit.py --check stats-structure
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 ```
 
@@ -126,7 +126,7 @@ python -m pytest tests\stats\pipeline\test_stats_pipeline_smoke.py tests\stats\a
 python -m pytest tests\stats\pipeline\test_stats_export_finalization_release_smoke.py tests\stats\gui\test_stats_window_errors_stats.py -q
 python -m pytest tests\stats\analysis\test_stats_lela_labels.py tests\stats\analysis\test_lela_filename_parser.py -q
 python -m pytest tests\stats\analysis\test_baseline_vs_zero.py tests\stats\analysis\test_stats_harmonics_integration.py tests\stats\pipeline\test_stats_multigroup_smoke.py -q
-python scripts\audit\agent_audit.py --check stats-structure
+python .agents\\scripts\\audit\\agent_audit.py --check stats-structure
 ```
 
 Broaden to layout smoke tests when callback wiring or view protocol assumptions

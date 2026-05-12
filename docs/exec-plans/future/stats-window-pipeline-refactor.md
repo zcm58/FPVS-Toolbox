@@ -129,7 +129,7 @@ on concrete controller internals.
 Before editing, run:
 
 ```powershell
-python scripts/audit/agent_audit.py --check stats-structure
+python .agents/scripts/audit/agent_audit.py --check stats-structure
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 ```
 
@@ -143,7 +143,7 @@ python -m pytest tests\stats\pipeline\test_stats_pipeline_smoke.py tests\stats\g
 python -m pytest tests\stats\analysis\test_stats_mixed_model_pipeline.py tests\stats\pipeline\test_stats_multigroup_lmm_signoff.py tests\stats\pipeline\test_stats_multigroup_smoke.py -q
 python -m pytest tests\stats\pipeline\test_stats_finalize_error_paths.py tests\stats\pipeline\test_stats_export_finalization_release_smoke.py tests\stats\gui\test_stats_window_errors_stats.py -q
 python -m pytest tests\stats\reporting\test_stats_reporting_summary_smoke.py tests\stats\reporting\test_stats_rm_anova_summary_reporting.py -q
-python scripts\audit\agent_audit.py --check stats-structure
+python .agents\\scripts\\audit\\agent_audit.py --check stats-structure
 ```
 
 Add pytest-qt smoke coverage when moving methods that update enabled states,

@@ -8,7 +8,7 @@ each condition and saved to a user-selected output folder.
 Before broad manual inspection, run:
 
 ```powershell
-python scripts/audit/agent_audit.py
+python .agents/scripts/audit/agent_audit.py
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ```

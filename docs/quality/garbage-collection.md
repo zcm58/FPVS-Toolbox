@@ -20,7 +20,7 @@ work from compounding into technical debt.
 Run:
 
 ```powershell
-python scripts/audit/agent_audit.py --check garbage-collection
+python .agents/scripts/audit/agent_audit.py --check garbage-collection
 ```
 
 The check is intentionally low-noise. It currently catches:
@@ -31,4 +31,4 @@ The check is intentionally low-noise. It currently catches:
 - retired `fsaverage` MRI template caches if they reappear in active source or quarantine.
 
 When a recurring cleanup rule becomes stable and low-noise, add it to
-`scripts/audit/agent_audit.py` instead of relying on manual review.
+`.agents/scripts/audit/agent_audit.py` instead of relying on manual review.

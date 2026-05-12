@@ -60,7 +60,7 @@ Useful checks:
 
 ```powershell
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
-python scripts/audit/agent_audit.py --check gui
+python .agents/scripts/audit/agent_audit.py --check gui
 python -m pytest tests/gui/test_ui_components_smoke.py -q
 python -m pytest tests/gui/test_main_window_layout_smoke.py -q
 ```

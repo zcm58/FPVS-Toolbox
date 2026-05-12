@@ -7,6 +7,8 @@ edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
 strict: true
+exclude_docs: |
+  README.md
 theme:
   name: material
   features:

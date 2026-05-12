@@ -79,7 +79,7 @@ for pytest marker guidance and focused test commands.
 Common gates:
 
 ```powershell
-python scripts/audit/agent_audit.py
+python .agents/scripts/audit/agent_audit.py
 python -m pytest -q
 ruff check .
 mypy src --strict

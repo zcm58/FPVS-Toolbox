@@ -5,7 +5,7 @@ Use this as a quick orientation map before opening files. Run the relevant audit
 Common first commands:
 
 ```powershell
-python scripts/audit/agent_audit.py
+python .agents/scripts/audit/agent_audit.py
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
@@ -39,7 +39,7 @@ Current `Legacy_App` runtime couplings:
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`: UI-agnostic average-preprocessing behavior used by the PySide6 tool.
 - `src/Tools/Image_Resizer/`: image resizing utility.
-- `scripts/audit/agent_audit.py` and `.agents/skills/*/scripts/`: repo-evaluation and agent harness checks, not runtime toolbox diagnostics.
+- `.agents/scripts/audit/agent_audit.py` and `.agents/skills/*/scripts/`: repo-evaluation and agent harness checks, not runtime toolbox diagnostics.
 - `scripts/manual_diagnostics/`: developer-run project/data investigation utilities, not runtime toolbox APIs.
 
 ## Dead Or Quarantined

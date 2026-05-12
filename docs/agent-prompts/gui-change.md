@@ -8,7 +8,7 @@ Checks:
 
 ```powershell
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
-python scripts/audit/agent_audit.py --check gui
+python .agents/scripts/audit/agent_audit.py --check gui
 python -m pytest <nearest pytest-qt test> -q
 ```
 

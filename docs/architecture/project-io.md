@@ -35,7 +35,7 @@ Useful checks:
 
 ```powershell
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-python scripts/audit/agent_audit.py --check paths
+python .agents/scripts/audit/agent_audit.py --check paths
 python -m pytest tests/project_io/test_project_settings_roundtrip.py tests/project_io/test_project_results_layout.py -q
 ```
 

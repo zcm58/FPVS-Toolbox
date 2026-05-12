@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 MANIFEST_PATH = REPO_ROOT / "docs" / "architecture" / "protected-paths.txt"
 ACTIVE_SOURCE_LOCALIZATION = "src/Tools/SourceLocalization"
 AGENT_INDEX = REPO_ROOT / "docs" / "agent-index.md"
@@ -518,7 +518,7 @@ def check_gui_imports() -> list[Issue]:
                         "import QAction from PySide6.QtGui, not QtWidgets or QtCore",
                     )
                 )
-            if normalized != "scripts/audit/agent_audit.py" and (
+            if normalized != ".agents/scripts/audit/agent_audit.py" and (
                 CUSTOMTK_IMPORT_RE.search(line) or TKINTER_IMPORT_RE.search(line)
             ):
                 issues.append(
@@ -556,7 +556,7 @@ def check_added_source_localization_refs() -> list[Issue]:
     issues: list[Issue] = []
     for path in _changed_files():
         normalized = _normalize(path)
-        if normalized == "scripts/audit/agent_audit.py":
+        if normalized == ".agents/scripts/audit/agent_audit.py":
             continue
         if not _is_python(normalized):
             continue
@@ -630,7 +630,7 @@ def check_stats_structure() -> list[Issue]:
 
         if not _is_python(normalized):
             continue
-        if normalized == "scripts/audit/agent_audit.py":
+        if normalized == ".agents/scripts/audit/agent_audit.py":
             continue
 
         for line_no, line in enumerate(_read_text(normalized), start=1):
@@ -753,7 +753,7 @@ def check_garbage_collection() -> list[Issue]:
 
     for path in _changed_files():
         normalized = _normalize(path)
-        if normalized == "scripts/audit/agent_audit.py":
+        if normalized == ".agents/scripts/audit/agent_audit.py":
             continue
         if not (_is_python(normalized) or Path(normalized).suffix in {".md", ".txt"}):
             continue

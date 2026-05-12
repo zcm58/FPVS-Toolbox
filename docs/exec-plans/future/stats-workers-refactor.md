@@ -112,8 +112,8 @@ callers are migrated and tests prove behavior is unchanged.
 Before editing, run:
 
 ```powershell
-python scripts/audit/agent_audit.py --check stats-structure
-python scripts/audit/agent_audit.py --check stats-reporting-legibility
+python .agents/scripts/audit/agent_audit.py --check stats-structure
+python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility
 ```
 
 ## Verification Plan
@@ -126,8 +126,8 @@ python -m pytest tests\stats\pipeline\test_stats_pipeline_smoke.py tests\stats\g
 python -m pytest tests\stats\analysis\test_stats_dv_policy.py tests\stats\analysis\test_stats_dv_variants.py tests\stats\qc\test_stats_qc_exclusion.py tests\stats\qc\test_stats_outlier_exclusion.py -q
 python -m pytest tests\stats\analysis\test_stats_mixed_model_pipeline.py tests\stats\analysis\test_stats_between_group_blocked_payload.py tests\stats\analysis\test_stats_group_contrasts_validation.py -q
 python -m pytest tests\stats\analysis\test_stats_shared_harmonics.py tests\stats\analysis\test_stats_fixed_harmonics_dv.py tests\stats\analysis\test_stats_harmonics_integration.py -q
-python scripts\audit\agent_audit.py --check stats-structure
-python scripts\audit\agent_audit.py --check stats-reporting-legibility
+python .agents\\scripts\\audit\\agent_audit.py --check stats-structure
+python .agents\\scripts\\audit\\agent_audit.py --check stats-reporting-legibility
 ```
 
 Use additional focused tests when the touched function already has a dedicated

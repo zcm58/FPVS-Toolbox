@@ -7,21 +7,21 @@ from pathlib import Path
 
 def _repo_root() -> Path:
     for parent in Path(__file__).resolve().parents:
-        candidate = parent / "scripts" / "audit" / "agent_audit.py"
+        candidate = parent / ".agents" / "scripts" / "audit" / "agent_audit.py"
         if candidate.exists():
             return parent
-    raise SystemExit("Could not find repo root containing scripts/audit/agent_audit.py")
+    raise SystemExit("Could not find repo root containing .agents/scripts/audit/agent_audit.py")
 
 
 if __name__ == "__main__":
     root = _repo_root()
     protected = subprocess.run(
-        [sys.executable, str(root / "scripts" / "audit" / "agent_audit.py"), "--check", "protected"],
+        [sys.executable, str(root / ".agents" / "scripts" / "audit" / "agent_audit.py"), "--check", "protected"],
         cwd=root,
         check=False,
     )
     source_localization = subprocess.run(
-        [sys.executable, str(root / "scripts" / "audit" / "agent_audit.py"), "--check", "source-localization"],
+        [sys.executable, str(root / ".agents" / "scripts" / "audit" / "agent_audit.py"), "--check", "source-localization"],
         cwd=root,
         check=False,
     )

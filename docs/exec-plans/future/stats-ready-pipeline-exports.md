@@ -55,7 +55,7 @@ The data-shaping and export implementation should live near the Stats I/O or rep
 - Value tests prove Summed BCA outputs match the existing Stats DV helpers.
 - Harmonic metadata tests prove selected harmonics match the Rossion-method selection rules.
 - Empty or missing harmonic tests prove fallback behavior is explicit and documented.
-- Run the relevant Stats structure/reporting checks and `python scripts/audit/agent_audit.py`.
+- Run the relevant Stats structure/reporting checks and `python .agents/scripts/audit/agent_audit.py`.
 
 ## Assumptions
 
