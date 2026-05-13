@@ -7,6 +7,8 @@ from pathlib import Path
 import importlib
 import importlib.util
 import shutil
+import faulthandler
+import threading
 from importlib.machinery import ModuleSpec
 
 import pytest
@@ -65,6 +67,9 @@ _AUTO_MARK_RULES = {
 }
 
 _QT_HINTS = ("gui", "layout", "main_window", "qt", "window", "dialog")
+_WATCHDOG_MARKERS = {"gui", "plot_generator", "qt"}
+_WATCHDOG_TIMEOUT_SECONDS = int(os.environ.get("FPVS_TEST_WATCHDOG_SECONDS", "20"))
+_SLOW_WATCHDOG_TIMEOUT_SECONDS = int(os.environ.get("FPVS_SLOW_TEST_WATCHDOG_SECONDS", "120"))
 
 
 def pytest_collection_modifyitems(config, items):  # noqa: ARG001
@@ -75,6 +80,39 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
                 item.add_marker(getattr(pytest.mark, marker_name))
         if any(hint in node for hint in _QT_HINTS):
             item.add_marker(pytest.mark.qt)
+
+
+@pytest.fixture(autouse=True)
+def _bounded_gui_and_plot_tests(request):
+    """Fail fast on GUI/plot-generator test hangs instead of leaving pytest stuck."""
+
+    if os.environ.get("FPVS_DISABLE_TEST_WATCHDOG") == "1":
+        yield
+        return
+    marker_names = {marker.name for marker in request.node.iter_markers()}
+    if not marker_names.intersection(_WATCHDOG_MARKERS):
+        yield
+        return
+    timeout = (
+        _SLOW_WATCHDOG_TIMEOUT_SECONDS
+        if "slow" in marker_names
+        else _WATCHDOG_TIMEOUT_SECONDS
+    )
+
+    def _timeout() -> None:
+        sys.stderr.write(
+            f"\nTest watchdog timed out after {timeout}s: {request.node.nodeid}\n"
+        )
+        faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        os._exit(124)
+
+    timer = threading.Timer(timeout, _timeout)
+    timer.daemon = True
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
 
 
 def _safe_find_spec(module_name: str):

@@ -11,7 +11,6 @@ from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QMessageBox
 
 from Tools.Plot_Generator.selection_state import ALL_CONDITIONS_OPTION
-from Tools.Plot_Generator.worker import _Worker
 
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,12 @@ logger = logging.getLogger(__name__)
 
 def _worker_class():
     gui_module = sys.modules.get("Tools.Plot_Generator.gui")
-    return getattr(gui_module, "_Worker", _Worker)
+    worker_cls = getattr(gui_module, "_Worker", None)
+    if worker_cls is not None:
+        return worker_cls
+    from Tools.Plot_Generator.worker import _Worker
+
+    return _Worker
 
 
 def _thread_class():

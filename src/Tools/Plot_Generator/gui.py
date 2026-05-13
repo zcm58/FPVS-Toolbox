@@ -41,7 +41,6 @@ from Tools.Plot_Generator.project_paths import (
     _project_paths,
     _resolve_project_subfolder,
 )
-from .worker import _Worker
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +207,7 @@ class PlotGeneratorWindow(
             self.out_edit.setText(default_out)
 
         self._thread: QThread | None = None
-        self._worker: _Worker | None = None
+        self._worker: object | None = None
         self._generated_paths: list[str] = []
         self._failed_items: list[dict[str, str]] = []
         self._gen_params: (

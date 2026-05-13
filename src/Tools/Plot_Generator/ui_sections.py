@@ -66,6 +66,8 @@ class PlotGeneratorUiSectionsMixin:
         self.folder_edit = input_picker.line_edit
         self.folder_edit.setText(self._defaults.get("input_folder", ""))
         self.folder_edit.setToolTip("Select the folder containing your Excel sheets.")
+        self.folder_edit.setMinimumWidth(260)
+        input_picker.setMinimumWidth(390)
         browse = input_picker.button
         browse.setToolTip(
             "Select the FOLDER that contains your results excel files"
@@ -82,6 +84,8 @@ class PlotGeneratorUiSectionsMixin:
         self.out_edit = output_picker.line_edit
         self.out_edit.setText(self._defaults.get("output_folder", ""))
         self.out_edit.setToolTip("Folder where plots will be saved")
+        self.out_edit.setMinimumWidth(260)
+        output_picker.setMinimumWidth(460)
         browse_out = output_picker.button
         browse_out.setToolTip("Browse for output folder")
         browse_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
