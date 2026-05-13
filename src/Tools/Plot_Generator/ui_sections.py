@@ -372,11 +372,13 @@ class PlotGeneratorUiSectionsMixin:
 
         self.progress_bar = QProgressBar()
 
-        progress_box = SectionCard("Progress")
-        progress_box.setSizePolicy(
+        self.progress_box = SectionCard("Progress")
+        self.progress_box.setMinimumWidth(420)
+        self.progress_box.setMaximumWidth(560)
+        self.progress_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         )
-        progress_layout = progress_box.content_layout
+        progress_layout = self.progress_box.content_layout
         progress_layout.setSpacing(6)
         progress_layout.addWidget(self.progress_bar)
 
@@ -429,21 +431,12 @@ class PlotGeneratorUiSectionsMixin:
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
         left_layout.addWidget(file_box)
-        left_layout.addWidget(progress_box)
+        left_layout.addWidget(params_box)
         left_layout.addStretch(1)
-
-        center_column = QWidget()
-        center_column.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        )
-        center_layout = QVBoxLayout(center_column)
-        center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(8)
-        center_layout.addWidget(params_box)
 
         right_column = QWidget()
         right_column.setSizePolicy(
-            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         )
         right_layout = QVBoxLayout(right_column)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -457,9 +450,17 @@ class PlotGeneratorUiSectionsMixin:
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(10)
         content_layout.addWidget(left_column, 1)
-        content_layout.addWidget(center_column, 2)
         content_layout.addWidget(right_column, 1)
         root_layout.addWidget(content_widget, 1)
+
+        progress_row = QWidget()
+        progress_row_layout = QHBoxLayout(progress_row)
+        progress_row_layout.setContentsMargins(0, 0, 0, 0)
+        progress_row_layout.setSpacing(0)
+        progress_row_layout.addStretch(1)
+        progress_row_layout.addWidget(self.progress_box)
+        progress_row_layout.addStretch(1)
+        root_layout.addWidget(progress_row)
 
         self.save_defaults_btn = make_action_button("Save Defaults")
         self.save_defaults_btn.setToolTip("Save current folders as defaults")
