@@ -79,7 +79,7 @@ def _configure_window(
         def moveToThread(self, *args, **kwargs):  # noqa: ANN001, ARG002
             return None
 
-    monkeypatch.setattr(plot_gui, "_Worker", DummyWorker)
+    monkeypatch.setattr(plot_gui, "_Worker", DummyWorker, raising=False)
     monkeypatch.setattr(plot_gui, "QThread", _DummyThread)
     monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: None, raising=False)
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None, raising=False)
@@ -129,10 +129,14 @@ def test_reset_legend_defaults(qtbot, tmp_path, monkeypatch):
     win, _ = _configure_window(qtbot, tmp_path, monkeypatch)
 
     win.legend_custom_check.setChecked(True)
-    win.legend_condition_a_edit.setText("Custom A")
-    win.legend_condition_b_edit.setText("Custom B")
-    win.legend_a_peaks_edit.setText("Custom A Peaks")
-    win.legend_b_peaks_edit.setText("Custom B Peaks")
+    for edit, text in (
+        (win.legend_condition_a_edit, "Custom A"),
+        (win.legend_condition_b_edit, "Custom B"),
+        (win.legend_a_peaks_edit, "Custom A Peaks"),
+        (win.legend_b_peaks_edit, "Custom B Peaks"),
+    ):
+        edit.clear()
+        qtbot.keyClicks(edit, text)
 
     win.legend_reset_btn.click()
 
@@ -143,8 +147,8 @@ def test_reset_legend_defaults(qtbot, tmp_path, monkeypatch):
     assert win.legend_b_peaks_edit.isEnabled() is False
     assert win.legend_condition_a_edit.text() == "CondA"
     assert win.legend_condition_b_edit.text() == "CondB"
-    assert win.legend_a_peaks_edit.text() == "A-Peaks"
-    assert win.legend_b_peaks_edit.text() == "B-Peaks"
+    assert win.legend_a_peaks_edit.text() == "CondA Peaks"
+    assert win.legend_b_peaks_edit.text() == "CondB Peaks"
 
 
 @pytest.mark.qt
@@ -152,10 +156,14 @@ def test_legend_group_visibility_retains_values(qtbot, tmp_path, monkeypatch):
     win, _ = _configure_window(qtbot, tmp_path, monkeypatch)
 
     win.legend_custom_check.setChecked(True)
-    win.legend_condition_a_edit.setText("Custom A")
-    win.legend_condition_b_edit.setText("Custom B")
-    win.legend_a_peaks_edit.setText("Custom A Peaks")
-    win.legend_b_peaks_edit.setText("Custom B Peaks")
+    for edit, text in (
+        (win.legend_condition_a_edit, "Custom A"),
+        (win.legend_condition_b_edit, "Custom B"),
+        (win.legend_a_peaks_edit, "Custom A Peaks"),
+        (win.legend_b_peaks_edit, "Custom B Peaks"),
+    ):
+        edit.clear()
+        qtbot.keyClicks(edit, text)
 
     win.overlay_check.setChecked(False)
     qtbot.wait(50)
@@ -169,3 +177,38 @@ def test_legend_group_visibility_retains_values(qtbot, tmp_path, monkeypatch):
     assert win.legend_b_peaks_edit.isVisible() is True
     assert win.legend_condition_a_edit.text() == "Custom A"
     assert win.legend_condition_b_edit.text() == "Custom B"
+
+
+@pytest.mark.qt
+def test_legend_defaults_follow_condition_selection(qtbot, tmp_path, monkeypatch):
+    win, _ = _configure_window(qtbot, tmp_path, monkeypatch)
+
+    win.legend_custom_check.setChecked(True)
+    assert win.legend_condition_a_edit.text() == "CondA"
+    assert win.legend_condition_b_edit.text() == "CondB"
+    assert win.legend_a_peaks_edit.text() == "CondA Peaks"
+    assert win.legend_b_peaks_edit.text() == "CondB Peaks"
+
+    win.condition_combo.setCurrentText("CondB")
+    win.condition_b_combo.setCurrentText("CondA")
+    qtbot.wait(50)
+
+    assert win.legend_condition_a_edit.text() == "CondB"
+    assert win.legend_condition_b_edit.text() == "CondA"
+    assert win.legend_a_peaks_edit.text() == "CondB Peaks"
+    assert win.legend_b_peaks_edit.text() == "CondA Peaks"
+
+
+@pytest.mark.qt
+def test_legend_peak_manual_override_is_preserved(qtbot, tmp_path, monkeypatch):
+    win, _ = _configure_window(qtbot, tmp_path, monkeypatch)
+
+    win.legend_custom_check.setChecked(True)
+    win.legend_a_peaks_edit.clear()
+    qtbot.keyClicks(win.legend_a_peaks_edit, "Manual A Peaks")
+
+    win.condition_combo.setCurrentText("CondB")
+    qtbot.wait(50)
+
+    assert win.legend_condition_a_edit.text() == "CondB"
+    assert win.legend_a_peaks_edit.text() == "Manual A Peaks"

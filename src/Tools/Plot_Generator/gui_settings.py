@@ -37,12 +37,22 @@ def _settings_float(value: object, fallback: float) -> float:
 class PlotGeneratorSettingsMixin:
     """Project and legend settings helpers for PlotGeneratorWindow."""
 
+    def _legend_peaks_default(self, condition_label: str, fallback: str) -> str:
+        label = condition_label.strip()
+        return f"{label} Peaks" if label else fallback
+
     def _legend_default_values(self) -> dict[str, str]:
+        condition_a = self.condition_combo.currentText().strip()
+        condition_b = self.condition_b_combo.currentText().strip()
         return {
-            "condition_a_label": self.condition_combo.currentText().strip(),
-            "condition_b_label": self.condition_b_combo.currentText().strip(),
-            "a_peaks_label": _LEGEND_DEFAULT_A_PEAKS,
-            "b_peaks_label": _LEGEND_DEFAULT_B_PEAKS,
+            "condition_a_label": condition_a,
+            "condition_b_label": condition_b,
+            "a_peaks_label": self._legend_peaks_default(
+                condition_a, _LEGEND_DEFAULT_A_PEAKS
+            ),
+            "b_peaks_label": self._legend_peaks_default(
+                condition_b, _LEGEND_DEFAULT_B_PEAKS
+            ),
         }
 
     def _legend_settings_payload(self) -> dict[str, object]:
@@ -104,16 +114,51 @@ class PlotGeneratorSettingsMixin:
             return False
         return True
 
-    def _prefill_legend_defaults_if_empty(self) -> None:
+    def _set_legend_text_auto(self, key: str, text: str) -> None:
+        field = self._legend_fields[key]
+        old_auto = self._legend_auto_values.get(key, "")
+        should_update = (
+            key not in self._legend_manual_overrides
+            or not field.text().strip()
+            or field.text() == old_auto
+        )
+        self._legend_auto_values[key] = text
+        if should_update and field.text() != text:
+            self._syncing_legend_defaults = True
+            try:
+                field.setText(text)
+            finally:
+                self._syncing_legend_defaults = False
+
+    def _sync_legend_defaults_with_conditions(self) -> None:
         defaults = self._legend_default_values()
-        if not self.legend_condition_a_edit.text().strip():
-            self.legend_condition_a_edit.setText(defaults["condition_a_label"])
-        if not self.legend_condition_b_edit.text().strip():
-            self.legend_condition_b_edit.setText(defaults["condition_b_label"])
-        if not self.legend_a_peaks_edit.text().strip():
-            self.legend_a_peaks_edit.setText(defaults["a_peaks_label"])
-        if not self.legend_b_peaks_edit.text().strip():
-            self.legend_b_peaks_edit.setText(defaults["b_peaks_label"])
+        for key, text in defaults.items():
+            self._set_legend_text_auto(key, text)
+
+    def _prefill_legend_defaults_if_empty(self) -> None:
+        self._sync_legend_defaults_with_conditions()
+
+    def _mark_legend_manual_override(self, key: str) -> None:
+        if self._syncing_legend_defaults:
+            return
+        self._legend_manual_overrides.add(key)
+
+    def _on_legend_condition_label_edited(self, condition_key: str) -> None:
+        self._mark_legend_manual_override(condition_key)
+        if condition_key == "condition_a_label":
+            self._set_legend_text_auto(
+                "a_peaks_label",
+                self._legend_peaks_default(
+                    self.legend_condition_a_edit.text(), _LEGEND_DEFAULT_A_PEAKS
+                ),
+            )
+        else:
+            self._set_legend_text_auto(
+                "b_peaks_label",
+                self._legend_peaks_default(
+                    self.legend_condition_b_edit.text(), _LEGEND_DEFAULT_B_PEAKS
+                ),
+            )
 
     def _toggle_custom_legend_labels(self, checked: bool) -> None:
         self.legend_condition_a_edit.setEnabled(checked)
@@ -127,12 +172,18 @@ class PlotGeneratorSettingsMixin:
             self._persist_legend_settings()
 
     def _reset_legend_defaults(self) -> None:
+        self._legend_manual_overrides.clear()
         defaults = self._legend_default_values()
         self.legend_custom_check.setChecked(False)
-        self.legend_condition_a_edit.setText(defaults["condition_a_label"])
-        self.legend_condition_b_edit.setText(defaults["condition_b_label"])
-        self.legend_a_peaks_edit.setText(defaults["a_peaks_label"])
-        self.legend_b_peaks_edit.setText(defaults["b_peaks_label"])
+        self._syncing_legend_defaults = True
+        try:
+            self.legend_condition_a_edit.setText(defaults["condition_a_label"])
+            self.legend_condition_b_edit.setText(defaults["condition_b_label"])
+            self.legend_a_peaks_edit.setText(defaults["a_peaks_label"])
+            self.legend_b_peaks_edit.setText(defaults["b_peaks_label"])
+        finally:
+            self._syncing_legend_defaults = False
+        self._legend_auto_values = dict(defaults)
         self.legend_condition_a_edit.setEnabled(False)
         self.legend_condition_b_edit.setEnabled(False)
         self.legend_a_peaks_edit.setEnabled(False)
@@ -192,18 +243,28 @@ class PlotGeneratorSettingsMixin:
         if not isinstance(labels, dict):
             labels = {}
         self.legend_custom_check.setChecked(bool(labels.get("custom_labels_enabled", False)))
-        self.legend_condition_a_edit.setText(
-            str(labels.get("condition_a_label", defaults["condition_a_label"]))
-        )
-        self.legend_condition_b_edit.setText(
-            str(labels.get("condition_b_label", defaults["condition_b_label"]))
-        )
-        self.legend_a_peaks_edit.setText(
-            str(labels.get("a_peaks_label", defaults["a_peaks_label"]))
-        )
-        self.legend_b_peaks_edit.setText(
-            str(labels.get("b_peaks_label", defaults["b_peaks_label"]))
-        )
+        loaded = {
+            "condition_a_label": str(
+                labels.get("condition_a_label", defaults["condition_a_label"])
+            ),
+            "condition_b_label": str(
+                labels.get("condition_b_label", defaults["condition_b_label"])
+            ),
+            "a_peaks_label": str(labels.get("a_peaks_label", defaults["a_peaks_label"])),
+            "b_peaks_label": str(labels.get("b_peaks_label", defaults["b_peaks_label"])),
+        }
+        self._syncing_legend_defaults = True
+        try:
+            self.legend_condition_a_edit.setText(loaded["condition_a_label"])
+            self.legend_condition_b_edit.setText(loaded["condition_b_label"])
+            self.legend_a_peaks_edit.setText(loaded["a_peaks_label"])
+            self.legend_b_peaks_edit.setText(loaded["b_peaks_label"])
+        finally:
+            self._syncing_legend_defaults = False
+        self._legend_auto_values = dict(defaults)
+        self._legend_manual_overrides = {
+            key for key, value in loaded.items() if value != defaults[key]
+        }
         self._toggle_custom_legend_labels(self.legend_custom_check.isChecked())
 
     def _persist_legend_settings(self) -> None:

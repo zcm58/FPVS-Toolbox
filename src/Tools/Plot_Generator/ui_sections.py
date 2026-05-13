@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyle,
     QTextEdit,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -39,10 +38,12 @@ from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
 class PlotGeneratorUiSectionsMixin:
     """Build the Plot Generator widget tree."""
 
-    def _toggle_log_panel(self, expanded: bool) -> None:
-        self.log_toggle_btn.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
-        self.log_body.setVisible(expanded)
-        self.log.setMinimumHeight(180 if expanded else 0)
+    def _style_section_title(self, card: SectionCard) -> None:
+        title = card.header.title_label
+        font = title.font()
+        font.setBold(True)
+        font.setPointSize(font.pointSize() + 1)
+        title.setFont(font)
 
     def _build_ui(self) -> None:
         configure_window_surface(
@@ -54,10 +55,14 @@ class PlotGeneratorUiSectionsMixin:
         root_layout.setContentsMargins(8, 8, 8, 8)
         root_layout.setSpacing(8)
         file_box = SectionCard("File I/O")
+        self._style_section_title(file_box)
         file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         file_layout = file_box.content_layout
         file_layout.setSpacing(6)
-        file_form = make_form_layout()
+        file_grid = QGridLayout()
+        file_grid.setContentsMargins(0, 0, 0, 0)
+        file_grid.setHorizontalSpacing(10)
+        file_grid.setVerticalSpacing(4)
 
         input_picker = PathPickerRow(
             "Browse...",
@@ -66,8 +71,8 @@ class PlotGeneratorUiSectionsMixin:
         self.folder_edit = input_picker.line_edit
         self.folder_edit.setText(self._defaults.get("input_folder", ""))
         self.folder_edit.setToolTip("Select the folder containing your Excel sheets.")
-        self.folder_edit.setMinimumWidth(260)
-        input_picker.setMinimumWidth(390)
+        self.folder_edit.setMinimumWidth(220)
+        input_picker.setMinimumWidth(360)
         browse = input_picker.button
         browse.setToolTip(
             "Select the FOLDER that contains your results excel files"
@@ -75,7 +80,9 @@ class PlotGeneratorUiSectionsMixin:
         browse.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         browse.clicked.connect(self._select_folder)
         self.folder_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        file_form.addRow(QLabel("Excel Files Folder:"), input_picker)
+        excel_label = QLabel("Excel Files Folder:")
+        file_grid.addWidget(excel_label, 0, 0)
+        file_grid.addWidget(input_picker, 0, 1)
 
         output_picker = PathPickerRow(
             "Browse...",
@@ -84,8 +91,8 @@ class PlotGeneratorUiSectionsMixin:
         self.out_edit = output_picker.line_edit
         self.out_edit.setText(self._defaults.get("output_folder", ""))
         self.out_edit.setToolTip("Folder where plots will be saved")
-        self.out_edit.setMinimumWidth(260)
-        output_picker.setMinimumWidth(460)
+        self.out_edit.setMinimumWidth(220)
+        output_picker.setMinimumWidth(420)
         browse_out = output_picker.button
         browse_out.setToolTip("Browse for output folder")
         browse_out.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
@@ -96,14 +103,19 @@ class PlotGeneratorUiSectionsMixin:
         open_out.clicked.connect(self._open_output_folder)
         output_picker.row_layout.addWidget(open_out, 0)
         self.out_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        file_form.addRow(QLabel("Save Plots To:"), output_picker)
+        save_label = QLabel("Save Plots To:")
+        file_grid.addWidget(save_label, 0, 2)
+        file_grid.addWidget(output_picker, 0, 3)
+        file_grid.setColumnStretch(1, 1)
+        file_grid.setColumnStretch(3, 1)
 
-        file_layout.addLayout(file_form)
+        file_layout.addLayout(file_grid)
 
-        params_box = SectionCard("Plot Parameters")
-        params_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
-        params_form = make_form_layout()
-        params_box.content_layout.addLayout(params_form)
+        self.params_box = SectionCard("Plot Parameters")
+        self._style_section_title(self.params_box)
+        self.params_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
+        params_layout = self.params_box.content_layout
+        params_layout.setSpacing(6)
 
         self.condition_combo = QComboBox()
         self.condition_combo.setToolTip("Select the condition to plot")
@@ -174,17 +186,12 @@ class PlotGeneratorUiSectionsMixin:
         selectors_grid.addWidget(cond_a_container, 0, 0)
         selectors_grid.addWidget(self.condB_container, 0, 1)
         selectors_grid.addWidget(roi_container, 0, 2)
-
-        selectors_container = QWidget()
-        selectors_container_layout = QHBoxLayout(selectors_container)
-        selectors_container_layout.setContentsMargins(0, 0, 0, 0)
-        selectors_container_layout.setSpacing(0)
-        selectors_container_layout.addStretch(1)
-        selectors_container_layout.addLayout(selectors_grid)
-        selectors_container_layout.addStretch(1)
+        selectors_grid.setColumnStretch(0, 1)
+        selectors_grid.setColumnStretch(1, 1)
+        selectors_grid.setColumnStretch(2, 1)
 
         self._selectors_grid = selectors_grid
-        params_form.addRow(selectors_container)
+        params_layout.addLayout(selectors_grid)
 
         self.overlay_check = QCheckBox("Overlay Comparison")
         self.overlay_check.toggled.connect(self._overlay_toggled)
@@ -202,52 +209,91 @@ class PlotGeneratorUiSectionsMixin:
         overlay_layout.addWidget(self.scalp_check)
         overlay_layout.addStretch(1)
 
-        params_form.addRow("", overlay_row)
+        params_layout.addWidget(overlay_row)
 
         self.legend_group = SectionCard("Legend labels (optional)")
+        self._style_section_title(self.legend_group)
         legend_layout = self.legend_group.content_layout
-        legend_layout.setSpacing(6)
+        legend_layout.setSpacing(8)
         self.legend_custom_check = QCheckBox("Custom legend labels")
         self.legend_custom_check.toggled.connect(self._toggle_custom_legend_labels)
-        legend_layout.addWidget(self.legend_custom_check)
+        legend_header = QHBoxLayout()
+        legend_header.setContentsMargins(0, 0, 0, 0)
+        legend_header.setSpacing(8)
+        legend_header.addWidget(self.legend_custom_check)
+        legend_header.addStretch(1)
 
-        legend_form = make_form_layout()
+        legend_form = QGridLayout()
+        legend_form.setContentsMargins(0, 0, 0, 0)
+        legend_form.setHorizontalSpacing(10)
+        legend_form.setVerticalSpacing(5)
 
         self.legend_condition_a_edit = QLineEdit()
         self.legend_condition_a_edit.setPlaceholderText("Condition A label")
         self.legend_condition_a_edit.setEnabled(False)
         self.legend_condition_a_edit.textChanged.connect(self._persist_legend_settings)
+        self.legend_condition_a_edit.textEdited.connect(
+            lambda _text: self._on_legend_condition_label_edited("condition_a_label")
+        )
         self.legend_condition_a_label = QLabel("Condition A label:")
-        legend_form.addRow(self.legend_condition_a_label, self.legend_condition_a_edit)
+        legend_form.addWidget(self.legend_condition_a_label, 0, 0)
+        legend_form.addWidget(self.legend_condition_a_edit, 0, 1)
 
         self.legend_condition_b_edit = QLineEdit()
         self.legend_condition_b_edit.setPlaceholderText("Condition B label")
         self.legend_condition_b_edit.setEnabled(False)
         self.legend_condition_b_edit.textChanged.connect(self._persist_legend_settings)
+        self.legend_condition_b_edit.textEdited.connect(
+            lambda _text: self._on_legend_condition_label_edited("condition_b_label")
+        )
         self.legend_condition_b_label = QLabel("Condition B label:")
-        legend_form.addRow(self.legend_condition_b_label, self.legend_condition_b_edit)
+        legend_form.addWidget(self.legend_condition_b_label, 0, 2)
+        legend_form.addWidget(self.legend_condition_b_edit, 0, 3)
 
         self.legend_a_peaks_edit = QLineEdit()
         self.legend_a_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_A_PEAKS)
         self.legend_a_peaks_edit.setEnabled(False)
         self.legend_a_peaks_edit.textChanged.connect(self._persist_legend_settings)
+        self.legend_a_peaks_edit.textEdited.connect(
+            lambda _text: self._mark_legend_manual_override("a_peaks_label")
+        )
         self.legend_a_peaks_label = QLabel("A-Peaks label:")
-        legend_form.addRow(self.legend_a_peaks_label, self.legend_a_peaks_edit)
+        legend_form.addWidget(self.legend_a_peaks_label, 1, 0)
+        legend_form.addWidget(self.legend_a_peaks_edit, 1, 1)
 
         self.legend_b_peaks_edit = QLineEdit()
         self.legend_b_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_B_PEAKS)
         self.legend_b_peaks_edit.setEnabled(False)
         self.legend_b_peaks_edit.textChanged.connect(self._persist_legend_settings)
+        self.legend_b_peaks_edit.textEdited.connect(
+            lambda _text: self._mark_legend_manual_override("b_peaks_label")
+        )
         self.legend_b_peaks_label = QLabel("B-Peaks label:")
-        legend_form.addRow(self.legend_b_peaks_label, self.legend_b_peaks_edit)
+        legend_form.addWidget(self.legend_b_peaks_label, 1, 2)
+        legend_form.addWidget(self.legend_b_peaks_edit, 1, 3)
+        legend_form.setColumnStretch(1, 1)
+        legend_form.setColumnStretch(3, 1)
 
-        legend_layout.addLayout(legend_form)
         self.legend_reset_btn = make_action_button("Reset to defaults")
         self.legend_reset_btn.clicked.connect(self._reset_legend_defaults)
-        legend_layout.addWidget(self.legend_reset_btn, alignment=Qt.AlignRight)
-        params_form.addRow(self.legend_group)
+        legend_header.addWidget(self.legend_reset_btn)
+        legend_layout.addStretch(1)
+        legend_layout.addLayout(legend_header)
+        legend_layout.addLayout(legend_form)
+        legend_layout.addStretch(1)
+
+        self._legend_fields = {
+            "condition_a_label": self.legend_condition_a_edit,
+            "condition_b_label": self.legend_condition_b_edit,
+            "a_peaks_label": self.legend_a_peaks_edit,
+            "b_peaks_label": self.legend_b_peaks_edit,
+        }
+        self._legend_auto_values: dict[str, str] = {}
+        self._legend_manual_overrides: set[str] = set()
+        self._syncing_legend_defaults = False
 
         self.group_box = SectionCard("Group Options")
+        self._style_section_title(self.group_box)
         group_layout = self.group_box.content_layout
         group_layout.setSpacing(6)
         self.group_overlay_check = QCheckBox("Overlay groups on plots")
@@ -258,7 +304,7 @@ class PlotGeneratorUiSectionsMixin:
         self.group_list.setMinimumHeight(80)
         group_layout.addWidget(self.group_list)
         self.group_box.setVisible(False)
-        params_form.addRow(self.group_box)
+        # Added below the legend in the left column; hidden unless multi-group data is present.
 
         self.scalp_title_a_edit = QLineEdit(self.scalp_title_a_template)
         self.scalp_title_a_edit.setPlaceholderText("{condition} {roi} scalp map")
@@ -266,7 +312,8 @@ class PlotGeneratorUiSectionsMixin:
             "Title template for scalp maps. Use {condition} and {roi} placeholders."
         )
         self.scalp_title_a_edit.setProperty("invalid", False)
-        params_form.addRow(QLabel("Scalp title (A):"), self.scalp_title_a_edit)
+        scalp_form = make_form_layout()
+        scalp_form.addRow(QLabel("Scalp title (A):"), self.scalp_title_a_edit)
 
         self.scalp_title_b_edit = QLineEdit(self.scalp_title_b_template)
         self.scalp_title_b_edit.setPlaceholderText("{condition} {roi} scalp map")
@@ -275,7 +322,8 @@ class PlotGeneratorUiSectionsMixin:
         )
         self.scalp_title_b_edit.setProperty("invalid", False)
         self.scalp_title_b_label = QLabel("Scalp title (B):")
-        params_form.addRow(self.scalp_title_b_label, self.scalp_title_b_edit)
+        scalp_form.addRow(self.scalp_title_b_label, self.scalp_title_b_edit)
+        params_layout.addLayout(scalp_form)
 
         self.title_edit = QLineEdit(self._defaults["title_snr"])
         self.title_edit.setPlaceholderText("e.g. Fruit vs Veg")
@@ -289,12 +337,14 @@ class PlotGeneratorUiSectionsMixin:
         self.ylabel_edit.setPlaceholderText("Metric units")
         self.ylabel_edit.setToolTip("Label for the Y axis")
 
-        ranges_box = SectionCard("Axis Ranges")
-        ranges_box.setSizePolicy(
-            QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        )
-        ranges_form = make_form_layout()
-        ranges_box.content_layout.addLayout(ranges_form)
+        self.axis_ranges_label = QLabel("Axis Ranges")
+        axis_font = self.axis_ranges_label.font()
+        axis_font.setBold(True)
+        self.axis_ranges_label.setFont(axis_font)
+        ranges_grid = QGridLayout()
+        ranges_grid.setContentsMargins(0, 0, 0, 0)
+        ranges_grid.setHorizontalSpacing(10)
+        ranges_grid.setVerticalSpacing(6)
 
         self.xmin_spin = QDoubleSpinBox()
         self.xmin_spin.setRange(-9999.0, 9999.0)
@@ -303,6 +353,7 @@ class PlotGeneratorUiSectionsMixin:
         self.xmin_spin.setSuffix(" Hz")
         self.xmin_spin.setValue(float(self._defaults["x_min"]))
         self.xmin_spin.setToolTip("Minimum X frequency")
+        self.xmin_spin.setMinimumWidth(105)
         self.xmax_spin = QDoubleSpinBox()
         self.xmax_spin.setRange(-9999.0, 9999.0)
         self.xmax_spin.setDecimals(2)
@@ -312,13 +363,11 @@ class PlotGeneratorUiSectionsMixin:
         self.xmax_spin.setToolTip(
             "Maximum X frequency. Oddball harmonics and peak markers are derived up to this value."
         )
-        x_row = QHBoxLayout()
-        x_row.setContentsMargins(0, 0, 0, 0)
-        x_row.setSpacing(8)
-        x_row.addWidget(self.xmin_spin)
-        x_row.addWidget(QLabel("to"))
-        x_row.addWidget(self.xmax_spin)
-        ranges_form.addRow(QLabel("X Range:"), x_row)
+        self.xmax_spin.setMinimumWidth(105)
+        ranges_grid.addWidget(QLabel("X Range:"), 0, 0)
+        ranges_grid.addWidget(self.xmin_spin, 0, 1)
+        ranges_grid.addWidget(QLabel("to"), 0, 2)
+        ranges_grid.addWidget(self.xmax_spin, 0, 3)
 
         self.ymin_spin = QDoubleSpinBox()
         self.ymin_spin.setRange(-9999.0, 9999.0)
@@ -326,89 +375,75 @@ class PlotGeneratorUiSectionsMixin:
         self.ymin_spin.setSingleStep(0.1)
         self.ymin_spin.setValue(float(self._defaults["y_min_snr"]))
         self.ymin_spin.setToolTip("Minimum Y value")
+        self.ymin_spin.setMinimumWidth(105)
         self.ymax_spin = QDoubleSpinBox()
         self.ymax_spin.setRange(-9999.0, 9999.0)
         self.ymax_spin.setDecimals(2)
         self.ymax_spin.setSingleStep(0.1)
         self.ymax_spin.setValue(float(self._defaults["y_max_snr"]))
         self.ymax_spin.setToolTip("Maximum Y value")
-        y_row = QHBoxLayout()
-        y_row.setContentsMargins(0, 0, 0, 0)
-        y_row.setSpacing(8)
-        y_row.addWidget(self.ymin_spin)
-        y_row.addWidget(QLabel("to"))
-        y_row.addWidget(self.ymax_spin)
-        ranges_form.addRow(QLabel("Y Range:"), y_row)
+        self.ymax_spin.setMinimumWidth(105)
+        ranges_grid.addWidget(QLabel("Y Range:"), 1, 0)
+        ranges_grid.addWidget(self.ymin_spin, 1, 1)
+        ranges_grid.addWidget(QLabel("to"), 1, 2)
+        ranges_grid.addWidget(self.ymax_spin, 1, 3)
 
-        scalp_row = QHBoxLayout()
-        scalp_row.setContentsMargins(0, 0, 0, 0)
-        scalp_row.setSpacing(6)
         self.scalp_min_spin = QDoubleSpinBox()
         self.scalp_min_spin.setRange(-9999.0, 9999.0)
         self.scalp_min_spin.setDecimals(2)
         self.scalp_min_spin.setSingleStep(0.1)
         self.scalp_min_spin.setValue(float(self.scalp_min))
         self.scalp_min_spin.setSuffix(" uV")
+        self.scalp_min_spin.setMinimumWidth(105)
         self.scalp_max_spin = QDoubleSpinBox()
         self.scalp_max_spin.setRange(-9999.0, 9999.0)
         self.scalp_max_spin.setDecimals(2)
         self.scalp_max_spin.setSingleStep(0.1)
         self.scalp_max_spin.setValue(float(self.scalp_max))
         self.scalp_max_spin.setSuffix(" uV")
-        scalp_row.addWidget(self.scalp_min_spin)
-        scalp_row.addWidget(QLabel("to"))
-        scalp_row.addWidget(self.scalp_max_spin)
-        ranges_form.addRow(QLabel("Scalp range (uV):"), scalp_row)
+        self.scalp_max_spin.setMinimumWidth(105)
+        ranges_grid.addWidget(QLabel("Scalp range (uV):"), 2, 0)
+        ranges_grid.addWidget(self.scalp_min_spin, 2, 1)
+        ranges_grid.addWidget(QLabel("to"), 2, 2)
+        ranges_grid.addWidget(self.scalp_max_spin, 2, 3)
+        ranges_grid.setColumnStretch(1, 1)
+        ranges_grid.setColumnStretch(3, 1)
 
-        advanced_box = SectionCard("Advanced")
-        advanced_box.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self.advanced_box = SectionCard("Advanced")
+        self._style_section_title(self.advanced_box)
+        self.advanced_box.setMinimumHeight(292)
+        self.advanced_box.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         )
-        advanced_layout = advanced_box.content_layout
-        advanced_layout.setSpacing(6)
+        advanced_layout = self.advanced_box.content_layout
+        advanced_layout.setSpacing(8)
 
         advanced_form = make_form_layout()
         advanced_form.addRow(QLabel("Chart title:"), self.title_edit)
         advanced_form.addRow(QLabel("X-axis label:"), self.xlabel_edit)
         advanced_form.addRow(QLabel("Y-axis label:"), self.ylabel_edit)
         advanced_layout.addLayout(advanced_form)
-        advanced_layout.addWidget(ranges_box)
+        advanced_layout.addWidget(self.axis_ranges_label)
+        advanced_layout.addLayout(ranges_grid)
 
         self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(10)
+        self.progress_bar.setMinimumWidth(360)
+        self.progress_bar.setMaximumWidth(520)
 
-        self.progress_box = SectionCard("Progress")
-        self.progress_box.setMinimumWidth(420)
-        self.progress_box.setMaximumWidth(560)
-        self.progress_box.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        )
-        progress_layout = self.progress_box.content_layout
-        progress_layout.setSpacing(6)
-        progress_layout.addWidget(self.progress_bar)
+        self.console_box = SectionCard("Log Output")
+        self._style_section_title(self.console_box)
+        self.console_box.setMaximumHeight(180)
+        console_layout = self.console_box.content_layout
+        console_layout.setSpacing(6)
 
-        console_box = SectionCard("Log Output")
-        console_layout = console_box.content_layout
-        console_layout.setSpacing(8)
-
-        header = QHBoxLayout()
-        header.setContentsMargins(2, 2, 2, 2)
-        header.setSpacing(6)
-        self.log_toggle_btn = QToolButton()
-        self.log_toggle_btn.setText("Log Output")
-        self.log_toggle_btn.setCheckable(True)
-        self.log_toggle_btn.setChecked(False)
-        self.log_toggle_btn.setArrowType(Qt.RightArrow)
-        self.log_toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.log_toggle_btn.toggled.connect(self._toggle_log_panel)
-        header.addWidget(self.log_toggle_btn)
-        header.addStretch()
         clear_btn = make_action_button("", compact=True)
         clear_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
         clear_btn.setFixedSize(22, 22)
         clear_btn.setToolTip("Clear Log")
         clear_btn.clicked.connect(lambda: self.log.clear())
-        header.addWidget(clear_btn)
-        console_layout.addLayout(header)
+        self.console_box.header.add_action_widget(clear_btn)
 
         self.log_body = QWidget()
         log_body_layout = QVBoxLayout(self.log_body)
@@ -418,14 +453,14 @@ class PlotGeneratorUiSectionsMixin:
         self.log = QTextEdit()
         self.log.setProperty("logSurface", True)
         self.log.setReadOnly(True)
+        self.log.setMinimumHeight(95)
+        self.log.setMaximumHeight(120)
         font = self.log.font()
         font.setBold(False)
         self.log.setFont(font)
         log_body_layout.addWidget(self.log)
 
         console_layout.addWidget(self.log_body)
-
-        self.log_body.setVisible(False)
 
         left_column = QWidget()
         left_column.setSizePolicy(
@@ -434,9 +469,9 @@ class PlotGeneratorUiSectionsMixin:
         left_layout = QVBoxLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
-        left_layout.addWidget(file_box)
-        left_layout.addWidget(params_box)
-        left_layout.addStretch(1)
+        left_layout.addWidget(self.params_box)
+        left_layout.addWidget(self.legend_group, 1)
+        left_layout.addWidget(self.group_box)
 
         right_column = QWidget()
         right_column.setSizePolicy(
@@ -445,9 +480,8 @@ class PlotGeneratorUiSectionsMixin:
         right_layout = QVBoxLayout(right_column)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
-        right_layout.addWidget(advanced_box)
-        right_layout.addWidget(console_box)
-        right_layout.addStretch(1)
+        right_layout.addWidget(self.advanced_box)
+        right_layout.addWidget(self.console_box)
 
         content_widget = QWidget()
         content_layout = QHBoxLayout(content_widget)
@@ -455,16 +489,8 @@ class PlotGeneratorUiSectionsMixin:
         content_layout.setSpacing(10)
         content_layout.addWidget(left_column, 1)
         content_layout.addWidget(right_column, 1)
+        root_layout.addWidget(file_box)
         root_layout.addWidget(content_widget, 1)
-
-        progress_row = QWidget()
-        progress_row_layout = QHBoxLayout(progress_row)
-        progress_row_layout.setContentsMargins(0, 0, 0, 0)
-        progress_row_layout.setSpacing(0)
-        progress_row_layout.addStretch(1)
-        progress_row_layout.addWidget(self.progress_box)
-        progress_row_layout.addStretch(1)
-        root_layout.addWidget(progress_row)
 
         self.save_defaults_btn = make_action_button("Save Defaults")
         self.save_defaults_btn.setToolTip("Save current folders as defaults")
@@ -490,6 +516,8 @@ class PlotGeneratorUiSectionsMixin:
         actions_layout.setSpacing(12)
         actions_layout.addWidget(self.save_defaults_btn)
         actions_layout.addWidget(self.load_defaults_btn)
+        actions_layout.addSpacing(8)
+        actions_layout.addWidget(self.progress_bar, 1)
         actions_layout.addSpacing(12)
         actions_layout.addWidget(self.gen_btn)
         actions_layout.addWidget(self.cancel_btn)
@@ -505,5 +533,3 @@ class PlotGeneratorUiSectionsMixin:
         self.scalp_title_b_edit.textChanged.connect(self._check_required)
         self._toggle_scalp_controls(self.include_scalp_maps)
         self._check_required()
-
-        self._toggle_log_panel(False)

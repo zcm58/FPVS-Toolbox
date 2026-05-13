@@ -43,22 +43,22 @@ def test_scalp_title_clearing_disables_generate(qtbot, tmp_path):
 
 
 @pytest.mark.usefixtures("qtbot")
-def test_log_collapse_keeps_top_height(qtbot):
+def test_log_output_is_fixed_height(qtbot):
     win = PlotGeneratorWindow()
     qtbot.addWidget(win)
     win.show()
-    qtbot.waitForWindowShown(win)
+    qtbot.waitExposed(win)
 
     height_before = win.height()
-    assert win.log_body.isVisible() is False
-
-    win.log_toggle_btn.setChecked(True)
-    qtbot.wait(100)
+    assert not hasattr(win, "log_toggle_btn")
     assert win.log_body.isVisible() is True
+    assert win.advanced_box.height() >= 290
+    assert win.console_box.height() <= 180
+    assert 95 <= win.log.height() <= 120
 
-    win.log_toggle_btn.setChecked(False)
+    win.log.append("Fixed log output")
     qtbot.wait(100)
     height_after = win.height()
 
-    assert win.log_body.isVisible() is False
+    assert "Fixed log output" in win.log.toPlainText()
     assert height_after <= height_before + 10

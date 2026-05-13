@@ -70,8 +70,8 @@ class PlotGeneratorSelectionMixin:
         self._update_chart_title_state(condition)
         if not (self._ui_initializing or self._populating_conditions):
             self.scalp_title_a_edit.clear()
-        if self.legend_custom_check.isChecked():
-            self._prefill_legend_defaults_if_empty()
+        if hasattr(self, "legend_custom_check"):
+            self._sync_legend_defaults_with_conditions()
         self._update_scalp_title_warnings()
         self._check_required()
 
@@ -79,8 +79,8 @@ class PlotGeneratorSelectionMixin:
         _ = condition
         if not (self._ui_initializing or self._populating_conditions):
             self.scalp_title_b_edit.clear()
-        if self.legend_custom_check.isChecked():
-            self._prefill_legend_defaults_if_empty()
+        if hasattr(self, "legend_custom_check"):
+            self._sync_legend_defaults_with_conditions()
         self._update_scalp_title_warnings()
         self._check_required()
 

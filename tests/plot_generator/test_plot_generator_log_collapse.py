@@ -8,7 +8,7 @@ def app():
     return QApplication.instance() or QApplication(sys.argv)
 
 
-def test_log_panel_collapses_and_expands(app, qtbot):
+def test_log_panel_is_always_visible(app, qtbot):
     from Tools.Plot_Generator.gui import PlotGeneratorWindow
 
     w = PlotGeneratorWindow()
@@ -17,15 +17,14 @@ def test_log_panel_collapses_and_expands(app, qtbot):
     qtbot.waitExposed(w)
 
     height_before = w.height()
-    assert w.log_body.isVisible() is False
+    assert not hasattr(w, "log_toggle_btn")
+    assert w.log_body.isVisible() is True
+    assert w.advanced_box.height() >= 290
+    assert w.console_box.height() <= 180
+    assert 95 <= w.log.height() <= 120
 
-    w.log_toggle_btn.setChecked(True)
-    qtbot.waitUntil(lambda: w.log_body.isVisible(), timeout=1000)
+    w.log.append("Always visible")
+    qtbot.wait(50)
 
-    w.log_toggle_btn.setChecked(False)
-    qtbot.waitUntil(lambda: not w.log_body.isVisible(), timeout=1000)
-
+    assert "Always visible" in w.log.toPlainText()
     assert w.height() <= height_before + 10
-
-    w.log_toggle_btn.setChecked(True)
-    qtbot.waitUntil(lambda: w.log_body.isVisible(), timeout=1000)
