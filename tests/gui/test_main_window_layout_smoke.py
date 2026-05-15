@@ -57,6 +57,7 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
 
     assert win.btn_create_project.text() == "New Project"
     assert win.btn_open_project.text() == "Open Project"
+    assert win.actionImportFpvsConfigProject.text() == "Import FPVS Studio Config..."
     assert win.btn_create_project.isVisibleTo(win)
     assert win.btn_open_project.isVisibleTo(win)
 

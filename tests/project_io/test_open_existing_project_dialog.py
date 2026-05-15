@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -148,3 +149,52 @@ def test_open_existing_project_cancel_from_dialog(tmp_path, main_window, monkeyp
     assert "items" in seen
     assert seen["items"]
     assert not message_spy["critical"]
+
+
+def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkeypatch, message_spy):
+    config_path = tmp_path / "studio.fpvsconfig"
+    input_dir = tmp_path / "raw_bdf"
+    input_dir.mkdir()
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "project": {"name": "Semantic Categories"},
+                "conditions": [
+                    {"name": "Fruit vs Vegetable", "trigger_code": 1},
+                    {"name": "Veg vs Fruit", "trigger_code": 2},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        project_manager,
+        "ensure_projects_root",
+        lambda parent: tmp_path,
+    )
+    monkeypatch.setattr(
+        project_manager.QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: (str(config_path), "FPVS Studio Config (*.fpvsconfig)"),
+    )
+    monkeypatch.setattr(
+        project_manager.QFileDialog,
+        "getExistingDirectory",
+        lambda *args, **kwargs: str(input_dir),
+    )
+
+    main_window.actionImportFpvsConfigProject.trigger()
+
+    assert main_window.currentProject.name == "Semantic Categories"
+    assert main_window.currentProject.event_map == {
+        "Fruit vs Vegetable": 1,
+        "Veg vs Fruit": 2,
+    }
+    assert main_window.currentProject.input_folder == input_dir.resolve()
+    manifest_path = tmp_path / "Semantic Categories" / "project.json"
+    assert manifest_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["input_folder"] == str(input_dir)
+    assert message_spy["info"]

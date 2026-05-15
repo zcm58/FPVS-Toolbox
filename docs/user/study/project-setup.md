@@ -42,6 +42,17 @@ Alt text: A simple FPVS project folder with raw input files, project settings, p
 7. Add condition labels and trigger codes.
 8. Save the project.
 
+## Import from FPVS Studio
+
+If the study was authored in FPVS Studio, choose **File > Import FPVS Studio
+Config...** and select the `.fpvsconfig` file. The Toolbox creates a project
+using the Studio project title and condition trigger map, then asks for the
+folder containing the raw `.bdf` files. Review processing settings before
+processing.
+
+See [FPVS Studio Config Import](../reference/fpvs-studio-config-import.md) for
+the imported field contract.
+
 ## Event map checklist
 
 | Check | Why it matters |

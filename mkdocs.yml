@@ -77,5 +77,6 @@ nav:
       - Individual-level Detectability: tools/individual-level-detectability.md
   - Reference:
       - Methods Reporting Checklist: reference/methods-reporting-checklist.md
+      - FPVS Studio Config Import: reference/fpvs-studio-config-import.md
       - Glossary: reference/glossary.md
       - Relevant Publications: reference/relevant-publications.md

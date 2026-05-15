@@ -18,6 +18,11 @@ from PySide6.QtWidgets import (
 
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.gui.op_guard import OpGuard
+from Main_App.projects.fpvs_config_import import (
+    CONFIG_SUFFIX,
+    FPVSConfigImportError,
+    create_project_from_fpvs_config,
+)
 from Main_App.projects.project import Project
 from Main_App.projects.project_metadata import ProjectMetadata, read_project_metadata
 from Main_App.projects.projects_root import ensure_projects_root
@@ -197,6 +202,63 @@ def new_project(self) -> None:
 
     self.currentProject = project
     self.loadProject(project)
+
+
+def import_fpvs_config_project(self, parent: QWidget | None = None) -> Project | None:
+    if parent is None:
+        parent = getattr(self, "window", lambda: None)() or getattr(self, "parent", lambda: None)() or None
+
+    root = ensure_projects_root(parent)
+    if root is None:
+        QMessageBox.information(parent, "Projects Root", "Project root not set.")
+        return None
+
+    self.projectsRoot = root
+    path, _selected_filter = QFileDialog.getOpenFileName(
+        parent,
+        "Import FPVS Studio Config",
+        "",
+        f"FPVS Studio Config (*{CONFIG_SUFFIX});;JSON Files (*.json);;All Files (*)",
+    )
+    if not path:
+        return None
+
+    try:
+        project = create_project_from_fpvs_config(root, Path(path))
+    except FPVSConfigImportError as exc:
+        QMessageBox.critical(parent, "Import Failed", str(exc))
+        logger.error(
+            "Failed to import FPVS config %s: %s",
+            path,
+            exc,
+            exc_info=exc,
+            extra={"op": "import_fpvs_config", "path": path},
+        )
+        return None
+
+    input_folder = QFileDialog.getExistingDirectory(
+        parent,
+        "Select Folder Containing BDF Files",
+        str(root),
+    )
+    if input_folder:
+        project.input_folder = Path(input_folder)
+        project.save()
+
+    self.currentProject = project
+    self.loadProject(project)
+    logger.info(
+        "Imported FPVS config %s into project %s.",
+        path,
+        project.project_root,
+        extra={"op": "import_fpvs_config", "path": path},
+    )
+    QMessageBox.information(
+        parent,
+        "FPVS Config Imported",
+        f"Created project '{project.name}' with {len(project.event_map)} condition(s).",
+    )
+    return project
 
 
 def open_existing_project(self, parent: QWidget | None = None) -> None:

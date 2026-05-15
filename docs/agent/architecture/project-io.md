@@ -19,6 +19,11 @@ FPVS Toolbox uses a strict hybrid settings model:
 - Project-specific settings stay in the active project's `project.json`.
 - `%APPDATA%\FPVS_Toolbox\*.ini` files and old Qt `QSettings` locations are legacy migration inputs only; do not add new writers there.
 - Do not write settings to the install directory, repo directory, `Program Files`, or the process current working directory.
+- FPVS Studio `.fpvsconfig` import is a project-shell helper under
+  `Main_App.projects.fpvs_config_import`. It imports only `project.name` and
+  `conditions[].name`/`conditions[].trigger_code` into `project.json`
+  `event_map`, then prompts for the raw `.bdf` input folder; it must not copy
+  Studio stimulus assets or runtime artifacts.
 
 Rules:
 

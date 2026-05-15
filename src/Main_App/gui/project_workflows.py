@@ -13,6 +13,7 @@ from Main_App.processing.processing_controller import prepare_batch_files
 from Main_App.gui.op_guard import OpGuard
 from Main_App.projects.project_manager import (
     edit_project_settings as _edit_project_settings,
+    import_fpvs_config_project as _import_fpvs_config_project,
     loadProject as _load_project,
     new_project as _new_project,
     openProjectPath as _open_project_path,
@@ -39,6 +40,12 @@ def new_project(host: Any) -> None:
 def open_existing_project(host: Any) -> None:
     _open_existing_project(host, host)
     on_project_ready(host)
+
+
+def import_fpvs_config_project(host: Any) -> None:
+    project = _import_fpvs_config_project(host, host)
+    if project is not None:
+        on_project_ready(host)
 
 
 def open_project_path(host: Any, folder: str) -> None:
