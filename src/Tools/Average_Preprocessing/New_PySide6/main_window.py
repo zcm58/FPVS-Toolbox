@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 import os
 
@@ -20,7 +20,13 @@ from .advanced_analysis_file_ops import AdvancedAnalysisFileOpsMixin
 from .advanced_analysis_group_ops import AdvancedAnalysisGroupOpsMixin
 from .advanced_analysis_processing import AdvancedAnalysisProcessingMixin
 from .advanced_analysis_post import AdvancedAnalysisPostMixin
-from Main_App.gui.components import SectionCard, SurfaceSize, configure_window_surface, make_action_button
+from Main_App.gui.components import (
+    ActionRow,
+    SectionCard,
+    SurfaceSize,
+    configure_window_surface,
+    make_action_button,
+)
 
 
 class AdvancedAveragingWindow(
@@ -94,27 +100,31 @@ class AdvancedAveragingWindow(
         src_gb = SectionCard("Source EEG Files")
         src_l = src_gb.content_layout
         self.source_files_listbox = QListWidget()
-        btn_h1 = QHBoxLayout()
         self.btn_add = make_action_button("Add Files...")
         self.btn_remove = make_action_button("Remove Selected", variant="danger")
-        btn_h1.addWidget(self.btn_add)
-        btn_h1.addWidget(self.btn_remove)
+        source_actions = ActionRow(src_gb, alignment=Qt.AlignLeft)
+        source_actions.setObjectName("advanced_averaging_source_actions")
+        source_actions.add_button(self.btn_add)
+        source_actions.add_button(self.btn_remove)
+        source_actions.row_layout.addStretch(1)
         src_l.addWidget(self.source_files_listbox)
-        src_l.addLayout(btn_h1)
+        src_l.addWidget(source_actions)
 
         grp_gb = SectionCard("Defined Averaging Groups")
         grp_l = grp_gb.content_layout
         self.groups_listbox = QListWidget()
         self.grp_list = self.groups_listbox
-        btn_h2 = QHBoxLayout()
         self.btn_new = make_action_button("Create New Group")
         self.btn_rename = make_action_button("Rename Group")
         self.btn_del = make_action_button("Delete Group", variant="danger")
-        btn_h2.addWidget(self.btn_new)
-        btn_h2.addWidget(self.btn_rename)
-        btn_h2.addWidget(self.btn_del)
+        group_actions = ActionRow(grp_gb, alignment=Qt.AlignLeft)
+        group_actions.setObjectName("advanced_averaging_group_actions")
+        group_actions.add_button(self.btn_new)
+        group_actions.add_button(self.btn_rename)
+        group_actions.add_button(self.btn_del)
+        group_actions.row_layout.addStretch(1)
         grp_l.addWidget(self.groups_listbox)
-        grp_l.addLayout(btn_h2)
+        grp_l.addWidget(group_actions)
 
         row2 = QHBoxLayout()
         row2.addWidget(src_gb)
@@ -148,17 +158,18 @@ class AdvancedAveragingWindow(
         self.log_edit.setReadOnly(True)
         main_v.addWidget(self.log_edit)
 
-        btn_controls = QHBoxLayout()
         self.btn_start = make_action_button("Start Advanced Processing", variant="primary")
         self.btn_stop = make_action_button("Stop", variant="danger")
-        btn_controls.addWidget(self.btn_start)
-        btn_controls.addWidget(self.btn_stop)
-        btn_controls.addStretch(1)
         self.btn_clear = make_action_button("Clear Log")
         self.btn_close = make_action_button("Close", variant="tertiary")
-        btn_controls.addWidget(self.btn_clear)
-        btn_controls.addWidget(self.btn_close)
-        main_v.addLayout(btn_controls)
+        processing_actions = ActionRow(central, alignment=Qt.AlignLeft)
+        processing_actions.setObjectName("advanced_averaging_processing_actions")
+        processing_actions.add_button(self.btn_start)
+        processing_actions.add_button(self.btn_stop)
+        processing_actions.row_layout.addStretch(1)
+        processing_actions.add_button(self.btn_clear)
+        processing_actions.add_button(self.btn_close)
+        main_v.addWidget(processing_actions)
 
         central.setLayout(main_v)
         self.setCentralWidget(central)

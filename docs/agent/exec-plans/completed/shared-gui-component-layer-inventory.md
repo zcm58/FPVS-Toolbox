@@ -1,9 +1,10 @@
 # Shared GUI Component Layer Inventory
 
-Status: Slice 0 inventory completed on 2026-05-15. Updated through Slice 4 on
+Status: Slice 0 inventory completed on 2026-05-15. Updated through Slice 6 on
 2026-05-16 after normalizing the public component export contract, adopting the
 first runtime `ActionRow` surface, and pinning section/path/status contracts for
-low-risk auxiliary tools.
+low-risk auxiliary tools, expanding component contract smoke coverage, and
+closing the plan with final verification.
 
 Scope: inventory of shared GUI primitives, consumers, duplicate local patterns,
 and migration candidates. Slice-specific sections below record implementation
@@ -99,6 +100,28 @@ Focused smoke coverage now asserts:
 No file-dialog titles, defaults, path writes, worker signals, or generated
 outputs changed.
 
+## Slice 5 Component Contract Coverage
+
+Slice 5 added contract coverage without changing runtime component code. The
+component smoke suite now covers:
+
+- explicit export and import contracts;
+- side-effect-free `Main_App.gui.components` import behavior;
+- action button invalid variants and disabled-state property preservation;
+- section-card object names, content layout ownership, and current layout
+  sizing margins;
+- path-row object names, button signal emission, empty-click behavior, and
+  missing-path text preservation;
+- status-banner invalid variants, status text, `statusVariant`, word-wrap, and
+  current layout sizing margins;
+- theme stylesheet selectors for action buttons and status variants;
+- action-row button signal emission and spacing;
+- message-helper delegation to `QMessageBox`.
+
+`PathPickerRow` remains presentation-only. File-dialog Cancel behavior is owned
+by each tool surface and is covered by the Slice 4 Image Resizer and Individual
+Detectability tests.
+
 ## Current Runtime Consumers
 
 Active consumers found by the Slice 0 search:
@@ -136,7 +159,7 @@ high-context work and use the Stats future plans before moving those methods.
 
 ## Risk-Ranked Migration Candidates
 
-1. Low risk: strengthen `Main_App.gui.components` export/import tests for no
+1. Complete: strengthen `Main_App.gui.components` export/import tests for no
    side effects, public `__all__`, and existing component smoke contracts.
 2. Low risk: adopt `ActionRow` in a touched small dialog or tool settings dialog
    where button order and slots are simple.
@@ -170,13 +193,15 @@ high-context work and use the Stats future plans before moving those methods.
 
 Commands run:
 
-- `python .agents/scripts/audit/agent_audit.py` - PASS.
-- `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` - PASS.
-- `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` - PASS.
-- `python -m pytest tests/gui/test_ui_components_smoke.py -q` - PASS, 9 passed.
-- `rg "from Main_App\\.gui\\.components|from Main_App\\.gui\\.widgets" src/Main_App/gui src/Tools -g "*.py"` - PASS.
-- `rg "QAction|QMessageBox|QFileDialog|QProgressDialog|statusBar\\(|setStyleSheet|setObjectName" src/Main_App/gui src/Tools -g "*.py"` - PASS.
-- `rg "customtkinter|CustomTkinter|tkinter" src -g "*.py"` - PASS; matches were standalone/quarantine references, not active GUI imports.
-- `rg "Main_App\\.Legacy_App|Tools\\.SourceLocalization|Main_App\\.PySide6_App" src -g "*.py"` - PASS; no active matches returned.
+- `.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py` - PASS.
+- `.venv1\Scripts\python.exe .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py` - PASS.
+- `.venv1\Scripts\python.exe .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py` - PASS.
+- `.venv1\Scripts\python.exe -m pytest tests\gui\test_ui_components_smoke.py -q` - PASS, 20 passed.
+- `.venv1\Scripts\python.exe -m pytest tests\gui\test_image_resizer_gui.py tests\gui\test_individual_detectability_gui_smoke.py tests\gui\test_ui_components_smoke.py -q` - PASS, 23 passed.
+- `.venv1\Scripts\python.exe -m ruff check tests\gui\test_ui_components_smoke.py` - PASS.
+- `.venv1\Scripts\python.exe -m py_compile tests\gui\test_ui_components_smoke.py` - PASS.
 
-No tests were added or updated because Slice 0 is inventory-only.
+Slice 6 added no new runtime code. The inventory is complete for this plan;
+future component migrations should open a focused plan or use the nearest
+domain-specific plan for Stats, Ratio Calculator, Plot Generator, or
+Epoch/Average Preprocessing surfaces.

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QColorDialog,
 )
 
-from Main_App.gui.components import make_action_button
+from Main_App.gui.components import ActionRow, make_action_button
 
 
 class _SettingsDialog(QDialog):
@@ -38,14 +38,15 @@ class _SettingsDialog(QDialog):
         row_b.addWidget(pick_b)
         layout.addLayout(row_b)
 
-        btns = QHBoxLayout()
         ok = make_action_button("OK", variant="primary")
         ok.clicked.connect(self.accept)
         cancel = make_action_button("Cancel")
         cancel.clicked.connect(self.reject)
-        btns.addWidget(ok)
-        btns.addWidget(cancel)
-        layout.addLayout(btns)
+        btns = ActionRow(self)
+        btns.setObjectName("plot_generator_settings_actions")
+        btns.add_button(ok)
+        btns.add_button(cancel)
+        layout.addWidget(btns)
 
     def _choose_custom(self, which: str) -> None:
         init = self.color_a if which == "a" else self.color_b

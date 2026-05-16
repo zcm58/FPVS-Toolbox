@@ -5,7 +5,7 @@ from typing import Any, Dict
 import config
 import psutil
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from Main_App.Shared.settings_manager import SettingsManager
 from Main_App.workers.mp_env import get_ram_tier_recommendation
 from Main_App.gui.components import (
+    ActionRow,
     SectionCard,
     make_action_button,
     make_form_layout,
@@ -55,12 +56,13 @@ class SettingsPanel(QWidget):
         form.addRow(QLabel("Output Folder"), self.out_edit)
         form.addRow(QLabel("Threshold"), self.thr_edit)
 
-        btn_row = QHBoxLayout()
         self.ok_btn = make_action_button("OK", variant="primary")
         self.cancel_btn = make_action_button("Cancel", variant="tertiary")
-        btn_row.addWidget(self.ok_btn)
-        btn_row.addWidget(self.cancel_btn)
-        layout.addLayout(btn_row)
+        btn_row = ActionRow(self, alignment=Qt.AlignLeft)
+        btn_row.setObjectName("settings_panel_actions")
+        btn_row.add_button(self.ok_btn)
+        btn_row.add_button(self.cancel_btn)
+        layout.addWidget(btn_row)
 
         self.ok_btn.clicked.connect(self._on_ok)
         self.cancel_btn.clicked.connect(self._on_cancel)

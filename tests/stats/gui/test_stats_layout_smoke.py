@@ -6,7 +6,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QSplitter, QTabWidget  # noqa: E402
 
-from Main_App.gui.components import SectionCard, StatusBanner  # noqa: E402
+from Main_App.gui.components import ActionRow, SectionCard, StatusBanner  # noqa: E402
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 
@@ -67,3 +67,21 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert isinstance(window.multi_group_ready_value, StatusBanner)
     assert window.log_text.property("logSurface") is True
     assert window.summary_text.property("logSurface") is True
+
+    action_rows = {row.objectName(): row for row in window.findChildren(ActionRow)}
+    expected_rows = {
+        "stats_conditions_actions",
+        "stats_manual_exclusion_actions",
+        "stats_single_group_actions",
+        "stats_between_group_actions",
+        "stats_data_folder_actions",
+        "stats_multigroup_harmonic_actions",
+        "stats_multigroup_issue_actions",
+        "stats_export_path_actions",
+        "stats_reporting_summary_actions",
+        "stats_output_copy_actions",
+    }
+    assert expected_rows <= set(action_rows)
+    assert action_rows["stats_single_group_actions"].row_layout.indexOf(window.analyze_single_btn) >= 0
+    assert action_rows["stats_between_group_actions"].row_layout.indexOf(window.analyze_between_btn) >= 0
+    assert action_rows["stats_output_copy_actions"].row_layout.indexOf(window.copy_summary_btn) >= 0

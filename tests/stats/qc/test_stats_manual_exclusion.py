@@ -4,6 +4,7 @@ import pandas as pd
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog
 
+from Main_App.gui.components import ActionRow
 from Tools.Stats.workers import stats_workers
 from Tools.Stats.common.stats_core import PipelineId, StepId
 from Tools.Stats.ui.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
@@ -18,6 +19,11 @@ def test_manual_exclusion_dialog_apply_emits_and_closes(qtbot) -> None:
         preselected=set(),
     )
     qtbot.addWidget(dialog)
+
+    action_row = dialog.findChild(ActionRow, "stats_manual_dialog_actions")
+    assert action_row is not None
+    assert action_row.row_layout.indexOf(dialog.select_all_btn) >= 0
+    assert action_row.row_layout.indexOf(dialog.select_none_btn) >= 0
 
     dialog.list_widget.item(0).setCheckState(Qt.Checked)
     with qtbot.waitSignal(dialog.manualExclusionsApplied, timeout=1000) as blocker:

@@ -9,10 +9,12 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel
 
 import Main_App.gui.components as components
 from Main_App.gui.components import (
+    ActionRow,
     AppDialog,
     PathPickerRow,
     SectionCard,
@@ -138,6 +140,24 @@ def test_make_action_button_sets_properties(qtbot) -> None:
     assert button.isEnabled()
 
 
+def test_make_action_button_rejects_unknown_variant() -> None:
+    with pytest.raises(ValueError, match="Unsupported action button variant"):
+        make_action_button("Run", variant="ghost")
+
+
+def test_action_button_preserves_contract_when_disabled(qtbot) -> None:
+    button = make_action_button("Delete", variant="danger")
+    qtbot.addWidget(button)
+
+    button.setObjectName("delete_action")
+    button.setEnabled(False)
+
+    assert button.objectName() == "delete_action"
+    assert not button.isEnabled()
+    assert button.property("variant") == "danger"
+    assert button.property("danger") is True
+
+
 def test_section_card_exposes_header_and_content_layout(qtbot) -> None:
     card = SectionCard("Processing Options", object_name="processing_group")
     qtbot.addWidget(card)
@@ -149,6 +169,18 @@ def test_section_card_exposes_header_and_content_layout(qtbot) -> None:
     assert card.header.title_label.text() == "Processing Options"
     assert card.header.property("cardHeader") is True
     assert card.content_layout.indexOf(child) >= 0
+
+
+def test_section_card_has_stable_layout_size_contract(qtbot) -> None:
+    card = SectionCard("Output", object_name="output_group")
+    qtbot.addWidget(card)
+
+    card.content_layout.addWidget(QLabel("Folder", card))
+
+    assert card.sizeHint().isValid()
+    assert card.minimumSizeHint().isValid()
+    assert card.layout().contentsMargins().left() == 15
+    assert card.content_layout.contentsMargins().left() == 0
 
 
 def test_path_picker_row_exposes_field_and_button(qtbot) -> None:
@@ -167,6 +199,36 @@ def test_path_picker_row_exposes_field_and_button(qtbot) -> None:
     assert row.line_edit.text() == ""
 
 
+def test_path_picker_row_keeps_object_names_and_empty_selection_state(qtbot) -> None:
+    row = PathPickerRow("Choose", placeholder="Select a folder")
+    qtbot.addWidget(row)
+
+    row.setObjectName("input_path_row")
+    row.line_edit.setObjectName("input_path_field")
+    row.button.setObjectName("input_path_button")
+
+    with qtbot.waitSignal(row.button.clicked, timeout=1000):
+        qtbot.mouseClick(row.button, Qt.LeftButton)
+
+    assert row.objectName() == "input_path_row"
+    assert row.line_edit.objectName() == "input_path_field"
+    assert row.button.objectName() == "input_path_button"
+    assert row.line_edit.text() == ""
+
+
+def test_path_picker_row_preserves_missing_or_invalid_path_text(qtbot) -> None:
+    row = PathPickerRow("Choose", placeholder="Select a folder")
+    qtbot.addWidget(row)
+    missing_path = r"C:\missing\not-a-project-folder"
+
+    row.line_edit.setText(missing_path)
+
+    with qtbot.waitSignal(row.button.clicked, timeout=1000):
+        qtbot.mouseClick(row.button, Qt.LeftButton)
+
+    assert row.line_edit.text() == missing_path
+
+
 def test_status_banner_switches_text_and_variant(qtbot) -> None:
     banner = StatusBanner("Ready", variant="info")
     qtbot.addWidget(banner)
@@ -183,6 +245,28 @@ def test_status_banner_switches_text_and_variant(qtbot) -> None:
     banner.setText("Running")
     banner.setWordWrap(False)
     assert banner.text() == "Running"
+
+
+def test_status_banner_rejects_unknown_variant(qtbot) -> None:
+    banner = StatusBanner("Ready", variant="info")
+    qtbot.addWidget(banner)
+
+    with pytest.raises(ValueError, match="Unsupported status banner variant"):
+        banner.set_variant("muted")
+
+    assert banner.property("statusVariant") == "info"
+
+
+def test_status_banner_has_stable_layout_size_contract(qtbot) -> None:
+    banner = StatusBanner("Ready", variant="warning")
+    qtbot.addWidget(banner)
+
+    banner.setObjectName("operation_status")
+
+    assert banner.objectName() == "operation_status"
+    assert banner.label.wordWrap()
+    assert banner.banner_layout.contentsMargins().left() == 10
+    assert banner.sizeHint().isValid()
 
 
 def test_make_form_layout_uses_expected_defaults() -> None:
@@ -207,6 +291,10 @@ def test_apply_fpvs_theme_sets_app_stylesheet_and_preserves_button_properties(qt
         assert 'QPushButton[secondary="true"]' in app.styleSheet()
         assert 'QPushButton[tertiary="true"]' in app.styleSheet()
         assert 'QPushButton[variant="danger"]' in app.styleSheet()
+        assert 'QWidget[statusVariant="info"]' in app.styleSheet()
+        assert 'QWidget[statusVariant="warning"]' in app.styleSheet()
+        assert 'QWidget[statusVariant="error"]' in app.styleSheet()
+        assert 'QWidget[statusVariant="success"]' in app.styleSheet()
         assert button.property("variant") == "danger"
         assert button.property("danger") is True
         assert button.property("compact") is True
@@ -244,6 +332,22 @@ def test_component_action_row_adds_buttons(qtbot) -> None:
 
     assert row.row_layout.indexOf(run_button) >= 0
     assert row.row_layout.indexOf(cancel_button) >= 0
+
+
+def test_component_action_row_emits_button_signals(qtbot) -> None:
+    run_button = make_action_button("Run", variant="primary")
+    row = ActionRow(alignment=Qt.AlignLeft, spacing=12)
+    qtbot.addWidget(row)
+
+    row.setObjectName("run_action_row")
+    row.add_button(run_button)
+
+    with qtbot.waitSignal(run_button.clicked, timeout=1000):
+        qtbot.mouseClick(run_button, Qt.LeftButton)
+
+    assert row.objectName() == "run_action_row"
+    assert row.row_layout.spacing() == 12
+    assert row.row_layout.indexOf(run_button) >= 0
 
 
 def test_component_message_helpers_delegate_to_qmessagebox(monkeypatch) -> None:

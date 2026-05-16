@@ -34,6 +34,7 @@ from .style_tokens import (
     build_main_page_stylesheet,
 )
 from Main_App.gui.components import (
+    ActionRow,
     SectionCard,
     make_action_button,
     make_form_layout,
@@ -145,14 +146,12 @@ def init_ui(self) -> None:
         btn.setFixedSize(220, 52)
         btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-    btn_row = QHBoxLayout()
-    btn_row.setContentsMargins(0, 0, 0, 0)
-    btn_row.setSpacing(12)
-    btn_row.addStretch(1)
-    btn_row.addWidget(self.btn_create_project)
-    btn_row.addWidget(self.btn_open_project)
-    btn_row.addStretch(1)
-    center_layout.addLayout(btn_row)
+    btn_row = ActionRow(welcome_card, alignment=Qt.AlignRight, spacing=12)
+    btn_row.setObjectName("main_landing_actions")
+    btn_row.add_button(self.btn_create_project)
+    btn_row.add_button(self.btn_open_project)
+    btn_row.row_layout.addStretch(1)
+    center_layout.addWidget(btn_row)
 
     self.landing_version_label = QLabel("", welcome_card)
     self.landing_version_label.setObjectName("landing_version_label")
@@ -397,11 +396,8 @@ def init_ui(self) -> None:
     setup_layout.addWidget(grp_event, 1)
 
     # Start + Progress Row
-    run_panel = QWidget(setup_panel)
+    run_panel = ActionRow(setup_panel, alignment=Qt.AlignLeft, spacing=10)
     run_panel.setObjectName("run_panel")
-    action_row = QHBoxLayout(run_panel)
-    action_row.setContentsMargins(0, 0, 0, 0)
-    action_row.setSpacing(10)
 
     self.btn_start = make_action_button(
         "Start Processing",
@@ -422,8 +418,8 @@ def init_ui(self) -> None:
     self.btn_start.setFixedHeight(btn_h)
     self.progress_bar.setFixedHeight(btn_h)
 
-    action_row.addWidget(self.btn_start)
-    action_row.addWidget(self.progress_bar, 1)
+    run_panel.add_button(self.btn_start)
+    run_panel.row_layout.addWidget(self.progress_bar, 1)
     setup_layout.addWidget(run_panel)
 
     self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")

@@ -51,6 +51,7 @@ from Main_App.projects.project import (
 )
 from Main_App.gui.op_guard import OpGuard
 from Main_App.gui.components import (
+    ActionRow,
     BusySpinner,
     SectionCard,
     SurfaceSize,

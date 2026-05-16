@@ -48,7 +48,8 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - Active refactor plans live in `docs/agent/exec-plans/active/`.
 - Future plans live in `docs/agent/exec-plans/future/`; read them only when scoping or starting the matching effort.
 - Known debt that is not yet active work lives in `docs/agent/exec-plans/tech-debt-tracker.md`.
-- Shared GUI component-layer consolidation is tracked in `docs/agent/exec-plans/active/shared-gui-component-layer-updated.md`; read it before changing reusable GUI primitives, shared action/message/path/status patterns, or migrating tool windows to `Main_App.gui.components`.
+- Shared GUI surface migration is recorded in `docs/agent/exec-plans/completed/shared-gui-surface-migration.md`; read it before continuing tool-window migration patterns or validating the Ratio Calculator, Epoch/Average Preprocessing, Stats UI, Plot Generator, or Main App shell component adoption.
+- Shared GUI component-layer consolidation is recorded in `docs/agent/exec-plans/completed/shared-gui-component-layer-updated.md`; read it before changing reusable GUI primitives, shared action/message/path/status patterns, or migrating tool windows to `Main_App.gui.components`.
 - Read `docs/agent/exec-plans/completed/main-app-refactor.md` only when historical Main App refactor context is needed.
 - Read `docs/agent/exec-plans/completed/main-app-folder-retirement.md` only when historical folder-retirement context is needed for retired `Legacy_App` or `PySide6_App` paths.
 - Keep active plans current with phase status, touched areas, doc updates, verification commands, and decisions.

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
-from Main_App.gui.components import SectionCard
+from Main_App.gui.components import ActionRow, SectionCard
 import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
 
@@ -110,6 +110,13 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
     assert "Preprocessing Parameters" in cards
     assert dlg.group_preproc is cards["Preprocessing Parameters"]
     assert dlg.btn_changeRoot.property("secondary") is True
+
+    panel = settings_panel.SettingsPanel(controller=SimpleNamespace(save_settings=lambda _values: None))
+    qtbot.addWidget(panel)
+    actions = panel.findChild(ActionRow, "settings_panel_actions")
+    assert actions is not None
+    assert actions.row_layout.indexOf(panel.ok_btn) >= 0
+    assert actions.row_layout.indexOf(panel.cancel_btn) >= 0
 
 
 def test_dialog_saves_bandpass_mapping(tmp_path, qtbot, monkeypatch):

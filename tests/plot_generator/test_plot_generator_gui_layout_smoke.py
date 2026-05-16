@@ -5,7 +5,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint
 
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
-from Main_App.gui.components import PathPickerRow, SectionCard
+from Tools.Plot_Generator.settings_dialog import _SettingsDialog
+from Main_App.gui.components import ActionRow, PathPickerRow, SectionCard
 
 
 def test_plot_generator_gui_layout_smoke(qtbot):
@@ -58,6 +59,12 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.legend_group.isVisible()
     assert window.gen_btn.property("primary") is True
     assert window.cancel_btn.property("danger") is True
+    action_row = window.findChild(ActionRow, "plot_generator_bottom_actions")
+    assert action_row is not None
+    assert action_row.row_layout.indexOf(window.save_defaults_btn) >= 0
+    assert action_row.row_layout.indexOf(window.load_defaults_btn) >= 0
+    assert action_row.row_layout.indexOf(window.gen_btn) >= 0
+    assert action_row.row_layout.indexOf(window.cancel_btn) >= 0
     assert window.log.property("logSurface") is True
     assert window.log_body.isVisible() is True
     assert window.advanced_box.height() >= 290
@@ -102,3 +109,20 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     window.log.append("Smoke log line")
     qtbot.wait(10)
     assert "Smoke log line" in window.log.toPlainText()
+
+
+def test_plot_generator_settings_dialog_uses_shared_action_row(qtbot):
+    parent = PlotGeneratorWindow()
+    qtbot.addWidget(parent)
+    dialog = _SettingsDialog(parent, "#112233", "#445566")
+    qtbot.addWidget(dialog)
+
+    action_row = dialog.findChild(ActionRow, "plot_generator_settings_actions")
+    assert action_row is not None
+    labels = [
+        item.widget().text()
+        for idx in range(action_row.row_layout.count())
+        if (item := action_row.row_layout.itemAt(idx)).widget() is not None
+    ]
+    assert "OK" in labels
+    assert "Cancel" in labels

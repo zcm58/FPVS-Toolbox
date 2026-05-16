@@ -74,6 +74,12 @@ instances now have stable object names and focused tests that preserve
 file-dialog Cancel as a no-op. Use that pattern before migrating path rows in
 more stateful tools such as Ratio Calculator, Stats, or Plot Generator.
 
+The component contract suite in `tests/gui/test_ui_components_smoke.py` now
+pins shared component imports, object names, signal emission, invalid variants,
+enabled-state preservation, theme selectors, and basic layout sizing. Extend
+that suite before changing shared component behavior so migrated surfaces get a
+single stable contract.
+
 Lower-level PySide6 primitives live in `src/Main_App/gui/widgets/`. Keep this
 package focused on presentation-only widgets such as reusable buttons, cards,
 form rows, animation widgets, the busy spinner, and inline status widgets.

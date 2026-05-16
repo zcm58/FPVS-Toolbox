@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.components import (
+    ActionRow,
     PathPickerRow,
     SectionCard,
     SurfaceSize,
@@ -510,17 +511,16 @@ class PlotGeneratorUiSectionsMixin:
         self.gen_btn.setAutoDefault(True)
         self.gen_btn.setMinimumWidth(110)
 
-        actions_widget = QWidget()
-        actions_layout = QHBoxLayout(actions_widget)
-        actions_layout.setContentsMargins(8, 8, 8, 8)
-        actions_layout.setSpacing(12)
-        actions_layout.addWidget(self.save_defaults_btn)
-        actions_layout.addWidget(self.load_defaults_btn)
-        actions_layout.addSpacing(8)
-        actions_layout.addWidget(self.progress_bar, 1)
-        actions_layout.addSpacing(12)
-        actions_layout.addWidget(self.gen_btn)
-        actions_layout.addWidget(self.cancel_btn)
+        actions_widget = ActionRow(self, alignment=Qt.AlignLeft, spacing=12)
+        actions_widget.setObjectName("plot_generator_bottom_actions")
+        actions_widget.row_layout.setContentsMargins(8, 8, 8, 8)
+        actions_widget.add_button(self.save_defaults_btn)
+        actions_widget.add_button(self.load_defaults_btn)
+        actions_widget.row_layout.addSpacing(8)
+        actions_widget.row_layout.addWidget(self.progress_bar, 1)
+        actions_widget.row_layout.addSpacing(12)
+        actions_widget.add_button(self.gen_btn)
+        actions_widget.add_button(self.cancel_btn)
 
         root_layout.addWidget(actions_widget, alignment=Qt.AlignHCenter)
 

@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QWidget
 
 from Main_App.gui import main_window as main_window_module
+from Main_App.gui.components import ActionRow
 import Main_App.gui.update_manager as update_manager
 
 
@@ -60,6 +61,10 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
     assert win.actionImportFpvsConfigProject.text() == "Import FPVS Studio Config..."
     assert win.btn_create_project.isVisibleTo(win)
     assert win.btn_open_project.isVisibleTo(win)
+    landing_actions = win.findChild(ActionRow, "main_landing_actions")
+    assert landing_actions is not None
+    assert landing_actions.row_layout.indexOf(win.btn_create_project) >= 0
+    assert landing_actions.row_layout.indexOf(win.btn_open_project) >= 0
 
 
 def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -75,6 +80,10 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert splitter.widget(1).isAncestorOf(win.text_log)
 
     assert win.btn_start.text() == "Start Processing"
+    run_panel = win.findChild(ActionRow, "run_panel")
+    assert run_panel is not None
+    assert run_panel.row_layout.indexOf(win.btn_start) >= 0
+    assert run_panel.row_layout.indexOf(win.progress_bar) >= 0
     assert win.findChild(QWidget, "preprocessing_info_strip") is not None
     assert win.findChild(QWidget, "event_map_header") is not None
     assert win.findChild(QWidget, "log_group") is not None

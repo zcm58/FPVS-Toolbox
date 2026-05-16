@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from Main_App.gui.components import make_action_button
+from Main_App.gui.components import ActionRow, make_action_button
 from Tools.Stats.qc.stats_outlier_exclusion import outlier_reason_label
 
 
@@ -76,13 +76,14 @@ class ManualOutlierExclusionDialog(QDialog):
                 item.setToolTip(tooltip)
             self.list_widget.addItem(item)
 
-        controls_row = QHBoxLayout()
         self.select_all_btn = make_action_button("Select all")
         self.select_none_btn = make_action_button("Select none")
-        controls_row.addWidget(self.select_all_btn)
-        controls_row.addWidget(self.select_none_btn)
-        controls_row.addStretch(1)
-        layout.addLayout(controls_row)
+        controls_row = ActionRow(self, alignment=Qt.AlignLeft)
+        controls_row.setObjectName("stats_manual_dialog_actions")
+        controls_row.add_button(self.select_all_btn)
+        controls_row.add_button(self.select_none_btn)
+        controls_row.row_layout.addStretch(1)
+        layout.addWidget(controls_row)
 
         self.button_box = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
         layout.addWidget(self.button_box)
