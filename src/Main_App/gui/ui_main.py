@@ -202,11 +202,14 @@ def init_ui(self) -> None:
 
     row.addWidget(right, 1)
 
-    splitter = QSplitter(Qt.Vertical, container)
+    self.workspace_stack = QStackedWidget(container)
+    self.workspace_stack.setObjectName("workspace_stack")
+    main_layout.addWidget(self.workspace_stack, 1)
+
+    splitter = QSplitter(Qt.Vertical, self.workspace_stack)
     splitter.setObjectName("main_page_splitter")
     splitter.setChildrenCollapsible(False)
     splitter.setHandleWidth(8)
-    main_layout.addWidget(splitter, 1)
     self.main_page_splitter = splitter
 
     setup_panel = QWidget(splitter)
@@ -454,9 +457,10 @@ def init_ui(self) -> None:
     splitter.setSizes([620, 220])
 
     # Finalize
+    self.workspace_stack.addWidget(splitter)
     self.page1_container = container
     self.page1_right = container
-    self.homeWidget = container
+    self.homeWidget = splitter
     self.stacked.addWidget(page1)
 
     # Wire buttons

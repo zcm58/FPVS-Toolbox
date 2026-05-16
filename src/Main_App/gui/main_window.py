@@ -49,6 +49,7 @@ from Main_App.workers.mp_env import (
 from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
 )
+from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
 from Tools.Stats import StatsWindow as PysideStatsWindow
 from config import FPVS_TOOLBOX_VERSION
 from Main_App.gui import update_manager
@@ -459,8 +460,37 @@ class MainWindow(QMainWindow, ProcessingMixin):
             STATS_TOOL_UNDER_DEVELOPMENT_WARNING,
         )
 
+    def _set_sidebar_selection(self, role: str) -> None:
+        sidebar = getattr(self, "sidebar", None)
+        if sidebar is None:
+            return
+        for widget in sidebar.findChildren(QWidget):
+            setter = getattr(widget, "set_selected", None)
+            if callable(setter) and widget.property("role"):
+                setter(widget.property("role") == role)
+
+    def show_home_page(self) -> None:
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        if hasattr(self, "workspace_stack") and hasattr(self, "homeWidget"):
+            self.workspace_stack.setCurrentWidget(self.homeWidget)
+        self._set_sidebar_selection("btn_home")
+
+    def _ensure_image_resizer_page(self) -> FPVSImageResizerQt:
+        page = getattr(self, "_image_resizer_page", None)
+        if page is None:
+            page = FPVSImageResizerQt(self.workspace_stack)
+            page.setObjectName("embedded_image_resizer_page")
+            self.workspace_stack.addWidget(page)
+            self._image_resizer_page = page
+        return page
+
     def open_image_resizer(self) -> None:
-        tool_workflows.open_image_resizer(Path(__file__).resolve().parents[3])
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(self._ensure_image_resizer_page())
+        self._set_sidebar_selection("btn_image")
+
 
     def open_plot_generator(self) -> None:
         tool_workflows.open_plot_generator(self, Path(__file__).resolve().parents[3])

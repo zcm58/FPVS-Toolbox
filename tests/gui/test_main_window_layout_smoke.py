@@ -8,11 +8,12 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QStackedWidget, QWidget
 
 from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
 import Main_App.gui.update_manager as update_manager
+from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
 
 
 def _build_window(tmp_path: Path, qtbot, monkeypatch) -> main_window_module.MainWindow:
@@ -31,6 +32,16 @@ def _build_window(tmp_path: Path, qtbot, monkeypatch) -> main_window_module.Main
     win.show()
     qtbot.wait(50)
     return win
+
+
+def _sidebar_button(win: main_window_module.MainWindow, role: str) -> QWidget:
+    matches = [
+        widget
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("role") == role
+    ]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypatch) -> None:
@@ -74,6 +85,9 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
 
     splitter = win.findChild(QSplitter, "main_page_splitter")
     assert splitter is not None
+    workspace_stack = win.findChild(QStackedWidget, "workspace_stack")
+    assert workspace_stack is not None
+    assert workspace_stack.currentWidget() is win.homeWidget
     assert splitter.orientation() == Qt.Vertical
     assert splitter.widget(0) is not None
     assert splitter.widget(1) is not None
@@ -111,6 +125,18 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
         if widget.property("selected") is True
     ]
     assert selected_sidebar_items
+    settings_buttons = [
+        widget
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("role") == "btn_settings"
+    ]
+    assert len(settings_buttons) == 1
+    settings_pixmaps = [
+        label.pixmap()
+        for label in settings_buttons[0].findChildren(QLabel)
+        if label.pixmap() is not None
+    ]
+    assert any(not pixmap.isNull() for pixmap in settings_pixmaps)
 
     help_actions = []
     for action in win.menuBar().actions():
@@ -120,3 +146,37 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
             break
     assert "Relevant Publications" not in help_actions
     assert any(text.startswith("About") for text in help_actions)
+
+
+def test_sidebar_image_resizer_embeds_in_main_workspace(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_image"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert win.stacked.currentIndex() == 1
+    assert isinstance(win.workspace_stack.currentWidget(), FPVSImageResizerQt)
+    assert win.workspace_stack.currentWidget().objectName() == "embedded_image_resizer_page"
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_image"]
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_home"]

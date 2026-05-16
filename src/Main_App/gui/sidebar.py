@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from Main_App.gui.icons import division_icon, individual_detectability_icon
+from Main_App.gui.icons import division_icon, individual_detectability_icon, settings_icon
 from Tools.Ratio_Calculator.launcher import open_ratio_calculator_tool
 from Tools.Individual_Detectability.launcher import open_individual_detectability_tool
 from .style_tokens import (
@@ -211,7 +211,7 @@ def init_sidebar(self) -> None:
     primary_layout.setContentsMargins(0, 0, 0, 0)
     primary_layout.setSpacing(4)
 
-    home_btn = make_button(primary_layout, "btn_home", "Home", "go-home", lambda: None)
+    home_btn = make_button(primary_layout, "btn_home", "Home", "go-home", self.show_home_page)
     home_btn.setProperty("homeEntry", True)
     self.sidebar_home_button = home_btn
 
@@ -254,13 +254,14 @@ def init_sidebar(self) -> None:
         individual_detectability_icon(ICON_PX),
         lambda: open_individual_detectability_tool(self),
     )
-    make_button(
+    image_btn = make_button(
         tools_layout,
         "btn_image",
         "Image Resizer",
         "camera-photo",
         self.open_image_resizer,
     )
+    self.sidebar_image_button = image_btn
     make_button(
         tools_layout,
         "btn_epoch",
@@ -293,7 +294,7 @@ def init_sidebar(self) -> None:
     utilities_layout.addWidget(utility_label)
     self.sidebar_utilities_label = utility_label
 
-    make_button(utilities_layout, "btn_settings", "Settings", "settings", self.open_settings_window)
+    make_button(utilities_layout, "btn_settings", "Settings", settings_icon(ICON_PX), self.open_settings_window)
 
     def _open_docs() -> None:
         QDesktopServices.openUrl(QUrl(DOCS_URL))
