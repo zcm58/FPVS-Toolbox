@@ -5,7 +5,7 @@ Use this page when you want a high-level map of the Statistics tool before choos
 This page summarizes the statistical methods used by the FPVS Toolbox
 **Statistical Analysis** module for end users. It focuses on the primary
 output measure (**Summed BCA**) and how to interpret results in the
-single-group and multi-group workflows.
+currently supported single-group workflow.
 
 ---
 
@@ -105,41 +105,6 @@ For more details, see: **[Post-hoc tests](../statistics/posthoc-tests.md)**.
   (no explicit coding is set for other factors).
 
 For more details, see: **[Mixed model details](../statistics/mixed-model.md)**.
-
----
-
-## Multi-group analyses
-
-Multi-group mode compares two or more groups (e.g., clinical vs control).
-
-Supported multi-group workflow in the active PySide6 app phase:
-
-- Between-group mixed model (LMM)
-- Group contrasts
-
-### Between-group ANOVA (mixed ANOVA)
-
-- **Status:** Paused for the active multi-group workflow in the current
-  PySide6 application phase.
-- **Scope note:** This pause applies to the **multi-group** workflow
-  only. The separate **single-group** workflow still retains its
-  existing RM-ANOVA support.
-
-- **Current behavior:** Not part of the supported multi-group run/export
-  path in this phase.
-
-### Between-group mixed model
-
-- **Fixed effects:** group, condition, ROI, and all interactions.
-- **Random effects:** random intercept for subject.
-
-### Group contrasts
-
-- **Welch's t-tests** (unequal variances) for each
-  **condition x ROI** combination.
-- **Correction:** Benjamini-Hochberg FDR across all contrasts in the
-  output table.
-- **Effect size:** Cohen's d for independent groups.
 
 ---
 

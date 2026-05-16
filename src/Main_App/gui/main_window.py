@@ -471,9 +471,6 @@ class MainWindow(QMainWindow, ProcessingMixin):
     def open_advanced_analysis_window(self) -> None:
         self.open_epoch_averaging()
 
-    def show_relevant_publications(self) -> None:
-        tool_workflows.show_relevant_publications(self)
-
     def show_about_dialog(self) -> None:
         tool_workflows.show_about_dialog(self, FPVS_TOOLBOX_VERSION)
 

@@ -111,3 +111,12 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
         if widget.property("selected") is True
     ]
     assert selected_sidebar_items
+
+    help_actions = []
+    for action in win.menuBar().actions():
+        menu = action.menu()
+        if menu and menu.title() == "Help":
+            help_actions = [child.text() for child in menu.actions() if child.text()]
+            break
+    assert "Relevant Publications" not in help_actions
+    assert any(text.startswith("About") for text in help_actions)

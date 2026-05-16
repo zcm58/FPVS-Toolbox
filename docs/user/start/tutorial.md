@@ -48,8 +48,8 @@ settings and organize output folders.
 1. Open FPVS Toolbox.
 2. Click **Create New Project**.
 3. Enter a short project name.
-4. Add the group names for your study.
-5. Select each group's input folder containing `.bdf` files.
+4. Add the group name for the study.
+5. Select the input folder containing `.bdf` files.
 6. Enter condition labels and their trigger codes.
 7. Save the project.
 

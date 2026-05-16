@@ -5,6 +5,7 @@ Use this page before gathering broad context. Run the relevant command first, th
 ## First Commands
 
 ```powershell
+.\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py
 python .agents/scripts/audit/agent_audit.py --check stats-structure
 python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility
@@ -75,4 +76,4 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 ## Reading Rule
 
-Do not scan broad folders just to confirm invariants that a script already checks. Read focused architecture docs after a script fails, when the task changes that area, or when the user asks for design/context rather than code.
+Activate `.\.venv1` before running Python-based repo commands. Do not scan broad folders just to confirm invariants that a script already checks. Read focused architecture docs after a script fails, when the task changes that area, or when the user asks for design/context rather than code.

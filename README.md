@@ -7,7 +7,7 @@ FPVS Toolbox is a Windows desktop application for preprocessing, cleaning, and a
 - Automated batch preprocessing pipeline: referencing, filtering, resampling, kurtosis-based channel rejection, and channel interpolation
 - Extraction of epochs and post-processing metrics (FFT, SNR, BCA, Z-score)
 - Built-in statistical analysis with repeated-measures ANOVA, linear mixed-effects models, and post-hoc pairwise tests
-- Support for single-group and multi-group FPVS datasets
+- Support for single-group FPVS statistical workflows
 
 
 ## Removed Features

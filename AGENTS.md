@@ -10,7 +10,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Prefer the smallest behavior-preserving change that solves the task.
 - Touch only files required by the task; do not refactor adjacent code opportunistically.
 - Preserve existing processing order, data formats, exports, and user workflows unless the task explicitly changes them.
-- Prefer executable checks over broad reading. Run the relevant skill script or `python .agents/scripts/audit/agent_audit.py` first, then read only the focused docs needed for failures or context.
+- Prefer executable checks over broad reading. Activate `.\.venv1` first, then run the relevant skill script or `python .agents/scripts/audit/agent_audit.py` before reading only the focused docs needed for failures or context.
 - Treat [ARCHITECTURE.md](ARCHITECTURE.md) as the repo map before structural changes; do not read every architecture page by default.
 - Start with [docs/agent/agent-index.md](docs/agent/agent-index.md) when choosing skills, scripts, and focused tests.
 - For non-trivial refactors, read the active execution plan first. Update architecture docs or the nearest scoped `AGENTS.md` when structure, ownership, boundaries, or workflows change; otherwise state why no doc update was needed.
@@ -48,6 +48,7 @@ Repo-local skills live in `.agents/skills/`.
 Run skill-local scripts before manual inspection when they apply:
 
 ```powershell
+.\.venv1\Scripts\Activate.ps1
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
@@ -82,6 +83,7 @@ Use the script output to decide what to read next. If a script passes, do not sc
 Run the narrowest relevant checks first, then broaden when the change affects shared behavior.
 
 ```powershell
+.\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py
 python -m pytest -q
 ruff check .

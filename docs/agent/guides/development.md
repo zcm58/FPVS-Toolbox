@@ -19,9 +19,16 @@ Install dependencies with:
 .\.venv1\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-If PyCharm or another IDE reports that it did not find the executable, repoint
-the project interpreter to `.\.venv1\Scripts\python.exe` and remove stale
-references to other virtual environments.
+Before running repo commands in a shell, activate the environment:
+
+```powershell
+.\.venv1\Scripts\Activate.ps1
+```
+
+After activation, use `python` in command examples. If PyCharm or another IDE
+reports that it did not find the executable, repoint the project interpreter to
+`.\.venv1\Scripts\python.exe` and remove stale references to other virtual
+environments.
 
 For validation commands, set `PYTHONNOUSERSITE=1` when you need to ensure tests
 and import checks do not fall back to user-site packages from the global Python
@@ -29,7 +36,7 @@ installation.
 
 ## Versioning
 
-The toolbox version is defined in `config.py` as `FPVS_TOOLBOX_VERSION`.
+The toolbox version is defined in `src/config.py` as `FPVS_TOOLBOX_VERSION`.
 Scripts that need the version should import that constant rather than hard
 coding a string.
 
@@ -79,6 +86,7 @@ for pytest marker guidance and focused test commands.
 Common gates:
 
 ```powershell
+.\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py
 python -m pytest -q
 ruff check .

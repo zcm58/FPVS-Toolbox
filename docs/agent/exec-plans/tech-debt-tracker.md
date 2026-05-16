@@ -22,13 +22,16 @@ Use this page for known debt that is not yet an active execution plan.
 - Retired `Main_App` package names are now guarded by `.agents/scripts/audit/agent_audit.py`;
   future debt should focus on oversized modules and behavior-covered cleanup,
   not resurrecting historical package wrappers.
+- Relevant Publications is intentionally not user-facing. Rebuild it as a
+  reviewed user page and app Help entry only after the citation list and scope
+  are explicitly specified.
 
 ## Latest Garbage-Collection Scan
 
 Run after adding the mechanical garbage-collection gate:
 
-- Passed: `python .agents/scripts/audit/agent_audit.py`
-- Passed: `python .agents/scripts/audit/agent_audit.py --check garbage-collection`
+- Passed with `.\.venv1` activated: `python .agents/scripts/audit/agent_audit.py`
+- Passed with `.\.venv1` activated: `python .agents/scripts/audit/agent_audit.py --check garbage-collection`
 - Passed: tracked artifact scan for cache/build/temp patterns returned no
   matches.
 - Debt-marker grep found no repo debt markers outside the audit check itself.

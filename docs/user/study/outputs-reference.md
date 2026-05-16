@@ -7,6 +7,7 @@ This page maps the main result files to the workflow steps that create them.
 ## Default result folders
 
 - `1 - Excel Data Files`: per-condition, per-participant spectral exports from processing.
+- `2 - SNR Plots`: generated plot outputs from the SNR Plot Generator.
 - `3 - Statistical Analysis Results`: inferential tables, QC flags, and exclusion reports.
 
 Your exact folder names may vary by project setup, but the file types below are expected.

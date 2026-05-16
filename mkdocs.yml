@@ -74,9 +74,12 @@ nav:
       - Baseline vs Zero Tests: statistics/baseline-vs-zero.md
   - Tools:
       - Feature Tour: tools/feature-tour.md
+      - SNR Plot Generator: tools/snr-plot-generator.md
+      - Ratio Calculator: tools/ratio-calculator.md
+      - Image Resizer: tools/image-resizer.md
+      - Epoch Averaging: tools/epoch-averaging.md
       - Individual-level Detectability: tools/individual-level-detectability.md
   - Reference:
       - Methods Reporting Checklist: reference/methods-reporting-checklist.md
       - FPVS Studio Config Import: reference/fpvs-studio-config-import.md
       - Glossary: reference/glossary.md
-      - Relevant Publications: reference/relevant-publications.md

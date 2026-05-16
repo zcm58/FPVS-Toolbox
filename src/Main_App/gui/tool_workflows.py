@@ -98,14 +98,6 @@ def open_epoch_averaging(
     host._epoch_win.activateWindow()
 
 
-def show_relevant_publications(host: Any) -> None:
-    QMessageBox.information(
-        host,
-        "Relevant Publications",
-        "This dialog is not yet implemented in the Qt interface.",
-    )
-
-
 def show_about_dialog(host: Any, version: str) -> None:
     QMessageBox.information(
         host,

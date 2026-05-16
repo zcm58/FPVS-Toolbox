@@ -50,7 +50,6 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
     # Help
     help_menu = menu_bar.addMenu("Help")
     for text, slot in [
-        ("Relevant Publications", parent.show_relevant_publications),
         ("About…",                parent.show_about_dialog),
     ]:
         action = QAction(text, parent)

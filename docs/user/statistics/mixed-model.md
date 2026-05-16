@@ -50,13 +50,10 @@ amplitude summed across the set of statistically significant oddball
 harmonics defined for the analysis). Data are indexed by participant, condition, and ROI.
 
 Models are fit in Python using statsmodels (`MixedLM`) with a
-participant-level random intercept. For single-group analyses, fixed
-effects included Condition, ROI, and the Condition x ROI interaction. For
-multi-group analyses, Group was included as an additional fixed effect
-along with all interactions among Group, Condition, and ROI. This
-specification estimates group-average effects of condition and ROI while
-allowing each participant to vary in overall baseline response level via
-the random intercept.
+participant-level random intercept. Fixed effects include Condition, ROI, and
+the Condition x ROI interaction. This specification estimates condition and ROI
+effects while allowing each participant to vary in overall baseline response
+level via the random intercept.
 
 ### Categorical coding and interpretation
 
@@ -73,10 +70,9 @@ reference level. Under this coding:
   changes differ across ROIs (i.e., whether the condition effect depends
   on ROI).
 
-For the active multi-group workflow, group contrasts are exposed as a
-separate step alongside the mixed model. Between-group ANOVA is paused
-in that workflow, while the single-group workflow still retains its
-existing RM-ANOVA support.
+Use this model for the current single-group Statistics workflow when you need
+the repeated-measures structure of condition x ROI while tolerating a small
+number of missing cells.
 
 ### Practical relationship to RM-ANOVA
 

@@ -16,6 +16,10 @@ This page lists the main FPVS Toolbox features and when to use each one.
 | Post-hoc tests | Finds specific condition pairs that differ within each ROI | After significant interaction effects | Pairwise comparison tables |
 | Baseline vs zero tests | Tests whether a condition ROI response is above no-response baseline | Detectability checks | Baseline vs Zero workbook |
 | Outliers and QC | Flags unusual values and separates flags from exclusions | Before final inferential reporting | Flagged and excluded participant reports |
+| SNR Plot Generator | Builds publication-oriented SNR or BCA plots from processed Excel outputs | After processing when you need ROI or condition figures | Plot image files |
+| Ratio Calculator | Compares two condition folders and computes participant-level ratios | When a ratio between two processed conditions is part of the analysis | Ratio tables and plots |
+| Image Resizer | Batch-resizes stimulus images and converts file formats | Before running an FPVS experiment that needs standardized image dimensions | Resized stimulus image folder |
+| Epoch Averaging | Combines preprocessed epochs before post-processing | When multiple preprocessed files should contribute to one averaged response | Averaged files for downstream processing |
 | Individual-level detectability tool | Creates participant-level topomap plus mini-spectrum figures | Participant-level reporting and diagnostics | Detectability figures |
 
 ## Typical order of use
@@ -24,10 +28,14 @@ This page lists the main FPVS Toolbox features and when to use each one.
 2. Run processing pipeline.
 3. Confirm outputs in Excel.
 4. Run harmonic selection and inferential statistics.
-5. Generate QC reports and optional individual-level figures.
+5. Generate QC reports, plots, ratios, or optional individual-level figures.
 
 ## Related docs
 
 - [Processing Pipeline Overview](../study/processing-pipeline.md)
 - [Statistical Analysis Overview](../results/statistical-analysis.md)
 - [Output Files](../study/outputs-reference.md)
+- [SNR Plot Generator](snr-plot-generator.md)
+- [Ratio Calculator](ratio-calculator.md)
+- [Image Resizer](image-resizer.md)
+- [Epoch Averaging](epoch-averaging.md)

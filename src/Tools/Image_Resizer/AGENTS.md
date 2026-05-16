@@ -6,6 +6,7 @@ the processing code.
 Before broad manual inspection, run:
 
 ```powershell
+.\.venv1\Scripts\Activate.ps1
 python .agents/scripts/audit/agent_audit.py
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 ```

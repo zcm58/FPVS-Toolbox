@@ -66,14 +66,14 @@ security policy.
 
 1. Click **Create New Project**.
 2. Enter a project name.
-3. Add group names if your study has groups.
+3. Add the group name for the study.
 4. Select the input folder containing `.bdf` files.
 5. Enter each condition name and trigger code.
 6. Save the project.
 
-For a single-group study, use one group. For a group comparison study, create a
-separate group for each participant group and point each group to the correct
-input folder.
+Use one analysis group for the current supported statistics workflow. If your
+files are split across folders, keep the folder labels simple and confirm the
+Statistics tool reads the processed Excel output folder before running analyses.
 
 ## Run one file first
 
