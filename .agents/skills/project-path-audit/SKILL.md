@@ -11,16 +11,17 @@ Use this workflow for file dialogs, manifests, imports, exports, generated outpu
 
 ## Workflow
 
-1. Run `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` before broad manual inspection.
-2. Read only the focused docs or files needed by the task or by script failures.
-3. Identify the active project root source for the workflow before changing path logic.
-4. Find hard-coded absolute paths, home-directory assumptions, and current-working-directory assumptions in the touched workflow.
-5. Replace unsafe joins with project-root-relative path construction.
-6. Ensure user-selected paths cannot silently escape the intended project boundary when the workflow requires project-local outputs.
-7. Handle `QFileDialog` Cancel without exceptions or stale state.
-8. Preserve existing output formats, filenames, sheet names, and folder layout unless explicitly requested.
-9. Cover missing, invalid, permission-denied, repeated-operation, and existing-file cases when they are realistic for the workflow.
-10. Use `tmp_path` for tests and avoid depending on developer-machine paths.
+1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` for Python commands.
+2. Run `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` before broad manual inspection.
+3. Read only the focused docs or files needed by the task or by script failures.
+4. Identify the active project root source for the workflow before changing path logic.
+5. Find hard-coded absolute paths, home-directory assumptions, and current-working-directory assumptions in the touched workflow.
+6. Replace unsafe joins with project-root-relative path construction.
+7. Ensure user-selected paths cannot silently escape the intended project boundary when the workflow requires project-local outputs.
+8. Handle `QFileDialog` Cancel without exceptions or stale state.
+9. Preserve existing output formats, filenames, sheet names, and folder layout unless explicitly requested.
+10. Cover missing, invalid, permission-denied, repeated-operation, and existing-file cases when they are realistic for the workflow.
+11. Use `tmp_path` for tests and avoid depending on developer-machine paths.
 
 ## Checks
 

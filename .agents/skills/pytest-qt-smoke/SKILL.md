@@ -11,15 +11,16 @@ Use this workflow when a GUI change needs lightweight coverage. Prefer a smoke t
 
 ## Workflow
 
-1. Read `AGENTS.md`, `ARCHITECTURE.md`, and the nearest existing pytest-qt tests in `tests/`.
-2. Instantiate the changed widget or window with the smallest practical setup.
-3. Register widgets with `qtbot.addWidget`.
-4. Use fake controllers, lightweight payloads, or signals instead of real processing.
-5. Emit or click the relevant signal path.
-6. Assert visible labels, enabled states, checked states, tooltips, status text, or emitted signals.
-7. Avoid real file I/O unless using `tmp_path`.
-8. Avoid depending on protected legacy internals.
-9. Keep the test deterministic and focused on the changed behavior.
+1. Activate `.\.venv1` or use `.\.venv1\Scripts\python.exe` for Python commands.
+2. Read `AGENTS.md`, `ARCHITECTURE.md`, `docs/agent/agent-index.md`, and the nearest existing pytest-qt tests in `tests/`.
+3. Instantiate the changed widget or window with the smallest practical setup.
+4. Register widgets with `qtbot.addWidget`.
+5. Use fake controllers, lightweight payloads, or signals instead of real processing.
+6. Emit or click the relevant signal path.
+7. Assert visible labels, enabled states, checked states, tooltips, status text, or emitted signals.
+8. Avoid real file I/O unless using `tmp_path`.
+9. Avoid depending on protected legacy internals.
+10. Keep the test deterministic and focused on the changed behavior.
 
 ## Checks
 
