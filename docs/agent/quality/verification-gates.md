@@ -4,6 +4,23 @@ Use the narrowest executable gate that can prove the change first, then broaden 
 
 For a compact command map, use `docs/agent/agent-index.md`.
 
+## Command Boundaries
+
+- Do not run exploratory commands without a bounded timeout. Use short bounds
+  for import probes and audits, and stop rather than letting a command run
+  indefinitely.
+- Avoid broad "import every GUI/tool module" sweeps as verification. GUI imports
+  can cascade into optional analysis dependencies, windows, process launchers,
+  or slow scientific library initialization.
+- Prefer targeted pytest files, skill-local audits, `py_compile`, and narrow
+  subprocess import probes for the exact public API being changed.
+- If an import probe exceeds its expected runtime or reaches an unrelated
+  optional dependency failure, stop and report the attempted command, first
+  failing module, and safer replacement check.
+- Do not combine many high-risk imports into one long process. Probe one import
+  surface or one small module group at a time so failures are attributable and
+  interruptible.
+
 ## Standard Commands
 
 ```powershell

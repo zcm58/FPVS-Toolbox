@@ -1,23 +1,23 @@
-"""Canonical shared GUI component layer for FPVS PySide6 surfaces."""
+"""Canonical shared GUI component layer for FPVS PySide6 surfaces.
+
+This package is the stable public import surface for reusable presentation
+primitives. Imports here must remain side-effect free: no app initialization,
+windows, filesystem access, project state reads, or worker startup.
+"""
 
 from __future__ import annotations
-
-from Main_App.gui.widgets import (
-    BrainPulseWidget,
-    BusySpinner,
-    CardHeader,
-    PathPickerRow,
-    SectionCard,
-    StatusBanner,
-    make_action_button,
-    make_form_layout,
-)
 
 from .actions import ActionRow, make_action_row
 from .messages import confirm, show_error, show_info, show_warning
 from .surfaces import AppDialog, SurfaceSize, configure_window_surface
+from Main_App.gui.widgets.brain_pulse import BrainPulseWidget
+from Main_App.gui.widgets.busy_spinner import BusySpinner
+from Main_App.gui.widgets.buttons import make_action_button
+from Main_App.gui.widgets.cards import CardHeader, SectionCard
+from Main_App.gui.widgets.forms import PathPickerRow, make_form_layout
+from Main_App.gui.widgets.status import StatusBanner
 
-__all__ = [
+__all__ = (
     "ActionRow",
     "AppDialog",
     "BrainPulseWidget",
@@ -35,4 +35,4 @@ __all__ = [
     "show_error",
     "show_info",
     "show_warning",
-]
+)

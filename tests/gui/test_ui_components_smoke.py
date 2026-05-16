@@ -1,4 +1,8 @@
 import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -7,6 +11,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 
 from PySide6.QtWidgets import QApplication, QLabel
 
+import Main_App.gui.components as components
 from Main_App.gui.components import (
     AppDialog,
     PathPickerRow,
@@ -20,6 +25,106 @@ from Main_App.gui.components import (
     show_warning,
 )
 from Main_App.gui.theme import apply_fpvs_theme
+
+EXPECTED_COMPONENT_EXPORTS = (
+    "ActionRow",
+    "AppDialog",
+    "BrainPulseWidget",
+    "BusySpinner",
+    "CardHeader",
+    "PathPickerRow",
+    "SectionCard",
+    "StatusBanner",
+    "SurfaceSize",
+    "confirm",
+    "configure_window_surface",
+    "make_action_button",
+    "make_action_row",
+    "make_form_layout",
+    "show_error",
+    "show_info",
+    "show_warning",
+)
+
+
+def test_component_public_exports_are_explicit() -> None:
+    assert components.__all__ == EXPECTED_COMPONENT_EXPORTS
+    for name in EXPECTED_COMPONENT_EXPORTS:
+        assert getattr(components, name) is not None
+
+
+def test_component_consumer_import_style_remains_available() -> None:
+    from Main_App.gui.components import ActionRow as ImportedActionRow
+    from Main_App.gui.components import AppDialog as ImportedAppDialog
+    from Main_App.gui.components import BrainPulseWidget as ImportedBrainPulseWidget
+    from Main_App.gui.components import BusySpinner as ImportedBusySpinner
+    from Main_App.gui.components import CardHeader as ImportedCardHeader
+    from Main_App.gui.components import PathPickerRow as ImportedPathPickerRow
+    from Main_App.gui.components import SectionCard as ImportedSectionCard
+    from Main_App.gui.components import StatusBanner as ImportedStatusBanner
+    from Main_App.gui.components import SurfaceSize as ImportedSurfaceSize
+    from Main_App.gui.components import confirm as imported_confirm
+    from Main_App.gui.components import configure_window_surface as imported_configure_window_surface
+    from Main_App.gui.components import make_action_button as imported_make_action_button
+    from Main_App.gui.components import make_action_row as imported_make_action_row
+    from Main_App.gui.components import make_form_layout as imported_make_form_layout
+    from Main_App.gui.components import show_error as imported_show_error
+    from Main_App.gui.components import show_info as imported_show_info
+    from Main_App.gui.components import show_warning as imported_show_warning
+
+    imported = {
+        "ActionRow": ImportedActionRow,
+        "AppDialog": ImportedAppDialog,
+        "BrainPulseWidget": ImportedBrainPulseWidget,
+        "BusySpinner": ImportedBusySpinner,
+        "CardHeader": ImportedCardHeader,
+        "PathPickerRow": ImportedPathPickerRow,
+        "SectionCard": ImportedSectionCard,
+        "StatusBanner": ImportedStatusBanner,
+        "SurfaceSize": ImportedSurfaceSize,
+        "confirm": imported_confirm,
+        "configure_window_surface": imported_configure_window_surface,
+        "make_action_button": imported_make_action_button,
+        "make_action_row": imported_make_action_row,
+        "make_form_layout": imported_make_form_layout,
+        "show_error": imported_show_error,
+        "show_info": imported_show_info,
+        "show_warning": imported_show_warning,
+    }
+
+    for name in EXPECTED_COMPONENT_EXPORTS:
+        assert imported[name] is getattr(components, name)
+
+
+def test_component_import_does_not_create_qapplication() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    existing_pythonpath = env.get("PYTHONPATH")
+    src_path = str(repo_root / "src")
+    env["PYTHONPATH"] = (
+        src_path
+        if not existing_pythonpath
+        else src_path + os.pathsep + existing_pythonpath
+    )
+    code = (
+        "from PySide6.QtWidgets import QApplication\n"
+        "assert QApplication.instance() is None\n"
+        "import Main_App.gui.components as components\n"
+        "assert QApplication.instance() is None\n"
+        "assert components.__all__[0] == 'ActionRow'\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_make_action_button_sets_properties(qtbot) -> None:

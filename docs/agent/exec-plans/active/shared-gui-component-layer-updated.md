@@ -184,11 +184,11 @@ local`.
 
 | Slice | Status | Required output | Exit verification |
 | --- | --- | --- | --- |
-| 0. Inventory shared and duplicated UI patterns | Pending | Inventory of current component exports, direct widget helpers, duplicated FPVS-specific patterns, current users, risk-ranked migration candidates, and intentionally local patterns | Agent audit; GUI import audit; targeted `rg`; no code changes |
-| 1. Document component hub contract | Pending | `docs/agent/architecture/gui.md` and nearest agent guidance updated with import rules, promotion decision tree, invariants, and examples | Agent audit; docs review; no runtime code changes |
-| 2. Normalize component exports | Pending | Stable exports from `Main_App.gui.components`; no import side effects; compatibility shims where needed; component smoke tests | `python -m pytest tests/gui/test_ui_components_smoke.py -q`; GUI import audit; import cycle check |
-| 3. Consolidate action and message patterns | Pending | Opportunistic migration of touched surfaces to shared action rows/buttons/message helpers while preserving labels, shortcuts, object names, enabled states, and signal wiring | Focused pytest-qt smoke tests for touched surfaces; re-entrancy and Cancel checks |
-| 4. Consolidate section/status/path patterns | Pending | Opportunistic migration of touched surfaces to shared cards/status/path-picker helpers while preserving project-root behavior and file dialog semantics | Focused pytest-qt smoke tests; project-path audit when file paths are touched |
+| 0. Inventory shared and duplicated UI patterns | Complete | Inventory of current component exports, direct widget helpers, duplicated FPVS-specific patterns, current users, risk-ranked migration candidates, and intentionally local patterns | Agent audit; GUI import audit; targeted `rg`; no code changes |
+| 1. Document component hub contract | Complete | `docs/agent/architecture/gui.md` and nearest agent guidance updated with import rules, promotion decision tree, invariants, and examples | Agent audit; docs review; no runtime code changes |
+| 2. Normalize component exports | Complete | Stable exports from `Main_App.gui.components`; no import side effects; compatibility shims where needed; component smoke tests | `python -m pytest tests/gui/test_ui_components_smoke.py -q`; GUI import audit; import cycle check |
+| 3. Consolidate action and message patterns | Complete | Opportunistic migration of touched surfaces to shared action rows/buttons/message helpers while preserving labels, shortcuts, object names, enabled states, and signal wiring | Focused pytest-qt smoke tests for touched surfaces; re-entrancy and Cancel checks |
+| 4. Consolidate section/status/path patterns | Complete | Opportunistic migration of touched surfaces to shared cards/status/path-picker helpers while preserving project-root behavior and file dialog semantics | Focused pytest-qt smoke tests; project-path audit when file paths are touched |
 | 5. Add coverage for component contracts | Pending | Component contract tests for object names, signal behavior, theme-token use, sizing/layout expectations, and basic high-DPI safety | `python -m pytest tests/gui/test_ui_components_smoke.py -q` plus touched-surface tests |
 | 6. Completion review | Pending | Final inventory of centralized patterns and intentionally local patterns; plan moved from active to completed only after verification passes | Agent audit; GUI import audit; hardcoded-path audit; selected surface smoke tests |
 
@@ -250,6 +250,21 @@ python -m pytest -q tests/gui/test_ui_components_smoke.py
 
 Add focused tests for each touched surface. Use the narrowest relevant test set
 from `docs/agent/quality/test-selection.md`.
+
+## Command Boundaries For This Plan
+
+- Keep exploratory verification commands bounded. Use short command timeouts for
+  import probes and stop on the first unrelated dependency failure.
+- Do not verify the component layer by importing broad GUI or tool-window module
+  lists. Those imports can cascade into optional analysis dependencies, tool
+  launchers, scientific-library initialization, or app-window setup that is not
+  part of the component contract.
+- Prefer focused component smoke tests, `py_compile` for touched component
+  modules, skill-local audits, and a narrow subprocess import of
+  `Main_App.gui.components` when checking import side effects.
+- If a broad import probe is accidentally started and runs longer than expected,
+  stop the process, record the attempted command and first failing or hanging
+  module, and replace it with a narrower gate.
 
 ## Inventory Commands
 
@@ -324,7 +339,9 @@ Required checks:
 
 - Exported names are stable and explicit.
 - Importing `Main_App.gui.components` has no runtime side effects.
-- Existing consumers still import successfully.
+- Existing consumer import styles remain available through
+  `from Main_App.gui.components import ...`; do not use broad app/tool module
+  import sweeps as this slice's gate.
 - Re-export shims do not hide circular imports.
 - New public APIs have type hints and docstrings.
 
@@ -510,3 +527,259 @@ eliminating direct `QWidget` usage.
 - Verification: document consistency review complete; implementation
   verification remains pending for Slice 0.
 - Next slice: `0. Inventory shared and duplicated UI patterns`.
+
+### 2026-05-15 - Slice 0 Inventory Complete
+
+- Status: complete.
+- Slice number and name: `0. Inventory shared and duplicated UI patterns`.
+- Files changed:
+  `docs/agent/exec-plans/active/shared-gui-component-layer-updated.md`,
+  `docs/agent/exec-plans/active/shared-gui-component-layer-inventory.md`.
+- Behavior preserved: no production code changes; no runtime GUI behavior,
+  worker behavior, project I/O, processing order, generated data, or export
+  formats changed.
+- Public API changes: none.
+- Tests added or updated: none; Slice 0 is inventory-only.
+- Commands run with PASS/FAIL result:
+  - PASS: `python .agents/scripts/audit/agent_audit.py`
+  - PASS: `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py`
+  - PASS: `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py`
+  - PASS: `python -m pytest tests/gui/test_ui_components_smoke.py -q`
+  - PASS: `rg "from Main_App\\.gui\\.components|from Main_App\\.gui\\.widgets" src/Main_App/gui src/Tools -g "*.py"`
+  - PASS: `rg "QAction|QMessageBox|QFileDialog|QProgressDialog|statusBar\\(|setStyleSheet|setObjectName" src/Main_App/gui src/Tools -g "*.py"`
+  - PASS: `rg "customtkinter|CustomTkinter|tkinter" src -g "*.py"`; matches were standalone/quarantine references, not active GUI imports.
+  - PASS: `rg "Main_App\\.Legacy_App|Tools\\.SourceLocalization|Main_App\\.PySide6_App" src -g "*.py"`; no active matches returned.
+- Verification gates result:
+  - PASS: imports resolve on Windows through component smoke tests.
+  - PASS - not touched: threading and worker behavior.
+  - PASS - not touched: UI integrity and DPI.
+  - PASS: legacy boundaries preserved by agent audit and retired-path search.
+  - PASS: project-path discipline preserved by path audit.
+  - PASS - not touched: error UX and logging.
+  - PASS - not touched: static hygiene beyond docs edits.
+  - PASS - not touched: edge cases.
+  - PASS - not touched: resource cleanup.
+  - PASS - not touched: Excel/CSV behavior.
+- Blockers or risks: no blocker. Inventory identified high-risk future work in
+  Stats UI, Ratio Calculator run/path workflow, and Plot Generator
+  output-sensitive behavior; these should stay in focused future-plan slices.
+- Next slice: `1. Document component hub contract`.
+
+### 2026-05-15 - Slice 1 Component Hub Contract Complete
+
+- Status: complete.
+- Slice number and name: `1. Document component hub contract`.
+- Files changed:
+  `docs/agent/architecture/gui.md`,
+  `docs/agent/agent-index.md`,
+  `docs/agent/exec-plans/active/shared-gui-component-layer-updated.md`.
+- Behavior preserved: docs-only change; no runtime GUI behavior, worker
+  behavior, project I/O, processing order, generated data, or export formats
+  changed.
+- Public API changes: none.
+- Tests added or updated: none; Slice 1 is documentation-only.
+- Commands run with PASS/FAIL result:
+  - PASS: `python .agents/scripts/audit/agent_audit.py`
+  - PASS: `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py`
+  - PASS: `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py`
+  - PASS: `python -m pytest tests/gui/test_ui_components_smoke.py -q`
+- Manual verification:
+  - PASS: reviewed `docs/agent/architecture/gui.md` and confirmed it documents
+    the canonical `Main_App.gui.components` import rule, direct Qt composition
+    rule, promotion decision tree, retired-path boundaries, `QAction` import
+    rule, worker/signal boundary, project-path discipline, and error UX/logging
+    expectations.
+  - PASS: reviewed `docs/agent/agent-index.md` and confirmed the GUI skill row
+    and execution-plan note point agents to the component hub plan before
+    reusable GUI primitive work.
+  - PASS: reviewed `git diff --stat` and focused diff; changes were limited to
+    agent docs and the active plan.
+- Verification gates result:
+  - PASS: imports resolve on Windows through component smoke tests.
+  - PASS - not touched: threading and worker behavior.
+  - PASS - not touched: UI integrity and DPI.
+  - PASS: legacy boundaries preserved by agent audit.
+  - PASS: project-path discipline preserved by path audit.
+  - PASS - not touched: runtime error UX and logging.
+  - PASS - not touched: static hygiene beyond docs edits.
+  - PASS - not touched: edge cases.
+  - PASS - not touched: resource cleanup.
+  - PASS - not touched: Excel/CSV behavior.
+- Blockers or risks: no blocker. Future implementation slices must still avoid
+  broad migrations and use the Slice 0 inventory to keep Stats, Ratio
+  Calculator, and Plot Generator changes focused.
+- Next slice: `2. Normalize component exports`.
+
+### 2026-05-16 - Slice 2 Verification Boundary Correction
+
+- Status: Slice 2 remains in progress.
+- Slice number and name: `2. Normalize component exports`.
+- Files changed:
+  `docs/agent/exec-plans/active/shared-gui-component-layer-updated.md`,
+  `docs/agent/quality/verification-gates.md`.
+- Behavior preserved: docs-only safety update; no runtime GUI behavior, worker
+  behavior, project I/O, processing order, generated data, or export formats
+  changed.
+- Public API changes: none in this safety update.
+- Tests added or updated: none in this safety update.
+- Commands run with PASS/FAIL result:
+  - FAIL: broad consumer import probe with
+    `Main_App.gui.ui_main`, Settings, Plot Generator, Ratio Calculator, Stats,
+    Image Resizer, Individual Detectability, and Advanced Averaging modules
+    ran too long and was interrupted. This was not an appropriate component
+    layer gate.
+  - FAIL: a narrower global-Python consumer import probe stopped on pre-existing
+    missing optional dependencies (`mne`, then `psutil`) before proving the
+    component export contract.
+  - PASS: leftover Python processes from the interrupted probe were stopped.
+- Verification gates result:
+  - PASS: command-boundary guidance now says to avoid broad GUI/tool import
+    sweeps for component-layer verification.
+  - PASS: Slice 2 checks now require the component import style to remain
+    available, not broad app/tool module imports.
+- Blockers or risks: broad GUI/tool imports can cascade into optional scientific
+  dependencies and long-running initialization unrelated to the component layer.
+  Future verification should use `tests/gui/test_ui_components_smoke.py`,
+  `py_compile` of touched component modules, skill audits, and a narrow
+  `Main_App.gui.components` subprocess import check.
+- Next slice: continue `2. Normalize component exports` with bounded checks.
+
+### 2026-05-16 - Slice 2 Normalize Component Exports Complete
+
+- Status: complete.
+- Slice number and name: `2. Normalize component exports`.
+- Files changed:
+  `src/Main_App/gui/components/__init__.py`,
+  `src/Main_App/gui/components/messages.py`,
+  `tests/gui/test_ui_components_smoke.py`,
+  `docs/agent/architecture/gui.md`,
+  `docs/agent/exec-plans/active/shared-gui-component-layer-inventory.md`,
+  `docs/agent/exec-plans/active/shared-gui-component-layer-updated.md`.
+- Behavior preserved: no GUI surface migration; no runtime GUI workflow,
+  worker behavior, project I/O, processing order, generated data, or export
+  formats changed.
+- Public API changes: `Main_App.gui.components.__all__` is now the explicit
+  public export tuple for reusable FPVS GUI primitives. Existing component
+  import names remain available.
+- Tests added or updated:
+  `tests/gui/test_ui_components_smoke.py` now checks the explicit export tuple,
+  direct consumer import style, and side-effect-free `Main_App.gui.components`
+  import behavior in a narrow subprocess.
+- Commands run with PASS/FAIL result:
+  - PASS: `.venv1\Scripts\python.exe -m pytest tests/gui/test_ui_components_smoke.py -q`
+  - PASS: `.venv1\Scripts\python.exe -m py_compile src\Main_App\gui\components\__init__.py src\Main_App\gui\components\actions.py src\Main_App\gui\components\messages.py src\Main_App\gui\components\surfaces.py src\Main_App\gui\widgets\buttons.py src\Main_App\gui\widgets\cards.py src\Main_App\gui\widgets\forms.py src\Main_App\gui\widgets\status.py tests\gui\test_ui_components_smoke.py`
+  - PASS: `$env:PYTHONPATH='src'; .venv1\Scripts\python.exe -c "from PySide6.QtWidgets import QApplication; assert QApplication.instance() is None; import Main_App.gui.components as components; assert QApplication.instance() is None; assert components.__all__[0] == 'ActionRow'; print('component import side effects ok')"`
+  - PASS: `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py`
+  - PASS: `python .agents/scripts/audit/agent_audit.py`
+  - PASS: `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py`
+  - PASS: `.venv1\Scripts\python.exe -m ruff check src\Main_App\gui\components\__init__.py src\Main_App\gui\components\messages.py tests\gui\test_ui_components_smoke.py`
+- Verification gates result:
+  - PASS: imports resolve on Windows through component smoke tests and narrow
+    component subprocess import.
+  - PASS - not touched: threading and worker behavior.
+  - PASS - not touched: UI integrity and DPI beyond existing component smoke
+    coverage.
+  - PASS: legacy boundaries preserved by agent audit.
+  - PASS: project-path discipline preserved by path audit.
+  - PASS - not touched: runtime error UX and logging.
+  - PASS: static hygiene covered by `py_compile` and narrow `ruff check`.
+  - PASS - not touched: edge cases outside the import/export contract.
+  - PASS - not touched: resource cleanup; no workers or windows started.
+  - PASS - not touched: Excel/CSV behavior.
+- Blockers or risks: no blocker. Avoid broad app/tool import sweeps for this
+  plan; they are not needed to prove the component export contract.
+- Next slice: `3. Consolidate action and message patterns`.
+
+### 2026-05-16 - Slice 3 Action Row Consolidation Complete
+
+- Status: complete.
+- Slice number and name: `3. Consolidate action and message patterns`.
+- Files changed:
+  `src/Tools/Image_Resizer/pyside_resizer.py`,
+  `tests/gui/test_image_resizer_gui.py`,
+  `docs/agent/architecture/gui.md`,
+  `docs/agent/exec-plans/active/shared-gui-component-layer-inventory.md`,
+  `docs/agent/exec-plans/active/shared-gui-component-layer-updated.md`.
+- Behavior preserved: Image Resizer button labels, button order, button
+  variants, initial enabled states, and signal connections are unchanged. No
+  image resizing behavior, worker/thread behavior, file dialog behavior,
+  project I/O, processing order, generated data, or export format changed.
+- Public API changes: none.
+- Tests added or updated:
+  `tests/gui/test_image_resizer_gui.py` now asserts the actions panel uses
+  `ActionRow` and preserves the `Process`, `Cancel`, and `Open Folder` button
+  labels, variants, and initial enabled states.
+- Commands run with PASS/FAIL result:
+  - PASS: `.venv1\Scripts\python.exe -m pytest tests/gui/test_image_resizer_gui.py tests/gui/test_ui_components_smoke.py -q`
+  - PASS: `.venv1\Scripts\python.exe -m py_compile src\Tools\Image_Resizer\pyside_resizer.py tests\gui\test_image_resizer_gui.py`
+  - PASS: `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py`
+  - PASS: `python .agents/scripts/audit/agent_audit.py`
+  - PASS: `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py`
+  - PASS: `.venv1\Scripts\python.exe -m ruff check src\Tools\Image_Resizer\pyside_resizer.py tests\gui\test_image_resizer_gui.py src\Main_App\gui\components\__init__.py src\Main_App\gui\components\messages.py tests\gui\test_ui_components_smoke.py`
+- Verification gates result:
+  - PASS: imports resolve on Windows through focused GUI/component smoke tests
+    and `py_compile`.
+  - PASS: threading is safe; the slice did not change worker construction,
+    signal wiring to worker progress/finished, or thread cleanup.
+  - PASS: UI integrity preserved; the existing actions card still contains the
+    same three buttons in one row.
+  - PASS: legacy boundaries preserved by agent audit.
+  - PASS: project-path discipline preserved by path audit; no path behavior was
+    touched.
+  - PASS: error UX and logging preserved; message helper calls were already in
+    place and were not changed.
+  - PASS: static hygiene covered by `py_compile` and narrow `ruff check`.
+  - PASS: edge cases preserved; cancel/open buttons remain disabled initially.
+  - PASS - not touched: resource cleanup and worker lifetime.
+  - PASS - not touched: Excel/CSV behavior.
+- Blockers or risks: no blocker. Larger action/message migrations remain
+  future work and should use the Image Resizer row as the low-risk pattern.
+- Next slice: `4. Consolidate section/status/path patterns`.
+
+### 2026-05-16 - Slice 4 Section Path Status Contracts Complete
+
+- Status: complete.
+- Slice number and name: `4. Consolidate section/status/path patterns`.
+- Files changed:
+  `src/Tools/Image_Resizer/pyside_resizer.py`,
+  `src/Tools/Individual_Detectability/main_window.py`,
+  `tests/gui/test_image_resizer_gui.py`,
+  `tests/gui/test_individual_detectability_gui_smoke.py`,
+  `docs/agent/architecture/gui.md`,
+  `docs/agent/exec-plans/active/shared-gui-component-layer-inventory.md`,
+  `docs/agent/exec-plans/active/shared-gui-component-layer-updated.md`.
+- Behavior preserved: no visible section headings or order changed; no file
+  dialog titles, filters, defaults, Cancel behavior, path writes, worker
+  behavior, project I/O, generated data, or export formats changed.
+- Public API changes: none.
+- Tests added or updated:
+  `tests/gui/test_image_resizer_gui.py` and
+  `tests/gui/test_individual_detectability_gui_smoke.py` now assert stable
+  shared path/status object names, status text and variant, and file-dialog
+  Cancel no-op behavior for Image Resizer and Individual Detectability.
+- Commands run with PASS/FAIL result:
+  - PASS: `.venv1\Scripts\python.exe -m pytest tests/gui/test_image_resizer_gui.py tests/gui/test_individual_detectability_gui_smoke.py tests/gui/test_ui_components_smoke.py -q`
+  - PASS: `.venv1\Scripts\python.exe -m py_compile src\Tools\Image_Resizer\pyside_resizer.py src\Tools\Individual_Detectability\main_window.py tests\gui\test_image_resizer_gui.py tests\gui\test_individual_detectability_gui_smoke.py`
+  - PASS: `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py`
+  - PASS: `python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py`
+  - PASS: `python .agents/scripts/audit/agent_audit.py`
+  - PASS: `.venv1\Scripts\python.exe -m ruff check src\Tools\Image_Resizer\pyside_resizer.py src\Tools\Individual_Detectability\main_window.py tests\gui\test_image_resizer_gui.py tests\gui\test_individual_detectability_gui_smoke.py`
+- Verification gates result:
+  - PASS: imports resolve on Windows through focused GUI/component smoke tests
+    and `py_compile`.
+  - PASS: threading is safe; worker creation, worker signal wiring, and worker
+    lifetime were not changed.
+  - PASS: UI integrity preserved; shared path/status widgets now have stable
+    object names and existing sections remain present.
+  - PASS: legacy boundaries preserved by agent audit.
+  - PASS: project-path discipline preserved by path audit and Cancel no-op
+    tests.
+  - PASS: error UX and logging preserved; message behavior was not changed.
+  - PASS: static hygiene covered by `py_compile` and narrow `ruff check`.
+  - PASS: edge cases covered for file-dialog Cancel no-op behavior.
+  - PASS - not touched: resource cleanup and worker lifetime.
+  - PASS - not touched: Excel/CSV behavior.
+- Blockers or risks: no blocker. Ratio Calculator, Plot Generator, Stats, and
+  Epoch Averaging path/status migrations remain future focused work and should
+  preserve their tool-specific path defaults and worker behavior.
+- Next slice: `5. Add coverage for component contracts`.

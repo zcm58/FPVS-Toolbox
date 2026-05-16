@@ -12,7 +12,7 @@ import subprocess
 import sys
 from typing import List, Tuple
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -32,6 +32,7 @@ from Main_App.gui.components import (
     SectionCard,
     StatusBanner,
     make_action_button,
+    make_action_row,
     make_form_layout,
     show_error,
     show_info,
@@ -118,11 +119,13 @@ class FPVSImageResizerQt(QWidget):
         )
         folders_form = make_form_layout()
         self.input_row = PathPickerRow("Browse...", folders_card)
+        self.input_row.setObjectName("image_resizer_input_row")
         self.input_row.button.clicked.connect(self._select_input)
         self.in_edit = self.input_row.line_edit
         folders_form.addRow("Input Folder:", self.input_row)
 
         self.output_row = PathPickerRow("Browse...", folders_card)
+        self.output_row.setObjectName("image_resizer_output_row")
         self.output_row.button.clicked.connect(self._select_output)
         self.out_edit = self.output_row.line_edit
         folders_form.addRow("Output Folder:", self.output_row)
@@ -156,28 +159,28 @@ class FPVSImageResizerQt(QWidget):
         layout.addWidget(options_card)
 
         actions_card = SectionCard("Actions", self, object_name="image_resizer_actions")
-        action_row = QHBoxLayout()
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(8)
         self.start_btn = make_action_button("Process", variant="primary")
         self.start_btn.clicked.connect(self._start)
-        action_row.addWidget(self.start_btn)
 
         self.cancel_btn = make_action_button("Cancel", variant="danger")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel)
-        action_row.addWidget(self.cancel_btn)
 
         self.open_btn = make_action_button("Open Folder")
         self.open_btn.setEnabled(False)
         self.open_btn.clicked.connect(self._open_folder)
-        action_row.addWidget(self.open_btn)
-        action_row.addStretch(1)
-        actions_card.content_layout.addLayout(action_row)
+
+        self.action_row = make_action_row(
+            [self.start_btn, self.cancel_btn, self.open_btn],
+            alignment=Qt.AlignLeft,
+            parent=actions_card,
+        )
+        actions_card.content_layout.addWidget(self.action_row)
         layout.addWidget(actions_card)
 
         progress_card = SectionCard("Progress", self, object_name="image_resizer_progress")
         self.status_banner = StatusBanner("Ready.", progress_card)
+        self.status_banner.setObjectName("image_resizer_status")
         progress_card.content_layout.addWidget(self.status_banner)
         self.progress = QProgressBar()
         progress_card.content_layout.addWidget(self.progress)

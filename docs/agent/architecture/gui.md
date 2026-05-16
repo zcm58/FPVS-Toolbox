@@ -45,6 +45,35 @@ New and migrated GUI surfaces should import shared UI building blocks from
 windows, dialogs, action rows, message helpers, and reusable presentation
 widgets.
 
+Canonical public import forms:
+
+```python
+from Main_App.gui import components
+from Main_App.gui.components import SectionCard, make_action_button
+```
+
+Prefer `Main_App.gui.components` for FPVS-specific shells, action buttons,
+action rows, section cards, path rows, status banners, message helpers, and
+window/dialog sizing. Direct imports from `Main_App.gui.widgets` should stay
+inside the component layer or existing compatibility code unless a surface has a
+specific reason to depend on a lower-level widget implementation.
+
+`Main_App.gui.components.__all__` is the public component export contract.
+Changing that list is a shared-GUI API change: update component smoke tests,
+keep imports side-effect free, and record the decision in the active component
+layer plan.
+
+The Image Resizer actions panel is the first runtime `ActionRow` adoption. Use
+it as the small-surface pattern for future action-row migrations: preserve
+button labels, order, variants, enabled states, and signal connections, and add
+focused pytest-qt coverage for the touched surface.
+
+Image Resizer and Individual Detectability are the first section/path/status
+contract surfaces for Slice 4. Their shared `PathPickerRow` and `StatusBanner`
+instances now have stable object names and focused tests that preserve
+file-dialog Cancel as a no-op. Use that pattern before migrating path rows in
+more stateful tools such as Ratio Calculator, Stats, or Plot Generator.
+
 Lower-level PySide6 primitives live in `src/Main_App/gui/widgets/`. Keep this
 package focused on presentation-only widgets such as reusable buttons, cards,
 form rows, animation widgets, the busy spinner, and inline status widgets.
@@ -55,6 +84,29 @@ The component layer is intentionally thin. It should centralize shared shell
 and presentation conventions, not own backend processing, file export behavior,
 project mutation, or tool-specific orchestration.
 
+Allowed direct Qt composition:
+
+- Use direct `QLabel`, `QLineEdit`, `QComboBox`, `QCheckBox`, `QTableWidget`,
+  `QTreeWidget`, splitters, and simple layouts when the control is local and
+  has no durable FPVS-specific behavior.
+- Do not wrap a one-off Qt control just to make imports look uniform.
+- Keep domain-specific surfaces local when they own non-reusable behavior such
+  as sidebar selection, color swatches, result tables, export details, or
+  tool-specific logs.
+
+Promote a local GUI pattern to `Main_App.gui.components` only when all of these
+are true:
+
+1. The pattern is duplicated in at least two surfaces, or a planned surface is
+   likely to reuse it.
+2. It encodes FPVS-specific styling, object names, geometry, project-path
+   behavior, validation, messaging, or signal wiring.
+3. It can be introduced without changing labels, defaults, processing behavior,
+   generated data, persisted settings, or output formats.
+4. It can be covered with focused pytest-qt smoke or contract tests.
+5. It does not import retired paths, start workers, touch project state, access
+   the filesystem at import time, or create windows as an import side effect.
+
 The main app shell is the visual source of truth. Shared component defaults should mirror the main window's current-project shell, card, form, status, and action-button styling through `apply_fpvs_theme()` in `src/Main_App/gui/theme.py` and the tokens in `src/Main_App/gui/style_tokens.py`.
 
 `src/Main_App/gui/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
@@ -64,6 +116,53 @@ Shell-specific implementations live under `src/Main_App/gui/`, including the mai
 General GUI utilities should live under `Main_App.gui` when they coordinate UI-facing behavior. Non-GUI resource/path helpers should live under `Main_App.Shared`.
 
 Widgets must not own backend processing, file export behavior, project mutation, or dialog orchestration. Keep those responsibilities in GUI controllers, backend modules, workers, or tool-specific code.
+
+## Component Boundaries
+
+Black-box and retired paths:
+
+- Do not add new GUI components under `src/Main_App/Legacy_App/**`,
+  `src/Main_App/PySide6_App/**`, or `src/Tools/SourceLocalization/**`.
+- Do not import active GUI code from those retired paths.
+- If old behavior is needed for compatibility, consume it through the current
+  purpose-based APIs or a thin adapter outside protected folders.
+
+Qt import rules:
+
+- Import `QAction` only from `PySide6.QtGui`.
+- Do not introduce Tkinter, CustomTkinter, CTkMessagebox, PyQt, or mixed-toolkit
+  compatibility shims in active GUI code.
+
+Worker and signal boundaries:
+
+- Components and widgets are presentation-only. They must not start long work,
+  read or mutate worker internals, or inspect backend dataframes.
+- Long-running EEG, plotting, export, statistics, and resize work must remain
+  in `QThread`, `QRunnable`, `QThreadPool`, process-runner code, or the
+  existing tool worker owner.
+- Workers must communicate progress, errors, completion, and reports through
+  signals or existing message callbacks. Workers must not read or mutate Qt
+  widgets directly.
+
+Project-path discipline:
+
+- Shared path components may present a path field and button, but the owning
+  workflow must preserve current project-root resolution, file-dialog filters,
+  default directories, settings keys, and Cancel no-op behavior.
+- Project I/O must remain under the active project root or an explicitly
+  user-selected path already allowed by the existing surface.
+- Do not hard-code user, machine, or study paths in GUI components.
+
+Error UX and logging:
+
+- Prefer non-blocking inline status for recoverable validation, missing-path,
+  busy, and completion state.
+- Preserve modal `QMessageBox` behavior where it is already part of a
+  confirmation, destructive action, or completion workflow unless the slice
+  explicitly changes and tests that behavior.
+- Production error paths should use structured logging with the operation name,
+  relevant project/path context, and exception details. Do not add `print` or
+  silent `pass` patterns.
 
 Rules:
 

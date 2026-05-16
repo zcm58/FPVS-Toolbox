@@ -14,7 +14,7 @@ from Tools.Individual_Detectability.main_window import (  # noqa: E402
 from Main_App.gui.components import PathPickerRow, SectionCard, StatusBanner  # noqa: E402
 
 
-def test_individual_detectability_window_smoke(qtbot, tmp_path: Path) -> None:
+def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatch) -> None:
     window = IndividualDetectabilityWindow(project_root=str(tmp_path))
     qtbot.addWidget(window)
     window.show()
@@ -30,11 +30,30 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path) -> None:
     }
     assert expected_cards <= set(cards)
     assert isinstance(window.input_root_row, PathPickerRow)
+    assert window.input_root_row.objectName() == "individual_detectability_input_root_row"
+    assert window.input_root_edit.placeholderText() == "Select Excel root folder"
     assert isinstance(window.output_root_row, PathPickerRow)
+    assert window.output_root_row.objectName() == "individual_detectability_output_root_row"
+    assert window.output_root_edit.placeholderText() == "Select output folder"
     assert isinstance(window.status_label, StatusBanner)
+    assert window.status_label.objectName() == "individual_detectability_status"
+    assert window.status_label.text() == "Ready."
+    assert window.status_label.property("statusVariant") == "info"
     assert window.run_btn.property("variant") == "primary"
     assert window.toggle_log_btn.property("variant") == "tertiary"
     assert window.log_box.property("logSurface") is True
+
+    monkeypatch.setattr(
+        "Tools.Individual_Detectability.main_window.QFileDialog.getExistingDirectory",
+        lambda *_args, **_kwargs: "",
+    )
+    window._browse_input_root()
+    assert window.input_root_edit.text() == ""
+    assert window._last_dir is None
+
+    window._browse_output_root()
+    assert window.output_root_edit.text() == ""
+    assert window._last_dir is None
 
 
 def test_individual_detectability_scan_populates_participants_with_missingness(

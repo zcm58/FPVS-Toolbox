@@ -154,6 +154,7 @@ class IndividualDetectabilityWindow(QWidget):
             group,
             placeholder="Select Excel root folder",
         )
+        self.input_root_row.setObjectName("individual_detectability_input_root_row")
         self.input_root_edit = self.input_root_row.line_edit
         self.input_root_btn = self.input_root_row.button
         self.input_root_btn.clicked.connect(self._browse_input_root)
@@ -205,6 +206,7 @@ class IndividualDetectabilityWindow(QWidget):
             group,
             placeholder="Select output folder",
         )
+        self.output_root_row.setObjectName("individual_detectability_output_root_row")
         self.output_root_edit = self.output_root_row.line_edit
         self.output_root_btn = self.output_root_row.button
         self.output_root_btn.clicked.connect(self._browse_output_root)
@@ -402,6 +404,7 @@ class IndividualDetectabilityWindow(QWidget):
         self.progress = QProgressBar()
         self.progress.setValue(0)
         self.status_label = StatusBanner("Ready.", panel)
+        self.status_label.setObjectName("individual_detectability_status")
         row_layout.addWidget(self.run_btn)
         row_layout.addWidget(self.progress, 1)
         row_layout.addWidget(self.status_label)
