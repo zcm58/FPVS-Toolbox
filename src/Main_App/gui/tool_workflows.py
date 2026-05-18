@@ -71,13 +71,10 @@ def open_plot_generator(host: Any, source_root: Path) -> None:
     subprocess.Popen(cmd, close_fds=True, env=env)
 
 
-def open_epoch_averaging(
-    host: Any,
-    advanced_averaging_window_cls: Callable[..., Any],
-) -> None:
+def resolve_epoch_averaging_paths(host: Any) -> tuple[str, str] | None:
     if not host.currentProject:
         QMessageBox.warning(host, "No Project", "Please load a project first.")
-        return
+        return None
 
     data_dir = host.currentProject.subfolders.get("data")
     if data_dir is None:
@@ -88,7 +85,17 @@ def open_epoch_averaging(
         host.currentProject.project_root
         / host.currentProject.subfolders.get("excel", "")
     )
+    return data_dir, excel_dir
 
+
+def open_epoch_averaging(
+    host: Any,
+    advanced_averaging_window_cls: Callable[..., Any],
+) -> None:
+    paths = resolve_epoch_averaging_paths(host)
+    if paths is None:
+        return
+    data_dir, excel_dir = paths
     if not getattr(host, "_epoch_win", None):
         host._epoch_win = advanced_averaging_window_cls(
             parent=host, input_dir=data_dir, output_dir=excel_dir

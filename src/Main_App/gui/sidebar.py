@@ -262,13 +262,14 @@ def init_sidebar(self) -> None:
         self.open_image_resizer,
     )
     self.sidebar_image_button = image_btn
-    make_button(
+    epoch_btn = make_button(
         tools_layout,
         "btn_epoch",
         "Epoch Averaging",
         "view-refresh",
         self.open_epoch_averaging,
     )
+    self.sidebar_epoch_button = epoch_btn
 
     primary_layout.addWidget(tools_group)
     self.sidebar_tools_group = tools_group

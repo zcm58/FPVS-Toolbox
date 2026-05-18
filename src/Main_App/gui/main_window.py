@@ -491,12 +491,41 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self.workspace_stack.setCurrentWidget(self._ensure_image_resizer_page())
         self._set_sidebar_selection("btn_image")
 
+    def _ensure_epoch_averaging_page(self) -> AdvancedAveragingWindow | None:
+        paths = tool_workflows.resolve_epoch_averaging_paths(self)
+        if paths is None:
+            return None
+
+        page = getattr(self, "_epoch_page", None)
+        if page is None:
+            data_dir, excel_dir = paths
+            page = AdvancedAveragingWindow(
+                parent=self,
+                input_dir=data_dir,
+                output_dir=excel_dir,
+            )
+            page.setObjectName("embedded_epoch_averaging_page")
+            try:
+                page.btn_close.clicked.disconnect(page.close)
+            except (RuntimeError, TypeError):
+                pass
+            page.btn_close.clicked.connect(self.show_home_page)
+            self.workspace_stack.addWidget(page)
+            self._epoch_page = page
+            self._epoch_win = page
+        return page
 
     def open_plot_generator(self) -> None:
         tool_workflows.open_plot_generator(self, Path(__file__).resolve().parents[3])
 
     def open_epoch_averaging(self) -> None:
-        tool_workflows.open_epoch_averaging(self, AdvancedAveragingWindow)
+        page = self._ensure_epoch_averaging_page()
+        if page is None:
+            return
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(page)
+        self._set_sidebar_selection("btn_epoch")
 
     def open_advanced_analysis_window(self) -> None:
         self.open_epoch_averaging()

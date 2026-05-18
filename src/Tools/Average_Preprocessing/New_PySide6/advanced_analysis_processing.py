@@ -109,7 +109,8 @@ class AdvancedAnalysisProcessingMixin:
         Validate all configurations and retrieve a complete parameter set
         from the main application.
         """
-        main_app = self.parent()
+        main_app_getter = getattr(self, "main_app", None)
+        main_app = main_app_getter() if callable(main_app_getter) else self.parent()
 
         # 1. First, perform all the checks on the averaging groups themselves
         if not self.defined_groups:
@@ -171,7 +172,8 @@ class AdvancedAnalysisProcessingMixin:
         self.log("Validation successful. Starting processing thread...")
 
         # Gather necessary callbacks from the parent application
-        parent_app = self.parent()
+        main_app_getter = getattr(self, "main_app", None)
+        parent_app = main_app_getter() if callable(main_app_getter) else self.parent()
 
         if hasattr(parent_app, "load_eeg_file") and callable(parent_app.load_eeg_file):
             load_file_method = parent_app.load_eeg_file

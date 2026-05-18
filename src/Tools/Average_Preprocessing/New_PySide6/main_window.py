@@ -45,6 +45,7 @@ class AdvancedAveragingWindow(
     ) -> None:
         super().__init__(parent)
         configure_window_surface(self, title="Advanced Averaging Analysis")
+        self._main_app = parent
 
         # Store project paths
         self.project_input_folder = input_dir
@@ -229,6 +230,10 @@ class AdvancedAveragingWindow(
     def save_groups_to_file(self) -> None:
         """Stubbed out: configuration saving is disabled in this UI."""
         return
+
+    def main_app(self):
+        """Return the owning Main App shell, even when embedded in a workspace."""
+        return self._main_app if self._main_app is not None else self.parent()
 
     def _auto_load_source_files(self) -> None:
         """Scan project_input_folder for .bdf files and populate the list."""

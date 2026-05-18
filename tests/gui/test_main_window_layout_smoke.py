@@ -1,6 +1,7 @@
 import importlib.util
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QStackedWidget, QW
 from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
 import Main_App.gui.update_manager as update_manager
+from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
 from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
 
 
@@ -171,6 +173,53 @@ def test_sidebar_image_resizer_embeds_in_main_workspace(
     assert selected_roles == ["btn_image"]
 
     qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_epoch_averaging_embeds_in_main_workspace(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    data_dir = project_root / "data"
+    excel_dir = project_root / "excel"
+    data_dir.mkdir(parents=True)
+    excel_dir.mkdir()
+    (data_dir / "P001.bdf").touch()
+    win.currentProject = SimpleNamespace(
+        project_root=project_root,
+        input_folder=data_dir,
+        subfolders={"data": "data", "excel": "excel"},
+    )
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_epoch"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert isinstance(win.workspace_stack.currentWidget(), AdvancedAveragingWindow)
+    assert win.workspace_stack.currentWidget().objectName() == "embedded_epoch_averaging_page"
+    assert win._epoch_page.parent() is win.workspace_stack
+    assert win._epoch_page.main_app() is win
+    assert win._epoch_page.source_eeg_files == [str(data_dir / "P001.bdf")]
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_epoch"]
+
+    qtbot.mouseClick(win._epoch_page.btn_close, Qt.LeftButton)
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is win.homeWidget

@@ -42,7 +42,8 @@ The main app shell uses the outer `MainWindow.stacked` widget for landing vs
 application shell navigation. Inside the application shell, `workspace_stack`
 switches the right-hand workspace content while preserving the persistent
 sidebar and project header. The preprocessing page remains `homeWidget`; the
-Image Resizer is the first tool embedded in this workspace stack.
+Image Resizer and Epoch Averaging are the first tools embedded in this
+workspace stack.
 
 ## Component Layer
 
