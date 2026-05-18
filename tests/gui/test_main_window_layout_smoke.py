@@ -16,6 +16,7 @@ from Main_App.gui.components import ActionRow
 import Main_App.gui.update_manager as update_manager
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
 from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
+from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 
 
 def _build_window(tmp_path: Path, qtbot, monkeypatch) -> main_window_module.MainWindow:
@@ -171,6 +172,47 @@ def test_sidebar_image_resizer_embeds_in_main_workspace(
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_image"]
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_ratio_calculator_embeds_in_main_workspace(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(
+        project_root=project_root,
+        input_folder=project_root,
+        subfolders={},
+    )
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_ratio"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert isinstance(win.workspace_stack.currentWidget(), RatioCalculatorWindow)
+    assert win.workspace_stack.currentWidget().objectName() == "embedded_ratio_calculator_page"
+    assert win._ratio_calculator_page._project_root == project_root
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_ratio"]
 
     qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
     qtbot.wait(20)

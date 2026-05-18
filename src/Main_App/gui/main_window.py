@@ -50,6 +50,7 @@ from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
 )
 from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
+from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Stats import StatsWindow as PysideStatsWindow
 from config import FPVS_TOOLBOX_VERSION
 from Main_App.gui import update_manager
@@ -490,6 +491,25 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_image_resizer_page())
         self._set_sidebar_selection("btn_image")
+
+    def _ensure_ratio_calculator_page(self) -> RatioCalculatorWindow:
+        page = getattr(self, "_ratio_calculator_page", None)
+        if page is None:
+            project_root = None
+            project = getattr(self, "currentProject", None)
+            if project is not None and hasattr(project, "project_root"):
+                project_root = str(project.project_root)
+            page = RatioCalculatorWindow(parent=self, project_root=project_root)
+            page.setObjectName("embedded_ratio_calculator_page")
+            self.workspace_stack.addWidget(page)
+            self._ratio_calculator_page = page
+        return page
+
+    def open_ratio_calculator(self) -> None:
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(self._ensure_ratio_calculator_page())
+        self._set_sidebar_selection("btn_ratio")
 
     def _ensure_epoch_averaging_page(self) -> AdvancedAveragingWindow | None:
         paths = tool_workflows.resolve_epoch_averaging_paths(self)

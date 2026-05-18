@@ -46,7 +46,7 @@ def test_ratio_calculator_window_smoke(qtbot):
     if not _module_available("PySide6") or not _module_available("pytestqt"):
         pytest.skip("PySide6 or pytest-qt not available")
 
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QSizePolicy, QWidget
 
     from Main_App.gui.components import ActionRow, SectionCard, StatusBanner
     from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
@@ -67,9 +67,17 @@ def test_ratio_calculator_window_smoke(qtbot):
     assert expected_cards <= set(cards)
     assert isinstance(window.status_label, StatusBanner)
     assert isinstance(window.validation_label, StatusBanner)
+    assert cards["ratio_calculator_conditions"].sizePolicy().verticalPolicy() == QSizePolicy.Maximum
+    assert not cards["ratio_calculator_conditions"].header.isVisible()
+    assert window.input_a_open_btn.minimumHeight() >= 30
+    assert window.input_a_btn.minimumHeight() >= 30
+    assert cards["ratio_calculator_participants"].toolTip()
+    assert not cards["ratio_calculator_run"].header.isVisible()
+    assert window.findChild(QWidget, "ratio_calculator_run_output_row") is not None
     assert window.run_btn.property("variant") == "primary"
     assert window.log_toggle_btn.property("variant") == "tertiary"
-    assert window.log_box.property("logSurface") is True
+    assert window.log_toggle_btn.text() == "Open log"
+    assert "Select both condition folders" in window._log_text
 
     action_rows = {row.objectName(): row for row in window.findChildren(ActionRow)}
     expected_rows = {

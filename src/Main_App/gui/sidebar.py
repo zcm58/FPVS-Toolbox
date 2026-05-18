@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from Main_App.gui.icons import division_icon, individual_detectability_icon, settings_icon
-from Tools.Ratio_Calculator.launcher import open_ratio_calculator_tool
 from Tools.Individual_Detectability.launcher import open_individual_detectability_tool
 from .style_tokens import (
     SIDEBAR_WIDTH,
@@ -245,7 +244,7 @@ def init_sidebar(self) -> None:
         "btn_ratio",
         "Ratio Calculator",
         division_icon(ICON_PX),
-        lambda: open_ratio_calculator_tool(self),
+        self.open_ratio_calculator,
     )
     make_button(
         tools_layout,
