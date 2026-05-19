@@ -1,13 +1,11 @@
 from __future__ import annotations
 from PySide6.QtWidgets import QMenuBar, QMainWindow
 from PySide6.QtGui import QAction
-from Main_App.gui.icons import division_icon, individual_detectability_icon
-from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow  # noqa: F401
 
 
 def build_menu_bar(parent: QMainWindow) -> QMenuBar:
     """
-    Returns a QMenuBar with File, Tools, and Help menus.
+    Returns a QMenuBar with app-level File and Help menus.
     """
     menu_bar = QMenuBar(parent)
 
@@ -24,26 +22,6 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
         file_menu.addAction(action)
         file_menu.addSeparator()
     file_menu.removeAction(file_menu.actions()[-1])  # drop trailing separator
-
-    # Tools
-    tools_menu = menu_bar.addMenu("Tools")
-    items = [
-        ("Stats Toolbox",                              parent.open_stats_analyzer, None),
-        ("Image Resizer",                              parent.open_image_resizer, None),
-        ("Generate SNR Plots",                         parent.open_plot_generator, None),
-        ("Ratio Calculator",                           parent.open_ratio_calculator, division_icon()),
-        ("Individual Detectability",                   parent.open_individual_detectability,
-         individual_detectability_icon()),
-        ("Average Epochs in Pre-Processing Phase",     parent.open_epoch_averaging, None),
-    ]
-    for text, slot, icon in items:
-        action = QAction(text, parent)
-        if icon:
-            action.setIcon(icon)
-        action.triggered.connect(slot)
-        tools_menu.addAction(action)
-        tools_menu.addSeparator()
-    tools_menu.removeAction(tools_menu.actions()[-1])
 
     # Help
     help_menu = menu_bar.addMenu("Help")
