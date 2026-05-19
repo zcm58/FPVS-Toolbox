@@ -189,12 +189,15 @@ class StatsWindowUiMixin:
         self.group_mean_preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.group_mean_preview_table.setSelectionMode(QAbstractItemView.NoSelection)
         self.group_mean_preview_table.setSizePolicy(
-            QSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         )
         self.group_mean_preview_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.group_mean_preview_table.setMinimumHeight(96)
-        self.group_mean_preview_table.setMaximumHeight(180)
-        group_mean_layout.addWidget(self.group_mean_preview_table)
+        self.group_mean_preview_table.setMinimumHeight(180)
+        group_mean_table_header = self.group_mean_preview_table.horizontalHeader()
+        for col in range(self.group_mean_preview_table.columnCount()):
+            group_mean_table_header.setSectionResizeMode(col, QHeaderView.Stretch)
+        group_mean_table_header.setStretchLastSection(True)
+        group_mean_layout.addWidget(self.group_mean_preview_table, 1)
 
         dv_layout.addWidget(self.group_mean_controls)
         self._set_group_mean_controls_visible(
@@ -206,13 +209,7 @@ class StatsWindowUiMixin:
         self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
         dv_variants_layout = QVBoxLayout(self.dv_variants_group)
         dv_variants_layout.setContentsMargins(0, 0, 0, 0)
-        dv_variants_layout.setSpacing(4)
-        dv_variants_heading = QLabel("Comparison Exports")
-        dv_variants_heading.setProperty("cardTitle", True)
-        dv_variants_heading_font = dv_variants_heading.font()
-        dv_variants_heading_font.setBold(True)
-        dv_variants_heading.setFont(dv_variants_heading_font)
-        dv_variants_layout.addWidget(dv_variants_heading)
+        dv_variants_layout.setSpacing(6)
         dv_variants_note = QLabel(
             "These exports are for consistency checks. Statistical results use the Primary DV only."
         )
@@ -246,12 +243,6 @@ class StatsWindowUiMixin:
         outlier_layout = QVBoxLayout(self.outlier_group)
         outlier_layout.setContentsMargins(0, 0, 0, 0)
         outlier_layout.setSpacing(6)
-        outlier_heading = QLabel("Outlier Flagging")
-        outlier_heading.setProperty("cardTitle", True)
-        outlier_heading_font = outlier_heading.font()
-        outlier_heading_font.setBold(True)
-        outlier_heading.setFont(outlier_heading_font)
-        outlier_layout.addWidget(outlier_heading)
 
         self.outlier_enable_checkbox = QCheckBox("Enable DV flagging (always on)")
         self.outlier_enable_checkbox.setChecked(True)
@@ -395,7 +386,7 @@ class StatsWindowUiMixin:
 
         export_row = QHBoxLayout()
         export_row.setSpacing(6)
-        export_row.addWidget(QLabel("Last Export:"))
+        export_row.addWidget(QLabel("Path:"))
         self.export_path_label = ElidedPathLabel()
         self.export_path_label.setMinimumHeight(22)
         export_row.addWidget(self.export_path_label, 1)
@@ -428,18 +419,32 @@ class StatsWindowUiMixin:
         self.export_options_menu.addAction(self.reporting_summary_export_action)
         self.export_options_btn.setMenu(self.export_options_menu)
 
-        review_group = SectionCard("Review")
-        review_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
-        review_layout = review_group.content_layout
-        review_layout.setSpacing(8)
-        review_layout.addWidget(self.outlier_group)
-        review_layout.addWidget(self.dv_variants_group)
-        review_layout.addLayout(export_row)
-        review_actions = ActionRow(review_group, alignment=Qt.AlignLeft)
-        review_actions.setObjectName("stats_review_export_actions")
-        review_actions.add_button(self.export_options_btn)
-        review_actions.row_layout.addStretch(1)
-        review_layout.addWidget(review_actions)
+        outlier_section = SectionCard("Outlier Flagging")
+        outlier_section.setObjectName("stats_outlier_flagging_section")
+        outlier_section.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
+        outlier_section.content_layout.setSpacing(6)
+        outlier_section.content_layout.addWidget(self.outlier_group)
+
+        comparison_exports_section = SectionCard("Comparison Exports")
+        comparison_exports_section.setObjectName("stats_comparison_exports_section")
+        comparison_exports_section.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        )
+        comparison_exports_layout = comparison_exports_section.content_layout
+        comparison_exports_layout.setSpacing(8)
+        comparison_exports_layout.addWidget(self.dv_variants_group)
+
+        export_options_actions = ActionRow(comparison_exports_section, alignment=Qt.AlignLeft)
+        export_options_actions.setObjectName("stats_export_options_actions")
+        export_options_actions.add_button(self.export_options_btn)
+        export_options_actions.row_layout.addStretch(1)
+        comparison_exports_layout.addWidget(export_options_actions)
+
+        last_export_section = SectionCard("Last Export")
+        last_export_section.setObjectName("stats_last_export_section")
+        last_export_section.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
+        last_export_section.content_layout.setSpacing(6)
+        last_export_section.content_layout.addLayout(export_row)
 
         self.lbl_rois = QLabel("")
         self.lbl_rois.setWordWrap(True)
@@ -447,7 +452,12 @@ class StatsWindowUiMixin:
         self.lbl_rois.setToolTip(
             "ROIs loaded from Settings. Update ROI definitions in Settings to change this list."
         )
-        review_layout.addWidget(self.lbl_rois)
+
+        roi_context_section = SectionCard("ROI Context")
+        roi_context_section.setObjectName("stats_roi_context_section")
+        roi_context_section.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
+        roi_context_section.content_layout.setSpacing(6)
+        roi_context_section.content_layout.addWidget(self.lbl_rois)
 
         # output pane
         self.summary_text = QTextEdit()
@@ -479,6 +489,7 @@ class StatsWindowUiMixin:
         self.copy_summary_btn.clicked.connect(self._copy_summary_text)
 
         output_container = QWidget()
+        output_container.setObjectName("stats_summary_output_container")
         output_layout = QVBoxLayout(output_container)
         output_layout.setContentsMargins(0, 0, 0, 0)
         output_layout.setSpacing(6)
@@ -544,12 +555,31 @@ class StatsWindowUiMixin:
         harmonics_layout.setSpacing(8)
         harmonics_layout.addWidget(self.dv_group, 1)
 
-        review_page = QWidget()
-        review_page.setObjectName("stats_review_setup_page")
-        review_layout_page = QVBoxLayout(review_page)
-        review_layout_page.setContentsMargins(0, 0, 0, 0)
-        review_layout_page.setSpacing(8)
-        review_layout_page.addWidget(review_group, 1)
+        advanced_page = QWidget()
+        advanced_page.setObjectName("stats_advanced_setup_page")
+        advanced_layout_page = QVBoxLayout(advanced_page)
+        advanced_layout_page.setContentsMargins(0, 0, 0, 0)
+        advanced_layout_page.setSpacing(10)
+
+        advanced_top_row = QWidget()
+        advanced_top_row.setObjectName("stats_advanced_screening_export_row")
+        advanced_top_layout = QHBoxLayout(advanced_top_row)
+        advanced_top_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_top_layout.setSpacing(10)
+        advanced_top_layout.addWidget(outlier_section, 1)
+        advanced_top_layout.addWidget(comparison_exports_section, 1)
+
+        advanced_bottom_row = QWidget()
+        advanced_bottom_row.setObjectName("stats_advanced_context_row")
+        advanced_bottom_layout = QHBoxLayout(advanced_bottom_row)
+        advanced_bottom_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_bottom_layout.setSpacing(10)
+        advanced_bottom_layout.addWidget(last_export_section, 1)
+        advanced_bottom_layout.addWidget(roi_context_section, 1)
+
+        advanced_layout_page.addWidget(advanced_top_row)
+        advanced_layout_page.addWidget(advanced_bottom_row)
+        advanced_layout_page.addStretch(1)
 
         self.setup_tabs = QTabWidget()
         self.setup_tabs.setObjectName("stats_setup_tabs")
@@ -567,7 +597,8 @@ class StatsWindowUiMixin:
         )
         self.setup_tabs.addTab(basic_page, "Basic")
         self.setup_tabs.addTab(harmonics_page, "Significant Harmonics")
-        self.setup_tabs.addTab(review_page, "Review")
+        self.setup_tabs.addTab(advanced_page, "Advanced")
+        self.setup_tabs.currentChanged.connect(self._sync_summary_output_visibility)
         setup_layout.addWidget(self.setup_tabs, 1)
 
         self.run_action_bar = QWidget()
@@ -589,15 +620,33 @@ class StatsWindowUiMixin:
         root_splitter.setStretchFactor(0, 5)
         root_splitter.setStretchFactor(1, 2)
         root_splitter.setSizes([620, 200])
+        self.root_splitter = root_splitter
+        self.summary_output_container = output_container
 
         main_layout.addWidget(root_splitter, 1)
 
         # initialize export buttons
         self._update_export_buttons()
         self._populate_conditions_panel([])
+        self._sync_summary_output_visibility()
 
     # --------------------------- actions ---------------------------
 
     def _auto_export_reporting_summary_enabled(self) -> bool:
         action = getattr(self, "reporting_summary_export_action", None)
         return bool(action is None or action.isChecked())
+
+    def _sync_summary_output_visibility(self, *_args) -> None:
+        """Show Basic-only summary and run controls only on the Basic tab."""
+        tabs = getattr(self, "setup_tabs", None)
+        output = getattr(self, "summary_output_container", None)
+        action_bar = getattr(self, "run_action_bar", None)
+        splitter = getattr(self, "root_splitter", None)
+        if tabs is None or output is None:
+            return
+        show_basic_controls = tabs.currentIndex() == 0
+        output.setVisible(show_basic_controls)
+        if action_bar is not None:
+            action_bar.setVisible(show_basic_controls)
+        if splitter is not None:
+            splitter.setSizes([620, 200] if show_basic_controls else [820, 0])
