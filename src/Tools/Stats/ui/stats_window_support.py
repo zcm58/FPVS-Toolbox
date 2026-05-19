@@ -16,7 +16,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 from PySide6.QtCore import Qt, QTimer, QThreadPool, Slot, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QFontMetrics, QGuiApplication, QTextCursor
+from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
     QCheckBox,
@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QSpinBox,
     QSizePolicy,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -70,15 +71,10 @@ from Tools.Stats.reporting.stats_export import (
 from Tools.Stats.data.shared_rois import apply_rois_to_modules, load_rois_from_settings
 from Tools.Stats.controller.stats_controller import StatsController
 from Tools.Stats.common.stats_core import (
-    ANOVA_BETWEEN_XLS,
     ANOVA_XLS,
     BASELINE_VS_ZERO_XLS,
-    GROUP_CONTRAST_XLS,
     HARMONIC_XLS,
-    LMM_BETWEEN_XLS,
     LMM_XLS,
-    MULTIGROUP_MISSINGNESS_XLS,
-    MULTIGROUP_QC_CONTEXT_XLS,
     PipelineId,
     PipelineStep,
     POSTHOC_XLS,
@@ -97,8 +93,6 @@ from Tools.Stats.data.stats_data_loader import (
     resolve_project_subfolder,
 )
 from Tools.Stats.reporting.stats_logging import format_log_line, format_section_header
-from Tools.Stats.data.stats_missingness import export_missingness_workbook
-from Tools.Stats.analysis.stats_group_contrasts import export_group_contrasts_workbook
 from Tools.Stats.analysis.baseline_vs_zero import export_baseline_vs_zero_results_to_excel
 from Tools.Stats.reporting.stats_export_formatting import (
     apply_baseline_vs_zero_number_formats,
@@ -106,7 +100,6 @@ from Tools.Stats.reporting.stats_export_formatting import (
     apply_rm_anova_pvalue_number_formats,
     log_rm_anova_p_minima,
 )
-from Tools.Stats.qc.stats_qc_reports import export_qc_context_workbook
 from Tools.Stats.workers.stats_workers import StatsWorker
 from Tools.Stats.workers import stats_workers as stats_worker_funcs
 from Tools.Stats.analysis.dv_policies import (
@@ -114,7 +107,6 @@ from Tools.Stats.analysis.dv_policies import (
     EMPTY_LIST_FALLBACK_FIXED_K,
     EMPTY_LIST_SET_ZERO,
     FIXED_K_POLICY_NAME,
-    FIXED_SHARED_POLICY_NAME,
     LEGACY_POLICY_NAME,
     ROSSION_POLICY_NAME,
 )
@@ -142,7 +134,6 @@ from Tools.Stats.reporting.stats_run_report import StatsRunReport
 from Tools.Stats.reporting.summary import (
     StatsSummaryFrames,
     SummaryConfig,
-    build_between_anova_output,
     build_rm_anova_output,
     build_summary_from_frames,
     build_summary_frames_from_results,
@@ -152,17 +143,6 @@ from Tools.Stats.reporting.reporting_summary import (
     build_default_report_path,
     build_reporting_summary,
     safe_project_path_join,
-)
-from Tools.Stats.data.stats_multigroup_scan import (
-    MultiGroupScanResult,
-    ScanIssue,
-    run_multigroup_scan_worker,
-)
-from Tools.Stats.data.stats_multigroup_ids import (
-    MultigroupRuntimeSnapshot,
-    build_multigroup_runtime_snapshot,
-    normalize_multigroup_manifest_groups,
-    normalize_multigroup_pid,
 )
 from Tools.Stats.widgets.elided_label import ElidedPathLabel
 from Tools.Stats.common.stats_window_types import HarmonicConfig

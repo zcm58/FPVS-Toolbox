@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtWidgets import QPushButton, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import QComboBox, QPushButton, QStackedWidget, QTabWidget  # noqa: E402
 
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
@@ -27,12 +27,19 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     assert window.manual_exclusion_edit_btn.text() in buttons
     assert "Clear" in buttons
 
-    tab_widget = window.findChild(QTabWidget)
-    assert tab_widget is not None
-    assert tab_widget.indexOf(window.summary_text) != -1
-    assert tab_widget.indexOf(window.log_text) != -1
-    assert tab_widget.tabText(tab_widget.indexOf(window.summary_text)) == "Summary"
-    assert tab_widget.tabText(tab_widget.indexOf(window.log_text)) == "Log"
+    setup_tabs = window.findChild(QTabWidget, "stats_setup_tabs")
+    assert setup_tabs is not None
+    assert [setup_tabs.tabText(i) for i in range(setup_tabs.count())] == [
+        "Basic",
+        "Advanced",
+    ]
+    results_selector = window.findChild(QComboBox, "stats_results_selector")
+    results_stack = window.findChild(QStackedWidget, "stats_results_stack")
+    assert results_selector is not None
+    assert results_stack is not None
+    assert results_stack.indexOf(window.summary_text) == 0
+    assert results_stack.indexOf(window.reporting_summary_text) == 1
+    assert results_stack.indexOf(window.log_text) == 2
 
     long_path = str(tmp_path / "a" / "very" / "long" / "path" / "to" / "fpvs" / "results")
     window._set_data_folder_path(long_path)
@@ -49,6 +56,8 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     qtbot.mouseClick(window.copy_summary_btn, Qt.LeftButton)
     assert clipboard.text() == "Summary content"
 
+    results_selector.setCurrentText("Log")
+    qtbot.wait(20)
     qtbot.mouseClick(window.copy_log_btn, Qt.LeftButton)
     assert clipboard.text() == "Log content"
 

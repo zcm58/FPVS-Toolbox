@@ -7,10 +7,6 @@ from typing import Callable, Dict, List, Optional
 
 from Tools.Stats.analysis.stats_analysis import prepare_all_subject_summed_bca_data
 from Tools.Stats.analysis.dv_policy_fixed_k import _prepare_fixed_k_bca_data
-from Tools.Stats.analysis.dv_policy_fixed_shared import (
-    _prepare_fixed_harmonics_by_roi_bca_data,
-    compute_fixed_harmonic_dv_table,
-)
 from Tools.Stats.analysis.dv_policy_rossion import (
     _prepare_rossion_bca_data,
     apply_empty_union_policy,
@@ -22,7 +18,6 @@ from Tools.Stats.analysis.dv_policy_settings import (
     EMPTY_LIST_FALLBACK_FIXED_K,
     EMPTY_LIST_SET_ZERO,
     FIXED_K_POLICY_NAME,
-    FIXED_SHARED_POLICY_NAME,
     GROUP_MEAN_Z_POLICY_NAME,
     LEGACY_POLICY_NAME,
     ROSSION_POLICY_NAME,
@@ -36,13 +31,11 @@ __all__ = [
     "FIXED_K_POLICY_NAME",
     "ROSSION_POLICY_NAME",
     "GROUP_MEAN_Z_POLICY_NAME",
-    "FIXED_SHARED_POLICY_NAME",
     "EMPTY_LIST_FALLBACK_FIXED_K",
     "EMPTY_LIST_SET_ZERO",
     "EMPTY_LIST_ERROR",
     "normalize_dv_policy",
     "prepare_summed_bca_data",
-    "compute_fixed_harmonic_dv_table",
     "apply_empty_union_policy",
     "build_rossion_preview_payload",
 ]
@@ -135,21 +128,7 @@ def prepare_summed_bca_data(
             if dv_metadata is not None:
                 dv_metadata.update(copy.deepcopy(cached_meta))
             return cached_data
-    harmonics_by_roi_policy = (dv_policy or {}).get("harmonics_by_roi", {}) if dv_policy else {}
-    if settings.name == FIXED_SHARED_POLICY_NAME or harmonics_by_roi_policy:
-        data = _prepare_fixed_harmonics_by_roi_bca_data(
-            subjects=subjects,
-            conditions=conditions,
-            subject_data=subject_data,
-            base_freq=base_freq,
-            log_func=log_func,
-            rois=rois,
-            harmonics_by_roi=harmonics_by_roi_policy if isinstance(harmonics_by_roi_policy, dict) else {},
-            provenance_map=provenance_map,
-            dv_metadata=meta_target,
-            settings=settings,
-        )
-    elif settings.name == ROSSION_POLICY_NAME:
+    if settings.name == ROSSION_POLICY_NAME:
         data = _prepare_rossion_bca_data(
             subjects=subjects,
             conditions=conditions,

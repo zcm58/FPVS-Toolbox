@@ -10,15 +10,11 @@ Legend:
 ## Runtime-used (do not quarantine yet)
 
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`
-- `src/Tools/Stats/cli/between_groups_cli.py`
 - `src/Tools/Stats/common/blas_limits.py`
-- `src/Tools/Stats/analysis/cross_phase_lmm_core.py`
 - `src/Tools/Stats/io/excel_io.py`
 - `src/Tools/Stats/analysis/full_snr.py`
-- `src/Tools/Stats/analysis/group_contrasts.py`
 - `src/Tools/Stats/analysis/interpretation_helpers.py`
 - `src/Tools/Stats/analysis/mixed_effects_model.py`
-- `src/Tools/Stats/analysis/mixed_group_anova.py`
 - `src/Tools/Stats/analysis/noise_utils.py`
 - `src/Tools/Stats/analysis/posthoc_tests.py`
 - `src/Tools/Stats/analysis/repeated_m_anova.py`

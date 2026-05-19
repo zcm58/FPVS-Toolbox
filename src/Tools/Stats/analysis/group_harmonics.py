@@ -382,16 +382,47 @@ def select_rossion_harmonics_by_roi(
 
 
 def compute_union_harmonics_by_roi(
+    mean_z_table: pd.DataFrame | None = None,
     *,
-    subjects: List[str],
+    subjects: List[str] | None = None,
     conditions: List[str],
-    subject_data: Dict[str, Dict[str, str]],
-    base_freq: float,
-    rois: Dict[str, List[str]],
-    log_func: Callable[[str], None],
+    subject_data: Dict[str, Dict[str, str]] | None = None,
+    base_freq: float | None = None,
+    rois: Dict[str, List[str]] | None = None,
+    log_func: Callable[[str], None] | None = None,
     dv_policy: dict[str, object] | None = None,
+    z_threshold: float | None = None,
 ) -> Dict[str, List[float]]:
+    """Return union harmonics by ROI from a mean-Z table or preview payload."""
+    if isinstance(mean_z_table, pd.DataFrame):
+        if z_threshold is None:
+            raise ValueError("z_threshold is required when mean_z_table is provided.")
+        if mean_z_table.empty:
+            return {}
+
+        table = mean_z_table.copy()
+        required = {"roi", "harmonic_hz", "mean_z"}
+        missing = required.difference(table.columns)
+        if missing:
+            raise ValueError(f"mean_z_table missing required columns: {sorted(missing)}")
+        if "condition" in table.columns:
+            table = table[table["condition"].astype(str).isin([str(cond) for cond in conditions])]
+
+        out: Dict[str, List[float]] = {}
+        for roi_name, roi_df in table.groupby("roi", dropna=False):
+            significant = roi_df[pd.to_numeric(roi_df["mean_z"], errors="coerce") > float(z_threshold)]
+            harmonics = sorted(
+                {
+                    float(value)
+                    for value in pd.to_numeric(significant["harmonic_hz"], errors="coerce").dropna()
+                }
+            )
+            out[str(roi_name)] = harmonics
+        return out
+
     """Return union harmonics by ROI using the Rossion preview payload."""
+    if subjects is None or subject_data is None or base_freq is None or rois is None:
+        raise ValueError("subjects, subject_data, base_freq, and rois are required without mean_z_table.")
     from Tools.Stats.analysis import dv_policies
 
     payload = dv_policies.build_rossion_preview_payload(
@@ -400,7 +431,7 @@ def compute_union_harmonics_by_roi(
         subject_data=subject_data,
         base_freq=base_freq,
         rois=rois,
-        log_func=log_func,
+        log_func=log_func or (lambda _message: None),
         dv_policy=dv_policy,
     )
     union_harmonics = payload.get("union_harmonics_by_roi", {})

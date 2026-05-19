@@ -11,7 +11,6 @@ LEGACY_POLICY_NAME = "Current (Legacy)"
 FIXED_K_POLICY_NAME = "Fixed-K harmonics"
 ROSSION_POLICY_NAME = "Rossion Method (Significant-only; stop after 2 failures)"
 GROUP_MEAN_Z_POLICY_NAME = ROSSION_POLICY_NAME
-FIXED_SHARED_POLICY_NAME = "Fixed harmonics by ROI (Shared)"
 
 EMPTY_LIST_FALLBACK_FIXED_K = "Fallback to Fixed-K"
 EMPTY_LIST_SET_ZERO = "Set DV=0"
@@ -51,7 +50,6 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
         LEGACY_POLICY_NAME,
         FIXED_K_POLICY_NAME,
         ROSSION_POLICY_NAME,
-        FIXED_SHARED_POLICY_NAME,
     ):
         name = LEGACY_POLICY_NAME
     fixed_k = int(settings.get("fixed_k", 5))

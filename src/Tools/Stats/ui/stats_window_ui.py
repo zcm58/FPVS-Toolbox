@@ -17,7 +17,8 @@ class StatsWindowUiMixin:
 
         # included conditions panel
         self.conditions_group = SectionCard("Included Conditions")
-        self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
+        self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
+        self.conditions_group.setMaximumHeight(260)
         self.conditions_group.setToolTip(
             "Choose which conditions to include in the analysis."
         )
@@ -40,6 +41,7 @@ class StatsWindowUiMixin:
         self.conditions_scroll_area = QScrollArea()
         self.conditions_scroll_area.setWidgetResizable(True)
         self.conditions_scroll_area.setMinimumHeight(120)
+        self.conditions_scroll_area.setMaximumHeight(180)
         conditions_list_widget = QWidget()
         self.conditions_list_layout = QVBoxLayout(conditions_list_widget)
         self.conditions_list_layout.setContentsMargins(0, 0, 0, 0)
@@ -49,7 +51,7 @@ class StatsWindowUiMixin:
 
         # summed BCA definition panel
         self.dv_group = SectionCard("Summed BCA definition")
-        self.dv_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
+        self.dv_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
         self.dv_group.setToolTip(
             "Select how the primary Summed BCA DV is computed."
         )
@@ -69,11 +71,18 @@ class StatsWindowUiMixin:
                 ROSSION_POLICY_NAME,
             ]
         )
+        self.dv_policy_combo.setMinimumContentsLength(14)
+        self.dv_policy_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.dv_policy_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.dv_policy_combo.setCurrentText(self._dv_policy_name)
         self.dv_policy_combo.currentTextChanged.connect(self._on_dv_policy_changed)
         dv_method_row.addWidget(self.dv_policy_combo, 1)
         dv_layout.addLayout(dv_method_row)
 
+        self.fixed_k_controls = QWidget()
+        fixed_controls_layout = QVBoxLayout(self.fixed_k_controls)
+        fixed_controls_layout.setContentsMargins(0, 0, 0, 0)
+        fixed_controls_layout.setSpacing(4)
         fixed_form = make_form_layout()
 
         self.fixed_k_spinbox = QSpinBox()
@@ -108,7 +117,8 @@ class StatsWindowUiMixin:
         )
         fixed_form.addRow("Base frequency:", self.fixed_k_base_freq_value)
 
-        dv_layout.addLayout(fixed_form)
+        fixed_controls_layout.addLayout(fixed_form)
+        dv_layout.addWidget(self.fixed_k_controls)
         self._set_fixed_k_controls_enabled(self._dv_policy_name == FIXED_K_POLICY_NAME)
 
         self.group_mean_controls = QWidget()
@@ -139,6 +149,11 @@ class StatsWindowUiMixin:
                 EMPTY_LIST_ERROR,
             ]
         )
+        self.group_mean_empty_policy_combo.setMinimumContentsLength(12)
+        self.group_mean_empty_policy_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.group_mean_empty_policy_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.group_mean_empty_policy_combo.setCurrentText(self._dv_empty_list_policy)
         self.group_mean_empty_policy_combo.currentTextChanged.connect(
             self._on_empty_list_policy_changed
@@ -171,9 +186,11 @@ class StatsWindowUiMixin:
         self.group_mean_preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.group_mean_preview_table.setSelectionMode(QAbstractItemView.NoSelection)
         self.group_mean_preview_table.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+            QSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         )
-        self.group_mean_preview_table.setMinimumHeight(120)
+        self.group_mean_preview_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.group_mean_preview_table.setMinimumHeight(96)
+        self.group_mean_preview_table.setMaximumHeight(180)
         group_mean_layout.addWidget(self.group_mean_preview_table)
 
         dv_layout.addWidget(self.group_mean_controls)
@@ -181,7 +198,7 @@ class StatsWindowUiMixin:
             self._dv_policy_name == ROSSION_POLICY_NAME
         )
 
-        self.dv_variants_group = SectionCard("Optional comparison exports (do not change results)")
+        self.dv_variants_group = SectionCard("Comparison Exports")
         self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred))
         dv_variants_layout = self.dv_variants_group.content_layout
         dv_variants_layout.setSpacing(4)
@@ -196,7 +213,7 @@ class StatsWindowUiMixin:
         dv_variants_layout.addWidget(dv_variants_note)
 
         dv_variant_labels = {
-            FIXED_K_POLICY_NAME: "Export a comparison version using a fixed number of harmonics",
+            FIXED_K_POLICY_NAME: "Fixed-K comparison export",
         }
         for policy_name in [FIXED_K_POLICY_NAME]:
             checkbox = QCheckBox(dv_variant_labels[policy_name])
@@ -253,7 +270,7 @@ class StatsWindowUiMixin:
 
         self.manual_exclusion_group = SectionCard(
             "Manual Exclusions",
-            content_layout=QHBoxLayout(),
+            content_layout=QVBoxLayout(),
         )
         self.manual_exclusion_group.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -276,6 +293,7 @@ class StatsWindowUiMixin:
         manual_actions.setObjectName("stats_manual_exclusion_actions")
         manual_actions.add_button(self.manual_exclusion_edit_btn)
         manual_actions.add_button(self.manual_exclusion_clear_btn)
+        manual_actions.row_layout.addStretch(1)
         manual_layout.addWidget(manual_actions)
 
         self.manual_exclusion_edit_btn.clicked.connect(self._open_manual_exclusion_dialog)
@@ -312,56 +330,7 @@ class StatsWindowUiMixin:
         self.single_status_lbl.setWordWrap(True)
         single_layout.addWidget(self.single_status_lbl)
 
-        # between-group section
-        between_box = SectionCard("Between-Group Analysis")
-        between_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
-        between_layout = between_box.content_layout
-
-        self.analyze_between_btn = make_action_button("Analyze Group Differences", variant="primary")
-        self.analyze_between_btn.setToolTip(
-            "Run the full between-group analysis pipeline."
-        )
-        self.analyze_between_btn.clicked.connect(self.on_analyze_between_groups_clicked)
-
-        self.between_advanced_btn = make_action_button("Advanced...")
-        self.between_advanced_btn.setToolTip(
-            "Run or export individual between-group steps."
-        )
-        self.between_advanced_btn.clicked.connect(self.on_between_advanced_clicked)
-        between_action_row = ActionRow(between_box, alignment=Qt.AlignLeft)
-        between_action_row.setObjectName("stats_between_group_actions")
-        between_action_row.add_button(self.analyze_between_btn)
-        between_action_row.add_button(self.between_advanced_btn)
-        between_layout.addWidget(between_action_row)
-
-        self.lela_mode_btn = make_action_button("Lela Mode (Cross-Phase LMM)")
-        self.lela_mode_btn.setToolTip(
-            "Run the cross-phase mixed model for between-group analyses."
-        )
-        self.lela_mode_btn.clicked.connect(self.on_run_lela_mode)
-        between_layout.addWidget(self.lela_mode_btn)
-
-        self.between_status_lbl = StatusBanner("Idle")
-        self.between_status_lbl.setWordWrap(True)
-        between_layout.addWidget(self.between_status_lbl)
-
         analysis_layout.addWidget(single_group_box)
-        analysis_layout.addWidget(between_box)
-
-        middle_scroll_area = QScrollArea()
-        middle_scroll_area.setWidgetResizable(True)
-        middle_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        middle_scroll_area.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding))
-        middle_contents = QWidget()
-        middle_layout = QVBoxLayout(middle_contents)
-        middle_layout.setContentsMargins(0, 0, 0, 0)
-        middle_layout.setSpacing(8)
-        middle_layout.addWidget(self.dv_group)
-        middle_layout.addWidget(self.dv_variants_group)
-        middle_layout.addWidget(self.outlier_group)
-        middle_layout.addWidget(self.manual_exclusion_group)
-        middle_layout.addStretch(1)
-        middle_scroll_area.setWidget(middle_contents)
 
         right_top_widget = QWidget()
         right_layout = QVBoxLayout(right_top_widget)
@@ -385,20 +354,16 @@ class StatsWindowUiMixin:
         self.btn_copy_folder.setToolTip("Copy the data folder path.")
         self.btn_copy_folder.setEnabled(False)
         self.btn_copy_folder.clicked.connect(self._copy_data_folder_path)
-        self.btn_open_results = make_action_button("Open Results Folder")
+        self.btn_open_results = make_action_button("Results", compact=True)
         self.btn_open_results.clicked.connect(self._open_results_folder)
         self.btn_open_results.setToolTip(
             "Open the folder where stats outputs are saved."
         )
-        fm = QFontMetrics(self.btn_open_results.font())
-        self.btn_open_results.setMinimumWidth(fm.horizontalAdvance(self.btn_open_results.text()) + 24)
-        self.info_button = make_action_button("Analysis Info")
+        self.info_button = make_action_button("Info", compact=True)
         self.info_button.clicked.connect(self.on_show_analysis_info)
         self.info_button.setToolTip(
             "Show a short description of each analysis step."
         )
-        folder_row = QHBoxLayout()
-        folder_row.setSpacing(6)
         folder_actions = ActionRow(data_actions_widget, alignment=Qt.AlignLeft, spacing=6)
         folder_actions.setObjectName("stats_data_folder_actions")
         folder_actions.add_button(btn_browse)
@@ -406,85 +371,15 @@ class StatsWindowUiMixin:
         folder_actions.add_button(self.btn_open_results)
         folder_actions.add_button(self.info_button)
         folder_actions.row_layout.addStretch(1)
+        folder_row = QHBoxLayout()
+        folder_row.setSpacing(6)
         folder_row.addWidget(QLabel("Data Folder:"))
         folder_row.addWidget(self.le_folder, 1)
-        folder_row.addWidget(folder_actions)
         data_actions_layout.addLayout(folder_row)
+        data_actions_layout.addWidget(folder_actions)
 
-        multigroup_box = SectionCard("Multi-Group Scan Summary")
-        multigroup_box.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum))
-        multigroup_layout = multigroup_box.content_layout
-        multigroup_layout.setSpacing(4)
-
-        multigroup_status_row = QHBoxLayout()
-        multigroup_status_row.addWidget(QLabel("Status:"))
-        self.multi_group_ready_value = StatusBanner("Not ready", variant="error")
-        multigroup_status_row.addWidget(self.multi_group_ready_value)
-        multigroup_status_row.addStretch(1)
-        multigroup_layout.addLayout(multigroup_status_row)
-
-        multigroup_counts = make_form_layout()
-        self.multi_group_discovered_value = QLabel("0")
-        self.multi_group_assigned_value = QLabel("0")
-        self.multi_group_groups_value = QLabel("0")
-        self.multi_group_unassigned_value = QLabel("0")
-        multigroup_counts.addRow("Discovered subjects:", self.multi_group_discovered_value)
-        multigroup_counts.addRow("Assigned subjects:", self.multi_group_assigned_value)
-        multigroup_counts.addRow("Groups with subjects:", self.multi_group_groups_value)
-        multigroup_counts.addRow("Unassigned subjects:", self.multi_group_unassigned_value)
-        multigroup_layout.addLayout(multigroup_counts)
-
-        self.compute_shared_harmonics_btn = make_action_button("Compute Shared Harmonics")
-        self.compute_shared_harmonics_btn.setToolTip(
-            "Compute shared harmonic sets pooled across groups and intersected across selected conditions."
-        )
-        self.compute_shared_harmonics_btn.setEnabled(False)
-        self.compute_shared_harmonics_btn.clicked.connect(self._on_compute_shared_harmonics_clicked)
-
-        self.compute_fixed_harmonic_dv_btn = make_action_button("Compute Fixed-harmonic DV")
-        self.compute_fixed_harmonic_dv_btn.setToolTip(
-            "Compute Summed BCA DV values using the cached shared-harmonics-by-ROI mapping."
-        )
-        self.compute_fixed_harmonic_dv_btn.setEnabled(False)
-        self.compute_fixed_harmonic_dv_btn.clicked.connect(self._on_compute_fixed_harmonic_dv_clicked)
-        shared_action_row = ActionRow(multigroup_box, alignment=Qt.AlignLeft)
-        shared_action_row.setObjectName("stats_multigroup_harmonic_actions")
-        shared_action_row.add_button(self.compute_shared_harmonics_btn)
-        shared_action_row.add_button(self.compute_fixed_harmonic_dv_btn)
-        shared_action_row.row_layout.addStretch(1)
-        multigroup_layout.addWidget(shared_action_row)
-
-        fixed_status_row = QHBoxLayout()
-        fixed_status_row.addWidget(QLabel("Fixed-harmonic DV:"))
-        self.fixed_harmonic_dv_summary_value = QLabel("Waiting for shared harmonics.")
-        self.fixed_harmonic_dv_summary_value.setWordWrap(True)
-        fixed_status_row.addWidget(self.fixed_harmonic_dv_summary_value, 1)
-        multigroup_layout.addLayout(fixed_status_row)
-
-        issues_header = QHBoxLayout()
-        issues_header.addWidget(QLabel("Issues:"))
-        issues_header.addStretch(1)
-        self.multi_group_issue_toggle_btn = make_action_button("Show details")
-        self.multi_group_issue_toggle_btn.setEnabled(False)
-        self.multi_group_issue_toggle_btn.clicked.connect(self._toggle_multigroup_issue_details)
-        issue_actions = ActionRow(multigroup_box, alignment=Qt.AlignLeft)
-        issue_actions.setObjectName("stats_multigroup_issue_actions")
-        issue_actions.add_button(self.multi_group_issue_toggle_btn)
-        issues_header.addWidget(issue_actions)
-        multigroup_layout.addLayout(issues_header)
-
-        self.multi_group_issue_text = QPlainTextEdit()
-        self.multi_group_issue_text.setProperty("logSurface", True)
-        self.multi_group_issue_text.setReadOnly(True)
-        self.multi_group_issue_text.setPlaceholderText("Issues will appear here after scan.")
-        self.multi_group_issue_text.setMinimumHeight(70)
-        self.multi_group_issue_text.setMaximumHeight(120)
-        self.multi_group_issue_text.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.multi_group_issue_text.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
-        multigroup_layout.addWidget(self.multi_group_issue_text)
-
-        right_layout.addWidget(multigroup_box)
         right_layout.addWidget(analysis_box)
+        right_layout.addWidget(self.manual_exclusion_group)
 
         # status + ROI labels with spinner
         status_row = QHBoxLayout()
@@ -553,14 +448,6 @@ class StatsWindowUiMixin:
         self.log_text.setMinimumHeight(140)
         self.log_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.output_tabs = QTabWidget()
-        self.output_tabs.addTab(self.summary_text, "Summary")
-        self.output_tabs.addTab(self.log_text, "Log")
-
-        reporting_tab = QWidget()
-        reporting_layout = QVBoxLayout(reporting_tab)
-        reporting_layout.setContentsMargins(0, 0, 0, 0)
-        reporting_layout.setSpacing(6)
         self.reporting_summary_text = QPlainTextEdit()
         self.reporting_summary_text.setProperty("logSurface", True)
         self.reporting_summary_text.setReadOnly(True)
@@ -568,17 +455,10 @@ class StatsWindowUiMixin:
         mono = self.reporting_summary_text.font()
         mono.setFamilies(["Consolas", "Menlo", "Courier New", "monospace"])
         self.reporting_summary_text.setFont(mono)
-        reporting_layout.addWidget(self.reporting_summary_text)
-        self.reporting_summary_copy_btn = make_action_button("Copy to Clipboard")
+        self.reporting_summary_copy_btn = make_action_button("Copy")
         self.reporting_summary_copy_btn.clicked.connect(self._copy_reporting_summary_text)
         self.reporting_summary_save_btn = make_action_button("Save .txt...")
         self.reporting_summary_save_btn.clicked.connect(self._save_reporting_summary_text)
-        reporting_btn_row = ActionRow(reporting_tab, alignment=Qt.AlignRight)
-        reporting_btn_row.setObjectName("stats_reporting_summary_actions")
-        reporting_btn_row.add_button(self.reporting_summary_copy_btn)
-        reporting_btn_row.add_button(self.reporting_summary_save_btn)
-        reporting_layout.addWidget(reporting_btn_row)
-        self.output_tabs.addTab(reporting_tab, "Reporting Summary")
 
         self.copy_summary_btn = make_action_button("Copy summary")
         self.copy_summary_btn.clicked.connect(self._copy_summary_text)
@@ -589,48 +469,84 @@ class StatsWindowUiMixin:
         output_layout = QVBoxLayout(output_container)
         output_layout.setContentsMargins(0, 0, 0, 0)
         output_layout.setSpacing(6)
-        output_header = ActionRow(output_container)
+        output_header_widget = QWidget(output_container)
+        output_header_layout = QHBoxLayout(output_header_widget)
+        output_header_layout.setContentsMargins(0, 0, 0, 0)
+        output_header_layout.setSpacing(8)
+        output_header_layout.addWidget(QLabel("Results:"))
+        self.results_selector = QComboBox()
+        self.results_selector.setObjectName("stats_results_selector")
+        self.results_selector.addItems(["Summary", "Report", "Log"])
+        self.results_selector.setToolTip("Choose which Stats output to view.")
+        self.results_selector.setMinimumContentsLength(8)
+        self.results_selector.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.results_selector.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        output_header_layout.addWidget(self.results_selector)
+        output_header_layout.addStretch(1)
+
+        output_header = ActionRow(output_header_widget, alignment=Qt.AlignRight)
         output_header.setObjectName("stats_output_copy_actions")
         output_header.add_button(self.copy_summary_btn)
         output_header.add_button(self.copy_log_btn)
-        output_layout.addWidget(output_header)
-        output_layout.addWidget(self.output_tabs)
+        output_header_layout.addWidget(output_header)
+
+        reporting_btn_row = ActionRow(output_header_widget, alignment=Qt.AlignRight)
+        reporting_btn_row.setObjectName("stats_reporting_summary_actions")
+        reporting_btn_row.add_button(self.reporting_summary_copy_btn)
+        reporting_btn_row.add_button(self.reporting_summary_save_btn)
+        output_header_layout.addWidget(reporting_btn_row)
+        self.reporting_summary_actions = reporting_btn_row
+
+        self.results_stack = QStackedWidget()
+        self.results_stack.setObjectName("stats_results_stack")
+        self.results_stack.addWidget(self.summary_text)
+        self.results_stack.addWidget(self.reporting_summary_text)
+        self.results_stack.addWidget(self.log_text)
+        self.results_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.results_selector.currentIndexChanged.connect(self._sync_results_view)
+        output_layout.addWidget(output_header_widget)
+        output_layout.addWidget(self.results_stack)
 
         self.output_text = self.log_text
 
-        column_one = QWidget()
-        column_one_layout = QVBoxLayout(column_one)
-        column_one_layout.setContentsMargins(0, 0, 0, 0)
-        column_one_layout.setSpacing(0)
-        column_one_layout.addWidget(self.conditions_group)
+        self.setup_tabs = QTabWidget()
+        self.setup_tabs.setObjectName("stats_setup_tabs")
 
-        column_two = QWidget()
-        column_two_layout = QVBoxLayout(column_two)
-        column_two_layout.setContentsMargins(0, 0, 0, 0)
-        column_two_layout.setSpacing(0)
-        column_two_layout.addWidget(middle_scroll_area)
+        basic_scroll_area = QScrollArea()
+        basic_scroll_area.setObjectName("stats_basic_setup_scroll_area")
+        basic_scroll_area.setWidgetResizable(True)
+        basic_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        basic_scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        basic_contents = QWidget()
+        basic_layout = QVBoxLayout(basic_contents)
+        basic_layout.setContentsMargins(0, 0, 0, 0)
+        basic_layout.setSpacing(8)
+        basic_layout.addWidget(self.conditions_group)
+        basic_layout.addWidget(right_top_widget)
+        basic_layout.addStretch(1)
+        basic_scroll_area.setWidget(basic_contents)
+        self.setup_tabs.addTab(basic_scroll_area, "Basic")
 
-        column_three = QWidget()
-        column_three_layout = QVBoxLayout(column_three)
-        column_three_layout.setContentsMargins(0, 0, 0, 0)
-        column_three_layout.setSpacing(0)
-        column_three_layout.addWidget(right_top_widget)
-
-        top_splitter = QSplitter(Qt.Horizontal)
-        top_splitter.setObjectName("stats_top_splitter")
-        top_splitter.setChildrenCollapsible(False)
-        top_splitter.addWidget(column_one)
-        top_splitter.addWidget(column_two)
-        top_splitter.addWidget(column_three)
-        top_splitter.setStretchFactor(0, 1)
-        top_splitter.setStretchFactor(1, 2)
-        top_splitter.setStretchFactor(2, 2)
-        top_splitter.setSizes([280, 560, 560])
+        advanced_scroll_area = QScrollArea()
+        advanced_scroll_area.setObjectName("stats_advanced_setup_scroll_area")
+        advanced_scroll_area.setWidgetResizable(True)
+        advanced_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        advanced_scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        advanced_contents = QWidget()
+        advanced_layout = QVBoxLayout(advanced_contents)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_layout.setSpacing(8)
+        advanced_layout.addWidget(self.dv_group)
+        advanced_layout.addWidget(self.dv_variants_group)
+        advanced_layout.addWidget(self.outlier_group)
+        advanced_layout.addStretch(1)
+        advanced_scroll_area.setWidget(advanced_contents)
+        self.setup_tabs.addTab(advanced_scroll_area, "Advanced")
 
         root_splitter = QSplitter(Qt.Vertical)
         root_splitter.setObjectName("stats_root_splitter")
         root_splitter.setChildrenCollapsible(False)
-        root_splitter.addWidget(top_splitter)
+        root_splitter.addWidget(self.setup_tabs)
         root_splitter.addWidget(output_container)
         root_splitter.setStretchFactor(0, 5)
         root_splitter.setStretchFactor(1, 2)
@@ -642,5 +558,20 @@ class StatsWindowUiMixin:
         # initialize export buttons
         self._update_export_buttons()
         self._populate_conditions_panel([])
+        self._sync_results_view()
 
     # --------------------------- actions ---------------------------
+
+    def _sync_results_view(self, *_args) -> None:
+        index = self.results_selector.currentIndex() if hasattr(self, "results_selector") else 0
+        if hasattr(self, "results_stack"):
+            self.results_stack.setCurrentIndex(index)
+        is_summary = index == 0
+        is_report = index == 1
+        is_log = index == 2
+        if hasattr(self, "copy_summary_btn"):
+            self.copy_summary_btn.setVisible(is_summary)
+        if hasattr(self, "copy_log_btn"):
+            self.copy_log_btn.setVisible(is_log)
+        if hasattr(self, "reporting_summary_actions"):
+            self.reporting_summary_actions.setVisible(is_report)

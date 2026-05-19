@@ -19,7 +19,7 @@ def test_posthoc_summary_includes_both_directions_when_significant():
         }
     )
 
-    lines = _summarize_posthocs(posthoc_df, None, SummaryConfig())
+    lines = _summarize_posthocs(posthoc_df, SummaryConfig())
     summary = "\n".join(lines)
 
     assert "[roi_within_condition]" in summary
@@ -43,7 +43,7 @@ def test_posthoc_summary_reports_none_found_for_empty_direction():
         }
     )
 
-    lines = _summarize_posthocs(posthoc_df, None, SummaryConfig())
+    lines = _summarize_posthocs(posthoc_df, SummaryConfig())
     summary = "\n".join(lines)
 
     assert "Condition Face [roi_within_condition]" in summary

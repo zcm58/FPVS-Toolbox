@@ -1,6 +1,5 @@
 import pandas as pd
 
-from Tools.Stats.common.stats_core import PipelineId
 from Tools.Stats.reporting.summary import (
     StatsSummaryFrames,
     SummaryConfig,
@@ -56,68 +55,3 @@ def test_no_summary_when_missing_df():
 
     assert "NOT AVAILABLE" in summary
     assert "Wald z-tests" not in summary
-
-
-def test_between_summary_omits_rm_anova_section():
-    contrasts_df = pd.DataFrame(
-        {
-            "group_1": ["G1"],
-            "group_2": ["G2"],
-            "condition": ["Face"],
-            "roi": ["Occipital"],
-            "difference": [0.6],
-            "effect_size": [0.7],
-            "p_fdr": [0.02],
-        }
-    )
-    lmm_df = pd.DataFrame(
-        {
-            "Effect": ["group"],
-            "Estimate": [0.5],
-            "P>|z|": [0.03],
-        }
-    )
-
-    frames = StatsSummaryFrames(
-        between_contrasts=contrasts_df,
-        mixed_model_terms=lmm_df,
-        pipeline_id=PipelineId.BETWEEN,
-    )
-    summary = build_summary_from_frames(frames, SummaryConfig())
-
-    assert "RM-ANOVA:" not in summary
-    assert "Group contrasts:" in summary
-
-
-def test_between_summary_accepts_supported_multigroup_export_schema():
-    contrasts_df = pd.DataFrame(
-        {
-            "ROI": ["Occipital"],
-            "Condition": ["Face"],
-            "GroupA": ["G1"],
-            "GroupB": ["G2"],
-            "Estimate": [0.6],
-            "P": [0.01],
-            "P_corrected": [0.02],
-            "Method": ["fdr_bh"],
-        }
-    )
-    lmm_df = pd.DataFrame(
-        {
-            "Effect": ["Intercept"],
-            "Estimate": [0.5],
-            "P>|z|": [0.03],
-        }
-    )
-
-    frames = StatsSummaryFrames(
-        between_contrasts=contrasts_df,
-        mixed_model_terms=lmm_df,
-        pipeline_id=PipelineId.BETWEEN,
-    )
-    summary = build_summary_from_frames(frames, SummaryConfig())
-
-    assert "RM-ANOVA:" not in summary
-    assert "Group contrasts:" in summary
-    assert "Occipital (Face): G1 > G2, p_adj = 0.020" in summary
-    assert "post-hoc" not in summary.lower()

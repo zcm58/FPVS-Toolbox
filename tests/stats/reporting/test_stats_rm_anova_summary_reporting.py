@@ -99,92 +99,6 @@ def test_gui_rm_anova_summary_reports_significant_interaction_using_gg_p() -> No
     assert "Significant effect of condition * roi (p = 0.0014, GG corrected)." in summary
 
 
-def test_between_reporting_summary_omits_rm_anova_section() -> None:
-    context = ReportingSummaryContext(
-        project_name="Demo",
-        project_root=Path("/tmp/demo"),
-        pipeline_name=PipelineId.BETWEEN.name,
-        generated_local=datetime(2025, 1, 1, 12, 0, 0),
-        elapsed_ms=100,
-        timezone_label="UTC",
-        total_participants=8,
-        included_participants=[f"S{i:02d}" for i in range(1, 9)],
-        excluded_reasons={},
-        selected_conditions=["A", "B"],
-        selected_rois=["ROI1", "ROI2"],
-    )
-    anova_df = pd.DataFrame([{"Effect": "group", "Pr > F": 0.01}])
-    lmm_df = pd.DataFrame([{"Effect": "group", "Estimate": 0.5, "P>|z|": 0.03}])
-    contrasts_df = pd.DataFrame(
-        [
-            {
-                "group_pair": "G1 vs G2",
-                "mean_diff": 0.4,
-                "t_statistic": 2.1,
-                "df": 10.5,
-                "p_raw": 0.04,
-                "p_fdr_bh": 0.05,
-            }
-        ]
-    )
-
-    text = build_reporting_summary(
-        context,
-        anova_df=anova_df,
-        lmm_df=lmm_df,
-        posthoc_df=contrasts_df,
-    )
-
-    assert "RM-ANOVA (REPEATED MEASURES)" not in text
-    assert "GROUP CONTRASTS" in text
-
-
-def test_between_reporting_summary_reads_supported_multigroup_contrast_schema() -> None:
-    context = ReportingSummaryContext(
-        project_name="Demo",
-        project_root=Path("/tmp/demo"),
-        pipeline_name=PipelineId.BETWEEN.name,
-        generated_local=datetime(2025, 1, 1, 12, 0, 0),
-        elapsed_ms=100,
-        timezone_label="UTC",
-        total_participants=8,
-        included_participants=[f"P{i}" for i in range(1, 7)],
-        excluded_reasons={"P7": "missing group assignment", "P8": "manual exclusion"},
-        selected_conditions=["A", "B"],
-        selected_rois=["ROI1", "ROI2"],
-    )
-    lmm_df = pd.DataFrame([{"Effect": "Intercept", "Estimate": 0.5, "P>|z|": 0.03}])
-    contrasts_df = pd.DataFrame(
-        [
-            {
-                "ROI": "Occipital",
-                "Condition": "Face",
-                "GroupA": "G1",
-                "GroupB": "G2",
-                "Estimate": 0.4,
-                "TestStat": 2.1,
-                "DF": 10.5,
-                "P": 0.04,
-                "P_corrected": 0.05,
-                "Method": "fdr_bh",
-            }
-        ]
-    )
-
-    text = build_reporting_summary(
-        context,
-        anova_df=None,
-        lmm_df=lmm_df,
-        posthoc_df=contrasts_df,
-    )
-
-    assert "RM-ANOVA (REPEATED MEASURES)" not in text
-    assert "GROUP CONTRASTS" in text
-    assert "POST-HOC TESTS" not in text
-    assert "Included in supported multigroup model: 6" in text
-    assert "Not modeled: 2" in text
-    assert "Occipital / Face: G1 vs G2" in text
-    assert "p_adj=0.05" in text
 
 
 def test_rm_anova_text_report_exports_to_results_dir_used_by_stats_outputs(tmp_path: Path, monkeypatch) -> None:
@@ -194,11 +108,11 @@ def test_rm_anova_text_report_exports_to_results_dir_used_by_stats_outputs(tmp_p
     monkeypatch.setattr("Tools.Stats.workers.stats_workers.set_rois", lambda _rois: None)
     monkeypatch.setattr(
         "Tools.Stats.workers.stats_workers._apply_qc_screening",
-        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, None),
+        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None),
     )
     monkeypatch.setattr(
         "Tools.Stats.workers.stats_workers._apply_manual_exclusions",
-        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, []),
+        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], []),
     )
     monkeypatch.setattr(
         "Tools.Stats.workers.stats_workers.prepare_summed_bca_data",
@@ -269,11 +183,11 @@ def test_single_file_rm_anova_still_excludes_required_nonfinite_subjects(monkeyp
     monkeypatch.setattr("Tools.Stats.workers.stats_workers.set_rois", lambda _rois: None)
     monkeypatch.setattr(
         "Tools.Stats.workers.stats_workers._apply_qc_screening",
-        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, None),
+        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None),
     )
     monkeypatch.setattr(
         "Tools.Stats.workers.stats_workers._apply_manual_exclusions",
-        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], None, []),
+        lambda **kwargs: (kwargs["subjects"], kwargs["subject_data"], []),
     )
     monkeypatch.setattr(
         "Tools.Stats.workers.stats_workers.prepare_summed_bca_data",

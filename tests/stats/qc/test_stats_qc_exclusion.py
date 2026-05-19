@@ -26,11 +26,25 @@ def _make_bca_df(max_value: float) -> pd.DataFrame:
     return df
 
 
-def test_qc_exclusion_independent_of_selected_conditions(monkeypatch) -> None:
+def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) -> None:
+    paths = {
+        name: tmp_path / name
+        for name in (
+            "P1_A.xlsx",
+            "P1_B.xlsx",
+            "P2_A.xlsx",
+            "P2_B.xlsx",
+            "P3_A.xlsx",
+            "P3_B.xlsx",
+        )
+    }
+    for path in paths.values():
+        path.touch()
+
     subject_data = {
-        "P1": {"A": "P1_A.xlsx", "B": "P1_B.xlsx"},
-        "P2": {"A": "P2_A.xlsx", "B": "P2_B.xlsx"},
-        "P3": {"A": "P3_A.xlsx", "B": "P3_B.xlsx"},
+        "P1": {"A": str(paths["P1_A.xlsx"]), "B": str(paths["P1_B.xlsx"])},
+        "P2": {"A": str(paths["P2_A.xlsx"]), "B": str(paths["P2_B.xlsx"])},
+        "P3": {"A": str(paths["P3_A.xlsx"]), "B": str(paths["P3_B.xlsx"])},
     }
     conditions_all = ["A", "B"]
     rois = {"Occipital": ["O1", "O2"]}
@@ -51,6 +65,7 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch) -> None:
         conditions_all=conditions_all,
         rois_all=rois,
         base_freq=6.0,
+        warn_threshold=1.0,
         log_func=None,
     )
 

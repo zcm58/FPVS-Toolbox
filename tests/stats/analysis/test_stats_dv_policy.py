@@ -7,12 +7,10 @@ from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     EMPTY_LIST_FALLBACK_FIXED_K,
     FIXED_K_POLICY_NAME,
     GROUP_MEAN_Z_POLICY_NAME,
-    LEGACY_POLICY_NAME,
     ROSSION_POLICY_NAME,
 )
 from Tools.Stats.common.stats_core import PipelineId, StepId  # noqa: E402
 from Tools.Stats.controller.stats_controller import (  # noqa: E402
-    BETWEEN_PIPELINE_STEPS,
     SINGLE_PIPELINE_STEPS,
 )
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
@@ -91,8 +89,3 @@ def test_stats_dv_policy_does_not_change_step_queue(qtbot):
             assert default_step.kwargs["dv_policy"]["name"] == default_policy_name
             assert fixed_step.kwargs["dv_policy"]["name"] == FIXED_K_POLICY_NAME
 
-    window.dv_policy_combo.setCurrentText(LEGACY_POLICY_NAME)
-    between_legacy = window._controller._build_steps(PipelineId.BETWEEN, BETWEEN_PIPELINE_STEPS)
-    window.dv_policy_combo.setCurrentText(FIXED_K_POLICY_NAME)
-    between_fixed = window._controller._build_steps(PipelineId.BETWEEN, BETWEEN_PIPELINE_STEPS)
-    assert [step.id for step in between_legacy] == [step.id for step in between_fixed]

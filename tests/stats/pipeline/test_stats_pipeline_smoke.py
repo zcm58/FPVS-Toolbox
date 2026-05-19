@@ -35,9 +35,6 @@ def patched_workers(monkeypatch):
     def fake_posthoc(*_args, **_kwargs):
         return {"results_df": dummy_df.copy(), "output_text": "posthoc"}
 
-    def fake_contrasts(*_args, **_kwargs):
-        return {"results_df": dummy_df.copy(), "output_text": "contrasts"}
-
     def fake_baseline(*_args, **_kwargs):
         return {"results_df": dummy_df.copy(), "output_text": "baseline"}
 
@@ -47,16 +44,11 @@ def patched_workers(monkeypatch):
     monkeypatch.setattr(stats_workers, "run_rm_anova", fake_rm_anova, raising=False)
     monkeypatch.setattr(stats_workers, "run_lmm", fake_lmm, raising=False)
     monkeypatch.setattr(stats_workers, "run_posthoc", fake_posthoc, raising=False)
-    monkeypatch.setattr(stats_workers, "run_between_group_anova", fake_rm_anova, raising=False)
-    monkeypatch.setattr(stats_workers, "run_group_contrasts", fake_contrasts, raising=False)
     monkeypatch.setattr(stats_workers, "run_baseline_vs_zero", fake_baseline, raising=False)
     monkeypatch.setattr(stats_workers, "run_harmonic_check", fake_harmonic, raising=False)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.RM_ANOVA, fake_rm_anova)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.MIXED_MODEL, fake_lmm)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.INTERACTION_POSTHOCS, fake_posthoc)
-    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BETWEEN_GROUP_ANOVA, fake_rm_anova)
-    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BETWEEN_GROUP_MIXED_MODEL, fake_lmm)
-    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.GROUP_CONTRASTS, fake_contrasts)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BASELINE_VS_ZERO, fake_baseline)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.HARMONIC_CHECK, fake_harmonic)
     return dummy_df
@@ -97,7 +89,6 @@ def synced_window(monkeypatch, qtbot, tmp_path, patched_workers):
 def test_single_pipeline_completes_and_logs(qtbot, synced_window):
     synced_window.subjects = ["S1"]
     synced_window.conditions = ["C1"]
-    synced_window.subject_groups = {"S1": "G1"}
     synced_window.subject_data = {"S1": {"C1": {"ROI": 1.0}}}
     synced_window.rois = {"ROI": ["Cz"]}
 
@@ -108,23 +99,3 @@ def test_single_pipeline_completes_and_logs(qtbot, synced_window):
         lambda: "Single-Group Analysis finished" in synced_window.output_text.toPlainText(), timeout=2000
     )
     assert not synced_window._controller.is_running(PipelineId.SINGLE)
-
-
-@pytest.mark.qt
-def test_between_pipeline_completes_and_logs(qtbot, synced_window):
-    synced_window.subjects = ["S1", "S2"]
-    synced_window.conditions = ["C1"]
-    synced_window.subject_groups = {"S1": "G1", "S2": "G2"}
-    synced_window.subject_data = {
-        "S1": {"C1": {"ROI": 1.0}},
-        "S2": {"C1": {"ROI": 2.0}},
-    }
-    synced_window.rois = {"ROI": ["Cz"]}
-
-    qtbot.mouseClick(synced_window.analyze_between_btn, Qt.LeftButton)
-
-    qtbot.waitUntil(lambda: synced_window.analyze_between_btn.isEnabled(), timeout=2000)
-    qtbot.waitUntil(
-        lambda: "Between-Group Analysis finished" in synced_window.output_text.toPlainText(), timeout=2000
-    )
-    assert not synced_window._controller.is_running(PipelineId.BETWEEN)

@@ -10,7 +10,6 @@ from __future__ import annotations
 from Tools.Stats.reporting.summary import (
     StatsSummaryFrames,
     SummaryConfig,
-    build_between_anova_output,
     build_rm_anova_output,
     build_summary_frames_from_results,
     build_summary_from_files,
@@ -38,8 +37,6 @@ from Tools.Stats.reporting.summary.mixed_model import (
     _summarize_mixed_model,
 )
 from Tools.Stats.reporting.summary.posthoc import (
-    _coerce_between_contrasts_for_summary,
-    _summarize_between,
     _summarize_posthocs,
     _summarize_single_posthocs_by_direction,
 )
@@ -47,7 +44,6 @@ from Tools.Stats.reporting.summary.posthoc import (
 __all__ = [
     "StatsSummaryFrames",
     "SummaryConfig",
-    "_coerce_between_contrasts_for_summary",
     "_direction_word",
     "_extract_sum_coded_label",
     "_fmt_p",
@@ -59,13 +55,11 @@ __all__ = [
     "_normalize_effect_name",
     "_pick_column",
     "_select_rm_anova_p",
-    "_summarize_between",
     "_summarize_interactions",
     "_summarize_mixed_model",
     "_summarize_posthocs",
     "_summarize_rm_anova",
     "_summarize_single_posthocs_by_direction",
-    "build_between_anova_output",
     "build_rm_anova_output",
     "build_summary_frames_from_results",
     "build_summary_from_files",

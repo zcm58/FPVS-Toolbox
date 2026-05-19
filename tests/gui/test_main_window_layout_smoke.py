@@ -20,6 +20,7 @@ from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
+from Tools.Stats import StatsWindow
 
 
 def _build_window(tmp_path: Path, qtbot, monkeypatch) -> main_window_module.MainWindow:
@@ -220,6 +221,50 @@ def test_sidebar_ratio_calculator_embeds_in_main_workspace(
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_ratio"]
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_stats_embeds_in_main_workspace(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(
+        project_root=project_root,
+        input_folder=project_root,
+        subfolders={},
+    )
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_data"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert isinstance(win.workspace_stack.currentWidget(), StatsWindow)
+    assert win.workspace_stack.currentWidget().objectName() == "embedded_stats_page"
+    assert win._stats_page.parent() is win.workspace_stack
+    assert win._stats_page.project_dir == str(project_root)
+    assert win._stats_page.minimumWidth() <= win.workspace_stack.width()
+    assert win._stats_page.sizePolicy().horizontalPolicy() == QSizePolicy.Ignored
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_data"]
 
     qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
     qtbot.wait(20)

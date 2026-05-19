@@ -1,13 +1,9 @@
 import logging
-import os
-
 import pytest
 
 pytest.importorskip("PySide6")
 pytest.importorskip("pandas")
 pytest.importorskip("statsmodels")
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pandas as pd
 from PySide6.QtCore import Qt
@@ -32,13 +28,8 @@ def patched_workers(monkeypatch):
     def fake_lmm(*_args, **_kwargs):
         return {"mixed_results_df": dummy_df.copy(), "output_text": "lmm"}
 
-    def fake_contrasts(*_args, **_kwargs):
-        return {"results_df": dummy_df.copy(), "output_text": "contrasts"}
-
     monkeypatch.setattr(stats_workers, "run_rm_anova", fake_rm_anova, raising=False)
     monkeypatch.setattr(stats_workers, "run_lmm", fake_lmm, raising=False)
-    monkeypatch.setattr(stats_workers, "run_between_group_anova", fake_rm_anova, raising=False)
-    monkeypatch.setattr(stats_workers, "run_group_contrasts", fake_contrasts, raising=False)
     return dummy_df
 
 
@@ -67,35 +58,34 @@ def fast_window(monkeypatch, qtbot, tmp_path, patched_workers):
     return win
 
 
-def _prime_between_inputs(window: StatsWindow) -> None:
+def _prime_single_inputs(window: StatsWindow) -> None:
     window.subjects = ["S1", "S2"]
     window.conditions = ["C1"]
-    window.subject_groups = {"S1": "G1", "S2": "G2"}
     window.subject_data = {"S1": {"C1": {"ROI": 1.0}}, "S2": {"C1": {"ROI": 2.0}}}
     window.rois = {"ROI": ["Cz"]}
 
 
 @pytest.mark.qt
 def test_complete_pipeline_recovers_from_summary_error(qtbot, fast_window, monkeypatch):
-    _prime_between_inputs(fast_window)
+    _prime_single_inputs(fast_window)
 
     def boom_summary(self, pid):
         raise RuntimeError("summary boom")
 
     monkeypatch.setattr(StatsWindow, "build_and_render_summary", boom_summary, raising=False)
 
-    qtbot.mouseClick(fast_window.analyze_between_btn, Qt.LeftButton)
+    qtbot.mouseClick(fast_window.analyze_single_btn, Qt.LeftButton)
 
-    qtbot.waitUntil(lambda: fast_window.analyze_between_btn.isEnabled(), timeout=2000)
+    qtbot.waitUntil(lambda: fast_window.analyze_single_btn.isEnabled(), timeout=2000)
 
-    assert not fast_window._controller.is_running(PipelineId.BETWEEN)
+    assert not fast_window._controller.is_running(PipelineId.SINGLE)
     assert "Error during finalization" in fast_window.output_text.toPlainText()
-    assert fast_window.analyze_between_btn.isEnabled()
+    assert fast_window.analyze_single_btn.isEnabled()
 
 
 @pytest.mark.qt
 def test_finalize_handles_view_errors(qtbot, fast_window, monkeypatch, caplog):
-    _prime_between_inputs(fast_window)
+    _prime_single_inputs(fast_window)
 
     def boom_finished(self, *args, **kwargs):  # noqa: ANN002, ANN003
         raise RuntimeError("view boom")
@@ -103,9 +93,9 @@ def test_finalize_handles_view_errors(qtbot, fast_window, monkeypatch, caplog):
     monkeypatch.setattr(StatsWindow, "on_analysis_finished", boom_finished, raising=False)
     caplog.set_level(logging.ERROR)
 
-    qtbot.mouseClick(fast_window.analyze_between_btn, Qt.LeftButton)
+    qtbot.mouseClick(fast_window.analyze_single_btn, Qt.LeftButton)
 
-    qtbot.waitUntil(lambda: fast_window.analyze_between_btn.isEnabled(), timeout=2000)
+    qtbot.waitUntil(lambda: fast_window.analyze_single_btn.isEnabled(), timeout=2000)
 
-    assert fast_window.analyze_between_btn.isEnabled()
+    assert fast_window.analyze_single_btn.isEnabled()
     assert any("stats_finalize_view_error" in rec.message for rec in caplog.records)

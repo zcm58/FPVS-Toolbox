@@ -49,7 +49,10 @@ def test_dynamic_rois_anova_and_lmm(monkeypatch):
             ("Right Central", ["C4", "C2"]),
         ]
 
-    monkeypatch.setattr(rr.SettingsManager, "get_roi_pairs", fake_get_roi_pairs, raising=False)
+    class FakeSettingsManager:
+        get_roi_pairs = fake_get_roi_pairs
+
+    monkeypatch.setattr(rr, "SettingsManager", FakeSettingsManager, raising=False)
 
     rois = resolve_active_rois()
     roi_names = [r.name for r in rois]

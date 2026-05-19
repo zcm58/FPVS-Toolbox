@@ -87,8 +87,6 @@ def _is_intercept(term: str) -> bool:
 def format_mixed_model_plain_language(
     mixed_model_terms: pd.DataFrame,
     alpha: float,
-    *,
-    between_mode: bool = False,
 ) -> list[str]:
     """Build plain-language mixed-model bullets from an exported terms table."""
 
@@ -98,22 +96,6 @@ def format_mixed_model_plain_language(
     if raw_term_col is None and readable_term_col is not None:
         raw_term_col = readable_term_col
     estimate_col = _pick_column(mixed_model_terms, "Estimate", ["Coef.", "Estimate", "coef"])
-    attrs = mixed_model_terms.attrs if isinstance(mixed_model_terms, pd.DataFrame) else {}
-
-    if between_mode and attrs.get("lmm_fit_supported") is False:
-        status_message = attrs.get("lmm_fit_status_message", "Supported multigroup LMM blocked.")
-        contract_bits = [
-            attrs.get("lmm_fixed_effects_summary"),
-            attrs.get("lmm_random_effects_summary"),
-            attrs.get("lmm_estimation_summary"),
-            attrs.get("lmm_coding_summary"),
-        ]
-        bullets = [f"- {status_message}"]
-        contract_text = "; ".join(str(bit) for bit in contract_bits if bit)
-        if contract_text:
-            bullets.append(f"- Attempted contract: {contract_text}.")
-        return bullets
-
     if p_col is None or raw_term_col is None:
         return ["- Mixed model: NOT AVAILABLE (not computed by this run)."]
 
@@ -127,24 +109,6 @@ def format_mixed_model_plain_language(
     df["_estimate"] = pd.to_numeric(df[estimate_col], errors="coerce") if estimate_col else np.nan
 
     bullets: list[str] = []
-    if between_mode:
-        status_label = attrs.get("lmm_fit_status_label")
-        status_message = attrs.get("lmm_fit_status_message")
-        contract_bits = [
-            attrs.get("lmm_fixed_effects_summary"),
-            attrs.get("lmm_random_effects_summary"),
-            attrs.get("lmm_estimation_summary"),
-            attrs.get("lmm_coding_summary"),
-        ]
-        if status_label or status_message:
-            bullets.append(
-                "- Fit status: "
-                f"{status_label or 'NOT AVAILABLE'}"
-                f" ({status_message or 'NOT AVAILABLE'})."
-            )
-        contract_text = "; ".join(str(bit) for bit in contract_bits if bit)
-        if contract_text:
-            bullets.append(f"- Contract: {contract_text}.")
     bullets.append("- Inference for fixed effects: Wald z-tests (normal approximation).")
     sig = df[df["_p_val"] < alpha]
     if sig.empty:
@@ -215,8 +179,6 @@ def format_mixed_model_plain_language(
 def _summarize_mixed_model(
     mixed_model_terms: Optional[pd.DataFrame],
     cfg: SummaryConfig,
-    *,
-    between_mode: bool = False,
 ) -> list[str]:
     """Return mixed-model summary bullets."""
 
@@ -226,5 +188,4 @@ def _summarize_mixed_model(
     return format_mixed_model_plain_language(
         mixed_model_terms,
         cfg.alpha,
-        between_mode=between_mode,
     )

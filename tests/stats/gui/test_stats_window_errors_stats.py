@@ -1,12 +1,10 @@
 import pytest
-from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtWidgets import QMessageBox
 
 from Tools.Stats.analysis import stats_analysis
 from Tools.Stats.workers import stats_workers
-from Tools.Stats.common.stats_core import PipelineId
 from Tools.Stats.ui.stats_window import StatsWindow
 from Tools.Stats.workers.stats_workers import StatsWorker
 
@@ -70,7 +68,6 @@ def test_single_pipeline_worker_failure(qtbot, tmp_path, monkeypatch):
     win.subject_data = {"S1": {"CondA": {"ROI": 1.0}}}
     win.subjects = ["S1"]
     win.conditions = ["CondA"]
-    win.subject_groups = {"S1": None}
 
     def raise_single(*_args, **_kwargs):
         raise RuntimeError("simulated failure")
@@ -84,53 +81,6 @@ def test_single_pipeline_worker_failure(qtbot, tmp_path, monkeypatch):
     assert "simulated failure" in log_text or "ERROR" in log_text
 
 
-def test_between_pipeline_mixed_model_failure(qtbot, tmp_path, monkeypatch):
-    win = StatsWindow(project_dir=str(tmp_path))
-    qtbot.addWidget(win)
-    win.show()
-
-    _prepare_window(win, monkeypatch)
-    win.subject_data = {
-        "S1": {"CondA": {"ROI": 1.0}},
-        "S2": {"CondA": {"ROI": 2.0}},
-    }
-    win.subjects = ["S1", "S2"]
-    win.conditions = ["CondA"]
-    win.subject_groups = {"S1": "G1", "S2": "G2"}
-
-    monkeypatch.setattr(stats_workers, "run_between_group_anova", lambda *_a, **_k: {})
-    
-    original_run_lmm = stats_workers.run_lmm
-
-    def raise_between(progress_cb, message_cb, *, include_group=False, **kwargs):
-        if include_group:
-            raise RuntimeError("between mixed failure")
-        return original_run_lmm(progress_cb, message_cb, include_group=include_group, **kwargs)
-
-    monkeypatch.setattr(stats_workers, "run_lmm", raise_between, raising=False)
-
-    qtbot.mouseClick(win.analyze_between_btn, Qt.LeftButton)
-    _wait_for_idle(win, qtbot, win.analyze_between_btn)
-
-    log_text = win.output_text.toPlainText()
-    assert "between mixed failure" in log_text or "ERROR" in log_text
-
-
-def test_between_worker_dv_contract_messages_are_mirrored_into_log(monkeypatch):
-    mirrored: list[tuple[str, str, str]] = []
-    detected: list[str] = []
-    dummy = SimpleNamespace(
-        _controller=SimpleNamespace(is_running=lambda pid: pid is PipelineId.BETWEEN),
-        append_log=lambda section, message, level="info": mirrored.append((section, message, level)),
-        _set_detected_info=lambda msg: detected.append(msg),
-    )
-
-    StatsWindow._on_worker_message(dummy, "[BETWEEN DV CONTRACT] prepared_dv_table_rows=0")
-
-    assert mirrored == [("Between", "[BETWEEN DV CONTRACT] prepared_dv_table_rows=0", "info")]
-    assert detected == ["[BETWEEN DV CONTRACT] prepared_dv_table_rows=0"]
-
-
 def test_summary_failure_releases_busy_state(qtbot, tmp_path, monkeypatch):
     win = StatsWindow(project_dir=str(tmp_path))
     qtbot.addWidget(win)
@@ -140,7 +90,6 @@ def test_summary_failure_releases_busy_state(qtbot, tmp_path, monkeypatch):
     win.subject_data = {"S1": {"CondA": {"ROI": 1.0}}}
     win.subjects = ["S1"]
     win.conditions = ["CondA"]
-    win.subject_groups = {"S1": None}
 
     monkeypatch.setattr(stats_workers, "run_rm_anova", lambda *_a, **_k: {})
     monkeypatch.setattr(stats_workers, "run_lmm", lambda *_a, **_k: {})

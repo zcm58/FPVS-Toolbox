@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from Tools.Stats.reporting.summary.anova import (
-    build_between_anova_output,
     build_rm_anova_output,
     format_rm_anova_summary,
 )
@@ -16,7 +15,6 @@ from Tools.Stats.reporting.summary.models import StatsSummaryFrames, SummaryConf
 __all__ = [
     "StatsSummaryFrames",
     "SummaryConfig",
-    "build_between_anova_output",
     "build_rm_anova_output",
     "build_summary_frames_from_results",
     "build_summary_from_files",

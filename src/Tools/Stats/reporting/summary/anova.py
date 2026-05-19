@@ -43,19 +43,7 @@ def format_rm_anova_summary(df: pd.DataFrame, alpha: float) -> str:
         except Exception:
             p_val = np.nan
 
-        if (
-            "group" in effect_lower
-            and "condition" in effect_lower
-            and "roi" in effect_lower
-        ):
-            tag = "group by condition by ROI interaction"
-        elif "group" in effect_lower and "condition" in effect_lower:
-            tag = "group-by-condition interaction"
-        elif "group" in effect_lower and "roi" in effect_lower:
-            tag = "group-by-ROI interaction"
-        elif effect_lower.startswith("group") or effect_lower == "group":
-            tag = "difference between groups"
-        elif effect_compact in {
+        if effect_compact in {
             "condition*roi",
             "condition:roi",
             "conditionxroi",
@@ -102,27 +90,6 @@ def build_rm_anova_output(anova_df_results: Optional[pd.DataFrame], alpha: float
         output_text += "--------------------------------------------\n"
     else:
         output_text += "RM-ANOVA returned no results.\n"
-    return output_text
-
-
-def build_between_anova_output(anova_df_results: Optional[pd.DataFrame], alpha: float) -> str:
-    """Build the between-group ANOVA console/report text block."""
-
-    output_text = "============================================================\n"
-    output_text += "       Between-Group Mixed ANOVA Results\n"
-    output_text += "============================================================\n\n"
-    output_text += (
-        "Group was treated as a between-subject factor with Condition and ROI as\n"
-        "within-subject factors. Only subjects with known group assignments were\n"
-        "included in this analysis.\n\n"
-    )
-    if isinstance(anova_df_results, pd.DataFrame) and not anova_df_results.empty:
-        output_text += format_rm_anova_summary(anova_df_results, alpha) + "\n"
-        output_text += "--------------------------------------------\n"
-        output_text += "Refer to the exported table for all Group main and interaction effects.\n"
-        output_text += "--------------------------------------------\n"
-    else:
-        output_text += "Between-group ANOVA returned no results.\n"
     return output_text
 
 

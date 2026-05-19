@@ -89,7 +89,7 @@ The GUI targets below identify relevant coverage only; do not run them locally
 via pytest-qt/offscreen unless explicitly approved.
 
 - GUI/layout smoke: `tests/stats/gui/test_stats_layout_smoke.py`, `tests/stats/gui/test_stats_window_smoke_phase0.py`
-- Pipeline smoke: `tests/stats/pipeline/test_stats_pipeline_smoke.py`, `tests/stats/pipeline/test_stats_multigroup_smoke.py`
+- Pipeline smoke: `tests/stats/pipeline/test_stats_pipeline_smoke.py`
 - File scanning and project paths: `tests/stats/pipeline/test_stats_file_scanner.py`, `tests/stats/pipeline/test_stats_project_paths.py`
 - DV and reporting rules: `tests/stats/analysis/test_stats_dv_policy.py`, `tests/stats/reporting/test_stats_reporting_summary_smoke.py`
 - Summary reporting: `tests/stats/analysis/test_summary_utils_mixed_model.py`, `tests/stats/analysis/test_summary_utils_posthoc_directions.py`, `tests/stats/reporting/test_lmm_reporting_exports.py`, `tests/stats/reporting/test_stats_rm_anova_summary_reporting.py`

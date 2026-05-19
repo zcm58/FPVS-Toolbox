@@ -49,9 +49,6 @@ def build_summary_frames_from_results(
     single_posthoc: Optional[pd.DataFrame] = None,
     rm_anova_results: Optional[pd.DataFrame] = None,
     mixed_model_results: Optional[pd.DataFrame] = None,
-    between_contrasts: Optional[pd.DataFrame] = None,
-    between_anova_results: Optional[pd.DataFrame] = None,
-    between_mixed_model_results: Optional[pd.DataFrame] = None,
     harmonic_results: Optional[pd.DataFrame | list[dict]] = None,
 ) -> StatsSummaryFrames:
     """Build summary frames from worker/controller result payloads."""
@@ -61,8 +58,5 @@ def build_summary_frames_from_results(
         frames.single_posthoc = to_dataframe(single_posthoc)
         frames.anova_terms = to_dataframe(rm_anova_results)
         frames.mixed_model_terms = to_dataframe(mixed_model_results)
-    elif pipeline_id is PipelineId.BETWEEN:
-        frames.between_contrasts = to_dataframe(between_contrasts)
-        frames.mixed_model_terms = to_dataframe(between_mixed_model_results)
     frames.harmonic_results = to_dataframe(harmonic_results)
     return frames

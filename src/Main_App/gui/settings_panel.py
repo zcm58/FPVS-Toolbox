@@ -428,13 +428,15 @@ class SettingsDialog(QDialog):
                 load_rois_from_settings,
                 apply_rois_to_modules,
             )
-            from Tools.Stats.stats import StatsAnalysisWindow
 
             rois = load_rois_from_settings(self.manager)
             apply_rois_to_modules(rois)
 
-            for window in StatsAnalysisWindow.get_instances():
-                window.reload_rois(rois)
+            stats_page = getattr(self.parent(), "_stats_page", None)
+            if stats_page is not None:
+                refresh_rois = getattr(stats_page, "refresh_rois", None)
+                if callable(refresh_rois):
+                    refresh_rois()
         except Exception:
             pass
 

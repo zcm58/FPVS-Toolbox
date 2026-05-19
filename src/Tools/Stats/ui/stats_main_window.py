@@ -11,7 +11,6 @@ from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 from Tools.Stats.ui.stats_window_actions import StatsWindowActionsMixin
 from Tools.Stats.ui.stats_window_exclusions import StatsWindowExclusionsMixin
 from Tools.Stats.ui.stats_window_exports import StatsWindowExportsMixin
-from Tools.Stats.ui.stats_window_multigroup import StatsWindowMultigroupMixin
 from Tools.Stats.ui.stats_window_pipeline import StatsWindowPipelineMixin
 from Tools.Stats.ui.stats_window_ui import StatsWindowUiMixin
 
@@ -22,14 +21,17 @@ class StatsWindow(
     StatsWindowActionsMixin,
     StatsWindowExclusionsMixin,
     StatsWindowExportsMixin,
-    StatsWindowMultigroupMixin,
     StatsWindowPipelineMixin,
     StatsWindowUiMixin,
     QMainWindow,
 ):
     """PySide6 window wrapping the FPVS Statistical Analysis Tool."""
 
-    def __init__(self, parent: Optional[QMainWindow] = None, project_dir: Optional[str] = None):
+    def __init__(
+        self,
+        parent: Optional[QMainWindow] = None,
+        project_dir: Optional[str] = None,
+    ):
         """Set up this object so it is ready to be used by the Stats tool."""
         if project_dir and os.path.isdir(project_dir):
             self.project_dir = project_dir
@@ -52,7 +54,6 @@ class StatsWindow(
             self.project_title = os.path.basename(self.project_dir)
 
         super().__init__(parent)
-        self.setWindowFlags(self.windowFlags() | Qt.Window)
         self.setWindowTitle("FPVS Statistical Analysis Tool")
         logger.info(
             "stats_window_init",
@@ -71,37 +72,25 @@ class StatsWindow(
         # lifetime / GC edge cases that could drop Qt signals.
         self._active_workers: list[StatsWorker] = []
 
-        configure_window_surface(
-            self,
-            size=SurfaceSize(width=1400, height=820, min_width=1180, min_height=760),
-        )
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        configure_window_surface(self)
 
         # re-entrancy guard for scan
         self._scan_guard = OpGuard()
         if not hasattr(self._scan_guard, "done"):
             self._scan_guard.done = self._scan_guard.end  # type: ignore[attr-defined]
-        self._multigroup_scan_guard = OpGuard()
-        if not hasattr(self._multigroup_scan_guard, "done"):
-            self._multigroup_scan_guard.done = self._multigroup_scan_guard.end  # type: ignore[attr-defined]
-
         # --- state ---
         self.subject_data: Dict = {}
-        self.subject_groups: Dict[str, str | None] = {}
         self.subjects: List[str] = []
         self.conditions: List[str] = []
         self.selected_conditions: List[str] = []
-        self._multi_group_manifest: bool = False
         self.rm_anova_results_data: Optional[pd.DataFrame] = None
         self.mixed_model_results_data: Optional[pd.DataFrame] = None
-        self.between_anova_results_data: Optional[pd.DataFrame] = None
-        self.between_mixed_model_results_data: Optional[pd.DataFrame] = None
-        self.group_contrasts_results_data: Optional[pd.DataFrame] = None
         self.posthoc_results_data: Optional[pd.DataFrame] = None
         self.baseline_vs_zero_results_payload: Optional[dict] = None
         self.harmonic_check_results_data: List[dict] = []
         self._harmonic_results: dict[PipelineId, list[dict]] = {
             PipelineId.SINGLE: [],
-            PipelineId.BETWEEN: [],
         }
         self.rois: Dict[str, List[str]] = {}
         self._harmonic_config: HarmonicConfig = HarmonicConfig("Z Score", 1.64)
@@ -135,13 +124,6 @@ class StatsWindow(
         self._qc_threshold_sumabs: float = QC_DEFAULT_WARN_THRESHOLD
         self._qc_threshold_maxabs: float = QC_DEFAULT_CRITICAL_THRESHOLD
         self._last_export_path: str | None = None
-        self._multigroup_scan_result: MultiGroupScanResult | None = None
-        self._between_subject_snapshot: MultigroupRuntimeSnapshot | None = None
-        self._shared_harmonics_payload: dict[str, object] = {}
-        self._fixed_harmonic_dv_payload: dict[str, object] = {}
-        self._between_missingness_payload: dict[str, object] = {}
-        self._multigroup_issue_expanded = False
-        self._multigroup_issue_preview_limit = 5
         self._reporting_summary_text: str = ""
         self._pipeline_start_perf: dict[PipelineId, float] = {}
 
@@ -166,7 +148,6 @@ class StatsWindow(
 
         # controller
         self._controller = StatsController(view=self)
-        self._refresh_fixed_harmonic_ui_state()
 
     # --------- ROI + status helpers ---------
 

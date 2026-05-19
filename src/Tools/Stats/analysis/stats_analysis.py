@@ -1169,5 +1169,3 @@ def _run_harmonic_check_impl(
 
     return "\n".join(output_lines), findings
 
-
-# Lela mode is in full effect

@@ -101,8 +101,8 @@ def test_manual_exclusion_filters_before_dv_compute(monkeypatch) -> None:
     def _fake_run_rm_anova(*_args, **_kwargs):
         return "ok", pd.DataFrame()
 
-    def _skip_qc_screening(*, subjects, subject_data, subject_groups, **_kwargs):
-        return list(subjects), subject_data, subject_groups, None
+    def _skip_qc_screening(*, subjects, subject_data, **_kwargs):
+        return list(subjects), subject_data, None
 
     monkeypatch.setattr(stats_workers, "prepare_summed_bca_data", _fake_prepare_summed_bca_data)
     monkeypatch.setattr(stats_workers, "analysis_run_rm_anova", _fake_run_rm_anova)

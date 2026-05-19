@@ -203,5 +203,4 @@ if __name__ == "__main__":
 # python scripts/migration/rename_phase_subject_ids.py "path\\to\\phase-a" "path\\to\\phase-b"
 #
 # This normalization ensures the Stats scanner extracts base IDs like P2, P7, or P10
-# for all phases of the same subject, allowing Lela Mode to intersect subjects
-# across phases without dropping them.
+# consistently across generated phase folders.

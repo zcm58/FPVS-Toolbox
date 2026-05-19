@@ -27,25 +27,6 @@ EXCEL_PID_REGEX = re.compile(
 )
 
 
-class LelaFilenameParseError(Exception):
-    """Raised when a Lela Mode Excel filename cannot be parsed."""
-
-    def __init__(self, path: Path, message: str) -> None:
-        """Set up this object so it is ready to be used by the Stats tool."""
-        super().__init__(f"{path}: {message}")
-        self.path = Path(path)
-        self.message = message
-
-
-@dataclass(frozen=True)
-class LelaFilenameMetadata:
-    """Represent the LelaFilenameMetadata part of the Stats tool."""
-    subject_id: str
-    group_code: str
-    phase_code: str
-    condition: str
-
-
 class ScanError(Exception):
     """Exception raised when scanning fails due to invalid folder or permissions."""
 
@@ -58,8 +39,6 @@ class ProjectScanResult:
     subject_data: Dict[str, Dict[str, str]]
     manifest: dict | None
     participants_map: Dict[str, str]
-    subject_groups: Dict[str, str | None]
-    multi_group_manifest: bool
 
 
 logger = logging.getLogger(__name__)
@@ -206,14 +185,6 @@ def map_subjects_to_groups(subjects: Iterable[str], participants_map: dict[str, 
     return {pid: participants_map.get(pid.upper()) for pid in subjects}
 
 
-def has_multi_groups(manifest: dict | None) -> bool:
-    """Handle the has multi groups step for the Stats workflow."""
-    if not isinstance(manifest, dict):
-        return False
-    groups = manifest.get("groups")
-    return isinstance(groups, dict) and bool(groups)
-
-
 def group_harmonic_results(data) -> dict[str, dict[str, list[dict]]]:
     """Normalize harmonic check findings into a nested mapping for export."""
 
@@ -228,128 +199,6 @@ def group_harmonic_results(data) -> dict[str, dict[str, list[dict]]]:
         roi = rec.get("ROI") or rec.get("roi") or "Unknown"
         grouped.setdefault(cond, {}).setdefault(roi, []).append(rec)
     return grouped
-
-
-def parse_lela_excel_filename(path: Path) -> LelaFilenameMetadata:
-    r"""Parse subject, group, phase, and condition metadata from an Excel file path.
-
-    Expected filename pattern (case-insensitive)::
-
-        ^(P(?P<num>\d+))(?P<group>CG|BC)(?P<phase>F|L)_(?P<condition>.+)_Results\.xlsx$
-
-    Underscores in the condition name are converted to spaces. Subject IDs are
-    canonicalized to ``P{int}``.
-    """
-
-    if not isinstance(path, Path):
-        path = Path(path)
-
-    name = path.name
-    if not name.lower().endswith(".xlsx"):
-        raise LelaFilenameParseError(path, "Expected an Excel (.xlsx) file")
-
-    stem = path.stem
-    parts = stem.split("_", 1)
-    if len(parts) != 2:
-        raise LelaFilenameParseError(
-            path, "Filename must contain an underscore separating metadata and condition"
-        )
-
-    meta_token, remainder = parts[0], parts[1]
-    match = re.match(r"^(P(?P<num>\d+))(?P<group>CG|BC)(?P<phase>F|L)$", meta_token, re.IGNORECASE)
-    if not match:
-        raise LelaFilenameParseError(
-            path,
-            "First token must follow pattern P<number><CG|BC><F|L> (e.g., P2CGF)",
-        )
-
-    remainder_lower = remainder.lower()
-    suffix = "_results"
-    idx = remainder_lower.rfind(suffix)
-    if idx == -1:
-        raise LelaFilenameParseError(path, "Filename must end with '_Results.xlsx'")
-
-    condition_part = remainder[:idx]
-    if not condition_part:
-        raise LelaFilenameParseError(path, "Condition segment is empty")
-
-    condition = condition_part.replace("_", " ").strip()
-    if not condition:
-        raise LelaFilenameParseError(path, "Condition segment is empty")
-
-    subject_num = int(match.group("num"))
-    subject_id = f"P{subject_num}"
-    group_code = match.group("group").upper()
-    phase_code = match.group("phase").upper()
-
-    return LelaFilenameMetadata(
-        subject_id=subject_id,
-        group_code=group_code,
-        phase_code=phase_code,
-        condition=condition,
-    )
-
-
-@dataclass
-class LelaPhaseScanResult:
-    """Represent the LelaPhaseScanResult part of the Stats tool."""
-    subjects: list[str]
-    conditions: list[str]
-    subject_data: dict[str, dict[str, str]]
-    group_map: dict[str, str]
-    phase_code: str
-
-
-def scan_lela_phase_folder(phase_folder: Path) -> LelaPhaseScanResult:
-    """Scan a phase folder for Lela Mode using filename metadata only."""
-
-    if not phase_folder.exists():
-        raise FileNotFoundError(f"Phase folder not found: {phase_folder}")
-    if not phase_folder.is_dir():
-        raise NotADirectoryError(f"Phase folder is not a directory: {phase_folder}")
-
-    subjects_set: set[str] = set()
-    conditions_set: set[str] = set()
-    subject_data: dict[str, dict[str, str]] = {}
-    group_map: dict[str, str] = {}
-    phase_codes: set[str] = set()
-
-    for filepath in sorted(phase_folder.rglob("*.xlsx")):
-        if any(parent.name.lower() in IGNORED_FOLDERS for parent in filepath.parents):
-            continue
-        metadata = parse_lela_excel_filename(filepath)
-        subjects_set.add(metadata.subject_id)
-        conditions_set.add(metadata.condition)
-        phase_codes.add(metadata.phase_code)
-
-        existing_group = group_map.get(metadata.subject_id)
-        if existing_group and existing_group != metadata.group_code:
-            raise LelaFilenameParseError(
-                filepath,
-                f"Conflicting group codes for subject {metadata.subject_id}: "
-                f"{existing_group} vs {metadata.group_code}",
-            )
-        group_map[metadata.subject_id] = metadata.group_code
-
-        subject_data.setdefault(metadata.subject_id, {})
-        subject_data[metadata.subject_id][metadata.condition] = str(filepath)
-
-    if not subjects_set:
-        raise LelaFilenameParseError(phase_folder, "No matching Excel result files found")
-
-    if len(phase_codes) != 1:
-        raise LelaFilenameParseError(
-            phase_folder,
-            f"Expected one phase code in folder, found: {sorted(phase_codes) if phase_codes else 'none'}",
-        )
-
-    return LelaPhaseScanResult(
-        subjects=sorted(subjects_set),
-        conditions=sorted(conditions_set),
-        subject_data=subject_data,
-        group_map=group_map,
-        phase_code=next(iter(phase_codes)),
-    )
 
 
 def safe_export_call(
@@ -508,15 +357,11 @@ def load_project_scan(folder: str) -> ProjectScanResult:
     subjects, conditions, data = scan_folder_simple(folder)
     manifest = load_project_manifest_for_excel_root(Path(folder))
     participants_map = normalize_participants_map(manifest)
-    subject_groups = map_subjects_to_groups(subjects, participants_map)
-    multi_group_manifest = has_multi_groups(manifest)
     return ProjectScanResult(
         subjects=subjects,
         conditions=conditions,
         subject_data=data,
         manifest=manifest,
         participants_map=participants_map,
-        subject_groups=subject_groups,
-        multi_group_manifest=multi_group_manifest,
     )
 

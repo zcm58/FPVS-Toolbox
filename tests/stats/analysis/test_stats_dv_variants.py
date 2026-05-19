@@ -38,6 +38,7 @@ def test_stats_group_mean_option_visibility(qtbot):
     qtbot.addWidget(window)
     window.show()
 
+    window.setup_tabs.setCurrentIndex(1)
     window.dv_policy_combo.setCurrentText(GROUP_MEAN_Z_POLICY_NAME)
     assert window.group_mean_controls.isVisible() is True
 

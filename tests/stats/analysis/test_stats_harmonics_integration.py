@@ -60,8 +60,6 @@ def patched_workers(monkeypatch, harmonic_calls):
     monkeypatch.setattr(stats_workers, "run_rm_anova", fake_rm_anova, raising=False)
     monkeypatch.setattr(stats_workers, "run_lmm", fake_lmm, raising=False)
     monkeypatch.setattr(stats_workers, "run_posthoc", fake_posthoc, raising=False)
-    monkeypatch.setattr(stats_workers, "run_between_group_anova", fake_rm_anova, raising=False)
-    monkeypatch.setattr(stats_workers, "run_group_contrasts", fake_contrasts, raising=False)
     monkeypatch.setattr(stats_workers, "run_harmonic_check", fake_harmonic, raising=False)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.RM_ANOVA, fake_rm_anova)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.MIXED_MODEL, fake_lmm)
@@ -71,9 +69,6 @@ def patched_workers(monkeypatch, harmonic_calls):
         StepId.BASELINE_VS_ZERO,
         lambda *_a, **_k: {"output_text": "baseline"},
     )
-    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BETWEEN_GROUP_ANOVA, fake_rm_anova)
-    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BETWEEN_GROUP_MIXED_MODEL, fake_lmm)
-    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.GROUP_CONTRASTS, fake_contrasts)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.HARMONIC_CHECK, fake_harmonic)
     return dummy_df
 
@@ -118,7 +113,6 @@ def test_single_pipeline_runs_harmonics_and_exports(qtbot, synced_window):
     win, export_calls, harmonic_calls = synced_window
     win.subjects = ["S1"]
     win.conditions = ["C1"]
-    win.subject_groups = {"S1": "G1"}
     win.subject_data = {"S1": {"C1": {"ROI": 1.0}}}
     win.rois = {"ROI": ["Cz"]}
 
@@ -135,23 +129,3 @@ def test_single_pipeline_runs_harmonics_and_exports(qtbot, synced_window):
     assert "Harmonic Check completed" in text
 
 
-@pytest.mark.qt
-def test_between_pipeline_excludes_harmonics_from_supported_path(qtbot, synced_window):
-    win, export_calls, harmonic_calls = synced_window
-    win.subjects = ["S1", "S2"]
-    win.conditions = ["C1"]
-    win.subject_groups = {"S1": "G1", "S2": "G2"}
-    win.subject_data = {"S1": {"C1": {"ROI": 1.0}}, "S2": {"C1": {"ROI": 2.0}}}
-    win.rois = {"ROI": ["Cz"]}
-
-    qtbot.mouseClick(win.analyze_between_btn, Qt.LeftButton)
-
-    qtbot.waitUntil(lambda: win.analyze_between_btn.isEnabled(), timeout=2000)
-    qtbot.waitUntil(
-        lambda: "Between-Group Analysis finished" in win.output_text.toPlainText(), timeout=2000
-    )
-
-    assert harmonic_calls == []
-    assert "harmonic" not in export_calls
-    text = win.output_text.toPlainText()
-    assert "Harmonic Check completed" not in text

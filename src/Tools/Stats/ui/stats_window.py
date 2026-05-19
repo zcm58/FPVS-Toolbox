@@ -9,7 +9,5 @@ from .stats_main_window import StatsWindow
 _rm_anova_calc = _stats_workers.run_rm_anova
 _lmm_calc = _stats_workers.run_lmm
 _posthoc_calc = _stats_workers.run_posthoc
-_between_group_anova_calc = _stats_workers.run_between_group_anova
-_group_contrasts_calc = _stats_workers.run_group_contrasts
 
 __all__ = ["StatsWindow"]

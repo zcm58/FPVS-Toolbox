@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
 
 from Tools.Stats.ui import stats_window as stats_mod
 from Tools.Stats.ui.stats_window import StatsWindow
@@ -27,8 +26,6 @@ def patch_pipeline_workers(monkeypatch):
         "_rm_anova_calc",
         "_lmm_calc",
         "_posthoc_calc",
-        "_between_group_anova_calc",
-        "_group_contrasts_calc",
     ]:
         monkeypatch.setattr(stats_mod, name, stub_worker)
 
@@ -71,25 +68,6 @@ def test_single_group_run_smoke(qtbot, monkeypatch, app):
 
 
 @pytest.mark.qt
-def test_between_group_run_smoke(qtbot, monkeypatch, app):
-    win = StatsWindow(project_dir=str(_project_dir("between-group-run-smoke")))
-    qtbot.addWidget(win)
-    _prepare_window(win, monkeypatch)
-    captured: list[dict] = []
-
-    monkeypatch.setattr(
-        win._controller,
-        "run_between_group_analysis",
-        lambda **kwargs: captured.append(kwargs),
-        raising=False,
-    )
-
-    qtbot.mouseClick(win.analyze_between_btn, Qt.LeftButton)
-
-    assert captured == [{}]
-
-
-@pytest.mark.qt
 def test_single_group_advanced_actions_keep_anova_and_lmm(qtbot, monkeypatch, app):
     win = StatsWindow(project_dir=str(_project_dir("single-group-advanced-actions")))
     qtbot.addWidget(win)
@@ -108,49 +86,3 @@ def test_single_group_advanced_actions_keep_anova_and_lmm(qtbot, monkeypatch, ap
     labels = [label for label, _cb, _enabled in captured["actions"]]
     assert "Run RM-ANOVA" in labels
     assert "Run Mixed Model" in labels
-
-
-@pytest.mark.qt
-def test_between_group_advanced_actions_hide_anova(qtbot, monkeypatch, app):
-    win = StatsWindow(project_dir=str(_project_dir("between-group-advanced-actions")))
-    qtbot.addWidget(win)
-    _prepare_window(win, monkeypatch)
-    captured = {}
-
-    monkeypatch.setattr(
-        StatsWindow,
-        "_open_advanced_dialog",
-        lambda self, title, actions: captured.update(title=title, actions=actions),
-        raising=False,
-    )
-
-    win.on_between_advanced_clicked()
-
-    labels = [label for label, _cb, _enabled in captured["actions"]]
-    assert "Run Between-Group Mixed Model" in labels
-    assert "Run Group Contrasts" in labels
-    assert all("ANOVA" not in label for label in labels)
-
-
-@pytest.mark.qt
-def test_between_anova_actions_fail_closed_and_info_copy_is_explicit(qtbot, monkeypatch, app):
-    win = StatsWindow(project_dir=str(_project_dir("between-anova-fail-closed")))
-    qtbot.addWidget(win)
-    _prepare_window(win, monkeypatch)
-    infos: list[str] = []
-
-    monkeypatch.setattr(
-        QMessageBox,
-        "information",
-        lambda _parent, _title, message, *_rest: infos.append(message),
-        raising=False,
-    )
-
-    win.on_run_between_anova()
-    win.on_export_between_anova()
-    win.on_show_analysis_info()
-
-    assert any("between-group anova is paused" in msg.lower() for msg in infos)
-    assert any("exports are unavailable" in msg.lower() for msg in infos)
-    assert any("between-group anova (paused)" in msg.lower() for msg in infos)
-    assert any("single-group analyses" in msg.lower() and "rm-anova" in msg.lower() for msg in infos)

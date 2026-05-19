@@ -16,9 +16,7 @@ Use script output to decide what to read next.
 The stats tool should be able to calculate and output everything 
 that might be needed for a publication quality manuscript. 
 
-The stats tool should support statistical analysis of one group or multiple groups. There may be two groups in which
-we need to compare the FPVS responses between Group A and Group B using ANOVA, Linear Mixed Models, followed 
-with post-hoc t-tests. 
+The stats tool currently supports single-group statistical analysis only.
 
 
 IMPORTANT RULES for Codex:

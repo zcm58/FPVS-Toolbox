@@ -31,7 +31,7 @@ def test_main_window_stats_launch_does_not_import_legacy_stats(qtbot, tmp_path, 
         if name.startswith(("Tools.Stats.Legacy", "Tools.Stats.PySide6")):
             sys.modules.pop(name, None)
 
-    from PySide6.QtWidgets import QWidget, QMessageBox
+    from PySide6.QtWidgets import QWidget
 
     from Main_App.gui import main_window as main_window_module
     import Main_App.gui.update_manager as update_manager
@@ -48,7 +48,6 @@ def test_main_window_stats_launch_does_not_import_legacy_stats(qtbot, tmp_path, 
         lambda self: setattr(self, "projectsRoot", tmp_path),
     )
     monkeypatch.setattr(main_window_module, "PysideStatsWindow", _DummyStatsWindow)
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Ok))
 
     window = main_window_module.MainWindow()
     qtbot.addWidget(window)
@@ -59,6 +58,6 @@ def test_main_window_stats_launch_does_not_import_legacy_stats(qtbot, tmp_path, 
     assert "customtkinter" not in sys.modules
     assert not any(name.startswith("Tools.Stats.Legacy") for name in sys.modules)
     assert not any(name.startswith("Tools.Stats.PySide6") for name in sys.modules)
-    assert hasattr(window, "_child_windows")
-    assert len(window._child_windows) == 1
-    assert isinstance(window._child_windows[0], _DummyStatsWindow)
+    assert window.workspace_stack.currentWidget() is window._stats_page
+    assert window._stats_page.objectName() == "embedded_stats_page"
+    assert window._stats_page.parent() is window.workspace_stack

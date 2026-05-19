@@ -30,23 +30,6 @@ def check_for_updates(host: Any, update_manager_module: Any) -> None:
     )
 
 
-def open_stats_analyzer(
-    host: Any,
-    stats_window_cls: Callable[..., Any],
-    under_development_warning: str,
-) -> None:
-    QMessageBox.warning(
-        host,
-        "Statistics Tool Under Development",
-        under_development_warning,
-    )
-    window = stats_window_cls(host)
-    window.show()
-    if not hasattr(host, "_child_windows"):
-        host._child_windows = []
-    host._child_windows.append(window)
-
-
 def open_image_resizer(source_root: Path) -> None:
     cmd = [sys.executable]
     if getattr(sys, "frozen", False):

@@ -8,13 +8,12 @@ Implementation files belong in the functional subpackages below.
 ## Active Layout
 
 * `ui/`, `controller/`, `workers/`, and `widgets/` - PySide6 window, run coordination, worker wrappers, and widgets. `Tools.Stats.StatsWindow` is the public import; the implementation lives in `ui.stats_window`.
-* `analysis/` - statistical engines and analysis helpers, including DV policies, RM-ANOVA, mixed models, post-hocs, group contrasts, cross-phase LMM, SNR/noise helpers, and harmonics.
-* `data/` - project scans, subject/group metadata, manifests, ROI resolution, shared ROI settings, and missingness.
+* `analysis/` - statistical engines and analysis helpers, including DV policies, RM-ANOVA, mixed models, post-hocs, SNR/noise helpers, and harmonics.
+* `data/` - project scans, subject metadata, manifests, ROI resolution, and shared ROI settings.
 * `qc/` - QC, outlier, and manual exclusion helpers.
 * `reporting/` - summaries, workbook exports, formatting, and run reports.
 * `common/` - shared enums, dataclasses, constants, window types, and runtime helpers.
 * `io/` - Excel/dataframe I/O helpers.
-* `cli/` - out-of-process and command-line entry points.
 
 ## Removed Namespaces
 

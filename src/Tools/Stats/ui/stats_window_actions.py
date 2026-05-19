@@ -223,10 +223,6 @@ class StatsWindowActionsMixin:
         """Handle the on analyze single group clicked step for the Stats workflow."""
         self._controller.run_single_group_analysis()
 
-    def on_analyze_between_groups_clicked(self) -> None:
-        """Handle the on analyze between groups clicked step for the Stats workflow."""
-        self._controller.run_between_group_analysis()
-
     def _open_advanced_dialog(self, title: str, actions: list[tuple[str, Callable[[], None], bool]]) -> None:
         """Handle the open advanced dialog step for the Stats workflow."""
         dialog = QDialog(self)
@@ -269,31 +265,6 @@ class StatsWindowActionsMixin:
         ]
         self._open_advanced_dialog("Single Group – Advanced", actions)
 
-    def on_between_advanced_clicked(self) -> None:
-        """Handle the on between advanced clicked step for the Stats workflow."""
-        actions = [
-            ("Run Between-Group Mixed Model", self.on_run_between_mixed_model, True),
-            ("Run Group Contrasts", self.on_run_group_contrasts, True),
-            (
-                "Export Between-Group Mixed Model",
-                self.on_export_between_mixed,
-                self._can_export_between_mixed_model(),
-            ),
-            (
-                "Export Group Contrasts",
-                self.on_export_group_contrasts,
-                isinstance(self.group_contrasts_results_data, pd.DataFrame)
-                and not self.group_contrasts_results_data.empty,
-            ),
-            (
-                "Export QC Context (By Group)",
-                self.on_export_qc_context_by_group,
-                isinstance(self._fixed_harmonic_dv_payload.get("dv_table"), pd.DataFrame)
-                and not self._fixed_harmonic_dv_payload.get("dv_table").empty,
-            ),
-        ]
-        self._open_advanced_dialog("Between-Group – Advanced", actions)
-
     def on_show_analysis_info(self) -> None:
         """
         Show a brief summary of the statistical methods used in the Stats tool.
@@ -316,16 +287,6 @@ class StatsWindowActionsMixin:
             "- Mixed model: Linear mixed-effects model with a random intercept for each "
             "subject and fixed effects for condition, ROI, and their interaction. No "
             "additional multiple-comparison correction is applied to these coefficients.\n\n"
-            "Multi-group analyses\n"
-            "- Between-group ANOVA (paused): This analysis is unavailable in the supported "
-            "multigroup workflow in this phase.\n"
-            "- Between-group mixed model: Linear mixed-effects model on Summed BCA with "
-            "fixed effects for group, condition, ROI, and their interactions, plus a "
-            "random intercept per subject.\n"
-            "- Group contrasts: Pairwise group comparisons (Welch's t-tests) computed "
-            "separately for each condition x ROI. P-values are corrected for multiple "
-            "comparisons using Benjamini-Hochberg FDR, and effect sizes (Cohen's d) "
-            "are reported.\n\n"
             "General notes\n"
             "- Unless otherwise noted, the default alpha level is 0.05.\n"
             f"- Excel exports in the '{RESULTS_SUBFOLDER_NAME}' folder contain "
@@ -367,49 +328,6 @@ class StatsWindowActionsMixin:
         self.mixed_model_results_data = None
         self._update_export_buttons()
         self._controller.run_single_group_mixed_model_only()
-
-    def on_run_between_anova(self) -> None:
-        """Handle the on run between anova step for the Stats workflow."""
-        QMessageBox.information(
-            self,
-            "Between-Group ANOVA Paused",
-            "Between-group ANOVA is paused and unavailable in the multigroup workflow in this phase.",
-        )
-
-    def on_run_between_mixed_model(self) -> None:
-        """Handle the on run between mixed model step for the Stats workflow."""
-        self._clear_output_views()
-        self.between_mixed_model_results_data = None
-        self._update_export_buttons()
-        self._controller.run_between_group_mixed_only()
-
-    def on_run_lela_mode(self) -> None:
-        """
-        Run Lela mode (cross-phase single + between analyses).
-
-        This mirrors the other run buttons by:
-        - going through _precheck with start_guard=True (which calls _begin_run()),
-        - delegating the actual work to the controller, and
-        - making sure _end_run() is called if the controller raises.
-        """
-        # If your other run-* methods clear output/results first, you can mirror that here.
-        # Keeping this minimal to avoid changing behavior.
-        if not self._precheck(start_guard=True, require_anova=False):
-            return
-
-        try:
-            self._controller.run_lela_mode_analysis()
-        except Exception:
-            # Ensure the guard / busy state is released even on error
-            self._end_run()
-            raise
-
-    def on_run_group_contrasts(self) -> None:
-        """Handle the on run group contrasts step for the Stats workflow."""
-        self._clear_output_views()
-        self.group_contrasts_results_data = None
-        self._update_export_buttons()
-        self._controller.run_between_group_contrasts_only()
 
     def on_run_interaction_posthocs(self) -> None:
         """Handle the on run interaction posthocs step for the Stats workflow."""
@@ -453,35 +371,6 @@ class StatsWindowActionsMixin:
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
 
-    def on_export_between_anova(self) -> None:
-        """Handle the on export between anova step for the Stats workflow."""
-        QMessageBox.information(
-            self,
-            "Between-Group ANOVA Paused",
-            "Between-group ANOVA exports are unavailable because this workflow is paused in the multigroup UI.",
-        )
-
-    def on_export_between_mixed(self) -> None:
-        """Handle the on export between mixed step for the Stats workflow."""
-        supported, support_message = self._between_mixed_model_support_state()
-        if not supported:
-            QMessageBox.information(
-                self,
-                "No Results",
-                support_message or "Run Between-Group Mixed Model first.",
-            )
-            return
-        out_dir = self._ensure_results_dir()
-        try:
-            self.export_results("lmm_between", self.between_mixed_model_results_data, out_dir)
-            self._set_status(f"Between-group Mixed Model exported to: {out_dir}")
-            self._set_last_export_path(out_dir)
-        except Exception as e:
-            import traceback
-            logger.exception("Between-group Mixed Model export failed.")
-            tb = traceback.format_exc()
-            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
-
     def on_export_posthoc(self) -> None:
         """Handle the on export posthoc step for the Stats workflow."""
         if not isinstance(self.posthoc_results_data, pd.DataFrame) or self.posthoc_results_data.empty:
@@ -497,47 +386,6 @@ class StatsWindowActionsMixin:
             logger.exception("Post-hoc export failed.")
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
-
-    def on_export_group_contrasts(self) -> None:
-        """Handle the on export group contrasts step for the Stats workflow."""
-        if not isinstance(self.group_contrasts_results_data, pd.DataFrame) or self.group_contrasts_results_data.empty:
-            QMessageBox.information(self, "No Results", "Run Group Contrasts first.")
-            return
-        out_dir = self._ensure_results_dir()
-        try:
-            self.export_results("group_contrasts", self.group_contrasts_results_data, out_dir)
-            self._set_status(f"Group contrasts exported to: {out_dir}")
-            self._set_last_export_path(out_dir)
-        except Exception as e:
-            import traceback
-            logger.exception("Group contrasts export failed.")
-            tb = traceback.format_exc()
-            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
-
-    def on_export_qc_context_by_group(self) -> None:
-        """Handle the on export qc context by group step for the Stats workflow."""
-        fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
-        dv_table = fixed_payload.get("dv_table")
-        if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
-            QMessageBox.information(self, "No Results", "Compute Fixed-harmonic DV first.")
-            return
-
-        out_dir = self._ensure_results_dir()
-        try:
-            export_path = self._export_qc_context_by_group(out_dir)
-            if export_path is None:
-                QMessageBox.information(self, "No Results", "No fixed-harmonic DV rows available for QC export.")
-                return
-            self._set_status(f"QC/context workbook exported to: {export_path}")
-            self._set_last_export_path(export_path)
-        except Exception as e:
-            import traceback
-
-            logger.exception("QC/context export failed.")
-            tb = traceback.format_exc()
-            QMessageBox.critical(self, "Export Failed", f"{type(e).__name__}: {e}\n\n{tb}")
-
-    # ---- folder & scan ----
 
     def on_browse_folder(self) -> None:
         """Handle the on browse folder step for the Stats workflow."""
@@ -559,29 +407,14 @@ class StatsWindowActionsMixin:
                 return
             try:
                 scan_result = load_project_scan(folder)
-                self.subject_groups = {}
-                self._multi_group_manifest = scan_result.multi_group_manifest
-                self._between_subject_snapshot = None
-
-                if scan_result.multi_group_manifest:
-                    self._between_subject_snapshot = build_multigroup_runtime_snapshot(
-                        manifest=scan_result.manifest,
-                        subjects=scan_result.subjects,
-                        subject_data=scan_result.subject_data,
-                    )
-                    self._warn_unknown_excel_files(scan_result.subject_data, scan_result.manifest)
-                    self._log_between_snapshot_messages()
-
                 self.subjects = scan_result.subjects
                 self.conditions = scan_result.conditions
                 self._populate_conditions_panel(self.conditions)
                 self.subject_data = scan_result.subject_data
-                self.subject_groups = scan_result.subject_groups
                 self._reconcile_manual_exclusions(self.subjects)
                 self._set_status(
                     f"Scan complete: Found {len(scan_result.subjects)} subjects and {len(scan_result.conditions)} conditions."
                 )
-                self._start_multigroup_scan(Path(folder))
             except ScanError as e:
                 self._set_status(f"Scan failed: {e}")
                 QMessageBox.critical(self, "Scan Error", str(e))
@@ -605,7 +438,6 @@ class StatsWindowActionsMixin:
         do nothing (user can Browse).
         """
         target = self._preferred_stats_folder()
-        self._start_multigroup_scan(target)
         if target.exists() and target.is_dir():
             self._set_data_folder_path(str(target))
             self._scan_button_clicked()

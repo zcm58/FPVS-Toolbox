@@ -72,14 +72,6 @@ from Main_App.gui.post_export_workflows import (
 )
 from Main_App.gui.op_guard import OpGuard
 
-STATS_TOOL_UNDER_DEVELOPMENT_WARNING = (
-    "The Statistics Tool is currently under development. Certain features, like "
-    "multigroup analysis, are not currently functional. Single Group Analysis mode "
-    "does work as expected. Future updates will fix the Statistics Tool and add "
-    "between group analysis."
-)
-
-
 class Processor(QObject):
     """Minimal processing stub emitting progress updates."""
 
@@ -456,13 +448,6 @@ class MainWindow(QMainWindow, ProcessingMixin):
         project_workflows.on_project_ready(self)
 
     # --------------------------- tools UI --------------------------- #
-    def open_stats_analyzer(self) -> None:
-        tool_workflows.open_stats_analyzer(
-            self,
-            PysideStatsWindow,
-            STATS_TOOL_UNDER_DEVELOPMENT_WARNING,
-        )
-
     def _set_sidebar_selection(self, role: str) -> None:
         sidebar = getattr(self, "sidebar", None)
         if sidebar is None:
@@ -478,6 +463,21 @@ class MainWindow(QMainWindow, ProcessingMixin):
         if hasattr(self, "workspace_stack") and hasattr(self, "homeWidget"):
             self.workspace_stack.setCurrentWidget(self.homeWidget)
         self._set_sidebar_selection("btn_home")
+
+    def _ensure_stats_page(self) -> PysideStatsWindow:
+        page = getattr(self, "_stats_page", None)
+        if page is None:
+            page = PysideStatsWindow(parent=self)
+            page.setObjectName("embedded_stats_page")
+            self.workspace_stack.addWidget(page)
+            self._stats_page = page
+        return page
+
+    def open_stats_analyzer(self) -> None:
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(self._ensure_stats_page())
+        self._set_sidebar_selection("btn_data")
 
     def _ensure_image_resizer_page(self) -> FPVSImageResizerQt:
         page = getattr(self, "_image_resizer_page", None)

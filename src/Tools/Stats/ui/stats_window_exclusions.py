@@ -18,33 +18,6 @@ class StatsWindowExclusionsMixin:
             "empty_list_policy": str(self._dv_empty_list_policy),
         }
 
-    def _get_between_group_dv_policy_payload(self) -> dict[str, object]:
-        """Handle the get between group dv policy payload step for the Stats workflow."""
-        payload = self._get_dv_policy_payload()
-        harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
-        if isinstance(harmonics_by_roi, dict) and any((harmonics_by_roi.get(k) or []) for k in harmonics_by_roi):
-            payload["name"] = FIXED_SHARED_POLICY_NAME
-            payload["harmonics_by_roi"] = harmonics_by_roi
-        return payload
-
-    def _refresh_fixed_harmonic_ui_state(self) -> None:
-        """Handle the refresh fixed harmonic ui state step for the Stats workflow."""
-        harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
-        has_shared_harmonics = isinstance(harmonics_by_roi, dict) and any(
-            (harmonics_by_roi.get(k) or []) for k in harmonics_by_roi
-        )
-        button = getattr(self, "compute_fixed_harmonic_dv_btn", None)
-        if button is not None:
-            button.setEnabled(has_shared_harmonics)
-        summary_label = getattr(self, "fixed_harmonic_dv_summary_value", None)
-        if summary_label is not None:
-            if self._fixed_harmonic_dv_payload:
-                summary_label.setText(str(self._fixed_harmonic_dv_payload.get("summary", "Ready")))
-            elif has_shared_harmonics:
-                summary_label.setText("Shared harmonics ready; DV not computed.")
-            else:
-                summary_label.setText("Waiting for shared harmonics.")
-
     def get_dv_policy_snapshot(self) -> dict[str, object]:
         """Handle the get dv policy snapshot step for the Stats workflow."""
         return dict(self._get_dv_policy_payload())
@@ -200,6 +173,9 @@ class StatsWindowExclusionsMixin:
         for widget in widgets:
             if widget is not None:
                 widget.setEnabled(enabled)
+        container = getattr(self, "fixed_k_controls", None)
+        if container is not None:
+            container.setVisible(enabled)
 
     def _set_group_mean_controls_visible(self, visible: bool) -> None:
         """Handle the set group mean controls visible step for the Stats workflow."""

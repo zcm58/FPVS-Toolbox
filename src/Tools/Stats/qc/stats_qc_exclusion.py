@@ -10,7 +10,7 @@ from typing import Callable, Dict, Iterable, List, Optional
 import numpy as np
 import pandas as pd
 
-from Tools.Stats.io.excel_io import safe_read_excel
+from Tools.Stats.io import excel_io
 from Tools.Stats.analysis.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
     _match_freq_column,
@@ -296,7 +296,7 @@ def run_qc_exclusion(
                 _log_message(log_func, f"QC: Missing file for {pid} {cond_name}: {file_path}")
                 continue
             try:
-                df_bca = safe_read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
+                df_bca = excel_io.safe_read_excel(file_path, sheet_name="BCA (uV)", index_col="Electrode")
             except Exception as exc:  # noqa: BLE001
                 _log_message(log_func, f"QC: Failed to read BCA sheet from {file_path}: {exc}")
                 continue

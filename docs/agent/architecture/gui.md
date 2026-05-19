@@ -42,8 +42,9 @@ The main app shell uses the outer `MainWindow.stacked` widget for landing vs
 application shell navigation. Inside the application shell, `workspace_stack`
 switches the right-hand workspace content while preserving the persistent
 sidebar and project header. The preprocessing page remains `homeWidget`; the
-SNR Plot Generator, Individual Detectability, Image Resizer, Ratio Calculator,
-and Epoch Averaging are the first tools embedded in this workspace stack.
+Statistical Analysis, SNR Plot Generator, Individual Detectability, Image
+Resizer, Ratio Calculator, and Epoch Averaging are embedded in this workspace
+stack.
 
 The main shell default and minimum size is `1280x900` to provide enough
 workspace area for embedded tools without requiring individual pop-out windows.

@@ -14,9 +14,6 @@ class StatsWindowExportsMixin:
             "lmm": (export_mixed_model_results_to_excel, LMM_XLS),
             "posthoc": (export_posthoc_results_to_excel, POSTHOC_XLS),
             "harmonic": (export_harmonic_results_to_excel, HARMONIC_XLS),
-            "anova_between": (export_rm_anova_results_to_excel, ANOVA_BETWEEN_XLS),
-            "lmm_between": (export_mixed_model_results_to_excel, LMM_BETWEEN_XLS),
-            "group_contrasts": (export_group_contrasts_workbook, GROUP_CONTRAST_XLS),
             "baseline_vs_zero": (export_baseline_vs_zero_results_to_excel, BASELINE_VS_ZERO_XLS),
         }
         func, fname = mapping[kind]
@@ -55,7 +52,7 @@ class StatsWindowExportsMixin:
         if data is None:
             return []
 
-        if kind in {"anova", "anova_between"} and isinstance(data, pd.DataFrame):
+        if kind == "anova" and isinstance(data, pd.DataFrame):
             log_rm_anova_p_minima(data)
 
         path = safe_export_call(
@@ -65,9 +62,9 @@ class StatsWindowExportsMixin:
             fname,
             log_func=self._set_status,
         )
-        if kind in {"anova", "anova_between"}:
+        if kind == "anova":
             apply_rm_anova_pvalue_number_formats(path)
-        if kind in {"lmm", "lmm_between"} and isinstance(data, pd.DataFrame):
+        if kind == "lmm" and isinstance(data, pd.DataFrame):
             apply_lmm_number_formats_and_metadata(path, lmm_df=data)
         if kind == "baseline_vs_zero":
             apply_baseline_vs_zero_number_formats(path)
@@ -312,125 +309,5 @@ class StatsWindowExportsMixin:
         )
         paths.append(excluded_path)
         return paths
-
-    def _export_between_pipeline(self) -> bool:
-        """Handle the export between pipeline step for the Stats workflow."""
-        section = "Between"
-        exports = [
-            ("lmm_between", self.between_mixed_model_results_data, "Between-Group Mixed Model"),
-            ("group_contrasts", self.group_contrasts_results_data, "Group Contrasts"),
-        ]
-        out_dir = self._ensure_results_dir()
-
-        try:
-            paths: list[Path] = []
-
-            for kind, data_obj, label in exports:
-                if data_obj is None:
-                    self.append_log(
-                        section,
-                        f"  • Skipping export for {label} (no data)",
-                        level="warning",
-                    )
-                    continue
-
-                result_paths = self.export_results(kind, data_obj, out_dir)
-
-                if not result_paths:
-                    if kind == "harmonic":
-                        self.append_log(
-                            section,
-                            f"  • Skipping export for {label} (no significant harmonics)",
-                            level="warning",
-                        )
-                        continue
-
-                    self.append_log(
-                        section,
-                        f"  • Export produced no files for {label}",
-                        level="error",
-                    )
-                    return False
-
-                paths.extend(result_paths)
-
-            dv_variant_paths = self._export_dv_variants(PipelineId.BETWEEN, out_dir)
-            if dv_variant_paths:
-                paths.extend(dv_variant_paths)
-
-            exclusion_paths = self._export_outlier_exclusions(PipelineId.BETWEEN, out_dir)
-            if exclusion_paths:
-                paths.extend(exclusion_paths)
-
-            missing_export = self._export_between_missingness(out_dir)
-            if missing_export is not None:
-                paths.append(missing_export)
-
-            qc_context_export = self._export_qc_context_by_group(out_dir)
-            if qc_context_export is not None:
-                paths.append(qc_context_export)
-
-            if paths:
-                self.append_log(section, "  • Results exported to:")
-                for p in paths:
-                    self.append_log(section, f"      {p}")
-                self._write_dv_metadata(out_dir, PipelineId.BETWEEN)
-
-            return True
-
-        except Exception as exc:  # noqa: BLE001
-            self.append_log(section, f"  • Export failed: {exc}", level="error")
-            return False
-
-    def _export_between_missingness(self, out_dir: str) -> Path | None:
-        """Handle the export between missingness step for the Stats workflow."""
-        payload = self._between_missingness_payload if isinstance(self._between_missingness_payload, dict) else {}
-        mixed_rows = payload.get("mixed_model_missing_cells", [])
-        summary = payload.get("summary", {})
-        summary_rows = [
-            {"Metric": "Supported workflow", "Value": "Between-group mixed model + group contrasts"},
-            {"Metric": "N groups", "Value": summary.get("n_groups", 0)},
-            {
-                "Metric": "N subjects modeled in multigroup mixed model",
-                "Value": summary.get("n_mixed_subjects", 0),
-            },
-            {"Metric": "N mixed-model missing condition cells", "Value": len(mixed_rows)},
-            {"Metric": "N discovered multigroup subjects", "Value": summary.get("n_discovered_subjects", 0)},
-            {"Metric": "N assigned multigroup subjects", "Value": summary.get("n_assigned_subjects", 0)},
-        ]
-        save_path = Path(out_dir) / MULTIGROUP_MISSINGNESS_XLS
-        export_path = export_missingness_workbook(
-            save_path=save_path,
-            mixed_missing_rows=mixed_rows if isinstance(mixed_rows, list) else [],
-            anova_excluded_rows=[],
-            summary_rows=summary_rows,
-            log_func=self._set_status,
-        )
-        self._between_missingness_payload["export_path"] = str(export_path)
-        return export_path
-
-    def _export_qc_context_by_group(self, out_dir: str) -> Path | None:
-        """Handle the export qc context by group step for the Stats workflow."""
-        fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
-        dv_table = fixed_payload.get("dv_table")
-        if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
-            return None
-
-        run_report = self._pipeline_run_reports.get(PipelineId.BETWEEN)
-        flagged_map: dict[str, list[str]] = {}
-        if isinstance(run_report, StatsRunReport):
-            flagged_map = collect_flagged_pid_map(run_report.qc_report, run_report.dv_report)
-
-        save_path = Path(out_dir) / MULTIGROUP_QC_CONTEXT_XLS
-        export_path = export_qc_context_workbook(
-            save_path=save_path,
-            dv_table=dv_table,
-            subject_to_group=self._between_subject_groups(),
-            missing_harmonics_rows=fixed_payload.get("missing_harmonics", []),
-            flagged_pid_map=flagged_map,
-            log_func=self._set_status,
-        )
-        fixed_payload["qc_context_export_path"] = str(export_path)
-        return export_path
 
     # --------- worker signal handlers ---------

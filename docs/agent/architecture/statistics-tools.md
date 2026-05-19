@@ -4,7 +4,7 @@ Statistics and tool code is organized under one active Stats package. Old `PySid
 
 Primary paths:
 
-- `src/Tools/Stats/`: active statistics GUI, controller, workers, analysis helpers, QC helpers, reporting, I/O, CLI, and shared helpers grouped by function. The root contains only package/docs files.
+- `src/Tools/Stats/`: active single-group statistics GUI, controller, workers, analysis helpers, QC helpers, reporting, I/O, and shared helpers grouped by function. The root contains only package/docs files.
 - `src/Tools/Stats/data/shared_rois.py` and `src/Tools/Stats/data/roi_resolver.py`: shared ROI helpers.
 - `src/quarantine/Tools/Stats/Legacy_UI/`: reference-only source for the removed CustomTkinter Stats UI.
 - `src/Tools/Plot_Generator/`: plot generation GUI, workers, and manifest helpers.
@@ -17,14 +17,13 @@ Stats grouping:
 - `ui/`: window mixins, dialogs, widget assembly, and small widgets.
 - `controller/`: run coordination, pipeline state, and worker scheduling.
 - `workers/`: Qt worker wrappers and GUI-agnostic statistical job execution.
-- `data/`: project scans, manifests, subject IDs, group metadata, and missing input detection.
-- `analysis/`: DV policy facade and focused helpers, statistical engines, harmonics, cross-phase statistics, SNR/noise helpers, and group contrasts.
+- `data/`: project scans, manifests, subject IDs, and missing input detection.
+- `analysis/`: DV policy facade and focused helpers, statistical engines, harmonics, and SNR/noise helpers.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
-- `reporting/summary/`: focused rule-based summary builders split by models, frame/file loading, ANOVA, posthoc/group contrasts, and mixed-model language. `reporting/summary_utils.py` is a compatibility facade only.
+- `reporting/summary/`: focused rule-based summary builders split by models, frame/file loading, ANOVA, posthoc, and mixed-model language. `reporting/summary_utils.py` is a compatibility facade only.
 - `common/`: shared dataclasses, enums, constants, and lightweight window types.
 - `io/`: Excel/dataframe I/O helpers.
-- `cli/`: command-line and out-of-process job entry points.
 
 Rules:
 

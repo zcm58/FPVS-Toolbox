@@ -21,7 +21,7 @@ def test_export_skips_rm_anova_none(tmp_path, monkeypatch):
     win.rm_anova_results_data = None
     win.mixed_model_results_data = pd.DataFrame({"value": [1.0]})
     win.posthoc_results_data = None
-    win._harmonic_results = {PipelineId.SINGLE: None, PipelineId.BETWEEN: None}
+    win._harmonic_results = {PipelineId.SINGLE: None}
 
     export_calls: list[tuple[str, object, str]] = []
 

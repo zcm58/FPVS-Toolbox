@@ -21,8 +21,6 @@ class StatsWindowPipelineMixin:
         """Handle the section label step for the Stats workflow."""
         if pipeline is PipelineId.SINGLE:
             return "Single"
-        if pipeline is PipelineId.BETWEEN:
-            return "Between"
         return "General"
 
     def _log_pipeline_event(
@@ -54,21 +52,11 @@ class StatsWindowPipelineMixin:
         buttons = [
             getattr(self, "analyze_single_btn", None),
             getattr(self, "single_advanced_btn", None),
-            getattr(self, "analyze_between_btn", None),
-            getattr(self, "between_advanced_btn", None),
-            getattr(self, "lela_mode_btn", None),
             getattr(self, "btn_open_results", None),
-            getattr(self, "compute_shared_harmonics_btn", None),
-            getattr(self, "compute_fixed_harmonic_dv_btn", None),
         ]
         for b in buttons:
             if b:
                 b.setEnabled(not running)
-        if not running and hasattr(self, "compute_shared_harmonics_btn"):
-            self.compute_shared_harmonics_btn.setEnabled(
-                bool(self._multigroup_scan_result and self._multigroup_scan_result.multi_group_ready)
-            )
-            self._refresh_fixed_harmonic_ui_state()
         spinner = getattr(self, "spinner", None)
         if spinner:
             if running:
@@ -213,41 +201,6 @@ class StatsWindowPipelineMixin:
 
     # --------- exports plumbing ---------
 
-    def _between_mixed_model_support_state(
-        self,
-        payload: dict | None = None,
-    ) -> tuple[bool, str]:
-        """Return whether the current multigroup LMM result is exportable/supported."""
-
-        candidate_payload = payload if isinstance(payload, dict) else {}
-        fit_status = candidate_payload.get("fit_status")
-        if isinstance(fit_status, dict) and fit_status.get("supported") is False:
-            return False, str(fit_status.get("message") or "Supported multigroup LMM blocked.")
-        if str(candidate_payload.get("status", "")).strip().lower() == "blocked":
-            blocked_message = candidate_payload.get("message") or candidate_payload.get("blocked_reason")
-            return False, str(blocked_message or "Supported multigroup LMM blocked.")
-
-        results_df = (
-            candidate_payload.get("mixed_results_df")
-            if isinstance(candidate_payload.get("mixed_results_df"), pd.DataFrame)
-            else self.between_mixed_model_results_data
-        )
-        if not isinstance(results_df, pd.DataFrame) or results_df.empty:
-            attrs = results_df.attrs if isinstance(results_df, pd.DataFrame) else {}
-            message = attrs.get("lmm_fit_status_message") if isinstance(attrs, dict) else ""
-            return False, str(message or "Run Between-Group Mixed Model first.")
-
-        attrs = results_df.attrs if isinstance(results_df.attrs, dict) else {}
-        if attrs.get("lmm_fit_supported") is False:
-            return False, str(attrs.get("lmm_fit_status_message") or "Supported multigroup LMM blocked.")
-        return True, ""
-
-    def _can_export_between_mixed_model(self) -> bool:
-        """Return whether a supported between-group LMM export is available."""
-
-        supported, _message = self._between_mixed_model_support_state()
-        return supported
-
     def _update_export_buttons(self) -> None:
         """Handle the update export buttons step for the Stats workflow."""
         def _maybe_enable(name: str, enabled: bool) -> None:
@@ -271,25 +224,6 @@ class StatsWindowPipelineMixin:
             isinstance(self.posthoc_results_data, pd.DataFrame)
             and not self.posthoc_results_data.empty,
         )
-        _maybe_enable(
-            "export_between_anova_btn",
-            False,
-        )
-        _maybe_enable(
-            "export_between_mixed_btn",
-            self._can_export_between_mixed_model(),
-        )
-        _maybe_enable(
-            "export_group_contrasts_btn",
-            isinstance(self.group_contrasts_results_data, pd.DataFrame)
-            and not self.group_contrasts_results_data.empty,
-        )
-        fixed_payload = self._fixed_harmonic_dv_payload if isinstance(self._fixed_harmonic_dv_payload, dict) else {}
-        fixed_table = fixed_payload.get("dv_table")
-        _maybe_enable(
-            "export_qc_context_btn",
-            isinstance(fixed_table, pd.DataFrame) and not fixed_table.empty,
-        )
 
     def _build_summary_frames(self, pipeline_id: PipelineId) -> StatsSummaryFrames:
         """Handle the build summary frames step for the Stats workflow."""
@@ -298,9 +232,6 @@ class StatsWindowPipelineMixin:
             single_posthoc=self.posthoc_results_data,
             rm_anova_results=self.rm_anova_results_data,
             mixed_model_results=self.mixed_model_results_data,
-            between_contrasts=self.group_contrasts_results_data,
-            between_anova_results=self.between_anova_results_data,
-            between_mixed_model_results=self.between_mixed_model_results_data,
             harmonic_results=self._harmonic_results.get(pipeline_id),
         )
 
@@ -351,7 +282,7 @@ class StatsWindowPipelineMixin:
         selected_rois = sorted((self.rois or {}).keys())
         report = self._pipeline_run_reports.get(pipeline_id)
         included = report.final_modeled_pids if isinstance(report, StatsRunReport) else []
-        total_participants = len(self.subjects) if pipeline_id is PipelineId.SINGLE else len(self._between_subjects())
+        total_participants = len(self.subjects)
         context = ReportingSummaryContext(
             project_name=self.project_title,
             project_root=self._project_path,
@@ -366,8 +297,8 @@ class StatsWindowPipelineMixin:
             selected_rois=selected_rois,
         )
         anova_df = self.rm_anova_results_data if pipeline_id is PipelineId.SINGLE else None
-        lmm_df = self.mixed_model_results_data if pipeline_id is PipelineId.SINGLE else self.between_mixed_model_results_data
-        posthoc_df = self.posthoc_results_data if pipeline_id is PipelineId.SINGLE else self.group_contrasts_results_data
+        lmm_df = self.mixed_model_results_data
+        posthoc_df = self.posthoc_results_data
         auto_export = bool(getattr(self, "reporting_summary_export_checkbox", None) and self.reporting_summary_export_checkbox.isChecked())
         return {
             "context": context,
@@ -663,11 +594,6 @@ class StatsWindowPipelineMixin:
         """Handle the ensure results dir step for the Stats workflow."""
         return self._ensure_results_dir()
 
-    def prompt_phase_folder(self, title: str, start_dir: str | None = None) -> Optional[str]:
-        """Handle the prompt phase folder step for the Stats workflow."""
-        folder = QFileDialog.getExistingDirectory(self, title, start_dir or self.project_dir)
-        return folder or None
-
     def get_analysis_settings_snapshot(self) -> tuple[float, float, dict, list[str]]:
         """Handle the get analysis settings snapshot step for the Stats workflow."""
         self.refresh_rois()
@@ -688,32 +614,6 @@ class StatsWindowPipelineMixin:
                 pipeline=pipeline_id, event="end", extra={"reason": "precheck_failed"}
             )
             return False
-        if pipeline_id is PipelineId.BETWEEN and not self._ensure_between_ready():
-            self._log_pipeline_event(
-                pipeline=pipeline_id, event="end", extra={"reason": "between_not_ready"}
-            )
-            return False
-        if pipeline_id is PipelineId.BETWEEN:
-            if not (self._multigroup_scan_result and self._multigroup_scan_result.multi_group_ready):
-                message = "Between-group analysis is blocked: multi-group readiness is not satisfied."
-                self._set_status(message)
-                self.append_log("Between", message, level="warning")
-                return False
-            harmonics_by_roi = self._shared_harmonics_payload.get("harmonics_by_roi", {})
-            has_shared = isinstance(harmonics_by_roi, dict) and any(
-                (harmonics_by_roi.get(key) or []) for key in harmonics_by_roi
-            )
-            if not has_shared:
-                message = "Between-group analysis is blocked: compute shared harmonics first."
-                self._set_status(message)
-                self.append_log("Between", message, level="warning")
-                return False
-            dv_table = self._fixed_harmonic_dv_payload.get("dv_table")
-            if not isinstance(dv_table, pd.DataFrame) or dv_table.empty:
-                message = "Between-group analysis is blocked: compute fixed-harmonic DV first."
-                self._set_status(message)
-                self.append_log("Between", message, level="warning")
-                return False
         self._log_pipeline_event(pipeline=pipeline_id, event="end")
         return True
 
@@ -732,17 +632,12 @@ class StatsWindowPipelineMixin:
         self._pipeline_qc_config[pipeline_id] = self._get_qc_exclusion_payload()
         self._pipeline_qc_state[pipeline_id] = {"report": None}
         self._pipeline_run_reports[pipeline_id] = None
-        if pipeline_id is PipelineId.BETWEEN:
-            self.between_anova_results_data = None
-            self._between_missingness_payload = {}
-            if isinstance(self._fixed_harmonic_dv_payload, dict):
-                self._fixed_harmonic_dv_payload.pop("prepared_multigroup_dv_payload", None)
-        label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
+        label = self.single_status_lbl
         if label:
             if hasattr(label, "set_variant"):
                 label.set_variant("info")
             label.setText("Running…")
-        btn = self.analyze_single_btn if pipeline_id is PipelineId.SINGLE else self.analyze_between_btn
+        btn = self.analyze_single_btn
         if btn:
             btn.setEnabled(False)
         self._focus_self()
@@ -774,8 +669,8 @@ class StatsWindowPipelineMixin:
                 "exports_ran": bool(exports_ran),
             },
         )
-        label = self.single_status_lbl if pipeline_id is PipelineId.SINGLE else self.between_status_lbl
-        btn = self.analyze_single_btn if pipeline_id is PipelineId.SINGLE else self.analyze_between_btn
+        label = self.single_status_lbl
+        btn = self.analyze_single_btn
         try:
             if label:
                 if success:
@@ -792,21 +687,7 @@ class StatsWindowPipelineMixin:
                 elapsed_ms = int((time.perf_counter() - self._pipeline_start_perf.get(pipeline_id, time.perf_counter())) * 1000)
                 section = self._section_label(pipeline_id)
                 if exports_ran:
-                    if pipeline_id is PipelineId.SINGLE:
-                        self.append_log(section, "  • Results exported for Single Group Analysis")
-                    elif pipeline_id is PipelineId.BETWEEN:
-                        self.append_log(section, "  • Results exported for Between-Group Analysis")
-                        summary = self._between_missingness_payload.get("summary") if isinstance(self._between_missingness_payload, dict) else None
-                        export_path = self._between_missingness_payload.get("export_path") if isinstance(self._between_missingness_payload, dict) else None
-                        if isinstance(summary, dict):
-                            line = (
-                                "Between-group complete: "
-                                f"groups={summary.get('n_groups', 0)}, "
-                                f"modeled subjects={summary.get('n_mixed_subjects', 0)}, "
-                                f"missingness export={export_path or 'pending export'}"
-                            )
-                            self._set_status(line)
-                            self.append_log(section, line, level="info")
+                    self.append_log(section, "  - Results exported for Single Group Analysis")
                     stats_folder = Path(self._ensure_results_dir())
                     self._prompt_view_results(self._section_label(pipeline_id), stats_folder)
                 else:
@@ -887,8 +768,6 @@ class StatsWindowPipelineMixin:
         """Handle the export pipeline results step for the Stats workflow."""
         if pipeline_id is PipelineId.SINGLE:
             return self._export_single_pipeline()
-        if pipeline_id is PipelineId.BETWEEN:
-            return self._export_between_pipeline()
         return False
 
     def _build_harmonic_kwargs(self) -> dict:
@@ -939,7 +818,7 @@ class StatsWindowPipelineMixin:
                     base_freq=self._current_base_freq,
                     rois=self.rois,
                     rois_all=self.rois,
-                    dv_policy=self._get_between_group_dv_policy_payload(),
+                    dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -964,8 +843,7 @@ class StatsWindowPipelineMixin:
                     alpha=self._current_alpha,
                     rois=self.rois,
                     rois_all=self.rois,
-                    subject_groups=self.subject_groups,
-                    dv_policy=self._get_between_group_dv_policy_payload(),
+                    dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -988,8 +866,7 @@ class StatsWindowPipelineMixin:
                     alpha=self._current_alpha,
                     rois=self.rois,
                     rois_all=self.rois,
-                    subject_groups=self.subject_groups,
-                    dv_policy=self._get_between_group_dv_policy_payload(),
+                    dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -1012,7 +889,7 @@ class StatsWindowPipelineMixin:
                     alpha=self._current_alpha,
                     rois=self.rois,
                     rois_all=self.rois,
-                    dv_policy=self._get_between_group_dv_policy_payload(),
+                    dv_policy=self._get_dv_policy_payload(),
                     dv_variants=dv_variants_payload,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
@@ -1034,86 +911,6 @@ class StatsWindowPipelineMixin:
                     self._apply_harmonic_results(payload, pipeline_id=pid, update_text=True)
 
                 return kwargs, handler
-        if pipeline_id is PipelineId.BETWEEN:
-            between_subjects = self._between_subjects()
-            between_subject_data = self._between_subject_data()
-            between_subject_groups = self._between_subject_groups()
-            between_manual_excluded = self._between_manual_excluded_pids()
-            fixed_dv_table = self._fixed_harmonic_dv_payload.get("dv_table")
-            shared_multigroup_dv_payload = self._fixed_harmonic_dv_payload.setdefault(
-                "prepared_multigroup_dv_payload", {}
-            )
-            selected_conditions = self._get_selected_conditions()
-            if step_id is StepId.BETWEEN_GROUP_ANOVA:
-                raise ValueError(
-                    "Between-group ANOVA is paused and unavailable in the multigroup workflow."
-                )
-            if step_id is StepId.BETWEEN_GROUP_MIXED_MODEL:
-                results_dir = self._ensure_results_dir()
-                kwargs = dict(
-                    subjects=between_subjects,
-                    conditions=self._get_selected_conditions(),
-                    conditions_all=self.conditions,
-                    subject_data=between_subject_data,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                    rois_all=self.rois,
-                    subject_groups=between_subject_groups,
-                    include_group=True,
-                    dv_policy=self._get_between_group_dv_policy_payload(),
-                    dv_variants=dv_variants_payload,
-                    outlier_exclusion_enabled=outlier_payload.get("enabled", True),
-                    outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
-                    qc_config=qc_payload,
-                    qc_state=qc_state,
-                    manual_excluded_pids=between_manual_excluded,
-                    fixed_harmonic_dv_table=fixed_dv_table,
-                    required_conditions=selected_conditions,
-                    subject_to_group=between_subject_groups,
-                    prepared_multigroup_dv_payload=shared_multigroup_dv_payload,
-                    results_dir=results_dir,
-                )
-                def handler(payload):
-                    """Handle the handler step for the Stats workflow."""
-                    self._apply_between_mixed_results(payload, update_text=False)
-                    supported, support_message = self._between_mixed_model_support_state(payload)
-                    if not supported:
-                        raise RuntimeError(support_message)
-
-                return kwargs, handler
-            if step_id is StepId.GROUP_CONTRASTS:
-                kwargs = dict(
-                    subjects=between_subjects,
-                    conditions=self._get_selected_conditions(),
-                    conditions_all=self.conditions,
-                    subject_data=between_subject_data,
-                    base_freq=self._current_base_freq,
-                    alpha=self._current_alpha,
-                    rois=self.rois,
-                    rois_all=self.rois,
-                    subject_groups=between_subject_groups,
-                    dv_policy=self._get_between_group_dv_policy_payload(),
-                    dv_variants=dv_variants_payload,
-                    outlier_exclusion_enabled=outlier_payload.get("enabled", True),
-                    outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
-                    qc_config=qc_payload,
-                    qc_state=qc_state,
-                    manual_excluded_pids=between_manual_excluded,
-                    fixed_harmonic_dv_table=fixed_dv_table,
-                    required_conditions=selected_conditions,
-                    subject_to_group=between_subject_groups,
-                    prepared_multigroup_dv_payload=shared_multigroup_dv_payload,
-                )
-                def handler(payload):
-                    """Handle the handler step for the Stats workflow."""
-                    self._apply_group_contrasts_results(payload, update_text=True)
-
-                return kwargs, handler
-            if step_id is StepId.HARMONIC_CHECK:
-                raise ValueError(
-                    "Harmonic Check is not part of the supported multigroup workflow in this phase."
-                )
         raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
 
     def _prompt_view_results(self, section: str, stats_folder: Path) -> None:
@@ -1140,12 +937,6 @@ class StatsWindowPipelineMixin:
     @Slot(str)
     def _on_worker_message(self, msg: str) -> None:
         """Handle the on worker message step for the Stats workflow."""
-        text = msg or ""
-        if (
-            text.startswith("[BETWEEN DV CONTRACT]")
-            and self._controller.is_running(PipelineId.BETWEEN)
-        ):
-            self.append_log("Between", text)
         self._set_detected_info(msg)
 
     @Slot(str)
@@ -1156,8 +947,6 @@ class StatsWindowPipelineMixin:
         try:
             if self._controller.is_running(PipelineId.SINGLE):
                 section = "Single"
-            elif self._controller.is_running(PipelineId.BETWEEN):
-                section = "Between"
         except Exception:
             section = "General"
         self.append_log(section, f"Worker error: {msg}", level="error")
@@ -1228,49 +1017,12 @@ class StatsWindowPipelineMixin:
         self._update_export_buttons()
         return output_text
 
-    def _apply_between_anova_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply between anova results step for the Stats workflow."""
-        self.between_anova_results_data = payload.get("anova_df_results")
-        self._store_dv_metadata(PipelineId.BETWEEN, payload)
-        self._store_run_report(PipelineId.BETWEEN, payload)
-        missingness = payload.get("missingness", {}) if isinstance(payload, dict) else {}
-        if isinstance(missingness, dict):
-            self._between_missingness_payload.update(missingness)
-        alpha = getattr(self, "_current_alpha", 0.05)
-
-        output_text = build_between_anova_output(self.between_anova_results_data, alpha)
-        self._refresh_between_missingness_summary()
-        if update_text:
-            self.summary_text.append(output_text)
-        self._update_export_buttons()
-        return output_text
-
     def _apply_mixed_model_results(self, payload: dict, *, update_text: bool = True) -> str:
         """Handle the apply mixed model results step for the Stats workflow."""
         self.mixed_model_results_data = payload.get("mixed_results_df")
         self._store_dv_metadata(PipelineId.SINGLE, payload)
         self._store_run_report(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
-        if update_text:
-            self.summary_text.append(output_text)
-        self._update_export_buttons()
-        return output_text
-
-    def _apply_between_mixed_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply between mixed results step for the Stats workflow."""
-        if not isinstance(payload, dict):
-            raise ValueError("Mixed-model payload must be a dict.")
-        if "mixed_results_df" not in payload:
-            raise ValueError("Mixed-model payload missing 'mixed_results_df'.")
-
-        self.between_mixed_model_results_data = payload.get("mixed_results_df")
-        self._store_dv_metadata(PipelineId.BETWEEN, payload)
-        self._store_run_report(PipelineId.BETWEEN, payload)
-        missingness = payload.get("missingness", {}) if isinstance(payload, dict) else {}
-        if isinstance(missingness, dict):
-            self._between_missingness_payload.update(missingness)
-        output_text = payload.get("output_text", "")
-        self._refresh_between_missingness_summary()
         if update_text:
             self.summary_text.append(output_text)
         self._update_export_buttons()
@@ -1297,17 +1049,6 @@ class StatsWindowPipelineMixin:
         self._update_export_buttons()
         return output_text
 
-    def _apply_group_contrasts_results(self, payload: dict, *, update_text: bool = True) -> str:
-        """Handle the apply group contrasts results step for the Stats workflow."""
-        self.group_contrasts_results_data = payload.get("results_df")
-        self._store_dv_metadata(PipelineId.BETWEEN, payload)
-        self._store_run_report(PipelineId.BETWEEN, payload)
-        output_text = payload.get("output_text", "")
-        if update_text:
-            self.summary_text.append(output_text)
-        self._update_export_buttons()
-        return output_text
-
     def _apply_harmonic_results(
         self, payload: dict, *, pipeline_id: PipelineId, update_text: bool = True
     ) -> str:
@@ -1328,21 +1069,9 @@ class StatsWindowPipelineMixin:
         self._end_run()
 
     @Slot(dict)
-    def _on_between_anova_finished(self, payload: dict) -> None:
-        """Handle the on between anova finished step for the Stats workflow."""
-        self._apply_between_anova_results(payload)
-        self._end_run()
-
-    @Slot(dict)
     def _on_mixed_model_finished(self, payload: dict) -> None:
         """Handle the on mixed model finished step for the Stats workflow."""
         self._apply_mixed_model_results(payload)
-        self._end_run()
-
-    @Slot(dict)
-    def _on_between_mixed_finished(self, payload: dict) -> None:
-        """Handle the on between mixed finished step for the Stats workflow."""
-        self._apply_between_mixed_results(payload)
         self._end_run()
 
     @Slot(dict)
@@ -1352,36 +1081,10 @@ class StatsWindowPipelineMixin:
         self._end_run()
 
     @Slot(dict)
-    def _on_group_contrasts_finished(self, payload: dict) -> None:
-        """Handle the on group contrasts finished step for the Stats workflow."""
-        self._apply_group_contrasts_results(payload)
-        self._end_run()
-
-    @Slot(dict)
     def _on_harmonic_finished(self, payload: dict) -> None:
         """Handle the on harmonic finished step for the Stats workflow."""
         pipeline_id = self._active_pipeline or PipelineId.SINGLE
         self._apply_harmonic_results(payload, pipeline_id=pipeline_id)
         self._end_run()
-
-    @Slot(object)
-    def _on_lela_mode_finished(self, stats_folder: Path | None = None) -> None:
-        """Handle the on lela mode finished step for the Stats workflow."""
-        try:
-            section = self._section_label(PipelineId.BETWEEN)
-            self.append_log(section, "[Between] Lela Mode: complete — see Cross-Phase LMM Analysis.xlsx")
-            if stats_folder:
-                self.append_log(section, f"  • Excel: {stats_folder}")
-        finally:
-            self._end_run()
-
-    @Slot(str)
-    def _on_lela_mode_error(self, message: str) -> None:
-        """Handle the on lela mode error step for the Stats workflow."""
-        try:
-            section = self._section_label(PipelineId.BETWEEN)
-            self.append_log(section, f"[Between] Lela Mode error: {message}", level="error")
-        finally:
-            self._end_run()
 
     # --------------------------- UI building ---------------------------

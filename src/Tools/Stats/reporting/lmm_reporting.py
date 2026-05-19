@@ -18,7 +18,6 @@ TERM_PATTERN = re.compile(
 )
 
 NOT_AVAILABLE = "NOT AVAILABLE (not computed by this run)"
-DEFAULT_GROUP_CODING_NOTE = "Default/implicit (not explicitly set by FPVS wrapper)"
 
 
 def resolve_lmm_formula(*, model: Any, fallback_formula: str) -> str:
@@ -53,15 +52,12 @@ def _factor_coding_from_formula(formula: str, factor: str) -> str:
     if explicit:
         return explicit.group(1).strip()
     if _formula_mentions_factor(formula, factor):
-        if factor == "group":
-            return DEFAULT_GROUP_CODING_NOTE
         return "Default/implicit"
     return NOT_AVAILABLE
 
 
 def build_lmm_run_contract(
     *,
-    include_group: bool,
     formula: str,
     method_used: str,
     re_formula_used: str,
@@ -69,8 +65,6 @@ def build_lmm_run_contract(
     """Build the canonical contract for the fitted LMM."""
 
     coding_map: dict[str, str] = {}
-    if include_group:
-        coding_map["group"] = _factor_coding_from_formula(formula, "group")
     if _formula_mentions_factor(formula, "condition"):
         coding_map["condition"] = _factor_coding_from_formula(formula, "condition")
     if _formula_mentions_factor(formula, "roi"):
@@ -78,19 +72,11 @@ def build_lmm_run_contract(
     coding_summary = "; ".join(f"{key}: {value}" for key, value in coding_map.items()) or NOT_AVAILABLE
 
     return {
-        "scope": "supported_multigroup_between" if include_group else "single_group",
-        "scope_label": (
-            "Supported multigroup between-group LMM"
-            if include_group
-            else "Single-group LMM"
-        ),
+        "scope": "single_group",
+        "scope_label": "Single-group LMM",
         "formula": formula,
         "formula_rhs": _extract_formula_rhs(formula),
-        "fixed_effects_summary": (
-            "Group, condition, ROI, and all interactions"
-            if include_group
-            else "Condition, ROI, and their interaction"
-        ),
+        "fixed_effects_summary": "Condition, ROI, and their interaction",
         "random_effects_summary": f"Random intercept for subject only (re_formula={re_formula_used})",
         "estimation_summary": f"{method_used} via statsmodels MixedLM",
         "coding_map": coding_map,
@@ -101,7 +87,6 @@ def build_lmm_run_contract(
 def classify_lmm_fit_status(
     table: pd.DataFrame,
     *,
-    include_group: bool,
     converged: bool,
     singular: bool,
 ) -> dict[str, Any]:
@@ -141,7 +126,7 @@ def classify_lmm_fit_status(
     if singular:
         issues.append("random-effects covariance is near-singular")
 
-    scope_label = "Supported multigroup LMM" if include_group else "LMM"
+    scope_label = "LMM"
     supported = not issues
     status = "supported" if supported else "unsupported"
     message = (

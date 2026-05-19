@@ -78,7 +78,6 @@ def test_stats_export_finalization_release_smoke(
 
     win.subjects = ["S1"]
     win.conditions = ["CondA", "CondB"]
-    win.subject_groups = {"S1": None}
     win.subject_data = {
         "S1": {
             "CondA": {"ROI": 1.0},
