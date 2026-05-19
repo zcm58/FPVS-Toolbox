@@ -11,6 +11,10 @@ if not hasattr(QtCore, "QThread"):
 from Tools.Individual_Detectability.main_window import (  # noqa: E402
     IndividualDetectabilityWindow,
 )
+from Main_App.gui.style_tokens import (  # noqa: E402
+    COMPACT_SECTION_MAX_HEIGHT,
+    SECTION_HEADER_CONTENT_GAP,
+)
 from Main_App.gui.components import PathPickerRow, SectionCard, StatusBanner  # noqa: E402
 
 
@@ -27,9 +31,31 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatc
         "individual_detectability_output",
         "individual_detectability_participants",
         "individual_detectability_run",
+        "individual_detectability_harmonics",
+        "individual_detectability_snr",
+        "individual_detectability_layout",
+        "individual_detectability_summary",
     }
     assert expected_cards <= set(cards)
     assert isinstance(window.input_root_row, PathPickerRow)
+    assert window.basic_tab.layout() is window.basic_grid
+    assert window.basic_grid.getItemPosition(
+        window.basic_grid.indexOf(cards["individual_detectability_input"])
+    ) == (0, 0, 1, 2)
+    assert window.basic_grid.getItemPosition(
+        window.basic_grid.indexOf(cards["individual_detectability_conditions"])
+    ) == (1, 0, 1, 1)
+    assert window.basic_grid.getItemPosition(
+        window.basic_grid.indexOf(cards["individual_detectability_participants"])
+    ) == (1, 1, 1, 1)
+    assert window.basic_grid.getItemPosition(
+        window.basic_grid.indexOf(cards["individual_detectability_output"])
+    ) == (2, 0, 1, 1)
+    assert window.basic_grid.getItemPosition(
+        window.basic_grid.indexOf(cards["individual_detectability_run"])
+    ) == (2, 1, 1, 1)
+    assert window.basic_grid.rowStretch(1) > window.basic_grid.rowStretch(2)
+    assert window.basic_grid.columnStretch(0) == window.basic_grid.columnStretch(1)
     assert window.input_root_row.objectName() == "individual_detectability_input_root_row"
     assert window.input_root_edit.placeholderText() == "Select Excel root folder"
     assert isinstance(window.output_root_row, PathPickerRow)
@@ -42,6 +68,19 @@ def test_individual_detectability_window_smoke(qtbot, tmp_path: Path, monkeypatc
     assert window.run_btn.property("variant") == "primary"
     assert window.toggle_log_btn.property("variant") == "tertiary"
     assert window.log_box.property("logSurface") is True
+    assert not hasattr(window, "output_table")
+    for card in cards.values():
+        assert card.shell_layout.spacing() == SECTION_HEADER_CONTENT_GAP
+        assert card.content_layout.spacing() == SECTION_HEADER_CONTENT_GAP
+        assert card.shell_layout.alignmentOf(card.header) & QtCore.Qt.AlignmentFlag.AlignTop
+    assert cards["individual_detectability_output"].maximumHeight() == (
+        COMPACT_SECTION_MAX_HEIGHT
+    )
+    assert cards["individual_detectability_run"].maximumHeight() == COMPACT_SECTION_MAX_HEIGHT
+    assert cards["individual_detectability_conditions"].sizePolicy().verticalPolicy() == (
+        cards["individual_detectability_participants"].sizePolicy().verticalPolicy()
+    )
+    assert window.summary_box.minimumHeight() >= 150
 
     monkeypatch.setattr(
         "Tools.Individual_Detectability.main_window.QFileDialog.getExistingDirectory",
@@ -81,3 +120,7 @@ def test_individual_detectability_scan_populates_participants_with_missingness(
         for row in range(window.participant_table.rowCount())
     }
     assert participants == {"P1", "P11"}
+    assert window._collect_output_stems() == {
+        "AngryNeutral": "AngryNeutral_individual_detectability_grid",
+        "HappyNeutral": "HappyNeutral_individual_detectability_grid",
+    }

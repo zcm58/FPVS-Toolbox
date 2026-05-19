@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLayout,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from Main_App.gui.style_tokens import SECTION_PADDING
+from Main_App.gui.style_tokens import (
+    COMPACT_SECTION_MAX_HEIGHT,
+    SECTION_GRID_GAP,
+    SECTION_HEADER_CONTENT_GAP,
+    SECTION_PADDING,
+)
 
 
 class CardHeader(QWidget):
@@ -31,7 +39,7 @@ class CardHeader(QWidget):
 
         self.header_layout = QHBoxLayout(self)
         self.header_layout.setContentsMargins(0, 0, 0, 0)
-        self.header_layout.setSpacing(8)
+        self.header_layout.setSpacing(SECTION_HEADER_CONTENT_GAP)
 
         self.title_label = QLabel(title, self)
         self.title_label.setProperty("cardTitle", True)
@@ -44,7 +52,7 @@ class CardHeader(QWidget):
         self.action_slot = QWidget(self)
         self.action_layout = QHBoxLayout(self.action_slot)
         self.action_layout.setContentsMargins(0, 0, 0, 0)
-        self.action_layout.setSpacing(8)
+        self.action_layout.setSpacing(SECTION_HEADER_CONTENT_GAP)
         self.header_layout.addWidget(self.action_slot)
 
     def add_action_widget(self, widget: QWidget) -> None:
@@ -74,13 +82,42 @@ class SectionCard(QGroupBox):
             SECTION_PADDING,
             SECTION_PADDING,
         )
-        self.shell_layout.setSpacing(8)
+        self.shell_layout.setSpacing(SECTION_HEADER_CONTENT_GAP)
 
         self.header = CardHeader(title, self)
-        self.shell_layout.addWidget(self.header)
+        self.header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.shell_layout.addWidget(self.header, 0)
+        self.shell_layout.setAlignment(self.header, Qt.AlignTop)
 
         self.content = QWidget(self)
+        self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.content_layout = content_layout or QVBoxLayout()
         self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(SECTION_HEADER_CONTENT_GAP)
         self.content.setLayout(self.content_layout)
-        self.shell_layout.addWidget(self.content)
+        self.shell_layout.addWidget(self.content, 1)
+
+    def set_compact(self, maximum_height: int = COMPACT_SECTION_MAX_HEIGHT) -> None:
+        """Use a fixed-height card profile for short action/output sections."""
+        self.setMaximumHeight(maximum_height)
+        self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+
+
+def make_section_grid_layout(
+    *,
+    margins: int = 8,
+    gap: int = SECTION_GRID_GAP,
+    row_stretches: tuple[int, ...] = (),
+    column_stretches: tuple[int, ...] = (),
+) -> QGridLayout:
+    """Create the standard grid used by embedded tool section cards."""
+    layout = QGridLayout()
+    layout.setContentsMargins(margins, margins, margins, margins)
+    layout.setHorizontalSpacing(gap)
+    layout.setVerticalSpacing(gap)
+    for row, stretch in enumerate(row_stretches):
+        layout.setRowStretch(row, stretch)
+    for column, stretch in enumerate(column_stretches):
+        layout.setColumnStretch(column, stretch)
+    return layout

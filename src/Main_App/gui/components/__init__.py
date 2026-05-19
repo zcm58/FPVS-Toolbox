@@ -13,7 +13,7 @@ from .surfaces import AppDialog, SurfaceSize, configure_window_surface
 from Main_App.gui.widgets.brain_pulse import BrainPulseWidget
 from Main_App.gui.widgets.busy_spinner import BusySpinner
 from Main_App.gui.widgets.buttons import make_action_button
-from Main_App.gui.widgets.cards import CardHeader, SectionCard
+from Main_App.gui.widgets.cards import CardHeader, SectionCard, make_section_grid_layout
 from Main_App.gui.widgets.forms import PathPickerRow, make_form_layout
 from Main_App.gui.widgets.status import StatusBanner
 
@@ -32,6 +32,7 @@ __all__ = (
     "make_action_button",
     "make_action_row",
     "make_form_layout",
+    "make_section_grid_layout",
     "show_error",
     "show_info",
     "show_warning",

@@ -17,6 +17,7 @@ from Main_App.gui.components import ActionRow
 import Main_App.gui.update_manager as update_manager
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
 from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
+from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 
@@ -278,6 +279,54 @@ def test_sidebar_snr_plot_generator_embeds_in_main_workspace(
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_graphs"]
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_individual_detectability_embeds_in_main_workspace(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    excel_dir = project_root / "1 - Excel Data Files"
+    excel_dir.mkdir(parents=True)
+    (excel_dir / "CondA").mkdir()
+    win.currentProject = SimpleNamespace(
+        project_root=project_root,
+        input_folder=project_root,
+        subfolders={"excel": "1 - Excel Data Files"},
+    )
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_individual_detectability"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert isinstance(win.workspace_stack.currentWidget(), IndividualDetectabilityWindow)
+    assert (
+        win.workspace_stack.currentWidget().objectName()
+        == "embedded_individual_detectability_page"
+    )
+    assert win._individual_detectability_page.parent() is win.workspace_stack
+    assert win._individual_detectability_page._project_root == project_root
+    assert win._individual_detectability_page.input_root_edit.text() == str(excel_dir)
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_individual_detectability"]
 
     qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
     qtbot.wait(20)

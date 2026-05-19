@@ -2,7 +2,6 @@ from __future__ import annotations
 from PySide6.QtWidgets import QMenuBar, QMainWindow
 from PySide6.QtGui import QAction
 from Main_App.gui.icons import division_icon, individual_detectability_icon
-from Tools.Individual_Detectability.launcher import open_individual_detectability_tool
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow  # noqa: F401
 
 
@@ -33,7 +32,7 @@ def build_menu_bar(parent: QMainWindow) -> QMenuBar:
         ("Image Resizer",                              parent.open_image_resizer, None),
         ("Generate SNR Plots",                         parent.open_plot_generator, None),
         ("Ratio Calculator",                           parent.open_ratio_calculator, division_icon()),
-        ("Individual Detectability",                   lambda: open_individual_detectability_tool(parent),
+        ("Individual Detectability",                   parent.open_individual_detectability,
          individual_detectability_icon()),
         ("Average Epochs in Pre-Processing Phase",     parent.open_epoch_averaging, None),
     ]

@@ -11,6 +11,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -20,7 +21,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPlainTextEdit,
     QSizePolicy,
-    QSplitter,
     QSpinBox,
     QDoubleSpinBox,
     QStyle,
@@ -42,6 +42,7 @@ from Main_App.gui.components import (
     configure_window_surface,
     make_action_button,
     make_form_layout,
+    make_section_grid_layout,
     show_error,
 )
 
@@ -116,37 +117,21 @@ class IndividualDetectabilityWindow(QWidget):
         return None
 
     def _build_basic_tab(self) -> None:
-        layout = QVBoxLayout(self.basic_tab)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
+        self.basic_grid = make_section_grid_layout(
+            row_stretches=(0, 4, 1),
+            column_stretches=(1, 1),
+        )
+        self.basic_tab.setLayout(self.basic_grid)
 
-        splitter = QSplitter(Qt.Horizontal, self.basic_tab)
-        splitter.setChildrenCollapsible(False)
+        self.basic_grid.addWidget(self._build_input_group(), 0, 0, 1, 2)
+        self.basic_grid.addWidget(self._build_conditions_group(), 1, 0)
+        self.basic_grid.addWidget(self._build_participant_group(), 1, 1)
+        self.basic_grid.addWidget(self._build_output_group(), 2, 0)
+        self.basic_grid.addWidget(self._build_bottom_panel(), 2, 1)
 
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(6)
-        self._build_input_group(left_layout)
-        self._build_conditions_group(left_layout)
-        self._build_participant_group(left_layout)
-        left_layout.addStretch(1)
-
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(6)
-        self._build_output_group(right_layout)
-        self._build_bottom_panel(right_layout)
-
-        splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 4)
-        layout.addWidget(splitter, 1)
-
-    def _build_input_group(self, parent_layout: QVBoxLayout) -> None:
+    def _build_input_group(self) -> SectionCard:
         group = SectionCard("Input data", object_name="individual_detectability_input")
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         layout = make_form_layout()
 
         self.input_root_row = PathPickerRow(
@@ -164,15 +149,15 @@ class IndividualDetectabilityWindow(QWidget):
         layout.addRow("Excel root folder:", self.input_root_row)
         layout.addRow("", self.refresh_btn)
         group.content_layout.addLayout(layout)
-        parent_layout.addWidget(group)
+        return group
 
-    def _build_conditions_group(self, parent_layout: QVBoxLayout) -> None:
+    def _build_conditions_group(self) -> SectionCard:
         group = SectionCard("Conditions", object_name="individual_detectability_conditions")
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = group.content_layout
 
         self.conditions_list = QListWidget()
-        self.conditions_list.setMaximumHeight(200)
-        self.conditions_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.conditions_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.conditions_list.itemChanged.connect(self._on_condition_check_changed)
 
         button_row = QWidget()
@@ -193,10 +178,11 @@ class IndividualDetectabilityWindow(QWidget):
         layout.addWidget(self.conditions_list)
         layout.addWidget(button_row)
         layout.addWidget(self.conditions_summary)
-        parent_layout.addWidget(group)
+        return group
 
-    def _build_output_group(self, parent_layout: QVBoxLayout) -> None:
+    def _build_output_group(self) -> SectionCard:
         group = SectionCard("Output", object_name="individual_detectability_output")
+        group.set_compact()
         layout = group.content_layout
 
         form = make_form_layout()
@@ -217,17 +203,6 @@ class IndividualDetectabilityWindow(QWidget):
 
         layout.addLayout(form)
 
-        self.output_table = QTableWidget(0, 2)
-        self.output_table.setHorizontalHeaderLabels(["Condition", "Filename stem"])
-        self.output_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.output_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.output_table.verticalHeader().setVisible(False)
-        self.output_table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed)
-        self.output_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        self.autofill_btn = make_action_button("Auto-fill stems", compact=True, parent=group)
-        self.autofill_btn.clicked.connect(self._autofill_stems)
-
         format_row = QWidget()
         format_layout = QHBoxLayout(format_row)
         format_layout.setContentsMargins(0, 0, 0, 0)
@@ -242,17 +217,16 @@ class IndividualDetectabilityWindow(QWidget):
         format_layout.addWidget(self.export_png_check)
         format_layout.addStretch(1)
 
-        layout.addWidget(self.output_table)
-        layout.addWidget(self.autofill_btn)
         layout.addWidget(format_row)
         layout.addWidget(self.open_on_complete_check)
-        parent_layout.addWidget(group)
+        return group
 
-    def _build_participant_group(self, parent_layout: QVBoxLayout) -> None:
+    def _build_participant_group(self) -> SectionCard:
         group = SectionCard(
             "Participant filtering (optional)",
             object_name="individual_detectability_participants",
         )
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = group.content_layout
 
         help_text = QLabel(
@@ -292,7 +266,7 @@ class IndividualDetectabilityWindow(QWidget):
         layout.addWidget(filter_row)
         layout.addWidget(self.participant_table)
         layout.addWidget(self.participant_summary)
-        parent_layout.addWidget(group)
+        return group
 
     def _build_advanced_tab(self) -> None:
         layout = QVBoxLayout(self.advanced_tab)
@@ -300,6 +274,11 @@ class IndividualDetectabilityWindow(QWidget):
         layout.setSpacing(8)
 
         settings = DetectabilitySettings()
+
+        settings_grid = QGridLayout()
+        settings_grid.setContentsMargins(0, 0, 0, 0)
+        settings_grid.setHorizontalSpacing(8)
+        settings_grid.setVerticalSpacing(8)
 
         harmonics_group = SectionCard(
             "Harmonics & thresholds",
@@ -376,23 +355,34 @@ class IndividualDetectabilityWindow(QWidget):
         layout_form.addRow("", self.letter_portrait_check)
         layout_group.content_layout.addLayout(layout_form)
 
+        summary_group = SectionCard(
+            "Effective parameters summary",
+            object_name="individual_detectability_summary",
+        )
+        summary_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
         self.summary_box = QTextEdit()
         self.summary_box.setReadOnly(True)
-        self.summary_box.setMinimumHeight(110)
+        self.summary_box.setMinimumHeight(150)
+        self.summary_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        summary_group.content_layout.addWidget(self.summary_box)
 
-        layout.addWidget(harmonics_group)
-        layout.addWidget(snr_group)
-        layout.addWidget(layout_group)
-        summary_label = QLabel("Effective parameters summary")
-        summary_label.setProperty("caption", True)
-        layout.addWidget(summary_label)
-        layout.addWidget(self.summary_box)
-        layout.addStretch(1)
+        settings_grid.addWidget(harmonics_group, 0, 0, 1, 2)
+        settings_grid.addWidget(snr_group, 1, 0)
+        settings_grid.addWidget(layout_group, 1, 1)
+        settings_grid.addWidget(summary_group, 2, 0, 1, 2)
+        settings_grid.setColumnStretch(0, 1)
+        settings_grid.setColumnStretch(1, 1)
+        settings_grid.setRowStretch(0, 0)
+        settings_grid.setRowStretch(1, 0)
+        settings_grid.setRowStretch(2, 1)
+        layout.addLayout(settings_grid, 1)
         self._toggle_fdr_alpha()
         self._update_summary_text()
 
-    def _build_bottom_panel(self, parent_layout: QVBoxLayout) -> None:
+    def _build_bottom_panel(self) -> SectionCard:
         panel = SectionCard("Run", object_name="individual_detectability_run")
+        panel.set_compact()
         layout = panel.content_layout
 
         row = QWidget()
@@ -443,7 +433,7 @@ class IndividualDetectabilityWindow(QWidget):
         layout.addWidget(row)
         layout.addWidget(log_row)
         layout.addWidget(self.log_box)
-        parent_layout.addWidget(panel)
+        return panel
 
     def _apply_button_styling(self) -> None:
         for btn in self.findChildren(QPushButton):
@@ -457,7 +447,6 @@ class IndividualDetectabilityWindow(QWidget):
         self.refresh_btn.setIcon(style.standardIcon(QStyle.SP_BrowserReload))
         self.output_root_btn.setIcon(style.standardIcon(QStyle.SP_DirOpenIcon))
         self.output_root_open_btn.setIcon(style.standardIcon(QStyle.SP_DialogOpenButton))
-        self.autofill_btn.setIcon(style.standardIcon(QStyle.SP_ArrowRight))
         self.run_btn.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
         self.toggle_log_btn.setIcon(style.standardIcon(QStyle.SP_FileDialogInfoView))
         self.copy_log_btn.setIcon(style.standardIcon(QStyle.SP_DialogSaveButton))
@@ -528,31 +517,9 @@ class IndividualDetectabilityWindow(QWidget):
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                 item.setCheckState(Qt.Checked)
                 self.conditions_list.addItem(item)
-        self._populate_output_table()
         self._update_condition_summary()
         self._populate_participants()
         self._update_run_state()
-
-    def _populate_output_table(self) -> None:
-        self.output_table.setRowCount(len(self._conditions))
-        for row, cond in enumerate(self._conditions):
-            name_item = QTableWidgetItem(cond.name)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
-            stem_item = QTableWidgetItem(
-                sanitize_filename_stem(f"{cond.name}_individual_detectability_grid")
-            )
-            self.output_table.setItem(row, 0, name_item)
-            self.output_table.setItem(row, 1, stem_item)
-
-    def _autofill_stems(self) -> None:
-        for row in range(self.output_table.rowCount()):
-            cond = self.output_table.item(row, 0)
-            if cond is None:
-                continue
-            stem = sanitize_filename_stem(
-                f"{cond.text()}_individual_detectability_grid"
-            )
-            self.output_table.setItem(row, 1, QTableWidgetItem(stem))
 
     def _on_condition_check_changed(self, _item: QListWidgetItem) -> None:
         self._update_condition_summary()
@@ -717,14 +684,10 @@ class IndividualDetectabilityWindow(QWidget):
         return values
 
     def _collect_output_stems(self) -> dict[str, str]:
-        stems: dict[str, str] = {}
-        for row in range(self.output_table.rowCount()):
-            cond_item = self.output_table.item(row, 0)
-            stem_item = self.output_table.item(row, 1)
-            if not cond_item or not stem_item:
-                continue
-            stems[cond_item.text()] = sanitize_filename_stem(stem_item.text())
-        return stems
+        return {
+            cond.name: sanitize_filename_stem(f"{cond.name}_individual_detectability_grid")
+            for cond in self._selected_conditions()
+        }
 
     def _excluded_participants(self) -> set[str]:
         excluded: set[str] = set()

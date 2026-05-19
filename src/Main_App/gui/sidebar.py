@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from Main_App.gui.icons import division_icon, individual_detectability_icon, settings_icon
-from Tools.Individual_Detectability.launcher import open_individual_detectability_tool
 from .style_tokens import (
     SIDEBAR_WIDTH,
     build_sidebar_stylesheet,
@@ -251,7 +250,7 @@ def init_sidebar(self) -> None:
         "btn_individual_detectability",
         "Individual Detectability",
         individual_detectability_icon(ICON_PX),
-        lambda: open_individual_detectability_tool(self),
+        self.open_individual_detectability,
     )
     image_btn = make_button(
         tools_layout,

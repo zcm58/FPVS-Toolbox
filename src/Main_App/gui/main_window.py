@@ -49,6 +49,7 @@ from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
 )
 from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
+from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Stats import StatsWindow as PysideStatsWindow
@@ -511,6 +512,25 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_ratio_calculator_page())
         self._set_sidebar_selection("btn_ratio")
+
+    def _ensure_individual_detectability_page(self) -> IndividualDetectabilityWindow:
+        page = getattr(self, "_individual_detectability_page", None)
+        if page is None:
+            project_root = None
+            project = getattr(self, "currentProject", None)
+            if project is not None and hasattr(project, "project_root"):
+                project_root = str(project.project_root)
+            page = IndividualDetectabilityWindow(parent=self, project_root=project_root)
+            page.setObjectName("embedded_individual_detectability_page")
+            self.workspace_stack.addWidget(page)
+            self._individual_detectability_page = page
+        return page
+
+    def open_individual_detectability(self) -> None:
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(self._ensure_individual_detectability_page())
+        self._set_sidebar_selection("btn_individual_detectability")
 
     def _ensure_plot_generator_page(self) -> PlotGeneratorWindow:
         page = getattr(self, "_plot_generator_page", None)
