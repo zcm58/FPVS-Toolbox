@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QTabWidget,
 )
 
-from Main_App.gui.components import ActionRow, SectionCard  # noqa: E402
+from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel  # noqa: E402
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 
@@ -131,7 +131,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.findChild(QWidget, "stats_results_stack") is None
     output_headers = [
         label.text()
-        for label in window.findChildren(QLabel)
+        for label in window.findChildren(SubsectionHeaderLabel)
         if label.text() == "Significant Results Summary:"
     ]
     assert output_headers == ["Significant Results Summary:"]

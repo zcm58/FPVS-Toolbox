@@ -60,6 +60,7 @@ from Main_App.gui.components import (
     ActionRow,
     BusySpinner,
     SectionCard,
+    SubsectionHeaderLabel,
     SurfaceSize,
     StatusBanner,
     configure_window_surface,

@@ -15,6 +15,7 @@ from Main_App.gui.widgets.busy_spinner import BusySpinner
 from Main_App.gui.widgets.buttons import make_action_button
 from Main_App.gui.widgets.cards import CardHeader, SectionCard, make_section_grid_layout
 from Main_App.gui.widgets.forms import PathPickerRow, make_form_layout
+from Main_App.gui.widgets.labels import SubsectionHeaderLabel
 from Main_App.gui.widgets.status import StatusBanner
 
 __all__ = (
@@ -26,6 +27,7 @@ __all__ = (
     "PathPickerRow",
     "SectionCard",
     "StatusBanner",
+    "SubsectionHeaderLabel",
     "SurfaceSize",
     "confirm",
     "configure_window_surface",

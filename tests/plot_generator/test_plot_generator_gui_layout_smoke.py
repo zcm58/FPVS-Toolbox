@@ -6,7 +6,7 @@ from PySide6.QtCore import QPoint
 
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
 from Tools.Plot_Generator.settings_dialog import _SettingsDialog
-from Main_App.gui.components import ActionRow, PathPickerRow, SectionCard
+from Main_App.gui.components import ActionRow, PathPickerRow, SectionCard, SubsectionHeaderLabel
 
 
 def test_plot_generator_gui_layout_smoke(qtbot):
@@ -55,6 +55,15 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.ymax_spin.width() >= 100
     assert window.scalp_min_spin.width() >= 100
     assert window.scalp_max_spin.width() >= 100
+    assert isinstance(window.condition_b_label, SubsectionHeaderLabel)
+    assert isinstance(window.axis_ranges_label, SubsectionHeaderLabel)
+    subsection_titles = [
+        label.text() for label in window.findChildren(SubsectionHeaderLabel)
+    ]
+    assert "Condition A" in subsection_titles
+    assert "Condition B" in subsection_titles
+    assert "ROI" in subsection_titles
+    assert "Axis Ranges" in subsection_titles
     assert window.axis_ranges_label.isVisible()
     assert window.legend_group.isVisible()
     assert window.gen_btn.property("primary") is True

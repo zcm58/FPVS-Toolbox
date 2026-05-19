@@ -498,7 +498,7 @@ class StatsWindowUiMixin:
         output_header_layout = QHBoxLayout(output_header_widget)
         output_header_layout.setContentsMargins(0, 0, 0, 0)
         output_header_layout.setSpacing(8)
-        output_header_layout.addWidget(QLabel("Significant Results Summary:"))
+        output_header_layout.addWidget(SubsectionHeaderLabel("Significant Results Summary:"))
         output_header_layout.addStretch(1)
 
         output_header = ActionRow(output_header_widget, alignment=Qt.AlignRight)

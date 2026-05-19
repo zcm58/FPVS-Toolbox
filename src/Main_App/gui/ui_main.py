@@ -36,6 +36,7 @@ from .style_tokens import (
 from Main_App.gui.components import (
     ActionRow,
     SectionCard,
+    SubsectionHeaderLabel,
     make_action_button,
     make_form_layout,
 )
@@ -299,36 +300,6 @@ def init_ui(self) -> None:
         lambda checked: checked and self._on_mode_changed("batch")
     )
 
-    info_strip = QFrame(grp_proc)
-    info_strip.setObjectName("preprocessing_info_strip")
-    info_layout = QHBoxLayout(info_strip)
-    info_layout.setContentsMargins(10, 8, 10, 8)
-    info_layout.setSpacing(8)
-
-    info_icon = QLabel("i", info_strip)
-    info_icon.setObjectName("preprocessing_info_icon")
-    info_icon.setAlignment(Qt.AlignCenter)
-    info_icon.setFixedSize(20, 20)
-
-    info_text = QLabel(
-        "Preprocessing options are configured in Settings.",
-        info_strip,
-    )
-    info_text.setWordWrap(True)
-
-    btn_open_settings = make_action_button(
-        "Open Settings",
-        variant="tertiary",
-        compact=True,
-        parent=info_strip,
-    )
-    btn_open_settings.clicked.connect(self.open_settings_window)
-
-    info_layout.addWidget(info_icon, 0, Qt.AlignVCenter)
-    info_layout.addWidget(info_text, 1)
-    info_layout.addWidget(btn_open_settings, 0, Qt.AlignRight | Qt.AlignVCenter)
-    proc_layout.addWidget(info_strip)
-
     setup_layout.addWidget(grp_proc)
 
     self.row_single_file.setVisible(False)
@@ -350,37 +321,32 @@ def init_ui(self) -> None:
     # Event Map
     grp_event = SectionCard("Event Map", setup_panel, object_name="event_map_group")
     grp_event.header.setObjectName("event_map_card_header")
+    grp_event.header.title_label.setText("")
+    grp_event.header.hide()
     event_group_layout = grp_event.content_layout
     event_group_layout.setSpacing(8)
 
-    self.btn_detect = make_action_button(
-        "Detect Trigger IDs",
-        compact=True,
-        parent=grp_event,
-    )
     self.btn_add_row = make_action_button(
         "+ Add Condition",
         compact=True,
         parent=grp_event,
     )
-    grp_event.header.add_action_widget(self.btn_detect)
-    grp_event.header.add_action_widget(self.btn_add_row)
 
     event_header = QWidget(grp_event)
     event_header.setObjectName("event_map_header")
     header_layout = QHBoxLayout(event_header)
-    header_layout.setContentsMargins(10, 0, 6, 0)
+    header_layout.setContentsMargins(0, 0, 0, 0)
     header_layout.setSpacing(8)
 
-    lbl_condition = QLabel("Condition", event_header)
-    lbl_id = QLabel("Trigger ID", event_header)
+    lbl_condition = SubsectionHeaderLabel("Condition", event_header)
+    lbl_id = SubsectionHeaderLabel("Trigger ID", event_header, alignment=Qt.AlignCenter)
     lbl_id.setFixedWidth(EVENT_ID_COLUMN_WIDTH)
-    lbl_id.setAlignment(Qt.AlignCenter)
     lbl_actions = QLabel("", event_header)
     lbl_actions.setFixedWidth(24)
 
     header_layout.addWidget(lbl_condition, 1)
     header_layout.addWidget(lbl_id, 0)
+    header_layout.addWidget(self.btn_add_row, 0)
     header_layout.addWidget(lbl_actions, 0)
     event_group_layout.addWidget(event_header)
 
@@ -392,7 +358,7 @@ def init_ui(self) -> None:
     self.event_container.setObjectName("event_map_list")
     self.event_layout = QVBoxLayout(self.event_container)
     self.event_layout.setContentsMargins(0, 0, 0, 0)
-    self.event_layout.setSpacing(6)
+    self.event_layout.setSpacing(4)
     scroll.setWidget(self.event_container)
 
     event_group_layout.addWidget(scroll, 1)
@@ -465,7 +431,6 @@ def init_ui(self) -> None:
 
     # Wire buttons
     self.btn_add_row.clicked.connect(lambda: self.add_event_row())
-    self.btn_detect.clicked.connect(self.detect_trigger_ids)
 
     # Sync select button label
     self._update_select_button_text()

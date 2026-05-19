@@ -40,7 +40,12 @@ def test_ratio_calculator_window_smoke(qtbot):
 
     from PySide6.QtWidgets import QApplication, QSizePolicy, QWidget
 
-    from Main_App.gui.components import ActionRow, SectionCard, StatusBanner
+    from Main_App.gui.components import (
+        ActionRow,
+        SectionCard,
+        StatusBanner,
+        SubsectionHeaderLabel,
+    )
     from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 
     QApplication.instance() or QApplication([])
@@ -70,6 +75,19 @@ def test_ratio_calculator_window_smoke(qtbot):
     assert window.log_toggle_btn.property("variant") == "tertiary"
     assert window.log_toggle_btn.text() == "Open log"
     assert "Select both condition folders" in window._log_text
+    subsection_titles = {
+        label.text() for label in window.findChildren(SubsectionHeaderLabel)
+    }
+    assert {
+        "Condition A",
+        "Condition B",
+        "Condition A Folder",
+        "Condition B Folder",
+        "Condition A Label",
+        "Condition B Label",
+        "Output Folder",
+        "Run Label",
+    } <= subsection_titles
 
     action_rows = {row.objectName(): row for row in window.findChildren(ActionRow)}
     expected_rows = {

@@ -115,7 +115,7 @@ class _QtEntryAdapter:
         for n in (
                 "btn_select_input_file", "le_input_file",
                 "btn_select_input_folder", "le_input_folder",
-                "btn_add_event", "btn_add_row", "btn_detect",
+                "btn_add_event", "btn_add_row",
                 "btn_create_project", "btn_open_project",
         ):
             _safe_enable(n)
@@ -699,9 +699,6 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self._post_thread.quit()
             self._post_thread.wait(2000)
         super().closeEvent(event)
-
-    def detect_trigger_ids(self) -> None:
-        processing_inputs.detect_trigger_ids(self)
 
     def _update_start_enabled(self) -> None:
         processing_inputs.update_start_enabled(self)

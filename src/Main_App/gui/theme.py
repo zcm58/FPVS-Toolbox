@@ -37,6 +37,7 @@ from Main_App.gui.style_tokens import (
     WARNING_SOFT_BG,
     WARNING_SOFT_BORDER,
 )
+from Main_App.gui.widgets.labels import build_subsection_header_stylesheet
 
 try:  # qt_material is optional; we fall back to Fusion if it's missing.
     from qt_material import apply_stylesheet as _qt_material_apply_stylesheet  # type: ignore[import]
@@ -95,11 +96,7 @@ def build_fpvs_app_stylesheet() -> str:
             background: transparent;
         }}
 
-        QLabel[cardTitle="true"] {{
-            color: {TEXT_PRIMARY};
-            font-weight: 600;
-            padding: 0;
-        }}
+        {build_subsection_header_stylesheet()}
 
         QLabel[caption="true"] {{
             color: {TEXT_SECONDARY};

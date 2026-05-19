@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QLayout,
     QSizePolicy,
     QVBoxLayout,
@@ -20,6 +19,7 @@ from Main_App.gui.style_tokens import (
     SECTION_HEADER_CONTENT_GAP,
     SECTION_PADDING,
 )
+from Main_App.gui.widgets.labels import SubsectionHeaderLabel
 
 
 class CardHeader(QWidget):
@@ -41,11 +41,8 @@ class CardHeader(QWidget):
         self.header_layout.setContentsMargins(0, 0, 0, 0)
         self.header_layout.setSpacing(SECTION_HEADER_CONTENT_GAP)
 
-        self.title_label = QLabel(title, self)
+        self.title_label = SubsectionHeaderLabel(title, self)
         self.title_label.setProperty("cardTitle", True)
-        title_font = self.title_label.font()
-        title_font.setBold(True)
-        self.title_label.setFont(title_font)
         self.header_layout.addWidget(self.title_label)
         self.header_layout.addStretch(1)
 

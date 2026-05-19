@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from Main_App.gui.icons import division_icon, individual_detectability_icon, settings_icon
+from Main_App.gui.widgets.labels import SubsectionHeaderLabel
 from .style_tokens import (
     SIDEBAR_WIDTH,
     build_sidebar_stylesheet,
@@ -217,7 +218,7 @@ def init_sidebar(self) -> None:
     primary_layout.addWidget(make_divider(primary_group, "sidebar_home_divider"))
     primary_layout.addSpacing(8)
 
-    tools_label = QLabel("Workspace Tools", primary_group)
+    tools_label = SubsectionHeaderLabel("Workspace Tools", primary_group)
     tools_label.setObjectName("SidebarSectionLabel")
     primary_layout.addWidget(tools_label)
     self.sidebar_tools_label = tools_label
@@ -288,7 +289,7 @@ def init_sidebar(self) -> None:
     utilities_layout.addWidget(make_divider(utilities_group))
     utilities_layout.addSpacing(8)
 
-    utility_label = QLabel("Utilities", utilities_group)
+    utility_label = SubsectionHeaderLabel("Utilities", utilities_group)
     utility_label.setObjectName("SidebarSectionLabel")
     utilities_layout.addWidget(utility_label)
     self.sidebar_utilities_label = utility_label

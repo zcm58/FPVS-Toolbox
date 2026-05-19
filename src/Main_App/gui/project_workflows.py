@@ -246,16 +246,16 @@ def update_select_button_text(host: Any) -> None:
         if mode == "Single":
             btn_file = getattr(host, "btn_select_input_file", None)
             if btn_file and hasattr(btn_file, "setText"):
-                btn_file.setText("Select EEG Fileâ€¦")
+                btn_file.setText("Select EEG File...")
             btn_generic = getattr(host, "btn_select_input", None)
             if btn_generic and hasattr(btn_generic, "setText"):
-                btn_generic.setText("Select EEG Fileâ€¦")
+                btn_generic.setText("Select EEG File...")
         else:
             btn_folder = getattr(host, "btn_select_input_folder", None)
             if btn_folder and hasattr(btn_folder, "setText"):
-                btn_folder.setText("Select Data Folderâ€¦")
+                btn_folder.setText("Select Data Folder...")
             btn_generic = getattr(host, "btn_select_input", None)
             if btn_generic and hasattr(btn_generic, "setText"):
-                btn_generic.setText("Select Data Folderâ€¦")
+                btn_generic.setText("Select Data Folder...")
     except Exception as e:
         host.log(f"update_select_button_text failed: {e}", level=logging.WARNING)

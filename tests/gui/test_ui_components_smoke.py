@@ -19,6 +19,7 @@ from Main_App.gui.components import (
     PathPickerRow,
     SectionCard,
     StatusBanner,
+    SubsectionHeaderLabel,
     SurfaceSize,
     configure_window_surface,
     make_action_row,
@@ -37,6 +38,7 @@ EXPECTED_COMPONENT_EXPORTS = (
     "PathPickerRow",
     "SectionCard",
     "StatusBanner",
+    "SubsectionHeaderLabel",
     "SurfaceSize",
     "confirm",
     "configure_window_surface",
@@ -64,6 +66,7 @@ def test_component_consumer_import_style_remains_available() -> None:
     from Main_App.gui.components import PathPickerRow as ImportedPathPickerRow
     from Main_App.gui.components import SectionCard as ImportedSectionCard
     from Main_App.gui.components import StatusBanner as ImportedStatusBanner
+    from Main_App.gui.components import SubsectionHeaderLabel as ImportedSubsectionHeaderLabel
     from Main_App.gui.components import SurfaceSize as ImportedSurfaceSize
     from Main_App.gui.components import confirm as imported_confirm
     from Main_App.gui.components import configure_window_surface as imported_configure_window_surface
@@ -83,6 +86,7 @@ def test_component_consumer_import_style_remains_available() -> None:
         "PathPickerRow": ImportedPathPickerRow,
         "SectionCard": ImportedSectionCard,
         "StatusBanner": ImportedStatusBanner,
+        "SubsectionHeaderLabel": ImportedSubsectionHeaderLabel,
         "SurfaceSize": ImportedSurfaceSize,
         "confirm": imported_confirm,
         "configure_window_surface": imported_configure_window_surface,
@@ -167,7 +171,9 @@ def test_section_card_exposes_header_and_content_layout(qtbot) -> None:
 
     assert card.objectName() == "processing_group"
     assert card.header.title_label.text() == "Processing Options"
+    assert isinstance(card.header.title_label, SubsectionHeaderLabel)
     assert card.header.title_label.font().bold()
+    assert card.header.title_label.property("subsectionHeader") is True
     assert card.header.property("cardHeader") is True
     assert card.content_layout.indexOf(child) >= 0
 
@@ -182,6 +188,16 @@ def test_section_card_has_stable_layout_size_contract(qtbot) -> None:
     assert card.minimumSizeHint().isValid()
     assert card.layout().contentsMargins().left() == 15
     assert card.content_layout.contentsMargins().left() == 0
+
+
+def test_subsection_header_label_uses_shared_header_contract(qtbot) -> None:
+    label = SubsectionHeaderLabel("Condition")
+    qtbot.addWidget(label)
+
+    assert label.text() == "Condition"
+    assert label.property("subsectionHeader") is True
+    assert label.font().bold()
+    assert label.alignment() & Qt.AlignVCenter
 
 
 def test_path_picker_row_exposes_field_and_button(qtbot) -> None:

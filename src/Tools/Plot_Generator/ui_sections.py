@@ -24,6 +24,7 @@ from Main_App.gui.components import (
     ActionRow,
     PathPickerRow,
     SectionCard,
+    SubsectionHeaderLabel,
     SurfaceSize,
     configure_window_surface,
     make_action_button,
@@ -140,7 +141,7 @@ class PlotGeneratorUiSectionsMixin:
         cond_a_layout = QVBoxLayout(cond_a_container)
         cond_a_layout.setContentsMargins(0, 0, 0, 0)
         cond_a_layout.setSpacing(4)
-        cond_a_layout.addWidget(QLabel("Condition A"))
+        cond_a_layout.addWidget(SubsectionHeaderLabel("Condition A"))
         cond_a_row = QHBoxLayout()
         cond_a_row.setContentsMargins(0, 0, 0, 0)
         cond_a_row.setSpacing(6)
@@ -152,7 +153,7 @@ class PlotGeneratorUiSectionsMixin:
         cond_b_layout = QVBoxLayout(self.condB_container)
         cond_b_layout.setContentsMargins(0, 0, 0, 0)
         cond_b_layout.setSpacing(4)
-        self.condition_b_label = QLabel("Condition B")
+        self.condition_b_label = SubsectionHeaderLabel("Condition B")
         cond_b_layout.addWidget(self.condition_b_label)
         cond_b_row = QHBoxLayout()
         cond_b_row.setContentsMargins(0, 0, 0, 0)
@@ -164,7 +165,7 @@ class PlotGeneratorUiSectionsMixin:
         roi_layout = QVBoxLayout(roi_container)
         roi_layout.setContentsMargins(0, 0, 0, 0)
         roi_layout.setSpacing(4)
-        roi_layout.addWidget(QLabel("ROI"))
+        roi_layout.addWidget(SubsectionHeaderLabel("ROI"))
         roi_row = QHBoxLayout()
         roi_row.setContentsMargins(0, 0, 0, 0)
         roi_row.setSpacing(6)
@@ -331,10 +332,7 @@ class PlotGeneratorUiSectionsMixin:
         self.ylabel_edit.setPlaceholderText("Metric units")
         self.ylabel_edit.setToolTip("Label for the Y axis")
 
-        self.axis_ranges_label = QLabel("Axis Ranges")
-        axis_font = self.axis_ranges_label.font()
-        axis_font.setBold(True)
-        self.axis_ranges_label.setFont(axis_font)
+        self.axis_ranges_label = SubsectionHeaderLabel("Axis Ranges")
         ranges_grid = QGridLayout()
         ranges_grid.setContentsMargins(0, 0, 0, 0)
         ranges_grid.setHorizontalSpacing(10)

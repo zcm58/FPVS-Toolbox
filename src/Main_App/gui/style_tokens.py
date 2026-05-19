@@ -40,9 +40,6 @@ TEXT_MUTED = "#7A8391"
 HEADER_BG = "#232A33"
 INFO_BG = "#F1F6FC"
 INFO_BORDER = "#D5E2F0"
-INFO_ICON_BG = "#DDE7F1"
-INFO_ICON_BORDER = "#BCCCDC"
-INFO_ICON_FG = "#30465D"
 
 SIDEBAR_BG = "#1F242B"
 SIDEBAR_BORDER = "#2C333D"
@@ -65,6 +62,8 @@ EVENT_REMOVE_BUTTON_SIZE = 24
 
 def build_main_page_stylesheet() -> str:
     """Return the scoped stylesheet for the polished main page."""
+    from Main_App.gui.widgets.labels import build_subsection_header_stylesheet
+
     return f"""
         #Page1 {{
             background: {PAGE_BG};
@@ -108,11 +107,7 @@ def build_main_page_stylesheet() -> str:
             background: transparent;
         }}
 
-        QLabel[cardTitle="true"] {{
-            color: {TEXT_PRIMARY};
-            font-weight: 600;
-            padding: 0;
-        }}
+        {build_subsection_header_stylesheet()}
 
         QRadioButton {{
             color: {TEXT_PRIMARY};
@@ -288,28 +283,6 @@ def build_main_page_stylesheet() -> str:
             border-radius: 8px;
         }}
 
-        #preprocessing_info_strip {{
-            background: {INFO_BG};
-            border: 1px solid {INFO_BORDER};
-            border-radius: 8px;
-        }}
-
-        #preprocessing_info_strip QLabel {{
-            color: {TEXT_SECONDARY};
-        }}
-
-        #preprocessing_info_icon {{
-            min-width: 20px;
-            max-width: 20px;
-            min-height: 20px;
-            max-height: 20px;
-            border-radius: 10px;
-            border: 1px solid {INFO_ICON_BORDER};
-            background: {INFO_ICON_BG};
-            color: {INFO_ICON_FG};
-            font-weight: 700;
-        }}
-
         #processing_group QLineEdit:read-only {{
             background: {SURFACE_ALT_BG};
         }}
@@ -329,13 +302,13 @@ def build_main_page_stylesheet() -> str:
         }}
 
         #event_map_scroll {{
-            border-top: 1px solid transparent;
+            border-top: 1px solid {BORDER_SOFT_COLOR};
         }}
 
         #event_map_row {{
-            background: {SURFACE_ALT_BG};
-            border: 1px solid {BORDER_SOFT_COLOR};
-            border-radius: 7px;
+            background: transparent;
+            border: none;
+            border-radius: 0;
         }}
 
         QLineEdit[event_map_role="id"] {{

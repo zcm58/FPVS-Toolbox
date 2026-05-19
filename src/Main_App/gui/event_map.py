@@ -169,7 +169,7 @@ def add_event_row(owner: object, label: str = "", ident: str = "") -> None:
     row.setAttribute(Qt.WA_StyledBackground, True)
     row.setProperty("event_map_row", True)
     hl = QHBoxLayout(row)
-    hl.setContentsMargins(10, 6, 6, 6)
+    hl.setContentsMargins(0, 2, 0, 2)
     hl.setSpacing(8)
 
     le_label = QLineEdit(label, row)

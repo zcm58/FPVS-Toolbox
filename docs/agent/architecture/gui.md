@@ -84,10 +84,13 @@ from Main_App.gui.components import SectionCard, make_action_button
 ```
 
 Prefer `Main_App.gui.components` for FPVS-specific shells, action buttons,
-action rows, section cards, path rows, status banners, message helpers, and
-window/dialog sizing. Direct imports from `Main_App.gui.widgets` should stay
-inside the component layer or existing compatibility code unless a surface has a
-specific reason to depend on a lower-level widget implementation.
+action rows, section cards, subsection headers, path rows, status banners,
+message helpers, and window/dialog sizing. `SectionCard` titles and local
+subsection headings must use `SubsectionHeaderLabel` so font, size, color, and
+weight stay editable from one shared component/style contract. Direct imports from
+`Main_App.gui.widgets` should stay inside the component layer or existing
+compatibility code unless a surface has a specific reason to depend on a
+lower-level widget implementation.
 
 `Main_App.gui.components.__all__` is the public component export contract.
 Changing that list is a shared-GUI API change: update component smoke tests,

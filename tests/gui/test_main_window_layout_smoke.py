@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QStackedWidget, QW
 
 from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
+from Main_App.gui.components import SubsectionHeaderLabel
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
 import Main_App.gui.update_manager as update_manager
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
@@ -110,9 +111,39 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert run_panel is not None
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert run_panel.row_layout.indexOf(win.progress_bar) >= 0
-    assert win.findChild(QWidget, "preprocessing_info_strip") is not None
-    assert win.findChild(QWidget, "event_map_header") is not None
+    assert win.findChild(QWidget, "preprocessing_info_strip") is None
+    event_map_header = win.findChild(QWidget, "event_map_header")
+    assert event_map_header is not None
+    assert event_map_header.isAncestorOf(win.btn_add_row)
+    condition_header = next(
+        label
+        for label in event_map_header.findChildren(SubsectionHeaderLabel)
+        if label.text() == "Condition"
+    )
+    trigger_header = next(
+        label
+        for label in event_map_header.findChildren(SubsectionHeaderLabel)
+        if label.text() == "Trigger ID"
+    )
+    assert condition_header.font().bold()
+    assert trigger_header.font().bold()
     assert win.findChild(QWidget, "log_group") is not None
+    assert not hasattr(win, "btn_detect")
+    assert win.btn_select_input_file.text() == "Select EEG File..."
+    assert win.btn_select_input_folder.text() == "Select Data Folder..."
+    assert win.btn_add_row.text() == "+ Add Condition"
+    event_map_group = win.findChild(QWidget, "event_map_group")
+    assert event_map_group is not None
+    assert not event_map_group.header.isVisible()
+    event_map_titles = [
+        label
+        for label in event_map_group.findChildren(QLabel)
+        if label.text() == "Event Map"
+    ]
+    assert not event_map_titles
+    event_rows = win._live_event_map_rows()
+    assert event_rows
+    assert event_rows[0].layout().contentsMargins().left() == 0
 
     assert hasattr(win, "row_single_file")
     assert hasattr(win, "row_input_folder")
@@ -137,6 +168,12 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
         if widget.property("selected") is True
     ]
     assert selected_sidebar_items
+    sidebar_section_titles = {
+        label.text()
+        for label in win.sidebar.findChildren(SubsectionHeaderLabel)
+        if label.objectName() == "SidebarSectionLabel"
+    }
+    assert sidebar_section_titles == {"Workspace Tools", "Utilities"}
     settings_buttons = [
         widget
         for widget in win.sidebar.findChildren(QWidget)

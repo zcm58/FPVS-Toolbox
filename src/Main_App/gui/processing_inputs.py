@@ -396,7 +396,7 @@ def set_controls_enabled(host: Any, enabled: bool) -> None:
     for n in (
             "btn_select_input_file", "le_input_file",
             "btn_select_input_folder", "le_input_folder",
-            "btn_add_event", "btn_add_row", "btn_detect",
+            "btn_add_event", "btn_add_row",
             "btn_create_project", "btn_open_project",
     ):
         _safe_enable(n)
@@ -411,32 +411,6 @@ def set_controls_enabled(host: Any, enabled: bool) -> None:
         except Exception:
             # Be quiet but safe
             host.log("_set_controls_enabled: child toggle failed", level=logging.DEBUG)
-
-
-def detect_trigger_ids(host: Any) -> None:
-    """
-    Non-blocking placeholder so the Detect button works without crashing.
-    If/when a public legacy API is exposed for trigger detection, call it here.
-    """
-    try:
-        # If we already have any event-map entries, just inform the user.
-        has_entries = any(
-            bool(edits.get("label").get() and edits.get("id").get())
-            for edits in host.event_map_entries
-        )
-        if has_entries:
-            host.log("Detect: event map already has entries; no changes made.")
-            QMessageBox.information(host, "Detect Triggers",
-                                    "Event map already contains entries.\nEdit as needed and Save Project.")
-            return
-        # Graceful notice; real detection can be wired to a worker later.
-        host.log("Detect: auto trigger detection not available in Qt UI yet.")
-        QMessageBox.information(host, "Detect Triggers",
-                                "Automatic trigger detection is not available yet in the Qt interface.\n"
-                                "Please enter event labels/IDs manually for now.")
-    except Exception as e:
-        host.log(f"Detect triggers failed: {e}", level=logging.ERROR)
-        QMessageBox.warning(host, "Detect Triggers", f"Could not run detection: {e}")
 
 
 def update_start_enabled(host: Any) -> None:

@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 from Main_App.gui.components import (
     ActionRow,
     SectionCard,
+    SubsectionHeaderLabel,
     SurfaceSize,
     StatusBanner,
     configure_window_surface,
@@ -428,12 +429,8 @@ class RatioCalculatorWindow(QWidget):
         edit.setToolTip(path)
 
     @staticmethod
-    def _make_caption_label(text: str) -> QLabel:
-        label = QLabel(text)
-        font = label.font()
-        font.setBold(True)
-        label.setFont(font)
-        return label
+    def _make_caption_label(text: str) -> SubsectionHeaderLabel:
+        return SubsectionHeaderLabel(text)
 
     def _apply_button_styling(self) -> None:
         buttons = [
