@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QStackedWidget, QW
 
 from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
+from Main_App.gui.settings_panel import EmbeddedSettingsPage
 import Main_App.gui.update_manager as update_manager
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
 from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
@@ -182,6 +183,40 @@ def test_sidebar_image_resizer_embeds_in_main_workspace(
     assert selected_roles == ["btn_image"]
 
     qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_settings_embeds_in_main_workspace(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_settings"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert isinstance(win.workspace_stack.currentWidget(), EmbeddedSettingsPage)
+    assert win.workspace_stack.currentWidget().objectName() == "embedded_settings_page"
+    assert win._settings_page.parent() is win.workspace_stack
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_settings"]
+
+    win._settings_page.reject()
     qtbot.wait(20)
 
     assert win.workspace_stack.currentWidget() is win.homeWidget

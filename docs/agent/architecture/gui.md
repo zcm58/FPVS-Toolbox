@@ -30,9 +30,10 @@ Primary paths:
 - `src/Main_App/gui/post_export_workflows.py`: GUI-side post-processing worker
   launch, worker error routing, and export completion handling used by
   `MainWindow` compatibility wrappers.
-- `src/Main_App/gui/tool_workflows.py`: settings, update-check, tool-launcher,
+- `src/Main_App/gui/tool_workflows.py`: update-check, tool-launcher,
   help/about, and auxiliary-window actions used by `MainWindow` compatibility
-  wrappers.
+  wrappers. Settings editing lives in `settings_panel.py` and is routed through
+  the main workspace stack by `MainWindow`.
 - `src/Main_App/gui/shell_status.py`: launch reveal, status bar, busy
   indicator, GUI log routing, and processing-start notice helpers used by
   `MainWindow` compatibility wrappers.
@@ -42,9 +43,9 @@ The main app shell uses the outer `MainWindow.stacked` widget for landing vs
 application shell navigation. Inside the application shell, `workspace_stack`
 switches the right-hand workspace content while preserving the persistent
 sidebar and project header. The preprocessing page remains `homeWidget`; the
-Statistical Analysis, SNR Plot Generator, Individual Detectability, Image
-Resizer, Ratio Calculator, and Epoch Averaging are embedded in this workspace
-stack.
+Settings page, Statistical Analysis, SNR Plot Generator, Individual
+Detectability, Image Resizer, Ratio Calculator, and Epoch Averaging are
+embedded in this workspace stack.
 
 The main shell default and minimum size is `1280x900` to provide enough
 workspace area for embedded tools without requiring individual pop-out windows.

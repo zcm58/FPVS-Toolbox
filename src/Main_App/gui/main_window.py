@@ -57,7 +57,7 @@ from config import FPVS_TOOLBOX_VERSION
 from Main_App.gui import update_manager
 from Main_App.gui import event_map
 from Main_App.gui.file_menu import init_file_menu
-from Main_App.gui.settings_panel import SettingsDialog
+from Main_App.gui.settings_panel import EmbeddedSettingsPage
 from Main_App.gui.sidebar import init_sidebar
 from Main_App.gui.ui_main import init_ui
 from Main_App.gui import project_workflows
@@ -177,6 +177,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self.data_paths: list[str] = []
         self.event_rows: list[QWidget] = []
         self._settings_dialog = None
+        self._settings_page = None
         self.processor = Processor()
         self.setWindowTitle("FPVS Toolbox")
         self.setMinimumSize(1280, 900)
@@ -423,7 +424,23 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     # ------------------------- settings UI -------------------------- #
     def open_settings_window(self) -> None:
-        tool_workflows.open_settings_window(self, SettingsDialog)
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(self._ensure_settings_page())
+        self._set_sidebar_selection("btn_settings")
+
+    def _ensure_settings_page(self) -> EmbeddedSettingsPage:
+        project = getattr(self, "currentProject", None)
+        page = getattr(self, "_settings_page", None)
+        if page is None or getattr(page, "project", None) is not project:
+            if page is not None:
+                self.workspace_stack.removeWidget(page)
+                page.deleteLater()
+            page = EmbeddedSettingsPage(self.settings, self, project)
+            page.setObjectName("embedded_settings_page")
+            self.workspace_stack.addWidget(page)
+            self._settings_page = page
+        return page
 
     def check_for_updates(self) -> None:
         tool_workflows.check_for_updates(self, update_manager)

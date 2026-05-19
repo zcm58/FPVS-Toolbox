@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialogButtonBox,
     QMessageBox,
+    QSizePolicy,
 )
 
 from Main_App.Shared.settings_manager import SettingsManager
@@ -90,6 +91,7 @@ class SettingsDialog(QDialog):
         project: Project | None = None,
     ) -> None:
         super().__init__(parent)
+        self.host = parent
         self.manager = manager
         self.project = project
         self._project_cache: Dict[str, Any] | None = None
@@ -432,7 +434,8 @@ class SettingsDialog(QDialog):
             rois = load_rois_from_settings(self.manager)
             apply_rois_to_modules(rois)
 
-            stats_page = getattr(self.parent(), "_stats_page", None)
+            host = getattr(self, "host", None) or self.parent()
+            stats_page = getattr(host, "_stats_page", None)
             if stats_page is not None:
                 refresh_rois = getattr(stats_page, "refresh_rois", None)
                 if callable(refresh_rois):
@@ -483,3 +486,36 @@ class SettingsDialog(QDialog):
             values[canonical] = edit.text()
         values["stim_channel"] = self.stim_edit.text()
         return values
+
+
+class EmbeddedSettingsPage(SettingsDialog):
+    """Settings editor used as a workspace page inside the main shell."""
+
+    def __init__(
+        self,
+        manager: SettingsManager,
+        host: QWidget,
+        project: Project | None = None,
+    ) -> None:
+        super().__init__(manager, host, project)
+        self.host = host
+        self.setObjectName("embedded_settings_page")
+        self.setWindowFlags(Qt.Widget)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def accept(self) -> None:
+        self._return_to_home()
+
+    def reject(self) -> None:
+        self._return_to_home()
+
+    def _return_to_home(self) -> None:
+        host = getattr(self, "host", None)
+        if host is None:
+            return
+        debug_label = getattr(host, "lbl_debug", None)
+        if debug_label is not None:
+            debug_label.setVisible(host.settings.debug_enabled())
+        show_home_page = getattr(host, "show_home_page", None)
+        if callable(show_home_page):
+            show_home_page()
