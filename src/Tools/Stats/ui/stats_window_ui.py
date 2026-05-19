@@ -18,8 +18,7 @@ class StatsWindowUiMixin:
         # included conditions panel
         self.conditions_group = SectionCard("Included Conditions")
         self.conditions_group.setObjectName("stats_conditions_group")
-        self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
-        self.conditions_group.setMaximumHeight(260)
+        self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.conditions_group.setToolTip(
             "Choose which conditions to include in the analysis."
         )
@@ -42,14 +41,16 @@ class StatsWindowUiMixin:
         self.conditions_scroll_area = QScrollArea()
         self.conditions_scroll_area.setObjectName("stats_conditions_scroll_area")
         self.conditions_scroll_area.setWidgetResizable(True)
-        self.conditions_scroll_area.setMinimumHeight(120)
-        self.conditions_scroll_area.setMaximumHeight(180)
+        self.conditions_scroll_area.setMinimumHeight(150)
+        self.conditions_scroll_area.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        )
         conditions_list_widget = QWidget()
         self.conditions_list_layout = QVBoxLayout(conditions_list_widget)
         self.conditions_list_layout.setContentsMargins(0, 0, 0, 0)
         self.conditions_list_layout.setSpacing(4)
         self.conditions_scroll_area.setWidget(conditions_list_widget)
-        conditions_layout.addWidget(self.conditions_scroll_area)
+        conditions_layout.addWidget(self.conditions_scroll_area, 1)
 
         # summed BCA definition panel
         self.dv_group = SectionCard("Summed BCA definition")
@@ -618,9 +619,10 @@ class StatsWindowUiMixin:
         run_action_layout = QHBoxLayout(self.run_action_bar)
         run_action_layout.setContentsMargins(0, 0, 0, 0)
         run_action_layout.setSpacing(8)
-        run_action_layout.addWidget(self.single_advanced_btn)
         run_action_layout.addStretch(1)
         run_action_layout.addWidget(self.analyze_single_btn)
+        run_action_layout.addWidget(self.single_advanced_btn)
+        run_action_layout.addStretch(1)
         setup_layout.addWidget(self.run_action_bar)
 
         root_splitter = QSplitter(Qt.Vertical)

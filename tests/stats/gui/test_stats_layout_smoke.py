@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QLabel,
     QListWidget,
+    QSizePolicy,
     QWidget,
     QComboBox,
     QScrollArea,
@@ -93,6 +94,8 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert basic_page.isAncestorOf(group_boxes["File I/O"])
     assert basic_page.isAncestorOf(group_boxes["Included Conditions"])
     assert basic_page.isAncestorOf(group_boxes["Manual Exclusions"])
+    assert group_boxes["Included Conditions"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
+    assert window.conditions_scroll_area.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert harmonics_page.isAncestorOf(group_boxes["Summed BCA definition"])
     assert review_page.isAncestorOf(group_boxes["Review"])
     assert basic_page.isAncestorOf(window.le_folder)
@@ -127,6 +130,10 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert setup_area.isAncestorOf(run_action_bar)
     assert run_action_bar.isAncestorOf(window.analyze_single_btn)
     assert run_action_bar.isAncestorOf(window.single_advanced_btn)
+    run_action_layout = run_action_bar.layout()
+    assert run_action_layout.indexOf(window.analyze_single_btn) < run_action_layout.indexOf(
+        window.single_advanced_btn
+    )
     assert not hasattr(window, "single_status_lbl")
     assert isinstance(window.lbl_status, StatusBanner)
     assert window.lbl_status.objectName() == "stats_status_chip"
