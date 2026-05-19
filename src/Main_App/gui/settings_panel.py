@@ -27,6 +27,7 @@ from Main_App.workers.mp_env import get_ram_tier_recommendation
 from Main_App.gui.components import (
     ActionRow,
     SectionCard,
+    SubsectionHeaderLabel,
     make_action_button,
     make_form_layout,
 )
@@ -241,17 +242,34 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------
     def _init_stats_tab(self, tabs: QTabWidget) -> None:
         tab = QWidget()
-        form = make_form_layout()
-        tab.setLayout(form)
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        analysis_group = SectionCard(
+            "Analysis Defaults",
+            tab,
+            object_name="settings_stats_analysis_card",
+        )
+        analysis_form = make_form_layout()
 
         self.base_freq_edit = QLineEdit(self.manager.get("analysis", "base_freq", "6.0"))
-        form.addRow(QLabel("FPVS Base Frequency (Hz)"), self.base_freq_edit)
+        analysis_form.addRow(QLabel("FPVS base frequency (Hz):"), self.base_freq_edit)
 
         self.bca_limit_edit = QLineEdit(self.manager.get("analysis", "bca_upper_limit", "16.8"))
-        form.addRow(QLabel("BCA Harmonic Upper Limit"), self.bca_limit_edit)
+        analysis_form.addRow(QLabel("BCA harmonic upper limit:"), self.bca_limit_edit)
 
         self.alpha_edit = QLineEdit(self.manager.get("analysis", "alpha", "0.05"))
-        form.addRow(QLabel("Alpha value for ANOVA"), self.alpha_edit)
+        analysis_form.addRow(QLabel("ANOVA alpha value:"), self.alpha_edit)
+        analysis_group.content_layout.addLayout(analysis_form)
+        layout.addWidget(analysis_group)
+
+        harmonic_group = SectionCard(
+            "Harmonic Detection",
+            tab,
+            object_name="settings_stats_harmonics_card",
+        )
+        harmonic_form = make_form_layout()
 
         self.harm_metric_combo = QComboBox()
         self.harm_metric_combo.addItems(["Z Score"])
@@ -259,17 +277,41 @@ class SettingsDialog(QDialog):
         idx = self.harm_metric_combo.findText(current_metric)
         if idx >= 0:
             self.harm_metric_combo.setCurrentIndex(idx)
-        form.addRow(QLabel("Harmonic Detection Metric"), self.harm_metric_combo)
+        harmonic_form.addRow(QLabel("Detection metric:"), self.harm_metric_combo)
 
         self.harm_threshold_edit = QLineEdit(self.manager.get("analysis", "harmonic_threshold", "1.64"))
-        form.addRow(QLabel("Harmonic Threshold"), self.harm_threshold_edit)
+        harmonic_form.addRow(QLabel("Threshold:"), self.harm_threshold_edit)
+        harmonic_group.content_layout.addLayout(harmonic_form)
+        layout.addWidget(harmonic_group)
+
+        roi_group = SectionCard(
+            "Regions of Interest",
+            tab,
+            object_name="settings_stats_rois_card",
+        )
+        roi_header = QWidget(roi_group)
+        roi_header_layout = QHBoxLayout(roi_header)
+        roi_header_layout.setContentsMargins(0, 0, 0, 0)
+        roi_header_layout.setSpacing(8)
+        roi_header_layout.addWidget(SubsectionHeaderLabel("ROI name", roi_header), 1)
+        roi_header_layout.addWidget(SubsectionHeaderLabel("Electrodes", roi_header), 1)
+        roi_header_layout.addSpacing(32)
+        roi_group.content_layout.addWidget(roi_header)
 
         self.roi_editor = ROISettingsEditor(self, self.manager.get_roi_pairs())
-        form.addRow(QLabel("Regions of Interest"), self.roi_editor)
+        self.roi_editor.setObjectName("settings_stats_roi_editor")
+        roi_group.content_layout.addWidget(self.roi_editor)
 
-        add_btn = make_action_button("+ Add ROI")
+        add_btn = make_action_button("+ Add ROI", compact=True, parent=roi_group)
+        add_btn.setObjectName("settings_stats_add_roi")
         add_btn.clicked.connect(lambda: self.roi_editor.add_entry())
-        form.addRow(add_btn)
+        roi_actions = ActionRow(roi_group, alignment=Qt.AlignLeft)
+        roi_actions.setObjectName("settings_stats_roi_actions")
+        roi_actions.add_button(add_btn)
+        roi_group.content_layout.addWidget(roi_actions)
+
+        layout.addWidget(roi_group, 1)
+        layout.addStretch(1)
 
         tabs.addTab(tab, "Stats")
 

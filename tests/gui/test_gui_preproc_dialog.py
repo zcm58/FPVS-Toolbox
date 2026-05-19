@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
 
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
-from Main_App.gui.components import ActionRow, SectionCard
+from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel
 import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
 
@@ -108,8 +108,18 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
         card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
     }
     assert "Preprocessing Parameters" in cards
+    assert "Analysis Defaults" in cards
+    assert "Harmonic Detection" in cards
+    assert "Regions of Interest" in cards
     assert dlg.group_preproc is cards["Preprocessing Parameters"]
+    assert cards["Regions of Interest"].isAncestorOf(dlg.roi_editor)
     assert dlg.btn_changeRoot.property("secondary") is True
+    assert dlg.findChild(ActionRow, "settings_stats_roi_actions") is not None
+    roi_headers = {
+        label.text()
+        for label in cards["Regions of Interest"].findChildren(SubsectionHeaderLabel)
+    }
+    assert {"ROI name", "Electrodes"} <= roi_headers
 
     panel = settings_panel.SettingsPanel(controller=SimpleNamespace(save_settings=lambda _values: None))
     qtbot.addWidget(panel)
