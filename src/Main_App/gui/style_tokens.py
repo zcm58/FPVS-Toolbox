@@ -287,10 +287,6 @@ def build_main_page_stylesheet() -> str:
             background: {SURFACE_ALT_BG};
         }}
 
-        #event_map_header {{
-            border-bottom: 1px solid {BORDER_SOFT_COLOR};
-        }}
-
         #event_map_header QLabel {{
             color: {TEXT_SECONDARY};
             font-weight: 600;

@@ -55,17 +55,19 @@ def test_ratio_calculator_window_smoke(qtbot):
 
     cards = {card.objectName(): card for card in window.findChildren(SectionCard)}
     expected_cards = {
-        "ratio_calculator_conditions",
         "ratio_calculator_participants",
         "ratio_calculator_rois",
         "ratio_calculator_harmonic_settings",
         "ratio_calculator_run",
     }
     assert expected_cards <= set(cards)
+    assert window.findChild(QWidget, "ratio_calculator_conditions") is not None
     assert isinstance(window.status_label, StatusBanner)
     assert isinstance(window.validation_label, StatusBanner)
-    assert cards["ratio_calculator_conditions"].sizePolicy().verticalPolicy() == QSizePolicy.Maximum
-    assert not cards["ratio_calculator_conditions"].header.isVisible()
+    assert (
+        window.findChild(QWidget, "ratio_calculator_conditions").sizePolicy().verticalPolicy()
+        == QSizePolicy.Maximum
+    )
     assert window.input_a_open_btn.minimumHeight() >= 30
     assert window.input_a_btn.minimumHeight() >= 30
     assert cards["ratio_calculator_participants"].toolTip()

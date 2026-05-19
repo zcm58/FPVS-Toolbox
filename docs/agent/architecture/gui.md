@@ -92,6 +92,15 @@ weight stay editable from one shared component/style contract. Direct imports fr
 compatibility code unless a surface has a specific reason to depend on a
 lower-level widget implementation.
 
+Subsection header presentation is owned by
+`src/Main_App/gui/widgets/labels.py` and re-exported through
+`Main_App.gui.components.SubsectionHeaderLabel`. To change subsection-header
+font weight, size, color, padding, or the `subsectionHeader` stylesheet
+contract, edit the constants and `build_subsection_header_stylesheet()` in
+`labels.py` rather than patching individual tool windows or local QSS blocks.
+Runtime surfaces should import `SubsectionHeaderLabel` from
+`Main_App.gui.components`.
+
 `Main_App.gui.components.__all__` is the public component export contract.
 Changing that list is a shared-GUI API change: update component smoke tests,
 keep imports side-effect free, and record the decision in the active component

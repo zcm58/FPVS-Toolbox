@@ -137,12 +137,12 @@ class RatioCalculatorWindow(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        cond_group = SectionCard("Conditions", object_name="ratio_calculator_conditions")
+        cond_group = QWidget()
+        cond_group.setObjectName("ratio_calculator_conditions")
         cond_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        cond_group.header.setVisible(False)
-        cond_group.shell_layout.setContentsMargins(14, 8, 14, 14)
-        cond_group.shell_layout.setSpacing(6)
-        cond_group_layout = cond_group.content_layout
+        cond_group_layout = QVBoxLayout(cond_group)
+        cond_group_layout.setContentsMargins(0, 0, 0, 0)
+        cond_group_layout.setSpacing(6)
         cond_layout = QGridLayout()
         cond_layout.setContentsMargins(0, 0, 0, 0)
         cond_layout.setHorizontalSpacing(12)
