@@ -189,15 +189,16 @@ class StatsWindowUiMixin:
         self.group_mean_preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.group_mean_preview_table.setSelectionMode(QAbstractItemView.NoSelection)
         self.group_mean_preview_table.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         )
         self.group_mean_preview_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.group_mean_preview_table.setMinimumHeight(180)
+        self.group_mean_preview_table.setMinimumHeight(120)
+        self.group_mean_preview_table.setMaximumHeight(150)
         group_mean_table_header = self.group_mean_preview_table.horizontalHeader()
         for col in range(self.group_mean_preview_table.columnCount()):
             group_mean_table_header.setSectionResizeMode(col, QHeaderView.Stretch)
         group_mean_table_header.setStretchLastSection(True)
-        group_mean_layout.addWidget(self.group_mean_preview_table, 1)
+        group_mean_layout.addWidget(self.group_mean_preview_table)
 
         dv_layout.addWidget(self.group_mean_controls)
         self._set_group_mean_controls_visible(
@@ -548,13 +549,6 @@ class StatsWindowUiMixin:
         basic_content_layout.addWidget(self.manual_exclusion_group, 1)
         basic_layout.addWidget(basic_content, 1)
 
-        harmonics_page = QWidget()
-        harmonics_page.setObjectName("stats_harmonics_setup_page")
-        harmonics_layout = QVBoxLayout(harmonics_page)
-        harmonics_layout.setContentsMargins(0, 0, 0, 0)
-        harmonics_layout.setSpacing(8)
-        harmonics_layout.addWidget(self.dv_group, 1)
-
         advanced_page = QWidget()
         advanced_page.setObjectName("stats_advanced_setup_page")
         advanced_layout_page = QVBoxLayout(advanced_page)
@@ -577,6 +571,7 @@ class StatsWindowUiMixin:
         advanced_bottom_layout.addWidget(last_export_section, 1)
         advanced_bottom_layout.addWidget(roi_context_section, 1)
 
+        advanced_layout_page.addWidget(self.dv_group)
         advanced_layout_page.addWidget(advanced_top_row)
         advanced_layout_page.addWidget(advanced_bottom_row)
         advanced_layout_page.addStretch(1)
@@ -596,7 +591,6 @@ class StatsWindowUiMixin:
             """
         )
         self.setup_tabs.addTab(basic_page, "Basic")
-        self.setup_tabs.addTab(harmonics_page, "Significant Harmonics")
         self.setup_tabs.addTab(advanced_page, "Advanced")
         self.setup_tabs.currentChanged.connect(self._sync_summary_output_visibility)
         setup_layout.addWidget(self.setup_tabs, 1)

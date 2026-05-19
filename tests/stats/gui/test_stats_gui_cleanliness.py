@@ -27,7 +27,6 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     assert setup_tabs is not None
     assert [setup_tabs.tabText(i) for i in range(setup_tabs.count())] == [
         "Basic",
-        "Significant Harmonics",
         "Advanced",
     ]
     assert setup_tabs.widget(0).isAncestorOf(window.le_folder)

@@ -50,12 +50,10 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert setup_tabs is not None
     assert [setup_tabs.tabText(i) for i in range(setup_tabs.count())] == [
         "Basic",
-        "Significant Harmonics",
         "Advanced",
     ]
     assert setup_tabs.widget(0).objectName() == "stats_basic_setup_page"
-    assert setup_tabs.widget(1).objectName() == "stats_harmonics_setup_page"
-    assert setup_tabs.widget(2).objectName() == "stats_advanced_setup_page"
+    assert setup_tabs.widget(1).objectName() == "stats_advanced_setup_page"
     assert "QTabWidget#stats_setup_tabs::pane" in setup_tabs.styleSheet()
     assert "border: 0" in setup_tabs.styleSheet()
     assert "background: transparent" in setup_tabs.styleSheet()
@@ -85,20 +83,20 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         "Data Folder",
         "Single Group Analysis",
         "Review",
+        "Significant Harmonics",
     ]:
         assert title not in group_boxes
     assert "Multi-Group Scan Summary" not in group_boxes
     assert "Between-Group Analysis" not in group_boxes
 
     basic_page = setup_tabs.widget(0)
-    harmonics_page = setup_tabs.widget(1)
-    advanced_page = setup_tabs.widget(2)
+    advanced_page = setup_tabs.widget(1)
     assert basic_page.isAncestorOf(group_boxes["File I/O"])
     assert basic_page.isAncestorOf(group_boxes["Included Conditions"])
     assert basic_page.isAncestorOf(group_boxes["Manual Exclusions"])
     assert group_boxes["Included Conditions"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert window.conditions_scroll_area.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
-    assert harmonics_page.isAncestorOf(group_boxes["Summed BCA definition"])
+    assert advanced_page.isAncestorOf(group_boxes["Summed BCA definition"])
     assert advanced_page.isAncestorOf(group_boxes["Outlier Flagging"])
     assert advanced_page.isAncestorOf(group_boxes["Comparison Exports"])
     assert advanced_page.isAncestorOf(group_boxes["Last Export"])
@@ -122,8 +120,9 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert isinstance(window.manual_exclusion_candidates_list, QListWidget)
     assert group_boxes["Manual Exclusions"].isAncestorOf(window.manual_exclusion_candidates_list)
     assert group_boxes["Summed BCA definition"].isAncestorOf(window.group_mean_preview_table)
-    assert window.group_mean_preview_table.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
+    assert window.group_mean_preview_table.sizePolicy().verticalPolicy() == QSizePolicy.Fixed
     assert window.group_mean_preview_table.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
+    assert window.group_mean_preview_table.maximumHeight() <= 150
     header = window.group_mean_preview_table.horizontalHeader()
     assert header.sectionResizeMode(0) == QHeaderView.Stretch
     assert header.sectionResizeMode(5) == QHeaderView.Stretch
@@ -150,10 +149,6 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert not window.run_action_bar.isVisible()
     assert not window.analyze_single_btn.isVisible()
     assert not window.single_advanced_btn.isVisible()
-    setup_tabs.setCurrentIndex(2)
-    qtbot.wait(20)
-    assert not window.summary_output_container.isVisible()
-    assert not window.run_action_bar.isVisible()
     setup_tabs.setCurrentIndex(0)
     qtbot.wait(20)
     assert window.summary_output_container.isVisible()
