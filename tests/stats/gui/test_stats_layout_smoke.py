@@ -9,14 +9,13 @@ from PySide6.QtWidgets import (  # noqa: E402
     QListWidget,
     QSizePolicy,
     QWidget,
-    QComboBox,
+    QPushButton,
     QScrollArea,
     QSplitter,
-    QStackedWidget,
     QTabWidget,
 )
 
-from Main_App.gui.components import ActionRow, SectionCard, StatusBanner  # noqa: E402
+from Main_App.gui.components import ActionRow, SectionCard  # noqa: E402
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 
@@ -109,18 +108,17 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert group_boxes["Summed BCA definition"].isAncestorOf(window.group_mean_preview_table)
     assert window.group_mean_preview_table.maximumHeight() <= 180
 
-    results_selector = window.findChild(QComboBox, "stats_results_selector")
-    results_stack = window.findChild(QStackedWidget, "stats_results_stack")
-    assert results_selector is not None
-    assert results_stack is not None
-    assert [results_selector.itemText(i) for i in range(results_selector.count())] == [
-        "Summary",
-        "Report",
-        "Log",
+    assert window.findChild(QWidget, "stats_results_selector") is None
+    assert window.findChild(QWidget, "stats_results_stack") is None
+    output_headers = [
+        label.text()
+        for label in window.findChildren(QLabel)
+        if label.text() == "Significant Results Summary:"
     ]
-    assert results_stack.indexOf(window.summary_text) == 0
-    assert results_stack.indexOf(window.reporting_summary_text) == 1
-    assert results_stack.indexOf(window.log_text) == 2
+    assert output_headers == ["Significant Results Summary:"]
+    assert window.summary_text.isVisible()
+    assert not window.log_text.isVisible()
+    assert not window.reporting_summary_text.isVisible()
 
     assert window.analyze_single_btn.text() == "Analyze Single Group"
     assert window.analyze_single_btn.property("primary") is True
@@ -135,10 +133,15 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         window.single_advanced_btn
     )
     assert not hasattr(window, "single_status_lbl")
-    assert isinstance(window.lbl_status, StatusBanner)
-    assert window.lbl_status.objectName() == "stats_status_chip"
-    assert setup_area.isAncestorOf(window.lbl_status)
+    assert window.lbl_status.objectName() == "stats_status_internal"
+    assert not window.lbl_status.isVisible()
+    assert not setup_area.isAncestorOf(window.lbl_status)
+    assert window.findChild(QWidget, "stats_status_chip") is None
     assert window.findChild(QWidget, "stats_status_footer") is None
+    assert not hasattr(window, "btn_copy_folder")
+    assert not hasattr(window, "btn_open_results")
+    assert not hasattr(window, "info_button")
+    assert not hasattr(window, "on_show_analysis_info")
     assert not hasattr(window, "analyze_between_btn")
     assert not hasattr(window, "between_status_lbl")
     assert not hasattr(window, "multi_group_ready_value")
@@ -159,13 +162,20 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         "stats_data_folder_actions",
         "stats_export_path_actions",
         "stats_review_export_actions",
-        "stats_reporting_summary_actions",
         "stats_output_copy_actions",
     }
     assert expected_rows <= set(action_rows)
     assert "stats_between_group_actions" not in action_rows
     assert "stats_single_group_actions" not in action_rows
+    assert "stats_reporting_summary_actions" not in action_rows
     assert "stats_multigroup_harmonic_actions" not in action_rows
     assert "stats_multigroup_issue_actions" not in action_rows
+    data_buttons = [
+        button.text()
+        for button in action_rows["stats_data_folder_actions"].findChildren(QPushButton)
+    ]
+    assert data_buttons == ["Browse..."]
     assert action_rows["stats_output_copy_actions"].row_layout.indexOf(window.copy_summary_btn) >= 0
-    assert action_rows["stats_reporting_summary_actions"].row_layout.indexOf(window.reporting_summary_save_btn) >= 0
+    assert not hasattr(window, "copy_log_btn")
+    assert not hasattr(window, "reporting_summary_copy_btn")
+    assert not hasattr(window, "reporting_summary_save_btn")

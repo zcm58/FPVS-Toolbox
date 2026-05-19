@@ -26,8 +26,6 @@ class StatsWindowActionsMixin:
                 self.le_folder.setToolTip(
                     "Selected folder that contains the FPVS result spreadsheets."
                 )
-        if hasattr(self, "btn_copy_folder"):
-            self.btn_copy_folder.setEnabled(bool(path))
 
     def _set_last_export_path(self, path: str | None) -> None:
         """Handle the set last export path step for the Stats workflow."""
@@ -107,13 +105,6 @@ class StatsWindowActionsMixin:
         """Handle the copy log text step for the Stats workflow."""
         text = self.log_text.toPlainText()
         self._copy_text_to_clipboard(text, context="log")
-
-    def _copy_data_folder_path(self) -> None:
-        """Handle the copy data folder path step for the Stats workflow."""
-        path = self.le_folder.text()
-        if not path:
-            return
-        self._copy_text_to_clipboard(path, context="data_folder")
 
     def _open_export_path(self) -> None:
         """Handle the open export path step for the Stats workflow."""
@@ -265,40 +256,6 @@ class StatsWindowActionsMixin:
             ),
         ]
         self._open_advanced_dialog("Single Group – Advanced", actions)
-
-    def on_show_analysis_info(self) -> None:
-        """
-        Show a brief summary of the statistical methods used in the Stats tool.
-        This is read-only and does not modify any data or settings.
-        """
-        text = (
-            "FPVS Toolbox - Statistical Pipeline Overview\n\n"
-            "Data analyzed\n"
-            "- All analyses use the summed baseline-corrected oddball amplitude "
-            "(Summed BCA) per subject x condition x ROI.\n\n"
-            "Single-group analyses\n"
-            "- RM-ANOVA: Repeated-measures ANOVA with within-subject factors "
-            "condition and ROI. When available, Pingouin's rm_anova is used and "
-            "both uncorrected and Greenhouse-Geisser/Huynh-Feldt corrected p-values "
-            "are reported; otherwise statsmodels' AnovaRM is used (uncorrected p-values).\n"
-            "- Post-hoc tests: Paired t-tests between conditions, run separately within "
-            "each ROI. P-values are corrected for multiple comparisons using the "
-            "Benjamini-Hochberg false discovery rate (FDR) procedure; exports include "
-            "raw p and FDR-adjusted p (p_fdr_bh) plus effect sizes.\n"
-            "- Mixed model: Linear mixed-effects model with a random intercept for each "
-            "subject and fixed effects for condition, ROI, and their interaction. No "
-            "additional multiple-comparison correction is applied to these coefficients.\n\n"
-            "General notes\n"
-            "- Unless otherwise noted, the default alpha level is 0.05.\n"
-            f"- Excel exports in the '{RESULTS_SUBFOLDER_NAME}' folder contain "
-            "the full tables for all analyses, including raw and corrected p-values.\n"
-        )
-
-        QMessageBox.information(
-            self,
-            "FPVS Toolbox - Analysis Info",
-            text,
-        )
 
     def _check_for_open_excel_files(self, folder_path: str) -> bool:
         """Best-effort check to avoid writing to open Excel files."""

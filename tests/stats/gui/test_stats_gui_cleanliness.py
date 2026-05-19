@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtWidgets import QListWidget, QWidget, QComboBox, QPushButton, QStackedWidget, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import QListWidget, QWidget, QPushButton, QTabWidget  # noqa: E402
 
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
@@ -32,8 +32,13 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     ]
     assert setup_tabs.widget(0).isAncestorOf(window.le_folder)
     assert setup_tabs.widget(0).isAncestorOf(window.manual_exclusion_group)
-    assert setup_area.isAncestorOf(window.lbl_status)
+    assert not setup_area.isAncestorOf(window.lbl_status)
+    assert not window.lbl_status.isVisible()
     assert not hasattr(window, "data_folder_group")
+    assert not hasattr(window, "btn_copy_folder")
+    assert not hasattr(window, "btn_open_results")
+    assert not hasattr(window, "info_button")
+    assert not hasattr(window, "on_show_analysis_info")
 
     buttons = {btn.text(): btn for btn in window.findChildren(QPushButton)}
     assert "Manage Exclusions" not in buttons
@@ -43,13 +48,11 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     assert not hasattr(window, "reporting_summary_export_checkbox")
     assert window.reporting_summary_export_action.isChecked()
 
-    results_selector = window.findChild(QComboBox, "stats_results_selector")
-    results_stack = window.findChild(QStackedWidget, "stats_results_stack")
-    assert results_selector is not None
-    assert results_stack is not None
-    assert results_stack.indexOf(window.summary_text) == 0
-    assert results_stack.indexOf(window.reporting_summary_text) == 1
-    assert results_stack.indexOf(window.log_text) == 2
+    assert window.findChild(QWidget, "stats_results_selector") is None
+    assert window.findChild(QWidget, "stats_results_stack") is None
+    assert window.summary_text.isVisible()
+    assert not window.reporting_summary_text.isVisible()
+    assert not window.log_text.isVisible()
 
     long_path = str(tmp_path / "a" / "very" / "long" / "path" / "to" / "fpvs" / "results")
     window._set_data_folder_path(long_path)
@@ -65,12 +68,4 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
 
     qtbot.mouseClick(window.copy_summary_btn, Qt.LeftButton)
     assert clipboard.text() == "Summary content"
-
-    results_selector.setCurrentText("Log")
-    qtbot.wait(20)
-    qtbot.mouseClick(window.copy_log_btn, Qt.LeftButton)
-    assert clipboard.text() == "Log content"
-
-    assert window.btn_copy_folder.isEnabled()
-    qtbot.mouseClick(window.btn_copy_folder, Qt.LeftButton)
-    assert clipboard.text() == long_path
+    assert not hasattr(window, "copy_log_btn")

@@ -378,36 +378,20 @@ class StatsWindowUiMixin:
         btn_browse = make_action_button("Browse...")
         btn_browse.setToolTip("Choose the folder that contains FPVS results.")
         btn_browse.clicked.connect(self.on_browse_folder)
-        self.btn_copy_folder = make_action_button("Copy", compact=True)
-        self.btn_copy_folder.setToolTip("Copy the data folder path.")
-        self.btn_copy_folder.setEnabled(False)
-        self.btn_copy_folder.clicked.connect(self._copy_data_folder_path)
-        self.btn_open_results = make_action_button("Results", compact=True)
-        self.btn_open_results.clicked.connect(self._open_results_folder)
-        self.btn_open_results.setToolTip(
-            "Open the folder where stats outputs are saved."
-        )
-        self.info_button = make_action_button("Info", compact=True)
-        self.info_button.clicked.connect(self.on_show_analysis_info)
-        self.info_button.setToolTip(
-            "Show a short description of each analysis step."
-        )
         folder_actions = ActionRow(self, alignment=Qt.AlignLeft, spacing=6)
         folder_actions.setObjectName("stats_data_folder_actions")
         folder_actions.add_button(btn_browse)
-        folder_actions.add_button(self.btn_copy_folder)
-        folder_actions.add_button(self.btn_open_results)
-        folder_actions.add_button(self.info_button)
 
-        self.spinner = BusySpinner()
+        self.spinner = BusySpinner(self)
         self.spinner.setFixedSize(18, 18)
         self.spinner.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.spinner.hide()
-        self.lbl_status = StatusBanner("Select a folder containing FPVS results.")
-        self.lbl_status.setObjectName("stats_status_chip")
+        self.lbl_status = StatusBanner("Select a folder containing FPVS results.", self)
+        self.lbl_status.setObjectName("stats_status_internal")
         self.lbl_status.setWordWrap(False)
         self.lbl_status.setMaximumWidth(360)
         self.lbl_status.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.lbl_status.hide()
 
         export_row = QHBoxLayout()
         export_row.setSpacing(6)
@@ -470,33 +454,29 @@ class StatsWindowUiMixin:
         self.summary_text.setProperty("logSurface", True)
         self.summary_text.setReadOnly(True)
         self.summary_text.setAcceptRichText(True)
-        self.summary_text.setPlaceholderText("Summary output")
+        self.summary_text.setPlaceholderText("Significant results summary will appear here after analysis.")
         self.summary_text.setMinimumHeight(140)
         self.summary_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.log_text = QPlainTextEdit()
+        self.log_text = QPlainTextEdit(self)
         self.log_text.setProperty("logSurface", True)
         self.log_text.setReadOnly(True)
         self.log_text.setPlaceholderText("Log output")
         self.log_text.setMinimumHeight(140)
         self.log_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.log_text.hide()
 
-        self.reporting_summary_text = QPlainTextEdit()
+        self.reporting_summary_text = QPlainTextEdit(self)
         self.reporting_summary_text.setProperty("logSurface", True)
         self.reporting_summary_text.setReadOnly(True)
         self.reporting_summary_text.setPlaceholderText("Reporting Summary output")
         mono = self.reporting_summary_text.font()
         mono.setFamilies(["Consolas", "Menlo", "Courier New", "monospace"])
         self.reporting_summary_text.setFont(mono)
-        self.reporting_summary_copy_btn = make_action_button("Copy")
-        self.reporting_summary_copy_btn.clicked.connect(self._copy_reporting_summary_text)
-        self.reporting_summary_save_btn = make_action_button("Save .txt...")
-        self.reporting_summary_save_btn.clicked.connect(self._save_reporting_summary_text)
+        self.reporting_summary_text.hide()
 
         self.copy_summary_btn = make_action_button("Copy summary")
         self.copy_summary_btn.clicked.connect(self._copy_summary_text)
-        self.copy_log_btn = make_action_button("Copy log")
-        self.copy_log_btn.clicked.connect(self._copy_log_text)
 
         output_container = QWidget()
         output_layout = QVBoxLayout(output_container)
@@ -506,39 +486,16 @@ class StatsWindowUiMixin:
         output_header_layout = QHBoxLayout(output_header_widget)
         output_header_layout.setContentsMargins(0, 0, 0, 0)
         output_header_layout.setSpacing(8)
-        output_header_layout.addWidget(QLabel("Results:"))
-        self.results_selector = QComboBox()
-        self.results_selector.setObjectName("stats_results_selector")
-        self.results_selector.addItems(["Summary", "Report", "Log"])
-        self.results_selector.setToolTip("Choose which Stats output to view.")
-        self.results_selector.setMinimumContentsLength(8)
-        self.results_selector.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.results_selector.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        output_header_layout.addWidget(self.results_selector)
+        output_header_layout.addWidget(QLabel("Significant Results Summary:"))
         output_header_layout.addStretch(1)
 
         output_header = ActionRow(output_header_widget, alignment=Qt.AlignRight)
         output_header.setObjectName("stats_output_copy_actions")
         output_header.add_button(self.copy_summary_btn)
-        output_header.add_button(self.copy_log_btn)
         output_header_layout.addWidget(output_header)
 
-        reporting_btn_row = ActionRow(output_header_widget, alignment=Qt.AlignRight)
-        reporting_btn_row.setObjectName("stats_reporting_summary_actions")
-        reporting_btn_row.add_button(self.reporting_summary_copy_btn)
-        reporting_btn_row.add_button(self.reporting_summary_save_btn)
-        output_header_layout.addWidget(reporting_btn_row)
-        self.reporting_summary_actions = reporting_btn_row
-
-        self.results_stack = QStackedWidget()
-        self.results_stack.setObjectName("stats_results_stack")
-        self.results_stack.addWidget(self.summary_text)
-        self.results_stack.addWidget(self.reporting_summary_text)
-        self.results_stack.addWidget(self.log_text)
-        self.results_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.results_selector.currentIndexChanged.connect(self._sync_results_view)
         output_layout.addWidget(output_header_widget)
-        output_layout.addWidget(self.results_stack)
+        output_layout.addWidget(self.summary_text)
 
         self.output_text = self.log_text
 
@@ -561,7 +518,6 @@ class StatsWindowUiMixin:
         file_grid.addWidget(self.le_folder, 0, 1)
         file_grid.addWidget(folder_actions, 0, 2)
         file_grid.addWidget(self.spinner, 0, 3, alignment=Qt.AlignVCenter)
-        file_grid.addWidget(self.lbl_status, 0, 4, alignment=Qt.AlignVCenter)
         file_grid.setColumnStretch(1, 1)
         file_layout.addLayout(file_grid)
 
@@ -639,24 +595,9 @@ class StatsWindowUiMixin:
         # initialize export buttons
         self._update_export_buttons()
         self._populate_conditions_panel([])
-        self._sync_results_view()
 
     # --------------------------- actions ---------------------------
 
     def _auto_export_reporting_summary_enabled(self) -> bool:
         action = getattr(self, "reporting_summary_export_action", None)
         return bool(action is None or action.isChecked())
-
-    def _sync_results_view(self, *_args) -> None:
-        index = self.results_selector.currentIndex() if hasattr(self, "results_selector") else 0
-        if hasattr(self, "results_stack"):
-            self.results_stack.setCurrentIndex(index)
-        is_summary = index == 0
-        is_report = index == 1
-        is_log = index == 2
-        if hasattr(self, "copy_summary_btn"):
-            self.copy_summary_btn.setVisible(is_summary)
-        if hasattr(self, "copy_log_btn"):
-            self.copy_log_btn.setVisible(is_log)
-        if hasattr(self, "reporting_summary_actions"):
-            self.reporting_summary_actions.setVisible(is_report)

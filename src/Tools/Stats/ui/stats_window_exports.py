@@ -173,11 +173,6 @@ class StatsWindowExportsMixin:
         )
         return str(target)
 
-    def _open_results_folder(self) -> None:
-        """Handle the open results folder step for the Stats workflow."""
-        out_dir = self._ensure_results_dir()
-        QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
-
     def _export_single_pipeline(self) -> bool:
         """Handle the export single pipeline step for the Stats workflow."""
         section = "Single"
