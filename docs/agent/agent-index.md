@@ -5,7 +5,17 @@ Use this page before gathering broad context. Run the relevant command first, th
 ## First Commands
 
 ```powershell
+# PowerShell
 .\.venv1\Scripts\Activate.ps1
+python .agents/scripts/audit/agent_audit.py
+python .agents/scripts/audit/agent_audit.py --check stats-structure
+python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility
+python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
+python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py
+python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
+
+# Bash
+source .venv1/bin/activate
 python .agents/scripts/audit/agent_audit.py
 python .agents/scripts/audit/agent_audit.py --check stats-structure
 python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility
