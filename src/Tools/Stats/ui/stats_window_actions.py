@@ -11,6 +11,7 @@ class StatsWindowActionsMixin:
         """Handle the set status step for the Stats workflow."""
         if hasattr(self, "lbl_status"):
             self.lbl_status.setText(txt)
+            self.lbl_status.setToolTip(txt)
 
     def _set_roi_status(self, txt: str) -> None:
         """Handle the set roi status step for the Stats workflow."""

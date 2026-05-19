@@ -4,7 +4,16 @@ import pytest
 
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QComboBox, QScrollArea, QSplitter, QStackedWidget, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QLabel,
+    QListWidget,
+    QWidget,
+    QComboBox,
+    QScrollArea,
+    QSplitter,
+    QStackedWidget,
+    QTabWidget,
+)
 
 from Main_App.gui.components import ActionRow, SectionCard, StatusBanner  # noqa: E402
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
@@ -33,40 +42,68 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     )
     assert root_splitter is not None
 
+    assert root_splitter.widget(1) is not None
+    setup_area = root_splitter.widget(0)
+    assert setup_area.objectName() == "stats_setup_area"
     setup_tabs = window.findChild(QTabWidget, "stats_setup_tabs")
     assert setup_tabs is not None
-    assert setup_tabs.isVisible()
     assert [setup_tabs.tabText(i) for i in range(setup_tabs.count())] == [
         "Basic",
-        "Advanced",
+        "Significant Harmonics",
+        "Review",
     ]
-    assert root_splitter.widget(1) is not None
-    assert root_splitter.widget(0) is setup_tabs
+    assert setup_tabs.widget(0).objectName() == "stats_basic_setup_page"
+    assert setup_tabs.widget(1).objectName() == "stats_harmonics_setup_page"
+    assert setup_tabs.widget(2).objectName() == "stats_review_setup_page"
+    assert "QTabWidget#stats_setup_tabs::pane" in setup_tabs.styleSheet()
+    assert "border: 0" in setup_tabs.styleSheet()
+    assert "background: transparent" in setup_tabs.styleSheet()
 
-    basic_scroll = window.findChild(QScrollArea, "stats_basic_setup_scroll_area")
-    advanced_scroll = window.findChild(QScrollArea, "stats_advanced_setup_scroll_area")
-    assert basic_scroll is not None
-    assert advanced_scroll is not None
-    assert basic_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
-    assert advanced_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    setup_scroll_areas = [
+        scroll.objectName()
+        for scroll in window.findChildren(QScrollArea)
+        if setup_area.isAncestorOf(scroll)
+    ]
+    assert setup_scroll_areas == ["stats_conditions_scroll_area"]
 
     group_boxes = {
         card.header.title_label.text(): card for card in window.findChildren(SectionCard)
     }
     for title in [
+        "File I/O",
         "Included Conditions",
+        "Manual Exclusions",
         "Summed BCA definition",
-        "Single Group Analysis",
+        "Review",
     ]:
         assert title in group_boxes
+    for title in [
+        "Data Folder",
+        "Outlier Flagging",
+        "Comparison Exports",
+        "Single Group Analysis",
+    ]:
+        assert title not in group_boxes
     assert "Multi-Group Scan Summary" not in group_boxes
     assert "Between-Group Analysis" not in group_boxes
 
-    assert setup_tabs.widget(0).isAncestorOf(group_boxes["Included Conditions"])
-    assert setup_tabs.widget(0).isAncestorOf(group_boxes["Single Group Analysis"])
-    assert setup_tabs.widget(0).isAncestorOf(group_boxes["Manual Exclusions"])
-    assert setup_tabs.widget(1).isAncestorOf(group_boxes["Summed BCA definition"])
-    assert setup_tabs.widget(1).isAncestorOf(window.group_mean_preview_table)
+    basic_page = setup_tabs.widget(0)
+    harmonics_page = setup_tabs.widget(1)
+    review_page = setup_tabs.widget(2)
+    assert basic_page.isAncestorOf(group_boxes["File I/O"])
+    assert basic_page.isAncestorOf(group_boxes["Included Conditions"])
+    assert basic_page.isAncestorOf(group_boxes["Manual Exclusions"])
+    assert harmonics_page.isAncestorOf(group_boxes["Summed BCA definition"])
+    assert review_page.isAncestorOf(group_boxes["Review"])
+    assert basic_page.isAncestorOf(window.le_folder)
+    assert basic_page.isAncestorOf(window.findChild(QWidget, "stats_manual_exclusion_row"))
+    assert group_boxes["Included Conditions"].header.title_label.text() == "Included Conditions"
+    assert group_boxes["Manual Exclusions"].isAncestorOf(
+        window.findChild(QWidget, "stats_manual_exclusion_row")
+    )
+    assert isinstance(window.manual_exclusion_candidates_list, QListWidget)
+    assert group_boxes["Manual Exclusions"].isAncestorOf(window.manual_exclusion_candidates_list)
+    assert group_boxes["Summed BCA definition"].isAncestorOf(window.group_mean_preview_table)
     assert window.group_mean_preview_table.maximumHeight() <= 180
 
     results_selector = window.findChild(QComboBox, "stats_results_selector")
@@ -84,11 +121,27 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
 
     assert window.analyze_single_btn.text() == "Analyze Single Group"
     assert window.analyze_single_btn.property("primary") is True
-    assert isinstance(window.single_status_lbl, StatusBanner)
+    assert window.analyze_single_btn.minimumHeight() >= 36
+    run_action_bar = window.findChild(QWidget, "stats_run_action_bar")
+    assert run_action_bar is not None
+    assert setup_area.isAncestorOf(run_action_bar)
+    assert run_action_bar.isAncestorOf(window.analyze_single_btn)
+    assert run_action_bar.isAncestorOf(window.single_advanced_btn)
+    assert not hasattr(window, "single_status_lbl")
     assert isinstance(window.lbl_status, StatusBanner)
+    assert window.lbl_status.objectName() == "stats_status_chip"
+    assert setup_area.isAncestorOf(window.lbl_status)
+    assert window.findChild(QWidget, "stats_status_footer") is None
     assert not hasattr(window, "analyze_between_btn")
     assert not hasattr(window, "between_status_lbl")
     assert not hasattr(window, "multi_group_ready_value")
+    assert not hasattr(window, "manual_exclusion_edit_btn")
+    assert window.manual_exclusion_select_all_btn.text() == "Exclude all"
+    assert window.manual_exclusion_clear_btn.text() == "Clear exclusions"
+    assert isinstance(window.manual_exclusion_summary_label, QLabel)
+    assert not hasattr(window, "reporting_summary_export_checkbox")
+    assert window.reporting_summary_export_action.isCheckable()
+    assert window.reporting_summary_export_action.isChecked()
     assert window.log_text.property("logSurface") is True
     assert window.summary_text.property("logSurface") is True
 
@@ -96,16 +149,16 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     expected_rows = {
         "stats_conditions_actions",
         "stats_manual_exclusion_actions",
-        "stats_single_group_actions",
         "stats_data_folder_actions",
         "stats_export_path_actions",
+        "stats_review_export_actions",
         "stats_reporting_summary_actions",
         "stats_output_copy_actions",
     }
     assert expected_rows <= set(action_rows)
     assert "stats_between_group_actions" not in action_rows
+    assert "stats_single_group_actions" not in action_rows
     assert "stats_multigroup_harmonic_actions" not in action_rows
     assert "stats_multigroup_issue_actions" not in action_rows
-    assert action_rows["stats_single_group_actions"].row_layout.indexOf(window.analyze_single_btn) >= 0
     assert action_rows["stats_output_copy_actions"].row_layout.indexOf(window.copy_summary_btn) >= 0
     assert action_rows["stats_reporting_summary_actions"].row_layout.indexOf(window.reporting_summary_save_btn) >= 0

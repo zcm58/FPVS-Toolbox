@@ -17,6 +17,7 @@ class StatsWindowUiMixin:
 
         # included conditions panel
         self.conditions_group = SectionCard("Included Conditions")
+        self.conditions_group.setObjectName("stats_conditions_group")
         self.conditions_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
         self.conditions_group.setMaximumHeight(260)
         self.conditions_group.setToolTip(
@@ -39,6 +40,7 @@ class StatsWindowUiMixin:
         conditions_layout.addWidget(conditions_button_row)
 
         self.conditions_scroll_area = QScrollArea()
+        self.conditions_scroll_area.setObjectName("stats_conditions_scroll_area")
         self.conditions_scroll_area.setWidgetResizable(True)
         self.conditions_scroll_area.setMinimumHeight(120)
         self.conditions_scroll_area.setMaximumHeight(180)
@@ -198,10 +200,18 @@ class StatsWindowUiMixin:
             self._dv_policy_name == ROSSION_POLICY_NAME
         )
 
-        self.dv_variants_group = SectionCard("Comparison Exports")
-        self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred))
-        dv_variants_layout = self.dv_variants_group.content_layout
+        self.dv_variants_group = QWidget()
+        self.dv_variants_group.setObjectName("stats_comparison_exports")
+        self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
+        dv_variants_layout = QVBoxLayout(self.dv_variants_group)
+        dv_variants_layout.setContentsMargins(0, 0, 0, 0)
         dv_variants_layout.setSpacing(4)
+        dv_variants_heading = QLabel("Comparison Exports")
+        dv_variants_heading.setProperty("cardTitle", True)
+        dv_variants_heading_font = dv_variants_heading.font()
+        dv_variants_heading_font.setBold(True)
+        dv_variants_heading.setFont(dv_variants_heading_font)
+        dv_variants_layout.addWidget(dv_variants_heading)
         dv_variants_note = QLabel(
             "These exports are for consistency checks. Statistical results use the Primary DV only."
         )
@@ -226,13 +236,21 @@ class StatsWindowUiMixin:
             self._dv_variant_checkboxes[policy_name] = checkbox
         self._sync_selected_dv_variants()
 
-        self.outlier_group = SectionCard("Outlier Flagging")
-        self.outlier_group.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred))
+        self.outlier_group = QWidget()
+        self.outlier_group.setObjectName("stats_outlier_flagging")
+        self.outlier_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
         self.outlier_group.setToolTip(
             "Flag participants whose DV values are outside the allowed range."
         )
-        outlier_layout = self.outlier_group.content_layout
+        outlier_layout = QVBoxLayout(self.outlier_group)
+        outlier_layout.setContentsMargins(0, 0, 0, 0)
         outlier_layout.setSpacing(6)
+        outlier_heading = QLabel("Outlier Flagging")
+        outlier_heading.setProperty("cardTitle", True)
+        outlier_heading_font = outlier_heading.font()
+        outlier_heading_font.setBold(True)
+        outlier_heading.setFont(outlier_heading_font)
+        outlier_layout.addWidget(outlier_heading)
 
         self.outlier_enable_checkbox = QCheckBox("Enable DV flagging (always on)")
         self.outlier_enable_checkbox.setChecked(True)
@@ -268,14 +286,11 @@ class StatsWindowUiMixin:
         )
         outlier_layout.addWidget(outlier_note)
 
-        self.manual_exclusion_group = SectionCard(
-            "Manual Exclusions",
-            content_layout=QVBoxLayout(),
-        )
-        self.manual_exclusion_group.setSizePolicy(
-            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        )
-        manual_layout = self.manual_exclusion_group.content_layout
+        manual_row = QWidget()
+        manual_row.setObjectName("stats_manual_exclusion_row")
+        manual_row.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
+        manual_layout = QHBoxLayout(manual_row)
+        manual_layout.setContentsMargins(0, 0, 0, 0)
         manual_layout.setSpacing(8)
 
         self.manual_exclusion_summary_label = QLabel("Excluded: 0")
@@ -287,29 +302,62 @@ class StatsWindowUiMixin:
         self.manual_exclusion_list.setToolTip("None")
         manual_layout.addWidget(self.manual_exclusion_list, 1)
 
-        self.manual_exclusion_edit_btn = make_action_button("Edit...")
-        self.manual_exclusion_clear_btn = make_action_button("Clear", variant="danger")
+        self.manual_exclusion_group = SectionCard("Manual Exclusions")
+        self.manual_exclusion_group.setObjectName("stats_manual_exclusion_group")
+        self.manual_exclusion_group.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        )
+        manual_group_layout = self.manual_exclusion_group.content_layout
+        manual_group_layout.setSpacing(8)
+        manual_group_layout.addWidget(manual_row)
+
+        manual_note = QLabel(
+            "Check participants to exclude them from modeling. Flagged participants remain suggestions until checked here."
+        )
+        manual_note.setWordWrap(True)
+        manual_group_layout.addWidget(manual_note)
+
+        manual_filter_row = QHBoxLayout()
+        manual_filter_row.setSpacing(6)
+        manual_filter_row.addWidget(QLabel("Filter:"))
+        self.manual_exclusion_search_input = QLineEdit()
+        self.manual_exclusion_search_input.setObjectName("stats_manual_exclusion_filter")
+        self.manual_exclusion_search_input.setPlaceholderText("Filter participants...")
+        manual_filter_row.addWidget(self.manual_exclusion_search_input, 1)
+        manual_group_layout.addLayout(manual_filter_row)
+
+        self.manual_exclusion_candidates_list = QListWidget()
+        self.manual_exclusion_candidates_list.setObjectName("stats_manual_exclusion_candidates_list")
+        self.manual_exclusion_candidates_list.setSelectionMode(QAbstractItemView.NoSelection)
+        self.manual_exclusion_candidates_list.setMinimumHeight(150)
+        self.manual_exclusion_candidates_list.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        )
+        manual_group_layout.addWidget(self.manual_exclusion_candidates_list, 1)
+
+        self.manual_exclusion_select_all_btn = make_action_button("Exclude all")
+        self.manual_exclusion_clear_btn = make_action_button("Clear exclusions", variant="danger")
         manual_actions = ActionRow(self.manual_exclusion_group, alignment=Qt.AlignLeft)
         manual_actions.setObjectName("stats_manual_exclusion_actions")
-        manual_actions.add_button(self.manual_exclusion_edit_btn)
+        manual_actions.add_button(self.manual_exclusion_select_all_btn)
         manual_actions.add_button(self.manual_exclusion_clear_btn)
         manual_actions.row_layout.addStretch(1)
-        manual_layout.addWidget(manual_actions)
+        manual_group_layout.addWidget(manual_actions)
 
-        self.manual_exclusion_edit_btn.clicked.connect(self._open_manual_exclusion_dialog)
+        self.manual_exclusion_search_input.textChanged.connect(
+            self._filter_manual_exclusion_candidates
+        )
+        self.manual_exclusion_candidates_list.itemChanged.connect(
+            self._on_manual_exclusion_item_changed
+        )
+        self.manual_exclusion_select_all_btn.clicked.connect(self._select_all_manual_exclusions)
         self.manual_exclusion_clear_btn.clicked.connect(self._clear_manual_exclusions)
 
-        analysis_box = SectionCard("Analysis Controls", content_layout=QHBoxLayout())
-        analysis_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
-        analysis_layout = analysis_box.content_layout
-        analysis_layout.setSpacing(8)
-
-        # single group section
-        single_group_box = SectionCard("Single Group Analysis")
-        single_group_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
-        single_layout = single_group_box.content_layout
-
         self.analyze_single_btn = make_action_button("Analyze Single Group", variant="primary")
+        self.analyze_single_btn.setObjectName("stats_analyze_single_primary")
+        self.analyze_single_btn.setMinimumHeight(36)
+        self.analyze_single_btn.setMinimumWidth(190)
+        self.analyze_single_btn.setDefault(True)
         self.analyze_single_btn.setToolTip(
             "Run the full single-group analysis pipeline using the selected settings."
         )
@@ -320,27 +368,6 @@ class StatsWindowUiMixin:
             "Run or export individual single-group steps."
         )
         self.single_advanced_btn.clicked.connect(self.on_single_advanced_clicked)
-        single_action_row = ActionRow(single_group_box, alignment=Qt.AlignLeft)
-        single_action_row.setObjectName("stats_single_group_actions")
-        single_action_row.add_button(self.analyze_single_btn)
-        single_action_row.add_button(self.single_advanced_btn)
-        single_layout.addWidget(single_action_row)
-
-        self.single_status_lbl = StatusBanner("Idle")
-        self.single_status_lbl.setWordWrap(True)
-        single_layout.addWidget(self.single_status_lbl)
-
-        analysis_layout.addWidget(single_group_box)
-
-        right_top_widget = QWidget()
-        right_layout = QVBoxLayout(right_top_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
-
-        data_actions_widget = QWidget()
-        data_actions_layout = QVBoxLayout(data_actions_widget)
-        data_actions_layout.setContentsMargins(0, 0, 0, 0)
-        data_actions_layout.setSpacing(6)
 
         self.le_folder = ElidedPathLabel()
         self.le_folder.setToolTip(
@@ -364,36 +391,22 @@ class StatsWindowUiMixin:
         self.info_button.setToolTip(
             "Show a short description of each analysis step."
         )
-        folder_actions = ActionRow(data_actions_widget, alignment=Qt.AlignLeft, spacing=6)
+        folder_actions = ActionRow(self, alignment=Qt.AlignLeft, spacing=6)
         folder_actions.setObjectName("stats_data_folder_actions")
         folder_actions.add_button(btn_browse)
         folder_actions.add_button(self.btn_copy_folder)
         folder_actions.add_button(self.btn_open_results)
         folder_actions.add_button(self.info_button)
-        folder_actions.row_layout.addStretch(1)
-        folder_row = QHBoxLayout()
-        folder_row.setSpacing(6)
-        folder_row.addWidget(QLabel("Data Folder:"))
-        folder_row.addWidget(self.le_folder, 1)
-        data_actions_layout.addLayout(folder_row)
-        data_actions_layout.addWidget(folder_actions)
 
-        right_layout.addWidget(analysis_box)
-        right_layout.addWidget(self.manual_exclusion_group)
-
-        # status + ROI labels with spinner
-        status_row = QHBoxLayout()
         self.spinner = BusySpinner()
         self.spinner.setFixedSize(18, 18)
         self.spinner.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.spinner.hide()
-        status_row.addWidget(self.spinner, alignment=Qt.AlignLeft)
-
         self.lbl_status = StatusBanner("Select a folder containing FPVS results.")
-        self.lbl_status.setWordWrap(True)
-        self.lbl_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        status_row.addWidget(self.lbl_status, 1)
-        right_layout.addLayout(status_row)
+        self.lbl_status.setObjectName("stats_status_chip")
+        self.lbl_status.setWordWrap(False)
+        self.lbl_status.setMaximumWidth(360)
+        self.lbl_status.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         export_row = QHBoxLayout()
         export_row.setSpacing(6)
@@ -409,19 +422,39 @@ class StatsWindowUiMixin:
         self.export_copy_btn.setToolTip("Copy the most recent export path.")
         self.export_copy_btn.setEnabled(False)
         self.export_copy_btn.clicked.connect(self._copy_export_path)
-        export_actions = ActionRow(right_top_widget, alignment=Qt.AlignLeft, spacing=6)
+        export_actions = ActionRow(self, alignment=Qt.AlignLeft, spacing=6)
         export_actions.setObjectName("stats_export_path_actions")
         export_actions.add_button(self.export_open_btn)
         export_actions.add_button(self.export_copy_btn)
         export_row.addWidget(export_actions)
-        right_layout.addLayout(export_row)
 
-        self.reporting_summary_export_checkbox = QCheckBox("Reporting Summary (.txt)")
-        self.reporting_summary_export_checkbox.setChecked(True)
-        self.reporting_summary_export_checkbox.setToolTip(
+        self.export_options_btn = make_action_button("Export Options", compact=True)
+        self.export_options_btn.setObjectName("stats_export_options_button")
+        self.export_options_menu = QMenu(self.export_options_btn)
+        self.reporting_summary_export_action = QAction(
+            "Auto-save Reporting Summary (.txt)",
+            self.export_options_menu,
+        )
+        self.reporting_summary_export_action.setCheckable(True)
+        self.reporting_summary_export_action.setChecked(True)
+        self.reporting_summary_export_action.setToolTip(
             "When checked, write a plain-text Reporting Summary at end-of-run."
         )
-        right_layout.addWidget(self.reporting_summary_export_checkbox)
+        self.export_options_menu.addAction(self.reporting_summary_export_action)
+        self.export_options_btn.setMenu(self.export_options_menu)
+
+        review_group = SectionCard("Review")
+        review_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
+        review_layout = review_group.content_layout
+        review_layout.setSpacing(8)
+        review_layout.addWidget(self.outlier_group)
+        review_layout.addWidget(self.dv_variants_group)
+        review_layout.addLayout(export_row)
+        review_actions = ActionRow(review_group, alignment=Qt.AlignLeft)
+        review_actions.setObjectName("stats_review_export_actions")
+        review_actions.add_button(self.export_options_btn)
+        review_actions.row_layout.addStretch(1)
+        review_layout.addWidget(review_actions)
 
         self.lbl_rois = QLabel("")
         self.lbl_rois.setWordWrap(True)
@@ -429,8 +462,7 @@ class StatsWindowUiMixin:
         self.lbl_rois.setToolTip(
             "ROIs loaded from Settings. Update ROI definitions in Settings to change this list."
         )
-        right_layout.addWidget(self.lbl_rois)
-        right_layout.addStretch(1)
+        review_layout.addWidget(self.lbl_rois)
 
         # output pane
         self.summary_text = QTextEdit()
@@ -509,50 +541,97 @@ class StatsWindowUiMixin:
 
         self.output_text = self.log_text
 
-        self.setup_tabs = QTabWidget()
-        self.setup_tabs.setObjectName("stats_setup_tabs")
+        setup_area = QWidget()
+        setup_area.setObjectName("stats_setup_area")
+        setup_layout = QVBoxLayout(setup_area)
+        setup_layout.setContentsMargins(0, 0, 0, 0)
+        setup_layout.setSpacing(8)
 
-        basic_scroll_area = QScrollArea()
-        basic_scroll_area.setObjectName("stats_basic_setup_scroll_area")
-        basic_scroll_area.setWidgetResizable(True)
-        basic_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        basic_scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        basic_contents = QWidget()
-        basic_layout = QVBoxLayout(basic_contents)
+        file_box = SectionCard("File I/O")
+        file_box.setObjectName("stats_file_io_section")
+        file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
+        file_layout = file_box.content_layout
+        file_layout.setSpacing(6)
+        file_grid = QGridLayout()
+        file_grid.setContentsMargins(0, 0, 0, 0)
+        file_grid.setHorizontalSpacing(10)
+        file_grid.setVerticalSpacing(4)
+        file_grid.addWidget(QLabel("Excel Files Folder:"), 0, 0)
+        file_grid.addWidget(self.le_folder, 0, 1)
+        file_grid.addWidget(folder_actions, 0, 2)
+        file_grid.addWidget(self.spinner, 0, 3, alignment=Qt.AlignVCenter)
+        file_grid.addWidget(self.lbl_status, 0, 4, alignment=Qt.AlignVCenter)
+        file_grid.setColumnStretch(1, 1)
+        file_layout.addLayout(file_grid)
+
+        basic_page = QWidget()
+        basic_page.setObjectName("stats_basic_setup_page")
+        basic_layout = QVBoxLayout(basic_page)
         basic_layout.setContentsMargins(0, 0, 0, 0)
         basic_layout.setSpacing(8)
-        basic_layout.addWidget(self.conditions_group)
-        basic_layout.addWidget(right_top_widget)
-        basic_layout.addStretch(1)
-        basic_scroll_area.setWidget(basic_contents)
-        self.setup_tabs.addTab(basic_scroll_area, "Basic")
+        basic_layout.addWidget(file_box)
 
-        advanced_scroll_area = QScrollArea()
-        advanced_scroll_area.setObjectName("stats_advanced_setup_scroll_area")
-        advanced_scroll_area.setWidgetResizable(True)
-        advanced_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        advanced_scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        advanced_contents = QWidget()
-        advanced_layout = QVBoxLayout(advanced_contents)
-        advanced_layout.setContentsMargins(0, 0, 0, 0)
-        advanced_layout.setSpacing(8)
-        advanced_layout.addWidget(self.dv_group)
-        advanced_layout.addWidget(self.dv_variants_group)
-        advanced_layout.addWidget(self.outlier_group)
-        advanced_layout.addStretch(1)
-        advanced_scroll_area.setWidget(advanced_contents)
-        self.setup_tabs.addTab(advanced_scroll_area, "Advanced")
+        basic_content = QWidget()
+        basic_content_layout = QHBoxLayout(basic_content)
+        basic_content_layout.setContentsMargins(0, 0, 0, 0)
+        basic_content_layout.setSpacing(10)
+
+        basic_content_layout.addWidget(self.conditions_group, 1)
+        basic_content_layout.addWidget(self.manual_exclusion_group, 1)
+        basic_layout.addWidget(basic_content, 1)
+
+        harmonics_page = QWidget()
+        harmonics_page.setObjectName("stats_harmonics_setup_page")
+        harmonics_layout = QVBoxLayout(harmonics_page)
+        harmonics_layout.setContentsMargins(0, 0, 0, 0)
+        harmonics_layout.setSpacing(8)
+        harmonics_layout.addWidget(self.dv_group, 1)
+
+        review_page = QWidget()
+        review_page.setObjectName("stats_review_setup_page")
+        review_layout_page = QVBoxLayout(review_page)
+        review_layout_page.setContentsMargins(0, 0, 0, 0)
+        review_layout_page.setSpacing(8)
+        review_layout_page.addWidget(review_group, 1)
+
+        self.setup_tabs = QTabWidget()
+        self.setup_tabs.setObjectName("stats_setup_tabs")
+        self.setup_tabs.setDocumentMode(True)
+        self.setup_tabs.setStyleSheet(
+            """
+            QTabWidget#stats_setup_tabs::pane {
+                border: 0;
+                background: transparent;
+            }
+            QTabWidget#stats_setup_tabs > QWidget {
+                background: transparent;
+            }
+            """
+        )
+        self.setup_tabs.addTab(basic_page, "Basic")
+        self.setup_tabs.addTab(harmonics_page, "Significant Harmonics")
+        self.setup_tabs.addTab(review_page, "Review")
+        setup_layout.addWidget(self.setup_tabs, 1)
+
+        self.run_action_bar = QWidget()
+        self.run_action_bar.setObjectName("stats_run_action_bar")
+        run_action_layout = QHBoxLayout(self.run_action_bar)
+        run_action_layout.setContentsMargins(0, 0, 0, 0)
+        run_action_layout.setSpacing(8)
+        run_action_layout.addWidget(self.single_advanced_btn)
+        run_action_layout.addStretch(1)
+        run_action_layout.addWidget(self.analyze_single_btn)
+        setup_layout.addWidget(self.run_action_bar)
 
         root_splitter = QSplitter(Qt.Vertical)
         root_splitter.setObjectName("stats_root_splitter")
         root_splitter.setChildrenCollapsible(False)
-        root_splitter.addWidget(self.setup_tabs)
+        root_splitter.addWidget(setup_area)
         root_splitter.addWidget(output_container)
         root_splitter.setStretchFactor(0, 5)
         root_splitter.setStretchFactor(1, 2)
         root_splitter.setSizes([620, 200])
 
-        main_layout.addWidget(data_actions_widget)
         main_layout.addWidget(root_splitter, 1)
 
         # initialize export buttons
@@ -561,6 +640,10 @@ class StatsWindowUiMixin:
         self._sync_results_view()
 
     # --------------------------- actions ---------------------------
+
+    def _auto_export_reporting_summary_enabled(self) -> bool:
+        action = getattr(self, "reporting_summary_export_action", None)
+        return bool(action is None or action.isChecked())
 
     def _sync_results_view(self, *_args) -> None:
         index = self.results_selector.currentIndex() if hasattr(self, "results_selector") else 0

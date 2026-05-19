@@ -17,6 +17,10 @@ ruff check <changed Python files>
 Requirements:
 
 - Preserve existing user flows, processing order, project paths, and export formats.
+- Avoid card-within-card layouts unless the user explicitly asks for them.
+  `SectionCard` should frame a top-level subsection; parent tab pages,
+  splitters, and setup containers should stay visually flat when they contain
+  subsection cards.
 - Keep long work off the UI thread; use `QThread` or `QRunnable`/`QThreadPool` for long work.
 - Workers must not touch widgets directly; communicate through signals.
 - Import `QAction` from `PySide6.QtGui` only.

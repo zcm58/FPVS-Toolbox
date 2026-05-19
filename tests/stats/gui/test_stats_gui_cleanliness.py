@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtWidgets import QComboBox, QPushButton, QStackedWidget, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import QListWidget, QWidget, QComboBox, QPushButton, QStackedWidget, QTabWidget  # noqa: E402
 
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
@@ -21,18 +21,28 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
     qtbot.addWidget(window)
     window.show()
 
-    assert window.manual_exclusion_group.header.title_label.text() == "Manual Exclusions"
-
-    buttons = {btn.text(): btn for btn in window.findChildren(QPushButton)}
-    assert window.manual_exclusion_edit_btn.text() in buttons
-    assert "Clear" in buttons
-
+    setup_area = window.findChild(QWidget, "stats_setup_area")
+    assert setup_area is not None
     setup_tabs = window.findChild(QTabWidget, "stats_setup_tabs")
     assert setup_tabs is not None
     assert [setup_tabs.tabText(i) for i in range(setup_tabs.count())] == [
         "Basic",
-        "Advanced",
+        "Significant Harmonics",
+        "Review",
     ]
+    assert setup_tabs.widget(0).isAncestorOf(window.le_folder)
+    assert setup_tabs.widget(0).isAncestorOf(window.manual_exclusion_group)
+    assert setup_area.isAncestorOf(window.lbl_status)
+    assert not hasattr(window, "data_folder_group")
+
+    buttons = {btn.text(): btn for btn in window.findChildren(QPushButton)}
+    assert "Manage Exclusions" not in buttons
+    assert window.manual_exclusion_select_all_btn.text() in buttons
+    assert window.manual_exclusion_clear_btn.text() in buttons
+    assert isinstance(window.manual_exclusion_candidates_list, QListWidget)
+    assert not hasattr(window, "reporting_summary_export_checkbox")
+    assert window.reporting_summary_export_action.isChecked()
+
     results_selector = window.findChild(QComboBox, "stats_results_selector")
     results_stack = window.findChild(QStackedWidget, "stats_results_stack")
     assert results_selector is not None

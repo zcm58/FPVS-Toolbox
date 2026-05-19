@@ -18,6 +18,7 @@ def test_stats_condition_selection_snapshot_and_block(qtbot, tmp_path, monkeypat
     conditions = ["CondA", "CondB", "CondC"]
     window._populate_conditions_panel(conditions)
 
+    assert window.conditions_group.objectName() == "stats_conditions_group"
     assert isinstance(window.conditions_group, SectionCard)
     assert window.conditions_group.header.title_label.text() == "Included Conditions"
     assert window._get_selected_conditions() == conditions

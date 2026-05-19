@@ -110,8 +110,8 @@ class StatsWindowExclusionsMixin:
             return {}
         return build_flagged_details_map(report.qc_report, report.dv_report)
 
-    def _update_manual_exclusion_summary(self) -> None:
-        """Handle the update manual exclusion summary step for the Stats workflow."""
+    def _update_manual_exclusion_summary_labels(self) -> None:
+        """Update the inline manual exclusion summary text."""
         excluded = sorted(self.manual_excluded_pids)
         self.manual_excluded_pids = set(excluded)
         summary_label = getattr(self, "manual_exclusion_summary_label", None)
@@ -130,6 +130,88 @@ class StatsWindowExclusionsMixin:
                 tooltip_text = ", ".join(excluded)
             list_widget.set_full_text(display_text)
             list_widget.setToolTip(tooltip_text)
+        clear_btn = getattr(self, "manual_exclusion_clear_btn", None)
+        if clear_btn is not None:
+            clear_btn.setEnabled(bool(excluded))
+
+    def _update_manual_exclusion_summary(self) -> None:
+        """Handle the update manual exclusion summary step for the Stats workflow."""
+        self._update_manual_exclusion_summary_labels()
+        self._sync_manual_exclusion_candidates_list()
+
+    def _sync_manual_exclusion_candidates_list(self) -> None:
+        """Refresh the inline manual exclusion participant checklist."""
+        list_widget = getattr(self, "manual_exclusion_candidates_list", None)
+        if list_widget is None:
+            return
+        search_input = getattr(self, "manual_exclusion_search_input", None)
+        filter_text = search_input.text() if search_input is not None else ""
+        candidates = list(getattr(self, "_manual_exclusion_candidates", []))
+        flagged_map = self._current_flagged_pid_map()
+        flagged_details_map = self._current_flagged_details_map()
+        self._updating_manual_exclusion_list = True
+        try:
+            list_widget.clear()
+            if not candidates:
+                item = QListWidgetItem("Load a data folder to list participants.")
+                item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+                list_widget.addItem(item)
+            for pid in candidates:
+                flags = flagged_map.get(pid, [])
+                label_flags = [outlier_reason_label(flag) for flag in flags]
+                suffix = f" (FLAGGED: {', '.join(label_flags)})" if label_flags else ""
+                item = QListWidgetItem(f"{pid}{suffix}")
+                item.setData(Qt.UserRole, pid)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked if pid in self.manual_excluded_pids else Qt.Unchecked)
+                tooltip = flagged_details_map.get(pid)
+                if tooltip:
+                    item.setToolTip(tooltip)
+                list_widget.addItem(item)
+        finally:
+            self._updating_manual_exclusion_list = False
+        self._filter_manual_exclusion_candidates(filter_text)
+        select_all_btn = getattr(self, "manual_exclusion_select_all_btn", None)
+        if select_all_btn is not None:
+            select_all_btn.setEnabled(bool(candidates))
+        search_input = getattr(self, "manual_exclusion_search_input", None)
+        if search_input is not None:
+            search_input.setEnabled(bool(candidates))
+        self._update_manual_exclusion_summary_labels()
+
+    def _filter_manual_exclusion_candidates(self, text: str) -> None:
+        """Filter the inline manual exclusion checklist."""
+        list_widget = getattr(self, "manual_exclusion_candidates_list", None)
+        if list_widget is None:
+            return
+        filter_text = text.strip().lower()
+        for idx in range(list_widget.count()):
+            item = list_widget.item(idx)
+            pid = item.data(Qt.UserRole)
+            if pid is None:
+                item.setHidden(False)
+                continue
+            item_text = item.text().lower()
+            item.setHidden(bool(filter_text) and filter_text not in item_text)
+
+    def _on_manual_exclusion_item_changed(self, item: QListWidgetItem) -> None:
+        """Update manual exclusions from the inline checklist."""
+        if getattr(self, "_updating_manual_exclusion_list", False):
+            return
+        pid = item.data(Qt.UserRole)
+        if pid is None:
+            return
+        pid_text = str(pid)
+        if item.checkState() == Qt.Checked:
+            self.manual_excluded_pids.add(pid_text)
+        else:
+            self.manual_excluded_pids.discard(pid_text)
+        self._update_manual_exclusion_summary_labels()
+
+    def _select_all_manual_exclusions(self) -> None:
+        """Mark every listed participant as manually excluded."""
+        self.manual_excluded_pids = set(self._manual_exclusion_candidates)
+        self._update_manual_exclusion_summary()
 
     def _reconcile_manual_exclusions(self, candidates: list[str]) -> None:
         """Handle the reconcile manual exclusions step for the Stats workflow."""
@@ -145,22 +227,13 @@ class StatsWindowExclusionsMixin:
         self._update_manual_exclusion_summary()
 
     def _open_manual_exclusion_dialog(self) -> None:
-        """Handle the open manual exclusion dialog step for the Stats workflow."""
-        dialog = ManualOutlierExclusionDialog(
-            candidates=self._manual_exclusion_candidates,
-            flagged_map=self._current_flagged_pid_map(),
-            flagged_details_map=self._current_flagged_details_map(),
-            preselected=self.manual_excluded_pids,
-            parent=self,
-        )
-
-        def _apply_changes(selections: set[str]) -> None:
-            """Handle the apply changes step for the Stats workflow."""
-            self.manual_excluded_pids = set(selections)
-            self._update_manual_exclusion_summary()
-
-        dialog.manualExclusionsApplied.connect(_apply_changes)
-        dialog.exec()
+        """Show the inline manual exclusions section without opening a modal."""
+        tabs = getattr(self, "setup_tabs", None)
+        if tabs is not None:
+            tabs.setCurrentIndex(0)
+        search_input = getattr(self, "manual_exclusion_search_input", None)
+        if search_input is not None:
+            search_input.setFocus()
 
     def _set_fixed_k_controls_enabled(self, enabled: bool) -> None:
         """Handle the set fixed k controls enabled step for the Stats workflow."""
@@ -595,7 +668,12 @@ class StatsWindowExclusionsMixin:
         copy_details_btn.clicked.connect(_copy_details)
         copy_btn.setEnabled(bool(display_rows))
         copy_details_btn.setEnabled(bool(display_rows))
-        edit_manual_btn.clicked.connect(self._open_manual_exclusion_dialog)
+        def _show_inline_manual_exclusions() -> None:
+            """Close this report and focus the inline manual exclusions editor."""
+            dialog.accept()
+            self._open_manual_exclusion_dialog()
+
+        edit_manual_btn.clicked.connect(_show_inline_manual_exclusions)
         close_btn.clicked.connect(dialog.accept)
 
         return dialog

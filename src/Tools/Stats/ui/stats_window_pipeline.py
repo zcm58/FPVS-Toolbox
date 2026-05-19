@@ -299,7 +299,7 @@ class StatsWindowPipelineMixin:
         anova_df = self.rm_anova_results_data if pipeline_id is PipelineId.SINGLE else None
         lmm_df = self.mixed_model_results_data
         posthoc_df = self.posthoc_results_data
-        auto_export = bool(getattr(self, "reporting_summary_export_checkbox", None) and self.reporting_summary_export_checkbox.isChecked())
+        auto_export = self._auto_export_reporting_summary_enabled()
         return {
             "context": context,
             "anova_df": anova_df,
@@ -632,11 +632,9 @@ class StatsWindowPipelineMixin:
         self._pipeline_qc_config[pipeline_id] = self._get_qc_exclusion_payload()
         self._pipeline_qc_state[pipeline_id] = {"report": None}
         self._pipeline_run_reports[pipeline_id] = None
-        label = self.single_status_lbl
-        if label:
-            if hasattr(label, "set_variant"):
-                label.set_variant("info")
-            label.setText("Running…")
+        if hasattr(self.lbl_status, "set_variant"):
+            self.lbl_status.set_variant("info")
+        self._set_status("Running...")
         btn = self.analyze_single_btn
         if btn:
             btn.setEnabled(False)
@@ -669,19 +667,17 @@ class StatsWindowPipelineMixin:
                 "exports_ran": bool(exports_ran),
             },
         )
-        label = self.single_status_lbl
         btn = self.analyze_single_btn
         try:
-            if label:
-                if success:
-                    ts = datetime.now().strftime("%H:%M:%S")
-                    if hasattr(label, "set_variant"):
-                        label.set_variant("success")
-                    label.setText(f"Last run OK at {ts}")
-                else:
-                    if hasattr(label, "set_variant"):
-                        label.set_variant("error")
-                    label.setText("Last run error (see log)")
+            if success:
+                ts = datetime.now().strftime("%H:%M:%S")
+                if hasattr(self.lbl_status, "set_variant"):
+                    self.lbl_status.set_variant("success")
+                self._set_status(f"Last run OK at {ts}")
+            else:
+                if hasattr(self.lbl_status, "set_variant"):
+                    self.lbl_status.set_variant("error")
+                self._set_status("Last run error (see log)")
             self._active_pipeline = None
             if success:
                 elapsed_ms = int((time.perf_counter() - self._pipeline_start_perf.get(pipeline_id, time.perf_counter())) * 1000)

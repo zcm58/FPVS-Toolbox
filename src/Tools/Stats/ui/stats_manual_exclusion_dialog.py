@@ -54,7 +54,7 @@ class ManualOutlierExclusionDialog(QDialog):
         search_row = QHBoxLayout()
         search_label = QLabel("Search:")
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Filter participants…")
+        self.search_input.setPlaceholderText("Filter participants...")
         search_row.addWidget(search_label)
         search_row.addWidget(self.search_input, 1)
         layout.addLayout(search_row)
@@ -77,11 +77,12 @@ class ManualOutlierExclusionDialog(QDialog):
             self.list_widget.addItem(item)
 
         self.select_all_btn = make_action_button("Select all")
-        self.select_none_btn = make_action_button("Select none")
+        self.clear_exclusions_btn = make_action_button("Clear exclusions", variant="danger")
+        self.select_none_btn = self.clear_exclusions_btn
         controls_row = ActionRow(self, alignment=Qt.AlignLeft)
         controls_row.setObjectName("stats_manual_dialog_actions")
         controls_row.add_button(self.select_all_btn)
-        controls_row.add_button(self.select_none_btn)
+        controls_row.add_button(self.clear_exclusions_btn)
         controls_row.row_layout.addStretch(1)
         layout.addWidget(controls_row)
 
@@ -93,7 +94,7 @@ class ManualOutlierExclusionDialog(QDialog):
 
         self.search_input.textChanged.connect(self._apply_filter)
         self.select_all_btn.clicked.connect(self._select_all)
-        self.select_none_btn.clicked.connect(self._select_none)
+        self.clear_exclusions_btn.clicked.connect(self._clear_exclusions)
         if self.apply_button is not None:
             self.apply_button.clicked.connect(self._apply_changes)
         self.button_box.rejected.connect(self.reject)
@@ -117,6 +118,13 @@ class ManualOutlierExclusionDialog(QDialog):
         for idx in range(self.list_widget.count()):
             item = self.list_widget.item(idx)
             item.setCheckState(Qt.Unchecked)
+
+    def _clear_exclusions(self) -> None:
+        """Clear manual exclusions and close the dialog."""
+        self._select_none()
+        self.selected_pids = set()
+        self.manualExclusionsApplied.emit(set())
+        self.accept()
 
     def _apply_changes(self) -> None:
         """Handle the apply changes step for the Stats workflow."""

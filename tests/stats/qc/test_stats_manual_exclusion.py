@@ -24,12 +24,28 @@ def test_manual_exclusion_dialog_apply_emits_and_closes(qtbot) -> None:
     assert action_row is not None
     assert action_row.row_layout.indexOf(dialog.select_all_btn) >= 0
     assert action_row.row_layout.indexOf(dialog.select_none_btn) >= 0
+    assert dialog.clear_exclusions_btn.text() == "Clear exclusions"
 
     dialog.list_widget.item(0).setCheckState(Qt.Checked)
     with qtbot.waitSignal(dialog.manualExclusionsApplied, timeout=1000) as blocker:
         qtbot.mouseClick(dialog.apply_button, Qt.LeftButton)
 
     assert blocker.args[0] == {"P1"}
+    assert dialog.result() == QDialog.DialogCode.Accepted
+
+
+def test_manual_exclusion_dialog_clear_exclusions_emits_empty(qtbot) -> None:
+    dialog = ManualOutlierExclusionDialog(
+        candidates=["P1", "P2"],
+        flagged_map={},
+        preselected={"P1", "P2"},
+    )
+    qtbot.addWidget(dialog)
+
+    with qtbot.waitSignal(dialog.manualExclusionsApplied, timeout=1000) as blocker:
+        qtbot.mouseClick(dialog.clear_exclusions_btn, Qt.LeftButton)
+
+    assert blocker.args[0] == set()
     assert dialog.result() == QDialog.DialogCode.Accepted
 
 
@@ -67,21 +83,12 @@ def test_manual_exclusion_state_in_payload(qtbot, monkeypatch) -> None:
 
     window._reconcile_manual_exclusions(window.subjects)
 
-    dialog = ManualOutlierExclusionDialog(
-        candidates=window.subjects,
-        flagged_map={},
-        preselected=window.manual_excluded_pids,
-        parent=window,
-    )
-    qtbot.addWidget(dialog)
+    assert window.manual_exclusion_candidates_list.count() == 3
+    window.setup_tabs.setCurrentIndex(1)
+    window._open_manual_exclusion_dialog()
+    assert window.setup_tabs.currentIndex() == 0
 
-    def _apply_changes(selections: set[str]) -> None:
-        window.manual_excluded_pids = set(selections)
-        window._update_manual_exclusion_summary()
-
-    dialog.manualExclusionsApplied.connect(_apply_changes)
-    dialog.list_widget.item(1).setCheckState(Qt.Checked)
-    qtbot.mouseClick(dialog.apply_button, Qt.LeftButton)
+    window.manual_exclusion_candidates_list.item(1).setCheckState(Qt.Checked)
 
     assert "P2" in window.manual_exclusion_list.toolTip()
     assert window.manual_exclusion_summary_label.text() == "Excluded: 1"

@@ -25,10 +25,15 @@ from PySide6.QtWidgets import (
     QComboBox,
     QAbstractItemView,
     QDoubleSpinBox,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QScrollArea,
@@ -120,8 +125,8 @@ from Tools.Stats.qc.stats_outlier_exclusion import (
     export_flagged_participants_report,
     format_flag_types_display,
     format_worst_value_display,
+    outlier_reason_label,
 )
-from Tools.Stats.ui.stats_manual_exclusion_dialog import ManualOutlierExclusionDialog
 from Tools.Stats.qc.stats_qc_exclusion import (
     QC_DEFAULT_CRITICAL_ABS_FLOOR_MAXABS,
     QC_DEFAULT_CRITICAL_ABS_FLOOR_SUMABS,

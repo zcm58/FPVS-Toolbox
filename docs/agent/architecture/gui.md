@@ -49,6 +49,25 @@ stack.
 The main shell default and minimum size is `1280x900` to provide enough
 workspace area for embedded tools without requiring individual pop-out windows.
 
+## Visual Layout Rules
+
+Use cards as first-level subsection boundaries, not as wrappers around other
+cards. A `SectionCard` should usually represent one coherent subsection such as
+File I/O, Plot Parameters, Advanced settings, Log Output, Included Conditions,
+or Review. Do not place `SectionCard` widgets inside another visible card,
+card-styled tab pane, bordered setup container, or other framed parent unless
+the user explicitly requests that nested-card look.
+
+When a screen needs tabs, splitters, or setup pages that contain subsection
+cards, keep the parent page visually flat: no pane border, filled background,
+or rounded outer frame around the child cards. The SNR Plot tool is the current
+reference pattern for embedded tool layout: dedicated subsection cards sit
+directly on the workspace background with normal spacing between them.
+
+Before adding a new card-like wrapper, ask whether it communicates a distinct
+top-level group. If it only exists to hold other cards or to make a tab page
+look enclosed, use an unframed `QWidget` plus layout spacing instead.
+
 ## Component Layer
 
 New and migrated GUI surfaces should import shared UI building blocks from
