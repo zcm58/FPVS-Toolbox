@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -137,7 +138,7 @@ def test_between_get_step_config_uses_canonical_multigroup_snapshot(qtbot, monke
 
 
 @pytest.mark.qt
-def test_update_multigroup_summary_does_not_overwrite_logrecord_message(qtbot) -> None:
+def test_update_multigroup_summary_logs_one_issue_summary(qtbot, caplog) -> None:
     win = StatsWindow(project_dir=str(_project_dir("multigroup-summary-logrecord")))
     qtbot.addWidget(win)
 
@@ -145,10 +146,35 @@ def test_update_multigroup_summary_does_not_overwrite_logrecord_message(qtbot) -
         subject_groups=["GroupA"],
         group_to_subjects={"GroupA": ["P1"]},
         unassigned_subjects=[],
-        issues=[ScanIssue(severity="warning", message="Normalized P01 -> P1", context={"pid": "P1"})],
+        issues=[
+            ScanIssue(
+                severity="warning",
+                message="Subject listed in manifest has no Excel outputs.",
+                context={"pid": f"P{pid}"},
+            )
+            for pid in range(1, 6)
+        ],
         multi_group_ready=True,
         discovered_subjects=["P1"],
         assigned_subjects=["P1"],
     )
 
-    win._update_multigroup_summary(result)
+    with caplog.at_level(logging.INFO, logger="Tools.Stats.ui.stats_window_multigroup"):
+        win._update_multigroup_summary(result)
+
+    issue_records = [
+        record for record in caplog.records if record.message == "stats_multigroup_issue"
+    ]
+    summary_records = [
+        record
+        for record in caplog.records
+        if record.message == "stats_multigroup_issues_summary"
+    ]
+    assert issue_records == []
+    assert len(summary_records) == 1
+    assert summary_records[0].issue_count == 5
+    assert summary_records[0].warning_count == 5
+    assert summary_records[0].blocking_count == 0
+    assert "pid=P1" in summary_records[0].preview
+    assert "... 2 more issue(s)" in summary_records[0].preview
+    assert "P5" in win.multi_group_issue_text.toPlainText()

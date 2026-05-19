@@ -189,6 +189,26 @@ class StatsWindowMultigroupMixin:
         lines = [self._format_multigroup_issue(issue) for issue in visible_issues]
         self.multi_group_issue_text.setPlainText("\n".join(lines))
 
+    def _log_multigroup_issue_summary(self, issues: list[ScanIssue]) -> None:
+        """Log one compact diagnostic for scan issues without per-issue I/O."""
+        if not issues:
+            return
+        blocking_count = sum(1 for issue in issues if issue.severity == "blocking")
+        warning_count = sum(1 for issue in issues if issue.severity == "warning")
+        preview = "; ".join(self._format_multigroup_issue(issue) for issue in issues[:3])
+        if len(issues) > 3:
+            preview = f"{preview}; ... {len(issues) - 3} more issue(s)"
+        logger.log(
+            logging.ERROR if blocking_count else logging.INFO,
+            "stats_multigroup_issues_summary",
+            extra={
+                "issue_count": len(issues),
+                "warning_count": warning_count,
+                "blocking_count": blocking_count,
+                "preview": preview,
+            },
+        )
+
     def _toggle_multigroup_issue_details(self) -> None:
         """Handle the toggle multigroup issue details step for the Stats workflow."""
         self._multigroup_issue_expanded = not self._multigroup_issue_expanded
@@ -228,17 +248,7 @@ class StatsWindowMultigroupMixin:
             self.append_log("General", message, level="warning")
         else:
             self._set_status("Multi-group scan complete.")
-        for issue in result.issues:
-            log_level = "error" if issue.severity == "blocking" else "warning"
-            logger.log(
-                logging.ERROR if log_level == "error" else logging.WARNING,
-                "stats_multigroup_issue",
-                extra={
-                    "severity": issue.severity,
-                    "issue_message": issue.message,
-                    **(issue.context or {}),
-                },
-            )
+        self._log_multigroup_issue_summary(result.issues)
 
     def _on_compute_shared_harmonics_clicked(self) -> None:
         """Handle the on compute shared harmonics clicked step for the Stats workflow."""

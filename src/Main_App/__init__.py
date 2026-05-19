@@ -40,6 +40,47 @@ def _log_dir() -> Path:
     return app_logs_dir()
 
 
+_STANDARD_LOG_RECORD_KEYS = set(
+    logging.LogRecord(
+        name="",
+        level=0,
+        pathname="",
+        lineno=0,
+        msg="",
+        args=(),
+        exc_info=None,
+    ).__dict__
+) | {"message", "asctime"}
+
+
+class _StructuredExtraFormatter(logging.Formatter):
+    """Append structured ``extra`` fields to the standard app log line."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = super().format(record)
+        extras = {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in _STANDARD_LOG_RECORD_KEYS and not key.startswith("_")
+        }
+        if not extras:
+            return message
+        extra_text = " ".join(
+            f"{key}={self._format_extra_value(extras[key])}"
+            for key in sorted(extras)
+        )
+        return f"{message} {extra_text}"
+
+    @staticmethod
+    def _format_extra_value(value: Any) -> str:
+        if isinstance(value, str):
+            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+            if not value or any(char.isspace() for char in value) or "=" in value:
+                return f'"{escaped}"'
+            return escaped
+        return str(value)
+
+
 def configure_logging(debug: bool) -> None:
     """Configure root logging without Legacy dependencies."""
     level = logging.DEBUG if debug else logging.INFO
@@ -50,7 +91,7 @@ def configure_logging(debug: bool) -> None:
         return
     root.setLevel(level)
 
-    fmt = logging.Formatter(
+    fmt = _StructuredExtraFormatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     )
 
