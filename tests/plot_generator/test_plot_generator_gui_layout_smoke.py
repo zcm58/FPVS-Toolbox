@@ -33,10 +33,10 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert "Legend labels (optional)" in section_titles
     assert len(window.findChildren(SectionCard)) >= 6
     assert window.params_box.header.title_label.font().bold()
-    assert window.params_box.header.title_label.font().pointSize() > window.font().pointSize()
+    assert window.params_box.header.title_label.font().pointSize() == window.font().pointSize()
     legend_top = window.legend_group.mapTo(window, QPoint(0, 0)).y()
     legend_field_top = window.legend_condition_a_edit.mapTo(window, QPoint(0, 0)).y()
-    assert legend_field_top - legend_top > 80
+    assert 80 <= legend_field_top - legend_top <= 120
     progress_origin = window.progress_bar.mapTo(window, QPoint(0, 0))
     assert progress_origin.y() > window.height() - 80
     reset_right = window.load_defaults_btn.mapTo(
@@ -67,10 +67,10 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert action_row.row_layout.indexOf(window.cancel_btn) >= 0
     assert window.log.property("logSurface") is True
     assert window.log_body.isVisible() is True
-    assert window.advanced_box.height() >= 290
+    assert window.advanced_box.height() >= 250
     assert window.console_box.height() <= 180
     assert 95 <= window.log.height() <= 120
-    assert window.console_box.y() > window.advanced_box.y() + 280
+    assert window.console_box.y() > window.advanced_box.y() + 240
     params_top = window.params_box.mapTo(window, QPoint(0, 0)).y()
     advanced_top = window.advanced_box.mapTo(window, QPoint(0, 0)).y()
     legend_bottom = (
@@ -82,19 +82,36 @@ def test_plot_generator_gui_layout_smoke(qtbot):
         + window.console_box.height()
     )
     assert abs(params_top - advanced_top) <= 2
+    assert abs(window.params_box.height() - window.legend_group.height()) <= 4
     assert abs(legend_bottom - console_bottom) <= 4
+    assert not window.group_box.isVisible()
     assert not window.scalp_title_a_edit.isEnabled()
     assert not window.scalp_title_b_edit.isEnabled()
 
     initial_visible = window.condition_b_label.isVisible()
+    initial_width = window.width()
+    condition_a_x = window.condition_combo.mapTo(window, QPoint(0, 0)).x()
+    condition_a_y = window.condition_combo.mapTo(window, QPoint(0, 0)).y()
     window.overlay_check.setChecked(not window.overlay_check.isChecked())
     qtbot.wait(50)
     assert window.condition_b_label.isVisible() != initial_visible
     if window.overlay_check.isChecked():
+        condition_b_x = window.condition_b_combo.mapTo(window, QPoint(0, 0)).x()
+        condition_b_y = window.condition_b_combo.mapTo(window, QPoint(0, 0)).y()
+        assert abs(window.width() - initial_width) <= 2
+        assert abs(condition_b_x - condition_a_x) <= 2
+        assert condition_b_y > condition_a_y
+        assert window.condition_b_combo.width() <= window.condition_combo.width() + 2
         assert window.legend_condition_b_label.isVisible()
         assert window.legend_condition_b_edit.isVisible()
         assert window.legend_b_peaks_label.isVisible()
         assert window.legend_b_peaks_edit.isVisible()
+        assert window.legend_condition_a_label.y() < window.legend_condition_a_edit.y()
+        assert window.legend_condition_b_label.y() < window.legend_condition_b_edit.y()
+        assert window.legend_a_peaks_label.y() < window.legend_a_peaks_edit.y()
+        assert window.legend_b_peaks_label.y() < window.legend_b_peaks_edit.y()
+        assert window.legend_condition_a_edit.width() >= 220
+        assert window.legend_condition_b_edit.width() >= 220
         assert window.legend_condition_b_edit.height() >= 20
         assert window.legend_b_peaks_edit.height() >= 20
     window.scalp_check.setChecked(True)

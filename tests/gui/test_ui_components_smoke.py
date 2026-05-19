@@ -167,6 +167,7 @@ def test_section_card_exposes_header_and_content_layout(qtbot) -> None:
 
     assert card.objectName() == "processing_group"
     assert card.header.title_label.text() == "Processing Options"
+    assert card.header.title_label.font().bold()
     assert card.header.property("cardHeader") is True
     assert card.content_layout.indexOf(child) >= 0
 

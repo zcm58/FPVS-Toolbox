@@ -2,6 +2,20 @@
 
 Pick the smallest relevant tests first, then broaden when the change affects shared behavior.
 
+## GUI Execution Boundary
+
+Do not run offscreen Qt workflows in this repo. Do not set
+`QT_QPA_PLATFORM=offscreen`, do not run pytest-qt/offscreen GUI tests, and do
+not launch ad-hoc offscreen Qt scripts; they can freeze or hang indefinitely in
+this Windows environment.
+
+For GUI changes, update focused pytest-qt coverage when useful, but verify
+locally with non-GUI checks such as `py_compile`, focused `ruff`,
+`.agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py`, and
+`.agents/scripts/audit/agent_audit.py --check gui`. Document a visible/manual
+smoke path instead of running offscreen GUI tests unless the user explicitly
+approves a safe visible GUI test environment.
+
 ## Marker Shortcuts
 
 The repository auto-applies common pytest markers from test filenames during
@@ -31,6 +45,9 @@ Tests are grouped by workflow under `tests/audit/`, `tests/gui/`,
 
 ## Main Window And GUI
 
+The targets below identify relevant coverage only; do not run them locally via
+pytest-qt/offscreen unless explicitly approved.
+
 - Main window layout: `tests/gui/test_main_window_layout_smoke.py`
 - Main window processing wiring: `tests/gui/test_main_window_processing.py`
 - Preprocessing dialog: `tests/gui/test_gui_preproc_dialog.py`
@@ -53,6 +70,9 @@ Tests are grouped by workflow under `tests/audit/`, `tests/gui/`,
 
 ## Plot Generator
 
+The GUI targets below identify relevant coverage only; do not run them locally
+via pytest-qt/offscreen unless explicitly approved.
+
 - GUI smoke and layout: `tests/plot_generator/test_plot_generator_gui.py`, `tests/plot_generator/test_plot_generator_gui_layout_smoke.py`
 - FFT/SNR behavior: `tests/plot_generator/test_plot_generator_fft_snr.py`, `tests/plot_generator/test_plot_generator_full_snr_roi.py`
 - Exports and manifests: `tests/plot_generator/test_plot_generator_export_svg_smoke.py`, `tests/plot_generator/test_plot_generator_project_defaults.py`
@@ -64,6 +84,9 @@ Tests are grouped by workflow under `tests/audit/`, `tests/gui/`,
 - Removed legacy smoke: `tests/ratio_calculator/test_ratio_calculator_removed_smoke.py`
 
 ## Statistics
+
+The GUI targets below identify relevant coverage only; do not run them locally
+via pytest-qt/offscreen unless explicitly approved.
 
 - GUI/layout smoke: `tests/stats/gui/test_stats_layout_smoke.py`, `tests/stats/gui/test_stats_window_smoke_phase0.py`
 - Pipeline smoke: `tests/stats/pipeline/test_stats_pipeline_smoke.py`, `tests/stats/pipeline/test_stats_multigroup_smoke.py`

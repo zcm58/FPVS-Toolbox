@@ -41,7 +41,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | Main App processing mixin behavior | `legacy-boundary-review` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/agent/architecture/processing-mixin-contract.md` |
 | BDF loading behavior, memmap paths, EXG typing | `legacy-boundary-review` + `project-path-audit` | `.agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py` | `docs/agent/architecture/eeg-loading-contract.md`; canonical import: `src/Main_App/io/load_utils.py` |
 | Project paths, dialogs, imports, exports, manifests | `project-path-audit` | `.agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py` | `docs/agent/architecture/project-io.md`; canonical import: `src/Main_App/projects/` |
-| GUI smoke coverage | `pytest-qt-smoke` | nearest focused pytest target | `docs/agent/quality/test-selection.md` |
+| GUI smoke coverage | `pytest-qt-smoke` | update coverage only; do not run pytest-qt/offscreen locally | `docs/agent/quality/test-selection.md` |
 | Entropy or garbage-collection cleanup | `cleanup-generated-files` | `python .agents/scripts/audit/agent_audit.py --check garbage-collection` | `docs/agent/quality/garbage-collection.md`; `docs/agent/exec-plans/tech-debt-tracker.md` |
 
 ## Script Layout
@@ -77,7 +77,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ## Test Selection
 
 - Component layer: `python -m pytest tests/gui/test_ui_components_smoke.py -q`
-- Main window or PySide6 layout: `python -m pytest tests/gui/test_main_window_layout_smoke.py -q`
+- Main window or PySide6 layout: update `tests/gui/test_main_window_layout_smoke.py` when useful, but do not run pytest-qt/offscreen locally.
 - Project I/O: `python -m pytest tests/project_io/test_project_settings_roundtrip.py tests/project_io/test_project_results_layout.py -q`
 - Plot generator: `python -m pytest tests/plot_generator/test_plot_generator_gui.py -q`
 - Ratio calculator: `python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py -q`

@@ -33,7 +33,13 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Workers must not touch widgets directly; communicate with signals.
 - All project I/O must use the active project root and preserve existing output formats.
 - Use structured logging instead of `print` in production code.
-- GUI changes need a pytest-qt smoke test or a documented manual smoke test.
+- Do not run offscreen Qt workflows in this repo. Do not set
+  `QT_QPA_PLATFORM=offscreen`, do not run pytest-qt/offscreen GUI tests, and
+  do not launch ad-hoc offscreen Qt scripts; they can freeze or hang
+  indefinitely in this Windows environment.
+- GUI changes need non-GUI checks plus a documented visible/manual smoke path.
+  Use `py_compile`, `ruff`, GUI import audits, and agent audits locally; leave
+  pytest-qt/offscreen GUI targets for explicit user-approved environments only.
 
 ## Skills
 
@@ -42,7 +48,7 @@ Repo-local skills live in `.agents/skills/`.
 - `pyside6-gui-cleanup`: PySide6 widgets, layouts, dialogs, actions, status UX, workers, and theme cleanup.
 - `legacy-boundary-review`: refactors near retired legacy paths, removed-feature boundaries, or historical API boundaries.
 - `project-path-audit`: file dialogs, manifests, exports, imports, generated files, and project-root path discipline.
-- `pytest-qt-smoke`: pytest-qt smoke coverage for changed PySide6 widgets, signals, and non-blocking UI behavior.
+- `pytest-qt-smoke`: maintain pytest-qt smoke coverage definitions, but do not run pytest-qt/offscreen GUI tests locally unless the user explicitly approves a safe visible test environment.
 - `cleanup-generated-files`: generated build, cache, temp, and stale local data cleanup.
 
 Run skill-local scripts before manual inspection when they apply:
@@ -89,7 +95,9 @@ python -m pytest -q
 ruff check .
 ```
 
-If a gate cannot run locally, report the command, failure reason, and residual risk.
+For GUI changes, skip offscreen pytest-qt targets locally and report the
+manual/visible smoke path instead. If any other gate cannot run locally, report
+the command, failure reason, and residual risk.
 
 ## Done Means
 
@@ -99,5 +107,5 @@ If a gate cannot run locally, report the command, failure reason, and residual r
 - UI work remains non-blocking.
 - Project-path discipline is preserved.
 - Errors are logged and surfaced without freezing the app.
-- Tests or documented manual smoke checks cover changed behavior.
+- Non-GUI checks or documented visible/manual smoke checks cover changed behavior.
 - Architecture or agent docs reflect any changed structure, or the handoff explains why no doc update was needed.

@@ -25,18 +25,27 @@ Use this workflow when changing PySide6 widgets, dialogs, menus, toolbar actions
 12. Keep workers from reading or mutating widgets directly.
 13. Reuse existing style tokens, layout conventions, and status/error UX.
 14. Use structured logging for production diagnostics.
-15. Add or update a pytest-qt smoke test when behavior or wiring changes.
-16. If automated GUI coverage is not practical, document the manual smoke path and why.
+15. Do not run offscreen Qt workflows in this repo. Do not set
+    `QT_QPA_PLATFORM=offscreen`, do not run pytest-qt/offscreen GUI tests, and
+    do not launch ad-hoc offscreen Qt scripts because they can freeze in this
+    Windows environment.
+16. Add or update pytest-qt smoke coverage when useful, but verify locally with
+    non-GUI checks unless the user explicitly approves a safe visible GUI test
+    environment.
+17. Document the visible/manual smoke path and why automated GUI execution was
+    skipped.
 
 ## Checks
 
 - Use `python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py` instead of manually searching all GUI imports.
 - Confirm no new `print` calls were added in production code.
 - Confirm long-running processing is not started directly from a slot on the UI thread.
-- Run the narrowest relevant pytest target first, then broaden as risk requires.
+- Run non-GUI checks first: `py_compile`, focused `ruff`, GUI import audit, and
+  `agent_audit.py --check gui`. Do not run pytest-qt/offscreen targets locally.
 
 ## Response Requirements
 
 - List exact files changed.
 - State verification commands run and results.
-- Include smoke test steps when GUI behavior cannot be fully asserted.
+- Include visible/manual smoke steps for GUI behavior that was not executed
+  locally.

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from Main_App.gui.components import ActionRow
 import Main_App.gui.update_manager as update_manager
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
 from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
+from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 
 
@@ -51,6 +53,10 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
     win = _build_window(tmp_path, qtbot, monkeypatch)
 
     assert win.stacked.currentIndex() == 0
+    assert win.minimumWidth() == 1280
+    assert win.minimumHeight() == 900
+    assert win.size().width() >= 1280
+    assert win.size().height() >= 900
     assert win.landing_page is win.stacked.currentWidget()
     assert win.landing_card.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
     assert win.landing_card.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
@@ -213,6 +219,65 @@ def test_sidebar_ratio_calculator_embeds_in_main_workspace(
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_ratio"]
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_snr_plot_generator_embeds_in_main_workspace(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    excel_dir = project_root / "1 - Excel Data Files"
+    snr_dir = project_root / "2 - SNR Plots"
+    excel_dir.mkdir(parents=True)
+    snr_dir.mkdir()
+    (excel_dir / "CondA").mkdir()
+    (project_root / "project.json").write_text(
+        json.dumps(
+            {
+                "name": "PlotProject",
+                "subfolders": {
+                    "excel": "1 - Excel Data Files",
+                    "snr": "2 - SNR Plots",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    win.currentProject = SimpleNamespace(
+        project_root=project_root,
+        input_folder=project_root,
+        subfolders={"excel": "1 - Excel Data Files", "snr": "2 - SNR Plots"},
+    )
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_graphs"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert isinstance(win.workspace_stack.currentWidget(), PlotGeneratorWindow)
+    assert win.workspace_stack.currentWidget().objectName() == "embedded_plot_generator_page"
+    assert win._plot_generator_page.parent() is win.workspace_stack
+    assert win._plot_generator_page.folder_edit.text() == str(excel_dir)
+    assert win._plot_generator_page.out_edit.text() == str(snr_dir)
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_graphs"]
 
     qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
     qtbot.wait(20)

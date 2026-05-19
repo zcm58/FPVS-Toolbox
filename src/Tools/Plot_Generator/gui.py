@@ -30,7 +30,7 @@ from Tools.Plot_Generator.generation_workflow import PlotGeneratorWorkflowMixin
 from Tools.Plot_Generator.ui_sections import PlotGeneratorUiSectionsMixin
 from Tools.Plot_Generator.settings_dialog import _SettingsDialog
 from Tools.Plot_Generator.selection_state import (
-    ALL_CONDITIONS_OPTION,
+    ALL_CONDITIONS_OPTION,  # noqa: F401 - re-exported by plot_generator.py
     PlotGeneratorSelectionMixin,
 )
 from Tools.Plot_Generator.project_paths import (
@@ -38,7 +38,6 @@ from Tools.Plot_Generator.project_paths import (
     SNR_SUBFOLDER_NAME,
     _auto_detect_project_dir,
     _load_manifest,
-    _project_paths,
     _resolve_project_subfolder,
 )
 
@@ -95,8 +94,9 @@ class PlotGeneratorWindow(
                 if (cand / "project.json").is_file():
                     project_dir_path = cand
         if proj and hasattr(proj, "project_root"):
-            self._project = proj
             self._project_root = Path(proj.project_root)
+            if hasattr(proj, "manifest"):
+                self._project = proj
 
         if project_dir_path is not None:
             self._project_root = project_dir_path
@@ -265,9 +265,9 @@ class PlotGeneratorWindow(
     def _update_selector_columns(self, overlay_on: bool) -> None:
         if not hasattr(self, "_selectors_grid"):
             return
-        stretches = (1, 1, 1) if overlay_on else (1, 0, 1)
-        for idx, stretch in enumerate(stretches):
-            self._selectors_grid.setColumnStretch(idx, stretch)
+        _ = overlay_on
+        self._selectors_grid.setColumnStretch(0, 1)
+        self._selectors_grid.setColumnStretch(1, 1)
         self.condB_container.setVisible(overlay_on)
 
     def _update_scalp_title_b_visibility(self) -> None:

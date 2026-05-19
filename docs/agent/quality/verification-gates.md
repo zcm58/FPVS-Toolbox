@@ -20,6 +20,12 @@ For a compact command map, use `docs/agent/agent-index.md`.
 - Do not combine many high-risk imports into one long process. Probe one import
   surface or one small module group at a time so failures are attributable and
   interruptible.
+- Do not run offscreen Qt workflows in this repo. Do not set
+  `QT_QPA_PLATFORM=offscreen`, do not run pytest-qt/offscreen GUI tests, and do
+  not launch ad-hoc offscreen Qt scripts; they can freeze or hang indefinitely
+  in this Windows environment. For GUI work, use non-GUI checks plus a
+  documented visible/manual smoke path unless the user explicitly approves a
+  safe visible GUI test environment.
 
 ## Standard Commands
 
@@ -36,7 +42,9 @@ ruff check .
 
 ## Targeted Checks
 
-- GUI changes: run the nearest pytest-qt smoke test, usually a `tests/test_*gui*` or `tests/test_*window*` target.
+- GUI changes: do not run pytest-qt/offscreen tests locally. Use `py_compile`,
+  focused `ruff`, `audit_gui_imports.py`, and `agent_audit.py --check gui`;
+  document the visible/manual smoke path for behavior that requires a window.
 - Project path or file I/O changes: add or run tests with `tmp_path`; do not depend on a developer machine path.
 - Legacy-boundary changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check protected` and confirm retired `Legacy_App` paths were not recreated; any historical behavior cleanup must preserve the processing pipeline.
 - Source Localization/eLORETA changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.

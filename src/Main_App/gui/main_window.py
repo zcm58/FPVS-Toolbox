@@ -10,7 +10,6 @@ import sys
 from Main_App.Shared.post_process import post_process as _shared_post_process
 from Main_App.gui.theme import apply_fpvs_theme
 from typing import Callable
-from pathlib import Path
 from types import MethodType, SimpleNamespace
 from collections import deque
 
@@ -50,6 +49,7 @@ from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
 )
 from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
+from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Stats import StatsWindow as PysideStatsWindow
 from config import FPVS_TOOLBOX_VERSION
@@ -186,7 +186,8 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self._settings_dialog = None
         self.processor = Processor()
         self.setWindowTitle("FPVS Toolbox")
-        self.setMinimumSize(1024, 768)
+        self.setMinimumSize(1280, 900)
+        self.resize(1280, 900)
         self.currentProject: Project | None = None
 
         # Build UI
@@ -511,6 +512,15 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self.workspace_stack.setCurrentWidget(self._ensure_ratio_calculator_page())
         self._set_sidebar_selection("btn_ratio")
 
+    def _ensure_plot_generator_page(self) -> PlotGeneratorWindow:
+        page = getattr(self, "_plot_generator_page", None)
+        if page is None:
+            page = PlotGeneratorWindow(parent=self)
+            page.setObjectName("embedded_plot_generator_page")
+            self.workspace_stack.addWidget(page)
+            self._plot_generator_page = page
+        return page
+
     def _ensure_epoch_averaging_page(self) -> AdvancedAveragingWindow | None:
         paths = tool_workflows.resolve_epoch_averaging_paths(self)
         if paths is None:
@@ -536,7 +546,10 @@ class MainWindow(QMainWindow, ProcessingMixin):
         return page
 
     def open_plot_generator(self) -> None:
-        tool_workflows.open_plot_generator(self, Path(__file__).resolve().parents[3])
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(self._ensure_plot_generator_page())
+        self._set_sidebar_selection("btn_graphs")
 
     def open_epoch_averaging(self) -> None:
         page = self._ensure_epoch_averaging_page()

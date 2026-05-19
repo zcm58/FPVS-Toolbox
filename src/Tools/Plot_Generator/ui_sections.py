@@ -39,13 +39,6 @@ from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
 class PlotGeneratorUiSectionsMixin:
     """Build the Plot Generator widget tree."""
 
-    def _style_section_title(self, card: SectionCard) -> None:
-        title = card.header.title_label
-        font = title.font()
-        font.setBold(True)
-        font.setPointSize(font.pointSize() + 1)
-        title.setFont(font)
-
     def _build_ui(self) -> None:
         configure_window_surface(
             self,
@@ -56,7 +49,6 @@ class PlotGeneratorUiSectionsMixin:
         root_layout.setContentsMargins(8, 8, 8, 8)
         root_layout.setSpacing(8)
         file_box = SectionCard("File I/O")
-        self._style_section_title(file_box)
         file_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
         file_layout = file_box.content_layout
         file_layout.setSpacing(6)
@@ -113,10 +105,9 @@ class PlotGeneratorUiSectionsMixin:
         file_layout.addLayout(file_grid)
 
         self.params_box = SectionCard("Plot Parameters")
-        self._style_section_title(self.params_box)
-        self.params_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum))
+        self.params_box.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         params_layout = self.params_box.content_layout
-        params_layout.setSpacing(6)
+        params_layout.setSpacing(8)
 
         self.condition_combo = QComboBox()
         self.condition_combo.setToolTip("Select the condition to plot")
@@ -183,13 +174,12 @@ class PlotGeneratorUiSectionsMixin:
         selectors_grid = QGridLayout()
         selectors_grid.setContentsMargins(0, 0, 0, 0)
         selectors_grid.setHorizontalSpacing(10)
-        selectors_grid.setVerticalSpacing(2)
+        selectors_grid.setVerticalSpacing(8)
         selectors_grid.addWidget(cond_a_container, 0, 0)
-        selectors_grid.addWidget(self.condB_container, 0, 1)
-        selectors_grid.addWidget(roi_container, 0, 2)
+        selectors_grid.addWidget(roi_container, 0, 1)
+        selectors_grid.addWidget(self.condB_container, 1, 0)
         selectors_grid.setColumnStretch(0, 1)
         selectors_grid.setColumnStretch(1, 1)
-        selectors_grid.setColumnStretch(2, 1)
 
         self._selectors_grid = selectors_grid
         params_layout.addLayout(selectors_grid)
@@ -213,9 +203,9 @@ class PlotGeneratorUiSectionsMixin:
         params_layout.addWidget(overlay_row)
 
         self.legend_group = SectionCard("Legend labels (optional)")
-        self._style_section_title(self.legend_group)
+        self.legend_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
         legend_layout = self.legend_group.content_layout
-        legend_layout.setSpacing(8)
+        legend_layout.setSpacing(10)
         self.legend_custom_check = QCheckBox("Custom legend labels")
         self.legend_custom_check.toggled.connect(self._toggle_custom_legend_labels)
         legend_header = QHBoxLayout()
@@ -226,11 +216,12 @@ class PlotGeneratorUiSectionsMixin:
 
         legend_form = QGridLayout()
         legend_form.setContentsMargins(0, 0, 0, 0)
-        legend_form.setHorizontalSpacing(10)
-        legend_form.setVerticalSpacing(5)
+        legend_form.setHorizontalSpacing(12)
+        legend_form.setVerticalSpacing(8)
 
         self.legend_condition_a_edit = QLineEdit()
         self.legend_condition_a_edit.setPlaceholderText("Condition A label")
+        self.legend_condition_a_edit.setMinimumWidth(0)
         self.legend_condition_a_edit.setEnabled(False)
         self.legend_condition_a_edit.textChanged.connect(self._persist_legend_settings)
         self.legend_condition_a_edit.textEdited.connect(
@@ -238,47 +229,49 @@ class PlotGeneratorUiSectionsMixin:
         )
         self.legend_condition_a_label = QLabel("Condition A label:")
         legend_form.addWidget(self.legend_condition_a_label, 0, 0)
-        legend_form.addWidget(self.legend_condition_a_edit, 0, 1)
+        legend_form.addWidget(self.legend_condition_a_edit, 1, 0)
 
         self.legend_condition_b_edit = QLineEdit()
         self.legend_condition_b_edit.setPlaceholderText("Condition B label")
+        self.legend_condition_b_edit.setMinimumWidth(0)
         self.legend_condition_b_edit.setEnabled(False)
         self.legend_condition_b_edit.textChanged.connect(self._persist_legend_settings)
         self.legend_condition_b_edit.textEdited.connect(
             lambda _text: self._on_legend_condition_label_edited("condition_b_label")
         )
         self.legend_condition_b_label = QLabel("Condition B label:")
-        legend_form.addWidget(self.legend_condition_b_label, 0, 2)
-        legend_form.addWidget(self.legend_condition_b_edit, 0, 3)
+        legend_form.addWidget(self.legend_condition_b_label, 0, 1)
+        legend_form.addWidget(self.legend_condition_b_edit, 1, 1)
 
         self.legend_a_peaks_edit = QLineEdit()
         self.legend_a_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_A_PEAKS)
+        self.legend_a_peaks_edit.setMinimumWidth(0)
         self.legend_a_peaks_edit.setEnabled(False)
         self.legend_a_peaks_edit.textChanged.connect(self._persist_legend_settings)
         self.legend_a_peaks_edit.textEdited.connect(
             lambda _text: self._mark_legend_manual_override("a_peaks_label")
         )
         self.legend_a_peaks_label = QLabel("A-Peaks label:")
-        legend_form.addWidget(self.legend_a_peaks_label, 1, 0)
-        legend_form.addWidget(self.legend_a_peaks_edit, 1, 1)
+        legend_form.addWidget(self.legend_a_peaks_label, 2, 0)
+        legend_form.addWidget(self.legend_a_peaks_edit, 3, 0)
 
         self.legend_b_peaks_edit = QLineEdit()
         self.legend_b_peaks_edit.setPlaceholderText(_LEGEND_DEFAULT_B_PEAKS)
+        self.legend_b_peaks_edit.setMinimumWidth(0)
         self.legend_b_peaks_edit.setEnabled(False)
         self.legend_b_peaks_edit.textChanged.connect(self._persist_legend_settings)
         self.legend_b_peaks_edit.textEdited.connect(
             lambda _text: self._mark_legend_manual_override("b_peaks_label")
         )
         self.legend_b_peaks_label = QLabel("B-Peaks label:")
-        legend_form.addWidget(self.legend_b_peaks_label, 1, 2)
-        legend_form.addWidget(self.legend_b_peaks_edit, 1, 3)
+        legend_form.addWidget(self.legend_b_peaks_label, 2, 1)
+        legend_form.addWidget(self.legend_b_peaks_edit, 3, 1)
+        legend_form.setColumnStretch(0, 1)
         legend_form.setColumnStretch(1, 1)
-        legend_form.setColumnStretch(3, 1)
 
         self.legend_reset_btn = make_action_button("Reset to defaults")
         self.legend_reset_btn.clicked.connect(self._reset_legend_defaults)
         legend_header.addWidget(self.legend_reset_btn)
-        legend_layout.addStretch(1)
         legend_layout.addLayout(legend_header)
         legend_layout.addLayout(legend_form)
         legend_layout.addStretch(1)
@@ -294,7 +287,6 @@ class PlotGeneratorUiSectionsMixin:
         self._syncing_legend_defaults = False
 
         self.group_box = SectionCard("Group Options")
-        self._style_section_title(self.group_box)
         group_layout = self.group_box.content_layout
         group_layout.setSpacing(6)
         self.group_overlay_check = QCheckBox("Overlay groups on plots")
@@ -325,6 +317,7 @@ class PlotGeneratorUiSectionsMixin:
         self.scalp_title_b_label = QLabel("Scalp title (B):")
         scalp_form.addRow(self.scalp_title_b_label, self.scalp_title_b_edit)
         params_layout.addLayout(scalp_form)
+        params_layout.addStretch(1)
 
         self.title_edit = QLineEdit(self._defaults["title_snr"])
         self.title_edit.setPlaceholderText("e.g. Fruit vs Veg")
@@ -411,13 +404,12 @@ class PlotGeneratorUiSectionsMixin:
         ranges_grid.setColumnStretch(3, 1)
 
         self.advanced_box = SectionCard("Advanced")
-        self._style_section_title(self.advanced_box)
-        self.advanced_box.setMinimumHeight(292)
+        self.advanced_box.setMinimumHeight(256)
         self.advanced_box.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         )
         advanced_layout = self.advanced_box.content_layout
-        advanced_layout.setSpacing(8)
+        advanced_layout.setSpacing(6)
 
         advanced_form = make_form_layout()
         advanced_form.addRow(QLabel("Chart title:"), self.title_edit)
@@ -434,7 +426,6 @@ class PlotGeneratorUiSectionsMixin:
         self.progress_bar.setMaximumWidth(520)
 
         self.console_box = SectionCard("Log Output")
-        self._style_section_title(self.console_box)
         self.console_box.setMaximumHeight(180)
         console_layout = self.console_box.content_layout
         console_layout.setSpacing(6)
@@ -470,7 +461,7 @@ class PlotGeneratorUiSectionsMixin:
         left_layout = QVBoxLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
-        left_layout.addWidget(self.params_box)
+        left_layout.addWidget(self.params_box, 1)
         left_layout.addWidget(self.legend_group, 1)
         left_layout.addWidget(self.group_box)
 
@@ -481,8 +472,8 @@ class PlotGeneratorUiSectionsMixin:
         right_layout = QVBoxLayout(right_column)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
-        right_layout.addWidget(self.advanced_box)
-        right_layout.addWidget(self.console_box)
+        right_layout.addWidget(self.advanced_box, 1)
+        right_layout.addWidget(self.console_box, 1)
 
         content_widget = QWidget()
         content_layout = QHBoxLayout(content_widget)

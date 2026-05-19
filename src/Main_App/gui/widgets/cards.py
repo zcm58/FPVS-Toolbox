@@ -35,6 +35,9 @@ class CardHeader(QWidget):
 
         self.title_label = QLabel(title, self)
         self.title_label.setProperty("cardTitle", True)
+        title_font = self.title_label.font()
+        title_font.setBold(True)
+        self.title_label.setFont(title_font)
         self.header_layout.addWidget(self.title_label)
         self.header_layout.addStretch(1)
 
@@ -71,7 +74,7 @@ class SectionCard(QGroupBox):
             SECTION_PADDING,
             SECTION_PADDING,
         )
-        self.shell_layout.setSpacing(10)
+        self.shell_layout.setSpacing(8)
 
         self.header = CardHeader(title, self)
         self.shell_layout.addWidget(self.header)
