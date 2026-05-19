@@ -289,7 +289,7 @@ def build_main_page_stylesheet() -> str:
 
         #event_map_header QLabel {{
             color: {TEXT_SECONDARY};
-            font-weight: 600;
+            font-weight: 700;
             padding: 0 0 3px 0;
         }}
 

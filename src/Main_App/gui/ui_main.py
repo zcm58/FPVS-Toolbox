@@ -345,8 +345,8 @@ def init_ui(self) -> None:
     lbl_actions.setFixedWidth(24)
 
     header_layout.addWidget(lbl_condition, 1)
-    header_layout.addWidget(lbl_id, 0)
     header_layout.addWidget(self.btn_add_row, 0)
+    header_layout.addWidget(lbl_id, 0)
     header_layout.addWidget(lbl_actions, 0)
     event_group_layout.addWidget(event_header)
 

@@ -127,6 +127,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     )
     assert condition_header.font().bold()
     assert trigger_header.font().bold()
+    assert event_map_header.layout().indexOf(win.btn_add_row) < event_map_header.layout().indexOf(trigger_header)
     assert win.findChild(QWidget, "log_group") is not None
     assert not hasattr(win, "btn_detect")
     assert win.btn_select_input_file.text() == "Select EEG File..."
