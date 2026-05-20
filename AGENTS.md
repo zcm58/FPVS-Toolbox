@@ -64,6 +64,13 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 
 Use the script output to decide what to read next. If a script passes, do not scan broad folders just to confirm the same invariant manually.
 
+Globally installed Codex skills are secondary to these repo-local rules. Use
+`docs/agent/agent-index.md` for the narrow list that applies here; do not route
+normal FPVS Toolbox work through React, Vercel, React Native, or web-app skills
+unless the repo gains that scoped surface in the task being performed. Global
+skills never replace `.\.venv1`, repo-local audits, no-offscreen Qt limits, or
+the focused verification gates below.
+
 ## Useful Docs
 
 - Architecture map: [ARCHITECTURE.md](ARCHITECTURE.md)

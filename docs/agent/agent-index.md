@@ -44,6 +44,36 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 | GUI smoke coverage | `pytest-qt-smoke` | update coverage only; do not run pytest-qt/offscreen locally | `docs/agent/quality/test-selection.md` |
 | Entropy or garbage-collection cleanup | `cleanup-generated-files` | `python .agents/scripts/audit/agent_audit.py --check garbage-collection` | `docs/agent/quality/garbage-collection.md`; `docs/agent/exec-plans/tech-debt-tracker.md` |
 
+## Installed Codex Skill Routing
+
+The repo-local skills above are the default for FPVS Toolbox work. Use the
+globally installed skills below only when their trigger is present and only
+after applying `AGENTS.md`, `ARCHITECTURE.md`, the focused architecture page,
+and the verification gates for the changed area.
+
+| Task trigger | Installed skill | Repo-specific use | Still required |
+| --- | --- | --- | --- |
+| Reported bug, failing command, hung GUI test, performance regression, or "diagnose/debug" request | `diagnose` | Build a bounded feedback loop first: targeted pytest, `py_compile`, audit script, import probe, or visible/manual GUI smoke path. For GUI hangs, check unbounded waits, modal dialogs, thread completion, and timeout coverage before editing. | Do not run offscreen Qt. Keep any regression test at the real seam. Remove temporary instrumentation before handoff. |
+| User asks for architecture/refactor opportunities, or a debugging result shows there is no good test seam | `improve-codebase-architecture` | Review current repo maps and focused docs, then propose small deepening candidates around actual FPVS modules such as `Main_App.gui.components`, `Main_App.workers`, `Main_App.projects`, `Tools.Stats`, or tool-specific processing seams. | Do not refactor while only producing an architecture review. Preserve retired-path and Source Localization boundaries. |
+| Plan, execution plan, UX flow, or architecture proposal needs stress testing before implementation | `grill-me` | Ask one decision question at a time, but first answer any question discoverable from `ARCHITECTURE.md`, active exec plans, and focused docs. | Do not turn grilling into code changes. Record durable decisions in an exec plan or focused agent doc only when the task scope calls for it. |
+| Three or more independent failures or independent docs/code slices can run in parallel | `dispatching-parallel-agents` | Split by non-overlapping subsystem, for example Stats reporting, Plot Generator path handling, and Main App GUI routing. Each worker must get file ownership, constraints, and expected verification. | Follow the active agent runtime's delegation policy. Do not use parallel work when failures share files or one result blocks the next step. |
+| The user asks whether a skill exists, or the task needs a capability outside the repo-local and installed skill set | `find-skills` | Search for a capability only after confirming no repo-local skill already covers it. | Do not install or recommend a skill to bypass repo rules or verification gates. |
+| User explicitly asks for visual polish, UX critique, or a new PySide6 surface | `impeccable`/`delight`, `ui-ux-pro-max`, or `frontend-design` | Use only as design critique or ideation. Translate output into PySide6, `Main_App.gui.components`, `theme.py`, `typography.py`, and existing FPVS workflows. | The PySide6-only rule, component-layer contract, card-within-card ban, no-offscreen Qt limit, and focused GUI checks override any web/mobile design advice. |
+
+Do not use these installed skills for normal FPVS Toolbox work:
+
+- `react-best-practices`, `composition-patterns`, and `react-view-transitions`:
+  this repo has no active React or Next.js surface.
+- `react-native-skills`: this repo is a Windows PySide6 desktop application,
+  not a React Native or Expo app.
+- `deploy-to-vercel`, `vercel-cli-with-tokens`, and `vercel-optimize`: the app
+  ships through Windows packaging and GitHub Release installer flows, not
+  Vercel deployment. Use `docs/agent/guides/development.md` and
+  `scripts/packaging/` for release work.
+- `web-design-guidelines`: user-facing MkDocs content is markdown under
+  `docs/user`; there is no repo-owned web application UI to audit with this
+  skill. Use `mkdocs build --strict` for docs-site validation.
+
 ## Script Layout
 
 - `.agents/scripts/audit/`: repo invariant checks.
