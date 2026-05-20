@@ -299,9 +299,11 @@ def _reset_failed_start(host: Any) -> None:
 def on_processing_finished(host: Any, payload: dict | None = None) -> None:
     results: list[dict] = []
     cancelled = False
+    interrupted_files: list[str] = []
     if isinstance(payload, dict):
         results = payload.get("results") or []
         cancelled = bool(payload.get("cancelled", False))
+        interrupted_files = [str(file_path) for file_path in payload.get("interrupted_files") or []]
 
     try:
         debug_on = host.settings.debug_enabled()
@@ -357,6 +359,13 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
     host._finalize_processing(success, cancelled=cancelled)
     if cancelled:
         host.log("Processing run cancelled by user.", level=logging.INFO)
+        if interrupted_files:
+            host.log(
+                "Stopped before "
+                f"{len(interrupted_files)} queued or active file(s) completed; "
+                "rerun those files before using any partial outputs.",
+                level=logging.WARNING,
+            )
 
 
 def on_processing_error(host: Any, message: str) -> None:

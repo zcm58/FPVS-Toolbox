@@ -23,6 +23,10 @@ Rules:
 - Communicate progress, errors, and completion through signals.
 - Keep user-facing errors non-blocking where possible.
 - Log diagnostics with structured logging.
+- Main App preprocessing cancellation is a hard-stop request: `MpRunnerBridge.cancel()`
+  sets the shared cancel event, `run_project_parallel()` terminates active
+  process-pool workers, cancels queued files, emits a cancelled done payload,
+  and reports interrupted files so partial outputs are not treated as complete.
 
 Useful tests:
 

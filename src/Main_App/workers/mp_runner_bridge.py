@@ -145,8 +145,9 @@ class MpRunnerBridge(QObject):
     @Slot()
     def cancel(self) -> None:
         """
-        Request cooperative cancellation of the current run.
-        This sets an Event that run_project_parallel checks periodically.
+        Request cancellation of the current run.
+        The process runner treats this Event as a hard-stop request for active
+        worker processes and queued files.
         """
         if not self._running:
             logger.debug("MpRunnerBridge.cancel called but no run is active.")

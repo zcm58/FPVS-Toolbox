@@ -26,7 +26,7 @@ from fractions import Fraction
 from multiprocessing import Queue, get_context, Event
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step
@@ -719,6 +719,37 @@ def _memory_ok(limit_ratio: Optional[float]) -> Tuple[bool, float]:
     return (vm.percent / 100.0) < float(limit_ratio), vm.percent
 
 
+def _terminate_executor_workers(pool: Any) -> int:
+    """Best-effort termination for active ProcessPoolExecutor child processes."""
+    processes = getattr(pool, "_processes", None)
+    if not processes:
+        return 0
+
+    terminated = 0
+    for proc in list(processes.values()):
+        if proc is None:
+            continue
+        try:
+            if proc.is_alive():
+                proc.terminate()
+                terminated += 1
+        except (OSError, RuntimeError, ValueError):
+            logger.debug("process_pool_worker_terminate_failed", exc_info=True)
+
+    for proc in list(processes.values()):
+        if proc is None:
+            continue
+        try:
+            proc.join(timeout=0.2)
+            if proc.is_alive() and hasattr(proc, "kill"):
+                proc.kill()
+                proc.join(timeout=0.2)
+        except (OSError, RuntimeError, ValueError):
+            logger.debug("process_pool_worker_join_failed", exc_info=True)
+
+    return terminated
+
+
 def _scavenge_stale_memmaps() -> None:
     """Remove memmap PID folders for processes that are no longer alive."""
     try:
@@ -778,6 +809,8 @@ def run_project_parallel(
     files_with_audit = 0
 
     cancelled = False
+    shutdown_wait = True
+    interrupted_files: List[str] = []
 
     def _cancelled() -> bool:
         nonlocal cancelled
@@ -785,11 +818,36 @@ def run_project_parallel(
             cancelled = True
         return cancelled
 
-    with ProcessPoolExecutor(
+    pool = ProcessPoolExecutor(
         max_workers=maxw,
         mp_context=ctx,
         initializer=_worker_init,
-    ) as pool:
+    )
+
+    try:
+
+        def _cancel_active_pool() -> None:
+            nonlocal shutdown_wait, interrupted_files
+            if not _cancelled():
+                return
+
+            interrupted = list(in_flight.values()) + list(remaining)
+            interrupted_files = [str(file_path) for file_path in interrupted]
+            for fut in list(in_flight.keys()):
+                try:
+                    fut.cancel()
+                except RuntimeError:
+                    logger.debug("process_pool_future_cancel_failed", exc_info=True)
+
+            terminated = _terminate_executor_workers(pool)
+            shutdown_wait = False
+            remaining.clear()
+            in_flight.clear()
+            logger.info(
+                "mp_run_cancel_terminated_workers interrupted_files=%d workers_terminated=%d",
+                len(interrupted_files),
+                terminated,
+            )
 
         def _submit_next_available() -> bool:
             """Submit one file if capacity and (if enabled) memory is OK."""
@@ -829,16 +887,22 @@ def run_project_parallel(
         while in_flight or remaining:
             if not in_flight:
                 if _cancelled():
+                    _cancel_active_pool()
                     break
                 if not _submit_next_available():
                     # Nothing could be submitted (likely due to cancellation).
                     if _cancelled() or not remaining:
+                        if _cancelled():
+                            _cancel_active_pool()
                         break
                     time.sleep(max(0.01, float(memory_check_interval)))
                 continue
 
             done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED, timeout=0.5)
             if not done:
+                if _cancelled():
+                    _cancel_active_pool()
+                    break
                 _submit_next_available()
                 continue
 
@@ -874,13 +938,15 @@ def run_project_parallel(
                     )
 
             if _cancelled():
-                if in_flight or remaining:
-                    for fut in list(in_flight.keys()):
-                        if not fut.done():
-                            fut.cancel()
+                _cancel_active_pool()
                 break
 
             _submit_next_available()
+    finally:
+        try:
+            pool.shutdown(wait=shutdown_wait, cancel_futures=True)
+        except TypeError:
+            pool.shutdown(wait=shutdown_wait)
 
     # Final cleanup: remove any stale memmaps in the %TEMP% folder from previous runs
     _scavenge_stale_memmaps()
@@ -933,4 +999,6 @@ def run_project_parallel(
                     "files_with_audit": files_with_audit,
                 }
             )
+        if interrupted_files:
+            done_msg["interrupted_files"] = interrupted_files
         progress_queue.put(done_msg)
