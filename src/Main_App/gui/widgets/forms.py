@@ -30,6 +30,7 @@ class PathPickerRow(QWidget):
         *,
         placeholder: str = "",
         read_only: bool = True,
+        compact_button: bool = False,
     ) -> None:
         super().__init__(parent)
         self.row_layout = QHBoxLayout(self)
@@ -40,7 +41,7 @@ class PathPickerRow(QWidget):
         self.line_edit.setReadOnly(read_only)
         self.line_edit.setPlaceholderText(placeholder)
 
-        self.button = make_action_button(button_text, parent=self)
+        self.button = make_action_button(button_text, compact=compact_button, parent=self)
 
         self.row_layout.addWidget(self.line_edit, 1)
         self.row_layout.addWidget(self.button, 0)

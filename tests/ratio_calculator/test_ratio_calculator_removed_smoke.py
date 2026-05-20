@@ -42,6 +42,7 @@ def test_ratio_calculator_window_smoke(qtbot):
 
     from Main_App.gui.components import (
         ActionRow,
+        PathPickerRow,
         SectionCard,
         StatusBanner,
         SubsectionHeaderLabel,
@@ -68,6 +69,9 @@ def test_ratio_calculator_window_smoke(qtbot):
         window.findChild(QWidget, "ratio_calculator_conditions").sizePolicy().verticalPolicy()
         == QSizePolicy.Maximum
     )
+    assert isinstance(window.input_a_row, PathPickerRow)
+    assert isinstance(window.input_b_row, PathPickerRow)
+    assert isinstance(window.output_path_row, PathPickerRow)
     assert window.input_a_open_btn.minimumHeight() >= 30
     assert window.input_a_btn.minimumHeight() >= 30
     assert cards["ratio_calculator_participants"].toolTip()
@@ -75,6 +79,7 @@ def test_ratio_calculator_window_smoke(qtbot):
     assert window.findChild(QWidget, "ratio_calculator_run_output_row") is not None
     assert window.run_btn.property("variant") == "primary"
     assert window.log_toggle_btn.property("variant") == "tertiary"
+    assert window.log_toggle_btn.property("compact") is True
     assert window.log_toggle_btn.text() == "Open log"
     assert "Select both condition folders" in window._log_text
     subsection_titles = {

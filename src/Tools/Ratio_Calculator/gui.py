@@ -28,25 +28,30 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
-    QToolButton,
     QVBoxLayout,
     QWidget,
     QSizePolicy,
     QFileDialog,
     QHeaderView,
     QStyle,
+    QPushButton,
 )
 
 from Main_App.gui.components import (
     ActionRow,
+    PathPickerRow,
     SectionCard,
     SubsectionHeaderLabel,
     SurfaceSize,
     StatusBanner,
     apply_font_role,
     configure_window_surface,
+    confirm,
     make_action_button,
     make_form_layout,
+    show_error,
+    show_info,
+    show_warning,
 )
 
 from .constants import RatioCalculatorSettings
@@ -156,12 +161,18 @@ class RatioCalculatorWindow(QWidget):
         self.swap_btn = make_action_button("Swap A/B", compact=True, parent=cond_group)
         self.swap_btn.clicked.connect(self._swap_conditions)
 
-        self.input_a_edit = QLineEdit()
-        self.input_a_edit.setReadOnly(True)
-        self.input_a_edit.setPlaceholderText("Select condition A folder")
-        self.input_a_open_btn = make_action_button("Open", compact=True, parent=cond_group)
+        (
+            self.input_a_row,
+            self.input_a_edit,
+            self.input_a_open_btn,
+            self.input_a_btn,
+        ) = self._make_folder_path_row(
+            cond_group,
+            row_name="ratio_calculator_input_a_row",
+            actions_name="ratio_calculator_input_a_actions",
+            placeholder="Select condition A folder",
+        )
         self.input_a_open_btn.clicked.connect(lambda: self._open_folder_from_edit(self.input_a_edit))
-        self.input_a_btn = make_action_button("Browse...", compact=True, parent=cond_group)
         self.input_a_btn.clicked.connect(
             lambda: self._browse_folder(self.input_a_edit, is_output=False, condition_key="a")
         )
@@ -174,12 +185,18 @@ class RatioCalculatorWindow(QWidget):
         self.condition_b_combo = QComboBox()
         self.condition_b_combo.currentTextChanged.connect(self._on_condition_b_selected)
 
-        self.input_b_edit = QLineEdit()
-        self.input_b_edit.setReadOnly(True)
-        self.input_b_edit.setPlaceholderText("Select condition B folder")
-        self.input_b_open_btn = make_action_button("Open", compact=True, parent=cond_group)
+        (
+            self.input_b_row,
+            self.input_b_edit,
+            self.input_b_open_btn,
+            self.input_b_btn,
+        ) = self._make_folder_path_row(
+            cond_group,
+            row_name="ratio_calculator_input_b_row",
+            actions_name="ratio_calculator_input_b_actions",
+            placeholder="Select condition B folder",
+        )
         self.input_b_open_btn.clicked.connect(lambda: self._open_folder_from_edit(self.input_b_edit))
-        self.input_b_btn = make_action_button("Browse...", compact=True, parent=cond_group)
         self.input_b_btn.clicked.connect(
             lambda: self._browse_folder(self.input_b_edit, is_output=False, condition_key="b")
         )
@@ -189,12 +206,18 @@ class RatioCalculatorWindow(QWidget):
         self.label_b_edit.textEdited.connect(self._mark_label_b_dirty)
         self.label_b_edit.textChanged.connect(self._on_label_text_changed)
 
-        self.output_edit = QLineEdit()
-        self.output_edit.setReadOnly(True)
-        self.output_edit.setPlaceholderText("Select output folder")
-        self.output_open_btn = make_action_button("Open", compact=True, parent=cond_group)
+        (
+            self.output_path_row,
+            self.output_edit,
+            self.output_open_btn,
+            self.output_btn,
+        ) = self._make_folder_path_row(
+            cond_group,
+            row_name="ratio_calculator_output_row",
+            actions_name="ratio_calculator_output_actions",
+            placeholder="Select output folder",
+        )
         self.output_open_btn.clicked.connect(lambda: self._open_folder_from_edit(self.output_edit))
-        self.output_btn = make_action_button("Browse...", compact=True, parent=cond_group)
         self.output_btn.clicked.connect(lambda: self._browse_folder(self.output_edit, is_output=True))
 
         self.run_label_edit = QLineEdit()
@@ -203,39 +226,6 @@ class RatioCalculatorWindow(QWidget):
 
         self.validation_label = StatusBanner("", variant="error")
         self.validation_label.setVisible(False)
-
-        a_path_row = QWidget()
-        a_path_layout = QHBoxLayout(a_path_row)
-        a_path_layout.setContentsMargins(0, 0, 0, 0)
-        a_path_layout.setSpacing(6)
-        a_path_actions = ActionRow(cond_group, alignment=Qt.AlignLeft, spacing=6)
-        a_path_actions.setObjectName("ratio_calculator_input_a_actions")
-        a_path_actions.add_button(self.input_a_open_btn)
-        a_path_actions.add_button(self.input_a_btn)
-        a_path_layout.addWidget(self.input_a_edit, 1)
-        a_path_layout.addWidget(a_path_actions)
-
-        b_path_row = QWidget()
-        b_path_layout = QHBoxLayout(b_path_row)
-        b_path_layout.setContentsMargins(0, 0, 0, 0)
-        b_path_layout.setSpacing(6)
-        b_path_actions = ActionRow(cond_group, alignment=Qt.AlignLeft, spacing=6)
-        b_path_actions.setObjectName("ratio_calculator_input_b_actions")
-        b_path_actions.add_button(self.input_b_open_btn)
-        b_path_actions.add_button(self.input_b_btn)
-        b_path_layout.addWidget(self.input_b_edit, 1)
-        b_path_layout.addWidget(b_path_actions)
-
-        out_path_row = QWidget()
-        out_path_layout = QHBoxLayout(out_path_row)
-        out_path_layout.setContentsMargins(0, 0, 0, 0)
-        out_path_layout.setSpacing(6)
-        out_path_actions = ActionRow(cond_group, alignment=Qt.AlignLeft, spacing=6)
-        out_path_actions.setObjectName("ratio_calculator_output_actions")
-        out_path_actions.add_button(self.output_open_btn)
-        out_path_actions.add_button(self.output_btn)
-        out_path_layout.addWidget(self.output_edit, 1)
-        out_path_layout.addWidget(out_path_actions)
 
         condition_actions = ActionRow(cond_group, alignment=Qt.AlignLeft, spacing=6)
         condition_actions.setObjectName("ratio_calculator_condition_actions")
@@ -255,21 +245,17 @@ class RatioCalculatorWindow(QWidget):
         cond_layout.addWidget(self.condition_b_combo, 1, 1)
         cond_layout.addWidget(self._make_caption_label("Condition A Folder"), 2, 0)
         cond_layout.addWidget(self._make_caption_label("Condition B Folder"), 2, 1)
-        cond_layout.addWidget(a_path_row, 3, 0)
-        cond_layout.addWidget(b_path_row, 3, 1)
+        cond_layout.addWidget(self.input_a_row, 3, 0)
+        cond_layout.addWidget(self.input_b_row, 3, 1)
         cond_layout.addWidget(self._make_caption_label("Condition A Label"), 4, 0)
         cond_layout.addWidget(self._make_caption_label("Condition B Label"), 4, 1)
         cond_layout.addWidget(self.label_a_edit, 5, 0)
         cond_layout.addWidget(self.label_b_edit, 5, 1)
-        self.output_path_row = out_path_row
         cond_layout.addWidget(self.validation_label, 6, 0, 1, 2)
         cond_layout.setColumnStretch(0, 1)
         cond_layout.setColumnStretch(1, 1)
         cond_group_layout.addLayout(cond_layout)
 
-        for row in (a_path_row, b_path_row, self.output_path_row):
-            row.setMinimumHeight(34)
-            row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for button in (
             self.input_a_open_btn,
             self.input_a_btn,
@@ -430,6 +416,37 @@ class RatioCalculatorWindow(QWidget):
     @staticmethod
     def _make_caption_label(text: str) -> SubsectionHeaderLabel:
         return SubsectionHeaderLabel(text)
+
+    @staticmethod
+    def _make_folder_path_row(
+        parent: QWidget,
+        *,
+        row_name: str,
+        actions_name: str,
+        placeholder: str,
+    ) -> tuple[PathPickerRow, QLineEdit, QPushButton, QPushButton]:
+        row = PathPickerRow(
+            "Browse...",
+            parent,
+            placeholder=placeholder,
+            read_only=True,
+            compact_button=True,
+        )
+        row.setObjectName(row_name)
+        row.row_layout.setSpacing(6)
+        row.setMinimumHeight(34)
+        row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        row.line_edit.setMinimumHeight(30)
+
+        browse_button = row.button
+        row.row_layout.removeWidget(browse_button)
+        open_button = make_action_button("Open", compact=True, parent=row)
+        actions = ActionRow(row, alignment=Qt.AlignLeft, spacing=6)
+        actions.setObjectName(actions_name)
+        actions.add_button(open_button)
+        actions.add_button(browse_button)
+        row.row_layout.addWidget(actions)
+        return row, row.line_edit, open_button, browse_button
 
     def _apply_button_styling(self) -> None:
         buttons = [
@@ -735,11 +752,7 @@ class RatioCalculatorWindow(QWidget):
         self.open_output_btn.clicked.connect(self._open_output_folder)
         self.copy_log_btn = make_action_button("Copy log", compact=True, parent=panel)
         self.copy_log_btn.clicked.connect(self._copy_log)
-        self.log_toggle_btn = QToolButton()
-        self.log_toggle_btn.setProperty("variant", "tertiary")
-        self.log_toggle_btn.setProperty("tertiary", True)
-        self.log_toggle_btn.setProperty("compact", True)
-        self.log_toggle_btn.setText("Open log")
+        self.log_toggle_btn = make_action_button("Open log", variant="tertiary", compact=True, parent=panel)
         self.log_toggle_btn.clicked.connect(self._show_log_dialog)
         bottom_actions = ActionRow(panel, alignment=Qt.AlignLeft)
         bottom_actions.setObjectName("ratio_calculator_bottom_actions")
@@ -870,14 +883,12 @@ class RatioCalculatorWindow(QWidget):
 
     def _confirm_exclude_all(self) -> None:
         message = "Exclude all participants from group summaries? This will set Used = 0."
-        reply = QMessageBox.question(
+        if confirm(
             self,
             "Confirm exclusion",
             message,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if reply == QMessageBox.Yes:
+            default=QMessageBox.No,
+        ):
             self._set_all_exclusions(True)
 
     def _apply_participant_filter(self) -> None:
@@ -910,7 +921,7 @@ class RatioCalculatorWindow(QWidget):
                     invalid.append(pid)
         if invalid:
             self._append_log(f"Invalid manual exclusions ignored: {invalid}")
-            QMessageBox.information(
+            show_info(
                 self,
                 "Invalid exclusions",
                 f"Ignored invalid manual exclusion entries: {', '.join(invalid)}",
@@ -984,11 +995,11 @@ class RatioCalculatorWindow(QWidget):
     def _open_folder_from_edit(self, edit: QLineEdit) -> None:
         path_str = edit.text().strip()
         if not path_str:
-            QMessageBox.information(self, "Missing folder", "No folder has been set yet.")
+            show_info(self, "Missing folder", "No folder has been set yet.")
             return
         path = Path(path_str)
         if not path.exists():
-            QMessageBox.warning(self, "Folder not found", f"Folder does not exist:\n{path}")
+            show_warning(self, "Folder not found", f"Folder does not exist:\n{path}")
             return
         try:
             if sys.platform.startswith("win"):
@@ -999,7 +1010,7 @@ class RatioCalculatorWindow(QWidget):
 
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
         except Exception as exc:
-            QMessageBox.warning(self, "Open failed", f"Failed to open folder:\n{exc}")
+            show_warning(self, "Open failed", f"Failed to open folder:\n{exc}")
 
     def _ensure_output_dir(self, output_dir: str) -> tuple[bool, str | None]:
         if not output_dir:
@@ -1096,7 +1107,7 @@ class RatioCalculatorWindow(QWidget):
 
     def _start_run(self) -> None:
         if self._thread and self._thread.isRunning():
-            QMessageBox.information(self, "Running", "Ratio calculations are already running.")
+            show_info(self, "Running", "Ratio calculations are already running.")
             return
 
         input_a = self.input_a_edit.text().strip()
@@ -1107,7 +1118,7 @@ class RatioCalculatorWindow(QWidget):
         run_label = self.run_label_edit.text().strip()
 
         if not all([input_a, input_b, output_dir, label_a, label_b, run_label]):
-            QMessageBox.warning(self, "Missing fields", "Fill out all required fields before running.")
+            show_warning(self, "Missing fields", "Fill out all required fields before running.")
             return
 
         if not self._active_roi_defs:
@@ -1122,11 +1133,11 @@ class RatioCalculatorWindow(QWidget):
 
         ok_out, out_err = self._ensure_output_dir(output_dir)
         if not ok_out:
-            QMessageBox.warning(self, "Output folder error", out_err or "Output folder is not usable.")
+            show_warning(self, "Output folder error", out_err or "Output folder is not usable.")
             return
 
         if not self._paired_participants:
-            QMessageBox.warning(
+            show_warning(
                 self,
                 "Participants not loaded",
                 "Participants are not loaded yet. Check the condition folders and try again.",
@@ -1192,7 +1203,7 @@ class RatioCalculatorWindow(QWidget):
         self._append_log(message)
         self.status_label.set_text("Error")
         self.status_label.set_variant("error")
-        QMessageBox.critical(self, "Ratio Calculator Error", message)
+        show_error(self, "Ratio Calculator Error", message)
         self._update_run_state()
 
     def _handle_finished(self, output_dir: str, excel_path: str) -> None:

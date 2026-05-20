@@ -236,6 +236,7 @@ def test_path_picker_row_exposes_field_and_button(qtbot) -> None:
         "Browse",
         placeholder="Select a file",
         read_only=True,
+        compact_button=True,
     )
     qtbot.addWidget(row)
 
@@ -244,6 +245,7 @@ def test_path_picker_row_exposes_field_and_button(qtbot) -> None:
     assert row.button.text() == "Browse"
     assert row.button.property("variant") == "secondary"
     assert row.button.property("secondary") is True
+    assert row.button.property("compact") is True
     assert row.line_edit.text() == ""
 
 
