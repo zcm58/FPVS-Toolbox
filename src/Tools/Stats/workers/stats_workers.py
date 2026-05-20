@@ -30,6 +30,7 @@ from Tools.Stats.analysis.stats_analysis import (
     run_rm_anova as analysis_run_rm_anova,
     set_rois,
 )
+from Tools.Stats.io.stats_ready_export import prepare_stats_ready_export
 from Tools.Stats.qc.stats_outlier_exclusion import (
     DvViolation,
     OUTLIER_REASON_NONFINITE,
@@ -323,6 +324,56 @@ def _extract_required_exclusions(report: OutlierExclusionReport) -> list[DvViola
                 if violation.reason == OUTLIER_REASON_NONFINITE
             )
     return required
+
+
+def run_stats_ready_export(
+    progress_cb,
+    message_cb,
+    *,
+    subjects,
+    conditions,
+    subject_data,
+    base_freq,
+    rois,
+    dv_policy: dict | None = None,
+    group_map: dict | None = None,
+    output_path: str,
+    manual_excluded_pids: list[str] | None = None,
+    max_freq: float | None = None,
+) -> dict[str, object]:
+    """Write the optional external-statistics Summed BCA workbook."""
+
+    progress_cb(5)
+    filtered_subjects, filtered_subject_data, manual_excluded = _apply_manual_exclusions(
+        subjects=list(subjects) if subjects else [],
+        subject_data=subject_data,
+        manual_excluded_pids=manual_excluded_pids,
+        message_cb=message_cb,
+    )
+    if not filtered_subjects:
+        raise RuntimeError("All participants are manually excluded.")
+
+    message_cb("Preparing stats-ready Summed BCA workbook.")
+    progress_cb(25)
+    export = prepare_stats_ready_export(
+        subjects=filtered_subjects,
+        conditions=list(conditions) if conditions else [],
+        subject_data=filtered_subject_data,
+        base_freq=base_freq,
+        rois=rois or {},
+        dv_policy=dv_policy,
+        group_map=group_map or {},
+        log_func=message_cb,
+        save_path=output_path,
+        max_freq=max_freq,
+    )
+    progress_cb(100)
+    return {
+        "path": str(export.workbook_path) if export.workbook_path else "",
+        "row_count": export.row_count,
+        "sheet_names": list(export.frames.keys()),
+        "manual_excluded_pids": manual_excluded,
+    }
 
 
 def _prepare_single_group_data(

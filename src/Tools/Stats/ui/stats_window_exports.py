@@ -173,6 +173,88 @@ class StatsWindowExportsMixin:
         )
         return str(target)
 
+    def on_export_stats_ready_clicked(self) -> None:
+        """Write the optional workbook for external statistics packages."""
+        if not self._precheck(start_guard=True):
+            return
+
+        try:
+            out_dir = self._ensure_results_dir()
+            output_path = Path(out_dir) / STATS_READY_WORKBOOK_NAME
+            if output_path.exists():
+                self.append_log(
+                    "General",
+                    f"Replacing existing stats-ready workbook: {output_path}",
+                )
+            _, max_freq_raw = self._safe_settings_get("analysis", "bca_upper_limit", None)
+            max_freq = float(max_freq_raw) if max_freq_raw not in (None, "") else None
+        except Exception as exc:  # noqa: BLE001
+            self._end_run()
+            logger.exception("stats_ready_export_prepare_failed", exc_info=True)
+            QMessageBox.critical(self, "Stats-Ready Export Failed", str(exc))
+            return
+
+        worker = StatsWorker(
+            stats_worker_funcs.run_stats_ready_export,
+            subjects=list(self.subjects),
+            conditions=self._get_selected_conditions(),
+            subject_data=self.subject_data,
+            base_freq=self._current_base_freq,
+            rois=self.rois,
+            dv_policy=self._get_dv_policy_payload(),
+            group_map=getattr(self, "_subject_group_map", {}),
+            output_path=str(output_path),
+            manual_excluded_pids=sorted(self.manual_excluded_pids),
+            max_freq=max_freq,
+            _op="stats_ready_export",
+        )
+        self._track_stats_ready_worker(worker)
+        self._wire_and_start(worker, self._on_stats_ready_export_finished)
+
+    def _track_stats_ready_worker(self, worker: StatsWorker) -> None:
+        """Keep the export worker alive until Qt emits its terminal signal."""
+        if not hasattr(self, "_active_workers"):
+            self._active_workers = []
+        self._active_workers.append(worker)
+
+        def _release(*_args, w=worker):
+            try:
+                if w in self._active_workers:
+                    self._active_workers.remove(w)
+            except Exception:  # noqa: BLE001
+                logger.exception("stats_ready_worker_release_failed")
+
+        worker.signals.finished.connect(_release)
+        worker.signals.error.connect(_release)
+
+    def _on_stats_ready_export_finished(self, payload: dict) -> None:
+        """Handle completion of the optional external-statistics export."""
+        path = payload.get("path") if isinstance(payload, dict) else ""
+        row_count = payload.get("row_count") if isinstance(payload, dict) else None
+        sheet_names = payload.get("sheet_names") if isinstance(payload, dict) else []
+        if not path:
+            self.append_log(
+                "General",
+                "Stats-ready workbook export finished without a file path.",
+                level="error",
+            )
+            self._set_status("Stats-ready workbook export failed.")
+            self._end_run()
+            return
+
+        self._set_last_export_path(str(path))
+        self.append_log(
+            "General",
+            f"Stats-ready workbook exported: {path}",
+        )
+        if sheet_names:
+            self.append_log(
+                "General",
+                "  Sheets: " + ", ".join(str(name) for name in sheet_names),
+            )
+        self._set_status(f"Stats-ready workbook exported ({row_count} rows): {path}")
+        self._end_run()
+
     def _export_single_pipeline(self) -> bool:
         """Handle the export single pipeline step for the Stats workflow."""
         section = "Single"

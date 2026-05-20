@@ -369,6 +369,11 @@ class StatsWindowActionsMixin:
                 self.conditions = scan_result.conditions
                 self._populate_conditions_panel(self.conditions)
                 self.subject_data = scan_result.subject_data
+                self._participants_map = dict(scan_result.participants_map)
+                self._subject_group_map = map_subjects_to_groups(
+                    self.subjects,
+                    self._participants_map,
+                )
                 self._reconcile_manual_exclusions(self.subjects)
                 self._set_status(
                     f"Scan complete: Found {len(scan_result.subjects)} subjects and {len(scan_result.conditions)} conditions."

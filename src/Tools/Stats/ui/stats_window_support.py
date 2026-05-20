@@ -92,6 +92,7 @@ from Tools.Stats.data.stats_data_loader import (
     check_for_open_excel_files,
     ensure_results_dir,
     group_harmonic_results,
+    map_subjects_to_groups,
     ScanError,
     auto_detect_project_dir,
     load_manifest_data,
@@ -99,6 +100,7 @@ from Tools.Stats.data.stats_data_loader import (
     safe_export_call,
     resolve_project_subfolder,
 )
+from Tools.Stats.io.stats_ready_export import STATS_READY_WORKBOOK_NAME
 from Tools.Stats.reporting.stats_logging import format_log_line, format_section_header
 from Tools.Stats.analysis.baseline_vs_zero import export_baseline_vs_zero_results_to_excel
 from Tools.Stats.reporting.stats_export_formatting import (

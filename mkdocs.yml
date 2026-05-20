@@ -71,6 +71,7 @@ nav:
       - RM-ANOVA: statistics/rm-anova.md
       - Post-hoc Tests: statistics/posthoc-tests.md
       - Mixed Model: statistics/mixed-model.md
+      - External Statistics Software: statistics/external-statistics-software.md
       - Baseline vs Zero Tests: statistics/baseline-vs-zero.md
   - Tools:
       - Feature Tour: tools/feature-tour.md

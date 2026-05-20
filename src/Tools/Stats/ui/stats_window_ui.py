@@ -420,6 +420,13 @@ class StatsWindowUiMixin:
         self.export_options_menu.addAction(self.reporting_summary_export_action)
         self.export_options_btn.setMenu(self.export_options_menu)
 
+        self.stats_ready_export_btn = make_action_button("Export Stats-Ready Workbook")
+        self.stats_ready_export_btn.setObjectName("stats_ready_export_button")
+        self.stats_ready_export_btn.setToolTip(
+            "Write an additional Summed BCA workbook for JASP, R/RStudio, and SAS."
+        )
+        self.stats_ready_export_btn.clicked.connect(self.on_export_stats_ready_clicked)
+
         outlier_section = SectionCard("Outlier Flagging")
         outlier_section.setObjectName("stats_outlier_flagging_section")
         outlier_section.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
@@ -437,6 +444,7 @@ class StatsWindowUiMixin:
 
         export_options_actions = ActionRow(comparison_exports_section, alignment=Qt.AlignLeft)
         export_options_actions.setObjectName("stats_export_options_actions")
+        export_options_actions.add_button(self.stats_ready_export_btn)
         export_options_actions.add_button(self.export_options_btn)
         export_options_actions.row_layout.addStretch(1)
         comparison_exports_layout.addWidget(export_options_actions)

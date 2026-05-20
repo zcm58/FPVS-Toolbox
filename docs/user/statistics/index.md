@@ -10,6 +10,7 @@ These pages are reference material. If you are not sure which method to run, sta
 | [RM-ANOVA](rm-anova.md) | Your repeated-measures dataset is complete and balanced. |
 | [Post-hoc Tests](posthoc-tests.md) | You need specific condition-pair comparisons within each ROI. |
 | [Mixed Model](mixed-model.md) | Your dataset has minor missing cells or needs flexible repeated-measures modeling. |
+| [External Statistics Software](external-statistics-software.md) | You want to analyze Summed BCA exports in JASP, R/RStudio, or SAS. |
 | [Baseline vs Zero Tests](baseline-vs-zero.md) | You need to test whether a response is above the no-response baseline. |
 
 ## Terms used in this section

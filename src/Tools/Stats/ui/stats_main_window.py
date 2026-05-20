@@ -84,6 +84,8 @@ class StatsWindow(
         self.subjects: List[str] = []
         self.conditions: List[str] = []
         self.selected_conditions: List[str] = []
+        self._participants_map: dict[str, str] = {}
+        self._subject_group_map: dict[str, str | None] = {}
         self.rm_anova_results_data: Optional[pd.DataFrame] = None
         self.mixed_model_results_data: Optional[pd.DataFrame] = None
         self.posthoc_results_data: Optional[pd.DataFrame] = None

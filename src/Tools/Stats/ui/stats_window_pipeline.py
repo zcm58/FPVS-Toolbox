@@ -52,6 +52,7 @@ class StatsWindowPipelineMixin:
         buttons = [
             getattr(self, "analyze_single_btn", None),
             getattr(self, "single_advanced_btn", None),
+            getattr(self, "stats_ready_export_btn", None),
         ]
         for b in buttons:
             if b:
