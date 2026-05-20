@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-import os
 import re
-import sys
 from time import perf_counter
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 import logging
 
-from PySide6.QtCore import QSignalBlocker, QThread, Qt, QTimer
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
@@ -27,11 +22,9 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
     QSizePolicy,
-    QFileDialog,
     QHeaderView,
     QStyle,
     QPushButton,
@@ -49,22 +42,25 @@ from Main_App.gui.components import (
     confirm,
     make_action_button,
     make_form_layout,
-    show_error,
     show_info,
-    show_warning,
 )
 
 from .constants import RatioCalculatorSettings
+from .gui_condition_selection import RatioConditionSelectionMixin
+from .gui_run_workflow import RatioRunWorkflowMixin
 from .roi_provider import load_ratio_rois
-from .worker import RatioCalculatorWorker
 from .utils import parse_participant_id
 
+if TYPE_CHECKING:
+    from PySide6.QtCore import QThread
+
+    from .worker import RatioCalculatorWorker
+
 PID_PATTERN = re.compile(r"^P\d+$", re.IGNORECASE)
-CUSTOM_CONDITION_OPTION = "Custom path"
 logger = logging.getLogger(__name__)
 
 
-class RatioCalculatorWindow(QWidget):
+class RatioCalculatorWindow(RatioRunWorkflowMixin, RatioConditionSelectionMixin, QWidget):
     def __init__(
         self,
         parent: QWidget | None = None,
@@ -120,23 +116,6 @@ class RatioCalculatorWindow(QWidget):
         self._roi_watch_timer.start()
         self._set_default_output()
         self._update_run_state()
-
-    def _resolve_project_root(self, provided_root: str | None) -> Optional[Path]:
-        if provided_root:
-            root = Path(provided_root)
-            if root.exists():
-                return root
-        env_root = os.environ.get("FPVS_PROJECT_ROOT")
-        if env_root:
-            root = Path(env_root)
-            if root.exists():
-                return root
-        proj = getattr(self.parent(), "currentProject", None)
-        if proj and hasattr(proj, "project_root"):
-            root = Path(proj.project_root)
-            if root.exists():
-                return root
-        return None
 
     def _build_basic_tab(self) -> None:
         layout = QVBoxLayout(self.basic_tab)
@@ -394,25 +373,6 @@ class RatioCalculatorWindow(QWidget):
             with QSignalBlocker(self.run_label_edit):
                 self.run_label_edit.setText(f"{label_a} vs {label_b}")
 
-    def _excel_root(self) -> Optional[Path]:
-        if not self._project_root:
-            return None
-        return self._project_root / "1 - Excel Data Files"
-
-    def _set_default_output(self) -> None:
-        if self.output_edit.text().strip():
-            return
-        if self._project_root:
-            default_out = self._project_root / "5 - Ratio Summaries"
-            self._set_path_lineedit(self.output_edit, str(default_out))
-
-    @staticmethod
-    def _set_path_lineedit(edit: QLineEdit, path: str) -> None:
-        edit.setText(path)
-        edit.setCursorPosition(0)
-        edit.deselect()
-        edit.setToolTip(path)
-
     @staticmethod
     def _make_caption_label(text: str) -> SubsectionHeaderLabel:
         return SubsectionHeaderLabel(text)
@@ -480,42 +440,6 @@ class RatioCalculatorWindow(QWidget):
             button.setMinimumHeight(30)
         self.run_btn.setMinimumWidth(90)
 
-    def _scan_condition_folders(self, excel_root: Path) -> list[Path]:
-        if not excel_root.exists():
-            return []
-        folders: list[Path] = []
-        for child in sorted(excel_root.iterdir(), key=lambda p: p.name.lower()):
-            if not child.is_dir():
-                continue
-            if any(
-                fp.suffix.lower() == ".xlsx" and not fp.name.startswith("~$")
-                for fp in child.glob("*.xlsx")
-            ):
-                folders.append(child)
-        return folders
-
-    def _refresh_conditions(self) -> None:
-        excel_root = self._excel_root()
-        condition_paths: dict[str, Path] = {}
-        if excel_root:
-            for folder in self._scan_condition_folders(excel_root):
-                condition_paths[folder.name] = folder
-        self._condition_paths = condition_paths
-
-        self._populate_condition_combo(self.condition_a_combo, self.input_a_edit)
-        self._populate_condition_combo(self.condition_b_combo, self.input_b_edit)
-        if (
-            len(self._condition_paths) > 1
-            and self.condition_a_combo.currentText() == self.condition_b_combo.currentText()
-        ):
-            second = list(self._condition_paths.keys())[1]
-            with QSignalBlocker(self.condition_b_combo):
-                self.condition_b_combo.setCurrentText(second)
-            self._apply_condition_selection(second, is_a=False)
-        self._maybe_autoload_participants(force=True)
-        self._refresh_rois()
-        self._update_run_state()
-
     def _rois_signature(self, rois: dict[str, list[str]]) -> tuple[tuple[str, tuple[str, ...]], ...]:
         return tuple((name, tuple(channels)) for name, channels in rois.items())
 
@@ -565,89 +489,6 @@ class RatioCalculatorWindow(QWidget):
             elec_item.setFlags(elec_item.flags() & ~Qt.ItemIsEditable)
             self.roi_table.setItem(row, 0, roi_item)
             self.roi_table.setItem(row, 1, elec_item)
-
-    def _populate_condition_combo(self, combo: QComboBox, edit: QLineEdit) -> None:
-        current_path = edit.text().strip()
-        current_match = None
-        if current_path:
-            for name, folder in self._condition_paths.items():
-                if folder.resolve() == Path(current_path).resolve():
-                    current_match = name
-                    break
-
-        with QSignalBlocker(combo):
-            combo.clear()
-            combo.addItems(self._condition_paths.keys())
-            combo.addItem(CUSTOM_CONDITION_OPTION)
-            if current_match:
-                combo.setCurrentText(current_match)
-            elif self._condition_paths:
-                combo.setCurrentText(next(iter(self._condition_paths.keys())))
-            else:
-                combo.setCurrentText(CUSTOM_CONDITION_OPTION)
-
-        selected = combo.currentText()
-        if selected in self._condition_paths:
-            self._set_path_lineedit(edit, str(self._condition_paths[selected]))
-            self._set_condition_labels_from_folder(selected, combo is self.condition_a_combo)
-
-    def _set_condition_labels_from_folder(self, folder_name: str, is_a: bool) -> None:
-        if is_a:
-            if not self._label_a_dirty:
-                with QSignalBlocker(self.label_a_edit):
-                    self.label_a_edit.setText(folder_name)
-        else:
-            if not self._label_b_dirty:
-                with QSignalBlocker(self.label_b_edit):
-                    self.label_b_edit.setText(folder_name)
-        self._update_run_label_default()
-
-    def _on_condition_a_selected(self, condition: str) -> None:
-        self._apply_condition_selection(condition, is_a=True)
-
-    def _on_condition_b_selected(self, condition: str) -> None:
-        self._apply_condition_selection(condition, is_a=False)
-
-    def _apply_condition_selection(self, condition: str, is_a: bool) -> None:
-        if condition == CUSTOM_CONDITION_OPTION:
-            self._maybe_autoload_participants(force=True)
-            self._update_run_state()
-            return
-
-        target_edit = self.input_a_edit if is_a else self.input_b_edit
-        selected_path = self._condition_paths.get(condition)
-        if selected_path:
-            self._set_path_lineedit(target_edit, str(selected_path))
-            self._set_condition_labels_from_folder(condition, is_a)
-            self._last_dir = selected_path
-        self._maybe_autoload_participants(force=True)
-        self._update_run_state()
-
-    def _swap_conditions(self) -> None:
-        a_path = self.input_a_edit.text()
-        b_path = self.input_b_edit.text()
-        a_label = self.label_a_edit.text()
-        b_label = self.label_b_edit.text()
-        a_combo = self.condition_a_combo.currentText()
-        b_combo = self.condition_b_combo.currentText()
-        a_dirty = self._label_a_dirty
-        b_dirty = self._label_b_dirty
-
-        with QSignalBlocker(self.condition_a_combo), QSignalBlocker(self.condition_b_combo):
-            self.condition_a_combo.setCurrentText(b_combo)
-            self.condition_b_combo.setCurrentText(a_combo)
-
-        self._set_path_lineedit(self.input_a_edit, b_path)
-        self._set_path_lineedit(self.input_b_edit, a_path)
-        with QSignalBlocker(self.label_a_edit), QSignalBlocker(self.label_b_edit):
-            self.label_a_edit.setText(b_label)
-            self.label_b_edit.setText(a_label)
-
-        self._label_a_dirty = b_dirty
-        self._label_b_dirty = a_dirty
-        self._update_run_label_default()
-        self._maybe_autoload_participants(force=True)
-        self._update_run_state()
 
     def _build_advanced_tab(self) -> None:
         layout = QVBoxLayout(self.advanced_tab)
@@ -765,35 +606,6 @@ class RatioCalculatorWindow(QWidget):
         self._log_text = ""
 
         return panel
-
-    def _browse_folder(self, target_edit: QLineEdit, is_output: bool, condition_key: str | None = None) -> None:
-        start_dir = self._initial_dialog_dir(is_output)
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder", str(start_dir))
-        if folder:
-            self._set_path_lineedit(target_edit, folder)
-            self._last_dir = Path(folder)
-            if condition_key:
-                combo = self.condition_a_combo if condition_key == "a" else self.condition_b_combo
-                if combo.findText(CUSTOM_CONDITION_OPTION) == -1:
-                    combo.addItem(CUSTOM_CONDITION_OPTION)
-                with QSignalBlocker(combo):
-                    combo.setCurrentText(CUSTOM_CONDITION_OPTION)
-                self._set_condition_labels_from_folder(Path(folder).name, condition_key == "a")
-            self._maybe_autoload_participants(force=True)
-            self._update_run_state()
-
-    def _initial_dialog_dir(self, is_output: bool) -> Path:
-        if self._project_root:
-            if is_output:
-                preferred = self._project_root / "5 - Ratio Summaries"
-            else:
-                preferred = self._project_root / "1 - Excel Data Files"
-            if preferred.exists():
-                return preferred
-            return self._project_root
-        if self._last_dir:
-            return self._last_dir
-        return Path.cwd()
 
     def _load_participants(self, silent: bool = False) -> bool:
         if self._loading_participants:
@@ -992,26 +804,6 @@ class RatioCalculatorWindow(QWidget):
             return None
         return (low, high)
 
-    def _open_folder_from_edit(self, edit: QLineEdit) -> None:
-        path_str = edit.text().strip()
-        if not path_str:
-            show_info(self, "Missing folder", "No folder has been set yet.")
-            return
-        path = Path(path_str)
-        if not path.exists():
-            show_warning(self, "Folder not found", f"Folder does not exist:\n{path}")
-            return
-        try:
-            if sys.platform.startswith("win"):
-                os.startfile(str(path))
-            else:
-                from PySide6.QtGui import QDesktopServices
-                from PySide6.QtCore import QUrl
-
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-        except Exception as exc:
-            show_warning(self, "Open failed", f"Failed to open folder:\n{exc}")
-
     def _ensure_output_dir(self, output_dir: str) -> tuple[bool, str | None]:
         if not output_dir:
             return False, "Select an output folder."
@@ -1098,201 +890,6 @@ class RatioCalculatorWindow(QWidget):
         self._update_exclusion_status()
         if status_message:
             self._set_status_message(status_message)
-
-    def _set_status_message(self, message: str) -> None:
-        if self._thread and self._thread.isRunning():
-            return
-        self.status_label.set_text(message)
-        self._append_log(message)
-
-    def _start_run(self) -> None:
-        if self._thread and self._thread.isRunning():
-            show_info(self, "Running", "Ratio calculations are already running.")
-            return
-
-        input_a = self.input_a_edit.text().strip()
-        input_b = self.input_b_edit.text().strip()
-        output_dir = self.output_edit.text().strip()
-        label_a = self.label_a_edit.text().strip()
-        label_b = self.label_b_edit.text().strip()
-        run_label = self.run_label_edit.text().strip()
-
-        if not all([input_a, input_b, output_dir, label_a, label_b, run_label]):
-            show_warning(self, "Missing fields", "Fill out all required fields before running.")
-            return
-
-        if not self._active_roi_defs:
-            message = "Cannot run: no valid ROIs are configured in Settings."
-            self._set_status_message(message)
-            logger.warning(
-                "operation=start_run project_root=%s elapsed_ms=0 error=%s",
-                self._project_root,
-                message,
-            )
-            return
-
-        ok_out, out_err = self._ensure_output_dir(output_dir)
-        if not ok_out:
-            show_warning(self, "Output folder error", out_err or "Output folder is not usable.")
-            return
-
-        if not self._paired_participants:
-            show_warning(
-                self,
-                "Participants not loaded",
-                "Participants are not loaded yet. Check the condition folders and try again.",
-            )
-            return
-
-        self.progress.setValue(0)
-        self.status_label.set_text("Running...")
-        self.status_label.set_variant("info")
-        self._log_text = ""
-        self.open_output_btn.setEnabled(False)
-
-        settings = self._settings_from_ui()
-        manual_list = self._collect_manual_exclusions()
-        manual_set = set(manual_list)
-        paired_set = set(self._paired_participants)
-        assert manual_set.issubset(paired_set)
-
-        n_paired = len(self._paired_participants)
-        n_excl = len(manual_set.intersection(paired_set))
-        n_used = n_paired - n_excl
-        if n_used == 0:
-            msg = QMessageBox(self)
-            msg.setWindowTitle("All participants excluded")
-            msg.setText(
-                "You excluded all paired participants. Group summaries and violin/box/mean overlays will be empty."
-            )
-            go_back_btn = msg.addButton("Go Back", QMessageBox.RejectRole)
-            msg.addButton("Continue Anyway", QMessageBox.AcceptRole)
-            msg.setDefaultButton(go_back_btn)
-            msg.setIcon(QMessageBox.Warning)
-            msg.exec()
-            if msg.clickedButton() == go_back_btn:
-                self.progress.setValue(0)
-                self.status_label.set_text("Ready")
-                return
-
-        self._thread = QThread()
-        self._worker = RatioCalculatorWorker(
-            input_dir_a=input_a,
-            condition_label_a=label_a,
-            input_dir_b=input_b,
-            condition_label_b=label_b,
-            output_dir=output_dir,
-            run_label=run_label,
-            manual_exclude=manual_list,
-            settings=settings,
-            roi_defs=self._active_roi_defs,
-        )
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self.progress.setValue)
-        self._worker.status.connect(self.status_label.set_text)
-        self._worker.log.connect(self._append_log)
-        self._worker.error.connect(self._handle_error)
-        self._worker.finished.connect(self._handle_finished)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.start()
-
-    def _handle_error(self, message: str) -> None:
-        self._append_log(message)
-        self.status_label.set_text("Error")
-        self.status_label.set_variant("error")
-        show_error(self, "Ratio Calculator Error", message)
-        self._update_run_state()
-
-    def _handle_finished(self, output_dir: str, excel_path: str) -> None:
-        self._output_dir = Path(output_dir)
-        self._append_log(f"Excel saved to: {excel_path}")
-        self.status_label.set_text("Complete")
-        self.status_label.set_variant("success")
-        self.progress.setValue(100)
-        self.open_output_btn.setEnabled(True)
-        self._show_completion_dialog()
-        self._update_run_state()
-
-    def _show_completion_dialog(self) -> None:
-        if self._output_dir is None:
-            return
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Processing Complete")
-        msg.setText("Aggregation finished successfully.")
-        msg.setInformativeText("Would you like to open the output folder?")
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg.setIcon(QMessageBox.Information)
-        if msg.exec() == QMessageBox.Yes:
-            try:
-                if sys.platform.startswith("win"):
-                    os.startfile(str(self._output_dir))
-                else:
-                    from PySide6.QtGui import QDesktopServices
-                    from PySide6.QtCore import QUrl
-
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._output_dir)))
-            except Exception as exc:
-                self._append_log(f"Failed to open output folder: {exc}")
-
-    def _open_output_folder(self) -> None:
-        if self._output_dir is None:
-            return
-        try:
-            if sys.platform.startswith("win"):
-                os.startfile(str(self._output_dir))
-            else:
-                from PySide6.QtGui import QDesktopServices
-                from PySide6.QtCore import QUrl
-
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._output_dir)))
-        except Exception as exc:
-            self._append_log(f"Failed to open output folder: {exc}")
-
-    def _copy_log(self) -> None:
-        QApplication.clipboard().setText(self._log_text)
-
-    def _append_log(self, message: str) -> None:
-        self._log_text = f"{self._log_text}\n{message}" if self._log_text else message
-
-    def _update_run_state(self) -> None:
-        errors = self._validate_inputs()
-        self._set_validation_errors(errors)
-        required_fields = all(
-            [
-                self.input_a_edit.text().strip(),
-                self.input_b_edit.text().strip(),
-                self.output_edit.text().strip(),
-                self.label_a_edit.text().strip(),
-                self.label_b_edit.text().strip(),
-                self.run_label_edit.text().strip(),
-            ]
-        )
-        if required_fields and not self._paired_participants:
-            self._maybe_autoload_participants()
-            errors = self._validate_inputs()
-            self._set_validation_errors(errors)
-        self.run_btn.setEnabled(required_fields and not errors)
-        self.input_a_open_btn.setEnabled(bool(self.input_a_edit.text().strip()))
-        self.input_b_open_btn.setEnabled(bool(self.input_b_edit.text().strip()))
-        self.output_open_btn.setEnabled(bool(self.output_edit.text().strip()))
-
-    def _show_log_dialog(self) -> None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Ratio Calculator Log")
-        dialog.resize(760, 460)
-        layout = QVBoxLayout(dialog)
-        log_view = QTextEdit(dialog)
-        log_view.setReadOnly(True)
-        log_view.setProperty("logSurface", True)
-        log_view.setPlainText(self._log_text)
-        layout.addWidget(log_view)
-        buttons = QDialogButtonBox(QDialogButtonBox.Close, dialog)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-        dialog.exec()
 
     def _apply_button_tooltips(self) -> None:
         self.refresh_btn.setToolTip("Refresh conditions list from the project folder.")

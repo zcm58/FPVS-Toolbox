@@ -129,7 +129,7 @@ def test_ratio_calculator_folder_cancel_preserves_state(qtbot, monkeypatch):
     previous_last_dir = window._last_dir
 
     monkeypatch.setattr(
-        "Tools.Ratio_Calculator.gui.QFileDialog.getExistingDirectory",
+        "Tools.Ratio_Calculator.gui_condition_selection.QFileDialog.getExistingDirectory",
         lambda *args, **kwargs: "",
     )
 

@@ -2,11 +2,18 @@
 
 ## Status
 
-Future plan. This work has not started.
+Active plan. Started on 2026-05-20.
+
+Slice 1, project paths and condition folders, is complete. The methods listed
+for that slice now live in
+`src/Tools/Ratio_Calculator/gui_condition_selection.py` on
+`RatioConditionSelectionMixin`, while `RatioCalculatorWindow` remains the
+public PySide6 window in `src/Tools/Ratio_Calculator/gui.py`.
 
 ## Target
 
-`src/Tools/Ratio_Calculator/gui.py`
+- `src/Tools/Ratio_Calculator/gui.py`
+- `src/Tools/Ratio_Calculator/gui_condition_selection.py`
 
 ## Summary
 
@@ -50,6 +57,15 @@ Prefer one seam per PR. Keep `RatioCalculatorWindow` as the public facade.
    - Preserve custom path insertion, dialog Cancel behavior, `_last_dir`, and
      auto participant reload.
    - Run project-path audit for this seam.
+   - Status: Complete on 2026-05-20.
+   - Implementation: moved these helpers to
+     `src/Tools/Ratio_Calculator/gui_condition_selection.py`:
+     `_resolve_project_root`, `_excel_root`, `_set_default_output`,
+     `_set_path_lineedit`, `_scan_condition_folders`,
+     `_refresh_conditions`, `_populate_condition_combo`,
+     `_set_condition_labels_from_folder`, `_apply_condition_selection`,
+     `_on_condition_a_selected`, `_on_condition_b_selected`,
+     `_swap_conditions`, `_browse_folder`, and `_initial_dialog_dir`.
 
 2. UI section builders:
    - Move `_build_basic_tab`, `_build_advanced_tab`, `_build_bottom_panel`,
@@ -93,6 +109,13 @@ Prefer one seam per PR. Keep `RatioCalculatorWindow` as the public facade.
      `_toggle_log_panel` to `src/Tools/Ratio_Calculator/gui_run_workflow.py`.
    - Preserve QThread wiring, worker signal connections, progress/status/log
      behavior, output-folder opening, clipboard copying, and cleanup behavior.
+   - Status: Complete on 2026-05-20.
+   - Implementation: moved `_open_folder_from_edit`, `_set_status_message`,
+     `_start_run`, `_handle_error`, `_handle_finished`,
+     `_show_completion_dialog`, `_open_output_folder`, `_copy_log`,
+     `_append_log`, `_update_run_state`, and `_show_log_dialog` to
+     `src/Tools/Ratio_Calculator/gui_run_workflow.py` on
+     `RatioRunWorkflowMixin`.
 
 ## Suggested Final Shape
 
