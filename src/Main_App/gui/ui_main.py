@@ -35,6 +35,7 @@ from .style_tokens import (
 )
 from Main_App.gui.components import (
     ActionRow,
+    BusySpinner,
     SectionCard,
     SubsectionHeaderLabel,
     apply_font_role,
@@ -145,10 +146,6 @@ def init_ui(self) -> None:
     btn_row.add_button(self.btn_open_project)
     btn_row.row_layout.addStretch(1)
     center_layout.addWidget(btn_row)
-
-    self.landing_version_label = QLabel("", welcome_card)
-    self.landing_version_label.setObjectName("landing_version_label")
-    self.landing_version_label.setVisible(False)
 
     card_layout.addWidget(center_content, 0, Qt.AlignCenter)
     card_layout.addStretch(1)
@@ -357,9 +354,10 @@ def init_ui(self) -> None:
     event_group_layout.addWidget(scroll, 1)
     setup_layout.addWidget(grp_event, 1)
 
-    # Start + Progress Row
+    # Start Row
     run_panel = ActionRow(setup_panel, alignment=Qt.AlignLeft, spacing=10)
     run_panel.setObjectName("run_panel")
+    self.run_panel = run_panel
 
     self.btn_start = make_action_button(
         "Start Processing",
@@ -369,25 +367,11 @@ def init_ui(self) -> None:
     self.btn_start.setMinimumSize(180, 38)
     self.btn_start.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-    self.progress_bar = QProgressBar(run_panel)
-    self.progress_bar.setRange(0, 100)
-    self.progress_bar.setValue(0)
-    self.progress_bar.setTextVisible(True)
-    self.progress_bar.setFormat("%p%")
-    self.progress_bar.setAlignment(Qt.AlignCenter)
-
     btn_h = max(38, self.btn_start.sizeHint().height())
     self.btn_start.setFixedHeight(btn_h)
-    self.progress_bar.setFixedHeight(btn_h)
 
     run_panel.add_button(self.btn_start)
-    run_panel.row_layout.addWidget(self.progress_bar, 1)
     setup_layout.addWidget(run_panel)
-
-    self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
-    self._progress_anim.setDuration(200)
-    self._progress_anim.valueChanged.connect(self.progress_bar.setValue)
-    self.processor.progressChanged.connect(self._animate_progress_to)
 
     saved_pairs = self.settings.get_event_pairs()
     if saved_pairs:
@@ -420,6 +404,74 @@ def init_ui(self) -> None:
     self.page1_container = container
     self.page1_right = container
     self.homeWidget = splitter
+
+    processing_page = QWidget(self.workspace_stack)
+    processing_page.setObjectName("processing_page")
+    processing_page.setAttribute(Qt.WA_StyledBackground, True)
+    processing_page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    self.processing_page = processing_page
+
+    processing_layout = QVBoxLayout(processing_page)
+    processing_layout.setContentsMargins(32, 32, 32, 32)
+    processing_layout.setSpacing(0)
+    processing_layout.addStretch(1)
+
+    processing_panel = QWidget(processing_page)
+    processing_panel.setObjectName("processing_activity_panel")
+    processing_panel.setAttribute(Qt.WA_StyledBackground, True)
+    processing_panel.setMaximumWidth(760)
+    processing_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    processing_panel_layout = QVBoxLayout(processing_panel)
+    processing_panel_layout.setContentsMargins(42, 38, 42, 38)
+    processing_panel_layout.setSpacing(20)
+
+    self.processing_spinner = BusySpinner(processing_panel, diameter=64)
+    self.processing_spinner.setObjectName("processing_spinner")
+    processing_panel_layout.addWidget(self.processing_spinner, 0, Qt.AlignCenter)
+
+    processing_title = QLabel("Processing Data", processing_panel)
+    processing_title.setObjectName("processing_title")
+    apply_font_role(processing_title, "project_title")
+    processing_title.setAlignment(Qt.AlignCenter)
+    processing_panel_layout.addWidget(processing_title)
+
+    processing_message = QLabel(
+        "Data processing has begun. Please be patient; your device may become "
+        "temporarily slow or unresponsive during processing.",
+        processing_panel,
+    )
+    processing_message.setObjectName("processing_message")
+    apply_font_role(processing_message, "body")
+    processing_message.setAlignment(Qt.AlignCenter)
+    processing_message.setWordWrap(True)
+    processing_panel_layout.addWidget(processing_message)
+
+    self.progress_bar = QProgressBar(processing_panel)
+    self.progress_bar.setObjectName("processing_progress_bar")
+    self.progress_bar.setRange(0, 100)
+    self.progress_bar.setValue(0)
+    self.progress_bar.setTextVisible(True)
+    self.progress_bar.setFormat("%p%")
+    self.progress_bar.setAlignment(Qt.AlignCenter)
+    self.progress_bar.setFixedHeight(btn_h)
+    processing_panel_layout.addWidget(self.progress_bar)
+
+    self.processing_action_slot = QWidget(processing_panel)
+    self.processing_action_slot.setObjectName("processing_action_slot")
+    self.processing_action_layout = QHBoxLayout(self.processing_action_slot)
+    self.processing_action_layout.setContentsMargins(0, 4, 0, 0)
+    self.processing_action_layout.setSpacing(0)
+    processing_panel_layout.addWidget(self.processing_action_slot)
+
+    processing_layout.addWidget(processing_panel, 0, Qt.AlignCenter)
+    processing_layout.addStretch(1)
+    self.workspace_stack.addWidget(processing_page)
+
+    self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
+    self._progress_anim.setDuration(200)
+    self._progress_anim.valueChanged.connect(self.progress_bar.setValue)
+    self.processor.progressChanged.connect(self._animate_progress_to)
     self.stacked.addWidget(page1)
 
     # Wire buttons

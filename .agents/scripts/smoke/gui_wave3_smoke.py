@@ -131,12 +131,9 @@ def main() -> int:
         assert getattr(window, "_launch_reveal_done", False)
         assert window.findChild(QWidget, "landing_welcome_card") is not None
         assert window.landing_card.graphicsEffect() is None
-        assert window.btn_create_project.text() == "Create New Project"
-        assert window.btn_open_project.text() == "Open Existing Project"
-        assert (
-            window.landing_version_label.text()
-            == f"FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
-        )
+        assert window.btn_create_project.text() == "New Project"
+        assert window.btn_open_project.text() == "Open Project"
+        assert window.windowTitle() == f"FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
 
         assert find_widget_by_role(window.sidebar, "btn_home") is not None
         assert window.findChild(QWidget, "sidebar_tools_group") is not None
@@ -147,8 +144,8 @@ def main() -> int:
         wait(60)
         app.processEvents()
 
-        assert window.findChild(QWidget, "preprocessing_info_strip") is not None
-        assert window.findChild(QWidget, "preprocessing_info_icon") is not None
+        assert window.findChild(QWidget, "preprocessing_info_strip") is None
+        assert window.findChild(QWidget, "processing_page") is not None
         assert window.findChild(QWidget, "input_folder_row") is not None
         active_row = (
             window.row_single_file if window.rb_single.isChecked() else window.row_input_folder

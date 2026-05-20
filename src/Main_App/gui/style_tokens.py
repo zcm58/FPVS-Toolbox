@@ -289,6 +289,30 @@ def build_main_page_stylesheet() -> str:
             background: {SURFACE_ALT_BG};
         }}
 
+        #processing_page {{
+            background: #E8EDF3;
+        }}
+
+        #processing_activity_panel {{
+            background: {SURFACE_BG};
+            border: 1px solid {BORDER_COLOR};
+            border-radius: {CORNER_RADIUS}px;
+        }}
+
+        #processing_title {{
+            color: {TEXT_PRIMARY};
+            font-size: {css_font_size("project_title")};
+            font-weight: {css_font_weight("project_title")};
+        }}
+
+        #processing_message {{
+            color: {TEXT_SECONDARY};
+        }}
+
+        #processing_progress_bar {{
+            min-height: 38px;
+        }}
+
         #event_map_header QLabel {{
             color: {TEXT_SECONDARY};
             font-size: {css_font_size("subsection_header")};

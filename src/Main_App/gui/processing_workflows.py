@@ -105,12 +105,6 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
     )
     host._run_excel_snapshot_before = excel_snapshot(host._run_excel_output_root)
 
-    try:
-        if hasattr(host, "_busy_start"):
-            host._busy_start()
-    except Exception:
-        pass
-
     if not host._processing_timer.isActive():
         host._processing_timer.start(host._POLL_INTERVAL_MS)
 
@@ -270,7 +264,8 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             max_workers=1 if is_single_ui else host.max_workers,
         )
         host._run_active = True
-        host._show_processing_started_notice()
+        if hasattr(host, "_busy_start"):
+            host._busy_start()
         if hasattr(host, "btn_start"):
             host.btn_start.setText("Stop Processing")
             host.btn_start.setEnabled(True)

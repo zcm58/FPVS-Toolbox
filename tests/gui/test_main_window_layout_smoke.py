@@ -10,7 +10,14 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QStackedWidget, QWidget
+from PySide6.QtWidgets import (
+    QLabel,
+    QSizePolicy,
+    QSplitter,
+    QStackedWidget,
+    QStatusBar,
+    QWidget,
+)
 
 from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
@@ -61,6 +68,8 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
     assert win.minimumHeight() == 900
     assert win.size().width() >= 1280
     assert win.size().height() >= 900
+    assert win.windowTitle() == f"FPVS Toolbox v{main_window_module.FPVS_TOOLBOX_VERSION}"
+    assert not win.findChildren(QStatusBar)
     assert win.landing_page is win.stacked.currentWidget()
     assert win.landing_card.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
     assert win.landing_card.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
@@ -114,7 +123,12 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     run_panel = win.findChild(ActionRow, "run_panel")
     assert run_panel is not None
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
-    assert run_panel.row_layout.indexOf(win.progress_bar) >= 0
+    assert run_panel.row_layout.indexOf(win.progress_bar) < 0
+    assert win.findChild(QWidget, "processing_page") is win.processing_page
+    assert win.workspace_stack.indexOf(win.processing_page) >= 0
+    assert win.processing_page.isAncestorOf(win.progress_bar)
+    assert win.progress_bar.objectName() == "processing_progress_bar"
+    assert win.findChild(QWidget, "processing_action_slot") is win.processing_action_slot
     assert win.findChild(QWidget, "preprocessing_info_strip") is None
     event_map_header = win.findChild(QWidget, "event_map_header")
     assert event_map_header is not None
@@ -200,6 +214,39 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
             break
     assert "Relevant Publications" not in help_actions
     assert any(text.startswith("About") for text in help_actions)
+
+
+def test_processing_activity_page_locks_navigation_and_reuses_start_button(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    run_panel = win.findChild(ActionRow, "run_panel")
+    assert run_panel is not None
+    assert run_panel.row_layout.indexOf(win.btn_start) >= 0
+
+    win._busy_start()
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.processing_page
+    assert win.processing_action_layout.indexOf(win.btn_start) >= 0
+    assert run_panel.row_layout.indexOf(win.btn_start) < 0
+    assert win.processing_spinner.isVisible()
+    assert not win.sidebar.isEnabled()
+    assert not win.menuBar().isEnabled()
+
+    win._busy_stop()
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    assert run_panel.row_layout.indexOf(win.btn_start) >= 0
+    assert win.processing_action_layout.indexOf(win.btn_start) < 0
+    assert win.sidebar.isEnabled()
+    assert win.menuBar().isEnabled()
 
 
 def test_sidebar_image_resizer_embeds_in_main_workspace(

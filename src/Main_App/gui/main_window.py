@@ -179,7 +179,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self._settings_dialog = None
         self._settings_page = None
         self.processor = Processor()
-        self.setWindowTitle("FPVS Toolbox")
+        self.setWindowTitle(f"FPVS Toolbox v{FPVS_TOOLBOX_VERSION}")
         self.setMinimumSize(1280, 900)
         self.resize(1280, 900)
         self.currentProject: Project | None = None
@@ -224,8 +224,6 @@ class MainWindow(QMainWindow, ProcessingMixin):
         if hasattr(self, "stacked"):
             self.stacked.currentChanged.connect(self._sync_menu_bar_for_current_page)
         self._sync_menu_bar_for_current_page()
-
-        shell_status.init_status_bar(self, FPVS_TOOLBOX_VERSION)
 
         # Wire landing page buttons if present
         if hasattr(self, "btn_create_project"):

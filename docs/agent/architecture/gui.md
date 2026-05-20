@@ -44,9 +44,9 @@ Primary paths:
   update checks. It preserves debounce and pytest startup skip while delegating
   update metadata, download, and install work to `Main_App.updates` and
   `update_dialog.py`.
-- `src/Main_App/gui/shell_status.py`: launch reveal, status bar, busy
-  indicator, GUI log routing, and processing-start notice helpers used by
-  `MainWindow` compatibility wrappers.
+- `src/Main_App/gui/shell_status.py`: launch reveal, GUI log routing, and
+  embedded processing activity-page helpers used by `MainWindow` compatibility
+  wrappers.
 - `src/Main_App/updates/`: non-GUI updater backend. It owns GitHub Release
   selection, typed update contracts, installer downloads, and installer launch.
   This package must not import Qt widgets or create windows.
@@ -183,7 +183,7 @@ The main app shell is the visual source of truth. Shared component defaults shou
 
 `src/Main_App/gui/main_window.py` has been appropriately refactored and downsized into the shell/coordinator for the main window. Do not choose it as a future refactor target just to reduce size. Further `main_window.py` refactors require explicit user direction and a concrete clarity or feature-maintenance benefit.
 
-Shell-specific implementations live under `src/Main_App/gui/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, style tokens, and update manager. Project workflow orchestration is split into `Main_App.gui.project_workflows`, processing input orchestration is split into `Main_App.gui.processing_inputs`, processing run orchestration is split into `Main_App.gui.processing_workflows`, post-export completion handling is split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is split into `Main_App.gui.tool_workflows`, and shell/status feedback is split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
+Shell-specific implementations live under `src/Main_App/gui/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, style tokens, and update manager. Project workflow orchestration is split into `Main_App.gui.project_workflows`, processing input orchestration is split into `Main_App.gui.processing_inputs`, processing run orchestration is split into `Main_App.gui.processing_workflows`, post-export completion handling is split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is split into `Main_App.gui.tool_workflows`, and shell feedback is split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
 
 General GUI utilities should live under `Main_App.gui` when they coordinate UI-facing behavior. Non-GUI resource/path helpers should live under `Main_App.Shared`.
 
