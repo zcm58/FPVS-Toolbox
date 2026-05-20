@@ -116,16 +116,18 @@ Changing that list is a shared-GUI API change: update component smoke tests,
 keep imports side-effect free, and record the decision in the active component
 layer plan.
 
-The Image Resizer actions panel is the first runtime `ActionRow` adoption. Use
-it as the small-surface pattern for future action-row migrations: preserve
-button labels, order, variants, enabled states, and signal connections, and add
-focused pytest-qt coverage for the touched surface.
+`ActionRow` is now used by the main shell, Settings, Plot Generator, Ratio
+Calculator, Stats, Image Resizer, Average Preprocessing, and focused dialogs.
+When migrating more action rows, preserve button labels, order, variants,
+enabled states, signal connections, and object names, then add focused smoke
+coverage for the touched surface.
 
-Image Resizer and Individual Detectability are the first section/path/status
-contract surfaces for Slice 4. Their shared `PathPickerRow` and `StatusBanner`
-instances now have stable object names and focused tests that preserve
-file-dialog Cancel as a no-op. Use that pattern before migrating path rows in
-more stateful tools such as Ratio Calculator, Stats, or Plot Generator.
+`PathPickerRow` is used by Plot Generator, Image Resizer, and Individual
+Detectability. `StatusBanner` is used by Stats, Ratio Calculator, Image Resizer,
+and Individual Detectability. Keep path defaults, filters, settings keys,
+project-root behavior, and file-dialog Cancel no-op behavior owned by the
+surface workflow; the shared widgets are presentation contracts, not I/O
+policy owners.
 
 The component contract suite in `tests/gui/test_ui_components_smoke.py` now
 pins shared component imports, object names, signal emission, invalid variants,

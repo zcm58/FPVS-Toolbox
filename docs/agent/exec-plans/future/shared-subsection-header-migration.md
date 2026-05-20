@@ -2,7 +2,13 @@
 
 ## Status
 
-Future plan. This work has not started.
+Partially complete baseline. Commit `417f4b37` introduced the shared
+`SubsectionHeaderLabel` contract, routed `SectionCard` titles through it, wired
+the shared QSS helper into the theme/style-token stylesheets, and migrated the
+first curated Main App, Stats, Plot Generator, and Ratio Calculator headings.
+
+This remains a future plan for any additional curated subsection-heading
+migration. Do not treat every plain `QLabel(...)` as remaining work.
 
 ## Target
 
@@ -33,18 +39,20 @@ Primary GUI surfaces:
 The app needs one shared edit point for subsection title presentation: font,
 size, color, weight, padding, and related QSS should be controlled from the
 shared subsection-header component layer. Top-level `SectionCard` titles are
-detectable and should be centralized mechanically. Free-floating labels require
-a curated pass because many plain `QLabel(...)` instances are ordinary form
-labels, status text, helper text, table contents, or button/sidebar text rather
-than subsection titles.
+now centralized mechanically through `CardHeader.title_label`. Free-floating
+labels still require a curated pass because many plain `QLabel(...)` instances
+are ordinary form labels, status text, helper text, table contents, or
+button/sidebar text rather than subsection titles.
 
-The goal is to finish migrating real subsection headers to
-`SubsectionHeaderLabel` without restyling normal form labels.
+The remaining goal is to migrate only additional confirmed subsection headers
+to `SubsectionHeaderLabel` without restyling normal form labels.
 
 ## Current Architecture Evidence
 
 - `SectionCard` is the shared component-layer card primitive in
   `src/Main_App/gui/widgets/cards.py`.
+- `CardHeader.title_label` is a `SubsectionHeaderLabel`, so `SectionCard`
+  titles already share the subsection-header widget contract.
 - `SectionCard` is re-exported through `Main_App.gui.components`.
 - Tools build their own layouts independently, but many top-level subsections
   already use `SectionCard("...")`.
@@ -52,6 +60,10 @@ The goal is to finish migrating real subsection headers to
   manual font changes. These must be reviewed before conversion.
 - `SubsectionHeaderLabel` and the QSS helper live in
   `src/Main_App/gui/widgets/labels.py`.
+- `SubsectionHeaderLabel` is re-exported from `Main_App.gui.components` and
+  `Main_App.gui.widgets`.
+- `build_subsection_header_stylesheet()` is included by both
+  `src/Main_App/gui/theme.py` and `src/Main_App/gui/style_tokens.py`.
 
 ## Detection Strategy
 
@@ -67,8 +79,7 @@ rg -n "SectionCard\(" src/Main_App src/Tools -g "*.py"
 
 Expected classification:
 
-- `SectionCard(...)`: already or should be centralized through
-  `CardHeader.title_label`.
+- `SectionCard(...)`: already centralized through `CardHeader.title_label`.
 - `SectionCard` title text should not need per-surface font styling.
 
 ### Heuristic Inventory
@@ -93,9 +104,12 @@ Classify each hit as one of:
 
 Do not convert `not-heading` labels.
 
-## Initial User-Confirmed Scope
+## Migrated Baseline Scope
 
-The following labels must be on the shared subsection header layer:
+Commit `417f4b37` migrated the first curated visible headings and added focused
+smoke coverage for the touched surfaces.
+
+The following labels are on the shared subsection header layer:
 
 Home page:
 
@@ -109,7 +123,7 @@ Statistical Analysis, Basic tab:
 - `File I/O`
 - `Included Conditions`
 - `Manual Exclusions`
-- `Significant Results Summary`
+- `Significant Results Summary:`
 
 Statistical Analysis, Advanced tab:
 
@@ -124,8 +138,33 @@ SNR Plot tool:
 - `File I/O`
 - `Plot Parameters`
 - `Advanced`
-- `Legend labels`
+- `Legend labels (optional)`
 - `Log Output`
+- `Condition A`
+- `Condition B`
+- `ROI`
+- `Axis Ranges`
+
+Ratio Calculator:
+
+- `Conditions`
+- `Condition A`
+- `Condition B`
+- `Condition A Folder`
+- `Condition B Folder`
+- `Condition A Label`
+- `Condition B Label`
+- `Output Folder`
+- `Run Label`
+- `Participant exclusions (optional)`
+- `ROIs (read-only)`
+- `Harmonic settings`
+- `Run`
+
+Sidebar:
+
+- `Workspace Tools`
+- `Utilities`
 
 This is not the full final list. Continue the pass only as the user confirms
 additional text that should count as a subsection header.
@@ -148,20 +187,26 @@ additional text that should count as a subsection header.
 
 ### Phase 1: Freeze The Shared Contract
 
-1. Confirm `SubsectionHeaderLabel` owns widget-level defaults:
+Status: complete in `417f4b37`.
+
+1. Confirmed `SubsectionHeaderLabel` owns widget-level defaults:
    - point-size delta
    - font weight
    - alignment
    - `subsectionHeader` dynamic property
-2. Confirm `build_subsection_header_stylesheet()` owns QSS-level defaults:
+2. Confirmed `build_subsection_header_stylesheet()` owns QSS-level defaults:
    - color
    - CSS font weight
    - padding
-3. Confirm `CardHeader.title_label` is a `SubsectionHeaderLabel`.
-4. Remove or avoid separate `cardTitle` font/color QSS paths.
-5. Update `tests/gui/test_ui_components_smoke.py` to pin this contract.
+3. Confirmed `CardHeader.title_label` is a `SubsectionHeaderLabel`.
+4. Removed separate subsection-heading QSS paths that would silently diverge.
+5. Updated `tests/gui/test_ui_components_smoke.py` to pin this contract.
 
 ### Phase 2: SectionCard Audit
+
+Status: baseline complete because all `SectionCard` titles now route through
+`CardHeader.title_label`; still rerun the structured inventory before future
+surface-specific edits.
 
 1. Run the structured inventory command.
 2. For each `SectionCard(...)`, verify the title is intended to be a subsection
@@ -172,6 +217,8 @@ additional text that should count as a subsection header.
    names.
 
 ### Phase 3: Local Heading Audit
+
+Status: started. Continue only with confirmed candidate headings.
 
 1. Run the heuristic inventory commands.
 2. Create a short migration table with columns:
@@ -187,6 +234,10 @@ additional text that should count as a subsection header.
 5. Remove any local bold-label helper that exists only for subsection headings.
 
 ### Phase 4: Surface-Specific Passes
+
+Status: started. Home/shell, Statistical Analysis, SNR Plot, and Ratio
+Calculator have initial converted headings. Remaining surfaces should be scoped
+one group at a time.
 
 Use one surface group per small change set:
 

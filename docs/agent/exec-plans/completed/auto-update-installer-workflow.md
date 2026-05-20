@@ -2,7 +2,42 @@
 
 ## Status
 
-Implemented in the Toolbox updater/release workflow.
+Completed in commit `090b3136` (`feat: add auto update release workflow`).
+The plan now lives under `docs/agent/exec-plans/completed/`; future updater
+work should start from the active architecture docs and this completion record,
+not from the implementation checklist below as if it were pending.
+
+## Completion Snapshot
+
+Landed files and ownership:
+
+- `src/Main_App/updates/`: non-GUI updater backend for typed release metadata,
+  GitHub Releases selection, installer downloads, and installer launch.
+- `src/Main_App/gui/update_dialog.py`: user-facing update dialog, download
+  progress, install confirmation, and busy-work install guard.
+- `src/Main_App/gui/update_manager.py`: startup/manual update scheduling facade
+  with debounce and pytest startup skip preserved.
+- `scripts/packaging/build_exe.ps1`, `build_installer.ps1`, and
+  `build_release.ps1`: script-driven PyInstaller and Inno release workflow.
+- `scripts/packaging/FPVS Toolbox Setup Script.iss`: installer relaunch support
+  through `/RELAUNCH=1`.
+- `tests/updates/test_update_check.py`, `tests/updates/test_update_download.py`,
+  and `tests/gui/test_update_manager_manual_force.py`: focused updater
+  coverage.
+
+Resolved decisions:
+
+- Installer asset contract is `FPVSToolbox-<version>-setup.exe`.
+- Backend update logic lives under `Main_App.updates`; GUI scheduling and
+  presentation live under `Main_App.gui.update_manager` and
+  `Main_App.gui.update_dialog`.
+- The first implementation keeps the existing install-root behavior and
+  installed executable name `FPVS_Toolbox.exe`.
+- Release builds are driven by PowerShell scripts under `scripts/packaging/`
+  invoking `ISCC.exe`; maintainers should not use the Inno GUI for normal
+  releases.
+- User-facing docs are not advertised as automatic install/relaunch proof until
+  a released installer smoke proves the flow.
 
 ## Target
 
@@ -63,7 +98,7 @@ FPVS Studio files inspected as the reference implementation:
 - `docs/PACKAGING.md`
 - `docs/exec-plans/planned/patch-update-workflow.md`
 
-## Current Toolbox Behavior
+## Original Pre-Implementation Baseline
 
 - `MainWindow.__init__` calls
   `Main_App.gui.update_manager.check_for_updates_on_launch(self)` after a
@@ -71,23 +106,23 @@ FPVS Studio files inspected as the reference implementation:
 - Manual `File > Check for Updates` routes through
   `src/Main_App/gui/tool_workflows.py` and calls
   `check_for_updates_async(..., silent=False, force=True)`.
-- `src/Main_App/gui/update_manager.py` uses a `QRunnable` on the global
-  `QThreadPool` to query `FPVS_TOOLBOX_UPDATE_API`, currently the GitHub
+- `src/Main_App/gui/update_manager.py` used a `QRunnable` on the global
+  `QThreadPool` to query `FPVS_TOOLBOX_UPDATE_API`, then the GitHub
   `/releases/latest` endpoint.
-- Update state is only `_UpdateInfo(latest, url)`. The user can open the GitHub
-  release page, but the app does not select an installer asset, download it,
+- Update state was only `_UpdateInfo(latest, url)`. The user could open the GitHub
+  release page, but the app did not select an installer asset, download it,
   launch it, or relaunch after install.
 - Startup checks are debounced through `SettingsManager` key
   `updates.last_checked_utc`; checks are skipped under pytest.
 - `src/config.py` owns `FPVS_TOOLBOX_VERSION`, `FPVS_TOOLBOX_UPDATE_API`, and
   `FPVS_TOOLBOX_REPO_PAGE`.
-- The Inno script currently outputs
+- The Inno script output
   `installers\FPVSToolbox-<version>-setup.exe`, installs `FPVS_Toolbox.exe`,
-  and always offers a normal postinstall launch. It does not support a
+  and always offered a normal postinstall launch. It did not support a
   `/RELAUNCH=1` command-line mode like FPVS Studio.
-- The current Inno script scan found `#define MyAppVersion "1.7.0` without a
-  closing quote. Future activation must validate and repair the packaging file
-  before assuming installer builds work.
+- The Inno script scan found `#define MyAppVersion "1.7.0` without a closing
+  quote before implementation. The completed release workflow now passes the
+  app version into Inno from `FPVS_TOOLBOX_VERSION`.
 
 ## Studio Behavior To Mirror
 
@@ -240,19 +275,22 @@ reason. Multiple accepted patterns make release mistakes harder to catch.
 
 ## Implementation Phases
 
+These phases are retained as historical implementation evidence. They are not
+pending future work.
+
 ### Phase 1 - Packaging Baseline
 
 Goal: create a Studio-style release workflow that builds the executable bundle
 and installer from PowerShell, then make the installer support updater-driven
 relaunch before the GUI depends on it.
 
-Tasks:
+Completed tasks:
 
 - Repair and validate `scripts/packaging/FPVS Toolbox Setup Script.iss`.
 - Stop hard-coding the version in two places. Prefer passing
   `FPVS_TOOLBOX_VERSION` into Inno from a build script, similar to Studio's
   `/DAppVersion=...` pattern.
-- Add `scripts/packaging/build_exe.ps1`.
+- Added `scripts/packaging/build_exe.ps1`.
   - Resolve the Python executable from `.venv1\Scripts\python.exe`, then fall
     back to `python` only if the project venv is unavailable.
   - Optionally refresh packaging dependencies unless `-SkipInstall` is passed.
@@ -262,7 +300,7 @@ Tasks:
     produced by the spec exists.
   - Fail fast on version drift between `src/config.py`, bundled metadata when
     available, and the installer version passed forward.
-- Add `scripts/packaging/build_installer.ps1`.
+- Added `scripts/packaging/build_installer.ps1`.
   - Accept `-InnoCompiler` and `-SkipSmoke`.
   - Resolve `ISCC.exe` from `-InnoCompiler`, `ISCC_EXE`, PATH, and common Inno
     Setup install locations.
@@ -271,7 +309,7 @@ Tasks:
   - Invoke `ISCC.exe` directly with command-line options such as
     `/DAppVersion=<version>`, `/O<output-dir>`, and `/F<installer-base-name>`.
   - Verify the expected installer file exists after compilation.
-- Add `scripts/packaging/build_release.ps1`.
+- Added `scripts/packaging/build_release.ps1`.
   - This is the single PyCharm-friendly entrypoint.
   - It calls `build_exe.ps1` and then `build_installer.ps1`.
   - It accepts pass-through options for `-SkipInstall`, `-InnoCompiler`, and
@@ -279,7 +317,7 @@ Tasks:
   - It prints the final installer path for GitHub Release upload.
 - Do not require maintainers to open the Inno Setup GUI. The only supported
   release path for this plan is the PowerShell script calling `ISCC.exe`.
-- Add `/RELAUNCH=1` handling to the Inno script:
+- Added `/RELAUNCH=1` handling to the Inno script:
 
 ```pascal
 [Run]
@@ -333,9 +371,10 @@ Confirm the installed app relaunches after the installer completes.
 
 ### Phase 2 - Typed Update Backend
 
-Goal: move release selection and installer metadata out of GUI code.
+Goal: move release selection and installer metadata out of GUI code. Status:
+complete.
 
-Add `src/Main_App/updates/models.py` with Studio-equivalent contracts:
+Added `src/Main_App/updates/models.py` with Studio-equivalent contracts:
 
 - `UpdateError`
 - `InstallerAsset`
@@ -343,7 +382,7 @@ Add `src/Main_App/updates/models.py` with Studio-equivalent contracts:
 - `CandidateRelease`
 - `DownloadedInstaller`
 
-Add `src/Main_App/updates/github_releases.py`:
+Added `src/Main_App/updates/github_releases.py`:
 
 - `DEFAULT_RELEASES_API_URL = "https://api.github.com/repos/zcm58/FPVS-Toolbox-Repo/releases"`
 - `INSTALLER_ASSET_PATTERN`
@@ -383,9 +422,10 @@ Focused tests to add:
 
 ### Phase 3 - Download And Installer Helpers
 
-Goal: download and launch the installer without GUI dependencies.
+Goal: download and launch the installer without GUI dependencies. Status:
+complete.
 
-Add `src/Main_App/updates/downloader.py`:
+Added `src/Main_App/updates/downloader.py`:
 
 - `default_update_cache_dir()` returns
   `%LOCALAPPDATA%\FPVS Toolbox\updates` when `LOCALAPPDATA` exists, otherwise a
@@ -400,7 +440,7 @@ Add `src/Main_App/updates/downloader.py`:
 - Validate final size when GitHub asset size is available.
 - Delete partial files on failed download.
 
-Add `src/Main_App/updates/installer.py`:
+Added `src/Main_App/updates/installer.py`:
 
 - `launch_installer(installer_path, relaunch_after_install=True)`.
 - Require an existing `.exe` path.
@@ -419,9 +459,10 @@ Focused tests to add:
 
 ### Phase 4 - Update Dialog
 
-Goal: replace release-page prompting with an in-app update dialog.
+Goal: replace release-page prompting with an in-app update dialog. Status:
+complete.
 
-Add `src/Main_App/gui/update_dialog.py`.
+Added `src/Main_App/gui/update_dialog.py`.
 
 Use Studio's dialog behavior, adapted to Toolbox styling:
 
@@ -492,8 +533,9 @@ No silent fallback:
 ### Phase 5 - Startup And Menu Integration
 
 Goal: keep the existing entry points but route them through the richer dialog.
+Status: complete.
 
-Update `src/Main_App/gui/update_manager.py`:
+Updated `src/Main_App/gui/update_manager.py`:
 
 - Preserve `cleanup_old_executable()` until its actual need is confirmed. If it
   is removed, document why and add a regression test or packaging note.
@@ -506,12 +548,12 @@ Update `src/Main_App/gui/update_manager.py`:
 - For manual checks, open `UpdateDialog(parent=host, auto_check=True)`.
 - Keep `tool_workflows.check_for_updates(...)` as the menu-facing helper.
 
-Update tests that monkeypatch `check_for_updates_on_launch` in main-window
+Updated tests that monkeypatch `check_for_updates_on_launch` in main-window
 smoke tests only as needed. Do not broaden GUI test scope just for the updater.
 
 ### Phase 6 - Release Documentation
 
-Update agent-facing docs when implementation starts:
+Updated agent-facing docs:
 
 - `docs/agent/guides/development.md`: release build, installer asset name,
   update cache, GitHub Release requirements, and manual update smoke.
@@ -523,7 +565,8 @@ Update agent-facing docs when implementation starts:
 - `docs/agent/quality/verification-gates.md`: add updater-specific non-GUI
   checks if they become durable.
 
-Update user-facing docs only after the feature actually ships:
+User-facing docs remain intentionally deferred until a released installer proves
+the flow:
 
 - `docs/user/start/getting-started.md`
 - `docs/user/study/troubleshooting.md`
@@ -593,25 +636,17 @@ Release smoke on a clean Windows machine or VM:
 - repeat manual installer run without `/RELAUNCH=1` and confirm the normal
   postinstall launch checkbox still behaves as expected
 
-## Open Decisions Before Activation
+## Resolved Decisions
 
-- Keep existing artifact name `FPVSToolbox-<version>-setup.exe` or rename to
-  `FPVS-Toolbox-Setup-<version>.exe`. Prefer keeping the existing name for the
-  first implementation.
-- Keep Toolbox's current install root behavior or migrate toward Studio's
-  per-user `%LOCALAPPDATA%\Programs\...` default. Prefer no install-root change
-  in the first updater PR because `UsePreviousAppDir=yes` already supports
-  update-over-existing-location.
-- Keep `CloseApplications=force` or soften to `CloseApplications=yes`. Prefer
-  testing `CloseApplications=yes` after the app quits itself.
-- Keep backend code under `Main_App.updates` or keep all update code under
-  `Main_App.gui`. Prefer `Main_App.updates` to mirror Studio and keep network,
-  download, and installer launch logic testable without widgets.
-- Decide whether to add a packaged smoke CLI flag to `src/main.py`, similar to
-  Studio's packaged smoke strategy. Do not add a hidden CLI mode unless it has a
-  clear bounded command and tests.
+- Kept existing artifact name `FPVSToolbox-<version>-setup.exe`.
+- Kept Toolbox's existing install-root behavior for the first updater PR.
+- Kept backend code under `Main_App.updates` to keep release selection,
+  downloads, and installer launch testable without widgets.
+- Kept release implementation under `scripts/packaging/` rather than adding
+  root-level build wrappers.
+- Did not add a hidden packaged-smoke CLI mode in this slice.
 
-## What Future Agents Should Inspect First
+## What Agents Should Inspect First
 
 Toolbox:
 
@@ -651,9 +686,9 @@ python .agents\scripts\audit\agent_audit.py
 python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
 ```
 
-## Reporting Requirements
+## Future Reporting Requirements
 
-Future agents using this plan must report:
+Agents changing this completed updater flow must report:
 
 - The selected installer asset filename contract.
 - Whether the Inno `/RELAUNCH=1` path was added and manually smoke-tested.
@@ -666,9 +701,8 @@ Future agents using this plan must report:
 - Commands run and results.
 - Any skipped GUI/package tests and residual risk.
 
-## Manual Verification Before Activation
+## Manual Verification Notes
 
-This plan was created from read-only inspection of the current Toolbox updater,
-Toolbox packaging files, and the current FPVS Studio updater implementation.
-Recheck the listed files before activation because release scripts, installer
-asset names, and GUI component contracts may change.
+Recheck the listed files before future updater changes because release scripts,
+installer asset names, GitHub Release metadata shape, and GUI component
+contracts may change.
