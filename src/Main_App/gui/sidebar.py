@@ -29,6 +29,10 @@ SECTION_LABEL_MIN_HEIGHT = 28
 ROW_LEFT_PADDING = 6
 ROW_RIGHT_PADDING = 8
 ROW_ITEM_GAP = 7
+SELECTION_BAR_WIDTH = 3
+CENTERED_TEXT_TRAILING_SPACER_PX = (
+    ROW_LEFT_PADDING + SELECTION_BAR_WIDTH + ICON_PX + ROW_ITEM_GAP - ROW_RIGHT_PADDING
+)
 # ---------------------------------------------------------------------------
 
 DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox-Repo/"  # MkDocs site for documentation
@@ -92,7 +96,7 @@ class SidebarButton(QWidget):
 
         self.selection_bar = QFrame(self)
         self.selection_bar.setObjectName("SidebarSelectionBar")
-        self.selection_bar.setFixedWidth(3)
+        self.selection_bar.setFixedWidth(SELECTION_BAR_WIDTH)
         self.selection_bar.setFixedHeight(20)
         self.selection_bar.setProperty("active", False)
         lay.addWidget(self.selection_bar, 0, Qt.AlignVCenter)
@@ -120,6 +124,7 @@ class SidebarButton(QWidget):
         self.text_lbl.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         lay.addWidget(self.text_lbl, 0 if center_content else 1, Qt.AlignVCenter)
         if center_content:
+            lay.addSpacing(CENTERED_TEXT_TRAILING_SPACER_PX)
             lay.addStretch(1)
 
     def set_processing_locked(self, locked: bool) -> None:
