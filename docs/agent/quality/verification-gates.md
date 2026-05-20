@@ -45,6 +45,12 @@ ruff check .
 - GUI changes: do not run pytest-qt/offscreen tests locally. Use `py_compile`,
   focused `ruff`, `audit_gui_imports.py`, and `agent_audit.py --check gui`;
   document the visible/manual smoke path for behavior that requires a window.
+- Updater changes: run pure backend tests before GUI smoke checks:
+  `python -m pytest tests/updates/test_update_check.py tests/updates/test_update_download.py -q`.
+  Syntax-check `scripts/packaging/*.ps1`, py-compile
+  `src/Main_App/updates/*.py`, `src/Main_App/gui/update_dialog.py`, and
+  `src/Main_App/gui/update_manager.py`, then document manual Windows smoke for
+  `File > Check for Updates` and installer `/RELAUNCH=1`.
 - Project path or file I/O changes: add or run tests with `tmp_path`; do not depend on a developer machine path.
 - Legacy-boundary changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check protected` and confirm retired `Legacy_App` paths were not recreated; any historical behavior cleanup must preserve the processing pipeline.
 - Source Localization/eLORETA changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.

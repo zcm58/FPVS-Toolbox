@@ -1,4 +1,4 @@
-"""Check for application updates via GitHub releases (PySide6-safe, non-blocking)."""
+"""Schedule and present application updates via GitHub Releases."""
 
 from __future__ import annotations
 
@@ -10,31 +10,36 @@ from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import Any
 
-import requests
-from packaging import version
-from PySide6.QtCore import QObject, Signal, QRunnable, QThreadPool, QTimer, QUrl
-from PySide6.QtWidgets import QWidget, QMessageBox
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtWidgets import QWidget
 
-from config import FPVS_TOOLBOX_VERSION, FPVS_TOOLBOX_UPDATE_API
 from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.gui.update_dialog import UpdateDialog
+from Main_App.updates.github_releases import check_for_updates
+from Main_App.updates.models import UpdateCheckResult
 
 _LOG = logging.getLogger(__name__)
 
 _DEBOUNCE_INTERVAL = timedelta(hours=24)
-_REQUEST_TIMEOUT_S = 2.0
 
 
-# ---------- public helpers ----------
+@dataclass(frozen=True)
+class _UpdateInfo:
+    """Compatibility payload for older update-check tests and signal consumers."""
+
+    latest: str
+    url: str
+
 
 def cleanup_old_executable() -> None:
-    """Remove leftover backup EXE after an Inno update."""
+    """Remove leftover backup EXE after an Inno update, if one exists."""
+
     backup = sys.executable + ".old"
     try:
         if os.path.exists(backup):
             os.remove(backup)
-    except Exception:
-        pass
+    except OSError:
+        _LOG.warning("Could not remove old executable backup: %s", backup, exc_info=True)
 
 
 def check_for_updates_async(
@@ -43,48 +48,48 @@ def check_for_updates_async(
     notify_if_no_update: bool = True,
     force: bool = False,
 ) -> None:
-    """Menu action: check in background. Popups only if silent=False."""
+    """Check for updates without blocking the UI thread."""
+
     if not force and _should_skip_update_check():
         _log(app, "Skipping update check (checked recently).")
         return
+
+    if not silent:
+        _show_update_dialog(app, auto_check=True)
+        return
+
     job = _CheckJob()
-    job.sigs.available.connect(lambda info: _on_available(app, info, silent))
-    job.sigs.none.connect(lambda current: _on_none(app, current, silent, notify_if_no_update))
-    job.sigs.error.connect(lambda msg: _on_error(app, msg, silent))
+    job.sigs.result.connect(lambda result: _on_silent_result(app, result, notify_if_no_update))
+    job.sigs.error.connect(lambda msg: _on_silent_error(app, msg))
     QThreadPool.globalInstance().start(job)
 
 
 def check_for_updates_on_launch(app: QWidget) -> None:
-    """Startup check: never show a dialog if up-to-date or on error."""
+    """Startup check: stay silent unless an installable update is available."""
+
     if _running_under_pytest():
         _log(app, "Skipping update check during pytest.")
         return
     if _should_skip_update_check():
         _log(app, "Skipping update check (checked recently).")
         return
+
     job = _CheckJob()
-    job.sigs.available.connect(lambda info: _on_available(app, info, False))  # prompt only if update exists
-    job.sigs.none.connect(lambda current: _log(app, "No update available."))
+    job.sigs.result.connect(lambda result: _on_launch_result(app, result))
     job.sigs.error.connect(lambda msg: _log(app, f"Update check failed: {msg}"))
     QThreadPool.globalInstance().start(job)
 
 
-# ---------- worker + signals ----------
-
-@dataclass(frozen=True)
-class _UpdateInfo:
-    latest: str
-    url: str
-
-
 class _UpdateSignals(QObject):
-    available = Signal(object)  # _UpdateInfo
-    none = Signal(str)          # current version (no update)
-    error = Signal(str)         # error message
+    result = Signal(object)  # UpdateCheckResult
+    available = Signal(object)  # _UpdateInfo, retained for compatibility
+    none = Signal(str)  # current version, retained for compatibility
+    error = Signal(str)
 
 
 class _CheckJob(QRunnable):
-    """QRunnable that hits the GitHub releases API and compares versions."""
+    """QRunnable that queries GitHub Releases and compares versions."""
+
     def __init__(self) -> None:
         super().__init__()
         self.setAutoDelete(True)
@@ -94,34 +99,31 @@ class _CheckJob(QRunnable):
         start = perf_counter()
         try:
             _LOG.info("Checking for updates...")
-            resp = requests.get(FPVS_TOOLBOX_UPDATE_API, timeout=_REQUEST_TIMEOUT_S)
-            resp.raise_for_status()
-            data = resp.json()
-            latest = str(data.get("tag_name") or "").strip()
-            url = str(data.get("html_url") or "").strip()
-            if not latest:
-                raise ValueError("Missing tag_name in release response.")
-            _record_successful_check()
-            if _is_newer(latest, f"v{FPVS_TOOLBOX_VERSION}"):
-                _safe_emit(self.sigs.available, _UpdateInfo(latest=latest, url=url))
+            result = _check_for_updates_and_record()
+            _safe_emit(self.sigs.result, result)
+            if result.update_available:
+                _safe_emit(
+                    self.sigs.available,
+                    _UpdateInfo(latest=result.latest_version, url=result.release_url or ""),
+                )
             else:
-                _safe_emit(self.sigs.none, FPVS_TOOLBOX_VERSION)
-        except Exception as e:
+                _safe_emit(self.sigs.none, result.current_version)
+        except Exception as exc:
             elapsed = int((perf_counter() - start) * 1000)
             _LOG.warning(
                 "Update check failed",
                 extra={
                     "op": "update_check",
-                    "path": FPVS_TOOLBOX_UPDATE_API,
                     "elapsed_ms": elapsed,
-                    "exc": repr(e),
+                    "exc": repr(exc),
                 },
             )
-            _safe_emit(self.sigs.error, str(e))
+            _safe_emit(self.sigs.error, str(exc))
 
 
 def _safe_emit(signal: Any, *args: object) -> bool:
     """Emit a Qt signal unless its QObject has already been deleted."""
+
     try:
         signal.emit(*args)
         return True
@@ -132,56 +134,78 @@ def _safe_emit(signal: Any, *args: object) -> bool:
         raise
 
 
-# ---------- UI-thread handlers ----------
+def _check_for_updates_and_record() -> UpdateCheckResult:
+    result = check_for_updates()
+    _record_successful_check()
+    return result
+
+
+def _show_update_dialog(
+    parent: QWidget,
+    *,
+    auto_check: bool,
+    initial_result: UpdateCheckResult | None = None,
+) -> UpdateDialog:
+    existing = getattr(parent, "_update_dialog", None)
+    if isinstance(existing, UpdateDialog) and existing.isVisible():
+        existing.raise_()
+        existing.activateWindow()
+        return existing
+
+    dialog = UpdateDialog(
+        parent=parent,
+        auto_check=auto_check,
+        check_callback=_check_for_updates_and_record,
+        initial_result=initial_result,
+    )
+    setattr(parent, "_update_dialog", dialog)
+    dialog.finished.connect(lambda _code: _clear_update_dialog(parent, dialog))
+    dialog.open()
+    dialog.raise_()
+    dialog.activateWindow()
+    return dialog
+
+
+def _clear_update_dialog(parent: QWidget, dialog: UpdateDialog) -> None:
+    if getattr(parent, "_update_dialog", None) is dialog:
+        setattr(parent, "_update_dialog", None)
+
+
+def _on_launch_result(parent: QWidget, result: UpdateCheckResult) -> None:
+    if result.update_available and result.installer_asset is not None:
+        _log(parent, f"Update {result.latest_version} available.")
+        _show_update_dialog(parent, auto_check=False, initial_result=result)
+    elif result.update_available:
+        _log(parent, f"Update {result.latest_version} metadata is incomplete; installer asset missing.")
+    else:
+        _log(parent, "No update available.")
+
+
+def _on_silent_result(
+    parent: QWidget,
+    result: UpdateCheckResult,
+    notify_if_no_update: bool,
+) -> None:
+    if result.update_available:
+        suffix = "" if result.installer_asset is not None else " but installer metadata is incomplete"
+        _log(parent, f"Update {result.latest_version} available{suffix}.")
+        return
+    if notify_if_no_update:
+        _log(parent, "No update available.")
+
+
+def _on_silent_error(parent: QWidget, msg: str) -> None:
+    _log(parent, f"Update check failed: {msg}")
+
 
 def _log(app: object, msg: str) -> None:
     if hasattr(app, "log"):
         try:
             app.log(msg)  # type: ignore[attr-defined]
             return
-        except Exception:
-            pass
+        except (AttributeError, RuntimeError, TypeError):
+            _LOG.debug("Could not write update message to app log.", exc_info=True)
     _LOG.info(msg)
-
-
-def _on_available(parent: QWidget, info: _UpdateInfo, silent: bool) -> None:
-    _log(parent, f"Update {info.latest} available at {info.url}")
-    if silent:
-        return
-    QTimer.singleShot(0, lambda: _prompt_open_release(parent, info))
-
-
-def _on_none(parent: QWidget, current: str, silent: bool, notify_if_no_update: bool) -> None:
-    _log(parent, "No update available.")
-    if not silent and notify_if_no_update:
-        QTimer.singleShot(0, lambda: QMessageBox.information(
-            parent, "Up to Date", f"You are running the latest version (v{current})."
-        ))
-
-
-def _on_error(parent: QWidget, msg: str, silent: bool) -> None:
-    _log(parent, f"Update check failed: {msg}")
-    if not silent:
-        QTimer.singleShot(0, lambda: QMessageBox.warning(
-            parent, "Update Error", f"Could not check for updates.\n\n{msg}"
-        ))
-
-
-def _prompt_open_release(parent: QWidget, info: _UpdateInfo) -> None:
-    m = QMessageBox.question(
-        parent,
-        "Update Available",
-        f"A newer version of the FPVS Toolbox ({info.latest}) is available.\n\nOpen the release page?",
-        QMessageBox.Yes | QMessageBox.No,
-    )
-    if m == QMessageBox.Yes and info.url:
-        QDesktopServices.openUrl(QUrl(info.url))
-
-# ---------- util ----------
-
-def _is_newer(latest: str, current: str) -> bool:
-    """Return True if latest > current, tolerant of a leading 'v'."""
-    return version.parse(latest.lstrip("v")) > version.parse(current.lstrip("v"))
 
 
 def _last_checked_utc() -> datetime | None:

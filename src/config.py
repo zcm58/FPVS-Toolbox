@@ -17,7 +17,7 @@ import numpy as np
 # — Version & repo —
 FPVS_TOOLBOX_VERSION: str = "1.7.0"
 FPVS_TOOLBOX_UPDATE_API: str = (
-    "https://api.github.com/repos/zcm58/FPVS-Toolbox-Repo/releases/latest"
+    "https://api.github.com/repos/zcm58/FPVS-Toolbox-Repo/releases"
 )
 FPVS_TOOLBOX_REPO_PAGE: str = "https://github.com/zcm58/FPVS-Toolbox-Repo/releases"
 

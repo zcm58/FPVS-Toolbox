@@ -54,8 +54,45 @@ Releases provide an Inno Setup installer. Running the installer creates a
 folder containing `FPVS_Toolbox.exe`, required DLLs, and configuration files.
 Release packaging definitions live in `scripts/packaging/`.
 
-Build scripts should locate the repository root automatically before running
-PyInstaller so they work even if launched from another directory.
+The supported maintainer workflow is script-driven. Do not open the Inno Setup
+GUI for normal releases.
+
+```powershell
+.\scripts\packaging\build_release.ps1 -SkipInstall -SkipSmoke
+```
+
+Use `-SkipInstall` only when `.\.venv1` already has `requirements.txt`
+installed. Omit it when building from a fresh environment. Use
+`-InnoCompiler "C:\Path\To\ISCC.exe"` when `ISCC.exe` is not on PATH or in a
+standard Inno Setup 6 location.
+
+The release entrypoint calls:
+
+- `scripts/packaging/build_exe.ps1`: builds `dist\FPVS_Toolbox\FPVS_Toolbox.exe`
+  with PyInstaller.
+- `scripts/packaging/build_installer.ps1`: compiles
+  `installers\FPVSToolbox-<version>-setup.exe` with `ISCC.exe`.
+
+Build scripts locate the repository root automatically before running
+PyInstaller/Inno so they work even if launched from PyCharm or another working
+directory. The Inno script receives the app version from `FPVS_TOOLBOX_VERSION`
+through `/DAppVersion=<version>`.
+
+The updater expects the GitHub Release asset name:
+
+```text
+FPVSToolbox-<version>-setup.exe
+```
+
+After uploading a release, manually smoke the installer update path on Windows:
+
+```powershell
+& "installers\FPVSToolbox-<version>-setup.exe" /RELAUNCH=1
+```
+
+Confirm the installer replaces app files, relaunches `FPVS_Toolbox.exe`, and
+leaves projects, settings, logs, and generated outputs outside the installer
+replacement scope.
 
 ## Configuration
 
@@ -67,8 +104,15 @@ tool modules.
 The update check is controlled by:
 
 - `FPVS_TOOLBOX_VERSION`: current running version.
-- `FPVS_TOOLBOX_UPDATE_API`: URL queried for the latest release.
-- `FPVS_TOOLBOX_REPO_PAGE`: repository or release page opened for updates.
+- `FPVS_TOOLBOX_UPDATE_API`: full GitHub Releases API URL queried by
+  `Main_App.updates.github_releases`.
+- `FPVS_TOOLBOX_REPO_PAGE`: repository release page used for user-facing release
+  note links.
+
+Installer downloads are cached under
+`%LOCALAPPDATA%\FPVS Toolbox\updates` when `LOCALAPPDATA` is available, or the
+system temp directory otherwise. The cache must stay outside the install
+folder, project root, and repository source tree.
 
 ## Debug Logging
 

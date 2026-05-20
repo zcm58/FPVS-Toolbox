@@ -1,6 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files
 from PyInstaller.utils.hooks import collect_all
+
+REPO_ROOT = Path(SPECPATH).parents[1]
+SRC_ROOT = REPO_ROOT / 'src'
+MAIN_SCRIPT = SRC_ROOT / 'main.py'
+APP_ICON = REPO_ROOT / 'assets' / 'ToolBox_Icon.ico'
 
 datas = []
 binaries = []
@@ -11,8 +18,8 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['src\\main.py'],
-    pathex=['src'],
+    [str(MAIN_SCRIPT)],
+    pathex=[str(SRC_ROOT)],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
@@ -41,7 +48,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['assets\\ToolBox_Icon.ico'],
+    icon=[str(APP_ICON)],
 )
 coll = COLLECT(
     exe,

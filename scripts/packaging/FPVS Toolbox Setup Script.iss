@@ -4,7 +4,10 @@
 ;   Every time the user downloads a new version of the app, it will automatically overwrite the old files but will NOT change the user's settings. 
 
 #define MyAppName "FPVS Toolbox"
-#define MyAppVersion "1.7.0
+#ifndef AppVersion
+#define AppVersion "1.7.0"
+#endif
+#define MyAppVersion AppVersion
 #define MyAppPublisher "Zack Murphy"
 #define MyAppExeName "FPVS_Toolbox.exe"
 
@@ -17,18 +20,19 @@ VersionInfoVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL=https://github.com/zcm58/FPVS-Toolbox-Repo
 AppMutex=FPVS_Toolbox_Install_Mutex
+SourceDir=..\..
 
 ; Install scope & UX
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 UsePreviousAppDir=yes
 AllowNoIcons=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-CloseApplications=force
+CloseApplications=yes
 RestartApplications=no
 DisableWelcomePage=no
 DisableDirPage=yes
@@ -63,7 +67,14 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName,'&','&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName,'&','&&')}}"; Flags: nowait postinstall skipifsilent; Check: not RelaunchRequested
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifsilent; Check: RelaunchRequested
+
+[Code]
+function RelaunchRequested: Boolean;
+begin
+  Result := Pos('/RELAUNCH=1', Uppercase(GetCmdTail)) > 0;
+end;
 
 [UninstallDelete]
 ; If your app stores user data under LocalAppData, clean it on uninstall:

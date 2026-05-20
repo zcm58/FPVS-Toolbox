@@ -34,9 +34,19 @@ Primary paths:
   help/about, and auxiliary-window actions used by `MainWindow` compatibility
   wrappers. Settings editing lives in `settings_panel.py` and is routed through
   the main workspace stack by `MainWindow`.
+- `src/Main_App/gui/update_dialog.py`: user-facing update check, release-note
+  preview, installer download progress, final install confirmation, and
+  install busy guard.
+- `src/Main_App/gui/update_manager.py`: compatibility facade for startup/manual
+  update checks. It preserves debounce and pytest startup skip while delegating
+  update metadata, download, and install work to `Main_App.updates` and
+  `update_dialog.py`.
 - `src/Main_App/gui/shell_status.py`: launch reveal, status bar, busy
   indicator, GUI log routing, and processing-start notice helpers used by
   `MainWindow` compatibility wrappers.
+- `src/Main_App/updates/`: non-GUI updater backend. It owns GitHub Release
+  selection, typed update contracts, installer downloads, and installer launch.
+  This package must not import Qt widgets or create windows.
 - `src/Tools/*/`: tool-specific PySide6 windows and launchers.
 
 The main app shell uses the outer `MainWindow.stacked` widget for landing vs
@@ -163,6 +173,18 @@ The main app shell is the visual source of truth. Shared component defaults shou
 Shell-specific implementations live under `src/Main_App/gui/`, including the main window assembly, event-map row behavior, header bar, sidebar, menus, navigation icons, style tokens, and update manager. Project workflow orchestration is split into `Main_App.gui.project_workflows`, processing input orchestration is split into `Main_App.gui.processing_inputs`, processing run orchestration is split into `Main_App.gui.processing_workflows`, post-export completion handling is split into `Main_App.gui.post_export_workflows`, tool/menu action orchestration is split into `Main_App.gui.tool_workflows`, and shell/status feedback is split into `Main_App.gui.shell_status`, while `MainWindow` keeps public wrapper methods for actions and tests.
 
 General GUI utilities should live under `Main_App.gui` when they coordinate UI-facing behavior. Non-GUI resource/path helpers should live under `Main_App.Shared`.
+
+Updater boundary:
+
+- `Main_App.gui.update_manager` schedules startup checks and opens the update
+  dialog for manual checks or installable startup updates.
+- `Main_App.gui.update_dialog` owns the visible dialog, progress bar, final
+  confirmation, and busy-processing install guard.
+- `Main_App.updates.github_releases`, `downloader`, and `installer` own
+  network metadata, installer cache writes, and subprocess installer launch.
+- A failed check, missing asset, ambiguous asset, download failure, or launch
+  failure must surface as an error/no-install state. Do not silently open the
+  GitHub release page as a fallback update path.
 
 Widgets must not own backend processing, file export behavior, project mutation, or dialog orchestration. Keep those responsibilities in GUI controllers, backend modules, workers, or tool-specific code.
 

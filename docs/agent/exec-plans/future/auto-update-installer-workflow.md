@@ -2,7 +2,7 @@
 
 ## Status
 
-Future plan. This work has not started.
+Implemented in the Toolbox updater/release workflow.
 
 ## Target
 
@@ -20,6 +20,12 @@ installed FPVS Toolbox
   -> installer replaces app files
   -> installer relaunches FPVS Toolbox
 ```
+
+The same effort must also add a Studio-style script-driven release workflow:
+one PowerShell entrypoint should build the PyInstaller executable bundle and
+then compile the Inno installer, suitable for running from PyCharm as an
+external tool. Maintainers should not need to open the Inno Setup GUI to create
+an `.exe` bundle or installer.
 
 ## Scanned Baseline
 
@@ -51,6 +57,8 @@ FPVS Studio files inspected as the reference implementation:
 - `tests/unit/test_update_download.py`
 - `tests/gui/test_update_dialog.py`
 - `packaging/inno/fpvs_studio.iss`
+- `scripts/build_exe.ps1`
+- `scripts/build_installer.ps1`
 - `scripts/build_release.ps1`
 - `docs/PACKAGING.md`
 - `docs/exec-plans/planned/patch-update-workflow.md`
@@ -98,6 +106,16 @@ FPVS Studio separates update work into a non-GUI backend and a GUI dialog:
 - `fpvs_studio.gui.update_dialog.UpdateDialog` checks, downloads, shows progress,
   enables `Install and Restart` only after a successful download, asks for final
   confirmation, launches the installer, then quits the app.
+- `scripts/build_release.ps1` is the one-command release entrypoint. It calls
+  `scripts/build_exe.ps1` and then `scripts/build_installer.ps1`.
+- `scripts/build_exe.ps1` verifies the packaging Python environment, refreshes
+  editable packaging dependencies unless `-SkipInstall` is passed, removes stale
+  PyInstaller outputs inside the repo, runs PyInstaller from the `.spec`, and
+  verifies bundled package metadata.
+- `scripts/build_installer.ps1` resolves `ISCC.exe` from `-InnoCompiler`,
+  `ISCC_EXE`, PATH, or common install locations, validates the existing bundle,
+  optionally runs a packaged-app smoke check, and invokes `ISCC.exe` with
+  command-line defines and output options. It does not open the Inno Setup GUI.
 - Startup update checks are silent unless an eligible update with an installer
   asset is available. Manual checks show no-update and error states.
 - `packaging/inno/fpvs_studio.iss` handles `/RELAUNCH=1` through a `[Code]`
@@ -118,6 +136,12 @@ FPVS Studio separates update work into a non-GUI backend and a GUI dialog:
   install folder, project folders, or repo source tree.
 - `Install and Restart` asks for final confirmation, launches the installer with
   `/RELAUNCH=1`, and exits FPVS Toolbox.
+- A maintainer can run one PowerShell script from PyCharm to build the
+  PyInstaller bundle and Inno installer.
+- The release scripts fail fast on missing Python, PyInstaller, Inno Setup,
+  bundle outputs, smoke-check failures, or missing installer outputs.
+- The Inno installer is compiled by script through `ISCC.exe`; the workflow does
+  not require manually opening or operating the Inno Setup application.
 - The Inno installer relaunches `FPVS_Toolbox.exe` only for updater-driven
   installs; normal first-time installs keep the current postinstall launch UX.
 - Processing, post-processing, statistics, plotting, and other long-running
@@ -218,8 +242,9 @@ reason. Multiple accepted patterns make release mistakes harder to catch.
 
 ### Phase 1 - Packaging Baseline
 
-Goal: make the installer support updater-driven relaunch before the GUI depends
-on it.
+Goal: create a Studio-style release workflow that builds the executable bundle
+and installer from PowerShell, then make the installer support updater-driven
+relaunch before the GUI depends on it.
 
 Tasks:
 
@@ -227,6 +252,33 @@ Tasks:
 - Stop hard-coding the version in two places. Prefer passing
   `FPVS_TOOLBOX_VERSION` into Inno from a build script, similar to Studio's
   `/DAppVersion=...` pattern.
+- Add `scripts/packaging/build_exe.ps1`.
+  - Resolve the Python executable from `.venv1\Scripts\python.exe`, then fall
+    back to `python` only if the project venv is unavailable.
+  - Optionally refresh packaging dependencies unless `-SkipInstall` is passed.
+  - Remove stale PyInstaller outputs only inside the repo after resolving paths.
+  - Run PyInstaller with `scripts/packaging/FPVS_Toolbox.spec`.
+  - Verify `dist\FPVS Toolbox\FPVS_Toolbox.exe` or the exact bundle path
+    produced by the spec exists.
+  - Fail fast on version drift between `src/config.py`, bundled metadata when
+    available, and the installer version passed forward.
+- Add `scripts/packaging/build_installer.ps1`.
+  - Accept `-InnoCompiler` and `-SkipSmoke`.
+  - Resolve `ISCC.exe` from `-InnoCompiler`, `ISCC_EXE`, PATH, and common Inno
+    Setup install locations.
+  - Validate the PyInstaller bundle exists before compiling the installer.
+  - Optionally run a packaged-app smoke check before compiling.
+  - Invoke `ISCC.exe` directly with command-line options such as
+    `/DAppVersion=<version>`, `/O<output-dir>`, and `/F<installer-base-name>`.
+  - Verify the expected installer file exists after compilation.
+- Add `scripts/packaging/build_release.ps1`.
+  - This is the single PyCharm-friendly entrypoint.
+  - It calls `build_exe.ps1` and then `build_installer.ps1`.
+  - It accepts pass-through options for `-SkipInstall`, `-InnoCompiler`, and
+    installer smoke behavior.
+  - It prints the final installer path for GitHub Release upload.
+- Do not require maintainers to open the Inno Setup GUI. The only supported
+  release path for this plan is the PowerShell script calling `ISCC.exe`.
 - Add `/RELAUNCH=1` handling to the Inno script:
 
 ```pascal
@@ -248,11 +300,7 @@ end;
   location.
 - Preserve the current installed executable name `FPVS_Toolbox.exe` unless a
   separate packaging rename is explicitly requested.
-- Add or update packaging scripts so the release workflow can build the
-  PyInstaller bundle, build the Inno installer, and prove the expected installer
-  filename exists.
-
-Suggested script shape:
+- Required script shape:
 
 ```text
 scripts/packaging/build_exe.ps1
@@ -260,8 +308,9 @@ scripts/packaging/build_installer.ps1
 scripts/packaging/build_release.ps1
 ```
 
-Keep the scripts under `scripts/packaging/` unless maintainers intentionally
-choose root-level `scripts/build_release.ps1` parity with Studio.
+Keep the scripts under `scripts/packaging/` for Toolbox. If maintainers later
+want root-level `scripts/build_release.ps1` parity with Studio, add a thin
+forwarding wrapper rather than moving the implementation.
 
 Verification for this phase:
 
@@ -269,12 +318,14 @@ Verification for this phase:
 .\.venv1\Scripts\Activate.ps1
 python -m py_compile src\config.py src\main.py
 python .agents\scripts\audit\agent_audit.py
+.\scripts\packaging\build_exe.ps1 -SkipInstall
+.\scripts\packaging\build_installer.ps1 -SkipSmoke
 ```
 
 Manual release smoke on Windows:
 
 ```powershell
-.\scripts\packaging\build_release.ps1
+.\scripts\packaging\build_release.ps1 -SkipInstall
 & "installers\FPVSToolbox-<version>-setup.exe" /RELAUNCH=1
 ```
 

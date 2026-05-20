@@ -20,6 +20,10 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 - `src/Main_App/processing/`: canonical package for active EEG preprocessing and processing entry-point ownership. `preprocess.py` owns the active preprocessing implementation, `processing.py` owns the stable no-op `process_data` coordinator, and `processing_controller.py` owns raw-file discovery, batch-file preparation, and the compatibility processing route.
 - `src/Main_App/io/`: canonical import surface for active BDF loading. It delegates to the existing shared loader implementation during the package-layout migration.
 - `src/Main_App/projects/`: canonical owner for project model, project manager workflows, project metadata scanning, projects-root helpers, and preprocessing settings normalization.
+- `src/Main_App/updates/`: canonical non-GUI updater backend for typed release
+  contracts, GitHub Releases selection, installer downloads, and installer
+  launch. GUI scheduling and presentation remain in `src/Main_App/gui/update_manager.py`
+  and `src/Main_App/gui/update_dialog.py`.
 - `src/Main_App/workers/`: canonical package for Qt workers, process runner wrappers, and multiprocessing environment helpers.
 - `src/Main_App/diagnostics/`: canonical owner for runtime toolbox diagnostics such as preprocessing audit summaries and event-time lock reports. It observes/reports app state and must not own repo-evaluation checks.
 - `src/Main_App/Shared/`: shared current-app settings, user-message helpers, BDF loader, processing mixin, FFT crop helpers, and post-processing export behavior.

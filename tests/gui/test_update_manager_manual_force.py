@@ -3,45 +3,37 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from PySide6.QtCore import QThreadPool
-from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
-from config import FPVS_TOOLBOX_VERSION
 from Main_App.gui import update_manager
 
 
-def test_manual_force_bypasses_debounce(monkeypatch, qtbot) -> None:
+def test_manual_force_bypasses_debounce_and_opens_dialog(monkeypatch, qtbot) -> None:
     QApplication.instance() or QApplication([])
     parent = QWidget()
     qtbot.addWidget(parent)
 
     monkeypatch.setattr(update_manager, "_should_skip_update_check", lambda: True)
+    captured: dict[str, object] = {}
 
-    class DummyResponse:
-        def raise_for_status(self) -> None:
-            return None
+    class DummyDialog:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+            self.finished = SimpleNamespace(connect=lambda callback: captured.setdefault("finished", callback))
 
-        def json(self) -> dict[str, str]:
-            return {
-                "tag_name": f"v{FPVS_TOOLBOX_VERSION}",
-                "html_url": "https://example.test/release",
-            }
+        def open(self) -> None:
+            captured["opened"] = True
 
-    monkeypatch.setattr(update_manager.requests, "get", lambda *_args, **_kwargs: DummyResponse())
+        def raise_(self) -> None:
+            captured["raised"] = True
 
-    captured: dict[str, str] = {}
+        def activateWindow(self) -> None:
+            captured["activated"] = True
 
-    def fake_information(_parent, title: str, text: str) -> int:
-        captured["title"] = title
-        captured["text"] = text
-        return QMessageBox.Ok
+        def isVisible(self) -> bool:
+            return True
 
-    monkeypatch.setattr(update_manager.QMessageBox, "information", fake_information)
-
-    class DummyPool:
-        def start(self, job) -> None:  # noqa: ANN001
-            job.run()
-
-    monkeypatch.setattr(QThreadPool, "globalInstance", lambda: DummyPool())
+    monkeypatch.setattr(update_manager, "UpdateDialog", DummyDialog)
 
     update_manager.check_for_updates_async(
         parent,
@@ -50,9 +42,11 @@ def test_manual_force_bypasses_debounce(monkeypatch, qtbot) -> None:
         force=True,
     )
 
-    qtbot.waitUntil(lambda: "title" in captured, timeout=1000)
-    assert captured["title"] == "Up to Date"
-    assert f"v{FPVS_TOOLBOX_VERSION}" in captured["text"]
+    assert captured["opened"] is True
+    assert captured["raised"] is True
+    assert captured["activated"] is True
+    assert captured["kwargs"]["parent"] is parent
+    assert captured["kwargs"]["auto_check"] is True
 
 
 def test_update_check_ignores_deleted_signal_source(monkeypatch) -> None:
@@ -60,11 +54,11 @@ def test_update_check_ignores_deleted_signal_source(monkeypatch) -> None:
         def emit(self, *_args):
             raise RuntimeError("Signal source has been deleted")
 
-    class BrokenResponse:
-        def raise_for_status(self) -> None:
-            raise RuntimeError("network unavailable")
-
-    monkeypatch.setattr(update_manager.requests, "get", lambda *_args, **_kwargs: BrokenResponse())
+    monkeypatch.setattr(
+        update_manager,
+        "check_for_updates",
+        lambda: (_ for _ in ()).throw(RuntimeError("network unavailable")),
+    )
 
     job = update_manager._CheckJob()
     job.sigs = SimpleNamespace(error=BrokenSignal())
