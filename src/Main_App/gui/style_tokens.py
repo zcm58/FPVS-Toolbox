@@ -293,10 +293,15 @@ def build_main_page_stylesheet() -> str:
             background: #E8EDF3;
         }}
 
-        #processing_activity_panel {{
+        #processing_activity_header {{
             background: {SURFACE_BG};
             border: 1px solid {BORDER_COLOR};
             border-radius: {CORNER_RADIUS}px;
+        }}
+
+        #processing_status_card,
+        #processing_files_card {{
+            background: {SURFACE_BG};
         }}
 
         #processing_title {{
@@ -311,6 +316,24 @@ def build_main_page_stylesheet() -> str:
 
         #processing_progress_bar {{
             min-height: 38px;
+        }}
+
+        #processing_files_table {{
+            background: {SURFACE_BG};
+            alternate-background-color: {SURFACE_ALT_BG};
+            border: 1px solid {BORDER_SOFT_COLOR};
+            border-radius: 8px;
+            gridline-color: {BORDER_SOFT_COLOR};
+            color: {TEXT_PRIMARY};
+        }}
+
+        #processing_files_table QHeaderView::section {{
+            background: {SURFACE_ALT_BG};
+            border: none;
+            border-bottom: 1px solid {BORDER_SOFT_COLOR};
+            color: {TEXT_SECONDARY};
+            font-weight: {css_font_weight("subsection_header")};
+            padding: 7px 10px;
         }}
 
         #event_map_header QLabel {{
@@ -430,6 +453,20 @@ def build_sidebar_stylesheet() -> str:
 
         #SidebarButton[selected="true"] QLabel {{
             color: white;
+        }}
+
+        #SidebarButton[processingLocked="true"] QLabel,
+        #SidebarButton[processingLocked="true"] QLabel:disabled {{
+            color: rgba(255, 255, 255, 0.38);
+        }}
+
+        #SidebarButton[processingLocked="true"] {{
+            background-color: transparent;
+            border-color: transparent;
+        }}
+
+        #SidebarButton[processingLocked="true"][selected="true"] {{
+            background-color: rgba(38, 50, 61, 0.65);
         }}
 
         #SidebarSelectionBar {{

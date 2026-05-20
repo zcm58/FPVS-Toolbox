@@ -32,6 +32,7 @@ class MpRunnerBridge(QObject):
     """Bridge between the Qt GUI and the multiprocessing-based project runner."""
 
     progress = Signal(int)
+    file_status = Signal(dict)
     error = Signal(str)
     finished = Signal(dict)
 
@@ -198,12 +199,11 @@ class MpRunnerBridge(QObject):
                         self._total,
                         pct,
                     )
-                    self.progress.emit(pct)
-
                     result = msg.get("result")
                     if isinstance(result, dict):
                         status = result.get("status")
                         if status == "error":
+                            self.file_status.emit(result)
                             raw_error = str(result.get("error") or "Unknown error")
                             stage = str(result.get("stage") or "unknown")
                             file_str = str(result.get("file") or "unknown")
@@ -223,6 +223,7 @@ class MpRunnerBridge(QObject):
                             self.error.emit(message)
                         elif status == "ok":
                             self._results.append(result)
+                            self.file_status.emit(result)
                             logger.debug(
                                 "MpRunnerBridge recorded successful result for file=%r "
                                 "(total_results=%d)",
@@ -236,6 +237,8 @@ class MpRunnerBridge(QObject):
                                 status,
                                 result.get("file"),
                             )
+
+                    self.progress.emit(pct)
 
                 elif mtype == "done":
                     cancelled = bool(msg.get("cancelled", False))

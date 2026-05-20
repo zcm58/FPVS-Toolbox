@@ -5,8 +5,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QFrame,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -16,6 +18,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedWidget,
+    QTableWidget,
     QTextEdit,
     QToolBar,
     QVBoxLayout,
@@ -412,42 +415,76 @@ def init_ui(self) -> None:
     self.processing_page = processing_page
 
     processing_layout = QVBoxLayout(processing_page)
-    processing_layout.setContentsMargins(32, 32, 32, 32)
-    processing_layout.setSpacing(0)
-    processing_layout.addStretch(1)
+    processing_layout.setContentsMargins(0, 0, 0, 0)
+    processing_layout.setSpacing(SECTION_GAP)
 
-    processing_panel = QWidget(processing_page)
-    processing_panel.setObjectName("processing_activity_panel")
-    processing_panel.setAttribute(Qt.WA_StyledBackground, True)
-    processing_panel.setMaximumWidth(760)
-    processing_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    processing_header = QWidget(processing_page)
+    processing_header.setObjectName("processing_activity_header")
+    processing_header.setAttribute(Qt.WA_StyledBackground, True)
+    processing_header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    processing_panel_layout = QVBoxLayout(processing_panel)
-    processing_panel_layout.setContentsMargins(42, 38, 42, 38)
-    processing_panel_layout.setSpacing(20)
+    processing_header_layout = QHBoxLayout(processing_header)
+    processing_header_layout.setContentsMargins(24, 22, 24, 22)
+    processing_header_layout.setSpacing(20)
 
-    self.processing_spinner = BusySpinner(processing_panel, diameter=64)
+    self.processing_spinner = BusySpinner(processing_header, diameter=54)
     self.processing_spinner.setObjectName("processing_spinner")
-    processing_panel_layout.addWidget(self.processing_spinner, 0, Qt.AlignCenter)
+    processing_header_layout.addWidget(self.processing_spinner, 0, Qt.AlignVCenter)
 
-    processing_title = QLabel("Processing Data", processing_panel)
+    processing_intro = QWidget(processing_header)
+    processing_intro_layout = QVBoxLayout(processing_intro)
+    processing_intro_layout.setContentsMargins(0, 0, 0, 0)
+    processing_intro_layout.setSpacing(8)
+
+    processing_title = QLabel("Processing Data", processing_intro)
     processing_title.setObjectName("processing_title")
     apply_font_role(processing_title, "project_title")
-    processing_title.setAlignment(Qt.AlignCenter)
-    processing_panel_layout.addWidget(processing_title)
+    processing_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    processing_intro_layout.addWidget(processing_title)
 
     processing_message = QLabel(
         "Data processing has begun. Please be patient; your device may become "
         "temporarily slow or unresponsive during processing.",
-        processing_panel,
+        processing_intro,
     )
     processing_message.setObjectName("processing_message")
     apply_font_role(processing_message, "body")
-    processing_message.setAlignment(Qt.AlignCenter)
+    processing_message.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
     processing_message.setWordWrap(True)
-    processing_panel_layout.addWidget(processing_message)
+    processing_intro_layout.addWidget(processing_message)
 
-    self.progress_bar = QProgressBar(processing_panel)
+    processing_header_layout.addWidget(processing_intro, 1)
+
+    self.processing_action_slot = QWidget(processing_header)
+    self.processing_action_slot.setObjectName("processing_action_slot")
+    self.processing_action_layout = QHBoxLayout(self.processing_action_slot)
+    self.processing_action_layout.setContentsMargins(0, 0, 0, 0)
+    self.processing_action_layout.setSpacing(0)
+    processing_header_layout.addWidget(self.processing_action_slot, 0, Qt.AlignVCenter)
+    processing_layout.addWidget(processing_header)
+
+    processing_status_card = SectionCard(
+        "Run Progress",
+        processing_page,
+        object_name="processing_status_card",
+    )
+    processing_status_layout = processing_status_card.content_layout
+    processing_status_layout.setSpacing(12)
+
+    self.processing_summary_label = QLabel("Waiting for files...", processing_status_card)
+    self.processing_summary_label.setObjectName("processing_summary_label")
+    apply_font_role(self.processing_summary_label, "caption")
+    processing_status_layout.addWidget(self.processing_summary_label)
+
+    self.processing_current_file_label = QLabel(
+        "Latest file: Not started",
+        processing_status_card,
+    )
+    self.processing_current_file_label.setObjectName("processing_current_file_label")
+    self.processing_current_file_label.setWordWrap(True)
+    processing_status_layout.addWidget(self.processing_current_file_label)
+
+    self.progress_bar = QProgressBar(processing_status_card)
     self.progress_bar.setObjectName("processing_progress_bar")
     self.progress_bar.setRange(0, 100)
     self.progress_bar.setValue(0)
@@ -455,17 +492,35 @@ def init_ui(self) -> None:
     self.progress_bar.setFormat("%p%")
     self.progress_bar.setAlignment(Qt.AlignCenter)
     self.progress_bar.setFixedHeight(btn_h)
-    processing_panel_layout.addWidget(self.progress_bar)
+    processing_status_layout.addWidget(self.progress_bar)
+    processing_layout.addWidget(processing_status_card)
 
-    self.processing_action_slot = QWidget(processing_panel)
-    self.processing_action_slot.setObjectName("processing_action_slot")
-    self.processing_action_layout = QHBoxLayout(self.processing_action_slot)
-    self.processing_action_layout.setContentsMargins(0, 4, 0, 0)
-    self.processing_action_layout.setSpacing(0)
-    processing_panel_layout.addWidget(self.processing_action_slot)
+    processing_files_card = SectionCard(
+        "File Completion",
+        processing_page,
+        object_name="processing_files_card",
+    )
+    processing_files_layout = processing_files_card.content_layout
 
-    processing_layout.addWidget(processing_panel, 0, Qt.AlignCenter)
-    processing_layout.addStretch(1)
+    self.processing_files_table = QTableWidget(0, 2, processing_files_card)
+    self.processing_files_table.setObjectName("processing_files_table")
+    self.processing_files_table.setHorizontalHeaderLabels(["Status", "File"])
+    self.processing_files_table.verticalHeader().hide()
+    self.processing_files_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    self.processing_files_table.setSelectionMode(QAbstractItemView.NoSelection)
+    self.processing_files_table.setFocusPolicy(Qt.NoFocus)
+    self.processing_files_table.setAlternatingRowColors(True)
+    self.processing_files_table.horizontalHeader().setStretchLastSection(True)
+    self.processing_files_table.horizontalHeader().setSectionResizeMode(
+        0,
+        QHeaderView.ResizeToContents,
+    )
+    self.processing_files_table.horizontalHeader().setSectionResizeMode(
+        1,
+        QHeaderView.Stretch,
+    )
+    processing_files_layout.addWidget(self.processing_files_table, 1)
+    processing_layout.addWidget(processing_files_card, 1)
     self.workspace_stack.addWidget(processing_page)
 
     self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")

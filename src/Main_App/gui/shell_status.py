@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
+    QTableWidgetItem,
     QToolBar,
     QWidget,
 )
@@ -94,6 +96,118 @@ def show_processing_started_notice(host: Any) -> None:
             host._processing_notice = None
 
 
+def _processing_file_label(file_path: Any) -> str:
+    try:
+        return Path(file_path).name
+    except TypeError:
+        return str(file_path)
+
+
+def _processing_file_keys(file_path: Any) -> tuple[str, str]:
+    raw = str(file_path)
+    return raw, _processing_file_label(file_path)
+
+
+def _set_processing_summary(host: Any, pct: int | None = None) -> None:
+    total = int(getattr(host, "_processing_file_total", 0) or 0)
+    completed = len(getattr(host, "_processing_completed_file_keys", set()))
+    pct_text = f" ({pct}%)" if pct is not None else ""
+    summary = f"{completed} of {total} files complete{pct_text}"
+    label = getattr(host, "processing_summary_label", None)
+    if label is not None:
+        label.setText(summary)
+
+
+def prepare_processing_activity(host: Any, files: list[Path]) -> None:
+    table = getattr(host, "processing_files_table", None)
+    if table is None:
+        return
+
+    host._processing_file_total = len(files)
+    host._processing_completed_file_keys = set()
+    host._processing_file_rows = {}
+    host._processing_row_keys = {}
+
+    table.setRowCount(len(files))
+    for row, file_path in enumerate(files):
+        raw_key, name_key = _processing_file_keys(file_path)
+        host._processing_file_rows[raw_key] = row
+        host._processing_file_rows.setdefault(name_key, row)
+        host._processing_row_keys[row] = raw_key
+
+        status_item = QTableWidgetItem("Queued")
+        file_item = QTableWidgetItem(_processing_file_label(file_path))
+        status_item.setTextAlignment(Qt.AlignCenter)
+        file_item.setToolTip(raw_key)
+        table.setItem(row, 0, status_item)
+        table.setItem(row, 1, file_item)
+
+    table.resizeRowsToContents()
+    table.scrollToTop()
+    _set_processing_summary(host, 0)
+    current_label = getattr(host, "processing_current_file_label", None)
+    if current_label is not None:
+        current_label.setText("Latest file: Waiting for processing to begin")
+
+
+def update_processing_progress(host: Any, pct: int) -> None:
+    _set_processing_summary(host, max(0, min(100, int(pct))))
+
+
+def update_processing_file_status(host: Any, result: dict[str, object]) -> None:
+    table = getattr(host, "processing_files_table", None)
+    if table is None:
+        return
+
+    file_value = result.get("file") or "unknown"
+    raw_key, name_key = _processing_file_keys(file_value)
+    rows = getattr(host, "_processing_file_rows", {})
+    row = rows.get(raw_key, rows.get(name_key))
+    if row is None:
+        row = table.rowCount()
+        table.insertRow(row)
+        rows[raw_key] = row
+        rows.setdefault(name_key, row)
+        host._processing_file_rows = rows
+        row_keys = getattr(host, "_processing_row_keys", {})
+        row_keys[row] = raw_key
+        host._processing_row_keys = row_keys
+        table.setItem(row, 0, QTableWidgetItem("Queued"))
+        table.setItem(row, 1, QTableWidgetItem(_processing_file_label(file_value)))
+
+    status = str(result.get("status") or "").lower()
+    if status == "ok":
+        status_text = "Complete"
+        completed = getattr(host, "_processing_completed_file_keys", set())
+        row_key = getattr(host, "_processing_row_keys", {}).get(row, raw_key)
+        completed.add(row_key)
+        host._processing_completed_file_keys = completed
+        latest = f"Latest file: Completed {_processing_file_label(file_value)}"
+    elif status == "error":
+        stage = str(result.get("stage") or "unknown")
+        status_text = "Failed"
+        latest = f"Latest file: Failed {_processing_file_label(file_value)} at {stage}"
+    else:
+        status_text = "Updated"
+        latest = f"Latest file: {_processing_file_label(file_value)}"
+
+    status_item = table.item(row, 0)
+    if status_item is None:
+        status_item = QTableWidgetItem()
+        table.setItem(row, 0, status_item)
+    status_item.setText(status_text)
+    status_item.setTextAlignment(Qt.AlignCenter)
+
+    current_label = getattr(host, "processing_current_file_label", None)
+    if current_label is not None:
+        current_label.setText(latest)
+
+    table.resizeRowsToContents()
+    if status_item is not None:
+        table.scrollToItem(status_item)
+    _set_processing_summary(host)
+
+
 def _remove_start_button_from_known_rows(host: Any) -> None:
     button = getattr(host, "btn_start", None)
     if button is None:
@@ -130,6 +244,49 @@ def _place_start_button(host: Any, target: str) -> None:
         button.show()
 
 
+def _refresh_widget_style(widget: QWidget) -> None:
+    try:
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()
+    except RuntimeError:
+        pass
+
+
+def _set_sidebar_processing_locked(sidebar: QWidget, locked: bool) -> None:
+    sidebar.setProperty("processingLocked", locked)
+    _refresh_widget_style(sidebar)
+    for child in sidebar.findChildren(QWidget):
+        if child.objectName() == "SidebarButton":
+            setter = getattr(child, "set_processing_locked", None)
+            if callable(setter):
+                setter(locked)
+            else:
+                child.setProperty("processingLocked", locked)
+                _refresh_widget_style(child)
+
+
+def ensure_processing_navigation_unlocked(host: Any) -> None:
+    sidebar = getattr(host, "sidebar", None)
+    if sidebar is not None:
+        sidebar.setEnabled(True)
+        sidebar.setGraphicsEffect(None)
+        _set_sidebar_processing_locked(sidebar, False)
+    for widget in (getattr(host, "menuBar", lambda: None)(),):
+        if widget is not None:
+            try:
+                widget.setEnabled(True)
+            except RuntimeError:
+                pass
+    try:
+        for toolbar in host.findChildren(QToolBar):
+            toolbar.setEnabled(True)
+    except RuntimeError:
+        pass
+    host._processing_navigation_states = []
+    host._processing_sidebar_effect = None
+
+
 def _set_processing_navigation_locked(host: Any, locked: bool) -> None:
     if locked:
         if getattr(host, "_processing_navigation_states", None):
@@ -137,7 +294,7 @@ def _set_processing_navigation_locked(host: Any, locked: bool) -> None:
         widgets: list[QWidget] = []
         sidebar = getattr(host, "sidebar", None)
         if sidebar is not None:
-            widgets.append(sidebar)
+            _set_sidebar_processing_locked(sidebar, True)
         try:
             widgets.append(host.menuBar())
         except Exception:
@@ -163,6 +320,11 @@ def _set_processing_navigation_locked(host: Any, locked: bool) -> None:
         except RuntimeError:
             continue
     host._processing_navigation_states = []
+    sidebar = getattr(host, "sidebar", None)
+    if sidebar is not None:
+        sidebar.setGraphicsEffect(None)
+        _set_sidebar_processing_locked(sidebar, False)
+    host._processing_sidebar_effect = None
 
 
 def show_processing_page(host: Any) -> None:

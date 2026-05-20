@@ -237,6 +237,8 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
         else:
             files = [Path(p) for p in host.data_paths]
         host._max_progress = len(files)
+        if hasattr(host, "_prepare_processing_activity"):
+            host._prepare_processing_activity(files)
         settings = host.validated_params.copy()
         event_map = settings.pop("event_id_map", {})
 
@@ -245,13 +247,17 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             host, "_preproc_fingerprint_validated", None
         )
 
-        host._mp.progress.connect(
-            lambda pct: (
+        def _handle_progress(pct: int) -> None:
+            if hasattr(host, "_animate_progress_to"):
                 host._animate_progress_to(pct / 100.0)
-                if hasattr(host, "_animate_progress_to")
-                else host.progress_bar.setValue(int(pct))
-            )
-        )
+            else:
+                host.progress_bar.setValue(int(pct))
+            if hasattr(host, "_update_processing_progress"):
+                host._update_processing_progress(int(pct))
+
+        host._mp.progress.connect(_handle_progress)
+        if hasattr(host._mp, "file_status") and hasattr(host, "_on_processing_file_status"):
+            host._mp.file_status.connect(host._on_processing_file_status)
         host._mp.error.connect(host._on_processing_error)
         host._mp.finished.connect(host._on_processing_finished)
 

@@ -127,8 +127,12 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert win.findChild(QWidget, "processing_page") is win.processing_page
     assert win.workspace_stack.indexOf(win.processing_page) >= 0
     assert win.processing_page.isAncestorOf(win.progress_bar)
+    assert win.findChild(QWidget, "processing_activity_header") is not None
+    assert win.findChild(QWidget, "processing_status_card") is not None
+    assert win.findChild(QWidget, "processing_files_card") is not None
     assert win.progress_bar.objectName() == "processing_progress_bar"
     assert win.findChild(QWidget, "processing_action_slot") is win.processing_action_slot
+    assert win.processing_files_table.columnCount() == 2
     assert win.findChild(QWidget, "preprocessing_info_strip") is None
     event_map_header = win.findChild(QWidget, "event_map_header")
     assert event_map_header is not None
@@ -187,6 +191,9 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
         if widget.property("selected") is True
     ]
     assert selected_sidebar_items
+    assert win.sidebar.isEnabled()
+    assert win.sidebar.graphicsEffect() is None
+    assert win.sidebar.property("processingLocked") is False
     sidebar_section_titles = {
         label.text()
         for label in win.sidebar.findChildren(QLabel)
@@ -236,7 +243,19 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert win.processing_action_layout.indexOf(win.btn_start) >= 0
     assert run_panel.row_layout.indexOf(win.btn_start) < 0
     assert win.processing_spinner.isVisible()
-    assert not win.sidebar.isEnabled()
+    assert win.sidebar.isEnabled()
+    assert win.sidebar.graphicsEffect() is None
+    assert win.sidebar.property("processingLocked") is True
+    assert all(
+        widget.property("processingLocked") is True
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.objectName() == "SidebarButton"
+    )
+    assert all(
+        label.property("processingLocked") is None
+        for label in win.sidebar.findChildren(QLabel)
+        if label.objectName() == "SidebarSectionLabel"
+    )
     assert not win.menuBar().isEnabled()
 
     win._busy_stop()
@@ -246,7 +265,35 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert run_panel.row_layout.indexOf(win.btn_start) >= 0
     assert win.processing_action_layout.indexOf(win.btn_start) < 0
     assert win.sidebar.isEnabled()
+    assert win.sidebar.graphicsEffect() is None
+    assert win.sidebar.property("processingLocked") is False
     assert win.menuBar().isEnabled()
+
+
+def test_processing_activity_tracks_completed_files(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    first_file = tmp_path / "P001.bdf"
+    second_file = tmp_path / "P002.bdf"
+
+    win._prepare_processing_activity([first_file, second_file])
+
+    assert win.processing_files_table.rowCount() == 2
+    assert win.processing_files_table.item(0, 0).text() == "Queued"
+    assert win.processing_files_table.item(0, 1).text() == "P001.bdf"
+    assert win.processing_summary_label.text() == "0 of 2 files complete (0%)"
+
+    win._on_processing_file_status({"status": "ok", "file": str(first_file)})
+
+    assert win.processing_files_table.item(0, 0).text() == "Complete"
+    assert win.processing_summary_label.text() == "1 of 2 files complete"
+    assert win.processing_current_file_label.text() == "Latest file: Completed P001.bdf"
+
+    win._update_processing_progress(50)
+    assert win.processing_summary_label.text() == "1 of 2 files complete (50%)"
 
 
 def test_sidebar_image_resizer_embeds_in_main_workspace(

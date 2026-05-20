@@ -146,6 +146,7 @@ def main() -> int:
 
         assert window.findChild(QWidget, "preprocessing_info_strip") is None
         assert window.findChild(QWidget, "processing_page") is not None
+        assert window.findChild(QWidget, "processing_files_table") is not None
         assert window.findChild(QWidget, "input_folder_row") is not None
         active_row = (
             window.row_single_file if window.rb_single.isChecked() else window.row_input_folder

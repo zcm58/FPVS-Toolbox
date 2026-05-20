@@ -7,6 +7,7 @@ import logging
 import os
 import queue
 import sys
+from pathlib import Path
 from Main_App.Shared.post_process import post_process as _shared_post_process
 from Main_App.gui.theme import apply_fpvs_theme
 from typing import Callable
@@ -219,6 +220,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
         # Build nav + menus
         init_sidebar(self)
+        shell_status.ensure_processing_navigation_unlocked(self)
         select_projects_root(self)
         init_file_menu(self)
         if hasattr(self, "stacked"):
@@ -356,6 +358,15 @@ class MainWindow(QMainWindow, ProcessingMixin):
     def _tick_busy(self) -> None:
         shell_status.tick_busy(self)
 
+    def _prepare_processing_activity(self, files: list[Path]) -> None:
+        shell_status.prepare_processing_activity(self, files)
+
+    def _update_processing_progress(self, pct: int) -> None:
+        shell_status.update_processing_progress(self, pct)
+
+    def _on_processing_file_status(self, result: dict[str, object]) -> None:
+        shell_status.update_processing_file_status(self, result)
+
     # --------------------------------
 
     def _on_processing_finished(self, payload: dict | None = None) -> None:
@@ -477,6 +488,8 @@ class MainWindow(QMainWindow, ProcessingMixin):
                 setter(widget.property("role") == role)
 
     def show_home_page(self) -> None:
+        if not getattr(self, "_run_active", False):
+            shell_status.ensure_processing_navigation_unlocked(self)
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         if hasattr(self, "workspace_stack") and hasattr(self, "homeWidget"):

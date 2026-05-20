@@ -34,8 +34,8 @@ ROW_ITEM_GAP = 7
 DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox-Repo/"  # MkDocs site for documentation
 
 
-def white_icon(source: QIcon | str | Path) -> QIcon:
-    """Return a white-tinted icon from a file path, theme name, or QIcon."""
+def tinted_icon(source: QIcon | str | Path, color: QColor) -> QIcon:
+    """Return a tinted icon from a file path, theme name, or QIcon."""
     if isinstance(source, QIcon):
         icon = source
     else:
@@ -51,9 +51,14 @@ def white_icon(source: QIcon | str | Path) -> QIcon:
     painter = QPainter(tinted)
     painter.drawPixmap(0, 0, pm)
     painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-    painter.fillRect(tinted.rect(), QColor("white"))
+    painter.fillRect(tinted.rect(), color)
     painter.end()
     return QIcon(tinted)
+
+
+def white_icon(source: QIcon | str | Path) -> QIcon:
+    """Return a white-tinted icon from a file path, theme name, or QIcon."""
+    return tinted_icon(source, QColor("white"))
 
 
 class SidebarButton(QWidget):
@@ -97,8 +102,15 @@ class SidebarButton(QWidget):
         self.icon_lbl = QLabel(self)
         self.icon_lbl.setFixedSize(ICON_PX, ICON_PX)
         self.icon_lbl.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self._normal_icon_pixmap: QPixmap | None = None
+        self._locked_icon_pixmap: QPixmap | None = None
         if icon:
-            self.icon_lbl.setPixmap(white_icon(icon).pixmap(ICON_PX, ICON_PX))
+            self._normal_icon_pixmap = white_icon(icon).pixmap(ICON_PX, ICON_PX)
+            self._locked_icon_pixmap = tinted_icon(icon, QColor(255, 255, 255, 97)).pixmap(
+                ICON_PX,
+                ICON_PX,
+            )
+            self.icon_lbl.setPixmap(self._normal_icon_pixmap)
         lay.addWidget(self.icon_lbl, 0, Qt.AlignVCenter)
 
         self.text_lbl = QLabel(text, self)
@@ -110,6 +122,17 @@ class SidebarButton(QWidget):
         if center_content:
             lay.addStretch(1)
 
+    def set_processing_locked(self, locked: bool) -> None:
+        self.setProperty("processingLocked", locked)
+        self.setCursor(Qt.ArrowCursor if locked else Qt.PointingHandCursor)
+        if self._normal_icon_pixmap is not None and self._locked_icon_pixmap is not None:
+            self.icon_lbl.setPixmap(self._locked_icon_pixmap if locked else self._normal_icon_pixmap)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.style().unpolish(self.text_lbl)
+        self.style().polish(self.text_lbl)
+        self.update()
+
     def set_selected(self, selected: bool) -> None:
         self.setProperty("selected", selected)
         self.selection_bar.setProperty("active", selected)
@@ -120,12 +143,12 @@ class SidebarButton(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.LeftButton:
+        if e.button() == Qt.LeftButton and not self.property("processingLocked"):
             self.clicked.emit()
         super().mouseReleaseEvent(e)
 
     def keyPressEvent(self, e):
-        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space) and not self.property("processingLocked"):
             self.clicked.emit()
         else:
             super().keyPressEvent(e)
