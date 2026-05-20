@@ -83,6 +83,7 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
     assert win.btn_create_project.text() == "New Project"
     assert win.btn_open_project.text() == "Open Project"
     assert win.actionImportFpvsConfigProject.text() == "Import FPVS Studio Config..."
+    assert win.menuBar().isHidden()
     assert win.btn_create_project.isVisibleTo(win)
     assert win.btn_open_project.isVisibleTo(win)
     landing_actions = win.findChild(ActionRow, "main_landing_actions")
@@ -96,6 +97,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
 
+    assert not win.menuBar().isHidden()
     splitter = win.findChild(QSplitter, "main_page_splitter")
     assert splitter is not None
     workspace_stack = win.findChild(QStackedWidget, "workspace_stack")

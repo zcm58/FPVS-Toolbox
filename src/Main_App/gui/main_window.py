@@ -228,6 +228,9 @@ class MainWindow(QMainWindow, ProcessingMixin):
         init_sidebar(self)
         select_projects_root(self)
         init_file_menu(self)
+        if hasattr(self, "stacked"):
+            self.stacked.currentChanged.connect(self._sync_menu_bar_for_current_page)
+        self._sync_menu_bar_for_current_page()
 
         shell_status.init_status_bar(self, FPVS_TOOLBOX_VERSION)
 
@@ -240,6 +243,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
         # Default page and initial logs
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(0)
+            self._sync_menu_bar_for_current_page()
         self.log("Welcome to the FPVS Toolbox!")
         # PySide6 now enforces a fixed light theme regardless of OS settings.
         self.log("Appearance Mode: Light (PySide6 fixed light theme)")
@@ -336,6 +340,13 @@ class MainWindow(QMainWindow, ProcessingMixin):
         shell_status.show_processing_started_notice(self)
 
     # -------------------------- processing -------------------------- #
+
+    def _sync_menu_bar_for_current_page(self, _index: int | None = None) -> None:
+        """Hide app-level menus on the welcome page until a project flow starts."""
+        menu_bar = self.menuBar()
+        landing_page = getattr(self, "landing_page", None)
+        current_page = self.stacked.currentWidget() if hasattr(self, "stacked") else None
+        menu_bar.setVisible(current_page is not landing_page)
 
     def stop_processing(self) -> None:
         processing_workflows.stop_processing(self)
