@@ -64,6 +64,7 @@ from Main_App.gui.components import (
     SurfaceSize,
     StatusBanner,
     configure_window_surface,
+    fixed_width_font,
     make_action_button,
     make_form_layout,
 )

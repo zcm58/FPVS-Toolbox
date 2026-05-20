@@ -21,10 +21,14 @@ from Main_App.gui.components import (
     StatusBanner,
     SubsectionHeaderLabel,
     SurfaceSize,
+    apply_font_role,
     configure_window_surface,
-    make_action_row,
+    fixed_width_font,
+    font_for_role,
     make_action_button,
+    make_action_row,
     make_form_layout,
+    make_section_grid_layout,
     show_warning,
 )
 from Main_App.gui.theme import apply_fpvs_theme
@@ -40,11 +44,15 @@ EXPECTED_COMPONENT_EXPORTS = (
     "StatusBanner",
     "SubsectionHeaderLabel",
     "SurfaceSize",
+    "apply_font_role",
     "confirm",
     "configure_window_surface",
+    "fixed_width_font",
+    "font_for_role",
     "make_action_button",
     "make_action_row",
     "make_form_layout",
+    "make_section_grid_layout",
     "show_error",
     "show_info",
     "show_warning",
@@ -68,11 +76,15 @@ def test_component_consumer_import_style_remains_available() -> None:
     from Main_App.gui.components import StatusBanner as ImportedStatusBanner
     from Main_App.gui.components import SubsectionHeaderLabel as ImportedSubsectionHeaderLabel
     from Main_App.gui.components import SurfaceSize as ImportedSurfaceSize
+    from Main_App.gui.components import apply_font_role as imported_apply_font_role
     from Main_App.gui.components import confirm as imported_confirm
     from Main_App.gui.components import configure_window_surface as imported_configure_window_surface
+    from Main_App.gui.components import fixed_width_font as imported_fixed_width_font
+    from Main_App.gui.components import font_for_role as imported_font_for_role
     from Main_App.gui.components import make_action_button as imported_make_action_button
     from Main_App.gui.components import make_action_row as imported_make_action_row
     from Main_App.gui.components import make_form_layout as imported_make_form_layout
+    from Main_App.gui.components import make_section_grid_layout as imported_make_section_grid_layout
     from Main_App.gui.components import show_error as imported_show_error
     from Main_App.gui.components import show_info as imported_show_info
     from Main_App.gui.components import show_warning as imported_show_warning
@@ -88,11 +100,15 @@ def test_component_consumer_import_style_remains_available() -> None:
         "StatusBanner": ImportedStatusBanner,
         "SubsectionHeaderLabel": ImportedSubsectionHeaderLabel,
         "SurfaceSize": ImportedSurfaceSize,
+        "apply_font_role": imported_apply_font_role,
         "confirm": imported_confirm,
         "configure_window_surface": imported_configure_window_surface,
+        "fixed_width_font": imported_fixed_width_font,
+        "font_for_role": imported_font_for_role,
         "make_action_button": imported_make_action_button,
         "make_action_row": imported_make_action_row,
         "make_form_layout": imported_make_form_layout,
+        "make_section_grid_layout": imported_make_section_grid_layout,
         "show_error": imported_show_error,
         "show_info": imported_show_info,
         "show_warning": imported_show_warning,
@@ -197,7 +213,22 @@ def test_subsection_header_label_uses_shared_header_contract(qtbot) -> None:
     assert label.text() == "Condition"
     assert label.property("subsectionHeader") is True
     assert label.font().bold()
+    assert label.font().pointSize() == font_for_role("subsection_header").pointSize()
     assert label.alignment() & Qt.AlignVCenter
+
+
+def test_typography_roles_share_font_family_and_independent_sizes(qtbot) -> None:
+    from Main_App.gui.typography import APP_FONT_FAMILY, css_font_size, css_font_weight
+
+    label = QLabel("Sidebar")
+    qtbot.addWidget(label)
+    apply_font_role(label, "sidebar_section")
+
+    assert APP_FONT_FAMILY in label.font().families()
+    assert label.font().pointSize() == font_for_role("sidebar_section").pointSize()
+    assert css_font_size("sidebar_section") == "13px"
+    assert css_font_weight("subsection_header") == 700
+    assert APP_FONT_FAMILY in fixed_width_font().families()
 
 
 def test_path_picker_row_exposes_field_and_button(qtbot) -> None:

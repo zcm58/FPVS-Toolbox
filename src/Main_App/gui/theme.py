@@ -37,6 +37,7 @@ from Main_App.gui.style_tokens import (
     WARNING_SOFT_BG,
     WARNING_SOFT_BORDER,
 )
+from Main_App.gui.typography import apply_app_font, css_font_family, css_font_size, css_font_weight
 from Main_App.gui.widgets.labels import build_subsection_header_stylesheet
 
 try:  # qt_material is optional; we fall back to Fusion if it's missing.
@@ -69,6 +70,8 @@ def build_fpvs_app_stylesheet() -> str:
     return f"""
         QWidget {{
             color: {TEXT_PRIMARY};
+            font-family: {css_font_family()};
+            font-size: {css_font_size("body")};
         }}
 
         QWidget[fpvsSurface="true"] {{
@@ -81,7 +84,7 @@ def build_fpvs_app_stylesheet() -> str:
             margin-top: 0;
             background: {SURFACE_BG};
             color: {TEXT_PRIMARY};
-            font-weight: 400;
+            font-weight: {css_font_weight("body")};
         }}
 
         QGroupBox::title {{
@@ -89,7 +92,7 @@ def build_fpvs_app_stylesheet() -> str:
             subcontrol-position: top left;
             padding: 0 4px;
             color: {TEXT_PRIMARY};
-            font-weight: 600;
+            font-weight: {css_font_weight("caption")};
         }}
 
         QWidget[cardHeader="true"] {{
@@ -100,7 +103,8 @@ def build_fpvs_app_stylesheet() -> str:
 
         QLabel[caption="true"] {{
             color: {TEXT_SECONDARY};
-            font-weight: 600;
+            font-size: {css_font_size("caption")};
+            font-weight: {css_font_weight("caption")};
         }}
 
         QLineEdit,
@@ -192,7 +196,7 @@ def build_fpvs_app_stylesheet() -> str:
             background-color: {ACCENT_COLOR};
             border-color: {ACCENT_COLOR};
             color: white;
-            font-weight: 600;
+            font-weight: {css_font_weight("button_strong")};
             padding: 8px 18px;
         }}
 
@@ -254,7 +258,7 @@ def build_fpvs_app_stylesheet() -> str:
             background: {DANGER_COLOR};
             border-color: {DANGER_COLOR};
             color: white;
-            font-weight: 600;
+            font-weight: {css_font_weight("button_strong")};
         }}
 
         QPushButton[variant="danger"]:hover {{
@@ -282,12 +286,14 @@ def build_fpvs_app_stylesheet() -> str:
             padding: 7px 12px;
             background: {SURFACE_ALT_BG};
             color: {TEXT_SECONDARY};
+            font-size: {css_font_size("tab")};
+            font-weight: {css_font_weight("tab")};
         }}
 
         QTabBar::tab:selected {{
             background: {SURFACE_BG};
             color: {TEXT_PRIMARY};
-            font-weight: 600;
+            font-weight: {css_font_weight("tab_selected")};
         }}
 
         QTextEdit[logSurface="true"],
@@ -425,4 +431,5 @@ def apply_fpvs_theme(
     else:
         apply_fusion_light_palette(app)
 
+    apply_app_font(app)
     app.setStyleSheet(build_fpvs_app_stylesheet())

@@ -8,7 +8,7 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
+from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QSizePolicy, QWidget
 
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
@@ -56,13 +56,12 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     qtbot.addWidget(dlg)
 
     assert dlg.preproc_edits[2].text() == "512"
-    assert dlg.stim_edit.text() == "Status"
+    assert not hasattr(dlg, "stim_edit")
     assert not hasattr(dlg, "save_fif_check")
 
     dlg.preproc_edits[2].setText("256")
     dlg.preproc_edits[4].setText("3.5")
     dlg.preproc_edits[5].setText("100")
-    dlg.stim_edit.setText("Trigger")
 
     dlg._save()
 
@@ -70,13 +69,13 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert reloaded.preprocessing["downsample"] == 256
     assert reloaded.preprocessing["rejection_z"] == 3.5
     assert reloaded.preprocessing["epoch_end_s"] == 100.0
-    assert reloaded.preprocessing["stim_channel"] == "Trigger"
+    assert reloaded.preprocessing["stim_channel"] == "Status"
     assert "save_preprocessed_fif" not in reloaded.preprocessing
 
     dlg2 = SettingsDialog(win.settings, win, reloaded)
     qtbot.addWidget(dlg2)
     assert dlg2.preproc_edits[2].text() == "256"
-    assert dlg2.stim_edit.text() == "Trigger"
+    assert not hasattr(dlg2, "stim_edit")
     assert not hasattr(dlg2, "save_fif_check")
 
     win.loadProject(reloaded)
@@ -88,7 +87,7 @@ def test_dialog_loads_saves_project(tmp_path, qtbot):
     assert params["downsample"] == 256
     assert params["reject_thresh"] == 3.5
     assert params["epoch_end"] == 100.0
-    assert params["stim_channel"] == "Trigger"
+    assert params["stim_channel"] == "Status"
     assert params["save_preprocessed_fif"] is False
 
 
@@ -108,13 +107,63 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
         card.header.title_label.text(): card for card in dlg.findChildren(SectionCard)
     }
     assert "Preprocessing Parameters" in cards
+    assert "Diagnostics" in cards
     assert "Analysis Defaults" in cards
     assert "Harmonic Detection" in cards
+    assert "Quick Add" in cards
     assert "Regions of Interest" in cards
+    assert [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())] == [
+        "Preprocessing",
+        "Stats",
+        "ROIs",
+    ]
+    assert "General" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
+    assert "Oddball" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert dlg.group_preproc is cards["Preprocessing Parameters"]
+    assert cards["Diagnostics"].isAncestorOf(dlg.debug_check)
+    assert cards["Analysis Defaults"].isAncestorOf(dlg.oddball_freq_edit)
+    assert cards["Regions of Interest"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert cards["Regions of Interest"].isAncestorOf(dlg.roi_editor)
+    assert dlg.roi_editor.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert dlg.btn_changeRoot.property("secondary") is True
-    assert dlg.findChild(ActionRow, "settings_stats_roi_actions") is not None
+    preproc_tab = dlg.tabs.widget(dlg._preproc_tab_index)
+    stats_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "Stats"
+    )
+    rois_tab_index = next(
+        i for i in range(dlg.tabs.count()) if dlg.tabs.tabText(i) == "ROIs"
+    )
+    stats_tab = dlg.tabs.widget(stats_tab_index)
+    rois_tab = dlg.tabs.widget(rois_tab_index)
+    assert rois_tab.isAncestorOf(cards["Regions of Interest"])
+    assert rois_tab.isAncestorOf(cards["Quick Add"])
+    assert not stats_tab.isAncestorOf(cards["Regions of Interest"])
+    rois_layout = rois_tab.layout()
+    assert rois_layout.indexOf(cards["Regions of Interest"]) < rois_layout.indexOf(cards["Quick Add"])
+    assert preproc_tab.findChild(ActionRow, "settings_preproc_footer_actions") is not None
+    assert stats_tab.findChild(ActionRow, "settings_stats_footer_actions") is not None
+    assert rois_tab.findChild(ActionRow, "settings_rois_footer_actions") is not None
+    assert preproc_tab.findChild(QWidget, "settings_preproc_footer") is not None
+    assert stats_tab.findChild(QWidget, "settings_stats_footer") is not None
+    assert rois_tab.findChild(QWidget, "settings_rois_footer") is not None
+    assert rois_tab.findChild(ActionRow, "settings_rois_actions") is not None
+    assert rois_tab.findChild(ActionRow, "settings_rois_quick_add_actions") is not None
+    assert dlg.roi_montage_combo.count() == 1
+    assert dlg.roi_montage_combo.currentData() == "10-10"
+    assert dlg.roi_preset_combo.findText("Frontal Lobe (Default)") >= 0
+    assert dlg.roi_preset_combo.findText("Occipital Lobe (Default)") >= 0
+    assert dlg.roi_preset_electrodes_edit.isReadOnly()
+    dlg.roi_preset_combo.setCurrentIndex(dlg.roi_preset_combo.findText("Occipital Lobe (Default)"))
+    dlg._add_selected_roi_preset()
+    assert ("Occipital Lobe", ["O1", "O2", "OZ"]) in dlg.roi_editor.get_pairs()
+    dlg.roi_editor.set_pairs([
+        ("Custom Occipito Temporal", ["PO7", "PO8"]),
+        ("Frontal Lobe", ["BAD"]),
+    ])
+    dlg._save_roi_editor_as_custom_presets()
+    assert dlg._custom_roi_presets_by_montage["10-10"] == [
+        ("Custom Occipito Temporal", ["PO7", "PO8"]),
+    ]
     roi_headers = {
         label.text()
         for label in cards["Regions of Interest"].findChildren(SubsectionHeaderLabel)

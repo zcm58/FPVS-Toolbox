@@ -17,6 +17,7 @@ from Main_App.gui.widgets.cards import CardHeader, SectionCard, make_section_gri
 from Main_App.gui.widgets.forms import PathPickerRow, make_form_layout
 from Main_App.gui.widgets.labels import SubsectionHeaderLabel
 from Main_App.gui.widgets.status import StatusBanner
+from Main_App.gui.typography import apply_font_role, fixed_width_font, font_for_role
 
 __all__ = (
     "ActionRow",
@@ -29,8 +30,11 @@ __all__ = (
     "StatusBanner",
     "SubsectionHeaderLabel",
     "SurfaceSize",
+    "apply_font_role",
     "confirm",
     "configure_window_surface",
+    "fixed_width_font",
+    "font_for_role",
     "make_action_button",
     "make_action_row",
     "make_form_layout",

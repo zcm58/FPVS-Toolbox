@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from Main_App.gui.typography import apply_font_role
+
 BUSY_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
@@ -44,9 +46,7 @@ def init_status_bar(host: Any, version: str) -> None:
     host._busyTimer.timeout.connect(host._tick_busy)
 
     host._busyLabel = QLabel("")
-    _big = host._busyLabel.font()
-    _big.setPointSize(max(_big.pointSize() + 4, 14))
-    host._busyLabel.setFont(_big)
+    apply_font_role(host._busyLabel, "busy_status")
     host._busyLabel.setStyleSheet("padding: 0 10px;")
     host._busyLabel.setVisible(False)
     host.statusBar().addPermanentWidget(host._busyLabel)

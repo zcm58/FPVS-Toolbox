@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QColorDialog
 
 
 from Main_App import SettingsManager
+from Main_App.gui.components import apply_font_role
 from Main_App.projects.project import Project
 from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
@@ -232,9 +233,7 @@ class PlotGeneratorWindow(
 
     def _bold_label(self, text: str) -> QLabel:
         label = QLabel(text)
-        font = label.font()
-        font.setBold(True)
-        label.setFont(font)
+        apply_font_role(label, "caption")
         return label
 
     def _update_legend_group_visibility(self) -> None:

@@ -68,7 +68,7 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
     assert not hasattr(win, "landing_brain_animation")
 
     labels = {label.text() for label in win.landing_page.findChildren(QLabel)}
-    assert "FPVS Toolbox" in labels
+    assert "FPVS Toolbox" not in labels
     assert "Welcome to FPVS Toolbox!" in labels
     assert "Create a new FPVS project or open an existing one." in labels
     title = next(
@@ -77,11 +77,13 @@ def test_landing_page_full_window_welcome_layout(tmp_path: Path, qtbot, monkeypa
         if label.text() == "Welcome to FPVS Toolbox!"
     )
     assert not title.wordWrap()
-    assert title.minimumHeight() >= 58
+    assert title.minimumHeight() >= 84
     assert title.sizeHint().height() <= title.minimumHeight()
 
     assert win.btn_create_project.text() == "New Project"
     assert win.btn_open_project.text() == "Open Project"
+    assert win.btn_create_project.width() >= 260
+    assert win.btn_create_project.height() >= 66
     assert win.actionImportFpvsConfigProject.text() == "Import FPVS Studio Config..."
     assert win.menuBar().isHidden()
     assert win.btn_create_project.isVisibleTo(win)
@@ -173,7 +175,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert selected_sidebar_items
     sidebar_section_titles = {
         label.text()
-        for label in win.sidebar.findChildren(SubsectionHeaderLabel)
+        for label in win.sidebar.findChildren(QLabel)
         if label.objectName() == "SidebarSectionLabel"
     }
     assert sidebar_section_titles == {"Workspace Tools", "Utilities"}
@@ -429,16 +431,21 @@ def test_sidebar_individual_detectability_embeds_in_main_workspace(
     )
     win.stacked.setCurrentIndex(1)
     qtbot.wait(20)
+    sidebar_width_before = win.sidebar.width()
+    workspace_width_before = win.workspace_stack.width()
 
     qtbot.mouseClick(_sidebar_button(win, "btn_individual_detectability"), Qt.LeftButton)
     qtbot.wait(20)
 
+    assert win.sidebar.width() == sidebar_width_before
+    assert win.workspace_stack.width() == workspace_width_before
     assert isinstance(win.workspace_stack.currentWidget(), IndividualDetectabilityWindow)
     assert (
         win.workspace_stack.currentWidget().objectName()
         == "embedded_individual_detectability_page"
     )
     assert win._individual_detectability_page.parent() is win.workspace_stack
+    assert win._individual_detectability_page.minimumWidth() <= win.workspace_stack.width()
     assert win._individual_detectability_page._project_root == project_root
     assert win._individual_detectability_page.input_root_edit.text() == str(excel_dir)
     selected_roles = [

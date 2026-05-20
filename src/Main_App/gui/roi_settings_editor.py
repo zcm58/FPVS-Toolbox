@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from PySide6.QtWidgets import (
     QWidget,
     QScrollArea,
@@ -54,6 +56,27 @@ class ROISettingsEditor(QWidget):
 
         self.container_layout.addWidget(row)
         self.entries.append({"frame": row, "name": name_edit, "elec": elec_edit})
+
+    def add_or_update_entry(self, name: str, electrodes: list[str]) -> str:
+        clean_name = name.strip()
+        electrode_text = ",".join(electrodes)
+        for ent in self.entries:
+            name_edit = cast(QLineEdit, ent["name"])
+            elec_edit = cast(QLineEdit, ent["elec"])
+            if name_edit.text().strip().casefold() == clean_name.casefold():
+                elec_edit.setText(electrode_text)
+                return "updated"
+
+        for ent in self.entries:
+            name_edit = cast(QLineEdit, ent["name"])
+            elec_edit = cast(QLineEdit, ent["elec"])
+            if not name_edit.text().strip() and not elec_edit.text().strip():
+                name_edit.setText(clean_name)
+                elec_edit.setText(electrode_text)
+                return "added"
+
+        self.add_entry(clean_name, electrode_text)
+        return "added"
 
     def remove_entry(self, frame: QWidget) -> None:
         for i, ent in enumerate(self.entries):

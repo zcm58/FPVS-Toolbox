@@ -481,9 +481,7 @@ class StatsWindowUiMixin:
         self.reporting_summary_text.setProperty("logSurface", True)
         self.reporting_summary_text.setReadOnly(True)
         self.reporting_summary_text.setPlaceholderText("Reporting Summary output")
-        mono = self.reporting_summary_text.font()
-        mono.setFamilies(["Consolas", "Menlo", "Courier New", "monospace"])
-        self.reporting_summary_text.setFont(mono)
+        self.reporting_summary_text.setFont(fixed_width_font())
         self.reporting_summary_text.hide()
 
         self.copy_summary_btn = make_action_button("Copy summary")

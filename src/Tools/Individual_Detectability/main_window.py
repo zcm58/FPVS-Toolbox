@@ -60,13 +60,23 @@ logger = logging.getLogger(__name__)
 
 
 class IndividualDetectabilityWindow(QWidget):
-    def __init__(self, parent: QWidget | None = None, project_root: str | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        project_root: str | None = None,
+        *,
+        embedded: bool = False,
+    ) -> None:
         super().__init__(parent)
+        surface_size = SurfaceSize(width=1200, height=780)
+        if not embedded:
+            surface_size = SurfaceSize(width=1200, height=780, min_width=1050)
         configure_window_surface(
             self,
             title="Individual Detectability",
-            size=SurfaceSize(width=1200, height=780, min_width=1050),
+            size=surface_size,
         )
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self._project_root = self._resolve_project_root(project_root)
         self._last_dir: Optional[Path] = None

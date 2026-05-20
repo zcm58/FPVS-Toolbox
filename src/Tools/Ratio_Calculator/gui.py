@@ -43,6 +43,7 @@ from Main_App.gui.components import (
     SubsectionHeaderLabel,
     SurfaceSize,
     StatusBanner,
+    apply_font_role,
     configure_window_surface,
     make_action_button,
     make_form_layout,
@@ -331,9 +332,7 @@ class RatioCalculatorWindow(QWidget):
         header.setSectionResizeMode(0, QHeaderView.Fixed)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         self.exclude_table.setColumnWidth(0, 70)
-        header_font = header.font()
-        header_font.setBold(False)
-        header.setFont(header_font)
+        apply_font_role(header, "table_header")
         self.exclude_table.itemChanged.connect(self._on_exclusion_item_changed)
         participants_layout.addWidget(self.exclude_table)
 
@@ -452,9 +451,7 @@ class RatioCalculatorWindow(QWidget):
         ]
         for button in buttons:
             button.setMinimumHeight(28)
-            font = button.font()
-            font.setBold(True)
-            button.setFont(font)
+            apply_font_role(button, "button_strong")
         for button in (
             self.input_a_open_btn,
             self.input_a_btn,

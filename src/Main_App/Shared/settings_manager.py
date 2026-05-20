@@ -14,6 +14,11 @@ import ast
 from pathlib import Path
 from typing import List, Tuple
 
+from Main_App.Shared.roi_presets import (
+    DEFAULT_ROI_MONTAGE,
+    default_roi_name_keys,
+    validate_roi_montage,
+)
 from Main_App.Shared.settings_paths import app_settings_dir, app_settings_file, legacy_settings_file
 
 logger = logging.getLogger(__name__)
@@ -47,8 +52,12 @@ DEFAULTS = {
         'alpha': '0.05'
     },
     'rois': {
+        'montage': DEFAULT_ROI_MONTAGE,
         'names': 'Frontal Lobe;Central Lobe;Parietal Lobe;Occipital Lobe',
         'electrodes': 'F3,F4,Fz;C3,C4,Cz;P3,P4,Pz;O1,O2,Oz'
+    },
+    'roi_presets': {
+        'custom_10_10': '[]'
     },
     'visualization': {
         'threshold': '0.0',
@@ -69,6 +78,11 @@ _LEGACY_QT_KEYS = (
 
 INI_NAME = 'settings.ini'
 CONFIGS_DIR = 'configs'
+
+
+def _custom_roi_presets_option(montage: str) -> str:
+    montage_key = validate_roi_montage(montage)
+    return f"custom_{montage_key.replace('-', '_')}"
 
 def _default_ini_path() -> str:
     """Return the default path for the central app settings file."""
@@ -320,6 +334,64 @@ class SettingsManager:
         electrodes = ';'.join([','.join([e.upper() for e in p[1]]) for p in pairs])
         self.set('rois', 'names', names)
         self.set('rois', 'electrodes', electrodes)
+
+    def get_roi_montage(self) -> str:
+        montage = self.get('rois', 'montage', DEFAULT_ROI_MONTAGE)
+        try:
+            return validate_roi_montage(montage)
+        except ValueError:
+            logger.warning("unsupported_roi_montage_setting", extra={"montage": montage})
+            return DEFAULT_ROI_MONTAGE
+
+    def set_roi_montage(self, montage: str) -> None:
+        self.set('rois', 'montage', validate_roi_montage(montage))
+
+    def get_custom_roi_presets(self, montage: str | None = None) -> List[Tuple[str, List[str]]]:
+        montage_key = validate_roi_montage(montage or self.get_roi_montage())
+        raw = self.get('roi_presets', _custom_roi_presets_option(montage_key), '[]')
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("custom_roi_presets_invalid_json", extra={"montage": montage_key})
+            return []
+        if not isinstance(payload, list):
+            logger.warning("custom_roi_presets_invalid_payload", extra={"montage": montage_key})
+            return []
+
+        default_names = default_roi_name_keys(montage_key)
+        seen: set[str] = set()
+        presets: List[Tuple[str, List[str]]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            electrodes_raw = item.get("electrodes", [])
+            if not name or not isinstance(electrodes_raw, list):
+                continue
+            name_key = name.casefold()
+            if name_key in default_names or name_key in seen:
+                continue
+            electrodes = [str(e).strip().upper() for e in electrodes_raw if str(e).strip()]
+            if electrodes:
+                presets.append((name, electrodes))
+                seen.add(name_key)
+        return presets
+
+    def set_custom_roi_presets(self, montage: str, pairs: List[Tuple[str, List[str]]]) -> None:
+        montage_key = validate_roi_montage(montage)
+        default_names = default_roi_name_keys(montage_key)
+        seen: set[str] = set()
+        payload = []
+        for name, electrodes_raw in pairs:
+            clean_name = str(name).strip()
+            name_key = clean_name.casefold()
+            if not clean_name or name_key in default_names or name_key in seen:
+                continue
+            electrodes = [str(e).strip().upper() for e in electrodes_raw if str(e).strip()]
+            if electrodes:
+                payload.append({"name": clean_name, "electrodes": electrodes})
+                seen.add(name_key)
+        self.set('roi_presets', _custom_roi_presets_option(montage_key), json.dumps(payload))
 
     def debug_enabled(self) -> bool:
         return self.get('debug', 'enabled', 'False').lower() == 'true'

@@ -17,16 +17,22 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QGridLayout,
     QCheckBox,
-    QDialogButtonBox,
     QMessageBox,
     QSizePolicy,
 )
 
 from Main_App.Shared.settings_manager import SettingsManager
+from Main_App.Shared.roi_presets import (
+    default_roi_name_keys,
+    default_roi_presets,
+    supported_roi_montages,
+    validate_roi_montage,
+)
 from Main_App.workers.mp_env import get_ram_tier_recommendation
 from Main_App.gui.components import (
     ActionRow,
     SectionCard,
+    StatusBanner,
     SubsectionHeaderLabel,
     make_action_button,
     make_form_layout,
@@ -96,6 +102,7 @@ class SettingsDialog(QDialog):
         self.manager = manager
         self.project = project
         self._project_cache: Dict[str, Any] | None = None
+        self._custom_roi_presets_by_montage: dict[str, list[tuple[str, list[str]]]] = {}
         # Stub attributes for pruned settings to avoid AttributeError if referenced
         self.data_edit = None
         self.out_edit = None
@@ -115,46 +122,41 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
 
         self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        layout.addWidget(self.tabs, 1)
 
-        self._init_general_tab(self.tabs)
         preproc_tab = self._init_preproc_tab(self.tabs)
         self._preproc_tab_index = self.tabs.indexOf(preproc_tab)
         self._init_stats_tab(self.tabs)
-        self._init_oddball_tab(self.tabs)
+        self._init_rois_tab(self.tabs)
         self._last_tab_index = self.tabs.currentIndex()
         self._tab_change_guard = False
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
-        self.btn_changeRoot = make_action_button("Change Projects Root...", parent=self)
-        self.btn_changeRoot.clicked.connect(lambda: changeProjectsRoot(self))
-        layout.addWidget(self.btn_changeRoot)
+    def _add_settings_footer(self, tab: QWidget, layout: QVBoxLayout, object_name: str) -> None:
+        footer = QWidget(tab)
+        footer.setObjectName(object_name)
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        footer_layout.setSpacing(8)
 
-        btn_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        layout.addWidget(btn_box)
-        btn_box.accepted.connect(self._save)
-        btn_box.rejected.connect(self.reject)
+        change_root = make_action_button("Change Projects Root...", parent=footer)
+        change_root.setObjectName(f"{object_name}_change_root")
+        change_root.clicked.connect(lambda: changeProjectsRoot(self))
+        footer_layout.addWidget(change_root)
+        if not hasattr(self, "btn_changeRoot"):
+            self.btn_changeRoot = change_root
 
-    # ------------------------------------------------------------------
-    def _init_general_tab(self, tabs: QTabWidget) -> None:
-        tab = QWidget()
-        form = make_form_layout()
-        tab.setLayout(form)
+        actions = ActionRow(footer, alignment=Qt.AlignRight)
+        actions.setObjectName(f"{object_name}_actions")
+        save_btn = make_action_button("Save", variant="primary", parent=actions)
+        cancel_btn = make_action_button("Cancel", variant="secondary", parent=actions)
+        save_btn.clicked.connect(self._save)
+        cancel_btn.clicked.connect(self.reject)
+        actions.add_button(save_btn)
+        actions.add_button(cancel_btn)
+        footer_layout.addWidget(actions)
 
-        stim_default = (
-            self._project_preprocessing().get("stim_channel", config.DEFAULT_STIM_CHANNEL)
-            if self.project
-            else self.manager.get("stim", "channel", config.DEFAULT_STIM_CHANNEL)
-        )
-        self.stim_edit = QLineEdit(stim_default)
-        form.addRow(QLabel("Stim Channel"), self.stim_edit)
-
-        debug_default = self.manager.get("debug", "enabled", "False").lower() == "true"
-        self.debug_check = QCheckBox("Enable Debug")
-        self.debug_check.setChecked(debug_default)
-        form.addRow(QLabel("Debug Mode"), self.debug_check)
-
-        tabs.addTab(tab, "General")
+        layout.addWidget(footer)
 
     # ------------------------------------------------------------------
     def _init_preproc_tab(self, tabs: QTabWidget) -> QWidget:
@@ -217,7 +219,22 @@ class SettingsDialog(QDialog):
                 edit.setText(self.manager.get(sec, opt, fallback))
 
         layout.addWidget(self.group_preproc)
+
+        diagnostics_group = SectionCard(
+            "Diagnostics",
+            tab,
+            object_name="settings_preproc_diagnostics_card",
+        )
+        diagnostics_form = make_form_layout()
+        debug_default = self.manager.get("debug", "enabled", "False").lower() == "true"
+        self.debug_check = QCheckBox("Enable Debug", diagnostics_group)
+        self.debug_check.setChecked(debug_default)
+        diagnostics_form.addRow(QLabel("Debug Mode", diagnostics_group), self.debug_check)
+        diagnostics_group.content_layout.addLayout(diagnostics_form)
+        layout.addWidget(diagnostics_group)
+
         layout.addStretch(1)
+        self._add_settings_footer(tab, layout, "settings_preproc_footer")
         tabs.addTab(tab, "Preprocessing")
         canonical_keys = [
             "low_pass",
@@ -256,6 +273,9 @@ class SettingsDialog(QDialog):
         self.base_freq_edit = QLineEdit(self.manager.get("analysis", "base_freq", "6.0"))
         analysis_form.addRow(QLabel("FPVS base frequency (Hz):"), self.base_freq_edit)
 
+        self.oddball_freq_edit = QLineEdit(self.manager.get("analysis", "oddball_freq", "1.2"))
+        analysis_form.addRow(QLabel("Oddball frequency (Hz):"), self.oddball_freq_edit)
+
         self.bca_limit_edit = QLineEdit(self.manager.get("analysis", "bca_upper_limit", "16.8"))
         analysis_form.addRow(QLabel("BCA harmonic upper limit:"), self.bca_limit_edit)
 
@@ -284,11 +304,74 @@ class SettingsDialog(QDialog):
         harmonic_group.content_layout.addLayout(harmonic_form)
         layout.addWidget(harmonic_group)
 
+        layout.addStretch(1)
+        self._add_settings_footer(tab, layout, "settings_stats_footer")
+
+        tabs.addTab(tab, "Stats")
+
+    # ------------------------------------------------------------------
+    def _init_rois_tab(self, tabs: QTabWidget) -> None:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        current_montage = self.manager.get_roi_montage()
+        self._custom_roi_presets_by_montage[current_montage] = self.manager.get_custom_roi_presets(
+            current_montage
+        )
+        quick_add_group = SectionCard(
+            "Quick Add",
+            tab,
+            object_name="settings_rois_quick_add_card",
+        )
+        quick_add_form = make_form_layout()
+
+        self.roi_montage_combo = QComboBox(quick_add_group)
+        self.roi_montage_combo.setObjectName("settings_rois_montage_combo")
+        for montage_key, label in supported_roi_montages():
+            self.roi_montage_combo.addItem(label, montage_key)
+        montage_index = self.roi_montage_combo.findData(current_montage)
+        if montage_index >= 0:
+            self.roi_montage_combo.setCurrentIndex(montage_index)
+        quick_add_form.addRow(QLabel("Electrode montage:", quick_add_group), self.roi_montage_combo)
+
+        self.roi_preset_combo = QComboBox(quick_add_group)
+        self.roi_preset_combo.setObjectName("settings_rois_preset_combo")
+        quick_add_form.addRow(QLabel("Quick-add ROI:", quick_add_group), self.roi_preset_combo)
+
+        self.roi_preset_electrodes_edit = QLineEdit(quick_add_group)
+        self.roi_preset_electrodes_edit.setObjectName("settings_rois_preset_electrodes")
+        self.roi_preset_electrodes_edit.setReadOnly(True)
+        quick_add_form.addRow(QLabel("Electrodes:", quick_add_group), self.roi_preset_electrodes_edit)
+        quick_add_group.content_layout.addLayout(quick_add_form)
+
+        quick_add_actions = ActionRow(quick_add_group, alignment=Qt.AlignLeft)
+        quick_add_actions.setObjectName("settings_rois_quick_add_actions")
+        add_preset_btn = make_action_button("Add ROI", compact=True, parent=quick_add_group)
+        add_preset_btn.setObjectName("settings_rois_add_preset")
+        add_preset_btn.clicked.connect(self._add_selected_roi_preset)
+        save_presets_btn = make_action_button("Save Custom Presets", compact=True, parent=quick_add_group)
+        save_presets_btn.setObjectName("settings_rois_save_custom_presets")
+        save_presets_btn.clicked.connect(self._save_roi_editor_as_custom_presets)
+        quick_add_actions.add_button(add_preset_btn)
+        quick_add_actions.add_button(save_presets_btn)
+        quick_add_group.content_layout.addWidget(quick_add_actions)
+
+        self.roi_preset_status = StatusBanner("", quick_add_group, variant="info")
+        self.roi_preset_status.setObjectName("settings_rois_preset_status")
+        self.roi_preset_status.setVisible(False)
+        quick_add_group.content_layout.addWidget(self.roi_preset_status)
+
+        self.roi_montage_combo.currentIndexChanged.connect(self._on_roi_montage_changed)
+        self.roi_preset_combo.currentIndexChanged.connect(self._update_roi_preset_preview)
+
         roi_group = SectionCard(
             "Regions of Interest",
             tab,
-            object_name="settings_stats_rois_card",
+            object_name="settings_rois_card",
         )
+        roi_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         roi_header = QWidget(roi_group)
         roi_header_layout = QHBoxLayout(roi_header)
         roi_header_layout.setContentsMargins(0, 0, 0, 0)
@@ -299,32 +382,117 @@ class SettingsDialog(QDialog):
         roi_group.content_layout.addWidget(roi_header)
 
         self.roi_editor = ROISettingsEditor(self, self.manager.get_roi_pairs())
-        self.roi_editor.setObjectName("settings_stats_roi_editor")
-        roi_group.content_layout.addWidget(self.roi_editor)
+        self.roi_editor.setObjectName("settings_rois_editor")
+        self.roi_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.roi_editor.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        roi_group.content_layout.addWidget(self.roi_editor, 1)
 
         add_btn = make_action_button("+ Add ROI", compact=True, parent=roi_group)
-        add_btn.setObjectName("settings_stats_add_roi")
+        add_btn.setObjectName("settings_rois_add_roi")
         add_btn.clicked.connect(lambda: self.roi_editor.add_entry())
         roi_actions = ActionRow(roi_group, alignment=Qt.AlignLeft)
-        roi_actions.setObjectName("settings_stats_roi_actions")
+        roi_actions.setObjectName("settings_rois_actions")
         roi_actions.add_button(add_btn)
         roi_group.content_layout.addWidget(roi_actions)
 
         layout.addWidget(roi_group, 1)
-        layout.addStretch(1)
+        layout.addWidget(quick_add_group)
+        self._add_settings_footer(tab, layout, "settings_rois_footer")
+        self._refresh_roi_preset_combo()
 
-        tabs.addTab(tab, "Stats")
+        tabs.addTab(tab, "ROIs")
 
-    # ------------------------------------------------------------------
-    def _init_oddball_tab(self, tabs: QTabWidget) -> None:
-        tab = QWidget()
-        form = make_form_layout()
-        tab.setLayout(form)
+    def _current_roi_montage(self) -> str:
+        return validate_roi_montage(str(self.roi_montage_combo.currentData()))
 
-        self.oddball_freq_edit = QLineEdit(self.manager.get("analysis", "oddball_freq", "1.2"))
-        form.addRow(QLabel("Oddball Frequency (Hz)"), self.oddball_freq_edit)
+    def _custom_roi_presets(self, montage: str) -> list[tuple[str, list[str]]]:
+        montage_key = validate_roi_montage(montage)
+        if montage_key not in self._custom_roi_presets_by_montage:
+            self._custom_roi_presets_by_montage[montage_key] = self.manager.get_custom_roi_presets(montage_key)
+        return self._custom_roi_presets_by_montage[montage_key]
 
-        tabs.addTab(tab, "Oddball")
+    def _roi_preset_items(self, montage: str) -> list[tuple[str, list[str], bool]]:
+        montage_key = validate_roi_montage(montage)
+        items: list[tuple[str, list[str], bool]] = []
+        seen: set[str] = set()
+        for preset in default_roi_presets(montage_key):
+            items.append((preset.name, list(preset.electrodes), True))
+            seen.add(preset.name.casefold())
+        for name, electrodes in self._custom_roi_presets(montage_key):
+            if name.casefold() not in seen:
+                items.append((name, list(electrodes), False))
+                seen.add(name.casefold())
+        return items
+
+    def _refresh_roi_preset_combo(self) -> None:
+        montage = self._current_roi_montage()
+        self.roi_preset_combo.blockSignals(True)
+        self.roi_preset_combo.clear()
+        for name, electrodes, is_default in self._roi_preset_items(montage):
+            source = "Default" if is_default else "Custom"
+            self.roi_preset_combo.addItem(f"{name} ({source})", (name, electrodes, is_default))
+        self.roi_preset_combo.blockSignals(False)
+        self._update_roi_preset_preview()
+
+    def _selected_roi_preset(self) -> tuple[str, list[str], bool] | None:
+        preset = self.roi_preset_combo.currentData()
+        if not isinstance(preset, tuple) or len(preset) != 3:
+            return None
+        name, electrodes, is_default = preset
+        if not isinstance(name, str) or not isinstance(electrodes, list) or not isinstance(is_default, bool):
+            return None
+        return name, electrodes, is_default
+
+    def _set_roi_preset_status(self, text: str, variant: str = "info") -> None:
+        self.roi_preset_status.set_variant(variant)
+        self.roi_preset_status.set_text(text)
+        self.roi_preset_status.setVisible(bool(text))
+
+    def _update_roi_preset_preview(self) -> None:
+        preset = self._selected_roi_preset()
+        if preset is None:
+            self.roi_preset_electrodes_edit.clear()
+            return
+        _name, electrodes, _is_default = preset
+        self.roi_preset_electrodes_edit.setText(",".join(electrodes))
+
+    def _on_roi_montage_changed(self) -> None:
+        self._refresh_roi_preset_combo()
+        self._set_roi_preset_status("")
+
+    def _add_selected_roi_preset(self) -> None:
+        preset = self._selected_roi_preset()
+        if preset is None:
+            self._set_roi_preset_status("No ROI preset is selected.", "warning")
+            return
+        name, electrodes, _is_default = preset
+        result = self.roi_editor.add_or_update_entry(name, electrodes)
+        action = "Updated" if result == "updated" else "Added"
+        self._set_roi_preset_status(f"{action} {name}.", "success")
+
+    def _save_roi_editor_as_custom_presets(self) -> None:
+        montage = self._current_roi_montage()
+        default_names = default_roi_name_keys(montage)
+        custom_by_name = {
+            name.casefold(): (name, list(electrodes))
+            for name, electrodes in self._custom_roi_presets(montage)
+        }
+        changed = 0
+        for name, electrodes in self.roi_editor.get_pairs():
+            name_key = name.casefold()
+            if name_key in default_names:
+                continue
+            candidate = (name, list(electrodes))
+            if custom_by_name.get(name_key) != candidate:
+                changed += 1
+            custom_by_name[name_key] = candidate
+
+        self._custom_roi_presets_by_montage[montage] = list(custom_by_name.values())
+        self._refresh_roi_preset_combo()
+        if changed:
+            self._set_roi_preset_status("Custom ROI presets will be saved when you click Save.", "success")
+        else:
+            self._set_roi_preset_status("No new custom ROI presets found.", "info")
 
     def _on_tab_changed(self, index: int) -> None:
         if getattr(self, "_tab_change_guard", False):
@@ -420,14 +588,17 @@ class SettingsDialog(QDialog):
             return
 
         if not using_project:
-            self.manager.set("stim", "channel", validated_preproc.get("stim_channel", self.stim_edit.text()))
+            self.manager.set("stim", "channel", config.DEFAULT_STIM_CHANNEL)
         self.manager.set("analysis", "base_freq", self.base_freq_edit.text())
         self.manager.set("analysis", "oddball_freq", self.oddball_freq_edit.text())
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
         self.manager.set("analysis", "harmonic_metric", self.harm_metric_combo.currentText())
         self.manager.set("analysis", "harmonic_threshold", self.harm_threshold_edit.text())
+        self.manager.set_roi_montage(self._current_roi_montage())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
+        for montage_key, custom_presets in self._custom_roi_presets_by_montage.items():
+            self.manager.set_custom_roi_presets(montage_key, custom_presets)
         pre_keys = [
             ("preprocessing", "low_pass", "low_pass"),
             ("preprocessing", "high_pass", "high_pass"),
@@ -526,7 +697,7 @@ class SettingsDialog(QDialog):
         ]
         for edit, canonical in zip(self.preproc_edits, canonical_keys):
             values[canonical] = edit.text()
-        values["stim_channel"] = self.stim_edit.text()
+        values["stim_channel"] = config.DEFAULT_STIM_CHANNEL
         return values
 
 

@@ -27,6 +27,7 @@ from Main_App.gui.components import (
     SubsectionHeaderLabel,
     SurfaceSize,
     configure_window_surface,
+    fixed_width_font,
     make_action_button,
     make_form_layout,
 )
@@ -445,9 +446,7 @@ class PlotGeneratorUiSectionsMixin:
         self.log.setReadOnly(True)
         self.log.setMinimumHeight(95)
         self.log.setMaximumHeight(120)
-        font = self.log.font()
-        font.setBold(False)
-        self.log.setFont(font)
+        self.log.setFont(fixed_width_font())
         log_body_layout.addWidget(self.log)
 
         console_layout.addWidget(self.log_body)

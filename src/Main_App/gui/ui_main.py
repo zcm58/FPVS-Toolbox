@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPropertyAnimation, Qt
-from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -30,6 +29,7 @@ from .style_tokens import (
     EVENT_ID_COLUMN_WIDTH,
     PAGE_MARGIN,
     SECTION_GAP,
+    SIDEBAR_WIDTH,
     build_landing_page_stylesheet,
     build_main_page_stylesheet,
 )
@@ -37,6 +37,8 @@ from Main_App.gui.components import (
     ActionRow,
     SectionCard,
     SubsectionHeaderLabel,
+    apply_font_role,
+    fixed_width_font,
     make_action_button,
     make_form_layout,
 )
@@ -94,27 +96,20 @@ def init_ui(self) -> None:
 
     center_content = QWidget(welcome_card)
     center_content.setObjectName("landing_center_content")
-    center_content.setMinimumWidth(620)
-    center_content.setMaximumWidth(760)
+    center_content.setMinimumWidth(720)
+    center_content.setMaximumWidth(920)
     center_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     center_layout = QVBoxLayout(center_content)
     center_layout.setContentsMargins(0, 0, 0, 0)
     center_layout.setSpacing(18)
 
-    badge = QLabel("FPVS Toolbox", center_content)
-    badge.setObjectName("landing_badge")
-    badge.setAlignment(Qt.AlignCenter)
-
     title = QLabel("Welcome to FPVS Toolbox!", center_content)
     title.setObjectName("landing_title")
-    title_font = QFont()
-    title_font.setPointSize(28)
-    title_font.setBold(True)
-    title.setFont(title_font)
+    apply_font_role(title, "landing_title")
     title.setAlignment(Qt.AlignCenter)
     title.setWordWrap(False)
-    title.setMinimumHeight(58)
+    title.setMinimumHeight(84)
     title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     subtitle = QLabel(
@@ -125,7 +120,6 @@ def init_ui(self) -> None:
     subtitle.setAlignment(Qt.AlignCenter)
     subtitle.setWordWrap(True)
 
-    center_layout.addWidget(badge)
     center_layout.addWidget(title)
     center_layout.addWidget(subtitle)
 
@@ -139,12 +133,10 @@ def init_ui(self) -> None:
         variant="secondary",
         parent=welcome_card,
     )
-    button_font = QFont()
-    button_font.setPointSize(11)
     for btn in (self.btn_create_project, self.btn_open_project):
         btn.setProperty("landingAction", True)
-        btn.setFont(button_font)
-        btn.setFixedSize(220, 52)
+        apply_font_role(btn, "landing_action")
+        btn.setFixedSize(260, 66)
         btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
     btn_row = ActionRow(welcome_card, alignment=Qt.AlignRight, spacing=12)
@@ -179,6 +171,7 @@ def init_ui(self) -> None:
     self.sidebar = QWidget(page1)
     self.sidebar.setObjectName("sidebar")
     self.sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+    self.sidebar.setFixedWidth(SIDEBAR_WIDTH)
     row.addWidget(self.sidebar)
 
     # Right: vertical stack -> header on top, content below
@@ -413,7 +406,7 @@ def init_ui(self) -> None:
     self.text_log = QTextEdit(grp_log)
     self.text_log.setObjectName("log_surface")
     self.text_log.setReadOnly(True)
-    self.text_log.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+    self.text_log.setFont(fixed_width_font())
     lay_log.addWidget(self.text_log)
 
     splitter.addWidget(setup_panel)

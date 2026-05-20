@@ -17,7 +17,7 @@ import psutil
 
 # Qt / PySide6
 from PySide6.QtCore import QObject, QEvent, QTimer, Signal, Slot
-from PySide6.QtGui import QFont, QCloseEvent, QAction, QShowEvent  # noqa: F401
+from PySide6.QtGui import QCloseEvent, QAction, QShowEvent  # noqa: F401
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
@@ -193,13 +193,6 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self._processing_timer = QTimer(self)
         self._processing_timer.setSingleShot(False)
         self._processing_timer.timeout.connect(self._periodic_queue_check)
-
-        # Style header bar via objectName (preferred)
-        if hasattr(self, "lbl_currentProject"):
-            font = self.lbl_currentProject.font()
-            font.setPointSize(font.pointSize() + 2)
-            font.setWeight(QFont.DemiBold)
-            self.lbl_currentProject.setFont(font)
 
         # Progress bar baseline config
         if hasattr(self, "progress_bar"):
@@ -548,7 +541,11 @@ class MainWindow(QMainWindow, ProcessingMixin):
             project = getattr(self, "currentProject", None)
             if project is not None and hasattr(project, "project_root"):
                 project_root = str(project.project_root)
-            page = IndividualDetectabilityWindow(parent=self, project_root=project_root)
+            page = IndividualDetectabilityWindow(
+                parent=self.workspace_stack,
+                project_root=project_root,
+                embedded=True,
+            )
             page.setObjectName("embedded_individual_detectability_page")
             self.workspace_stack.addWidget(page)
             self._individual_detectability_page = page

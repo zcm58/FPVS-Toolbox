@@ -5,28 +5,30 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QDesktopServices
 from PySide6.QtWidgets import (
-    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
-    QStyle,
     QVBoxLayout,
     QWidget,
 )
-from Main_App.gui.icons import division_icon, individual_detectability_icon, settings_icon
-from Main_App.gui.widgets.labels import SubsectionHeaderLabel
+from Main_App.gui.icons import sidebar_icon
 from .style_tokens import (
     SIDEBAR_WIDTH,
     build_sidebar_stylesheet,
 )
+from Main_App.gui.typography import apply_font_role
 
 # ---- Tunables -------------------------------------------------------------
-ICON_PX = 18          # normalize all icons to the same visual size
-ROW_MIN_HEIGHT = 42   # total button height
-TEXT_BOX_PX = 22      # common vertical box for the text
+ICON_PX = 20          # normalize all icons to the same visual size
+ROW_MIN_HEIGHT = 46   # total button height
+TEXT_BOX_PX = 26      # common vertical box for the text
+SECTION_LABEL_MIN_HEIGHT = 28
+ROW_LEFT_PADDING = 6
+ROW_RIGHT_PADDING = 8
+ROW_ITEM_GAP = 7
 # ---------------------------------------------------------------------------
 
 DOCS_URL = "https://zcm58.github.io/FPVS-Toolbox-Repo/"  # MkDocs site for documentation
@@ -54,47 +56,19 @@ def white_icon(source: QIcon | str | Path) -> QIcon:
     return QIcon(tinted)
 
 
-def chart_icon() -> QIcon:
-    """
-    Try common theme bar-chart icons. If none exist, draw a white bar chart.
-    Avoids Qt standard pixmap fallback that appeared as a white square.
-    """
-    for name in ("view-statistics", "office-chart-bar", "insert-chart", "chart", "analytics"):
-        ic = QIcon.fromTheme(name)
-        if not ic.isNull():
-            return white_icon(ic)
-
-    # Draw fallback bars
-    pm = QPixmap(ICON_PX, ICON_PX)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing, True)
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor("white"))
-
-    margin = 2
-    gap = 3
-    bars = 3
-    total_gap = gap * (bars - 1)
-    bar_w = max(2, (ICON_PX - 2 * margin - total_gap) // bars)
-    heights = [int(ICON_PX * 0.45), int(ICON_PX * 0.7), int(ICON_PX * 0.9)]
-
-    x = margin
-    for h in heights:
-        y = ICON_PX - margin - h
-        p.drawRoundedRect(x, y, bar_w, h, 2, 2)
-        x += bar_w + gap
-
-    p.end()
-    return QIcon(pm)
-
-
 class SidebarButton(QWidget):
     """Custom sidebar button: card style, icon + text aligned visually in the center."""
     clicked = Signal()
 
-    def __init__(self, name: str, text: str, icon: QIcon | str | Path | None,
-                 parent: QWidget | None = None):
+    def __init__(
+        self,
+        name: str,
+        text: str,
+        icon: QIcon | str | Path | None,
+        parent: QWidget | None = None,
+        *,
+        center_content: bool = False,
+    ):
         super().__init__(parent)
         self.setObjectName("SidebarButton")
         self.setProperty("role", name)
@@ -107,16 +81,18 @@ class SidebarButton(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 8, 14, 8)
-        lay.setSpacing(10)
+        lay.setContentsMargins(ROW_LEFT_PADDING, 8, ROW_RIGHT_PADDING, 8)
+        lay.setSpacing(ROW_ITEM_GAP)
         lay.setAlignment(Qt.AlignVCenter)
 
         self.selection_bar = QFrame(self)
         self.selection_bar.setObjectName("SidebarSelectionBar")
         self.selection_bar.setFixedWidth(3)
         self.selection_bar.setFixedHeight(20)
-        self.selection_bar.setVisible(False)
+        self.selection_bar.setProperty("active", False)
         lay.addWidget(self.selection_bar, 0, Qt.AlignVCenter)
+        if center_content:
+            lay.addStretch(1)
 
         self.icon_lbl = QLabel(self)
         self.icon_lbl.setFixedSize(ICON_PX, ICON_PX)
@@ -126,20 +102,21 @@ class SidebarButton(QWidget):
         lay.addWidget(self.icon_lbl, 0, Qt.AlignVCenter)
 
         self.text_lbl = QLabel(text, self)
-        f = QFont()
-        f.setPointSize(f.pointSize() + 1)
-        f.setWeight(QFont.Medium)
-        self.text_lbl.setFont(f)
+        apply_font_role(self.text_lbl, "sidebar_item")
         self.text_lbl.setMinimumHeight(TEXT_BOX_PX)
         self.text_lbl.setMaximumHeight(TEXT_BOX_PX)
         self.text_lbl.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-        lay.addWidget(self.text_lbl, 1, Qt.AlignVCenter)
+        lay.addWidget(self.text_lbl, 0 if center_content else 1, Qt.AlignVCenter)
+        if center_content:
+            lay.addStretch(1)
 
     def set_selected(self, selected: bool) -> None:
         self.setProperty("selected", selected)
-        self.selection_bar.setVisible(selected)
+        self.selection_bar.setProperty("active", selected)
         self.style().unpolish(self)
         self.style().polish(self)
+        self.style().unpolish(self.selection_bar)
+        self.style().polish(self.selection_bar)
         self.update()
 
     def mouseReleaseEvent(self, e):
@@ -155,14 +132,30 @@ class SidebarButton(QWidget):
 
 
 def make_button(
-    layout: QVBoxLayout, name: str, text: str, icon: QIcon | str | Path | None, slot
+    layout: QVBoxLayout,
+    name: str,
+    text: str,
+    icon: QIcon | str | Path | None,
+    slot,
+    *,
+    center_content: bool = False,
 ) -> SidebarButton:
     """API-compatible factory that returns a SidebarButton."""
-    btn = SidebarButton(name, text, icon)
+    btn = SidebarButton(name, text, icon, center_content=center_content)
     if slot:
         btn.clicked.connect(slot)
     layout.addWidget(btn)
     return btn
+
+
+def make_section_label(text: str, parent: QWidget) -> QLabel:
+    label = QLabel(text, parent)
+    label.setObjectName("SidebarSectionLabel")
+    apply_font_role(label, "sidebar_section")
+    label.setMinimumHeight(SECTION_LABEL_MIN_HEIGHT)
+    label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+    return label
 
 
 def init_sidebar(self) -> None:
@@ -187,15 +180,13 @@ def init_sidebar(self) -> None:
     sidebar.setObjectName("sidebar")
     sidebar.setAttribute(Qt.WA_StyledBackground, True)
     sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-    sidebar.setMinimumWidth(SIDEBAR_WIDTH)
+    sidebar.setFixedWidth(SIDEBAR_WIDTH)
     sidebar.setContentsMargins(12, 12, 12, 12)
     sidebar.setStyleSheet(build_sidebar_stylesheet())
 
     lay = QVBoxLayout(sidebar)
     lay.setContentsMargins(0, 6, 0, 6)
     lay.setSpacing(4)
-
-    app_style = QApplication.instance().style() if QApplication.instance() else self.style()
 
     def make_divider(parent: QWidget, object_name: str = "sidebar_divider") -> QFrame:
         divider = QFrame(parent)
@@ -210,7 +201,14 @@ def init_sidebar(self) -> None:
     primary_layout.setContentsMargins(0, 0, 0, 0)
     primary_layout.setSpacing(4)
 
-    home_btn = make_button(primary_layout, "btn_home", "Home", "go-home", self.show_home_page)
+    home_btn = make_button(
+        primary_layout,
+        "btn_home",
+        "Home",
+        sidebar_icon("home", ICON_PX),
+        self.show_home_page,
+        center_content=True,
+    )
     home_btn.setProperty("homeEntry", True)
     self.sidebar_home_button = home_btn
 
@@ -218,8 +216,7 @@ def init_sidebar(self) -> None:
     primary_layout.addWidget(make_divider(primary_group, "sidebar_home_divider"))
     primary_layout.addSpacing(8)
 
-    tools_label = SubsectionHeaderLabel("Workspace Tools", primary_group)
-    tools_label.setObjectName("SidebarSectionLabel")
+    tools_label = make_section_label("Workspace Tools", primary_group)
     primary_layout.addWidget(tools_label)
     self.sidebar_tools_label = tools_label
 
@@ -233,31 +230,30 @@ def init_sidebar(self) -> None:
         tools_layout,
         "btn_data",
         "Statistical Analysis",
-        app_style.standardIcon(QStyle.SP_ComputerIcon),
+        sidebar_icon("stats", ICON_PX),
         self.open_stats_analyzer,
     )
 
-    # SNR Plots: theme icon or drawn bar chart (no external files)
-    make_button(tools_layout, "btn_graphs", "SNR Plots", chart_icon(), self.open_plot_generator)
+    make_button(tools_layout, "btn_graphs", "SNR Plots", sidebar_icon("chart", ICON_PX), self.open_plot_generator)
     make_button(
         tools_layout,
         "btn_ratio",
         "Ratio Calculator",
-        division_icon(ICON_PX),
+        sidebar_icon("ratio", ICON_PX),
         self.open_ratio_calculator,
     )
     make_button(
         tools_layout,
         "btn_individual_detectability",
         "Individual Detectability",
-        individual_detectability_icon(ICON_PX),
+        sidebar_icon("detectability", ICON_PX),
         self.open_individual_detectability,
     )
     image_btn = make_button(
         tools_layout,
         "btn_image",
         "Image Resizer",
-        "camera-photo",
+        sidebar_icon("image", ICON_PX),
         self.open_image_resizer,
     )
     self.sidebar_image_button = image_btn
@@ -265,7 +261,7 @@ def init_sidebar(self) -> None:
         tools_layout,
         "btn_epoch",
         "Epoch Averaging",
-        "view-refresh",
+        sidebar_icon("epoch", ICON_PX),
         self.open_epoch_averaging,
     )
     self.sidebar_epoch_button = epoch_btn
@@ -289,12 +285,11 @@ def init_sidebar(self) -> None:
     utilities_layout.addWidget(make_divider(utilities_group))
     utilities_layout.addSpacing(8)
 
-    utility_label = SubsectionHeaderLabel("Utilities", utilities_group)
-    utility_label.setObjectName("SidebarSectionLabel")
+    utility_label = make_section_label("Utilities", utilities_group)
     utilities_layout.addWidget(utility_label)
     self.sidebar_utilities_label = utility_label
 
-    make_button(utilities_layout, "btn_settings", "Settings", settings_icon(ICON_PX), self.open_settings_window)
+    make_button(utilities_layout, "btn_settings", "Settings", sidebar_icon("settings", ICON_PX), self.open_settings_window)
 
     def _open_docs() -> None:
         QDesktopServices.openUrl(QUrl(DOCS_URL))
@@ -303,14 +298,14 @@ def init_sidebar(self) -> None:
         utilities_layout,
         "btn_info",
         "Information",
-        app_style.standardIcon(QStyle.SP_MessageBoxInformation),
+        sidebar_icon("info", ICON_PX),
         _open_docs,
     )
     make_button(
         utilities_layout,
         "btn_help",
         "Help",
-        app_style.standardIcon(QStyle.SP_DialogHelpButton),
+        sidebar_icon("help", ICON_PX),
         self.show_about_dialog,
     )
 

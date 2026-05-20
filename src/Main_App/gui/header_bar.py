@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
+from Main_App.gui.typography import apply_font_role
 from .style_tokens import build_header_bar_stylesheet
 
 class HeaderBar(QWidget):
@@ -20,10 +20,7 @@ class HeaderBar(QWidget):
         layout.setSpacing(0)
 
         self.titleLabel = QLabel(title, self)
-        font = QFont()
-        font.setPointSize(12)
-        font.setWeight(QFont.DemiBold)
-        self.titleLabel.setFont(font)
+        apply_font_role(self.titleLabel, "project_title")
 
         layout.addWidget(self.titleLabel)
         layout.addStretch(1)

@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QLabel, QWidget
 
 from Main_App.gui.style_tokens import TEXT_PRIMARY
+from Main_App.gui.typography import apply_font_role, css_font_size, css_font_weight
 
-SUBSECTION_HEADER_POINT_DELTA = 1
-SUBSECTION_HEADER_WEIGHT = QFont.Bold
-SUBSECTION_HEADER_CSS_WEIGHT = 700
 SUBSECTION_HEADER_COLOR = TEXT_PRIMARY
 SUBSECTION_HEADER_PADDING = 0
 
@@ -20,7 +17,8 @@ def build_subsection_header_stylesheet() -> str:
     return f"""
         QLabel[subsectionHeader="true"] {{
             color: {SUBSECTION_HEADER_COLOR};
-            font-weight: {SUBSECTION_HEADER_CSS_WEIGHT};
+            font-size: {css_font_size("subsection_header")};
+            font-weight: {css_font_weight("subsection_header")};
             padding: {SUBSECTION_HEADER_PADDING};
         }}
     """
@@ -39,9 +37,4 @@ class SubsectionHeaderLabel(QLabel):
         super().__init__(text, parent)
         self.setProperty("subsectionHeader", True)
         self.setAlignment(alignment)
-        font = self.font()
-        font.setWeight(SUBSECTION_HEADER_WEIGHT)
-        point_size = font.pointSize()
-        if point_size > 0:
-            font.setPointSize(point_size + SUBSECTION_HEADER_POINT_DELTA)
-        self.setFont(font)
+        apply_font_role(self, "subsection_header")

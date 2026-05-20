@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from config import FPVS_TOOLBOX_VERSION
 from Main_App.gui.components import make_action_button
 from Main_App.gui.components.messages import confirm, show_warning
+from Main_App.gui.typography import apply_font_role
 from Main_App.updates.downloader import download_installer
 from Main_App.updates.github_releases import check_for_updates
 from Main_App.updates.installer import launch_installer
@@ -104,7 +105,7 @@ class UpdateDialog(QDialog):
 
         self.title_label = QLabel("FPVS Toolbox updates", self)
         self.title_label.setObjectName("update_dialog_title")
-        self.title_label.setStyleSheet("font-size: 16px; font-weight: 700;")
+        apply_font_role(self.title_label, "update_title")
         layout.addWidget(self.title_label)
 
         self.status_label = QLabel("Ready to check for updates.", self)

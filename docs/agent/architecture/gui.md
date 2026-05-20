@@ -16,6 +16,9 @@ Primary paths:
   animation, and inline status widgets.
 - `src/Main_App/gui/theme.py`: shared FPVS light palette and stylesheet helpers
   used by the main app and tool windows.
+- `src/Main_App/gui/typography.py`: canonical font family, role sizes, font
+  weights, monospace font, and QSS font helpers used by the main app,
+  component layer, and migrated tool windows.
 - `src/Main_App/gui/op_guard.py`: non-blocking re-entrancy guard for
   GUI-triggered operations.
 - `src/Main_App/gui/project_workflows.py`: project open/create/load/save GUI
@@ -95,20 +98,28 @@ from Main_App.gui.components import SectionCard, make_action_button
 
 Prefer `Main_App.gui.components` for FPVS-specific shells, action buttons,
 action rows, section cards, subsection headers, path rows, status banners,
-message helpers, and window/dialog sizing. `SectionCard` titles and local
-subsection headings must use `SubsectionHeaderLabel` so font, size, color, and
-weight stay editable from one shared component/style contract. Direct imports from
-`Main_App.gui.widgets` should stay inside the component layer or existing
-compatibility code unless a surface has a specific reason to depend on a
-lower-level widget implementation.
+message helpers, window/dialog sizing, and typography helpers. `SectionCard`
+titles and local subsection headings must use `SubsectionHeaderLabel` so font,
+size, color, and weight stay editable from one shared component/style contract.
+Direct imports from `Main_App.gui.widgets` should stay inside the component
+layer or existing compatibility code unless a surface has a specific reason to
+depend on a lower-level widget implementation.
+
+Typography presentation is owned by `src/Main_App/gui/typography.py` and
+re-exported through `Main_App.gui.components`. To change the global app font
+family, base font size, role-specific sizes, role weights, tab fonts, sidebar
+fonts, header fonts, action-button emphasis, or fixed-width log font, edit the
+typography role tokens and helpers there. Runtime surfaces should use
+`apply_font_role()`, `font_for_role()`, or `fixed_width_font()` instead of
+locally constructing `QFont`, calling `setPointSize()`, or embedding
+hard-coded `font-size`/`font-weight` QSS. Style builders such as `theme.py`,
+`style_tokens.py`, and `labels.py` should consume typography helpers rather
+than own independent font values.
 
 Subsection header presentation is owned by
-`src/Main_App/gui/widgets/labels.py` and re-exported through
-`Main_App.gui.components.SubsectionHeaderLabel`. To change subsection-header
-font weight, size, color, padding, or the `subsectionHeader` stylesheet
-contract, edit the constants and `build_subsection_header_stylesheet()` in
-`labels.py` rather than patching individual tool windows or local QSS blocks.
-Runtime surfaces should import `SubsectionHeaderLabel` from
+`Main_App.gui.typography` for size/weight and
+`src/Main_App/gui/widgets/labels.py` for the `subsectionHeader` widget/QSS
+selector contract. Runtime surfaces should import `SubsectionHeaderLabel` from
 `Main_App.gui.components`.
 
 `Main_App.gui.components.__all__` is the public component export contract.

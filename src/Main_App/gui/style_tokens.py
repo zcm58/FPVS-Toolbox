@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from Main_App.gui.typography import css_font_size, css_font_weight
+
 ACCENT_COLOR = "#0F6CBD"
 ACCENT_COLOR_HOVER = "#0D5F9D"
 ACCENT_COLOR_PRESSED = "#0A4978"
@@ -54,7 +56,7 @@ SECTION_GRID_GAP = 8
 COMPACT_SECTION_MAX_HEIGHT = 170
 CORNER_RADIUS = 9
 
-SIDEBAR_WIDTH = 216
+SIDEBAR_WIDTH = 244
 BROWSE_BUTTON_WIDTH = 156
 EVENT_ID_COLUMN_WIDTH = 88
 EVENT_REMOVE_BUTTON_SIZE = 24
@@ -183,7 +185,7 @@ def build_main_page_stylesheet() -> str:
             background-color: {ACCENT_COLOR};
             border-color: {ACCENT_COLOR};
             color: white;
-            font-weight: 600;
+            font-weight: {css_font_weight("button_strong")};
             padding: 8px 18px;
         }}
 
@@ -245,7 +247,7 @@ def build_main_page_stylesheet() -> str:
             background: {DANGER_COLOR};
             border-color: {DANGER_COLOR};
             color: white;
-            font-weight: 600;
+            font-weight: {css_font_weight("button_strong")};
         }}
 
         QPushButton[variant="danger"]:hover {{
@@ -289,7 +291,8 @@ def build_main_page_stylesheet() -> str:
 
         #event_map_header QLabel {{
             color: {TEXT_SECONDARY};
-            font-weight: 700;
+            font-size: {css_font_size("subsection_header")};
+            font-weight: {css_font_weight("subsection_header")};
             padding: 0 0 3px 0;
         }}
 
@@ -360,12 +363,12 @@ def build_sidebar_stylesheet() -> str:
         }}
 
         #SidebarSectionLabel {{
-            color: rgba(255, 255, 255, 0.62);
+            color: rgba(255, 255, 255, 0.76);
             padding-left: 14px;
-            padding-top: 4px;
-            padding-bottom: 4px;
-            font-size: 11px;
-            font-weight: 600;
+            padding-top: 8px;
+            padding-bottom: 6px;
+            font-size: {css_font_size("sidebar_section")};
+            font-weight: {css_font_weight("sidebar_section")};
         }}
 
         #sidebar_primary_group,
@@ -397,6 +400,8 @@ def build_sidebar_stylesheet() -> str:
 
         #SidebarButton QLabel {{
             color: rgba(255, 255, 255, 0.88);
+            font-size: {css_font_size("sidebar_item")};
+            font-weight: {css_font_weight("sidebar_item")};
         }}
 
         #SidebarButton[selected="true"] QLabel {{
@@ -404,6 +409,11 @@ def build_sidebar_stylesheet() -> str:
         }}
 
         #SidebarSelectionBar {{
+            background-color: transparent;
+            border-radius: 2px;
+        }}
+
+        #SidebarSelectionBar[active="true"] {{
             background-color: {ACCENT_COLOR};
             border-radius: 2px;
         }}
@@ -425,6 +435,8 @@ def build_header_bar_stylesheet() -> str:
 
         #HeaderBar QLabel {{
             color: white;
+            font-size: {css_font_size("project_title")};
+            font-weight: {css_font_weight("project_title")};
         }}
     """
 
@@ -446,12 +458,10 @@ def build_landing_page_stylesheet() -> str:
             border-radius: 14px;
         }}
 
-        #landing_badge {{
-            color: {TEXT_SECONDARY};
-        }}
-
         #landing_title {{
             color: {TEXT_PRIMARY};
+            font-size: {css_font_size("landing_title")};
+            font-weight: {css_font_weight("landing_title")};
         }}
 
         #landing_subtitle {{
@@ -463,7 +473,8 @@ def build_landing_page_stylesheet() -> str:
             border: 1px solid {BORDER_COLOR};
             border-radius: 8px;
             color: {TEXT_PRIMARY};
-            font-weight: 600;
+            font-size: {css_font_size("landing_action")};
+            font-weight: {css_font_weight("landing_action")};
         }}
 
         QPushButton[landingAction="true"]:hover {{

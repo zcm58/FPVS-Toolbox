@@ -3,88 +3,117 @@ from __future__ import annotations
 from functools import lru_cache
 import math
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QPainter, QPalette, QPixmap, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap, QPen
 from PySide6.QtWidgets import QApplication
+
+from Main_App.gui.typography import font_for_role
+
+
+def _icon_color() -> QColor:
+    app = QApplication.instance()
+    return app.palette().color(QPalette.ButtonText) if app else QColor("white")
+
+
+def _stroke(size: int) -> QPen:
+    pen = QPen(_icon_color())
+    pen.setWidth(max(2, round(size * 0.1)))
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    return pen
+
+
+def _draw_dot(painter: QPainter, center: QPointF, radius: float) -> None:
+    painter.setBrush(_icon_color())
+    painter.drawEllipse(center, radius, radius)
+    painter.setBrush(Qt.NoBrush)
+
+
+@lru_cache(maxsize=32)
+def sidebar_icon(kind: str, size: int = 20) -> QIcon:
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(_stroke(size))
+    painter.setBrush(Qt.NoBrush)
+
+    if kind == "home":
+        painter.drawLine(QPointF(size * 0.18, size * 0.48), QPointF(size * 0.50, size * 0.20))
+        painter.drawLine(QPointF(size * 0.50, size * 0.20), QPointF(size * 0.82, size * 0.48))
+        painter.drawRoundedRect(QRectF(size * 0.27, size * 0.45, size * 0.46, size * 0.38), 2, 2)
+    elif kind == "stats":
+        painter.drawRoundedRect(QRectF(size * 0.18, size * 0.22, size * 0.64, size * 0.46), 2, 2)
+        painter.drawLine(QPointF(size * 0.50, size * 0.68), QPointF(size * 0.50, size * 0.82))
+        painter.drawLine(QPointF(size * 0.35, size * 0.82), QPointF(size * 0.65, size * 0.82))
+    elif kind == "chart":
+        for index, height in enumerate((0.30, 0.52, 0.72)):
+            x = size * (0.26 + index * 0.22)
+            painter.drawLine(QPointF(x, size * 0.78), QPointF(x, size * (0.78 - height)))
+    elif kind == "ratio":
+        painter.drawLine(QPointF(size * 0.28, size * 0.50), QPointF(size * 0.72, size * 0.50))
+        _draw_dot(painter, QPointF(size * 0.50, size * 0.30), size * 0.055)
+        _draw_dot(painter, QPointF(size * 0.50, size * 0.70), size * 0.055)
+    elif kind == "detectability":
+        center = QPointF(size * 0.50, size * 0.50)
+        painter.drawEllipse(center, size * 0.34, size * 0.34)
+        painter.drawEllipse(center, size * 0.16, size * 0.16)
+        painter.drawLine(QPointF(size * 0.50, size * 0.14), QPointF(size * 0.50, size * 0.28))
+        painter.drawLine(QPointF(size * 0.50, size * 0.72), QPointF(size * 0.50, size * 0.86))
+        painter.drawLine(QPointF(size * 0.14, size * 0.50), QPointF(size * 0.28, size * 0.50))
+        painter.drawLine(QPointF(size * 0.72, size * 0.50), QPointF(size * 0.86, size * 0.50))
+    elif kind == "image":
+        painter.drawRoundedRect(QRectF(size * 0.18, size * 0.24, size * 0.64, size * 0.52), 2, 2)
+        painter.drawEllipse(QPointF(size * 0.38, size * 0.40), size * 0.055, size * 0.055)
+        painter.drawLine(QPointF(size * 0.28, size * 0.68), QPointF(size * 0.43, size * 0.55))
+        painter.drawLine(QPointF(size * 0.43, size * 0.55), QPointF(size * 0.55, size * 0.64))
+        painter.drawLine(QPointF(size * 0.55, size * 0.64), QPointF(size * 0.68, size * 0.48))
+    elif kind == "epoch":
+        painter.drawArc(QRectF(size * 0.20, size * 0.20, size * 0.60, size * 0.60), 35 * 16, 285 * 16)
+        painter.drawLine(QPointF(size * 0.76, size * 0.24), QPointF(size * 0.80, size * 0.42))
+        painter.drawLine(QPointF(size * 0.76, size * 0.24), QPointF(size * 0.59, size * 0.27))
+    elif kind == "settings":
+        center = QPointF(size * 0.50, size * 0.50)
+        painter.drawEllipse(center, size * 0.22, size * 0.22)
+        painter.drawEllipse(center, size * 0.075, size * 0.075)
+        for index in range(8):
+            angle = index * math.pi / 4
+            inner = size * 0.31
+            outer = size * 0.42
+            painter.drawLine(
+                QPointF(center.x() + math.cos(angle) * inner, center.y() + math.sin(angle) * inner),
+                QPointF(center.x() + math.cos(angle) * outer, center.y() + math.sin(angle) * outer),
+            )
+    elif kind == "info":
+        center = QPointF(size * 0.50, size * 0.50)
+        painter.drawEllipse(center, size * 0.34, size * 0.34)
+        _draw_dot(painter, QPointF(size * 0.50, size * 0.34), size * 0.045)
+        painter.drawLine(QPointF(size * 0.50, size * 0.46), QPointF(size * 0.50, size * 0.66))
+    elif kind == "help":
+        center = QPointF(size * 0.50, size * 0.50)
+        painter.drawEllipse(center, size * 0.34, size * 0.34)
+        font = font_for_role("icon_glyph", QApplication.font() if QApplication.instance() else None)
+        font.setPixelSize(max(1, int(size * 0.58)))
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, "?")
+    else:
+        painter.drawEllipse(QPointF(size * 0.50, size * 0.50), size * 0.32, size * 0.32)
+
+    painter.end()
+    return QIcon(pixmap)
 
 
 @lru_cache(maxsize=4)
 def division_icon(size: int = 16) -> QIcon:
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    painter.setPen(QApplication.palette().color(QPalette.ButtonText))
-
-    font = QApplication.font()
-    font.setBold(True)
-    font.setPixelSize(max(1, int(size * 0.9)))
-    painter.setFont(font)
-    painter.drawText(pixmap.rect(), Qt.AlignCenter, "÷")
-    painter.end()
-
-    return QIcon(pixmap)
+    return sidebar_icon("ratio", size)
 
 
 @lru_cache(maxsize=4)
 def individual_detectability_icon(size: int = 16) -> QIcon:
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    color = QApplication.palette().color(QPalette.ButtonText)
-    pen = QPen(color)
-    pen.setWidth(max(1, int(size * 0.08)))
-    painter.setPen(pen)
-
-    center = pixmap.rect().center()
-    radius = int(size * 0.42)
-    painter.drawEllipse(center, radius, radius)
-    painter.drawEllipse(center, int(radius * 0.55), int(radius * 0.55))
-    painter.drawLine(center.x(), int(size * 0.1), center.x(), int(size * 0.9))
-    painter.drawLine(int(size * 0.1), center.y(), int(size * 0.9), center.y())
-
-    font = QApplication.font()
-    font.setBold(True)
-    font.setPixelSize(max(1, int(size * 0.45)))
-    painter.setFont(font)
-    painter.drawText(pixmap.rect(), Qt.AlignCenter, "ID")
-    painter.end()
-
-    return QIcon(pixmap)
+    return sidebar_icon("detectability", size)
 
 
 @lru_cache(maxsize=4)
 def settings_icon(size: int = 16) -> QIcon:
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    color = QApplication.palette().color(QPalette.ButtonText)
-    pen = QPen(color)
-    pen.setWidth(max(1, int(size * 0.1)))
-    pen.setCapStyle(Qt.RoundCap)
-    painter.setPen(pen)
-
-    center = pixmap.rect().center()
-    outer_radius = size * 0.33
-    inner_radius = size * 0.13
-    tooth_inner = size * 0.38
-    tooth_outer = size * 0.48
-
-    painter.drawEllipse(center, int(outer_radius), int(outer_radius))
-    painter.drawEllipse(center, int(inner_radius), int(inner_radius))
-
-    for index in range(8):
-        angle = index * math.pi / 4
-        x1 = center.x() + math.cos(angle) * tooth_inner
-        y1 = center.y() + math.sin(angle) * tooth_inner
-        x2 = center.x() + math.cos(angle) * tooth_outer
-        y2 = center.y() + math.sin(angle) * tooth_outer
-        painter.drawLine(int(x1), int(y1), int(x2), int(y2))
-
-    painter.end()
-    return QIcon(pixmap)
+    return sidebar_icon("settings", size)
