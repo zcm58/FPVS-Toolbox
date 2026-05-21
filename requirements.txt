@@ -60,7 +60,7 @@ threadpoolctl==3.6.0
 tqdm==4.67.1
 typing_extensions==4.14.0
 tzdata==2025.2
-urllib3==2.5.0
+urllib3==2.6.3
 vtk==9.4.2
 xlsxwriter==3.2.5
 xlwings==0.33.15
