@@ -157,3 +157,77 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     assert loaded.get_data().shape == raw.get_data().shape
     assert loaded_audit == audit_before
     assert n_rejected == 2
+
+
+def test_preprocessed_cache_prunes_old_entries_for_same_source(tmp_path: Path) -> None:
+    info = mne.create_info(["Cz", "Status"], sfreq=8.0, ch_types=["eeg", "stim"])
+    raw = mne.io.RawArray(np.zeros((2, 16), dtype=float), info, verbose=False)
+    fake_bdf = tmp_path / "fake.bdf"
+    fake_bdf.write_bytes(b"raw source")
+    project_root = tmp_path / "project"
+    base_settings = {
+        "stim_channel": "Status",
+        "ref_channel1": "EXG1",
+        "ref_channel2": "EXG2",
+        "downsample_rate": 8,
+        "enable_preprocessed_cache": True,
+    }
+    old_settings = dict(base_settings, high_pass=0.1)
+    new_settings = dict(base_settings, high_pass=1.0)
+
+    assert process_runner._store_preprocessed_cache(
+        raw=raw,
+        file_path=fake_bdf,
+        settings=old_settings,
+        project_root=project_root,
+        mne_module=mne,
+        audit_before={"file": "fake.bdf", "version": "old"},
+        n_rejected=1,
+    ) == "stored"
+    old_payload = process_runner._preproc_cache_payload(
+        fake_bdf,
+        old_settings,
+        mne_version=str(mne.__version__),
+    )
+    old_raw_path, old_meta_path = process_runner._preproc_cache_paths(
+        project_root,
+        fake_bdf,
+        process_runner._preproc_cache_key(old_payload),
+    )
+
+    assert old_raw_path.exists()
+    assert old_meta_path.exists()
+
+    assert process_runner._store_preprocessed_cache(
+        raw=raw,
+        file_path=fake_bdf,
+        settings=new_settings,
+        project_root=project_root,
+        mne_module=mne,
+        audit_before={"file": "fake.bdf", "version": "new"},
+        n_rejected=2,
+    ) == "stored"
+    new_payload = process_runner._preproc_cache_payload(
+        fake_bdf,
+        new_settings,
+        mne_version=str(mne.__version__),
+    )
+    new_raw_path, new_meta_path = process_runner._preproc_cache_paths(
+        project_root,
+        fake_bdf,
+        process_runner._preproc_cache_key(new_payload),
+    )
+
+    assert not old_raw_path.exists()
+    assert not old_meta_path.exists()
+    assert new_raw_path.exists()
+    assert new_meta_path.exists()
+    _, loaded_audit, n_rejected, status = process_runner._load_preprocessed_cache(
+        file_path=fake_bdf,
+        settings=new_settings,
+        project_root=project_root,
+        mne_module=mne,
+    )
+    assert status == "hit"
+    assert loaded_audit == {"file": "fake.bdf", "version": "new"}
+    assert n_rejected == 2

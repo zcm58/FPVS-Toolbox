@@ -28,7 +28,9 @@ FPVS Toolbox uses a strict hybrid settings model:
   root at `.fpvs_cache/preprocessed/`. Cache keys include source file path,
   size, mtime, MNE version, loader profile, and preprocessing settings. Cache
   files are generated artifacts, not project configuration, and are ignored by
-  git when a project root is inside the repo.
+  git when a project root is inside the repo. After a new preprocessed cache
+  entry is written, older cache entries whose metadata points at the same source
+  file are pruned.
 
 Rules:
 

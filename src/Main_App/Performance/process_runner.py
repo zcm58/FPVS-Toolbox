@@ -218,6 +218,53 @@ def _preproc_cache_paths(project_root: Path, file_path: Path, cache_key: str) ->
     return raw_path, meta_path
 
 
+def _raw_cache_path_for_meta(meta_path: Path) -> Path:
+    return meta_path.with_name(f"{meta_path.stem}_raw.fif")
+
+
+def _prune_stale_preprocessed_cache(
+    *,
+    cache_dir: Path,
+    source_path: str,
+    keep_meta_path: Path,
+) -> int:
+    if not cache_dir.exists():
+        return 0
+
+    pruned = 0
+    for meta_path in cache_dir.glob("*.json"):
+        if meta_path == keep_meta_path:
+            continue
+        try:
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(
+                "preproc_cache_prune_skip_unreadable_meta meta=%s error=%s",
+                meta_path,
+                exc,
+            )
+            continue
+
+        payload = metadata.get("payload")
+        if not isinstance(payload, dict) or payload.get("source_path") != source_path:
+            continue
+
+        raw_path = _raw_cache_path_for_meta(meta_path)
+        try:
+            if raw_path.exists():
+                raw_path.unlink()
+            meta_path.unlink()
+            pruned += 1
+        except OSError as exc:
+            logger.warning(
+                "preproc_cache_prune_failed meta=%s raw=%s error=%s",
+                meta_path,
+                raw_path,
+                exc,
+            )
+    return pruned
+
+
 def _load_preprocessed_cache(
     *,
     file_path: Path,
@@ -283,6 +330,7 @@ def _store_preprocessed_cache(
     cache_key = _preproc_cache_key(payload)
     raw_path, meta_path = _preproc_cache_paths(project_root, file_path, cache_key)
     raw_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_meta_path = meta_path.with_suffix(".json.tmp")
 
     try:
         raw.save(str(raw_path), overwrite=True, verbose=False)
@@ -292,14 +340,28 @@ def _store_preprocessed_cache(
             "audit_before": audit_before,
             "n_rejected": int(n_rejected),
         }
-        tmp_meta_path = meta_path.with_suffix(".json.tmp")
         tmp_meta_path.write_text(
             json.dumps(metadata, sort_keys=True, default=str),
             encoding="utf-8",
         )
         os.replace(tmp_meta_path, meta_path)
+        pruned = _prune_stale_preprocessed_cache(
+            cache_dir=raw_path.parent,
+            source_path=str(file_path.resolve()),
+            keep_meta_path=meta_path,
+        )
+        if pruned:
+            logger.info(
+                "preproc_cache_pruned file=%s count=%d",
+                file_path.name,
+                pruned,
+            )
         return "stored"
     except Exception as exc:
+        try:
+            tmp_meta_path.unlink(missing_ok=True)  # type: ignore[arg-type]
+        except OSError:
+            pass
         logger.warning(
             "preproc_cache_write_failed file=%s cache=%s error=%s",
             file_path.name,
