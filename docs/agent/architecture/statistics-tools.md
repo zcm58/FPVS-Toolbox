@@ -23,7 +23,9 @@ Stats grouping:
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
 - `reporting/summary/`: focused rule-based summary builders split by models, frame/file loading, ANOVA, posthoc, and mixed-model language. `reporting/summary_utils.py` is a compatibility facade only.
 - `common/`: shared dataclasses, enums, constants, and lightweight window types.
-- `io/`: Excel/dataframe I/O helpers.
+- `io/`: Excel/dataframe I/O helpers. `stats_ready_export.py` owns the optional
+  `Stats_Ready_Summed_BCA.xlsx` workbook builder/writer used for external
+  JASP, R/RStudio, and SAS workflows.
 
 Rules:
 
@@ -32,6 +34,10 @@ Rules:
 - Keep the public Stats entry point stable: `Tools.Stats.StatsWindow`.
 - New active code should import from `Tools.Stats.<functional area>`, not removed `Tools.Stats.Legacy` or `Tools.Stats.PySide6` paths.
 - New summary-reporting code should import from `Tools.Stats.reporting.summary`; keep `Tools.Stats.reporting.summary_utils` as a compatibility facade.
+- Stats-ready exports must stay explicit and additive. Keep
+  `Export Stats-Ready Workbook` as a distinct action, reuse the active Summed
+  BCA DV facade, preserve group labels and `subject_uid`, and surface missing
+  metadata or fallback policy instead of silently changing values.
 - Add new analysis logic under the functional subpackage that owns it, and expose stable caller-facing surfaces through the package facade when needed.
 - Run `python .agents/scripts/audit/agent_audit.py --check stats-structure` after Stats structural changes; it flags removed namespace usage and tkinter imports in active Stats code.
 - Run `python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility` after Stats reporting changes; it flags oversized reporting modules and large function/class spans.
@@ -41,6 +47,7 @@ Useful tests:
 
 ```powershell
 python -m pytest tests/stats/pipeline/test_stats_pipeline_smoke.py tests/stats/gui/test_stats_layout_smoke.py -q
+python -m pytest tests/stats/io/test_stats_ready_export.py -q
 python -m pytest tests/stats/analysis/test_summary_utils_mixed_model.py tests/stats/analysis/test_summary_utils_posthoc_directions.py tests/stats/reporting/test_lmm_reporting_exports.py -q
 python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py tests/plot_generator/test_plot_generator_gui.py -q
 ```

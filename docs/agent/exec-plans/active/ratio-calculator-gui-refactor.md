@@ -10,10 +10,15 @@ for that slice now live in
 `RatioConditionSelectionMixin`, while `RatioCalculatorWindow` remains the
 public PySide6 window in `src/Tools/Ratio_Calculator/gui.py`.
 
+Slice 6, run workflow and status/log UX, is also complete. Run lifecycle,
+status, log, output-opening, and worker-cleanup helpers now live in
+`src/Tools/Ratio_Calculator/gui_run_workflow.py` on `RatioRunWorkflowMixin`.
+
 ## Target
 
 - `src/Tools/Ratio_Calculator/gui.py`
 - `src/Tools/Ratio_Calculator/gui_condition_selection.py`
+- `src/Tools/Ratio_Calculator/gui_run_workflow.py`
 
 ## Summary
 

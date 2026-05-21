@@ -92,6 +92,7 @@ Do not use these installed skills for normal FPVS Toolbox work:
 - Shared GUI surface migration is recorded in `docs/agent/exec-plans/completed/shared-gui-surface-migration.md`; read it before continuing tool-window migration patterns or validating the Ratio Calculator, Epoch/Average Preprocessing, Stats UI, Plot Generator, or Main App shell component adoption.
 - Shared GUI component-layer consolidation is recorded in `docs/agent/exec-plans/completed/shared-gui-component-layer-updated.md`; read it before changing reusable GUI primitives, shared action/message/path/status patterns, or migrating tool windows to `Main_App.gui.components`.
 - Auto-update installer workflow implementation is recorded in `docs/agent/exec-plans/completed/auto-update-installer-workflow.md`; read it before changing `Main_App.updates`, `update_dialog.py`, `update_manager.py`, or packaging release scripts.
+- Stats-ready pipeline export implementation is recorded in `docs/agent/exec-plans/completed/stats-ready-pipeline-exports.md`; read it before changing `Tools.Stats.io.stats_ready_export`, the `Export Stats-Ready Workbook` GUI action, Stats export workers, or external-statistics user docs.
 - Read `docs/agent/exec-plans/completed/main-app-refactor.md` only when historical Main App refactor context is needed.
 - Read `docs/agent/exec-plans/completed/main-app-folder-retirement.md` only when historical folder-retirement context is needed for retired `Legacy_App` or `PySide6_App` paths.
 - Keep active plans current with phase status, touched areas, doc updates, verification commands, and decisions.
@@ -113,6 +114,7 @@ Do not use these installed skills for normal FPVS Toolbox work:
 - Plot generator: `python -m pytest tests/plot_generator/test_plot_generator_gui.py -q`
 - Ratio calculator: `python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py -q`
 - Stats GUI/pipeline: `python -m pytest tests/stats/gui/test_stats_layout_smoke.py tests/stats/pipeline/test_stats_pipeline_smoke.py -q`
+- Stats-ready workbook export: `python -m pytest tests/stats/io/test_stats_ready_export.py -q`
 - Stats reporting summaries: `python -m pytest tests/stats/analysis/test_summary_utils_mixed_model.py tests/stats/analysis/test_summary_utils_posthoc_directions.py tests/stats/reporting/test_lmm_reporting_exports.py -q`
 
 ## Reading Rule
