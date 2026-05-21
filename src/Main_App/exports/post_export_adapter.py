@@ -19,6 +19,7 @@ class LegacyCtx:
     data_paths: List[str] | None = None
     settings: Optional[Any] = None
     log: Optional[Callable[[str], None]] = None
+    export_timing_records: Optional[List[Dict[str, Any]]] = None
 
 
 def _normalize_save_folder(save_folder_path: Any) -> Any:
@@ -69,6 +70,7 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
         data_paths=list(ctx.data_paths or []),
         settings=settings_dict,
         log=log,
+        export_timing_records=ctx.export_timing_records,
     )
 
     # Exporting preprocessed FIF files is no longer supported, but legacy
@@ -78,6 +80,7 @@ def _build_legacy_shim(ctx: LegacyCtx) -> Any:
     shim.save_fif_var = SimpleNamespace(get=lambda: False)
     shim.save_condition_fif_var = SimpleNamespace(get=lambda: False)
     shim.save_condition_fif = False
+    save_pref = False
 
     # Other common knobs
     if not hasattr(shim, "file_mode"):

@@ -44,14 +44,8 @@ class StatsWindow(
         self._project_path = Path(self.project_dir).resolve()
         self._results_folder_hint: str | None = None
         self._subfolder_hints: dict[str, str] = {}
-
-        config_path = self._project_path / "project.json"
-        try:
-            cfg = json.loads(config_path.read_text(encoding="utf-8"))
-            self.project_title = cfg.get("name", cfg.get("title", os.path.basename(self.project_dir)))
-            self._results_folder_hint, self._subfolder_hints = load_manifest_data(self._project_path, cfg)
-        except Exception:
-            self.project_title = os.path.basename(self.project_dir)
+        self.project_title = os.path.basename(self.project_dir)
+        self._load_project_context_from_root(self._project_path)
 
         super().__init__(parent)
         self.setWindowTitle("FPVS Statistical Analysis Tool")
@@ -150,6 +144,87 @@ class StatsWindow(
 
         # controller
         self._controller = StatsController(view=self)
+
+    def _load_project_context_from_root(self, project_root: Path) -> None:
+        """Refresh Stats output-path metadata from a project root."""
+        self._project_path = Path(project_root).resolve()
+        self.project_dir = str(self._project_path)
+        self._results_folder_hint = None
+        self._subfolder_hints = {}
+        config_path = self._project_path / "project.json"
+        try:
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+            self.project_title = cfg.get("name", cfg.get("title", os.path.basename(self.project_dir)))
+            self._results_folder_hint, self._subfolder_hints = load_manifest_data(self._project_path, cfg)
+        except Exception:
+            self.project_title = os.path.basename(self.project_dir)
+
+    def rebind_project_context(
+        self,
+        project_root: str | Path,
+        *,
+        clear_last_export: bool = True,
+        reload_default_folder: bool = False,
+    ) -> None:
+        """Update project-owned output paths after the host project changes."""
+        new_root = Path(project_root).resolve()
+        old_root = getattr(self, "_project_path", None)
+        if old_root is not None and Path(old_root).resolve() == new_root:
+            return
+        self._load_project_context_from_root(new_root)
+        self._clear_project_bound_stats_state()
+        if clear_last_export:
+            self._set_last_export_path(None)
+        if reload_default_folder:
+            self._load_default_data_folder()
+        logger.info(
+            "stats_window_project_context_rebound",
+            extra={
+                "window_id": id(self),
+                "project_dir": self.project_dir,
+            },
+        )
+
+    def _clear_project_bound_stats_state(self) -> None:
+        """Clear scanned inputs and results that belong to the previous project."""
+        self.subject_data = {}
+        self.subjects = []
+        self.conditions = []
+        self.selected_conditions = []
+        self._participants_map = {}
+        self._subject_group_map = {}
+        self.manual_excluded_pids.clear()
+        self._manual_exclusion_candidates = []
+        self.rm_anova_results_data = None
+        self.mixed_model_results_data = None
+        self.posthoc_results_data = None
+        self.baseline_vs_zero_results_payload = None
+        self.harmonic_check_results_data = []
+        self._harmonic_results = {PipelineId.SINGLE: []}
+        self._active_pipeline = None
+        self._group_mean_preview_data = {}
+        self._pipeline_conditions.clear()
+        self._pipeline_dv_policy.clear()
+        self._pipeline_base_freq.clear()
+        self._pipeline_dv_metadata.clear()
+        self._pipeline_dv_variants.clear()
+        self._pipeline_dv_variant_payloads.clear()
+        self._pipeline_outlier_config.clear()
+        self._pipeline_qc_config.clear()
+        self._pipeline_qc_state.clear()
+        self._pipeline_run_reports.clear()
+        if hasattr(self, "conditions_list_layout"):
+            self._populate_conditions_panel([])
+        if hasattr(self, "summary_text"):
+            self.summary_text.clear()
+        if hasattr(self, "output_text"):
+            self.output_text.clear()
+        if hasattr(self, "le_folder"):
+            self._set_data_folder_path("")
+        if hasattr(self, "_update_manual_exclusion_summary"):
+            self._update_manual_exclusion_summary()
+        if hasattr(self, "_update_export_buttons"):
+            self._update_export_buttons()
 
     # --------- ROI + status helpers ---------
 

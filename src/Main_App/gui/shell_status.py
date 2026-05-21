@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from Main_App.diagnostics import log_router
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
@@ -72,16 +73,16 @@ def emit_backend_log(host: Any, log: logging.Logger, level: int, message: str) -
         debug_on = host.settings.debug_enabled()
     except Exception:
         debug_on = False
-    if debug_on or level >= logging.WARNING:
-        log.log(level, message)
+    log_router.emit_backend_log(
+        log,
+        level=level,
+        message=message,
+        debug_enabled=debug_on,
+    )
 
 
 def log_message(host: Any, log: logging.Logger, message: str, level: int = logging.INFO) -> None:
-    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    formatted = f"{ts} [GUI]: {message}"
-    if hasattr(host, "text_log") and host.text_log:
-        host.text_log.append(formatted)
-    host._emit_backend_log(level, message)
+    log_router.emit_gui_log(host, log, message=message, level=level)
 
 
 def show_processing_started_notice(host: Any) -> None:

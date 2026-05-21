@@ -24,6 +24,44 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 
+def _format_timing_summary(result: dict) -> str | None:
+    timings = result.get("timings_ms")
+    if not isinstance(timings, dict) or not timings:
+        return None
+
+    file_value = result.get("file") or "unknown"
+    file_name = Path(str(file_value)).name
+    cache_status = result.get("preproc_cache_status")
+    preferred_order = (
+        "cache_lookup",
+        "load",
+        "preproc_audit_before",
+        "preprocessing",
+        "cache_store",
+        "events",
+        "epochs",
+        "export",
+        "preproc_audit_after",
+        "cleanup",
+    )
+    parts: list[str] = []
+    for key in preferred_order:
+        value = timings.get(key)
+        if isinstance(value, (int, float)):
+            parts.append(f"{key}={int(value)}ms")
+
+    for key, value in sorted(timings.items()):
+        if key in preferred_order or not isinstance(value, (int, float)):
+            continue
+        parts.append(f"{key}={int(value)}ms")
+
+    if not parts:
+        return None
+
+    cache_part = f" cache={cache_status}" if cache_status else ""
+    return f"[TIMING] {file_name}{cache_part} " + " ".join(parts)
+
+
 def stop_processing(host: Any) -> None:
     """Cooperatively request cancellation for a process-mode run."""
     if not getattr(host, "_run_active", False):
@@ -327,6 +365,9 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
         problems = result.get("problems") or []
         line, is_warning = format_audit_summary(audit, problems)
         host.log(line, level=logging.WARNING if is_warning else logging.INFO)
+        timing_line = _format_timing_summary(result)
+        if timing_line:
+            host.log(timing_line, level=logging.INFO)
 
         if debug_on and audit_root and audit:
             try:

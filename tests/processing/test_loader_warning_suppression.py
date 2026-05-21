@@ -9,9 +9,10 @@ import Main_App.io.load_utils as loader
 
 
 class _FakeRaw:
-    def __init__(self) -> None:
+    def __init__(self, *, montage_missing: list[str] | None = None) -> None:
         self.ch_names = ["Cz", "EXG1", "EXG2", "EXG3", "Status"]
         self.info = {"sfreq": 512.0}
+        self.montage_missing = montage_missing or []
 
     def load_data(self) -> None:
         return None
@@ -26,10 +27,17 @@ class _FakeRaw:
 
     def set_montage(self, montage, on_missing="warn", match_case=False, verbose=False):
         assert on_missing == "warn"
+        if self.montage_missing:
+            warnings.warn(
+                "DigMontage is only a subset of info. "
+                f"The channels missing from the montage are:\n\n{self.montage_missing}.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
 
 def test_load_eeg_file_suppresses_expected_channel_and_montage_warnings(monkeypatch, tmp_path):
-    fake_raw = _FakeRaw()
+    fake_raw = _FakeRaw(montage_missing=["EXG1", "EXG2"])
 
     monkeypatch.setattr(shared_loader, "_memmap_dir_for_pid", lambda: tmp_path)
     monkeypatch.setattr(shared_loader, "_cached_1010", lambda: object())
@@ -51,6 +59,32 @@ def test_load_eeg_file_suppresses_expected_channel_and_montage_warnings(monkeypa
 
     assert raw is fake_raw
     assert caught == []
+
+
+def test_load_eeg_file_keeps_unexpected_montage_missing_warning(monkeypatch, tmp_path):
+    fake_raw = _FakeRaw(montage_missing=["Cz", "EXG1", "EXG2"])
+
+    monkeypatch.setattr(shared_loader, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(shared_loader, "_cached_1010", lambda: object())
+    monkeypatch.setattr(
+        shared_loader.mne.io,
+        "read_raw_bdf",
+        lambda *args, **kwargs: fake_raw,
+    )
+
+    app = SimpleNamespace(
+        currentProject=SimpleNamespace(preprocessing={"ref_chan1": "EXG1", "ref_chan2": "EXG2"}),
+        settings=SimpleNamespace(get=lambda *args, **kwargs: "Status"),
+        log=lambda *args, **kwargs: None,
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        raw = loader.load_eeg_file(app, str(tmp_path / "sample.bdf"))
+
+    assert raw is fake_raw
+    assert len(caught) == 1
+    assert "Cz" in str(caught[0].message)
 
 
 def test_load_eeg_file_logs_header_mismatch_with_exact_file(monkeypatch, tmp_path, caplog):

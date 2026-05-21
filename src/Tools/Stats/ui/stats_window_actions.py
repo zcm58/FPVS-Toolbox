@@ -365,6 +365,9 @@ class StatsWindowActionsMixin:
                 return
             try:
                 scan_result = load_project_scan(folder)
+                if scan_result.project_root is not None:
+                    self.rebind_project_context(scan_result.project_root)
+                    self._set_data_folder_path(folder)
                 self.subjects = scan_result.subjects
                 self.conditions = scan_result.conditions
                 self._populate_conditions_panel(self.conditions)

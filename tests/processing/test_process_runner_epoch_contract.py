@@ -60,7 +60,7 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
     )
     monkeypatch.setattr(
         "Main_App.io.load_utils.load_eeg_file",
-        lambda _app, _filepath, ref_pair=None: raw.copy(),
+        lambda _app, _filepath, ref_pair=None, first_n_channels=None: raw.copy(),
     )
     monkeypatch.setattr(
         "Main_App.exports.post_export_adapter.LegacyCtx",
@@ -69,6 +69,9 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
 
     def _capture_post_export(ctx, _labels):
         captured["epochs_dict"] = ctx.preprocessed_data
+        ctx.export_timing_records.append(
+            {"source": "post_process", "stage": "workbook_write", "elapsed_ms": 7}
+        )
         return 1
 
     monkeypatch.setattr(
@@ -83,14 +86,18 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
     )
     monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
 
+    fake_bdf = tmp_path / "fake.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
+
     result = process_runner._run_full_pipeline_for_file(
-        file_path=tmp_path / "fake.bdf",
+        file_path=fake_bdf,
         settings={
             "stim_channel": "Status",
             "epoch_start": 0.0,
             "epoch_end": 1.0,
             "ref_channel1": "EXG1",
             "ref_channel2": "EXG2",
+            "enable_preprocessed_cache": False,
         },
         event_map={"A": 21},
         save_folder=tmp_path / "out",
@@ -106,3 +113,47 @@ def test_run_full_pipeline_uses_single_epoch_contract_per_label(monkeypatch, tmp
         "label_has_fallback_rep",
         "insufficient_55",
     ]
+    assert result["preproc_cache_status"] == "disabled"
+    assert "events" in result["timings_ms"]
+    assert "epochs" in result["timings_ms"]
+    assert result["export_timing_records"] == [
+        {"source": "post_process", "stage": "workbook_write", "elapsed_ms": 7}
+    ]
+
+
+def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) -> None:
+    info = mne.create_info(["Cz", "Status"], sfreq=8.0, ch_types=["eeg", "stim"])
+    raw = mne.io.RawArray(np.zeros((2, 16), dtype=float), info, verbose=False)
+    fake_bdf = tmp_path / "fake.bdf"
+    fake_bdf.write_bytes(b"raw source")
+    settings = {
+        "stim_channel": "Status",
+        "ref_channel1": "EXG1",
+        "ref_channel2": "EXG2",
+        "downsample_rate": 8,
+        "enable_preprocessed_cache": True,
+    }
+    audit_before = {"file": "fake.bdf", "ch_names": ["Cz", "EXG1", "EXG2", "Status"]}
+
+    stored = process_runner._store_preprocessed_cache(
+        raw=raw,
+        file_path=fake_bdf,
+        settings=settings,
+        project_root=tmp_path / "project",
+        mne_module=mne,
+        audit_before=audit_before,
+        n_rejected=2,
+    )
+    loaded, loaded_audit, n_rejected, status = process_runner._load_preprocessed_cache(
+        file_path=fake_bdf,
+        settings=settings,
+        project_root=tmp_path / "project",
+        mne_module=mne,
+    )
+
+    assert stored == "stored"
+    assert status == "hit"
+    assert loaded is not None
+    assert loaded.get_data().shape == raw.get_data().shape
+    assert loaded_audit == audit_before
+    assert n_rejected == 2

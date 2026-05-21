@@ -14,7 +14,7 @@ _AUDIT_NAMES = {
     "write_audit_json",
 }
 
-__all__ = sorted(_AUDIT_NAMES | {"event_time_lock_report"})
+__all__ = sorted(_AUDIT_NAMES | {"event_time_lock_report", "log_router"})
 
 
 def __getattr__(name: str) -> Any:
@@ -24,4 +24,6 @@ def __getattr__(name: str) -> Any:
         return getattr(audit, name)
     if name == "event_time_lock_report":
         return importlib.import_module("Main_App.diagnostics.event_time_lock_report")
+    if name == "log_router":
+        return importlib.import_module("Main_App.diagnostics.log_router")
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -48,18 +48,26 @@ Callers should not depend on private helpers or split-stage internals.
 The canonical file-level process runner is
 `src/Main_App/Performance/process_runner.py`. Its single-file worker route is:
 
-1. Load BDF through `Main_App.io.load_utils.load_eeg_file`.
-2. Capture pre-state with `begin_preproc_audit`.
-3. Run `perform_preprocessing`.
-4. Extract events from the configured stim channel.
-5. Build epochs per event-map label.
-6. Run post-export through `Main_App.exports.post_export_adapter`.
-7. Finalize the preprocessing audit with `finalize_preproc_audit`.
-8. Clean up worker memory and temporary memmap paths.
+1. Check the strict project-root preprocessed Raw cache.
+2. On cache miss, load BDF through `Main_App.io.load_utils.load_eeg_file`.
+3. Capture pre-state with `begin_preproc_audit`.
+4. Run `perform_preprocessing`.
+5. Store a cache entry only after successful preprocessing.
+6. Extract events from the configured stim channel.
+7. Build epochs per event-map label.
+8. Run post-export through `Main_App.exports.post_export_adapter`.
+9. Finalize the preprocessing audit with `finalize_preproc_audit`.
+10. Clean up worker memory and temporary memmap paths.
 
 GUI processing must route through the active process runner. Single-file runs use
 the same runner with `max_workers=1`. Do not add a fallback path that bypasses
 the process runner or calls retired legacy preprocessing.
+
+The process runner logs `[TIMING] file=... section=... elapsed_ms=...` for
+cache lookup, load, pre-audit, preprocessing, cache store, events, epochs,
+export, post-audit, and cleanup when those stages run. The returned per-file
+result includes `timings_ms` and `preproc_cache_status` so users can compare
+first-run and cache-hit runtimes.
 
 ## Pipeline Order
 
@@ -125,6 +133,10 @@ Channel limiting:
 - The configured stim channel is appended to the keep list when it would
   otherwise be dropped.
 - Current behavior uses `raw.pick_channels(final_keep, ordered=False)`.
+- The process runner requests a loader subset of the first 64 BDF channels plus
+  the selected reference pair and stim channel. This keeps the current BioSemi
+  64-channel EEG surface plus `EXG1`/`EXG2` references and avoids loading
+  unused `EXG3` through `EXG8` before the existing channel-drop stage.
 
 Downsampling:
 

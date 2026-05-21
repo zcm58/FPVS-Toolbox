@@ -39,6 +39,7 @@ class ProjectScanResult:
     subject_data: Dict[str, Dict[str, str]]
     manifest: dict | None
     participants_map: Dict[str, str]
+    project_root: Path | None = None
 
 
 logger = logging.getLogger(__name__)
@@ -101,9 +102,8 @@ def resolve_project_subfolder(
     return (_resolve_results_root(project_root, results_folder) / candidate).resolve()
 
 
-def load_project_manifest_for_excel_root(excel_root: Path) -> dict | None:
-    """Walk upward from an Excel folder to locate and load project.json."""
-
+def find_project_manifest_for_excel_root(excel_root: Path) -> tuple[Path, dict] | tuple[None, None]:
+    """Walk upward from an Excel folder to locate the owning project manifest."""
     try:
         current = excel_root.resolve()
     except Exception:
@@ -117,7 +117,7 @@ def load_project_manifest_for_excel_root(excel_root: Path) -> dict | None:
                 import logging
 
                 logging.getLogger(__name__).warning("Failed to load manifest %s: %s", manifest, exc)
-                return None
+                return None, None
             try:
                 results_folder, subfolders = load_manifest_data(candidate, cfg)
                 expected_excel = resolve_project_subfolder(
@@ -134,8 +134,15 @@ def load_project_manifest_for_excel_root(excel_root: Path) -> dict | None:
                 allowed = {current, *current.parents}
                 if expected_resolved not in allowed:
                     continue
-            return cfg
-    return None
+            return candidate.resolve(), cfg
+    return None, None
+
+
+def load_project_manifest_for_excel_root(excel_root: Path) -> dict | None:
+    """Walk upward from an Excel folder to locate and load project.json."""
+
+    _project_root, manifest = find_project_manifest_for_excel_root(excel_root)
+    return manifest
 
 
 def normalize_participants_map(manifest: dict | None) -> dict[str, str]:
@@ -355,7 +362,7 @@ def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[s
 def load_project_scan(folder: str) -> ProjectScanResult:
     """Handle the load project scan step for the Stats workflow."""
     subjects, conditions, data = scan_folder_simple(folder)
-    manifest = load_project_manifest_for_excel_root(Path(folder))
+    project_root, manifest = find_project_manifest_for_excel_root(Path(folder))
     participants_map = normalize_participants_map(manifest)
     return ProjectScanResult(
         subjects=subjects,
@@ -363,5 +370,6 @@ def load_project_scan(folder: str) -> ProjectScanResult:
         subject_data=data,
         manifest=manifest,
         participants_map=participants_map,
+        project_root=project_root,
     )
 

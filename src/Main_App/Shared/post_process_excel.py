@@ -1,9 +1,50 @@
-import numpy as np
-import pandas as pd
+import logging
+from time import perf_counter
 from typing import Any, Dict, List, Optional
 
+import numpy as np
+import pandas as pd
 
+
+logger = logging.getLogger(__name__)
 NEIGHBOR_OFFSETS = [*range(-11, 0), *range(1, 12)]
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((perf_counter() - started_at) * 1000)
+
+
+def _log_excel_timing(
+    stage: str,
+    started_at: float,
+    *,
+    path: str,
+    sheet_name: str | None = None,
+    rows: int | None = None,
+    cols: int | None = None,
+    timing_sink: list[dict[str, object]] | None = None,
+) -> None:
+    elapsed_ms = _elapsed_ms(started_at)
+    record = {
+        "source": "excel",
+        "stage": stage,
+        "elapsed_ms": elapsed_ms,
+        "path": path,
+        "sheet": sheet_name,
+        "rows": rows,
+        "cols": cols,
+    }
+    if timing_sink is not None:
+        timing_sink.append(record)
+    logger.info(
+        "[EXCEL TIMING] stage=%s elapsed_ms=%d path=%r sheet=%r rows=%s cols=%s",
+        stage,
+        elapsed_ms,
+        path,
+        sheet_name,
+        rows,
+        cols,
+    )
 
 
 def build_fft_neighbors_rows(
@@ -86,35 +127,111 @@ def write_results_workbook(
     full_excel_path: str,
     dataframes_to_save: Dict[str, pd.DataFrame],
     fft_neighbors_df: Optional[pd.DataFrame] = None,
+    timing_sink: list[dict[str, object]] | None = None,
 ) -> None:
     """Write results workbook with consistent formatting and optional debug sheet."""
-    with pd.ExcelWriter(full_excel_path, engine="xlsxwriter") as writer:
-        workbook = writer.book
-        center_fmt = workbook.add_format({"align": "center", "valign": "vcenter"})
+    workbook_started = perf_counter()
+    logger.info(
+        "[EXCEL STAGE] workbook_write_start path=%r sheets=%d has_fft_neighbors=%s",
+        full_excel_path,
+        len(dataframes_to_save),
+        bool(fft_neighbors_df is not None and not fft_neighbors_df.empty),
+    )
+    try:
+        with pd.ExcelWriter(full_excel_path, engine="xlsxwriter") as writer:
+            workbook = writer.book
+            center_fmt = workbook.add_format({"align": "center", "valign": "vcenter"})
 
-        for sheet_name, df_to_write in dataframes_to_save.items():
-            df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
-            worksheet = writer.sheets[sheet_name]
-            worksheet.freeze_panes(1, 0)
-            for col_idx, header_name in enumerate(df_to_write.columns):
-                max_len = max(
-                    len(str(header_name)),
-                    df_to_write[header_name].astype(str).map(len).max()
-                    if not df_to_write[header_name].empty
-                    else 0,
+            for sheet_name, df_to_write in dataframes_to_save.items():
+                sheet_started = perf_counter()
+                write_started = perf_counter()
+                df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
+                _log_excel_timing(
+                    "sheet_to_excel",
+                    write_started,
+                    path=full_excel_path,
+                    sheet_name=sheet_name,
+                    rows=len(df_to_write),
+                    cols=len(df_to_write.columns),
+                    timing_sink=timing_sink,
                 )
-                worksheet.set_column(col_idx, col_idx, max_len + 4, center_fmt)
+                worksheet = writer.sheets[sheet_name]
+                worksheet.freeze_panes(1, 0)
+                widths_started = perf_counter()
+                for col_idx, header_name in enumerate(df_to_write.columns):
+                    max_len = max(
+                        len(str(header_name)),
+                        df_to_write[header_name].astype(str).map(len).max()
+                        if not df_to_write[header_name].empty
+                        else 0,
+                    )
+                    worksheet.set_column(col_idx, col_idx, max_len + 4, center_fmt)
+                _log_excel_timing(
+                    "sheet_column_widths",
+                    widths_started,
+                    path=full_excel_path,
+                    sheet_name=sheet_name,
+                    rows=len(df_to_write),
+                    cols=len(df_to_write.columns),
+                    timing_sink=timing_sink,
+                )
+                _log_excel_timing(
+                    "sheet_total",
+                    sheet_started,
+                    path=full_excel_path,
+                    sheet_name=sheet_name,
+                    rows=len(df_to_write),
+                    cols=len(df_to_write.columns),
+                    timing_sink=timing_sink,
+                )
 
-        if fft_neighbors_df is not None and not fft_neighbors_df.empty:
-            sheet_name = "FFT and neighbors"
-            fft_neighbors_df.to_excel(writer, sheet_name=sheet_name, index=False)
-            worksheet = writer.sheets[sheet_name]
-            worksheet.freeze_panes(1, 0)
-            for col_idx, header_name in enumerate(fft_neighbors_df.columns):
-                max_len = max(
-                    len(str(header_name)),
-                    fft_neighbors_df[header_name].astype(str).map(len).max()
-                    if not fft_neighbors_df[header_name].empty
-                    else 0,
+            if fft_neighbors_df is not None and not fft_neighbors_df.empty:
+                sheet_name = "FFT and neighbors"
+                sheet_started = perf_counter()
+                write_started = perf_counter()
+                fft_neighbors_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                _log_excel_timing(
+                    "sheet_to_excel",
+                    write_started,
+                    path=full_excel_path,
+                    sheet_name=sheet_name,
+                    rows=len(fft_neighbors_df),
+                    cols=len(fft_neighbors_df.columns),
+                    timing_sink=timing_sink,
                 )
-                worksheet.set_column(col_idx, col_idx, max_len + 4, center_fmt)
+                worksheet = writer.sheets[sheet_name]
+                worksheet.freeze_panes(1, 0)
+                widths_started = perf_counter()
+                for col_idx, header_name in enumerate(fft_neighbors_df.columns):
+                    max_len = max(
+                        len(str(header_name)),
+                        fft_neighbors_df[header_name].astype(str).map(len).max()
+                        if not fft_neighbors_df[header_name].empty
+                        else 0,
+                    )
+                    worksheet.set_column(col_idx, col_idx, max_len + 4, center_fmt)
+                _log_excel_timing(
+                    "sheet_column_widths",
+                    widths_started,
+                    path=full_excel_path,
+                    sheet_name=sheet_name,
+                    rows=len(fft_neighbors_df),
+                    cols=len(fft_neighbors_df.columns),
+                    timing_sink=timing_sink,
+                )
+                _log_excel_timing(
+                    "sheet_total",
+                    sheet_started,
+                    path=full_excel_path,
+                    sheet_name=sheet_name,
+                    rows=len(fft_neighbors_df),
+                    cols=len(fft_neighbors_df.columns),
+                    timing_sink=timing_sink,
+                )
+    finally:
+        _log_excel_timing(
+            "workbook_write_total",
+            workbook_started,
+            path=full_excel_path,
+            timing_sink=timing_sink,
+        )

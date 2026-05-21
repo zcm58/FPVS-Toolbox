@@ -1,4 +1,5 @@
 # post_process.py
+import logging
 import os
 import pandas as pd
 import numpy as np
@@ -6,7 +7,9 @@ import traceback
 import gc
 import mne
 import re
+from contextvars import ContextVar
 from fractions import Fraction
+from time import perf_counter
 import config
 from config import DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
 from typing import List, Any, Dict
@@ -19,6 +22,51 @@ from Main_App.Shared.post_process_excel import build_fft_neighbors_rows, write_r
 
 
 ODDBALL_FREQ = Fraction(6, 5)
+logger = logging.getLogger(__name__)
+_EXPORT_TIMING_SINK: ContextVar[list[dict[str, object]] | None] = ContextVar(
+    "_EXPORT_TIMING_SINK",
+    default=None,
+)
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((perf_counter() - started_at) * 1000)
+
+
+def _log_export_timing(
+    stage: str,
+    started_at: float,
+    *,
+    pid: str | None = None,
+    condition: str | None = None,
+    object_index: int | None = None,
+    path: str | None = None,
+    extra: str | None = None,
+) -> None:
+    elapsed_ms = _elapsed_ms(started_at)
+    record = {
+        "source": "post_process",
+        "stage": stage,
+        "elapsed_ms": elapsed_ms,
+        "pid": pid,
+        "condition": condition,
+        "object_index": object_index,
+        "path": path,
+        "extra": extra,
+    }
+    timing_sink = _EXPORT_TIMING_SINK.get()
+    if timing_sink is not None:
+        timing_sink.append(record)
+    logger.info(
+        "[EXPORT TIMING] stage=%s elapsed_ms=%d pid=%r condition=%r object_index=%s path=%r extra=%r",
+        stage,
+        elapsed_ms,
+        pid,
+        condition,
+        object_index,
+        path,
+        extra,
+    )
 
 
 def _read_analysis_setting(app: Any, option: str, default: float | str) -> Any:
@@ -176,10 +224,25 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     but must not change metric calculation, processing order, output formats,
     filenames, sheet names, or export behavior.
     """
+    post_started = perf_counter()
+    export_timing_sink = getattr(app, "export_timing_records", None)
+    _EXPORT_TIMING_SINK.set(
+        export_timing_sink if isinstance(export_timing_sink, list) else None
+    )
     app.log("--- Post-processing: Calculating Metrics & Saving Excel ---")
     parent_folder = app.save_folder_path.get()
+    logger.info(
+        "[EXPORT STAGE] post_process_start conditions=%d parent_folder=%r",
+        len(condition_labels_present),
+        parent_folder,
+    )
     if not parent_folder or not os.path.isdir(parent_folder):
         app.log(f"Error: Invalid save folder: '{parent_folder}'")
+        _log_export_timing(
+            "post_process_invalid_save_folder",
+            post_started,
+            path=parent_folder,
+        )
         return
 
     target_frequencies, configured_upper_limit = _resolve_target_frequencies(app)
@@ -225,13 +288,26 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
     event_cache: Dict[str, tuple[np.ndarray, int]] = {}
 
     for cond_label_from_keys in condition_labels_present:
+        condition_started = perf_counter()
         data_list = current_epochs_data_source.get(cond_label_from_keys, [])
         if not data_list:
             app.log(f"\nSkipping post-processing for '{cond_label_from_keys}': No data found.")
+            _log_export_timing(
+                "condition_skip_no_data",
+                condition_started,
+                pid=pid,
+                condition=cond_label_from_keys,
+            )
             continue
 
         app.log(
             f"\nPost-processing '{cond_label_from_keys}' (PID: {pid}, {len(data_list)} data object(s))..."
+        )
+        logger.info(
+            "[EXPORT STAGE] condition_start pid=%r condition=%r objects=%d",
+            pid,
+            cond_label_from_keys,
+            len(data_list),
         )
 
         # --- Output Naming Logic ---
@@ -310,6 +386,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 f"  Processing data object {data_idx + 1}/{len(data_list)} for '{cond_label_from_keys}'..."
             )
             gc.collect()
+            object_started = perf_counter()
             try:
                 if not is_evoked:  # Epochs
                     if not data_object.preload:
@@ -319,8 +396,16 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         continue
 
                     # ...
+                pick_started = perf_counter()
                 data_eeg = data_object.copy().pick(
                     "eeg", exclude="bads" if not is_evoked else []
+                )
+                _log_export_timing(
+                    "object_pick_eeg",
+                    pick_started,
+                    pid=pid,
+                    condition=cond_label_from_keys,
+                    object_index=data_idx + 1,
                 )
                 if not data_eeg.ch_names:
                     app.log("    No good EEG channels. Skip.")
@@ -329,8 +414,16 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 if is_evoked:
                     avg_data = data_eeg.data
                 else:  # Epochs
+                    average_started = perf_counter()
                     ep_data = data_eeg.get_data()
                     avg_data = np.mean(ep_data.astype(np.float64), axis=0)
+                    _log_export_timing(
+                        "epochs_get_data_average",
+                        average_started,
+                        pid=pid,
+                        condition=cond_label_from_keys,
+                        object_index=data_idx + 1,
+                    )
                 num_channels, num_times = avg_data.shape
                 # ...
                 current_ch_names_from_obj = data_eeg.info["ch_names"]
@@ -385,6 +478,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 fallback_reason = "legacy_epoch_path"
 
                 if is_evoked and app.data_paths:
+                    crop_started = perf_counter()
                     validated_params = getattr(app, "validated_params", {}) or {}
                     event_id_map = validated_params.get("event_id_map", {})
                     condition_id = _resolve_condition_id(event_id_map, cond_label_from_keys)
@@ -415,8 +509,17 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         except Exception as crop_err:
                             app.log(f"    Warn: 55-based crop attempt failed in legacy path: {crop_err}")
                             fallback_reason = "crop_exception"
+                    _log_export_timing(
+                        "legacy_event_crop",
+                        crop_started,
+                        pid=pid,
+                        condition=cond_label_from_keys,
+                        object_index=data_idx + 1,
+                        extra=f"crop_mode={crop_mode}",
+                    )
 
                 if not is_evoked and getattr(data_object, "metadata", None) is not None and not data_object.metadata.empty:
+                    metadata_started = perf_counter()
                     md = data_object.metadata
                     crop_modes = [m for m in md.get("crop_mode", pd.Series(dtype=object)).dropna().astype(str).tolist() if m]
                     if crop_modes and all(m == "55_onbin" for m in crop_modes):
@@ -449,6 +552,14 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         if len(unique_steps) > 1:
                             raise ValueError(f"Inconsistent N_step values for {cond_label_from_keys}: {unique_steps}")
                         n_step = unique_steps[0]
+                    _log_export_timing(
+                        "epochs_metadata_crop",
+                        metadata_started,
+                        pid=pid,
+                        condition=cond_label_from_keys,
+                        object_index=data_idx + 1,
+                        extra=f"crop_mode={crop_mode}",
+                    )
 
                 if crop_mode == "55_onbin":
                     if not n_step:
@@ -465,13 +576,23 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     )
 
                 num_fft_bins = num_times // 2 + 1
+                fft_started = perf_counter()
                 fft_frequencies = np.fft.rfftfreq(num_times, d=1.0 / sfreq)
                 fft_full_spectrum = np.fft.fft(avg_data_uv, axis=1)
                 fft_amplitudes = (
                     np.abs(fft_full_spectrum[:, :num_fft_bins]) / num_times * 2
                 )
+                _log_export_timing(
+                    "fft_amplitudes",
+                    fft_started,
+                    pid=pid,
+                    condition=cond_label_from_keys,
+                    object_index=data_idx + 1,
+                    extra=f"channels={num_channels} samples={num_times}",
+                )
 
                 source_file_name = os.path.basename(app.data_paths[0]) if app.data_paths else pid
+                neighbors_started = perf_counter()
                 fft_neighbors_rows.extend(
                     build_fft_neighbors_rows(
                         file_name=source_file_name,
@@ -492,9 +613,26 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         fallback_reason=fallback_reason,
                     )
                 )
+                _log_export_timing(
+                    "fft_neighbors_rows",
+                    neighbors_started,
+                    pid=pid,
+                    condition=cond_label_from_keys,
+                    object_index=data_idx + 1,
+                    extra=f"rows={len(fft_neighbors_rows)}",
+                )
 
                 # Full-spectrum SNR (uses shared noise logic via compute_full_snr)
+                full_snr_started = perf_counter()
                 full_snr_matrix = compute_full_snr(avg_data_uv, sfreq)
+                _log_export_timing(
+                    "full_snr_compute",
+                    full_snr_started,
+                    pid=pid,
+                    condition=cond_label_from_keys,
+                    object_index=data_idx + 1,
+                    extra=f"channels={num_channels} samples={num_times}",
+                )
 
                 num_target_freqs = len(target_frequencies)
                 metrics_fft = np.zeros((final_num_channels, num_target_freqs))
@@ -502,6 +640,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 metrics_z = np.zeros((final_num_channels, num_target_freqs))
                 metrics_bca = np.zeros((final_num_channels, num_target_freqs))
 
+                target_metrics_started = perf_counter()
                 for chan_idx in range(final_num_channels):
                     channel_amplitudes = fft_amplitudes[chan_idx, :]
                     for freq_idx, target_freq in enumerate(target_frequencies):
@@ -558,6 +697,14 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         metrics_snr[chan_idx, freq_idx] = snr_val
                         metrics_z[chan_idx, freq_idx] = z_score_val
                         metrics_bca[chan_idx, freq_idx] = bca_val
+                _log_export_timing(
+                    "target_metrics_loop",
+                    target_metrics_started,
+                    pid=pid,
+                    condition=cond_label_from_keys,
+                    object_index=data_idx + 1,
+                    extra=f"channels={final_num_channels} targets={num_target_freqs}",
+                )
 
                 if accum["fft"] is None:
                     accum = {
@@ -579,10 +726,18 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     f"!!! Error post-processing data object {data_idx + 1}: {e}\n{traceback.format_exc()}"
                 )
             finally:
+                _log_export_timing(
+                    "data_object_total",
+                    object_started,
+                    pid=pid,
+                    condition=cond_label_from_keys,
+                    object_index=data_idx + 1,
+                )
                 del data_eeg
                 gc.collect()
 
         if valid_data_count > 0 and final_electrode_names_ordered:
+            dataframe_started = perf_counter()
             avg_metrics = {k: v / valid_data_count for k, v in accum.items()}
             freq_column_names = [f"{f:.4f}_Hz" for f in target_frequencies]
             full_snr_avg = (
@@ -611,6 +766,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 ),
             }
             if full_snr_avg is not None:
+                full_snr_dataframe_started = perf_counter()
                 max_freq = min(configured_upper_limit, float(fft_frequencies[-1]))
                 freq_grid = np.arange(0.5, max_freq + 0.01, 0.01)
 
@@ -626,6 +782,14 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     interp_snr,
                     index=final_electrode_names_ordered,
                     columns=freq_cols_full,
+                )
+                _log_export_timing(
+                    "full_snr_dataframe",
+                    full_snr_dataframe_started,
+                    pid=pid,
+                    condition=cond_label_from_keys,
+                    path=full_excel_path,
+                    extra=f"channels={full_snr_avg.shape[0]} freqs={len(freq_grid)}",
                 )
             for df_name_iter in dataframes_to_save:
                 dataframes_to_save[df_name_iter].insert(
@@ -661,12 +825,29 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                 fft_neighbors_df = pd.DataFrame(columns=neighbor_columns)
             else:
                 fft_neighbors_df = fft_neighbors_df.reindex(columns=neighbor_columns)
+            _log_export_timing(
+                "dataframes_to_save",
+                dataframe_started,
+                pid=pid,
+                condition=cond_label_from_keys,
+                path=full_excel_path,
+                extra=f"sheets={len(dataframes_to_save)} neighbor_rows={len(fft_neighbors_df)}",
+            )
 
             try:
+                workbook_started = perf_counter()
                 write_results_workbook(
                     full_excel_path=full_excel_path,
                     dataframes_to_save=dataframes_to_save,
                     fft_neighbors_df=fft_neighbors_df,
+                    timing_sink=export_timing_sink if isinstance(export_timing_sink, list) else None,
+                )
+                _log_export_timing(
+                    "workbook_write",
+                    workbook_started,
+                    pid=pid,
+                    condition=cond_label_from_keys,
+                    path=full_excel_path,
                 )
                 app.log(f"Successfully saved Excel: {excel_filename}")
                 any_results_saved = True
@@ -678,9 +859,17 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
             app.log(
                 f"No valid data to save for '{cond_label_from_keys}' (PID: {pid}). No Excel file generated."
             )
+        _log_export_timing(
+            "condition_total",
+            condition_started,
+            pid=pid,
+            condition=cond_label_from_keys,
+            path=full_excel_path,
+        )
 
     if not any_results_saved:
         app.log("Warning: Post-processing completed, but no Excel files were saved.")
     del current_epochs_data_source
     gc.collect()
+    _log_export_timing("post_process_total", post_started, pid=pid, path=parent_folder)
     app.log("--- Post-processing finished. ---")

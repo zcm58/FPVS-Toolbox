@@ -46,7 +46,8 @@ Primary paths:
   `update_dialog.py`.
 - `src/Main_App/gui/shell_status.py`: launch reveal, GUI log routing, and
   embedded processing activity-page helpers used by `MainWindow` compatibility
-  wrappers.
+  wrappers. GUI log formatting and backend/IDE routing policy are delegated to
+  `Main_App.diagnostics.log_router`.
 - `src/Main_App/updates/`: non-GUI updater backend. It owns GitHub Release
   selection, typed update contracts, installer downloads, and installer launch.
   This package must not import Qt widgets or create windows.

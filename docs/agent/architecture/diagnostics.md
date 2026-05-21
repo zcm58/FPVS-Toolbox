@@ -5,8 +5,10 @@ Diagnostics are split by audience and side effects.
 Runtime toolbox diagnostics live under `src/Main_App/diagnostics/`. These modules
 observe and report app, run, or project state. `audit.py` owns preprocessing
 audit summaries and JSON helpers; `event_time_lock_report.py` owns the event/epoch
-time-lock report CLI/GUI helper. They must not mutate EEG data, change
-preprocessing order, alter project files, or change export formats.
+time-lock report CLI/GUI helper; `log_router.py` owns runtime logging routes for
+IDE/console output, GUI log-line formatting, and parent-process replay of
+worker timing records. They must not mutate EEG data, change preprocessing
+order, alter project files, or change export formats.
 
 Repo-evaluation scripts live under `scripts/` and `.agents/skills/*/scripts/`.
 These scripts enforce agent, CI, package-layout, GUI, path, and protected-boundary
@@ -20,6 +22,8 @@ arguments or environment variables, not hardcoded local user paths.
 Rules:
 
 - Active runtime imports should use `Main_App.diagnostics`.
+- Logging policy changes should go through `Main_App.diagnostics.log_router`
+  instead of adding new ad hoc `logger.info`/GUI text-log routing helpers.
 - Keep app/run diagnostics behavior-preserving and read/report oriented.
 - Keep repo-quality checks out of runtime packages.
 - Keep Stats-specific diagnostics inside `src/Tools/Stats/` unless a Stats

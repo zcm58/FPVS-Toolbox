@@ -93,6 +93,7 @@ src/quarantine/Tools/LORETA/fsaverage/
 src/quarantine/**
 !src/quarantine/
 /src/fpvs_cache/
+.fpvs_cache/
 
 # Agent harness manifests intentionally tracked despite the general *.txt rule.
 !docs/architecture/protected-paths.txt

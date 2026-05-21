@@ -50,6 +50,17 @@ def _audit_payload(tmp_path: Path) -> dict:
                 "file": str(tmp_path / "demo.bdf"),
                 "audit": audit,
                 "problems": problems,
+                "preproc_cache_status": "stored",
+                "timings_ms": {
+                    "cache_lookup": 1,
+                    "load": 20,
+                    "preprocessing": 300,
+                    "events": 4,
+                    "epochs": 50,
+                    "export": 60,
+                    "preproc_audit_after": 2,
+                    "cleanup": 3,
+                },
             }
         ]
     }
@@ -76,3 +87,9 @@ def test_audit_problems_surface(tmp_path, main_window, monkeypatch):
     # There should also be at least one audit summary line.
     all_lines = [msg for msg, _ in logs]
     assert any(msg.startswith("[AUDIT]") for msg in all_lines)
+    assert any(
+        msg.startswith("[TIMING] demo.bdf cache=stored")
+        and "preprocessing=300ms" in msg
+        and "export=60ms" in msg
+        for msg in all_lines
+    )

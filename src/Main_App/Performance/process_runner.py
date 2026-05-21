@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import atexit
+import hashlib
+import json
 import shutil
 import tempfile
 import os
@@ -29,13 +31,17 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
+from Main_App.diagnostics import log_router
 from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step
 
+import numpy as np
 import psutil  # soft memory cap
 from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
 ODDBALL_FREQ = Fraction(6, 5)
+PREPROC_CACHE_VERSION = "preprocessed-raw-v1"
+BDF_FIRST_N_CHANNELS = 64
 
 
 @dataclass(frozen=True)
@@ -54,6 +60,7 @@ class RunParams:
 
 def _worker_init() -> None:
     """Configure per-process environment."""
+    logger.info("[MP STAGE] worker_init_start pid=%d", os.getpid())
     set_blas_threads_multiprocess()
 
     # --- Memmap cleanup on worker exit ---
@@ -69,6 +76,7 @@ def _worker_init() -> None:
             pass
 
     atexit.register(_cleanup_pid_dir)
+    logger.info("[MP STAGE] worker_init_done pid=%d memmap_dir=%s", os.getpid(), pid_dir)
 
 
 def _memmap_path_for_file(file_path: Path) -> Path:
@@ -155,6 +163,171 @@ def _close_worker_logger(target_logger: logging.Logger) -> None:
             target_logger.removeHandler(handler)
 
 
+def _preproc_cache_enabled(settings: Dict[str, object]) -> bool:
+    value = settings.get("enable_preprocessed_cache", True)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
+
+
+def _preproc_cache_payload(
+    file_path: Path,
+    settings: Dict[str, object],
+    *,
+    mne_version: str,
+) -> Dict[str, object]:
+    stat = file_path.stat()
+    relevant_settings = {
+        "high_pass": settings.get("high_pass"),
+        "low_pass": settings.get("low_pass"),
+        "downsample_rate": settings.get("downsample_rate", settings.get("downsample")),
+        "reject_thresh": settings.get("reject_thresh"),
+        "ref_channel1": settings.get("ref_channel1", settings.get("ref_ch1")),
+        "ref_channel2": settings.get("ref_channel2", settings.get("ref_ch2")),
+        "stim_channel": settings.get("stim_channel"),
+        "max_idx_keep": settings.get("max_idx_keep"),
+    }
+    return {
+        "version": PREPROC_CACHE_VERSION,
+        "mne_version": mne_version,
+        "source_path": str(file_path.resolve()),
+        "source_size": int(stat.st_size),
+        "source_mtime_ns": int(stat.st_mtime_ns),
+        "loader_profile": {
+            "bdf_first_n_channels": BDF_FIRST_N_CHANNELS,
+            "ref_channels": [
+                relevant_settings["ref_channel1"],
+                relevant_settings["ref_channel2"],
+            ],
+            "stim_channel": relevant_settings["stim_channel"],
+        },
+        "preprocessing_settings": relevant_settings,
+    }
+
+
+def _preproc_cache_key(payload: Dict[str, object]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _preproc_cache_paths(project_root: Path, file_path: Path, cache_key: str) -> Tuple[Path, Path]:
+    safe_stem = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in file_path.stem)
+    cache_dir = project_root / ".fpvs_cache" / "preprocessed"
+    raw_path = cache_dir / f"{safe_stem}_{cache_key[:16]}_raw.fif"
+    meta_path = cache_dir / f"{safe_stem}_{cache_key[:16]}.json"
+    return raw_path, meta_path
+
+
+def _load_preprocessed_cache(
+    *,
+    file_path: Path,
+    settings: Dict[str, object],
+    project_root: Path,
+    mne_module: Any,
+) -> Tuple[Optional[Any], Optional[Dict[str, Any]], int, str]:
+    if not _preproc_cache_enabled(settings):
+        return None, None, 0, "disabled"
+
+    payload = _preproc_cache_payload(
+        file_path,
+        settings,
+        mne_version=str(getattr(mne_module, "__version__", "unknown")),
+    )
+    cache_key = _preproc_cache_key(payload)
+    raw_path, meta_path = _preproc_cache_paths(project_root, file_path, cache_key)
+    if not raw_path.exists() or not meta_path.exists():
+        return None, None, 0, "miss"
+
+    try:
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        if metadata.get("cache_key") != cache_key or metadata.get("payload") != payload:
+            return None, None, 0, "miss_metadata_mismatch"
+        memmap_path = str(_memmap_path_for_file(raw_path))
+        raw = mne_module.io.read_raw_fif(
+            str(raw_path),
+            preload=memmap_path,
+            verbose=False,
+        )
+        audit_before = metadata.get("audit_before")
+        if not isinstance(audit_before, dict):
+            return None, None, 0, "miss_missing_audit"
+        return raw, audit_before, int(metadata.get("n_rejected", 0)), "hit"
+    except Exception as exc:
+        logger.warning(
+            "preproc_cache_read_failed file=%s cache=%s error=%s",
+            file_path.name,
+            raw_path,
+            exc,
+        )
+        return None, None, 0, "read_error"
+
+
+def _store_preprocessed_cache(
+    *,
+    raw: Any,
+    file_path: Path,
+    settings: Dict[str, object],
+    project_root: Path,
+    mne_module: Any,
+    audit_before: Dict[str, Any],
+    n_rejected: int,
+) -> str:
+    if not _preproc_cache_enabled(settings):
+        return "disabled"
+
+    payload = _preproc_cache_payload(
+        file_path,
+        settings,
+        mne_version=str(getattr(mne_module, "__version__", "unknown")),
+    )
+    cache_key = _preproc_cache_key(payload)
+    raw_path, meta_path = _preproc_cache_paths(project_root, file_path, cache_key)
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        raw.save(str(raw_path), overwrite=True, verbose=False)
+        metadata = {
+            "cache_key": cache_key,
+            "payload": payload,
+            "audit_before": audit_before,
+            "n_rejected": int(n_rejected),
+        }
+        tmp_meta_path = meta_path.with_suffix(".json.tmp")
+        tmp_meta_path.write_text(
+            json.dumps(metadata, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
+        os.replace(tmp_meta_path, meta_path)
+        return "stored"
+    except Exception as exc:
+        logger.warning(
+            "preproc_cache_write_failed file=%s cache=%s error=%s",
+            file_path.name,
+            raw_path,
+            exc,
+        )
+        return "write_error"
+
+
+def _build_epoch_data_from_spans(
+    raw: Any,
+    spans: List[Tuple[int, int]],
+) -> Any:
+    first_start, first_stop = spans[0]
+    first_segment = raw.get_data(start=first_start, stop=first_stop)
+    data = np.empty((len(spans),) + first_segment.shape, dtype=first_segment.dtype)
+    data[0] = first_segment
+    for idx, (start_samp, stop_samp) in enumerate(spans[1:], start=1):
+        segment = raw.get_data(start=start_samp, stop=stop_samp)
+        if segment.shape != first_segment.shape:
+            raise ValueError(
+                "Epoch segment shape mismatch: "
+                f"expected {first_segment.shape}, got {segment.shape}"
+            )
+        data[idx] = segment
+    return data
+
+
 def _run_full_pipeline_for_file(
     file_path: Path,
     settings: Dict[str, object],
@@ -170,6 +343,19 @@ def _run_full_pipeline_for_file(
       post_export → preproc audit (after) → cleanup.
     """
     t0 = time.perf_counter()
+    timings_ms: Dict[str, int] = {}
+    cache_status = "not_checked"
+
+    def _record_timing(section: str, started_at: float) -> None:
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        timings_ms[section] = elapsed_ms
+        logger.info(
+            "[TIMING] file=%s section=%s elapsed_ms=%d",
+            file_path.name,
+            section,
+            elapsed_ms,
+        )
+
     stage = "load"
     crop_logger = _build_fft_crop_file_logger(project_root=project_root, file_path=file_path)
     try:
@@ -181,6 +367,7 @@ def _run_full_pipeline_for_file(
         crop_logger.info("file=%s stage=start", file_path.name)
 
         # Lazy imports (inside worker only)
+        logger.info("[PIPELINE STAGE] file=%s stage=worker_imports_start", file_path.name)
         from Main_App.io.load_utils import load_eeg_file  # type: ignore
         from Main_App.exports.post_export_adapter import (  # type: ignore
             LegacyCtx,
@@ -188,6 +375,7 @@ def _run_full_pipeline_for_file(
         )
         import gc
         import mne  # type: ignore
+        logger.info("[PIPELINE STAGE] file=%s stage=worker_imports_done", file_path.name)
 
         # Quiet noisy MNE INFO logs in worker processes (e.g., repeated
         # "Using data from preloaded Raw..." lines) while preserving
@@ -213,102 +401,150 @@ def _run_full_pipeline_for_file(
         ref_ch2 = settings.get("ref_channel2") or settings.get("ref_ch2") or "EXG2"
         ref_pair = (str(ref_ch1), str(ref_ch2))
 
-        # 1) Load
-        stage = "load"
-        raw = load_eeg_file(_App(), str(file_path), ref_pair=ref_pair)
-        if raw is None:
-            raise RuntimeError("load_eeg_file returned None")
-
-        try:
-            sfreq = float(raw.info["sfreq"])  # type: ignore[index]
-            n_ch = len(raw.ch_names)
-        except Exception:
-            sfreq = -1.0
-            n_ch = -1
-        logger.info(
-            "[PIPELINE] %s: load complete sfreq=%.3f n_channels=%d",
-            file_path.name,
-            sfreq,
-            n_ch,
+        # 1) Cache lookup, then load/preprocess only on misses.
+        stage = "cache_lookup"
+        logger.info("[PIPELINE STAGE] file=%s stage=cache_lookup_start", file_path.name)
+        section_started = time.perf_counter()
+        raw_proc, audit_before, n_rejected, cache_status = _load_preprocessed_cache(
+            file_path=file_path,
+            settings=settings,
+            project_root=project_root,
+            mne_module=mne,
         )
-
-        # 2) Preproc audit (before)
-        stage = "preprocess"
-        audit_before = backend_preprocess.begin_preproc_audit(
-            raw,
-            settings,
+        _record_timing("cache_lookup", section_started)
+        logger.info(
+            "[PIPELINE] %s: preproc cache status=%s",
             file_path.name,
+            cache_status,
         )
         logger.info(
-            "[PIPELINE] %s: preproc audit_before complete",
+            "[PIPELINE STAGE] file=%s stage=cache_lookup_done status=%s",
             file_path.name,
+            cache_status,
         )
 
-        # 3) Preprocessing via PySide6 backend (handles:
-        #    initial EXG ref -> drop EXGs -> channel limit keeping stim ->
-        #    downsample -> filter -> kurtosis/interp -> final avg ref)
-        logger.info(
-            "RUNNER_SETTINGS_SNAPSHOT file=%s high_pass=%r low_pass=%r downsample_rate=%r "
-            "reject_thresh=%r ref=(%r,%r) stim=%r",
-            Path(file_path).name if file_path else "UNKNOWN",
-            settings.get("high_pass"),
-            settings.get("low_pass"),
-            settings.get("downsample_rate", settings.get("downsample")),
-            settings.get("reject_thresh"),
-            settings.get("ref_channel1"),
-            settings.get("ref_channel2"),
-            settings.get("stim_channel"),
-            extra={
-                "source": "process_runner",
-                "file": file_path.name,
-                "high_pass": settings.get("high_pass"),
-                "low_pass": settings.get("low_pass"),
-                "downsample_rate": settings.get("downsample_rate"),
-                "downsample": settings.get("downsample"),
-                "reject_thresh": settings.get("reject_thresh"),
-                "ref_channel1": settings.get("ref_channel1"),
-                "ref_channel2": settings.get("ref_channel2"),
-                "stim_channel": settings.get("stim_channel"),
-            },
-        )
-        logger.info(
-            "RUNNER_PREPROC_PARAMS file=%s high_pass=%r low_pass=%r downsample_rate=%r "
-            "reject_thresh=%r",
-            Path(file_path).name,
-            settings.get("high_pass"),
-            settings.get("low_pass"),
-            settings.get("downsample_rate", settings.get("downsample")),
-            settings.get("reject_thresh"),
-        )
-        raw_proc, n_rejected = backend_preprocess.perform_preprocessing(
-            raw_input=raw,
-            params=settings,
-            log_func=logger.info,
-            filename_for_log=file_path.name,
-        )
         if raw_proc is None:
-            raise RuntimeError("perform_preprocessing returned None")
+            # 2) Load only the first 64 channels plus selected ref pair and stim.
+            stage = "load"
+            logger.info("[PIPELINE STAGE] file=%s stage=load_start", file_path.name)
+            section_started = time.perf_counter()
+            raw = load_eeg_file(
+                _App(),
+                str(file_path),
+                ref_pair=ref_pair,
+                first_n_channels=BDF_FIRST_N_CHANNELS,
+            )
+            _record_timing("load", section_started)
+            if raw is None:
+                raise RuntimeError("load_eeg_file returned None")
+            logger.info("[PIPELINE STAGE] file=%s stage=load_done", file_path.name)
 
-        try:
-            sfreq_proc = float(raw_proc.info["sfreq"])  # type: ignore[index]
+            sfreq = float(raw.info.get("sfreq", -1.0))
+            n_ch = len(raw.ch_names)
+            logger.info(
+                "[PIPELINE] %s: load complete sfreq=%.3f n_channels=%d",
+                file_path.name,
+                sfreq,
+                n_ch,
+            )
+
+            # 3) Preproc audit (before)
+            stage = "preprocess"
+            section_started = time.perf_counter()
+            audit_before = backend_preprocess.begin_preproc_audit(
+                raw,
+                settings,
+                file_path.name,
+            )
+            _record_timing("preproc_audit_before", section_started)
+            logger.info(
+                "[PIPELINE] %s: preproc audit_before complete",
+                file_path.name,
+            )
+
+            # 4) Preprocessing via PySide6 backend (handles:
+            #    initial EXG ref -> drop EXGs -> channel limit keeping stim ->
+            #    downsample -> filter -> kurtosis/interp -> final avg ref)
+            logger.info(
+                "RUNNER_SETTINGS_SNAPSHOT file=%s high_pass=%r low_pass=%r downsample_rate=%r "
+                "reject_thresh=%r ref=(%r,%r) stim=%r",
+                Path(file_path).name if file_path else "UNKNOWN",
+                settings.get("high_pass"),
+                settings.get("low_pass"),
+                settings.get("downsample_rate", settings.get("downsample")),
+                settings.get("reject_thresh"),
+                settings.get("ref_channel1"),
+                settings.get("ref_channel2"),
+                settings.get("stim_channel"),
+                extra={
+                    "source": "process_runner",
+                    "file": file_path.name,
+                    "high_pass": settings.get("high_pass"),
+                    "low_pass": settings.get("low_pass"),
+                    "downsample_rate": settings.get("downsample_rate"),
+                    "downsample": settings.get("downsample"),
+                    "reject_thresh": settings.get("reject_thresh"),
+                    "ref_channel1": settings.get("ref_channel1"),
+                    "ref_channel2": settings.get("ref_channel2"),
+                    "stim_channel": settings.get("stim_channel"),
+                },
+            )
+            logger.info(
+                "RUNNER_PREPROC_PARAMS file=%s high_pass=%r low_pass=%r downsample_rate=%r "
+                "reject_thresh=%r",
+                Path(file_path).name,
+                settings.get("high_pass"),
+                settings.get("low_pass"),
+                settings.get("downsample_rate", settings.get("downsample")),
+                settings.get("reject_thresh"),
+            )
+            section_started = time.perf_counter()
+            raw_proc, n_rejected = backend_preprocess.perform_preprocessing(
+                raw_input=raw,
+                params=settings,
+                log_func=logger.info,
+                filename_for_log=file_path.name,
+            )
+            _record_timing("preprocessing", section_started)
+            if raw_proc is None:
+                raise RuntimeError("perform_preprocessing returned None")
+
+            sfreq_proc = float(raw_proc.info.get("sfreq", -1.0))
             n_ch_proc = len(raw_proc.ch_names)
-        except Exception:
-            sfreq_proc = -1.0
-            n_ch_proc = -1
-        logger.info(
-            "[PIPELINE] %s: preprocess complete n_rejected=%d sfreq=%.3f n_channels=%d",
-            file_path.name,
-            int(n_rejected),
-            sfreq_proc,
-            n_ch_proc,
-        )
+            logger.info(
+                "[PIPELINE] %s: preprocess complete n_rejected=%d sfreq=%.3f n_channels=%d",
+                file_path.name,
+                int(n_rejected),
+                sfreq_proc,
+                n_ch_proc,
+            )
 
-        # Free loader Raw ASAP
-        del raw
-        gc.collect()
+            section_started = time.perf_counter()
+            cache_status = _store_preprocessed_cache(
+                raw=raw_proc,
+                file_path=file_path,
+                settings=settings,
+                project_root=project_root,
+                mne_module=mne,
+                audit_before=audit_before,
+                n_rejected=int(n_rejected),
+            )
+            _record_timing("cache_store", section_started)
+            logger.info(
+                "[PIPELINE] %s: preproc cache store status=%s",
+                file_path.name,
+                cache_status,
+            )
+
+            # Free loader Raw ASAP
+            del raw
+            gc.collect()
+        elif audit_before is None:
+            raise RuntimeError("preprocessed cache hit missing audit metadata")
 
         # 4) Events — prefer explicit stim channel (BioSemi 'Status')
         stage = "events"
+        section_started = time.perf_counter()
         stim = (
             settings.get("stim_channel")
             or settings.get("stim")
@@ -345,9 +581,11 @@ def _run_full_pipeline_for_file(
             stim,
             events_info["n_events"],
         )
+        _record_timing("events", section_started)
 
         # 5) Epochs per label/code (tolerant of missing runs)
         stage = "epochs"
+        section_started = time.perf_counter()
         tmin = float(settings.get("epoch_start", -1.0))
         tmax = float(settings.get("epoch_end", 1.0))
         sfreq = float(raw_proc.info["sfreq"])
@@ -384,7 +622,7 @@ def _run_full_pipeline_for_file(
                 continue
 
             rep_keys = sorted([k for k in crop_results if int(k[0]) == code_int], key=lambda x: x[1])
-            rep_segments: List[object] = []
+            rep_spans: List[Tuple[int, int]] = []
             rep_events: List[List[int]] = []
             rep_metadata: List[dict] = []
 
@@ -462,29 +700,6 @@ def _run_full_pipeline_for_file(
                     )
                     continue
 
-                epoch_data = raw_proc.get_data(start=start_samp, stop=stop_samp)
-                if epoch_data.size == 0:
-                    crop_logger.warning(
-                        "file=%s condition=%s rep=%d skip_no_data start=%d stop=%d",
-                        file_path.name,
-                        label,
-                        int(rep_key[1]),
-                        start_samp,
-                        stop_samp,
-                    )
-                    continue
-                if epoch_data.shape[1] != expected_n:
-                    crop_logger.warning(
-                        "file=%s condition=%s rep=%d skip_shape_mismatch expected=%d actual=%d crop_mode=%s",
-                        file_path.name,
-                        label,
-                        int(rep_key[1]),
-                        expected_n,
-                        int(epoch_data.shape[1]),
-                        crop_mode,
-                    )
-                    continue
-
                 n_used = expected_n
                 n_mod_step = int(n_used % n_step) if n_step else -1
                 df_hz = (sfreq / float(n_used)) if n_used > 0 else 0.0
@@ -516,7 +731,7 @@ def _run_full_pipeline_for_file(
                     fallback_reason,
                 )
 
-                rep_segments.append(epoch_data)
+                rep_spans.append((start_samp, stop_samp))
                 rep_events.append([start_samp, 0, code_int])
                 rep_metadata.append(
                     {
@@ -530,7 +745,7 @@ def _run_full_pipeline_for_file(
                     }
                 )
 
-            n_ep = len(rep_segments)
+            n_ep = len(rep_spans)
             logger.info(
                 "[AUDIT DEBUG] %s: label='%s' code=%s events_for_code=%d epochs_after_crop=%d",
                 file_path.name,
@@ -549,11 +764,12 @@ def _run_full_pipeline_for_file(
                 epochs_dict[label] = []
                 continue
 
-            import numpy as np  # local for worker import minimization
             import pandas as pd
 
+            epoch_data = _build_epoch_data_from_spans(raw_proc, rep_spans)
+
             epochs = mne.EpochsArray(
-                np.stack(rep_segments, axis=0),
+                epoch_data,
                 raw_proc.info.copy(),
                 events=np.asarray(rep_events, dtype=int),
                 event_id={label: code_int},
@@ -577,24 +793,30 @@ def _run_full_pipeline_for_file(
             file_path.name,
             total_epochs,
         )
+        _record_timing("epochs", section_started)
 
         # 6) Post-export (delegates to Legacy post_process via adapter)
         stage = "export"
+        section_started = time.perf_counter()
+        export_timing_records: List[Dict[str, object]] = []
         ctx = LegacyCtx(
             preprocessed_data=epochs_dict,
             save_folder_path=SimpleNamespace(get=lambda: str(save_folder)),
             data_paths=[str(file_path)],
             settings=settings,
             log=logger.info,
+            export_timing_records=export_timing_records,
         )
         fif_written = run_post_export(ctx, list(event_map.keys()))
         logger.info(
             "[PIPELINE] %s: export complete",
             file_path.name,
         )
+        _record_timing("export", section_started)
 
         # 7) Preproc audit (after)
         stage = "audit"
+        section_started = time.perf_counter()
         audit_after, problems = backend_preprocess.finalize_preproc_audit(
             audit_before,
             raw_proc,
@@ -611,6 +833,7 @@ def _run_full_pipeline_for_file(
             audit_after.get("n_rejected"),
             problems,
         )
+        _record_timing("preproc_audit_after", section_started)
 
         # Developer-only audit debug: summarize final preprocessing state when a
         # reference pair was requested in the settings. Uses the new audit payload
@@ -650,6 +873,7 @@ def _run_full_pipeline_for_file(
             logger.info("[AUDIT DEBUG] %s", " ".join(parts))
 
         # Done with Raw/Epochs
+        section_started = time.perf_counter()
         del raw_proc, epochs_dict
         gc.collect()
 
@@ -665,6 +889,7 @@ def _run_full_pipeline_for_file(
                 pass
         except Exception:
             pass
+        _record_timing("cleanup", section_started)
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(
@@ -680,6 +905,9 @@ def _run_full_pipeline_for_file(
             "audit": audit_after,
             "problems": problems,
             "events_info": events_info,
+            "timings_ms": dict(timings_ms),
+            "export_timing_records": export_timing_records,
+            "preproc_cache_status": cache_status,
             "post_export_ok": True,
         }
     except Exception as e:  # pragma: no cover - worker error path
@@ -709,6 +937,10 @@ def _process_one_file(
     _run_full_pipeline_for_file so the same pipeline can be reused by other callers.
     """
     return _run_full_pipeline_for_file(file_path, settings, event_map, save_folder, project_root)
+
+
+def _log_export_timing_records(result: Dict[str, object]) -> None:
+    log_router.replay_worker_timing_records(logger, result=result)
 
 
 def _memory_ok(limit_ratio: Optional[float]) -> Tuple[bool, float]:
@@ -818,11 +1050,17 @@ def run_project_parallel(
             cancelled = True
         return cancelled
 
+    logger.info(
+        "[MP STAGE] pool_create_start max_workers=%d files=%d",
+        maxw,
+        total,
+    )
     pool = ProcessPoolExecutor(
         max_workers=maxw,
         mp_context=ctx,
         initializer=_worker_init,
     )
+    logger.info("[MP STAGE] pool_created max_workers=%d", maxw)
 
     try:
 
@@ -865,6 +1103,12 @@ def run_project_parallel(
                 return False
 
             f = remaining.pop(0)
+            logger.info(
+                "[MP STAGE] submit_file_start file=%s in_flight=%d remaining=%d",
+                f.name,
+                len(in_flight),
+                len(remaining),
+            )
             fut = pool.submit(
                 _process_one_file,
                 f,
@@ -874,6 +1118,12 @@ def run_project_parallel(
                 params.project_root,
             )
             in_flight[fut] = f
+            logger.info(
+                "[MP STAGE] submit_file_done file=%s in_flight=%d remaining=%d",
+                f.name,
+                len(in_flight),
+                len(remaining),
+            )
             if len(in_flight) > peak_in_flight:
                 peak_in_flight = len(in_flight)
             return True
@@ -919,6 +1169,7 @@ def run_project_parallel(
 
                 # Accumulate per-file rejected-channel counts when available
                 if isinstance(res, dict) and res.get("status") == "ok":
+                    _log_export_timing_records(res)
                     audit = res.get("audit") or {}
                     if isinstance(audit, dict):
                         n_rejected = audit.get("n_rejected")

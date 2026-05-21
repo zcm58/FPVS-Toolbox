@@ -44,7 +44,6 @@ from Main_App.processing.processing_controller import (
 from Main_App.projects.project_manager import select_projects_root
 from Main_App.workers.mp_env import (
     compute_effective_max_workers,
-    get_ram_tier_recommendation,
 )
 from Tools.Average_Preprocessing.New_PySide6.main_window import (
     AdvancedAveragingWindow,
@@ -68,8 +67,8 @@ from Main_App.gui import post_export_workflows
 from Main_App.gui import tool_workflows
 from Main_App.gui import shell_status
 from Main_App.gui.post_export_workflows import (
-    excel_snapshot as _excel_snapshot,
-    should_show_no_excel_popup as _should_show_no_excel_popup,
+    excel_snapshot as _excel_snapshot,  # noqa: F401 - compatibility re-export
+    should_show_no_excel_popup as _should_show_no_excel_popup,  # noqa: F401 - compatibility re-export
 )
 from Main_App.gui.op_guard import OpGuard
 
@@ -476,6 +475,12 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     def _on_project_ready(self) -> None:
         project_workflows.on_project_ready(self)
+        stats_page = getattr(self, "_stats_page", None)
+        project = getattr(self, "currentProject", None)
+        if stats_page is not None and project is not None:
+            rebind = getattr(stats_page, "rebind_project_context", None)
+            if callable(rebind):
+                rebind(project.project_root, reload_default_folder=True)
 
     # --------------------------- tools UI --------------------------- #
     def _set_sidebar_selection(self, role: str) -> None:
@@ -497,8 +502,14 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self._set_sidebar_selection("btn_home")
 
     def _ensure_stats_page(self) -> PysideStatsWindow:
+        project = getattr(self, "currentProject", None)
+        project_root = Path(project.project_root).resolve() if project is not None else None
         page = getattr(self, "_stats_page", None)
-        if page is None:
+        page_root = Path(getattr(page, "project_dir", "")).resolve() if page is not None else None
+        if page is None or (project_root is not None and page_root != project_root):
+            if page is not None:
+                self.workspace_stack.removeWidget(page)
+                page.deleteLater()
             page = PysideStatsWindow(parent=self)
             page.setObjectName("embedded_stats_page")
             self.workspace_stack.addWidget(page)

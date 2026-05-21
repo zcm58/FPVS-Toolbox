@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 import Main_App.Shared.load_utils as shared_load_utils
@@ -12,6 +13,7 @@ class _FakeRaw:
         self.info = {"sfreq": 512.0}
         self.channel_type_calls = []
         self.montage_kwargs = None
+        self.montage = None
 
     def load_data(self) -> None:
         return None
@@ -20,6 +22,7 @@ class _FakeRaw:
         self.channel_type_calls.append(mapping)
 
     def set_montage(self, montage, **kwargs):
+        self.montage = montage
         self.montage_kwargs = kwargs
 
 
@@ -70,6 +73,45 @@ def test_shared_load_eeg_file_preserves_bdf_channel_and_montage_contract(monkeyp
         "verbose": False,
     }
     assert "BDF loaded successfully." in logs
+
+
+def test_shared_load_eeg_file_can_limit_bdf_to_first_channels_refs_and_stim(
+    monkeypatch,
+    tmp_path,
+    caplog,
+):
+    fake_raw = _FakeRaw()
+    calls = []
+
+    def _fake_read_raw_bdf(filepath, **kwargs):
+        calls.append(dict(kwargs))
+        return fake_raw
+
+    monkeypatch.setattr(shared_load_utils, "_memmap_dir_for_pid", lambda: tmp_path)
+    monkeypatch.setattr(shared_load_utils, "_cached_1010", lambda: object())
+    monkeypatch.setattr(shared_load_utils.mne.io, "read_raw_bdf", _fake_read_raw_bdf)
+
+    logs: list[str] = []
+    path = tmp_path / "sample.bdf"
+
+    with caplog.at_level(logging.INFO, logger=shared_load_utils.__name__):
+        raw = load_utils.load_eeg_file(
+            _app(logs),
+            str(path),
+            ref_pair=("EXG1", "EXG2"),
+            first_n_channels=1,
+        )
+
+    assert raw is fake_raw
+    assert calls[0]["preload"] is False
+    assert "include" not in calls[0]
+    assert calls[1]["include"] == ["Cz", "EXG1", "EXG2", "Status"]
+    assert calls[1]["preload"] == str(tmp_path / "sample_raw.dat")
+    assert any("[LOADER CHANNEL SUBSET]" in message for message in logs)
+    assert "stage=header_read_start" in caplog.text
+    assert "stage=read_raw_bdf_start" in caplog.text
+    assert "stage=load_data_done" in caplog.text
+    assert "stage=montage_apply_done" in caplog.text
 
 
 def test_shared_load_eeg_file_unsupported_extension_warns_and_returns_none(monkeypatch, tmp_path):

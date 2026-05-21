@@ -7,8 +7,8 @@ explicitly changes the processing pipeline.
 
 ## Entry Contract
 
-`load_eeg_file(app, filepath, ref_pair=None)` expects the host object to
-provide:
+`load_eeg_file(app, filepath, ref_pair=None, first_n_channels=None)` expects the
+host object to provide:
 
 - `log(message, ...)` for status and warning messages.
 - Optional `currentProject.preprocessing` with `ref_channel1`,
@@ -35,6 +35,11 @@ implementation module and must not duplicate logic elsewhere.
 - Disk-backed preload files are created under
   `tempfile.gettempdir()/fpvs_memmap/pid_<process-id>/<file-stem>_raw.dat`.
 - Loading does not resample data.
+- When `first_n_channels` is provided, the loader performs a header-only BDF
+  read, then passes `include=` for the first N channel names plus the selected
+  reference pair and resolved stim channel. If subset resolution fails, the
+  loader emits `[LOADER CHANNEL SUBSET WARNING]` and loads the full BDF rather
+  than silently changing results.
 
 ## Channel Behavior
 
@@ -46,11 +51,19 @@ implementation module and must not duplicate logic elsewhere.
 - The resolved stimulus channel is typed as `stim` when present.
 - EXG and stimulus matching is case-insensitive, while actual channel casing is
   preserved.
+- The active process runner currently requests the first 64 BDF channels plus
+  `EXG1`/`EXG2` as the selected reference pair and the resolved stim channel.
+  This avoids loading unused BioSemi `EXG3` through `EXG8` channels before
+  preprocessing drops non-selected EXG channels.
 
 ## Montage And Errors
 
 - The loader applies MNE's cached `standard_1005` montage with
   `on_missing="warn"`, `match_case=False`, and `verbose=False`.
+- The montage object is cached once per Python worker process with
+  `_cached_1010()`. Multiprocessing workers do not share that in-memory cache,
+  so a batch with several workers builds the montage once per worker, then
+  applies that cached object to each file handled by the worker.
 - BioSemi's headcap table lists standard 64-channel caps with `1020`
   layout/labelling, and Brainstorm's BioSemi cap documentation maps BioSemi
   16-, 32-, and 64-electrode cap labels one-to-one to the standard 10-10
@@ -58,18 +71,19 @@ implementation module and must not duplicate logic elsewhere.
   treated as 10-10-positioned recordings.
 - MNE does not expose a builtin named `standard_1010`; `standard_1005` is the
   denser standard montage that includes the needed 10-10 positions.
-- Missing montage positions must warn for now. This keeps unexpected missing
-  scalp channel locations visible while preserving the known EXG reference
-  channel behavior.
+- Missing montage positions must warn for scalp/data channels. The expected
+  missing-position warning for selected reference channels such as `EXG1` and
+  `EXG2` is suppressed because those channels are kept as EEG only for initial
+  referencing and are dropped before downstream interpolation/average reference.
 - Montage errors are logged as warnings and do not make loading fail.
 - Load failures log `!!! Load Error <filename>: <error>`, try to show a user
   error, and return `None`.
 
 ## Preservation Rules
 
-- Do not change supported extension, memmap directory shape, channel typing
-  policy, montage arguments, logging messages, or `None` return behavior without
-  an explicitly scoped behavior change.
+- Do not change supported extension, memmap directory shape, channel subset
+  policy, channel typing policy, montage arguments, logging messages, or `None`
+  return behavior without an explicitly scoped behavior change.
 - Do not restore `.set` support unless it is a new explicitly scoped feature.
 - Do not introduce Tkinter, CustomTkinter, or CTkMessagebox; user warnings and
   errors must use `Main_App.Shared.user_messages`.

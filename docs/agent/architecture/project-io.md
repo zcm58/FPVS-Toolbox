@@ -24,6 +24,11 @@ FPVS Toolbox uses a strict hybrid settings model:
   `conditions[].name`/`conditions[].trigger_code` into `project.json`
   `event_map`, then prompts for the raw `.bdf` input folder; it must not copy
   Studio stimulus assets or runtime artifacts.
+- The preprocessing runner may create a generated cache under the active project
+  root at `.fpvs_cache/preprocessed/`. Cache keys include source file path,
+  size, mtime, MNE version, loader profile, and preprocessing settings. Cache
+  files are generated artifacts, not project configuration, and are ignored by
+  git when a project root is inside the repo.
 
 Rules:
 
