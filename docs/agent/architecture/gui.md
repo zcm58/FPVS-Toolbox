@@ -61,6 +61,12 @@ Settings page, Statistical Analysis, SNR Plot Generator, Individual
 Detectability, Image Resizer, Ratio Calculator, and Epoch Averaging are
 embedded in this workspace stack.
 
+When the active project changes through create/open/import/path workflows, the
+main shell must return to Home and discard project-bound embedded page instances.
+Tools should be recreated from the new `currentProject` on the next sidebar
+open so stale project roots, default folders, and settings editors cannot
+survive a project switch.
+
 The main shell default and minimum size is `1280x900` to provide enough
 workspace area for embedded tools without requiring individual pop-out windows.
 

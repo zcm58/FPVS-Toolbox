@@ -34,23 +34,22 @@ def _illegal_condition_chars(label: str) -> list[str]:
 
 def new_project(host: Any) -> None:
     _new_project(host)
-    on_project_ready(host)
+    notify_project_ready(host)
 
 
 def open_existing_project(host: Any) -> None:
     _open_existing_project(host, host)
-    on_project_ready(host)
 
 
 def import_fpvs_config_project(host: Any) -> None:
     project = _import_fpvs_config_project(host, host)
     if project is not None:
-        on_project_ready(host)
+        notify_project_ready(host)
 
 
 def open_project_path(host: Any, folder: str) -> None:
     _open_project_path(host, folder)
-    on_project_ready(host)
+    notify_project_ready(host)
 
 
 def edit_project_settings(host: Any) -> None:
@@ -68,6 +67,80 @@ def on_project_ready(host: Any) -> None:
     update_select_button_text(host)
     if hasattr(host, "stacked"):
         host.stacked.setCurrentIndex(1)
+
+
+def notify_project_ready(host: Any) -> None:
+    callback = getattr(host, "_on_project_ready", None)
+    if callable(callback):
+        callback()
+    else:
+        on_project_ready(host)
+
+
+def _retire_widget(widget: Any, *, workspace: Any, seen: set[int]) -> None:
+    if widget is None:
+        return
+    widget_id = id(widget)
+    if widget_id in seen:
+        return
+    seen.add(widget_id)
+
+    if workspace is not None:
+        remover = getattr(workspace, "removeWidget", None)
+        if callable(remover):
+            try:
+                remover(widget)
+            except RuntimeError:
+                pass
+
+    closer = getattr(widget, "close", None)
+    if callable(closer):
+        try:
+            closer()
+        except RuntimeError:
+            pass
+
+    deleter = getattr(widget, "deleteLater", None)
+    if callable(deleter):
+        try:
+            deleter()
+        except RuntimeError:
+            pass
+
+
+def reset_project_context_workspace(host: Any) -> None:
+    """Discard project-bound embedded pages after the active project changes."""
+    workspace = getattr(host, "workspace_stack", None)
+    seen: set[int] = set()
+
+    settings_dialog = getattr(host, "_settings_dialog", None)
+    if settings_dialog is not None:
+        reject = getattr(settings_dialog, "reject", None)
+        if callable(reject):
+            try:
+                reject()
+            except RuntimeError:
+                pass
+        _retire_widget(settings_dialog, workspace=None, seen=seen)
+        host._settings_dialog = None
+
+    for attr_name in (
+        "_settings_page",
+        "_stats_page",
+        "_image_resizer_page",
+        "_ratio_calculator_page",
+        "_individual_detectability_page",
+        "_plot_generator_page",
+        "_epoch_page",
+        "_epoch_win",
+    ):
+        widget = getattr(host, attr_name, None)
+        _retire_widget(widget, workspace=workspace, seen=seen)
+        setattr(host, attr_name, None)
+
+    show_home_page = getattr(host, "show_home_page", None)
+    if callable(show_home_page):
+        show_home_page()
 
 
 def load_project(

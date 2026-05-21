@@ -475,12 +475,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
 
     def _on_project_ready(self) -> None:
         project_workflows.on_project_ready(self)
-        stats_page = getattr(self, "_stats_page", None)
-        project = getattr(self, "currentProject", None)
-        if stats_page is not None and project is not None:
-            rebind = getattr(stats_page, "rebind_project_context", None)
-            if callable(rebind):
-                rebind(project.project_root, reload_default_folder=True)
+        project_workflows.reset_project_context_workspace(self)
 
     # --------------------------- tools UI --------------------------- #
     def _set_sidebar_selection(self, role: str) -> None:
