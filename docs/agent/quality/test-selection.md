@@ -90,8 +90,8 @@ via pytest-qt/offscreen unless explicitly approved.
 
 - GUI/layout smoke: `tests/stats/gui/test_stats_layout_smoke.py`, `tests/stats/gui/test_stats_window_smoke_phase0.py`
 - Pipeline smoke: `tests/stats/pipeline/test_stats_pipeline_smoke.py`
-- File scanning and project paths: `tests/stats/pipeline/test_stats_file_scanner.py`, `tests/stats/pipeline/test_stats_project_paths.py`
-- DV and reporting rules: `tests/stats/analysis/test_stats_dv_policy.py`, `tests/stats/reporting/test_stats_reporting_summary_smoke.py`
+- File scanning and project paths: `tests/stats/pipeline/test_stats_file_scanner.py`, `tests/stats/pipeline/test_stats_project_paths.py`, `tests/stats/data/test_stats_project_context.py`
+- DV, FullSNR, and reporting rules: `tests/stats/analysis/test_stats_dv_policy.py`, `tests/stats/analysis/test_full_snr_reference_equivalence.py`, `tests/stats/reporting/test_stats_reporting_summary_smoke.py`
 - Summary reporting: `tests/stats/analysis/test_summary_utils_mixed_model.py`, `tests/stats/analysis/test_summary_utils_posthoc_directions.py`, `tests/stats/reporting/test_lmm_reporting_exports.py`, `tests/stats/reporting/test_stats_rm_anova_summary_reporting.py`
 - Reporting audit guardrails: `tests/audit/test_agent_audit_stats_reporting_legibility.py`
 - CustomTkinter quarantine: `tests/audit/test_stats_no_customtkinter_import.py`, `tests/audit/test_stats_legacy_ui_quarantine.py`

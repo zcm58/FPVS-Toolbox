@@ -39,7 +39,7 @@ Primary areas:
 - `src/Main_App/io/`: canonical Main App I/O import surface. It currently delegates BDF loading to the existing shared implementation while the repo moves toward purpose-based Main App folders.
 - `src/Main_App/projects/`: canonical Main App project import surface. It owns the project model, project manager workflows, project metadata scanning, projects-root helpers, and preprocessing-settings normalization.
 - `src/Main_App/workers/`: canonical Main App worker package for Qt workers, process-runner wrappers, and multiprocessing environment helpers.
-- `src/Main_App/diagnostics/`: canonical Main App runtime diagnostics package for preprocessing audit helpers and event-time lock reporting. Repo-evaluation scripts stay in `scripts/` and `.agents/skills/`.
+- `src/Main_App/diagnostics/`: canonical Main App runtime diagnostics package for preprocessing audit helpers, event-time lock reporting, and runtime log routing. Repo-evaluation scripts stay in `scripts/` and `.agents/skills/`.
 - `src/Main_App/Shared/`: current shared owners for cross-path behavior such as the canonical BDF loader, processing mixin, settings helpers, FFT crop helpers, and post-processing export behavior.
 - `src/Main_App/Performance/`: process-runner and multiprocessing support for heavy processing.
 - `src/Main_App/Legacy_App/`: retired historical package. Do not recreate it; active code belongs in purpose-based `Main_App` packages.

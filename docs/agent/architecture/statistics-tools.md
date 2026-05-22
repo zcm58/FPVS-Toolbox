@@ -17,8 +17,8 @@ Stats grouping:
 - `ui/`: window mixins, dialogs, widget assembly, and small widgets.
 - `controller/`: run coordination, pipeline state, and worker scheduling.
 - `workers/`: Qt worker wrappers and GUI-agnostic statistical job execution.
-- `data/`: project scans, manifests, subject IDs, and missing input detection.
-- `analysis/`: DV policy facade and focused helpers, statistical engines, harmonics, and SNR/noise helpers.
+- `data/`: project scans, manifest lookup, project-root context, subject IDs, and missing input detection.
+- `analysis/`: DV policy facade and focused helpers, statistical engines, harmonics, and vectorized FullSNR/SNR/noise helpers.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
 - `reporting/summary/`: focused rule-based summary builders split by models, frame/file loading, ANOVA, posthoc, and mixed-model language. `reporting/summary_utils.py` is a compatibility facade only.
@@ -38,6 +38,13 @@ Rules:
   `Export Stats-Ready Workbook` as a distinct action, reuse the active Summed
   BCA DV facade, preserve group labels and `subject_uid`, and surface missing
   metadata or fallback policy instead of silently changing values.
+- Stats folder scans may rebind the window to the manifest-owning project root
+  only when the selected Excel folder belongs to that manifest-defined Excel
+  subfolder. When rebinding, clear project-bound scan/results/export state so
+  stale subjects, conditions, groups, and output paths do not survive.
+- FullSNR helpers are vectorized for speed, but must preserve the legacy
+  +/-10-bin noise window, immediate-neighbor exclusion, min-bin behavior, and
+  zero-division handling exactly.
 - Add new analysis logic under the functional subpackage that owns it, and expose stable caller-facing surfaces through the package facade when needed.
 - Run `python .agents/scripts/audit/agent_audit.py --check stats-structure` after Stats structural changes; it flags removed namespace usage and tkinter imports in active Stats code.
 - Run `python .agents/scripts/audit/agent_audit.py --check stats-reporting-legibility` after Stats reporting changes; it flags oversized reporting modules and large function/class spans.
@@ -47,6 +54,7 @@ Useful tests:
 
 ```powershell
 python -m pytest tests/stats/pipeline/test_stats_pipeline_smoke.py tests/stats/gui/test_stats_layout_smoke.py -q
+python -m pytest tests/stats/analysis/test_full_snr_reference_equivalence.py tests/stats/data/test_stats_project_context.py -q
 python -m pytest tests/stats/io/test_stats_ready_export.py -q
 python -m pytest tests/stats/analysis/test_summary_utils_mixed_model.py tests/stats/analysis/test_summary_utils_posthoc_directions.py tests/stats/reporting/test_lmm_reporting_exports.py -q
 python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py tests/plot_generator/test_plot_generator_gui.py -q

@@ -113,7 +113,8 @@ Do not use these installed skills for normal FPVS Toolbox work:
 - Project I/O: `python -m pytest tests/project_io/test_project_settings_roundtrip.py tests/project_io/test_project_results_layout.py -q`
 - Plot generator: `python -m pytest tests/plot_generator/test_plot_generator_gui.py -q`
 - Ratio calculator: `python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py -q`
-- Stats GUI/pipeline: `python -m pytest tests/stats/gui/test_stats_layout_smoke.py tests/stats/pipeline/test_stats_pipeline_smoke.py -q`
+- Stats GUI/pipeline: `python -m pytest tests/stats/gui/test_stats_layout_smoke.py tests/stats/pipeline/test_stats_pipeline_smoke.py tests/stats/data/test_stats_project_context.py -q`
+- Stats FullSNR regression: `python -m pytest tests/stats/analysis/test_full_snr_reference_equivalence.py -q`
 - Stats-ready workbook export: `python -m pytest tests/stats/io/test_stats_ready_export.py -q`
 - Stats reporting summaries: `python -m pytest tests/stats/analysis/test_summary_utils_mixed_model.py tests/stats/analysis/test_summary_utils_posthoc_directions.py tests/stats/reporting/test_lmm_reporting_exports.py -q`
 
