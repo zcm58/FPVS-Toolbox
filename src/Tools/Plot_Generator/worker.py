@@ -5,7 +5,7 @@ import logging
 import math
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, List, Sequence
 
 import matplotlib
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
@@ -18,7 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from PySide6.QtCore import QObject, Signal
 
-from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
+from Tools.Plot_Generator.aggregation import PlotAggregationMixin
 from Tools.Plot_Generator.data_collection import PlotDataCollectionMixin
 from Tools.Plot_Generator.excel_inputs import (
     _frequency_pairs_from_columns,
@@ -63,7 +63,7 @@ _SCALP_CMAP = LinearSegmentedColormap.from_list(
 )
 
 
-class _Worker(QObject, PlotDataCollectionMixin):
+class _Worker(QObject, PlotDataCollectionMixin, PlotAggregationMixin):
     """Worker to process Excel files and generate plots."""
 
     progress = Signal(str, int, int)
@@ -338,84 +338,8 @@ class _Worker(QObject, PlotDataCollectionMixin):
         hi = max(freqs)
         return [freq for freq in self.oddballs if lo <= freq <= hi]
 
-    def _selected_roi_names(self) -> List[str]:
-        return list(self.roi_map.keys()) if self.selected_roi == ALL_ROIS_OPTION else [self.selected_roi]
-
-    def _aggregate_roi_data(
-        self,
-        subject_data: Dict[str, Dict[str, List[float]]],
-        subjects: Iterable[str] | None = None,
-    ) -> Dict[str, List[float]]:
-        started = time.perf_counter()
-        try:
-            roi_names = self._selected_roi_names()
-            filtered = set(subjects) if subjects is not None else None
-            aggregated: Dict[str, List[float]] = {}
-            for roi in roi_names:
-                rows: List[List[float]] = []
-                for pid, roi_values in subject_data.items():
-                    if filtered is not None and pid not in filtered:
-                        continue
-                    values = roi_values.get(roi)
-                    if values:
-                        rows.append(values)
-                if rows:
-                    aggregated[roi] = list(pd.DataFrame(rows).mean(axis=0))
-            return aggregated
-        finally:
-            self._mark_timing("roi_aggregate", started)
-
     def _scalp_oddball_frequencies(self) -> List[float]:
         return list(self.oddballs)
-
-    def _build_group_curves(
-        self,
-        subject_data: Dict[str, Dict[str, List[float]]],
-    ) -> Dict[str, Dict[str, List[float]]]:
-        if not self.enable_group_overlay or not self.subject_groups:
-            self._unknown_subject_files.clear()
-            return {}
-
-        # Group overlays ride on top of the same averaged ROI curves that power
-        # the single-subject plot. We simply filter the already aggregated
-        # ``subject_data`` per group so the worker never re-reads Excel files or
-        # blocks the UI thread with redundant IO.
-        per_group: Dict[str, Dict[str, List[float]]] = {}
-        for group in self.selected_groups:
-            subjects = {
-                pid
-                for pid, grp in self.subject_groups.items()
-                if grp == group and pid in subject_data
-            }
-            if not subjects:
-                continue
-            aggregated = self._aggregate_roi_data(subject_data, subjects)
-            if aggregated:
-                per_group[group] = aggregated
-
-        if not per_group:
-            self._emit(
-                "No participants assigned to the selected groups. Showing overall average only.",
-                0,
-                0,
-            )
-        self._warn_unknown_subjects()
-        return per_group
-
-    def _warn_unknown_subjects(self) -> None:
-        if (
-            self.multi_group_mode
-            and self.enable_group_overlay
-            and self._unknown_subject_files
-        ):
-            files = ", ".join(sorted(self._unknown_subject_files))
-            self._emit(
-                "Warning: The following Excel files lack group assignments and were excluded from group overlays:"
-                f" {files}",
-                0,
-                0,
-            )
-            self._unknown_subject_files.clear()
 
     def _prepare_scalp_inputs(
         self, subject_maps: Dict[str, Dict[str, float]]
