@@ -32,6 +32,7 @@ from Tools.Plot_Generator.scalp_utils import (
     select_oddball_harmonics,
     summarize_subject_scalp,
 )
+from Tools.Plot_Generator.worker_config import PlotWorkerConfig
 
 logger = logging.getLogger(__name__)
 _DEFAULT_A_PEAKS = "A-Peaks"
@@ -102,32 +103,67 @@ class _Worker(QObject):
         project_root: str | None = None,
     ) -> None:
         super().__init__()
-        self.folder = folder
-        self.condition = condition
-        self.roi_map = roi_map
-        self.selected_roi = selected_roi
+        self.config = PlotWorkerConfig(
+            folder=folder,
+            condition=condition,
+            roi_map=roi_map,
+            selected_roi=selected_roi,
+            title=title,
+            xlabel=xlabel,
+            ylabel=ylabel,
+            x_min=x_min,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=y_max,
+            out_dir=out_dir,
+            stem_color=stem_color,
+            condition_b=condition_b,
+            stem_color_b=stem_color_b,
+            oddballs=oddballs,
+            use_matlab_style=use_matlab_style,
+            overlay=overlay,
+            subject_groups=subject_groups,
+            selected_groups=selected_groups,
+            enable_group_overlay=enable_group_overlay,
+            multi_group_mode=multi_group_mode,
+            include_scalp_maps=include_scalp_maps,
+            scalp_vmin=scalp_vmin,
+            scalp_vmax=scalp_vmax,
+            scalp_title_a_template=scalp_title_a_template,
+            scalp_title_b_template=scalp_title_b_template,
+            legend_custom_enabled=legend_custom_enabled,
+            legend_condition_a=legend_condition_a,
+            legend_condition_b=legend_condition_b,
+            legend_a_peaks=legend_a_peaks,
+            legend_b_peaks=legend_b_peaks,
+            project_root=project_root,
+        )
+        self.folder = self.config.folder
+        self.condition = self.config.condition
+        self.roi_map = self.config.roi_map
+        self.selected_roi = self.config.selected_roi
         self.metric = "SNR"
-        self.title = title
-        self.xlabel = xlabel
-        self.ylabel = ylabel
-        self.x_min = x_min
-        self.x_max = x_max
-        self.y_min = y_min
-        self.y_max = y_max
+        self.title = self.config.title
+        self.xlabel = self.config.xlabel
+        self.ylabel = self.config.ylabel
+        self.x_min = self.config.x_min
+        self.x_max = self.config.x_max
+        self.y_min = self.config.y_min
+        self.y_max = self.config.y_max
 
-        self.out_dir = Path(out_dir)
-        self.stem_color = stem_color.lower()
-        self.stem_color_b = stem_color_b.lower()
-        self.condition_b = condition_b
-        self.overlay = overlay
+        self.out_dir = Path(self.config.out_dir)
+        self.stem_color = self.config.stem_color.lower()
+        self.stem_color_b = self.config.stem_color_b.lower()
+        self.condition_b = self.config.condition_b
+        self.overlay = self.config.overlay
         self._analysis_base_freq = self._read_analysis_float("base_freq", 0.0)
         self._analysis_oddball_freq = self._read_analysis_float(
             "oddball_freq", _DEFAULT_ODDBALL_FREQ
         )
         # Maintain explicit oddballs override for compatibility with older callers.
-        if oddballs:
+        if self.config.oddballs:
             parsed_oddballs: List[float] = []
-            for odd in oddballs:
+            for odd in self.config.oddballs:
                 try:
                     odd_val = float(odd)
                 except Exception:
@@ -138,32 +174,32 @@ class _Worker(QObject):
             self.oddballs = parsed_oddballs
         else:
             self.oddballs = self._derive_oddball_harmonics(self.x_max)
-        self.use_matlab_style = use_matlab_style
+        self.use_matlab_style = self.config.use_matlab_style
         self._stop_requested = False
         normalized_groups = {
             pid.upper(): grp
-            for pid, grp in (subject_groups or {}).items()
+            for pid, grp in (self.config.subject_groups or {}).items()
             if isinstance(pid, str) and isinstance(grp, str)
         }
         self.subject_groups: Dict[str, str] = normalized_groups
-        ordered = [g for g in (selected_groups or []) if isinstance(g, str) and g]
+        ordered = [g for g in (self.config.selected_groups or []) if isinstance(g, str) and g]
         self.selected_groups: List[str] = ordered
         self._selected_group_set = set(ordered)
-        self.enable_group_overlay = bool(enable_group_overlay and ordered)
-        self.multi_group_mode = multi_group_mode
+        self.enable_group_overlay = bool(self.config.enable_group_overlay and ordered)
+        self.multi_group_mode = self.config.multi_group_mode
         self._unknown_subject_files: set[str] = set()
-        self.include_scalp_maps = include_scalp_maps
-        self.scalp_vmin = scalp_vmin
-        self.scalp_vmax = scalp_vmax
-        self.scalp_title_a_template = scalp_title_a_template
-        self.scalp_title_b_template = scalp_title_b_template
+        self.include_scalp_maps = self.config.include_scalp_maps
+        self.scalp_vmin = self.config.scalp_vmin
+        self.scalp_vmax = self.config.scalp_vmax
+        self.scalp_title_a_template = self.config.scalp_title_a_template
+        self.scalp_title_b_template = self.config.scalp_title_b_template
         self._scalp_title_warned = False
-        self.legend_custom_enabled = legend_custom_enabled
-        self.legend_condition_a = legend_condition_a
-        self.legend_condition_b = legend_condition_b
-        self.legend_a_peaks = legend_a_peaks
-        self.legend_b_peaks = legend_b_peaks
-        self.project_root = project_root
+        self.legend_custom_enabled = self.config.legend_custom_enabled
+        self.legend_condition_a = self.config.legend_condition_a
+        self.legend_condition_b = self.config.legend_condition_b
+        self.legend_a_peaks = self.config.legend_a_peaks
+        self.legend_b_peaks = self.config.legend_b_peaks
+        self.project_root = self.config.project_root
         self.generated_paths: list[str] = []
         self.failed_items: list[dict[str, str]] = []
         self._timings: dict[str, float] = {

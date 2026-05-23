@@ -13,6 +13,7 @@ back into its module namespace so existing internal imports remain compatible.
 
 - `src/Tools/Plot_Generator/worker.py`
 - `src/Tools/Plot_Generator/excel_inputs.py`
+- `src/Tools/Plot_Generator/worker_config.py`
 
 ## Summary
 
@@ -62,6 +63,13 @@ imports are deliberately migrated.
    - Only do this after tests pin default oddball, group-overlay, scalp, legend,
      and project-root behavior. Keep `_Worker.__init__` compatible with current
      callers while delegating to the dataclass internally.
+   - Status: Complete on 2026-05-23.
+   - Implementation: added `PlotWorkerConfig` in
+     `src/Tools/Plot_Generator/worker_config.py`, stored it as
+     `_Worker.config`, and kept the public `_Worker.__init__` signature stable
+     for GUI callers. Added
+     `tests/plot_generator/test_plot_generator_worker_config.py` to pin
+     constructor defaults and optional payload handling.
 
 3. Excel collection and SNR fallback:
    - Move `_count_excel_files`, `_list_excel_files`, and `_collect_data` to
