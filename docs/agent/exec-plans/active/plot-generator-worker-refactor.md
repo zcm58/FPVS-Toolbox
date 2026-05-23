@@ -2,20 +2,26 @@
 
 ## Status
 
-Future plan. This work has not started.
+Active plan. Started on 2026-05-23.
+
+Slice 1, small pure helpers, is complete. Subject ID inference, frequency-column
+discovery, and x-range selection now live in
+`src/Tools/Plot_Generator/excel_inputs.py`. `worker.py` imports those helpers
+back into its module namespace so existing internal imports remain compatible.
 
 ## Target
 
-`src/Tools/Plot_Generator/worker.py`
+- `src/Tools/Plot_Generator/worker.py`
+- `src/Tools/Plot_Generator/excel_inputs.py`
 
 ## Summary
 
-`worker.py` currently combines the QObject worker shell, worker configuration,
-Excel file scanning and reading, SNR fallback calculation, subject ID inference,
-ROI aggregation, group overlays, scalp input preparation, topomap rendering,
-line/overlay plotting, output recording, failure tracking, and timing
-diagnostics. This slows future plot-generation work because data preparation and
-rendering are tightly coupled to Qt signal plumbing.
+`worker.py` still combines the QObject worker shell, worker configuration,
+Excel file scanning and reading, SNR fallback calculation, ROI aggregation,
+group overlays, scalp input preparation, topomap rendering, line/overlay
+plotting, output recording, failure tracking, and timing diagnostics. Subject
+ID inference and frequency-column selection have been extracted to
+`excel_inputs.py`.
 
 Do not change generated plot content, filenames, image formats, or Excel-reading
 rules in this plan. The goal is a behavior-preserving worker split.
@@ -45,6 +51,10 @@ imports are deliberately migrated.
      `_select_frequency_pairs` to `src/Tools/Plot_Generator/excel_inputs.py`.
    - This is the lowest-risk slice; add/confirm unit tests for filename parsing
      and frequency column filtering.
+   - Status: Complete on 2026-05-23.
+   - Implementation: moved these helpers to
+     `src/Tools/Plot_Generator/excel_inputs.py` and added
+     `tests/plot_generator/test_plot_generator_excel_inputs.py`.
 
 2. Worker configuration:
    - Introduce `src/Tools/Plot_Generator/worker_config.py` with a dataclass that

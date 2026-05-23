@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 import math
 import os
-import re
 import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
@@ -21,6 +20,11 @@ import matplotlib.pyplot as plt
 from PySide6.QtCore import QObject, Signal
 
 from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
+from Tools.Plot_Generator.excel_inputs import (
+    _frequency_pairs_from_columns,
+    _infer_subject_id_from_path,
+    _select_frequency_pairs,
+)
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 from Tools.Plot_Generator.scalp_utils import (
     ScalpInputs,
@@ -29,49 +33,11 @@ from Tools.Plot_Generator.scalp_utils import (
     summarize_subject_scalp,
 )
 
-
-_PID_PATTERN = re.compile(r"(?:[A-Za-z]*)?(P\d+)", re.IGNORECASE)
 logger = logging.getLogger(__name__)
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
 _DEFAULT_ODDBALL_FREQ = 1.2
 
-
-def _infer_subject_id_from_path(excel_path: Path) -> str | None:
-    """Return a best-effort subject identifier inferred from the file name."""
-
-    match = _PID_PATTERN.search(excel_path.stem)
-    if match:
-        return match.group(1).upper()
-    cleaned = excel_path.stem.strip()
-    return cleaned.upper() if cleaned else None
-
-
-def _frequency_pairs_from_columns(columns: Iterable[object]) -> list[tuple[float, str]]:
-    freq_pairs: list[tuple[float, str]] = []
-    for col in columns:
-        if isinstance(col, str) and col.endswith("_Hz"):
-            try:
-                freq_pairs.append((float(col.split("_")[0]), col))
-            except ValueError:
-                continue
-    freq_pairs.sort(key=lambda item: item[0])
-    return freq_pairs
-
-
-def _select_frequency_pairs(
-    freq_pairs: Sequence[tuple[float, str]],
-    *,
-    x_min: float,
-    x_max: float,
-) -> tuple[list[float], list[str]]:
-    tolerance = 1e-3
-    selected = [
-        (freq, col)
-        for freq, col in freq_pairs
-        if (x_min - tolerance) <= freq <= (x_max + tolerance)
-    ]
-    return [freq for freq, _ in selected], [col for _, col in selected]
 
 # Global plotting style applied after imports
 plt.rcParams.update(

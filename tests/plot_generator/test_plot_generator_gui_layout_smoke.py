@@ -1,9 +1,6 @@
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 from PySide6.QtCore import QPoint
 
+from Main_App.gui.typography import font_for_role
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
 from Tools.Plot_Generator.settings_dialog import _SettingsDialog
 from Main_App.gui.components import ActionRow, PathPickerRow, SectionCard, SubsectionHeaderLabel
@@ -33,7 +30,10 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert "Legend labels (optional)" in section_titles
     assert len(window.findChildren(SectionCard)) >= 6
     assert window.params_box.header.title_label.font().bold()
-    assert window.params_box.header.title_label.font().pointSize() == window.font().pointSize()
+    assert (
+        window.params_box.header.title_label.font().pointSize()
+        == font_for_role("subsection_header").pointSize()
+    )
     legend_top = window.legend_group.mapTo(window, QPoint(0, 0)).y()
     legend_field_top = window.legend_condition_a_edit.mapTo(window, QPoint(0, 0)).y()
     assert 80 <= legend_field_top - legend_top <= 120

@@ -1,15 +1,7 @@
-from pathlib import Path
-
 from PySide6.QtWidgets import QMessageBox
 
 from Tools.Plot_Generator.gui import PlotGeneratorWindow
-from Tools.Plot_Generator.worker import _Worker, _infer_subject_id_from_path
-
-
-def test_infer_subject_id_is_case_insensitive() -> None:
-    assert _infer_subject_id_from_path(Path("p10.bdf")) == "P10"
-    assert _infer_subject_id_from_path(Path("P01.bdf")) == "P01"
-    assert _infer_subject_id_from_path(Path("=p17.bdf")) == "P17"
+from Tools.Plot_Generator.worker import _Worker
 
 
 def test_finish_all_uses_generated_paths(qtbot, monkeypatch) -> None:

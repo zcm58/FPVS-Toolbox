@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
 
 import pytest
@@ -15,8 +14,6 @@ except ValueError:
 
 if not has_pyside or not has_pytestqt:
     pytest.skip("PySide6/pytest-qt not available", allow_module_level=True)
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QMessageBox  # noqa: E402
 
