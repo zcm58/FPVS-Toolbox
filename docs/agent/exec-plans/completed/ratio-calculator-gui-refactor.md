@@ -2,7 +2,7 @@
 
 ## Status
 
-Active plan. Started on 2026-05-20.
+Completed plan. Started on 2026-05-20 and completed on 2026-05-23.
 
 Slice 1, project paths and condition folders, is complete. The methods listed
 for that slice now live in
@@ -10,7 +10,25 @@ for that slice now live in
 `RatioConditionSelectionMixin`, while `RatioCalculatorWindow` remains the
 public PySide6 window in `src/Tools/Ratio_Calculator/gui.py`.
 
-Slice 6, run workflow and status/log UX, is also complete. Run lifecycle,
+Slice 2, UI section builders, is complete. Widget assembly, caption/path-row
+helpers, and button presentation helpers now live in
+`src/Tools/Ratio_Calculator/gui_sections.py` on `RatioSectionsMixin`.
+
+Slice 3, ROI state, is complete. ROI loading, signature comparison, dynamic
+Settings refresh, and table population now live in
+`src/Tools/Ratio_Calculator/gui_rois.py` on `RatioRoisMixin`.
+
+Slice 4, participant/exclusion state, is complete. Participant pairing,
+folder indexing, filtering, manual exclusion collection, and count/status
+helpers now live in `src/Tools/Ratio_Calculator/gui_participants.py` on
+`RatioParticipantsMixin`.
+
+Slice 5, settings and validation, is complete. Run-label dirty state,
+settings parsing, output-folder validation, input validation, and validation
+banner updates now live in `src/Tools/Ratio_Calculator/gui_settings.py` on
+`RatioSettingsMixin`.
+
+Slice 6, run workflow and status/log UX, is complete. Run lifecycle,
 status, log, output-opening, and worker-cleanup helpers now live in
 `src/Tools/Ratio_Calculator/gui_run_workflow.py` on `RatioRunWorkflowMixin`.
 
@@ -18,17 +36,19 @@ status, log, output-opening, and worker-cleanup helpers now live in
 
 - `src/Tools/Ratio_Calculator/gui.py`
 - `src/Tools/Ratio_Calculator/gui_condition_selection.py`
+- `src/Tools/Ratio_Calculator/gui_sections.py`
+- `src/Tools/Ratio_Calculator/gui_rois.py`
+- `src/Tools/Ratio_Calculator/gui_participants.py`
+- `src/Tools/Ratio_Calculator/gui_settings.py`
 - `src/Tools/Ratio_Calculator/gui_run_workflow.py`
 
 ## Summary
 
-`gui.py` currently combines project-root detection, path and condition
-selection, full widget assembly, ROI table refresh/watch behavior, participant
-pairing and exclusion state, advanced settings parsing, validation, QThread
-worker wiring, status/log UI, completion dialogs, and button styling/icons.
-The actual ratio math already lives in focused modules such as `compute.py`,
-`pipeline.py`, `plots.py`, and `worker.py`, so this plan should keep the split
-strictly GUI-focused.
+`gui.py` now keeps `RatioCalculatorWindow` as the public facade and composes
+focused GUI-only mixins for condition/path selection, widget assembly, ROI
+state, participant/exclusion state, settings/validation, and run workflow.
+The actual ratio math remains in focused modules such as `compute.py`,
+`pipeline.py`, `plots.py`, and `worker.py`.
 
 ## Behavior To Preserve
 
@@ -79,12 +99,24 @@ Prefer one seam per PR. Keep `RatioCalculatorWindow` as the public facade.
      `src/Tools/Ratio_Calculator/gui_sections.py`.
    - Preserve object names, labels, tooltips, icons, tab names, table columns,
      default spinbox values, and signal connections.
+   - Status: Complete on 2026-05-23.
+   - Implementation: moved these helpers to
+     `src/Tools/Ratio_Calculator/gui_sections.py`:
+     `_build_basic_tab`, `_build_advanced_tab`, `_build_bottom_panel`,
+     `_make_caption_label`, `_make_folder_path_row`,
+     `_apply_button_styling`, `_apply_button_tooltips`, and
+     `_apply_button_icons`.
 
 3. ROI state:
    - Move `_rois_signature`, `_refresh_rois`, `_sync_rois_if_changed`, and
      `_populate_roi_table` to `src/Tools/Ratio_Calculator/gui_rois.py`.
    - Preserve timer interval, status/log behavior when no ROIs are found, and
      dynamic ROI refresh from Settings.
+   - Status: Complete on 2026-05-23.
+   - Implementation: moved these helpers to
+     `src/Tools/Ratio_Calculator/gui_rois.py`:
+     `_rois_signature`, `_refresh_rois`, `_sync_rois_if_changed`, and
+     `_populate_roi_table`.
 
 4. Participant/exclusion state:
    - Move `_load_participants`, `_index_folder`, `_set_all_exclusions`,
@@ -96,6 +128,14 @@ Prefer one seam per PR. Keep `RatioCalculatorWindow` as the public facade.
    - Preserve paired participant intersection, invalid manual-exclusion
      handling, "show only excluded" filtering, hidden-row behavior for
      exclude-all, and "all participants excluded" run warning.
+   - Status: Complete on 2026-05-23.
+   - Implementation: moved these helpers to
+     `src/Tools/Ratio_Calculator/gui_participants.py`:
+     `_load_participants`, `_index_folder`, `_set_all_exclusions`,
+     `_confirm_exclude_all`, `_apply_participant_filter`,
+     `_collect_manual_exclusions`, `_update_exclusion_status`,
+     `_on_exclusion_item_changed`, `_update_participant_counts`,
+     `_clear_participants`, and `_maybe_autoload_participants`.
 
 5. Settings and validation:
    - Move `_settings_from_ui`, `_parse_excluded_freqs`, `_parse_ylim`,
@@ -106,6 +146,13 @@ Prefer one seam per PR. Keep `RatioCalculatorWindow` as the public facade.
    - Preserve `RatioCalculatorSettings` fields, default/auto y-limit parsing,
      invalid excluded-frequency logging, validation banner contents, and run
      button enabled rules.
+   - Status: Complete on 2026-05-23.
+   - Implementation: moved these helpers to
+     `src/Tools/Ratio_Calculator/gui_settings.py`:
+     `_settings_from_ui`, `_parse_excluded_freqs`, `_parse_ylim`,
+     `_ensure_output_dir`, `_validate_inputs`, `_set_validation_errors`,
+     `_mark_label_a_dirty`, `_mark_label_b_dirty`, `_mark_run_label_dirty`,
+     `_on_label_text_changed`, and `_update_run_label_default`.
 
 6. Run workflow and status/log UX:
    - Move `_start_run`, `_handle_error`, `_handle_finished`,
