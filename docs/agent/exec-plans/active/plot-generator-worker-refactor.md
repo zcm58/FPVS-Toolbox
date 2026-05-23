@@ -14,6 +14,7 @@ back into its module namespace so existing internal imports remain compatible.
 - `src/Tools/Plot_Generator/worker.py`
 - `src/Tools/Plot_Generator/excel_inputs.py`
 - `src/Tools/Plot_Generator/worker_config.py`
+- `src/Tools/Plot_Generator/data_collection.py`
 
 ## Summary
 
@@ -78,6 +79,12 @@ imports are deliberately migrated.
      preference, FFT Amplitude fallback via `calc_snr_matlab`, BCA/Z scalp sheet
      reading, ROI electrode matching, failure messages, and progress offsets for
      overlay mode.
+   - Status: Complete on 2026-05-23.
+   - Implementation: moved `_count_excel_files`, `_list_excel_files`, and
+     `_collect_data` to `PlotDataCollectionMixin` in
+     `src/Tools/Plot_Generator/data_collection.py`. `_Worker` now inherits that
+     mixin while preserving `_Worker` as the GUI-facing import and keeping the
+     new data-collection module free of PySide6 imports.
 
 4. ROI/group aggregation:
    - Move `_selected_roi_names`, `_aggregate_roi_data`,
