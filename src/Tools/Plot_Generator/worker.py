@@ -8,10 +8,8 @@ from pathlib import Path
 from typing import Dict, List, Sequence
 
 import matplotlib
-from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 import numpy as np
 import pandas as pd
-import mne
 from Main_App import SettingsManager
 
 matplotlib.use("Agg")
@@ -27,9 +25,9 @@ from Tools.Plot_Generator.excel_inputs import (
 )
 from Tools.Plot_Generator.scalp_utils import (
     ScalpInputs,
-    prepare_scalp_inputs,
     select_oddball_harmonics,
 )
+from Tools.Plot_Generator.scalp_rendering import PlotScalpRenderingMixin
 from Tools.Plot_Generator.worker_config import PlotWorkerConfig
 
 logger = logging.getLogger(__name__)
@@ -56,14 +54,12 @@ plt.rcParams.update(
 )
 
 
-_ZERO_MIDPOINT_COLOR = "#b6e3b6"
-_SCALP_CMAP = LinearSegmentedColormap.from_list(
-    "BlueGreenRed",
-    ["#2166ac", _ZERO_MIDPOINT_COLOR, "#b2182b"],
-)
-
-
-class _Worker(QObject, PlotDataCollectionMixin, PlotAggregationMixin):
+class _Worker(
+    QObject,
+    PlotDataCollectionMixin,
+    PlotAggregationMixin,
+    PlotScalpRenderingMixin,
+):
     """Worker to process Excel files and generate plots."""
 
     progress = Signal(str, int, int)
@@ -337,157 +333,6 @@ class _Worker(QObject, PlotDataCollectionMixin, PlotAggregationMixin):
         lo = min(freqs)
         hi = max(freqs)
         return [freq for freq in self.oddballs if lo <= freq <= hi]
-
-    def _scalp_oddball_frequencies(self) -> List[float]:
-        return list(self.oddballs)
-
-    def _prepare_scalp_inputs(
-        self, subject_maps: Dict[str, Dict[str, float]]
-    ) -> ScalpInputs | None:
-        if not self.include_scalp_maps:
-            return None
-
-        inputs = self._timed_call(
-            "scalp_prepare",
-            lambda: prepare_scalp_inputs(
-                subject_maps,
-                self.roi_map.get(self.selected_roi, []),
-            ),
-        )
-        if inputs is None and subject_maps:
-            self._emit("No scalp map data available for plotting.")
-        return inputs
-
-    def _plot_scalp_map(
-            self,
-            ax: plt.Axes,
-            scalp_inputs: ScalpInputs,
-            title: str,
-            *,
-            cax: plt.Axes | None = None,
-    ) -> None:
-        """Render a scalp topomap for the provided electrode data.
-
-        Parameters
-        ----------
-        ax
-            Target matplotlib Axes to render the topomap into.
-        scalp_inputs
-            Container holding the per-electrode data vector and an MNE Info object
-            with BioSemi64 channel locations already set.
-        title
-            Title to display above the topomap.
-        cax
-            Optional explicit Axes to use for the colorbar. If not provided, a
-            dedicated colorbar Axes is appended to the right of `ax` to keep
-            map+colorbar centering stable across figures.
-        """
-        # Local import so this is copy/paste safe without touching module imports.
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-        vmin = self.scalp_vmin
-        vmax = self.scalp_vmax
-
-        if vmin is None or vmax is None:
-            data = np.asarray(scalp_inputs.data, dtype=float)
-            max_abs = float(np.nanmax(np.abs(data))) if data.size else 0.0
-            if max_abs == 0:
-                max_abs = 1.0
-            vmin = -max_abs
-            vmax = max_abs
-
-        vlim = (float(vmin), float(vmax))
-        norm: TwoSlopeNorm | None = None
-        use_cnorm = vlim[0] < 0 < vlim[1]
-        if use_cnorm:
-            norm = TwoSlopeNorm(vmin=vlim[0], vcenter=0.0, vmax=vlim[1])
-
-        im = None
-        if use_cnorm and norm is not None:
-            try:
-                im, _ = mne.viz.plot_topomap(
-                    scalp_inputs.data,
-                    scalp_inputs.info,
-                    axes=ax,
-                    cmap=_SCALP_CMAP,
-                    cnorm=norm,
-                    contours=0,
-                    sensors=True,
-                    show=False,
-                    outlines="head",
-                )
-            except TypeError:
-                use_cnorm = False
-                lim = max(abs(vlim[0]), abs(vlim[1]))
-                vlim = (-lim, lim)
-
-        if im is None:
-            try:
-                # MNE versions that use vlim (e.g., mne==1.9.x)
-                im, _ = mne.viz.plot_topomap(
-                    scalp_inputs.data,
-                    scalp_inputs.info,
-                    axes=ax,
-                    cmap=_SCALP_CMAP,
-                    vlim=vlim,
-                    contours=0,
-                    sensors=True,
-                    show=False,
-                    outlines="head",
-                )
-            except TypeError:
-                try:
-                    im, _ = mne.viz.plot_topomap(
-                        scalp_inputs.data,
-                        scalp_inputs.info,
-                        axes=ax,
-                        cmap=_SCALP_CMAP,
-                        vmin=vlim[0],
-                        vmax=vlim[1],
-                        contours=0,
-                        sensors=True,
-                        show=False,
-                        outlines="head",
-                    )
-                except TypeError:
-                    lim = max(abs(vlim[0]), abs(vlim[1]))
-                    im, _ = mne.viz.plot_topomap(
-                        scalp_inputs.data,
-                        scalp_inputs.info,
-                        axes=ax,
-                        cmap=_SCALP_CMAP,
-                        vmin=-lim,
-                        vmax=lim,
-                        contours=0,
-                        sensors=True,
-                        show=False,
-                        outlines="head",
-                    )
-
-        if cax is None:
-            divider = make_axes_locatable(ax)
-            cax = divider.append_axes("right", size="4.5%", pad=0.08)
-
-        cbar = plt.colorbar(im, cax=cax)
-        cbar.ax.set_ylabel("uV")
-        cbar.ax.yaxis.set_label_position("right")
-        cbar.ax.yaxis.set_ticks_position("right")
-
-        ax.set_title(title, fontsize=12, fontweight="bold", pad=8)
-        ax.set_anchor("C")
-
-    def _format_scalp_title(self, template: str, condition: str, roi: str) -> str:
-        try:
-            return template.format(condition=condition, roi=roi)
-        except Exception:
-            if not self._scalp_title_warned:
-                self._emit(
-                    "Invalid scalp title template detected. Reverting to default.",
-                    0,
-                    0,
-                )
-                self._scalp_title_warned = True
-            return f"{condition} {roi} scalp map"
 
     def _run(self) -> None:
         if self.overlay and self.condition_b:

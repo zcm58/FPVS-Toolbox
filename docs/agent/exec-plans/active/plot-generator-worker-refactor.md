@@ -16,6 +16,7 @@ back into its module namespace so existing internal imports remain compatible.
 - `src/Tools/Plot_Generator/worker_config.py`
 - `src/Tools/Plot_Generator/data_collection.py`
 - `src/Tools/Plot_Generator/aggregation.py`
+- `src/Tools/Plot_Generator/scalp_rendering.py`
 
 ## Summary
 
@@ -106,6 +107,11 @@ imports are deliberately migrated.
      `src/Tools/Plot_Generator/scalp_rendering.py`.
    - Preserve MNE version compatibility fallbacks for `cnorm`, `vlim`, and
      `vmin`/`vmax`, colorbar placement, title fallback behavior, and units.
+   - Status: Complete on 2026-05-23.
+   - Implementation: moved these helpers to `PlotScalpRenderingMixin` in
+     `src/Tools/Plot_Generator/scalp_rendering.py`. `_Worker` now inherits that
+     mixin while preserving `_Worker` as the GUI-facing import and keeping the
+     scalp-rendering module free of PySide6 imports.
 
 6. Plot rendering:
    - Move `_plot` and `_plot_overlay` to
