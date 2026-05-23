@@ -7,6 +7,12 @@ The canonical active import surface for Main App workers is
 implementations used by the main GUI, plus wrappers for Performance
 process-runner helpers.
 
+Standalone tools may keep tool-local workers when that is their public import
+contract. Plot Generator keeps `_Worker` importable from
+`Tools.Plot_Generator.worker`; helper modules under `src/Tools/Plot_Generator/`
+own data collection, aggregation, and rendering logic while `worker.py` remains
+the QObject signal shell.
+
 Common long-running work:
 
 - EEG preprocessing and post-processing.

@@ -74,8 +74,10 @@ The GUI targets below identify relevant coverage only; do not run them locally
 via pytest-qt/offscreen unless explicitly approved.
 
 - GUI smoke and layout: `tests/plot_generator/test_plot_generator_gui.py`, `tests/plot_generator/test_plot_generator_gui_layout_smoke.py`
+- Worker helper contracts: `tests/plot_generator/test_plot_generator_excel_inputs.py`, `tests/plot_generator/test_plot_generator_worker_config.py`
 - FFT/SNR behavior: `tests/plot_generator/test_plot_generator_fft_snr.py`, `tests/plot_generator/test_plot_generator_full_snr_roi.py`
 - Exports and manifests: `tests/plot_generator/test_plot_generator_export_svg_smoke.py`, `tests/plot_generator/test_plot_generator_project_defaults.py`
+- Full focused suite after worker/rendering changes: `python -m pytest tests/plot_generator -q`
 
 ## Ratio Calculator
 

@@ -5,6 +5,33 @@ per file. ROI definitions should be loaded from the existing settings using the
 utilities in `Tools.Stats`. Plots should be averaged across participants within
 each condition and saved to a user-selected output folder.
 
+Current ownership map:
+
+- `gui.py`: public `PlotGeneratorWindow` facade.
+- `generation_workflow.py`: condition queueing, QThread worker launch/cancel,
+  progress aggregation, and completion handling.
+- `ui_sections.py`, `settings_dialog.py`, `gui_settings.py`,
+  `selection_state.py`, `project_paths.py`, and `manifest_utils.py`: focused
+  GUI, settings, selection, and project/manifest helpers.
+- `worker.py`: `_Worker` QObject shell, signals, stop state, timing, run
+  orchestration, finished payload emission, and compatibility re-exports for
+  older imports.
+- `worker_config.py`: `_Worker` constructor payload dataclass.
+- `excel_inputs.py`: subject ID and frequency-column helpers.
+- `data_collection.py`: Excel discovery/loading, FullSNR preference, FFT
+  Amplitude SNR fallback, and source data collection.
+- `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and
+  unknown-subject warnings.
+- `scalp_rendering.py` and `scalp_utils.py`: scalp input selection and MNE
+  topomap rendering.
+- `rendering.py`: line and overlay plot rendering plus Matplotlib `Agg`
+  configuration.
+- `snr_utils.py`: shared SNR calculation helpers.
+
+Keep `_Worker` importable from `Tools.Plot_Generator.worker`. New worker helper
+logic should go in the focused helper modules above and remain PySide6-free
+unless it belongs in the QObject shell.
+
 Before broad manual inspection, run:
 
 ```powershell
@@ -15,6 +42,13 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ```
 
 Use script output to decide what to read next.
+
+For Plot Generator worker or rendering changes, start with:
+
+```powershell
+.\.venv1\Scripts\python.exe -m py_compile src\Tools\Plot_Generator\worker.py src\Tools\Plot_Generator\excel_inputs.py src\Tools\Plot_Generator\worker_config.py src\Tools\Plot_Generator\data_collection.py src\Tools\Plot_Generator\aggregation.py src\Tools\Plot_Generator\scalp_rendering.py src\Tools\Plot_Generator\rendering.py
+.\.venv1\Scripts\python.exe -m pytest tests\plot_generator -q
+```
 
 This tool will be used to generate publication quality figures within the FPVS Toolbox. Users should have the ability
 to edit the plot title, x and y labels, and the scale of the x and y axes.

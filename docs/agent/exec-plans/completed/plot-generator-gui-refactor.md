@@ -62,7 +62,7 @@ this plan instead of forcing the split.
 
 | Slice | Status | Output | Focused verification |
 | --- | --- | --- | --- |
-| 0. Baseline and inventory | Complete | Current behavior/test baseline recorded in this plan | `python scripts/agent_audit.py`; GUI audit; project-path audit; Plot Generator smoke tests |
+| 0. Baseline and inventory | Complete | Current behavior/test baseline recorded in this plan | `python .agents/scripts/audit/agent_audit.py`; GUI audit; project-path audit; Plot Generator smoke tests |
 | 1. Project paths and manifest helpers | Complete | `src/Tools/Plot_Generator/project_paths.py` | Project defaults, project path, and condition-title tests; project-path audit |
 | 2. Settings parsing and persistence | Complete | `src/Tools/Plot_Generator/gui_settings.py` | Project defaults, legend-label, and condition-title tests |
 | 3. Settings dialog | Complete | `src/Tools/Plot_Generator/settings_dialog.py` | GUI/refactor smoke tests that cover settings dialog behavior |
@@ -97,12 +97,12 @@ understood.
 Run these before the first code slice and record the result in the progress log:
 
 ```powershell
-python scripts/agent_audit.py
+python .agents/scripts/audit/agent_audit.py
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
-python -m pytest tests\test_plot_generator_gui.py tests\test_plot_generator_gui_layout_smoke.py tests\test_plot_generator_gui_refactor_smoke.py -q
-python -m pytest tests\test_plot_generator_project_defaults.py tests\test_plot_generator_legend_labels.py tests\test_plot_generator_condition_title_all.py -q
-python -m pytest tests\test_plot_generator_generation_outcome.py tests\test_plot_generator_multigroup_smoke.py -q
+python -m pytest tests\plot_generator\test_plot_generator_gui.py tests\plot_generator\test_plot_generator_gui_layout_smoke.py tests\plot_generator\test_plot_generator_gui_refactor_smoke.py -q
+python -m pytest tests\plot_generator\test_plot_generator_project_defaults.py tests\plot_generator\test_plot_generator_legend_labels.py tests\plot_generator\test_plot_generator_condition_title_all.py -q
+python -m pytest tests\plot_generator\test_plot_generator_generation_outcome.py tests\plot_generator\test_plot_generator_multigroup_smoke.py -q
 ```
 
 ## Suggested Seams
@@ -178,7 +178,10 @@ point.
 - `src/Tools/Plot_Generator/generation_workflow.py`
 
 Do not move plotting calculations out of `worker.py` as part of this GUI plan;
-that is covered by the Plot Generator worker refactor plan.
+that is covered by the Plot Generator worker refactor plan. That worker plan is
+now complete: `_Worker` remains in `worker.py`, while config, Excel input
+parsing, data collection, aggregation, scalp rendering, and line/overlay
+rendering live in focused helper modules.
 
 ## What Future Agents Should Inspect First
 
@@ -187,13 +190,14 @@ that is covered by the Plot Generator worker refactor plan.
 3. `src/Tools/Plot_Generator/gui.py`
 4. `src/Tools/Plot_Generator/plot_settings.py`
 5. `src/Tools/Plot_Generator/manifest_utils.py`
-6. `src/Tools/Plot_Generator/worker.py` only for worker payload compatibility
-7. Plot Generator tests under `tests/test_plot_generator_*`
+6. `src/Tools/Plot_Generator/worker.py` plus worker helper modules when worker
+   payloads or plot outputs are touched
+7. Plot Generator tests under `tests/plot_generator/test_plot_generator_*`
 
 Before editing, run:
 
 ```powershell
-python scripts/agent_audit.py
+python .agents/scripts/audit/agent_audit.py
 python .agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py
 python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 ```
@@ -204,9 +208,9 @@ Run the narrowest checks for the moved seam first:
 
 ```powershell
 python -m py_compile src\Tools\Plot_Generator\gui.py
-python -m pytest tests\test_plot_generator_gui.py tests\test_plot_generator_gui_layout_smoke.py tests\test_plot_generator_gui_refactor_smoke.py -q
-python -m pytest tests\test_plot_generator_project_defaults.py tests\test_plot_generator_legend_labels.py tests\test_plot_generator_condition_title_all.py -q
-python -m pytest tests\test_plot_generator_generation_outcome.py tests\test_plot_generator_multigroup_smoke.py -q
+python -m pytest tests\plot_generator\test_plot_generator_gui.py tests\plot_generator\test_plot_generator_gui_layout_smoke.py tests\plot_generator\test_plot_generator_gui_refactor_smoke.py -q
+python -m pytest tests\plot_generator\test_plot_generator_project_defaults.py tests\plot_generator\test_plot_generator_legend_labels.py tests\plot_generator\test_plot_generator_condition_title_all.py -q
+python -m pytest tests\plot_generator\test_plot_generator_generation_outcome.py tests\plot_generator\test_plot_generator_multigroup_smoke.py -q
 python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
 python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py
 ```
@@ -230,7 +234,7 @@ This plan is complete when:
   selection, generation/cancel/completion behavior, and visible UI labels remain
   stable.
 - Targeted Plot Generator tests, GUI import audit, project-path audit, and
-  `python scripts/agent_audit.py` pass.
+  `python .agents/scripts/audit/agent_audit.py` pass.
 - This plan is moved to `docs/agent/exec-plans/completed/` with the final progress log.
 
 ## Reporting Requirements
@@ -323,6 +327,6 @@ boundaries before activation because Plot Generator GUI work may move quickly.
 
 - Status: complete.
 - Files changed: `src/Tools/Plot_Generator/gui.py`; `src/Tools/Plot_Generator/plot_generator.py`; `src/Tools/Plot_Generator/project_paths.py`; `src/Tools/Plot_Generator/gui_settings.py`; `src/Tools/Plot_Generator/settings_dialog.py`; `src/Tools/Plot_Generator/selection_state.py`; `src/Tools/Plot_Generator/generation_workflow.py`; `src/Tools/Plot_Generator/ui_sections.py`; `tests/test_plot_generator_baseline.py`; `tests/test_plot_generator_condition_title_all.py`; `tests/test_plot_generator_log_collapse.py`; `docs/agent/exec-plans/active/plot-generator-gui-refactor.md`.
-- Behavior preserved: Plot Generator remains PySide6-only; plot math and worker output behavior remain in `worker.py`; project paths, manifest persistence, legend/scalp settings, condition/group selection, generation/cancel/completion behavior, script entry-point compatibility, and visible UI behavior remain stable.
+- Behavior preserved: Plot Generator remains PySide6-only; at completion of this GUI plan, plot math and worker output behavior remained in `worker.py`; project paths, manifest persistence, legend/scalp settings, condition/group selection, generation/cancel/completion behavior, script entry-point compatibility, and visible UI behavior remain stable. Later worker-refactor work moved helper logic out of `worker.py` while preserving `_Worker` as the public worker shell.
 - Verification passed: `python -m py_compile src\Tools\Plot_Generator\gui.py src\Tools\Plot_Generator\project_paths.py src\Tools\Plot_Generator\gui_settings.py src\Tools\Plot_Generator\settings_dialog.py src\Tools\Plot_Generator\selection_state.py src\Tools\Plot_Generator\generation_workflow.py src\Tools\Plot_Generator\ui_sections.py src\Tools\Plot_Generator\plot_generator.py`; `.venv\Scripts\python -m pytest tests\test_plot_generator_baseline.py tests\test_plot_generator_condition_title_all.py tests\test_plot_generator_export_svg_smoke.py tests\test_plot_generator_fft_snr.py tests\test_plot_generator_full_snr_roi.py tests\test_plot_generator_generation_outcome.py tests\test_plot_generator_gridlines.py tests\test_plot_generator_gui.py tests\test_plot_generator_gui_layout_smoke.py tests\test_plot_generator_gui_refactor_smoke.py tests\test_plot_generator_ignore_fif.py tests\test_plot_generator_legend_labels.py tests\test_plot_generator_log_collapse.py tests\test_plot_generator_multigroup_smoke.py tests\test_plot_generator_oddballs_from_xmax.py tests\test_plot_generator_project_defaults.py tests\test_plot_generator_scalp_utils.py tests\test_plot_generator_title_roi.py -q`; `python scripts\agent_audit.py`; `python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`; `python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py`.
 - Completion note: `src/Tools/Plot_Generator/gui.py` is reduced to 362 lines, and the largest new Plot Generator GUI module is `ui_sections.py` at 439 lines.

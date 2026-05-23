@@ -112,7 +112,9 @@ Do not use these installed skills for normal FPVS Toolbox work:
 - Component layer: `python -m pytest tests/gui/test_ui_components_smoke.py -q`
 - Main window or PySide6 layout: update `tests/gui/test_main_window_layout_smoke.py` when useful, but do not run pytest-qt/offscreen locally.
 - Project I/O: `python -m pytest tests/project_io/test_project_settings_roundtrip.py tests/project_io/test_project_results_layout.py -q`
-- Plot generator: `python -m pytest tests/plot_generator/test_plot_generator_gui.py -q`
+- Plot generator: `python -m pytest tests/plot_generator -q` after worker,
+  rendering, or output changes; use the nearest `tests/plot_generator/test_*`
+  file first for narrower GUI-only edits.
 - Ratio calculator: `python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py -q`
 - Stats GUI/pipeline: `python -m pytest tests/stats/gui/test_stats_layout_smoke.py tests/stats/pipeline/test_stats_pipeline_smoke.py tests/stats/data/test_stats_project_context.py -q`
 - Stats FullSNR regression: `python -m pytest tests/stats/analysis/test_full_snr_reference_equivalence.py -q`

@@ -37,7 +37,11 @@ Current `Legacy_App` runtime couplings:
 ## Tools
 
 - `src/Tools/Stats/`: active statistics UI, pipeline, analysis engines, reporting, I/O, CLI, and shared helpers grouped by function. Removed `Tools.Stats.PySide6` and `Tools.Stats.Legacy` import paths are not supported.
-- `src/Tools/Plot_Generator/`: SNR/FFT plot generation.
+- `src/Tools/Plot_Generator/`: SNR/FFT/BCA plot generation. `gui.py` is the
+  public window facade; `generation_workflow.py` owns QThread launch/cancel and
+  completion handling; `worker.py` keeps `_Worker` as the QObject shell while
+  focused helper modules own config, Excel input parsing, data collection,
+  ROI/group aggregation, scalp rendering, and line/overlay rendering.
 - `src/Tools/Ratio_Calculator/`: ratio computation, export, and plotting.
 - `src/Tools/Individual_Detectability/`: individual-level detectability workflow.
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
