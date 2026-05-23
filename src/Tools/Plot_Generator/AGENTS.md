@@ -50,6 +50,13 @@ For Plot Generator worker or rendering changes, start with:
 .\.venv1\Scripts\python.exe -m pytest tests\plot_generator -q
 ```
 
+Future feature/fix plans:
+
+- `docs/agent/exec-plans/future/plot-generator-multigroup-snr-overlays.md`
+  covers first-class multi-group SNR overlays.
+- `docs/agent/exec-plans/future/plot-generator-scalp-topography-fix.md`
+  covers the scalp map/topography diagnosis and fix.
+
 This tool will be used to generate publication quality figures within the FPVS Toolbox. Users should have the ability
 to edit the plot title, x and y labels, and the scale of the x and y axes.
 
