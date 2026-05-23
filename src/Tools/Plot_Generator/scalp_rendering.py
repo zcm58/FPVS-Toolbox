@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-import matplotlib.pyplot as plt
+import matplotlib
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 import mne
 import numpy as np
 
 from Tools.Plot_Generator.scalp_utils import ScalpInputs, prepare_scalp_inputs
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 _ZERO_MIDPOINT_COLOR = "#b6e3b6"
 _SCALP_CMAP = LinearSegmentedColormap.from_list(

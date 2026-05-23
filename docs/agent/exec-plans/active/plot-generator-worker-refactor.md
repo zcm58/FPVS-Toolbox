@@ -17,6 +17,7 @@ back into its module namespace so existing internal imports remain compatible.
 - `src/Tools/Plot_Generator/data_collection.py`
 - `src/Tools/Plot_Generator/aggregation.py`
 - `src/Tools/Plot_Generator/scalp_rendering.py`
+- `src/Tools/Plot_Generator/rendering.py`
 
 ## Summary
 
@@ -119,6 +120,12 @@ imports are deliberately migrated.
    - Preserve figure sizes, gridlines, oddball markers, legends, y=1 SNR line,
      title formatting, scalp layout, save DPI, SVG export, and generated-path
      recording.
+   - Status: Complete on 2026-05-23.
+   - Implementation: moved `_plot` and `_plot_overlay` to
+     `PlotRenderingMixin` in `src/Tools/Plot_Generator/rendering.py`.
+     `_Worker` now inherits that mixin while preserving `_Worker` as the
+     GUI-facing import. For compatibility with older tests/imports, `worker.py`
+     still re-exports `matplotlib` and `plt` from the rendering module.
 
 7. Worker shell:
    - After the pure pieces are extracted, keep `_Worker` in `worker.py` as the
