@@ -2,12 +2,17 @@
 
 ## Status
 
-Active plan. Started on 2026-05-23.
+Completed plan. Started and completed on 2026-05-23.
 
 Slice 1, small pure helpers, is complete. Subject ID inference, frequency-column
 discovery, and x-range selection now live in
 `src/Tools/Plot_Generator/excel_inputs.py`. `worker.py` imports those helpers
 back into its module namespace so existing internal imports remain compatible.
+
+All planned slices are complete. `_Worker` remains importable from
+`Tools.Plot_Generator.worker` and now acts as the Qt worker shell around focused
+helper mixins/modules for configuration, Excel inputs, data collection,
+aggregation, scalp rendering, and PNG/SVG rendering.
 
 ## Target
 
@@ -21,12 +26,11 @@ back into its module namespace so existing internal imports remain compatible.
 
 ## Summary
 
-`worker.py` still combines the QObject worker shell, worker configuration,
-Excel file scanning and reading, SNR fallback calculation, ROI aggregation,
-group overlays, scalp input preparation, topomap rendering, line/overlay
-plotting, output recording, failure tracking, and timing diagnostics. Subject
-ID inference and frequency-column selection have been extracted to
-`excel_inputs.py`.
+`worker.py` now keeps `_Worker` as the QObject shell with signals, constructor
+compatibility, stop state, run orchestration, timing, failure/generated-path
+recording, and finished-payload emission. Focused modules own worker
+configuration, subject/frequency input helpers, Excel collection and SNR
+fallback, ROI/group aggregation, scalp rendering, and line/overlay rendering.
 
 Do not change generated plot content, filenames, image formats, or Excel-reading
 rules in this plan. The goal is a behavior-preserving worker split.
@@ -132,6 +136,11 @@ imports are deliberately migrated.
      thin QObject shell owning signals, stop state, timing, `_run`, and finished
      payload emission.
    - Avoid making helper modules depend on PySide6.
+   - Status: Complete on 2026-05-23.
+   - Implementation: `src/Tools/Plot_Generator/worker.py` keeps `_Worker` as
+     the public GUI-facing QObject worker. Extracted helper modules stay
+     PySide6-free; `worker.py` re-exports legacy `matplotlib`, `plt`, and Excel
+     helper names for compatibility with existing imports/tests.
 
 ## Suggested Final Shape
 
