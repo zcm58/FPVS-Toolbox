@@ -84,6 +84,9 @@ via pytest-qt/offscreen unless explicitly approved.
 - Plot behavior: `tests/ratio_calculator/test_ratio_calculator_plots.py`
 - Dynamic ROI behavior: `tests/ratio_calculator/test_ratio_calculator_roi_dynamic.py`
 - Removed legacy smoke: `tests/ratio_calculator/test_ratio_calculator_removed_smoke.py`
+- GUI refactor boundaries: use `py_compile` on `src/Tools/Ratio_Calculator/gui.py`
+  plus its focused GUI mixins; do not run pytest-qt/offscreen locally without
+  explicit approval.
 
 ## Statistics
 

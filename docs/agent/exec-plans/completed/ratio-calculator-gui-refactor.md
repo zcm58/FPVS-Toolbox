@@ -77,7 +77,6 @@ Prefer one seam per PR. Keep `RatioCalculatorWindow` as the public facade.
      `_apply_condition_selection`, `_on_condition_a_selected`,
      `_on_condition_b_selected`, `_swap_conditions`, `_browse_folder`, and
      `_initial_dialog_dir` to
-     `src/Tools/Ratio_Calculator/gui_paths.py` or
      `src/Tools/Ratio_Calculator/gui_condition_selection.py`.
    - Preserve custom path insertion, dialog Cancel behavior, `_last_dir`, and
      auto participant reload.
@@ -158,7 +157,7 @@ Prefer one seam per PR. Keep `RatioCalculatorWindow` as the public facade.
    - Move `_start_run`, `_handle_error`, `_handle_finished`,
      `_show_completion_dialog`, `_open_output_folder`, `_open_folder_from_edit`,
      `_copy_log`, `_append_log`, `_set_status_message`, `_update_run_state`, and
-     `_toggle_log_panel` to `src/Tools/Ratio_Calculator/gui_run_workflow.py`.
+     `_show_log_dialog` to `src/Tools/Ratio_Calculator/gui_run_workflow.py`.
    - Preserve QThread wiring, worker signal connections, progress/status/log
      behavior, output-folder opening, clipboard copying, and cleanup behavior.
    - Status: Complete on 2026-05-20.
@@ -206,7 +205,7 @@ python .agents/skills/project-path-audit/scripts/audit_hardcoded_paths.py
 Run focused Ratio Calculator checks first:
 
 ```powershell
-python -m py_compile src\Tools\Ratio_Calculator\gui.py
+python -m py_compile src\Tools\Ratio_Calculator\gui.py src\Tools\Ratio_Calculator\gui_condition_selection.py src\Tools\Ratio_Calculator\gui_sections.py src\Tools\Ratio_Calculator\gui_rois.py src\Tools\Ratio_Calculator\gui_participants.py src\Tools\Ratio_Calculator\gui_settings.py src\Tools\Ratio_Calculator\gui_run_workflow.py
 python -m pytest tests\ratio_calculator\test_ratio_calculator_plots.py tests\ratio_calculator\test_ratio_calculator_roi_dynamic.py tests\ratio_calculator\test_ratio_calculator_removed_smoke.py -q
 python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
 python .agents\skills\project-path-audit\scripts\audit_hardcoded_paths.py

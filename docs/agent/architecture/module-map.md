@@ -43,6 +43,9 @@ Current `Legacy_App` runtime couplings:
   focused helper modules own config, Excel input parsing, data collection,
   ROI/group aggregation, scalp rendering, and line/overlay rendering.
 - `src/Tools/Ratio_Calculator/`: ratio computation, export, and plotting.
+  `gui.py` is the public window facade; `gui_condition_selection.py`,
+  `gui_sections.py`, `gui_rois.py`, `gui_participants.py`,
+  `gui_settings.py`, and `gui_run_workflow.py` own focused GUI-only behavior.
 - `src/Tools/Individual_Detectability/`: individual-level detectability workflow.
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`: UI-agnostic average-preprocessing behavior used by the PySide6 tool.

@@ -11,7 +11,10 @@ Primary paths:
   `_Worker` QObject shell, worker config, Excel input/data collection helpers,
   ROI/group aggregation helpers, scalp rendering helpers, Matplotlib rendering,
   and manifest helpers.
-- `src/Tools/Ratio_Calculator/`: ratio calculator GUI, pipeline, exports, and plots.
+- `src/Tools/Ratio_Calculator/`: ratio calculator GUI, pipeline, exports,
+  and plots. `gui.py` keeps the public window facade while focused GUI mixins
+  own condition selection, section assembly, ROI state, participant state,
+  settings/validation, and run/status/log workflow.
 - `src/Tools/Individual_Detectability/`: detectability tool core, GUI, and worker.
 
 Stats grouping:
