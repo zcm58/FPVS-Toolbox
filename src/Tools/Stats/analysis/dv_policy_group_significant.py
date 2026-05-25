@@ -460,9 +460,34 @@ def build_group_significant_harmonic_selection(
         )
 
     if not selected_freqs:
+        candidate_summary = _format_candidate_z_summary(rows)
+        log_func(
+            "[PERF] Group harmonic selection found no significant harmonics. "
+            f"Threshold z>{settings.group_significant_z_threshold:g}; "
+            f"tested candidates: {candidate_summary}."
+        )
+        logger.warning(
+            "stats_group_harmonics_no_selection",
+            extra={
+                "z_threshold": settings.group_significant_z_threshold,
+                "candidate_summary": candidate_summary,
+                "candidate_rows": [
+                    {
+                        "harmonic_index": row.harmonic_index,
+                        "target_frequency_hz": row.target_frequency_hz,
+                        "matched_frequency_hz": row.matched_frequency_hz,
+                        "z_score": row.z_score,
+                        "excluded_base_rate": row.excluded_base_rate,
+                        "exclusion_reason": row.exclusion_reason,
+                    }
+                    for row in rows
+                ],
+            },
+        )
         raise RuntimeError(
             "Group-level significant harmonic selection found no oddball harmonics "
             f"above z>{settings.group_significant_z_threshold:g}. "
+            f"Tested candidates: {candidate_summary}. "
             "Use the fixed/predefined policy or inspect the regenerated full-spectrum workbooks."
         )
     elapsed = perf_counter() - started
@@ -1226,6 +1251,20 @@ def _frequency_resolution(freqs: Sequence[float]) -> float | None:
     if diffs.size == 0:
         return None
     return float(np.median(diffs))
+
+
+def _format_candidate_z_summary(rows: Sequence[GroupSignificantHarmonicRow]) -> str:
+    parts: list[str] = []
+    for row in rows:
+        if row.excluded_base_rate:
+            parts.append(f"{row.target_frequency_hz:.4f} Hz excluded base overlap")
+            continue
+        if row.z_score is None:
+            reason = row.exclusion_reason or "not tested"
+            parts.append(f"{row.target_frequency_hz:.4f} Hz {reason}")
+            continue
+        parts.append(f"{row.target_frequency_hz:.4f} Hz z={row.z_score:.3f}")
+    return "; ".join(parts) if parts else "none"
 
 
 def _is_base_overlap(freq: float, base: float, tolerance_hz: float) -> bool:

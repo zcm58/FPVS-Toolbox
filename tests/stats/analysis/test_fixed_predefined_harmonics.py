@@ -147,6 +147,33 @@ def test_group_significant_policy_selects_common_grand_average_harmonics(tmp_pat
     assert selection.z_by_harmonic[2.4] < settings.group_significant_z_threshold
 
 
+def test_group_significant_policy_reports_tested_candidates_when_none_selected(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "no_selected_group_policy.xlsx"
+    _write_group_policy_workbook(path, scale=1, peak_targets=set())
+    messages: list[str] = []
+
+    with pytest.raises(RuntimeError) as exc:
+        build_group_significant_harmonic_selection(
+            subjects=["S1"],
+            conditions=["C1"],
+            subject_data={"S1": {"C1": str(path)}},
+            base_frequency_hz=6.0,
+            rois={"Posterior": ["O1", "O2"]},
+            log_func=messages.append,
+            settings=normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME}),
+            max_freq=3.6,
+        )
+
+    message = str(exc.value)
+    assert "Tested candidates:" in message
+    assert "1.2000 Hz z=" in message
+    assert "2.4000 Hz z=" in message
+    assert "3.6000 Hz z=" in message
+    assert any("tested candidates:" in item for item in messages)
+
+
 def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_path: Path) -> None:
     subjects = ["S1", "S2"]
     conditions = ["C1", "C2"]
@@ -408,7 +435,10 @@ def _write_group_policy_workbook(
     *,
     scale: int,
     frequency_step: float = 0.3,
+    peak_targets: set[float] | None = None,
 ) -> None:
+    if peak_targets is None:
+        peak_targets = {1.2, 3.6, 7.2}
     frequency_values = [
         round(frequency_step * idx, 4)
         for idx in range(0, int(round(10.2 / frequency_step)) + 1)
@@ -416,7 +446,7 @@ def _write_group_policy_workbook(
     fft_values = []
     for idx, freq in enumerate(frequency_values):
         base_noise = 1.2 if idx % 2 == 0 else 0.8
-        if any(abs(freq - target) <= frequency_step / 2 for target in {1.2, 3.6, 7.2}):
+        if any(abs(freq - target) <= frequency_step / 2 for target in peak_targets):
             base_noise = 20.0
         fft_values.append(base_noise)
     full_fft = pd.DataFrame(

@@ -227,7 +227,7 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
         "selection_scope": "group_level_all_scalp_electrodes_all_selected_conditions",
         "selection_source_sheet": "FullFFT Amplitude (uV)",
         "selection_amplitude_summary": "grand_average_raw_amplitude_spectrum",
-        "z_threshold": 2.32,
+        "z_threshold": 1.64,
         "z_score_source": "computed_from_grand_averaged_amplitude_spectrum",
         "noise_window_bins": 10,
         "base_frequency_hz": 6.0,
@@ -301,7 +301,7 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
     excluded_row = selection_df[selection_df["requested_harmonic_hz"] == 6.0].iloc[0]
     assert selected_row["harmonic_policy"] == GROUP_SIGNIFICANT_POLICY_ID
     assert bool(selected_row["selected"]) is True
-    assert selected_row["z_threshold"] == pytest.approx(2.32)
+    assert selected_row["z_threshold"] == pytest.approx(1.64)
     assert excluded_row["exclusion_reason"] == "base_rate_overlap"
 
 

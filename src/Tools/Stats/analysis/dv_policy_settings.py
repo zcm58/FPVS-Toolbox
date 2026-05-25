@@ -20,7 +20,7 @@ GROUP_SIGNIFICANT_POLICY_ID = "group_level_significant_harmonics"
 GROUP_SIGNIFICANT_POLICY_LABEL = (
     "Group-level significant oddball harmonics from a grand-averaged amplitude spectrum"
 )
-GROUP_SIGNIFICANT_Z_THRESHOLD = 2.32
+GROUP_SIGNIFICANT_Z_THRESHOLD = 1.64
 GROUP_SIGNIFICANT_ELECTRODE_SCOPE = "all_scalp_electrodes"
 
 
