@@ -89,6 +89,7 @@ Do not use these installed skills for normal FPVS Toolbox work:
 - Active refactor plans live in `docs/agent/exec-plans/active/`.
 - Future plans live in `docs/agent/exec-plans/future/`; read them only when scoping or starting the matching effort.
 - Known debt that is not yet active work lives in `docs/agent/exec-plans/tech-debt-tracker.md`.
+- v2.1 processing workflow planning is active in `docs/agent/exec-plans/active/v2-1-processing-workflow.md`; read it before changing project setup, manifests, raw-file discovery, single-file or batch processing, Excel output layout, processing ledger behavior, Plot Generator group handling, or Stats group metadata.
 - Plot Generator worker refactor is recorded in `docs/agent/exec-plans/completed/plot-generator-worker-refactor.md`; read it before changing `src/Tools/Plot_Generator/worker.py` or the extracted worker helper modules.
 - Shared GUI surface migration is recorded in `docs/agent/exec-plans/completed/shared-gui-surface-migration.md`; read it before continuing tool-window migration patterns or validating the Ratio Calculator, Epoch/Average Preprocessing, Stats UI, Plot Generator, or Main App shell component adoption.
 - Shared GUI component-layer consolidation is recorded in `docs/agent/exec-plans/completed/shared-gui-component-layer-updated.md`; read it before changing reusable GUI primitives, shared action/message/path/status patterns, or migrating tool windows to `Main_App.gui.components`.
