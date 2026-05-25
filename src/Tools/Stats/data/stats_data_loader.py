@@ -327,6 +327,26 @@ def _condition_from_manifest_excel_root(filepath: Path, expected_excel_root: Pat
     return condition or None
 
 
+def _project_manifest_at_root(project_root: Path) -> tuple[dict | None, Path | None]:
+    manifest_path = project_root / "project.json"
+    if not manifest_path.is_file():
+        return None, None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        results_folder, subfolders = load_manifest_data(project_root, manifest)
+        excel_root = resolve_project_subfolder(
+            project_root,
+            results_folder,
+            subfolders,
+            "excel",
+            "1 - Excel Data Files",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to resolve Stats Excel root from %s: %s", manifest_path, exc)
+        return None, None
+    return manifest, excel_root
+
+
 def _group_folder_aliases(manifest: dict | None) -> set[str]:
     if not isinstance(manifest, dict):
         return set()
@@ -424,7 +444,14 @@ def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[s
 
     try:
         parent_path = Path(parent_folder)
+        root_manifest, root_excel = _project_manifest_at_root(parent_path)
+        if root_manifest is not None and root_excel is not None and root_excel.is_dir():
+            parent_path = root_excel
         project_root, manifest = find_project_manifest_for_excel_root(parent_path)
+        if manifest is None:
+            manifest = root_manifest
+        if project_root is None and root_manifest is not None:
+            project_root = Path(parent_folder).resolve()
         expected_excel_root = None
         if project_root is not None and manifest is not None:
             results_folder, subfolders = load_manifest_data(project_root, manifest)

@@ -105,3 +105,22 @@ def test_scan_folder_prefers_manifest_group_workbook_over_flat_legacy_copy(tmp_p
     assert subjects == ["P01"]
     assert conditions == ["Color"]
     assert subject_data["P01"]["Color"] == str(default_workbook)
+
+
+def test_scan_folder_project_root_uses_manifest_excel_root_with_group_folders(tmp_path):
+    project_root = tmp_path / "Project"
+    excel_root = project_root / "1 - Excel Data Files"
+    group = excel_root / "Semantic" / "Default"
+    backup = project_root / "10 - Excel Data Files Backup" / "Semantic"
+    group.mkdir(parents=True)
+    backup.mkdir(parents=True)
+    _write_project_manifest(project_root)
+    workbook = group / "P01_Semantic_Results.xlsx"
+    workbook.write_text("new", encoding="utf-8")
+    (backup / "P01_Semantic_Results.xlsx").write_text("old", encoding="utf-8")
+
+    subjects, conditions, subject_data = scan_folder_simple(str(project_root))
+
+    assert subjects == ["P01"]
+    assert conditions == ["Semantic"]
+    assert subject_data["P01"]["Semantic"] == str(workbook)
