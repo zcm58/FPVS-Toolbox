@@ -12,6 +12,10 @@ from Tools.Stats.io.stats_ready_export import (
     build_stats_ready_frames,
     prepare_stats_ready_export,
 )
+from Tools.Stats.analysis.dv_policy_settings import (
+    FIXED_PREDEFINED_POLICY_ID,
+    FIXED_PREDEFINED_POLICY_NAME,
+)
 
 
 def _fixture_inputs():
@@ -42,23 +46,20 @@ def _fixture_inputs():
         for roi in rois
     }
     dv_metadata = {
-        "policy_name": "Rossion",
-        "empty_list_policy": "fallback_fixed_k",
-        "rossion_method": {
-            "union_harmonics_by_roi": {
-                "Occipital": [6.0, 12.0],
-                "Frontal": [18.0],
-            },
-            "fallback_info_by_roi": {
-                "Occipital": {
-                    "policy": "fallback_fixed_k",
-                    "fallback_used": False,
-                },
-                "Frontal": {
-                    "policy": "fallback_fixed_k",
-                    "fallback_used": True,
-                },
-            },
+        "policy_name": FIXED_PREDEFINED_POLICY_NAME,
+        "fixed_predefined_harmonics": {
+            "harmonic_policy": FIXED_PREDEFINED_POLICY_ID,
+            "harmonic_policy_label": (
+                "Fixed predefined harmonic list applied uniformly across participants, "
+                "conditions, and ROIs"
+            ),
+            "fixed_harmonic_included_frequencies_hz": [6.0, 12.0],
+            "excluded_base_overlap_frequencies_hz": [],
+            "selection_rows": [],
+            "snr_used_for_statistics": False,
+            "applied_uniformly_across_participants": True,
+            "applied_uniformly_across_conditions": True,
+            "applied_uniformly_across_rois": True,
         },
     }
     return subjects, conditions, rois, subject_data, summed_bca, provenance, dv_metadata
@@ -75,7 +76,7 @@ def test_build_stats_ready_frames_preserves_canonical_long_and_group_data():
         summed_bca=summed_bca,
         provenance_map=provenance,
         dv_metadata=dv_metadata,
-        dv_policy={"name": "Rossion"},
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
         group_map={"S1": "Control", "S2": "Clinical"},
     )
 
@@ -89,8 +90,8 @@ def test_build_stats_ready_frames_preserves_canonical_long_and_group_data():
     assert row["subject_uid"] == "S2"
     assert row["group_id"] == "Clinical"
     assert row["summed_bca_uv"] == pytest.approx(3.5)
-    assert row["selected_harmonics_hz"] == "18"
-    assert bool(row["fallback_used"]) is True
+    assert row["selected_harmonics_hz"] == "6;12"
+    assert bool(row["fallback_used"]) is False
     assert row["source_workbook"] == "S2_Object.xlsx"
 
     sas_df = frames[SAS_LONG_SHEET]
@@ -127,9 +128,84 @@ def test_build_stats_ready_frames_requires_complete_group_labels_when_groups_exi
             summed_bca=summed_bca,
             provenance_map=provenance,
             dv_metadata=dv_metadata,
-            dv_policy={"name": "Rossion"},
+            dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
             group_map={"S1": "Control"},
         )
+
+
+def test_build_stats_ready_frames_exports_fixed_predefined_metadata():
+    subjects, conditions, rois, subject_data, summed_bca, provenance, _dv_metadata = _fixture_inputs()
+    fixed_meta = {
+        "harmonic_policy": FIXED_PREDEFINED_POLICY_ID,
+        "harmonic_policy_label": "Fixed predefined harmonic list applied uniformly across participants, conditions, and ROIs",
+        "fixed_harmonic_included_frequencies_hz": [1.2, 2.4, 3.6, 4.8, 7.2],
+        "excluded_base_overlap_frequencies_hz": [6.0],
+        "base_frequency_hz": 6.0,
+        "oddball_frequency_hz": 1.2,
+        "base_overlap_exclusion_enabled": True,
+        "base_overlap_tolerance_hz": 0.01,
+        "matching_tolerance_hz": 0.01,
+        "frequency_resolution_hz": 1.2,
+        "applied_uniformly_across_participants": True,
+        "applied_uniformly_across_conditions": True,
+        "applied_uniformly_across_rois": True,
+        "snr_used_for_statistics": False,
+        "bca_negative_values_retained": True,
+        "bca_near_zero_values_retained": True,
+        "selection_rows": [
+            {
+                "requested_frequency_hz": 1.2,
+                "matched_frequency_hz": 1.2,
+                "matched_column": "1.2000_Hz",
+                "matched_bin_index": 1,
+                "included": True,
+                "exclusion_reason": "",
+                "warning": "",
+            },
+            {
+                "requested_frequency_hz": 6.0,
+                "matched_frequency_hz": None,
+                "matched_column": None,
+                "matched_bin_index": None,
+                "included": False,
+                "exclusion_reason": "base_rate_overlap",
+                "warning": "Base-rate overlap excluded.",
+            },
+        ],
+    }
+    frames = build_stats_ready_frames(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        rois=rois,
+        summed_bca=summed_bca,
+        provenance_map=provenance,
+        dv_metadata={
+            "policy_name": FIXED_PREDEFINED_POLICY_NAME,
+            "fixed_predefined_harmonics": fixed_meta,
+        },
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
+        group_map={},
+    )
+
+    long_df = frames[RSTUDIO_LONG_SHEET]
+    assert set(long_df["selected_harmonics_hz"]) == {"1.2;2.4;3.6;4.8;7.2"}
+    assert set(long_df["selection_scope"]) == {FIXED_PREDEFINED_POLICY_ID}
+    assert set(long_df["selection_z_scores"]) == {""}
+    assert set(long_df["excluded_base_harmonics_hz"]) == {"6"}
+
+    selection_df = frames["Harmonic_Selection"]
+    selected_row = selection_df[selection_df["requested_harmonic_hz"] == 1.2].iloc[0]
+    excluded_row = selection_df[selection_df["requested_harmonic_hz"] == 6.0].iloc[0]
+    assert bool(selected_row["selected"]) is True
+    assert selected_row["base_frequency_hz"] == pytest.approx(6.0)
+    assert selected_row["oddball_frequency_hz"] == pytest.approx(1.2)
+    assert bool(selected_row["base_overlap_exclusion_enabled"]) is True
+    assert bool(selected_row["applied_uniformly_across_participants"]) is True
+    assert bool(selected_row["applied_uniformly_across_conditions"]) is True
+    assert bool(selected_row["applied_uniformly_across_rois"]) is True
+    assert bool(selected_row["snr_used_for_statistics"]) is False
+    assert excluded_row["exclusion_reason"] == "base_rate_overlap"
 
 
 def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook(
@@ -144,8 +220,7 @@ def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook
         kwargs["provenance_map"].update(provenance)
         kwargs["dv_metadata"].update(
             {
-                "policy_name": "Fixed-K",
-                "empty_list_policy": "fallback_fixed_k",
+                "policy_name": FIXED_PREDEFINED_POLICY_NAME,
             }
         )
         return summed_bca
@@ -163,7 +238,7 @@ def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook
         subject_data=subject_data,
         base_freq=6.0,
         rois=rois,
-        dv_policy={"name": "Fixed-K", "fixed_k": 2},
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
         group_map={},
         log_func=lambda _message: None,
         save_path=target,

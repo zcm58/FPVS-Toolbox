@@ -107,23 +107,6 @@ class StatsWindowPipelineMixin:
             return None
         return base_freq, alpha
 
-    def _get_harmonic_settings(self) -> Optional[HarmonicConfig]:
-        """Handle the get harmonic settings step for the Stats workflow."""
-        ok_metric, metric = self._safe_settings_get("analysis", "harmonic_metric", "Z Score")
-        ok_threshold, threshold = self._safe_settings_get("analysis", "harmonic_threshold", 1.64)
-        try:
-            threshold_val = float(threshold)
-        except Exception as exc:
-            QMessageBox.critical(self, "Settings Error", f"Invalid harmonic threshold: {exc}")
-            return None
-
-        if not (ok_metric and ok_threshold):
-            QMessageBox.critical(self, "Settings Error", "Could not load harmonic settings.")
-            return None
-
-        metric_str = str(metric) if metric is not None else "Z Score"
-        return HarmonicConfig(metric_str, threshold_val)
-
     def _get_qc_settings(self) -> Optional[tuple[float, float]]:
         """Handle the get qc settings step for the Stats workflow."""
         ok_warn, warn = self._safe_settings_get(
@@ -186,11 +169,7 @@ class StatsWindowPipelineMixin:
         if not got:
             return False
         self._current_base_freq, self._current_alpha = got
-        self._update_fixed_k_base_freq_label()
-        harmonic_cfg = self._get_harmonic_settings()
-        if not harmonic_cfg:
-            return False
-        self._harmonic_config = harmonic_cfg
+        self._update_fixed_predefined_base_freq_label()
         qc_cfg = self._get_qc_settings()
         if not qc_cfg:
             return False
@@ -232,7 +211,6 @@ class StatsWindowPipelineMixin:
             single_posthoc=self.posthoc_results_data,
             rm_anova_results=self.rm_anova_results_data,
             mixed_model_results=self.mixed_model_results_data,
-            harmonic_results=self._harmonic_results.get(pipeline_id),
         )
 
     def _render_summary(self, summary_text: str) -> None:
@@ -495,7 +473,6 @@ class StatsWindowPipelineMixin:
                     "step": getattr(sid, "name", str(sid)),
                     "payload_type": payload_type,
                     "payload_keys": payload_keys,
-                    "is_harmonic_check": getattr(sid, "name", str(sid)) == "HARMONIC_CHECK",
                 },
             )
             try:
@@ -601,7 +578,7 @@ class StatsWindowPipelineMixin:
         if not got:
             raise RuntimeError("Unable to load analysis settings.")
         self._current_base_freq, self._current_alpha = got
-        self._update_fixed_k_base_freq_label()
+        self._update_fixed_predefined_base_freq_label()
         return self._current_base_freq, self._current_alpha, self.rois, self._get_selected_conditions()
 
     def ensure_pipeline_ready(
@@ -621,13 +598,10 @@ class StatsWindowPipelineMixin:
         """Handle the on pipeline started step for the Stats workflow."""
         self._pipeline_start_perf[pipeline_id] = time.perf_counter()
         self._active_pipeline = pipeline_id
-        self._harmonic_results[pipeline_id] = []
         self._pipeline_conditions[pipeline_id] = self._get_selected_conditions()
         self._pipeline_dv_policy[pipeline_id] = self._get_dv_policy_payload()
         self._pipeline_base_freq[pipeline_id] = self._current_base_freq
         self._pipeline_dv_metadata[pipeline_id] = {}
-        self._pipeline_dv_variants[pipeline_id] = self._get_selected_dv_variants()
-        self._pipeline_dv_variant_payloads[pipeline_id] = {}
         self._pipeline_outlier_config[pipeline_id] = self._get_outlier_exclusion_payload()
         self._pipeline_qc_config[pipeline_id] = self._get_qc_exclusion_payload()
         self._pipeline_qc_state[pipeline_id] = {"report": None}
@@ -640,14 +614,6 @@ class StatsWindowPipelineMixin:
             btn.setEnabled(False)
         self._focus_self()
         self._log_pipeline_event(pipeline=pipeline_id, event="started")
-
-    def store_dv_variants_payload(
-        self, pipeline_id: PipelineId, dv_variants: dict | None
-    ) -> None:
-        """Handle the store dv variants payload step for the Stats workflow."""
-        if not isinstance(dv_variants, dict) or not dv_variants:
-            return
-        self._store_dv_variants(pipeline_id, {"dv_variants": dv_variants})
 
     def on_analysis_finished(
         self,
@@ -752,7 +718,7 @@ class StatsWindowPipelineMixin:
             alpha=0.05,
             min_effect=0.50,
             max_bullets=3,
-            z_threshold=self._harmonic_config.threshold,
+            z_threshold=1.64,
             p_col="p_fdr",
             effect_col="effect_size",
         )
@@ -766,45 +732,19 @@ class StatsWindowPipelineMixin:
             return self._export_single_pipeline()
         return False
 
-    def _build_harmonic_kwargs(self) -> dict:
-        # [SAFETY UPDATE] Load fresh ROIs from settings to ensure thread receives
-        # the most up-to-date map, preventing 0xC0000005 errors.
-        """Handle the build harmonic kwargs step for the Stats workflow."""
-        fresh_rois = load_rois_from_settings() or self.rois
-        _, max_freq_raw = self._safe_settings_get("analysis", "bca_upper_limit", 16.8)
-        try:
-            max_freq = float(max_freq_raw)
-        except Exception:
-            max_freq = None
-        manual_excluded = set(self.manual_excluded_pids)
-        filtered_subjects = [pid for pid in self.subjects if pid not in manual_excluded]
-        filtered_subject_data = {
-            pid: data for pid, data in self.subject_data.items() if pid not in manual_excluded
-        }
-
-        return dict(
-            subject_data=filtered_subject_data,
-            subjects=filtered_subjects,
-            conditions=self._get_selected_conditions(),
-            selected_metric=self._harmonic_config.metric,
-            mean_value_threshold=self._harmonic_config.threshold,
-            base_freq=self._current_base_freq,
-            alpha=self._current_alpha,
-            max_freq=max_freq,
-            rois=fresh_rois,  # <--- Using fresh_rois instead of potentially stale self.rois
-        )
-
     def get_step_config(
         self, pipeline_id: PipelineId, step_id: StepId
     ) -> tuple[dict, Callable[[dict], None]]:
         """Handle the get step config step for the Stats workflow."""
-        dv_variants_payload = self._get_dv_variant_payloads()
         outlier_payload = self._pipeline_outlier_config.get(
             pipeline_id, self._get_outlier_exclusion_payload()
         )
         qc_payload = self._pipeline_qc_config.get(pipeline_id, self._get_qc_exclusion_payload())
         qc_state = self._pipeline_qc_state.get(pipeline_id, {"report": None})
         if pipeline_id is PipelineId.SINGLE:
+            dv_policy = self._pipeline_dv_policy.get(
+                pipeline_id, self._get_dv_policy_payload()
+            )
             if step_id is StepId.RM_ANOVA:
                 kwargs = dict(
                     subjects=self.subjects,
@@ -814,8 +754,7 @@ class StatsWindowPipelineMixin:
                     base_freq=self._current_base_freq,
                     rois=self.rois,
                     rois_all=self.rois,
-                    dv_policy=self._get_dv_policy_payload(),
-                    dv_variants=dv_variants_payload,
+                    dv_policy=dv_policy,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
@@ -839,8 +778,7 @@ class StatsWindowPipelineMixin:
                     alpha=self._current_alpha,
                     rois=self.rois,
                     rois_all=self.rois,
-                    dv_policy=self._get_dv_policy_payload(),
-                    dv_variants=dv_variants_payload,
+                    dv_policy=dv_policy,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
@@ -862,8 +800,7 @@ class StatsWindowPipelineMixin:
                     alpha=self._current_alpha,
                     rois=self.rois,
                     rois_all=self.rois,
-                    dv_policy=self._get_dv_policy_payload(),
-                    dv_variants=dv_variants_payload,
+                    dv_policy=dv_policy,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
@@ -885,8 +822,7 @@ class StatsWindowPipelineMixin:
                     alpha=self._current_alpha,
                     rois=self.rois,
                     rois_all=self.rois,
-                    dv_policy=self._get_dv_policy_payload(),
-                    dv_variants=dv_variants_payload,
+                    dv_policy=dv_policy,
                     outlier_exclusion_enabled=outlier_payload.get("enabled", True),
                     outlier_abs_limit=outlier_payload.get("abs_limit", 50.0),
                     qc_config=qc_payload,
@@ -897,14 +833,6 @@ class StatsWindowPipelineMixin:
                 def handler(payload):
                     """Handle the handler step for the Stats workflow."""
                     self._apply_baseline_vs_zero_results(payload, update_text=True)
-
-                return kwargs, handler
-            if step_id is StepId.HARMONIC_CHECK:
-                kwargs = self._build_harmonic_kwargs()
-
-                def handler(payload, *, pid=pipeline_id):
-                    """Handle the handler step for the Stats workflow."""
-                    self._apply_harmonic_results(payload, pipeline_id=pid, update_text=True)
 
                 return kwargs, handler
         raise ValueError(f"Unsupported step configuration for {pipeline_id} / {step_id}")
@@ -953,28 +881,6 @@ class StatsWindowPipelineMixin:
         dv_meta = payload.get("dv_metadata")
         if isinstance(dv_meta, dict) and dv_meta:
             self._pipeline_dv_metadata[pipeline_id] = dv_meta
-        self._store_dv_variants(pipeline_id, payload)
-
-    def _store_dv_variants(self, pipeline_id: PipelineId, payload: dict) -> None:
-        """Handle the store dv variants step for the Stats workflow."""
-        dv_variants = payload.get("dv_variants")
-        if not isinstance(dv_variants, dict) or not dv_variants:
-            return
-        self._pipeline_dv_variant_payloads[pipeline_id] = dv_variants
-        selected = dv_variants.get("selected_variants")
-        if isinstance(selected, list):
-            self._pipeline_dv_variants[pipeline_id] = list(selected)
-        errors = dv_variants.get("errors", [])
-        if errors:
-            section = self._section_label(pipeline_id)
-            for err in errors:
-                variant_name = err.get("variant", "Unknown")
-                message = err.get("error", "Unknown error")
-                self.append_log(
-                    section,
-                    f"DV variant {variant_name} failed: {message}",
-                    level="warning",
-                )
 
     def _store_run_report(self, pipeline_id: PipelineId, payload: dict) -> None:
         """Handle the store run report step for the Stats workflow."""
@@ -1038,23 +944,11 @@ class StatsWindowPipelineMixin:
     def _apply_baseline_vs_zero_results(self, payload: dict, *, update_text: bool = True) -> str:
         """Handle the apply baseline-vs-zero results step for the Stats workflow."""
         self.baseline_vs_zero_results_payload = payload
+        self._store_dv_metadata(PipelineId.SINGLE, payload)
         self._store_run_report(PipelineId.SINGLE, payload)
         output_text = payload.get("output_text", "")
         if update_text:
             self.summary_text.append(output_text)
-        self._update_export_buttons()
-        return output_text
-
-    def _apply_harmonic_results(
-        self, payload: dict, *, pipeline_id: PipelineId, update_text: bool = True
-    ) -> str:
-        """Handle the apply harmonic results step for the Stats workflow."""
-        output_text = payload.get("output_text") or ""
-        findings = payload.get("findings") or []
-        if update_text:
-            self.summary_text.append("Harmonic details were exported to Harmonic Results.xlsx.")
-        self._harmonic_results[pipeline_id] = findings
-        self.harmonic_check_results_data = findings
         self._update_export_buttons()
         return output_text
 
@@ -1074,13 +968,6 @@ class StatsWindowPipelineMixin:
     def _on_posthoc_finished(self, payload: dict) -> None:
         """Handle the on posthoc finished step for the Stats workflow."""
         self._apply_posthoc_results(payload)
-        self._end_run()
-
-    @Slot(dict)
-    def _on_harmonic_finished(self, payload: dict) -> None:
-        """Handle the on harmonic finished step for the Stats workflow."""
-        pipeline_id = self._active_pipeline or PipelineId.SINGLE
-        self._apply_harmonic_results(payload, pipeline_id=pipeline_id)
         self._end_run()
 
     # --------------------------- UI building ---------------------------

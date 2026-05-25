@@ -73,14 +73,12 @@ from Tools.Stats.reporting.stats_export import (
     export_mixed_model_results_to_excel,
     export_posthoc_results_to_excel,
     export_rm_anova_results_to_excel,
-    export_significance_results_to_excel as export_harmonic_results_to_excel,
 )
 from Tools.Stats.data.shared_rois import apply_rois_to_modules, load_rois_from_settings
 from Tools.Stats.controller.stats_controller import StatsController
 from Tools.Stats.common.stats_core import (
     ANOVA_XLS,
     BASELINE_VS_ZERO_XLS,
-    HARMONIC_XLS,
     LMM_XLS,
     PipelineId,
     PipelineStep,
@@ -91,7 +89,6 @@ from Tools.Stats.common.stats_core import (
 from Tools.Stats.data.stats_data_loader import (
     check_for_open_excel_files,
     ensure_results_dir,
-    group_harmonic_results,
     map_subjects_to_groups,
     ScanError,
     auto_detect_project_dir,
@@ -112,14 +109,9 @@ from Tools.Stats.reporting.stats_export_formatting import (
 from Tools.Stats.workers.stats_workers import StatsWorker
 from Tools.Stats.workers import stats_workers as stats_worker_funcs
 from Tools.Stats.analysis.dv_policies import (
-    EMPTY_LIST_ERROR,
-    EMPTY_LIST_FALLBACK_FIXED_K,
-    EMPTY_LIST_SET_ZERO,
-    FIXED_K_POLICY_NAME,
-    LEGACY_POLICY_NAME,
-    ROSSION_POLICY_NAME,
+    FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
+    FIXED_PREDEFINED_POLICY_NAME,
 )
-from Tools.Stats.analysis.dv_variants import export_dv_variants_workbook
 from Tools.Stats.qc.stats_outlier_exclusion import (
     build_flagged_details_map,
     build_flagged_participant_summary,
@@ -154,7 +146,6 @@ from Tools.Stats.reporting.reporting_summary import (
     safe_project_path_join,
 )
 from Tools.Stats.widgets.elided_label import ElidedPathLabel
-from Tools.Stats.common.stats_window_types import HarmonicConfig
 
 logger = logging.getLogger(__name__)
 _unused_qaction = QAction  # keep import alive for Qt resource checkers

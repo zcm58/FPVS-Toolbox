@@ -10,48 +10,16 @@ class StatsWindowExclusionsMixin:
     def _get_dv_policy_payload(self) -> dict[str, object]:
         """Handle the get dv policy payload step for the Stats workflow."""
         return {
-            "name": self._dv_policy_name,
-            "fixed_k": int(self._dv_fixed_k),
-            "exclude_harmonic1": bool(self._dv_exclude_harmonic1),
-            "exclude_base_harmonics": bool(self._dv_exclude_base_harmonics),
-            "z_threshold": float(self._dv_group_mean_z_threshold),
-            "empty_list_policy": str(self._dv_empty_list_policy),
+            "name": FIXED_PREDEFINED_POLICY_NAME,
+            "fixed_harmonic_frequencies_hz": str(self._dv_fixed_harmonic_frequencies_hz),
+            "fixed_harmonic_auto_exclude_base": bool(
+                self._dv_fixed_harmonic_auto_exclude_base
+            ),
         }
 
     def get_dv_policy_snapshot(self) -> dict[str, object]:
         """Handle the get dv policy snapshot step for the Stats workflow."""
         return dict(self._get_dv_policy_payload())
-
-    def _sync_selected_dv_variants(self) -> None:
-        """Handle the sync selected dv variants step for the Stats workflow."""
-        self._dv_variants_selected = [
-            name
-            for name, checkbox in self._dv_variant_checkboxes.items()
-            if checkbox.isChecked()
-        ]
-
-    def _get_selected_dv_variants(self) -> List[str]:
-        """Handle the get selected dv variants step for the Stats workflow."""
-        if self._dv_variant_checkboxes:
-            return list(self._dv_variants_selected)
-        return []
-
-    def _get_dv_variant_payloads(self) -> list[dict[str, object]]:
-        """Handle the get dv variant payloads step for the Stats workflow."""
-        selected = self._get_selected_dv_variants()
-        if not selected:
-            return []
-        base_payload = self._get_dv_policy_payload()
-        payloads = []
-        for name in selected:
-            variant_payload = dict(base_payload)
-            variant_payload["name"] = name
-            payloads.append(variant_payload)
-        return payloads
-
-    def get_dv_variants_snapshot(self) -> list[str]:
-        """Handle the get dv variants snapshot step for the Stats workflow."""
-        return list(self._get_selected_dv_variants())
 
     def _get_outlier_exclusion_payload(self) -> dict[str, object]:
         """Handle the get outlier exclusion payload step for the Stats workflow."""
@@ -235,110 +203,54 @@ class StatsWindowExclusionsMixin:
         if search_input is not None:
             search_input.setFocus()
 
-    def _set_fixed_k_controls_enabled(self, enabled: bool) -> None:
-        """Handle the set fixed k controls enabled step for the Stats workflow."""
-        widgets = [
-            getattr(self, "fixed_k_spinbox", None),
-            getattr(self, "fixed_k_exclude_h1", None),
-            getattr(self, "fixed_k_exclude_base", None),
-            getattr(self, "fixed_k_base_freq_value", None),
-        ]
-        for widget in widgets:
-            if widget is not None:
-                widget.setEnabled(enabled)
-        container = getattr(self, "fixed_k_controls", None)
-        if container is not None:
-            container.setVisible(enabled)
-
-    def _set_group_mean_controls_visible(self, visible: bool) -> None:
-        """Handle the set group mean controls visible step for the Stats workflow."""
-        widget = getattr(self, "group_mean_controls", None)
+    def _set_fixed_predefined_controls_visible(self, visible: bool) -> None:
+        widget = getattr(self, "fixed_predefined_controls", None)
         if widget is not None:
             widget.setVisible(visible)
-        preview_button = getattr(self, "group_mean_preview_btn", None)
-        if preview_button is not None:
-            preview_button.setVisible(visible)
-        preview_table = getattr(self, "group_mean_preview_table", None)
-        if preview_table is not None:
-            preview_table.setVisible(visible)
 
-    def _on_group_mean_z_threshold_changed(self, value: float) -> None:
-        """Handle the on group mean z threshold changed step for the Stats workflow."""
-        self._dv_group_mean_z_threshold = float(value)
+    def _clear_fixed_predefined_preview(self) -> None:
+        table = getattr(self, "fixed_predefined_preview_table", None)
+        if table is not None:
+            table.setRowCount(0)
 
-    def _on_empty_list_policy_changed(self, text: str) -> None:
-        """Handle the on empty list policy changed step for the Stats workflow."""
-        self._dv_empty_list_policy = text
-
-    def _clear_group_mean_preview(self) -> None:
-        """Handle the clear group mean preview step for the Stats workflow."""
-        table = getattr(self, "group_mean_preview_table", None)
+    def _update_fixed_predefined_preview_table(self, payload: dict[str, object]) -> None:
+        table = getattr(self, "fixed_predefined_preview_table", None)
         if table is None:
             return
-        table.setRowCount(0)
-        self._group_mean_preview_data = {}
-
-    def _update_group_mean_preview_table(
-        self,
-        union_map: dict[str, list[float]],
-        fallback_info: dict[str, dict[str, object]],
-        stop_metadata: dict[str, dict[str, object]] | None = None,
-    ) -> None:
-        """Handle the update group mean preview table step for the Stats workflow."""
-        table = getattr(self, "group_mean_preview_table", None)
-        if table is None:
-            return
-        stop_metadata = stop_metadata or {}
-        rois = sorted(union_map.keys())
-        table.setRowCount(len(rois))
-        for row, roi_name in enumerate(rois):
-            harmonics = union_map.get(roi_name, [])
-            fallback = fallback_info.get(roi_name, {})
-            fallback_used = bool(fallback.get("fallback_used"))
-            policy = fallback.get("policy", "")
-            if fallback_used:
-                fallback_text = str(policy)
-            elif policy == EMPTY_LIST_SET_ZERO and not harmonics:
-                fallback_text = "DV=0"
-            else:
-                fallback_text = "None"
-
-            harmonic_text = ", ".join(f"{freq:g}" for freq in harmonics) or "—"
-            count_text = str(len(harmonics))
-            stop_meta = stop_metadata.get(roi_name, {})
-            stop_reason = stop_meta.get("stop_reason") or "—"
-            stop_fail = ", ".join(
-                f"{freq:g}" for freq in stop_meta.get("fail_harmonics", []) or []
-            ) or "—"
-
-            table.setItem(row, 0, QTableWidgetItem(str(roi_name)))
-            table.setItem(row, 1, QTableWidgetItem(harmonic_text))
-            table.setItem(row, 2, QTableWidgetItem(count_text))
-            table.setItem(row, 3, QTableWidgetItem(fallback_text))
-            table.setItem(row, 4, QTableWidgetItem(str(stop_reason)))
-            table.setItem(row, 5, QTableWidgetItem(stop_fail))
-
+        rows = payload.get("selection_rows", []) if isinstance(payload, dict) else []
+        if not isinstance(rows, list):
+            rows = []
+        table.setRowCount(len(rows))
+        for row_idx, row_data in enumerate(rows):
+            row = row_data if isinstance(row_data, dict) else {}
+            values = [
+                row.get("requested_frequency_hz", ""),
+                row.get("matched_frequency_hz", ""),
+                row.get("matched_column", ""),
+                row.get("matched_bin_index", ""),
+                "Yes" if row.get("included") else "No",
+                row.get("exclusion_reason") or row.get("warning") or "Included",
+            ]
+            for col_idx, value in enumerate(values):
+                if isinstance(value, float):
+                    text = f"{value:g}"
+                else:
+                    text = "" if value is None else str(value)
+                table.setItem(row_idx, col_idx, QTableWidgetItem(text))
         table.resizeColumnsToContents()
 
-    def _on_preview_group_mean_z_clicked(self) -> None:
-        """Handle the on preview group mean z clicked step for the Stats workflow."""
-        if self._dv_policy_name != ROSSION_POLICY_NAME:
-            return
+    def _on_preview_fixed_predefined_clicked(self) -> None:
         if not self.subject_data:
-            self._set_status("Load project data before previewing harmonic sets.")
-            return
-        self.refresh_rois()
-        if not self.rois:
-            self._set_status("Define at least one ROI before previewing.")
+            self._set_status("Load project data before validating the harmonic list.")
             return
         got = self._get_analysis_settings()
         if not got:
             return
         self._current_base_freq, self._current_alpha = got
-        self._update_fixed_k_base_freq_label()
+        self._update_fixed_predefined_base_freq_label()
 
-        self.group_mean_preview_btn.setEnabled(False)
-        self._set_status("Previewing harmonic sets…")
+        self.fixed_predefined_preview_btn.setEnabled(False)
+        self._set_status("Validating fixed harmonic list...")
 
         worker = StatsWorker(
             stats_worker_funcs.run_harmonics_preview,
@@ -357,36 +269,31 @@ class StatsWindowExclusionsMixin:
                 self._active_workers = []
             self._active_workers.append(worker)
         except Exception:  # noqa: BLE001
-            logger.exception("Failed to track preview worker")
+            logger.exception("Failed to track fixed-list preview worker")
 
         def _release():
-            """Handle the release step for the Stats workflow."""
             try:
                 if worker in self._active_workers:
                     self._active_workers.remove(worker)
             except Exception:  # noqa: BLE001
-                logger.exception("Failed to release preview worker")
+                logger.exception("Failed to release fixed-list preview worker")
 
         def _on_finished(payload: dict) -> None:
-            """Handle the on finished step for the Stats workflow."""
             try:
-                self._group_mean_preview_data = payload or {}
-                union_map = payload.get("union_harmonics_by_roi", {}) if isinstance(payload, dict) else {}
-                fallback_info = payload.get("fallback_info_by_roi", {}) if isinstance(payload, dict) else {}
-                stop_meta = payload.get("stop_metadata_by_roi", {}) if isinstance(payload, dict) else {}
-                self._update_group_mean_preview_table(union_map, fallback_info, stop_meta)
-                self._set_status("Preview updated.")
+                self._update_fixed_predefined_preview_table(payload or {})
+                included = payload.get("fixed_harmonic_included_frequencies_hz", [])
+                count = len(included) if isinstance(included, list) else 0
+                self._set_status(f"Fixed harmonic list validated: {count} included.")
             finally:
-                self.group_mean_preview_btn.setEnabled(True)
+                self.fixed_predefined_preview_btn.setEnabled(True)
                 _release()
 
         def _on_error(message: str) -> None:
-            """Handle the on error step for the Stats workflow."""
             try:
-                self.append_log("General", f"Preview error: {message}", level="error")
+                self.append_log("General", f"Fixed harmonic list error: {message}", level="error")
                 self._set_status(message)
             finally:
-                self.group_mean_preview_btn.setEnabled(True)
+                self.fixed_predefined_preview_btn.setEnabled(True)
                 _release()
 
         worker.signals.message.connect(self._on_worker_message)
@@ -395,32 +302,24 @@ class StatsWindowExclusionsMixin:
         worker.signals.progress.connect(self._on_worker_progress)
         self.pool.start(worker)
 
-    def _update_fixed_k_base_freq_label(self) -> None:
-        """Handle the update fixed k base freq label step for the Stats workflow."""
-        label = getattr(self, "fixed_k_base_freq_value", None)
-        if label is None:
-            return
-        label.setText(f"{self._current_base_freq:g} Hz")
+    def _update_fixed_predefined_base_freq_label(self) -> None:
+        """Update the base-frequency label used by the fixed predefined policy."""
+        fixed_label = getattr(self, "fixed_predefined_base_freq_value", None)
+        if fixed_label is not None:
+            fixed_label.setText(f"{self._current_base_freq:g} Hz")
 
     def _on_dv_policy_changed(self, text: str) -> None:
         """Handle the on dv policy changed step for the Stats workflow."""
-        self._dv_policy_name = text
-        self._set_fixed_k_controls_enabled(text == FIXED_K_POLICY_NAME)
-        self._set_group_mean_controls_visible(text == ROSSION_POLICY_NAME)
-        if text != ROSSION_POLICY_NAME:
-            self._clear_group_mean_preview()
+        self._dv_policy_name = FIXED_PREDEFINED_POLICY_NAME
+        self._set_fixed_predefined_controls_visible(True)
 
-    def _on_fixed_k_changed(self, value: int) -> None:
-        """Handle the on fixed k changed step for the Stats workflow."""
-        self._dv_fixed_k = int(value)
+    def _on_fixed_predefined_freqs_changed(self, text: str) -> None:
+        self._dv_fixed_harmonic_frequencies_hz = text
+        self._clear_fixed_predefined_preview()
 
-    def _on_fixed_k_exclude_h1_changed(self, state: int) -> None:
-        """Handle the on fixed k exclude h1 changed step for the Stats workflow."""
-        self._dv_exclude_harmonic1 = state == Qt.Checked
-
-    def _on_fixed_k_exclude_base_changed(self, state: int) -> None:
-        """Handle the on fixed k exclude base changed step for the Stats workflow."""
-        self._dv_exclude_base_harmonics = state == Qt.Checked
+    def _on_fixed_predefined_exclude_base_changed(self, state: int) -> None:
+        self._dv_fixed_harmonic_auto_exclude_base = state == Qt.Checked
+        self._clear_fixed_predefined_preview()
 
     def _show_outlier_exclusion_dialog(self, pipeline_id: PipelineId) -> None:
         """Handle the show outlier exclusion dialog step for the Stats workflow."""

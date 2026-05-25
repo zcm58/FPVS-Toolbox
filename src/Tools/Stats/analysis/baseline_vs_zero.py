@@ -238,6 +238,18 @@ def export_baseline_vs_zero_results_to_excel(
             "value": metadata.get("total_unique_subjects", np.nan),
         },
     ]
+    for field in (
+        "dv_policy_name",
+        "harmonic_policy",
+        "harmonic_policy_label",
+        "selected_harmonics_hz",
+        "snr_used_for_statistics",
+        "applied_uniformly_across_participants",
+        "applied_uniformly_across_conditions",
+        "applied_uniformly_across_rois",
+    ):
+        if field in metadata:
+            summary_rows.append({"field": field, "value": metadata.get(field)})
     metadata_df = pd.concat(
         [
             pd.DataFrame(summary_rows),

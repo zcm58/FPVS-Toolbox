@@ -45,7 +45,6 @@ def test_stats_condition_selection_snapshot_and_block(qtbot, tmp_path, monkeypat
     window.conditions = conditions
     window.le_folder.setText(str(tmp_path))
 
-    monkeypatch.setattr(window, "_get_harmonic_settings", lambda: window._harmonic_config)
     worker_called = {"value": False}
 
     def _record_worker(*_args, **_kwargs):

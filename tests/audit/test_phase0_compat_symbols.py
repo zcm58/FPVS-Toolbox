@@ -37,16 +37,17 @@ _ensure_package("Tools.Stats.analysis", STATS / "analysis")
 dv_policies = _load_module(
     "Tools.Stats.analysis.dv_policies", STATS / "analysis" / "dv_policies.py"
 )
-group_harmonics = _load_module(
-    "Tools.Stats.analysis.group_harmonics", STATS / "analysis" / "group_harmonics.py"
+fixed_predefined = _load_module(
+    "Tools.Stats.analysis.dv_policy_fixed_predefined",
+    STATS / "analysis" / "dv_policy_fixed_predefined.py",
 )
 
 
-def test_group_harmonics_exports_compute_union_harmonics_by_roi() -> None:
-    assert hasattr(group_harmonics, "compute_union_harmonics_by_roi")
+def test_fixed_predefined_policy_exports_selection_builder() -> None:
+    assert hasattr(fixed_predefined, "build_fixed_harmonic_selection")
 
 
-def test_dv_policies_exports_group_mean_z_policy_name() -> None:
-    assert hasattr(dv_policies, "GROUP_MEAN_Z_POLICY_NAME")
-    assert isinstance(dv_policies.GROUP_MEAN_Z_POLICY_NAME, str)
-    assert dv_policies.GROUP_MEAN_Z_POLICY_NAME
+def test_dv_policies_exports_fixed_predefined_policy_name() -> None:
+    assert hasattr(dv_policies, "FIXED_PREDEFINED_POLICY_NAME")
+    assert isinstance(dv_policies.FIXED_PREDEFINED_POLICY_NAME, str)
+    assert dv_policies.FIXED_PREDEFINED_POLICY_NAME

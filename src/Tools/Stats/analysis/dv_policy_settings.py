@@ -7,35 +7,33 @@ import numpy as np
 
 from Main_App import SettingsManager
 
-LEGACY_POLICY_NAME = "Current (Legacy)"
-FIXED_K_POLICY_NAME = "Fixed-K harmonics"
-ROSSION_POLICY_NAME = "Rossion Method (Significant-only; stop after 2 failures)"
-GROUP_MEAN_Z_POLICY_NAME = ROSSION_POLICY_NAME
-
-EMPTY_LIST_FALLBACK_FIXED_K = "Fallback to Fixed-K"
-EMPTY_LIST_SET_ZERO = "Set DV=0"
-EMPTY_LIST_ERROR = "Error"
+FIXED_PREDEFINED_POLICY_NAME = "Fixed / predefined harmonic list"
+FIXED_PREDEFINED_POLICY_ID = "fixed_predefined_harmonic_list"
+FIXED_PREDEFINED_POLICY_LABEL = (
+    "Fixed predefined harmonic list applied uniformly across participants, conditions, and ROIs"
+)
+FIXED_PREDEFINED_DEFAULT_FREQUENCIES = "1.2, 2.4, 3.6, 4.8, 7.2"
+FIXED_PREDEFINED_BASE_OVERLAP_TOLERANCE_HZ = 0.01
+FIXED_PREDEFINED_MATCHING_TOLERANCE_HZ = 0.01
 
 
 @dataclass(frozen=True)
 class DVPolicySettings:
     """Represent the DVPolicySettings part of the Stats tool."""
-    name: str = LEGACY_POLICY_NAME
-    fixed_k: int = 5
-    exclude_harmonic1: bool = False
-    exclude_base_harmonics: bool = True
-    z_threshold: float = 1.64
-    empty_list_policy: str = EMPTY_LIST_ERROR
+    name: str = FIXED_PREDEFINED_POLICY_NAME
+    fixed_harmonic_frequencies_hz: str = FIXED_PREDEFINED_DEFAULT_FREQUENCIES
+    fixed_harmonic_auto_exclude_base: bool = True
+    fixed_harmonic_base_tolerance_hz: float = FIXED_PREDEFINED_BASE_OVERLAP_TOLERANCE_HZ
+    fixed_harmonic_matching_tolerance_hz: float = FIXED_PREDEFINED_MATCHING_TOLERANCE_HZ
 
     def to_metadata(self, *, base_freq: float, selected_conditions: list[str]) -> dict:
         """Handle the to metadata step for the Stats workflow."""
         return {
-            "policy_name": self.name,
-            "fixed_k": int(self.fixed_k),
-            "exclude_harmonic1": bool(self.exclude_harmonic1),
-            "exclude_base_harmonics": bool(self.exclude_base_harmonics),
-            "z_threshold": float(self.z_threshold),
-            "empty_list_policy": str(self.empty_list_policy),
+            "policy_name": FIXED_PREDEFINED_POLICY_NAME,
+            "fixed_harmonic_frequencies_hz": str(self.fixed_harmonic_frequencies_hz),
+            "fixed_harmonic_auto_exclude_base": bool(self.fixed_harmonic_auto_exclude_base),
+            "fixed_harmonic_base_tolerance_hz": float(self.fixed_harmonic_base_tolerance_hz),
+            "fixed_harmonic_matching_tolerance_hz": float(self.fixed_harmonic_matching_tolerance_hz),
             "base_frequency_hz": float(base_freq),
             "selected_conditions": list(selected_conditions),
         }
@@ -45,31 +43,19 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
     """Handle the normalize dv policy step for the Stats workflow."""
     if not settings:
         return DVPolicySettings()
-    name = str(settings.get("name", LEGACY_POLICY_NAME))
-    if name not in (
-        LEGACY_POLICY_NAME,
-        FIXED_K_POLICY_NAME,
-        ROSSION_POLICY_NAME,
-    ):
-        name = LEGACY_POLICY_NAME
-    fixed_k = int(settings.get("fixed_k", 5))
-    if fixed_k < 1:
-        fixed_k = 1
-    empty_list_policy = str(settings.get("empty_list_policy", EMPTY_LIST_ERROR))
-    if empty_list_policy not in (
-        EMPTY_LIST_FALLBACK_FIXED_K,
-        EMPTY_LIST_SET_ZERO,
-        EMPTY_LIST_ERROR,
-    ):
-        empty_list_policy = EMPTY_LIST_ERROR
-    z_threshold = float(settings.get("z_threshold", 1.64))
+    fixed_freqs = str(settings.get("fixed_harmonic_frequencies_hz", FIXED_PREDEFINED_DEFAULT_FREQUENCIES))
+    fixed_base_tol = float(
+        settings.get("fixed_harmonic_base_tolerance_hz", FIXED_PREDEFINED_BASE_OVERLAP_TOLERANCE_HZ)
+    )
+    fixed_match_tol = float(
+        settings.get("fixed_harmonic_matching_tolerance_hz", FIXED_PREDEFINED_MATCHING_TOLERANCE_HZ)
+    )
     return DVPolicySettings(
-        name=name,
-        fixed_k=fixed_k,
-        exclude_harmonic1=bool(settings.get("exclude_harmonic1", False)),
-        exclude_base_harmonics=bool(settings.get("exclude_base_harmonics", True)),
-        z_threshold=z_threshold,
-        empty_list_policy=empty_list_policy,
+        name=FIXED_PREDEFINED_POLICY_NAME,
+        fixed_harmonic_frequencies_hz=fixed_freqs,
+        fixed_harmonic_auto_exclude_base=bool(settings.get("fixed_harmonic_auto_exclude_base", True)),
+        fixed_harmonic_base_tolerance_hz=fixed_base_tol,
+        fixed_harmonic_matching_tolerance_hz=fixed_match_tol,
     )
 
 

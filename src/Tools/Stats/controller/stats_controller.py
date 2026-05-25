@@ -94,7 +94,6 @@ SINGLE_PIPELINE_STEPS: Sequence[StepId] = (
     StepId.MIXED_MODEL,
     StepId.INTERACTION_POSTHOCS,
     StepId.BASELINE_VS_ZERO,
-    StepId.HARMONIC_CHECK,
 )
 """Default ordered steps for the single-group pipeline."""
 
@@ -103,7 +102,6 @@ STEP_LABELS: Dict[StepId, str] = {
     StepId.MIXED_MODEL: "Mixed Model",
     StepId.INTERACTION_POSTHOCS: "Interaction Post-hocs",
     StepId.BASELINE_VS_ZERO: "Baseline vs Zero",
-    StepId.HARMONIC_CHECK: "Harmonic Check",
 }
 
 WORKER_FN_BY_STEP: Dict[StepId, Callable[..., Any]] = {
@@ -111,7 +109,6 @@ WORKER_FN_BY_STEP: Dict[StepId, Callable[..., Any]] = {
     StepId.MIXED_MODEL: stats_workers.run_lmm,
     StepId.INTERACTION_POSTHOCS: stats_workers.run_posthoc,
     StepId.BASELINE_VS_ZERO: stats_workers.run_baseline_vs_zero,
-    StepId.HARMONIC_CHECK: stats_workers.run_harmonic_check,
 }
 
 
@@ -156,14 +153,6 @@ class StatsController:
             run_exports=False,
             run_summary=False,
             require_anova=True,
-        )
-
-    def run_harmonic_check_only(self) -> None:
-        self._start_pipeline(
-            PipelineId.SINGLE,
-            (StepId.HARMONIC_CHECK,),
-            run_exports=False,
-            run_summary=False,
         )
 
     def is_running(self, pipeline_id: PipelineId | None = None) -> bool:

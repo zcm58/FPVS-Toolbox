@@ -224,22 +224,6 @@ def map_subjects_to_groups(subjects: Iterable[str], participants_map: dict[str, 
     return {pid: participants_map.get(pid.upper()) for pid in subjects}
 
 
-def group_harmonic_results(data) -> dict[str, dict[str, list[dict]]]:
-    """Normalize harmonic check findings into a nested mapping for export."""
-
-    if isinstance(data, dict):
-        return data
-
-    grouped: dict[str, dict[str, list[dict]]] = {}
-    for rec in data or []:
-        if not isinstance(rec, dict):
-            continue
-        cond = rec.get("Condition") or rec.get("condition") or "Unknown"
-        roi = rec.get("ROI") or rec.get("roi") or "Unknown"
-        grouped.setdefault(cond, {}).setdefault(roi, []).append(rec)
-    return grouped
-
-
 def safe_export_call(
     func: Callable[..., None],
     data_obj,
@@ -332,6 +316,87 @@ def check_for_open_excel_files(folder_path: str) -> list[str]:
     return open_files
 
 
+def _condition_from_manifest_excel_root(filepath: Path, expected_excel_root: Path) -> str | None:
+    try:
+        rel_parts = filepath.resolve().relative_to(expected_excel_root.resolve()).parts
+    except ValueError:
+        return None
+    if len(rel_parts) < 2:
+        return None
+    condition = re.sub(r"^\d+\s*[-_]*\s*", "", rel_parts[0]).strip()
+    return condition or None
+
+
+def _group_folder_aliases(manifest: dict | None) -> set[str]:
+    if not isinstance(manifest, dict):
+        return set()
+    aliases = {"default"}
+    groups = manifest.get("groups")
+    if not isinstance(groups, dict):
+        return aliases
+    for group_id, info_raw in groups.items():
+        info = info_raw if isinstance(info_raw, dict) else {}
+        for value in (
+            group_id,
+            info.get("group_id"),
+            info.get("label"),
+            info.get("folder_name"),
+        ):
+            if isinstance(value, str) and value.strip():
+                aliases.add(value.strip().casefold())
+    return aliases
+
+
+def _workbook_candidate_score(
+    filepath: Path,
+    *,
+    expected_excel_root: Path | None,
+    group_aliases: set[str],
+) -> tuple[int, int, int, str]:
+    group_folder_score = 0
+    nested_score = 0
+    if expected_excel_root is not None:
+        try:
+            rel_parts = filepath.resolve().relative_to(expected_excel_root.resolve()).parts
+        except ValueError:
+            rel_parts = filepath.parts
+    else:
+        rel_parts = filepath.parts
+    if len(rel_parts) >= 3:
+        nested_parts = rel_parts[1:-1]
+        nested_score = len(nested_parts)
+        if any(str(part).strip().casefold() in group_aliases for part in nested_parts):
+            group_folder_score = 1
+    try:
+        mtime_ns = int(filepath.stat().st_mtime_ns)
+    except OSError:
+        mtime_ns = 0
+    return group_folder_score, nested_score, mtime_ns, str(filepath)
+
+
+def _prefer_workbook_candidate(
+    existing: str | None,
+    candidate: Path,
+    *,
+    expected_excel_root: Path | None,
+    group_aliases: set[str],
+) -> str:
+    if not existing:
+        return str(candidate)
+    existing_path = Path(existing)
+    if _workbook_candidate_score(
+        candidate,
+        expected_excel_root=expected_excel_root,
+        group_aliases=group_aliases,
+    ) >= _workbook_candidate_score(
+        existing_path,
+        expected_excel_root=expected_excel_root,
+        group_aliases=group_aliases,
+    ):
+        return str(candidate)
+    return existing
+
+
 def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[str, Dict[str, str]]]:
     """
     Scans the given parent folder for subject Excel files and condition subfolders.
@@ -358,30 +423,60 @@ def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[s
     pid_pattern = EXCEL_PID_REGEX
 
     try:
-        for entry in os.listdir(parent_folder):
-            entry_path = os.path.join(parent_folder, entry)
-            if not os.path.isdir(entry_path):
-                continue
-            if entry.lower() in IGNORED_FOLDERS:
-                continue
+        parent_path = Path(parent_folder)
+        project_root, manifest = find_project_manifest_for_excel_root(parent_path)
+        expected_excel_root = None
+        if project_root is not None and manifest is not None:
+            results_folder, subfolders = load_manifest_data(project_root, manifest)
+            expected_excel_root = resolve_project_subfolder(
+                project_root,
+                results_folder,
+                subfolders,
+                "excel",
+                "1 - Excel Data Files",
+            )
+        group_aliases = _group_folder_aliases(manifest)
 
-            condition_clean = re.sub(r"^\d+\s*[-_]*\s*", "", entry).strip()
+        for filepath in sorted(parent_path.rglob("*.xlsx")):
+            if filepath.name.startswith("~$"):
+                continue
+            if any(part.lower() in IGNORED_FOLDERS for part in filepath.parts):
+                continue
+            filename = filepath.name
+            match = pid_pattern.search(filename)
+            if not match:
+                continue
+            condition_clean = (
+                _condition_from_manifest_excel_root(filepath, expected_excel_root)
+                if expected_excel_root is not None
+                else None
+            )
+            if condition_clean is None:
+                try:
+                    rel_parts = filepath.relative_to(parent_path).parts
+                except ValueError:
+                    rel_parts = filepath.parts
+                if len(rel_parts) >= 2:
+                    raw_condition = rel_parts[0]
+                elif parent_path.name.strip().casefold() in group_aliases and parent_path.parent != parent_path:
+                    raw_condition = parent_path.parent.name
+                else:
+                    raw_condition = parent_path.name
+                condition_clean = re.sub(r"^\d+\s*[-_]*\s*", "", raw_condition).strip()
             if not condition_clean:
                 continue
 
-            for filepath in Path(entry_path).rglob("*.xlsx"):
-                if any(part.lower() in IGNORED_FOLDERS for part in filepath.parts):
-                    continue
-                filename = filepath.name
-                match = pid_pattern.search(filename)
-                if not match:
-                    continue
-                pid = match.group(1).upper()
-                subjects_set.add(pid)
-                conditions_set.add(condition_clean)
+            pid = match.group(1).upper()
+            subjects_set.add(pid)
+            conditions_set.add(condition_clean)
 
-                subject_data.setdefault(pid, {})
-                subject_data[pid][condition_clean] = str(filepath)
+            subject_data.setdefault(pid, {})
+            subject_data[pid][condition_clean] = _prefer_workbook_candidate(
+                subject_data[pid].get(condition_clean),
+                filepath,
+                expected_excel_root=expected_excel_root,
+                group_aliases=group_aliases,
+            )
     except PermissionError as e:  # noqa: PERF203
         raise ScanError(f"Permission denied to access folder: {parent_folder}\n{e}")
     except Exception as e:  # noqa: BLE001

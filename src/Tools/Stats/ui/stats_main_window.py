@@ -6,7 +6,6 @@ implementation is split across focused internal mixin modules.
 
 from __future__ import annotations
 
-from Tools.Stats.common.stats_window_types import HarmonicConfig
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 from Tools.Stats.ui.stats_window_actions import StatsWindowActionsMixin
 from Tools.Stats.ui.stats_window_exclusions import StatsWindowExclusionsMixin
@@ -84,24 +83,14 @@ class StatsWindow(
         self.mixed_model_results_data: Optional[pd.DataFrame] = None
         self.posthoc_results_data: Optional[pd.DataFrame] = None
         self.baseline_vs_zero_results_payload: Optional[dict] = None
-        self.harmonic_check_results_data: List[dict] = []
-        self._harmonic_results: dict[PipelineId, list[dict]] = {
-            PipelineId.SINGLE: [],
-        }
         self.rois: Dict[str, List[str]] = {}
-        self._harmonic_config: HarmonicConfig = HarmonicConfig("Z Score", 1.64)
         self._current_base_freq: float = 6.0
         self._current_alpha: float = 0.05
         self._active_pipeline: PipelineId | None = None
         self._condition_checkboxes: dict[str, QCheckBox] = {}
-        self._dv_policy_name: str = ROSSION_POLICY_NAME
-        self._dv_fixed_k: int = 5
-        self._dv_exclude_harmonic1: bool = False
-        self._dv_exclude_base_harmonics: bool = True
-        self._dv_group_mean_z_threshold: float = 1.64
-        self._dv_empty_list_policy: str = EMPTY_LIST_ERROR
-        self._dv_variant_checkboxes: dict[str, QCheckBox] = {}
-        self._dv_variants_selected: List[str] = []
+        self._dv_policy_name: str = FIXED_PREDEFINED_POLICY_NAME
+        self._dv_fixed_harmonic_frequencies_hz: str = FIXED_PREDEFINED_DEFAULT_FREQUENCIES
+        self._dv_fixed_harmonic_auto_exclude_base: bool = True
         self._outlier_exclusion_enabled: bool = True
         self._outlier_abs_limit: float = 50.0
         self.manual_excluded_pids: set[str] = set()
@@ -110,13 +99,10 @@ class StatsWindow(
         self._pipeline_dv_policy: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_base_freq: dict[PipelineId, float] = {}
         self._pipeline_dv_metadata: dict[PipelineId, dict[str, object]] = {}
-        self._pipeline_dv_variants: dict[PipelineId, list[str]] = {}
-        self._pipeline_dv_variant_payloads: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_outlier_config: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_qc_config: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_qc_state: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_run_reports: dict[PipelineId, StatsRunReport | None] = {}
-        self._group_mean_preview_data: dict[str, object] = {}
         self._qc_threshold_sumabs: float = QC_DEFAULT_WARN_THRESHOLD
         self._qc_threshold_maxabs: float = QC_DEFAULT_CRITICAL_THRESHOLD
         self._last_export_path: str | None = None
@@ -199,16 +185,11 @@ class StatsWindow(
         self.mixed_model_results_data = None
         self.posthoc_results_data = None
         self.baseline_vs_zero_results_payload = None
-        self.harmonic_check_results_data = []
-        self._harmonic_results = {PipelineId.SINGLE: []}
         self._active_pipeline = None
-        self._group_mean_preview_data = {}
         self._pipeline_conditions.clear()
         self._pipeline_dv_policy.clear()
         self._pipeline_base_freq.clear()
         self._pipeline_dv_metadata.clear()
-        self._pipeline_dv_variants.clear()
-        self._pipeline_dv_variant_payloads.clear()
         self._pipeline_outlier_config.clear()
         self._pipeline_qc_config.clear()
         self._pipeline_qc_state.clear()
@@ -249,4 +230,4 @@ class StatsWindow(
         self._set_roi_status(txt)
 
 
-__all__ = ["HarmonicConfig", "StatsWindow"]
+__all__ = ["StatsWindow"]

@@ -6,7 +6,6 @@ import logging
 import os
 import threading
 import time
-from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Callable, Dict
 
@@ -15,18 +14,16 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 from Tools.Stats.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
 from Tools.Stats.analysis.dv_policies import (
-    ROSSION_POLICY_NAME,
-    build_rossion_preview_payload,
+    FIXED_PREDEFINED_POLICY_NAME,
     normalize_dv_policy,
     prepare_summed_bca_data,
 )
-from Tools.Stats.analysis.dv_variants import compute_dv_variants_payload
+from Tools.Stats.analysis.dv_policy_fixed_predefined import build_fixed_predefined_preview_payload
 from Tools.Stats.analysis.interpretation_helpers import generate_lme_summary
 from Tools.Stats.analysis.mixed_effects_model import run_mixed_effects_model
 from Tools.Stats.analysis.posthoc_tests import run_interaction_posthocs
 from Tools.Stats.analysis.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
-    run_harmonic_check as run_harmonic_check_new,
     run_rm_anova as analysis_run_rm_anova,
     set_rois,
 )
@@ -130,33 +127,6 @@ class StatsWorker(QRunnable):
             logger.info("stats_run_done", extra={"op": self._op, "elapsed_ms": dt_ms})
 
 
-def _serialize_dv_variants_payload(payload) -> dict | None:
-    if payload is None:
-        return None
-    if isinstance(payload, dict):
-        return payload
-    return asdict(payload)
-
-
-def _variant_error_payload(
-    dv_policy: dict | None,
-    dv_variants: list[dict[str, object]] | None,
-    exc: Exception,
-) -> dict:
-    selected_variants = []
-    for item in dv_variants or []:
-        if isinstance(item, dict) and item.get("name"):
-            selected_variants.append(str(item.get("name")))
-    return {
-        "primary_name": str((dv_policy or {}).get("name", "")),
-        "primary_df": pd.DataFrame(),
-        "variant_dfs": {},
-        "summary_df": pd.DataFrame(),
-        "errors": [{"variant": "DV Variants", "error": str(exc)}],
-        "selected_variants": selected_variants,
-    }
-
-
 def _dv_trace_enabled() -> bool:
     value = os.getenv(DV_TRACE_ENV, "").strip().lower()
     return value not in ("", "0", "false", "no", "off")
@@ -175,16 +145,14 @@ def _log_dv_trace_policy_snapshot(
     settings = normalize_dv_policy(dv_policy)
     roi_list = list(rois.keys()) if isinstance(rois, dict) else []
     logger.info(
-        "DV_TRACE policy_snapshot policy_name=%s z_threshold=%s exclude_harmonic1=%s "
-        "exclude_base_harmonics=%s base_freq=%s oddball_every_n=%s fixed_k=%s "
+        "DV_TRACE policy_snapshot policy_name=%s fixed_harmonics_hz=%s "
+        "auto_exclude_base=%s base_freq=%s oddball_every_n=%s "
         "selected_conditions=%s selected_conditions_count=%d rois=%s rois_count=%d n_subjects=%d",
         settings.name,
-        settings.z_threshold,
-        settings.exclude_harmonic1,
-        settings.exclude_base_harmonics,
+        settings.fixed_harmonic_frequencies_hz,
+        settings.fixed_harmonic_auto_exclude_base,
         float(base_freq),
         SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
-        settings.fixed_k,
         list(conditions),
         len(conditions),
         roi_list,
@@ -472,37 +440,6 @@ def _prepare_single_group_data(
     )
 
 
-def _compute_dv_variants(
-    *,
-    subjects,
-    conditions,
-    subject_data,
-    base_freq,
-    rois,
-    dv_policy,
-    dv_variants,
-    message_cb,
-    primary_data,
-):
-    if not dv_variants:
-        return None
-    try:
-        return compute_dv_variants_payload(
-            subjects=subjects,
-            conditions=conditions,
-            subject_data=subject_data,
-            base_freq=base_freq,
-            rois=rois,
-            dv_policy=dv_policy,
-            variant_policies=dv_variants,
-            log_func=message_cb,
-            primary_data=primary_data,
-        )
-    except Exception as exc:  # noqa: BLE001
-        message_cb(f"DV variants computation failed: {exc}")
-        return _variant_error_payload(dv_policy, dv_variants, exc)
-
-
 def _diag_subject_data_structure(subject_data, subjects, conditions, rois, message_cb) -> None:
     if not RM_ANOVA_DIAG or not message_cb:
         return
@@ -513,6 +450,37 @@ def _diag_subject_data_structure(subject_data, subjects, conditions, rois, messa
     message_cb(
         f"[RM_ANOVA DIAG] subjects={len(subject_list)} conditions={len(condition_list)} rois={len(roi_list)}"
     )
+
+
+def _summarize_dv_metadata_for_export(dv_metadata: dict[str, object]) -> dict[str, object]:
+    """Return scalar DV metadata fields suitable for result metadata sheets."""
+    summary: dict[str, object] = {}
+    if not isinstance(dv_metadata, dict):
+        return summary
+    policy_name = dv_metadata.get("policy_name")
+    if policy_name is not None:
+        summary["dv_policy_name"] = str(policy_name)
+    fixed_meta = dv_metadata.get("fixed_predefined_harmonics")
+    if isinstance(fixed_meta, dict):
+        included = fixed_meta.get("fixed_harmonic_included_frequencies_hz", []) or []
+        summary.update(
+            {
+                "harmonic_policy": fixed_meta.get("harmonic_policy", ""),
+                "harmonic_policy_label": fixed_meta.get("harmonic_policy_label", ""),
+                "selected_harmonics_hz": ";".join(f"{float(freq):g}" for freq in included),
+                "snr_used_for_statistics": bool(fixed_meta.get("snr_used_for_statistics", False)),
+                "applied_uniformly_across_participants": bool(
+                    fixed_meta.get("applied_uniformly_across_participants", False)
+                ),
+                "applied_uniformly_across_conditions": bool(
+                    fixed_meta.get("applied_uniformly_across_conditions", False)
+                ),
+                "applied_uniformly_across_rois": bool(
+                    fixed_meta.get("applied_uniformly_across_rois", False)
+                ),
+            }
+        )
+    return summary
 
 
 def run_rm_anova(
@@ -527,7 +495,6 @@ def run_rm_anova(
     rois,
     rois_all=None,
     dv_policy: dict | None = None,
-    dv_variants: list[dict[str, object]] | None = None,
     results_dir: str | None = None,
     outlier_exclusion_enabled: bool = True,
     outlier_abs_limit: float = 50.0,
@@ -571,17 +538,6 @@ def run_rm_anova(
         manual_excluded_pids=manual_excluded_pids,
         message_cb=message_cb,
     )
-    dv_variants_payload = _compute_dv_variants(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        rois=rois,
-        dv_policy=dv_policy,
-        dv_variants=dv_variants,
-        message_cb=message_cb,
-        primary_data=all_subject_bca_data,
-    )
     _diag_subject_data_structure(all_subject_bca_data, subjects, conditions, rois, message_cb)
     message_cb("Running RM-ANOVA...")
     output_text, anova_df_results = analysis_run_rm_anova(
@@ -611,7 +567,6 @@ def run_rm_anova(
         "anova_df_results": anova_df_results,
         "output_text": output_text,
         "dv_metadata": dv_metadata,
-        "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
         "run_report": StatsRunReport(
             manual_excluded_pids=manual_excluded,
             qc_report=qc_report,
@@ -635,7 +590,6 @@ def run_lmm(
     rois,
     rois_all=None,
     dv_policy: dict | None = None,
-    dv_variants: list[dict[str, object]] | None = None,
     outlier_exclusion_enabled: bool = True,
     outlier_abs_limit: float = 50.0,
     qc_config: dict | None = None,
@@ -678,17 +632,6 @@ def run_lmm(
         qc_state=qc_state,
         manual_excluded_pids=manual_excluded_pids,
         message_cb=message_cb,
-    )
-    dv_variants_payload = _compute_dv_variants(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        rois=rois,
-        dv_policy=dv_policy,
-        dv_variants=dv_variants,
-        message_cb=message_cb,
-        primary_data=all_subject_bca_data,
     )
     df_long = df_long.dropna(subset=["value"]).copy()
     if df_long.empty:
@@ -791,7 +734,6 @@ def run_lmm(
         "mixed_results_df": mixed_results_df,
         "output_text": output_text,
         "dv_metadata": dv_metadata,
-        "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
         "fit_status": fit_status,
         "run_report": StatsRunReport(
             manual_excluded_pids=manual_excluded,
@@ -816,7 +758,6 @@ def run_posthoc(
     rois,
     rois_all=None,
     dv_policy: dict | None = None,
-    dv_variants: list[dict[str, object]] | None = None,
     outlier_exclusion_enabled: bool = True,
     outlier_abs_limit: float = 50.0,
     qc_config: dict | None = None,
@@ -860,17 +801,6 @@ def run_posthoc(
         manual_excluded_pids=manual_excluded_pids,
         message_cb=message_cb,
     )
-    dv_variants_payload = _compute_dv_variants(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        rois=rois,
-        dv_policy=dv_policy,
-        dv_variants=dv_variants,
-        message_cb=message_cb,
-        primary_data=all_subject_bca_data,
-    )
     if df_long.empty:
         raise RuntimeError("No valid rows for post-hoc tests after filtering NaNs.")
 
@@ -890,7 +820,6 @@ def run_posthoc(
         "results_df": results_df,
         "output_text": output_text,
         "dv_metadata": dv_metadata,
-        "dv_variants": _serialize_dv_variants_payload(dv_variants_payload),
         "run_report": StatsRunReport(
             manual_excluded_pids=manual_excluded,
             qc_report=qc_report,
@@ -914,7 +843,6 @@ def run_baseline_vs_zero(
     rois,
     rois_all=None,
     dv_policy: dict | None = None,
-    dv_variants: list[dict[str, object]] | None = None,
     outlier_exclusion_enabled: bool = True,
     outlier_abs_limit: float = 50.0,
     qc_config: dict | None = None,
@@ -925,15 +853,21 @@ def run_baseline_vs_zero(
     correction_scope: str = "global",
 ):
     _ = progress_cb
-    _ = dv_variants
     set_rois(rois)
     message_cb("Preparing data for baseline-vs-zero tests...")
+    _log_dv_trace_policy_snapshot(
+        dv_policy=dv_policy,
+        base_freq=base_freq,
+        conditions=list(conditions) if conditions else [],
+        rois=rois,
+        subjects=list(subjects) if subjects else [],
+    )
     (
         subjects,
         _subject_data,
         _all_subject_bca_data,
         df_long,
-        _dv_metadata,
+        dv_metadata,
         qc_report,
         exclusion_report,
         required_exclusions,
@@ -970,17 +904,20 @@ def run_baseline_vs_zero(
         correction_scope=correction_scope,
     )
     message_cb(output_text)
+    result_metadata = {
+        "dv_col": "value",
+        "alpha": alpha,
+        "alternative": alternative,
+        "correction": correction,
+        "correction_scope": correction_scope,
+        "total_unique_subjects": int(df_long["subject"].nunique()),
+    }
+    result_metadata.update(_summarize_dv_metadata_for_export(dv_metadata))
     return {
         "results_df": results_df,
         "output_text": output_text,
-        "metadata": {
-            "dv_col": "value",
-            "alpha": alpha,
-            "alternative": alternative,
-            "correction": correction,
-            "correction_scope": correction_scope,
-            "total_unique_subjects": int(df_long["subject"].nunique()),
-        },
+        "metadata": result_metadata,
+        "dv_metadata": dv_metadata,
         "run_report": StatsRunReport(
             manual_excluded_pids=manual_excluded,
             qc_report=qc_report,
@@ -1003,62 +940,14 @@ def run_harmonics_preview(
     rois,
     dv_policy: dict | None = None,
 ):
-    _ = progress_cb
-    settings = dv_policy or {}
-    if settings.get("name") == ROSSION_POLICY_NAME:
-        return build_rossion_preview_payload(
-            subjects=subjects,
-            conditions=conditions,
-            selection_conditions=list(conditions_all) if conditions_all else list(conditions or []),
-            subject_data=subject_data,
-            base_freq=base_freq,
-            rois=rois,
-            log_func=message_cb,
-            dv_policy=dv_policy,
-        )
-    raise RuntimeError("Preview requires the Rossion policy.")
-
-
-def run_harmonic_check(
-    progress_cb,
-    message_cb,
-    *,
-    subject_data,
-    subjects,
-    conditions,
-    selected_metric,
-    mean_value_threshold,
-    base_freq,
-    alpha,
-    rois,
-    **kwargs,
-):
-    _ = progress_cb
-    _ = alpha
-    set_rois(rois)
-    tail = "greater" if selected_metric in ("Z Score", "SNR") else "two-sided"
-    max_freq_raw = kwargs.get("max_freq")
-    try:
-        max_freq = float(max_freq_raw) if max_freq_raw is not None else None
-    except Exception:
-        max_freq = None
-    message_cb("Running harmonic check...")
-    output_text, findings = run_harmonic_check_new(
-        subject_data=subject_data,
+    _ = progress_cb, conditions_all, rois
+    return build_fixed_predefined_preview_payload(
         subjects=subjects,
-        conditions=conditions,
-        selected_metric=selected_metric,
-        mean_value_threshold=mean_value_threshold,
+        conditions=list(conditions or []),
+        subject_data=subject_data,
         base_freq=base_freq,
         log_func=message_cb,
-        max_freq=max_freq,
-        correction_method="holm",
-        tail=tail,
-        min_subjects=3,
-        do_wilcoxon_sensitivity=True,
+        dv_policy=dv_policy,
     )
-    message_cb("Harmonic check completed.")
-    return {
-        "output_text": output_text if output_text is not None else "",
-        "findings": findings if findings is not None else [],
-    }
+
+

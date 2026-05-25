@@ -1,6 +1,7 @@
-The stats directory contains scripts related to the statistical
-analysis of BCA values that are summed up across significant (z > 1.64) FFT frequency harmonics
-in EEG FPVS data. 
+The stats directory contains scripts related to statistical analysis of FPVS
+EEG BCA values. The active Summed BCA DV uses the fixed/predefined harmonic
+list policy only; deprecated legacy, Fixed-K, and Rossion/group-significance
+DV policies are not active Stats options.
 
 Before broad manual inspection, run:
 

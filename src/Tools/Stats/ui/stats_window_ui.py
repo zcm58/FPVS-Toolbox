@@ -65,175 +65,79 @@ class StatsWindowUiMixin:
         dv_method_row.addWidget(QLabel("Method:"))
         self.dv_policy_combo = QComboBox()
         self.dv_policy_combo.setToolTip(
-            "Choose the primary DV definition used for all statistical results."
+            "The primary DV is summed BCA over a fixed predefined harmonic list."
         )
-        self.dv_policy_combo.addItems(
-            [
-                LEGACY_POLICY_NAME,
-                FIXED_K_POLICY_NAME,
-                ROSSION_POLICY_NAME,
-            ]
-        )
+        self.dv_policy_combo.addItems([FIXED_PREDEFINED_POLICY_NAME])
         self.dv_policy_combo.setMinimumContentsLength(14)
         self.dv_policy_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.dv_policy_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.dv_policy_combo.setCurrentText(self._dv_policy_name)
+        self.dv_policy_combo.setEnabled(False)
         self.dv_policy_combo.currentTextChanged.connect(self._on_dv_policy_changed)
         dv_method_row.addWidget(self.dv_policy_combo, 1)
         dv_layout.addLayout(dv_method_row)
 
-        self.fixed_k_controls = QWidget()
-        fixed_controls_layout = QVBoxLayout(self.fixed_k_controls)
-        fixed_controls_layout.setContentsMargins(0, 0, 0, 0)
-        fixed_controls_layout.setSpacing(4)
-        fixed_form = make_form_layout()
+        self.fixed_predefined_controls = QWidget()
+        fixed_predefined_layout = QVBoxLayout(self.fixed_predefined_controls)
+        fixed_predefined_layout.setContentsMargins(0, 0, 0, 0)
+        fixed_predefined_layout.setSpacing(6)
+        fixed_predefined_form = make_form_layout()
 
-        self.fixed_k_spinbox = QSpinBox()
-        self.fixed_k_spinbox.setRange(1, 50)
-        self.fixed_k_spinbox.setValue(self._dv_fixed_k)
-        self.fixed_k_spinbox.setToolTip(
-            "Number of harmonics to include when using the Fixed-K method."
+        self.fixed_predefined_freqs_edit = QLineEdit()
+        self.fixed_predefined_freqs_edit.setText(self._dv_fixed_harmonic_frequencies_hz)
+        self.fixed_predefined_freqs_edit.setPlaceholderText("1.2, 2.4, 3.6, 4.8, 7.2")
+        self.fixed_predefined_freqs_edit.setToolTip(
+            "Comma-separated BCA harmonic frequencies in Hz."
         )
-        self.fixed_k_spinbox.valueChanged.connect(self._on_fixed_k_changed)
-        fixed_form.addRow("K:", self.fixed_k_spinbox)
+        self.fixed_predefined_freqs_edit.textChanged.connect(
+            self._on_fixed_predefined_freqs_changed
+        )
+        fixed_predefined_form.addRow("Frequencies (Hz):", self.fixed_predefined_freqs_edit)
 
-        self.fixed_k_exclude_h1 = QCheckBox("Exclude harmonic 1")
-        self.fixed_k_exclude_h1.setChecked(self._dv_exclude_harmonic1)
-        self.fixed_k_exclude_h1.setToolTip(
-            "Skip the first oddball harmonic when explicitly requested."
+        self.fixed_predefined_exclude_base = QCheckBox("Automatically exclude base-rate overlaps")
+        self.fixed_predefined_exclude_base.setChecked(self._dv_fixed_harmonic_auto_exclude_base)
+        self.fixed_predefined_exclude_base.setToolTip(
+            "Remove requested frequencies such as 6, 12, 18, and 24 Hz when they overlap with the base rate."
         )
-        self.fixed_k_exclude_h1.stateChanged.connect(self._on_fixed_k_exclude_h1_changed)
-        fixed_form.addRow("", self.fixed_k_exclude_h1)
+        self.fixed_predefined_exclude_base.stateChanged.connect(
+            self._on_fixed_predefined_exclude_base_changed
+        )
+        fixed_predefined_form.addRow("", self.fixed_predefined_exclude_base)
 
-        self.fixed_k_exclude_base = QCheckBox("Exclude base-rate harmonics")
-        self.fixed_k_exclude_base.setChecked(self._dv_exclude_base_harmonics)
-        self.fixed_k_exclude_base.setToolTip(
-            "Exclude base-rate harmonics from the Fixed-K DV."
-        )
-        self.fixed_k_exclude_base.stateChanged.connect(self._on_fixed_k_exclude_base_changed)
-        fixed_form.addRow("", self.fixed_k_exclude_base)
+        self.fixed_predefined_base_freq_value = QLabel(f"{self._current_base_freq:g} Hz")
+        self.fixed_predefined_base_freq_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        fixed_predefined_form.addRow("Base frequency:", self.fixed_predefined_base_freq_value)
 
-        self.fixed_k_base_freq_value = QLabel(f"{self._current_base_freq:g} Hz")
-        self.fixed_k_base_freq_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.fixed_k_base_freq_value.setToolTip(
-            "Base frequency from Settings used to identify harmonics."
-        )
-        fixed_form.addRow("Base frequency:", self.fixed_k_base_freq_value)
+        fixed_predefined_layout.addLayout(fixed_predefined_form)
 
-        fixed_controls_layout.addLayout(fixed_form)
-        dv_layout.addWidget(self.fixed_k_controls)
-        self._set_fixed_k_controls_enabled(self._dv_policy_name == FIXED_K_POLICY_NAME)
+        self.fixed_predefined_preview_btn = make_action_button("Validate harmonic list")
+        self.fixed_predefined_preview_btn.setToolTip(
+            "Validate the fixed harmonic list against BCA frequency columns."
+        )
+        self.fixed_predefined_preview_btn.clicked.connect(self._on_preview_fixed_predefined_clicked)
+        fixed_predefined_layout.addWidget(self.fixed_predefined_preview_btn)
 
-        self.group_mean_controls = QWidget()
-        group_mean_layout = QVBoxLayout(self.group_mean_controls)
-        group_mean_layout.setContentsMargins(0, 0, 0, 0)
-        group_mean_layout.setSpacing(6)
-
-        group_mean_form = make_form_layout()
-
-        self.group_mean_z_threshold = QDoubleSpinBox()
-        self.group_mean_z_threshold.setRange(-10.0, 10.0)
-        self.group_mean_z_threshold.setDecimals(2)
-        self.group_mean_z_threshold.setSingleStep(0.05)
-        self.group_mean_z_threshold.setValue(self._dv_group_mean_z_threshold)
-        self.group_mean_z_threshold.valueChanged.connect(
-            self._on_group_mean_z_threshold_changed
+        self.fixed_predefined_preview_table = QTableWidget(0, 6)
+        self.fixed_predefined_preview_table.setHorizontalHeaderLabels(
+            ["Requested Hz", "Matched Hz", "BCA column", "Bin", "Included", "Reason"]
         )
-        self.group_mean_z_threshold.setToolTip(
-            "Minimum group-mean Z value for a harmonic to count as significant."
-        )
-        group_mean_form.addRow("Z threshold:", self.group_mean_z_threshold)
-
-        self.group_mean_empty_policy_combo = QComboBox()
-        self.group_mean_empty_policy_combo.addItems(
-            [
-                EMPTY_LIST_FALLBACK_FIXED_K,
-                EMPTY_LIST_SET_ZERO,
-                EMPTY_LIST_ERROR,
-            ]
-        )
-        self.group_mean_empty_policy_combo.setMinimumContentsLength(12)
-        self.group_mean_empty_policy_combo.setSizeAdjustPolicy(
-            QComboBox.AdjustToMinimumContentsLengthWithIcon
-        )
-        self.group_mean_empty_policy_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.group_mean_empty_policy_combo.setCurrentText(self._dv_empty_list_policy)
-        self.group_mean_empty_policy_combo.currentTextChanged.connect(
-            self._on_empty_list_policy_changed
-        )
-        self.group_mean_empty_policy_combo.setToolTip(
-            "What to do if no significant common harmonics are found."
-        )
-        group_mean_form.addRow("Empty list policy:", self.group_mean_empty_policy_combo)
-
-        union_label = QLabel(
-            "All detected conditions are used to estimate one common group-level harmonic set."
-        )
-        union_label.setWordWrap(True)
-        group_mean_form.addRow("", union_label)
-
-        group_mean_layout.addLayout(group_mean_form)
-
-        self.group_mean_preview_btn = make_action_button("Preview harmonic sets")
-        self.group_mean_preview_btn.setToolTip(
-            "Preview the harmonics that will be used by the Rossion method."
-        )
-        self.group_mean_preview_btn.clicked.connect(self._on_preview_group_mean_z_clicked)
-        group_mean_layout.addWidget(self.group_mean_preview_btn)
-
-        self.group_mean_preview_table = QTableWidget(0, 6)
-        self.group_mean_preview_table.setHorizontalHeaderLabels(
-            ["ROI", "Harmonics (Hz)", "Count", "Fallback", "Stop reason", "Stop fail harmonics"]
-        )
-        self.group_mean_preview_table.verticalHeader().setVisible(False)
-        self.group_mean_preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.group_mean_preview_table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.group_mean_preview_table.setSizePolicy(
+        self.fixed_predefined_preview_table.verticalHeader().setVisible(False)
+        self.fixed_predefined_preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.fixed_predefined_preview_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.fixed_predefined_preview_table.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         )
-        self.group_mean_preview_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.group_mean_preview_table.setMinimumHeight(120)
-        self.group_mean_preview_table.setMaximumHeight(150)
-        group_mean_table_header = self.group_mean_preview_table.horizontalHeader()
-        for col in range(self.group_mean_preview_table.columnCount()):
-            group_mean_table_header.setSectionResizeMode(col, QHeaderView.Stretch)
-        group_mean_table_header.setStretchLastSection(True)
-        group_mean_layout.addWidget(self.group_mean_preview_table)
+        self.fixed_predefined_preview_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.fixed_predefined_preview_table.setMinimumHeight(120)
+        self.fixed_predefined_preview_table.setMaximumHeight(150)
+        fixed_predefined_header = self.fixed_predefined_preview_table.horizontalHeader()
+        for col in range(self.fixed_predefined_preview_table.columnCount()):
+            fixed_predefined_header.setSectionResizeMode(col, QHeaderView.Stretch)
+        fixed_predefined_header.setStretchLastSection(True)
+        fixed_predefined_layout.addWidget(self.fixed_predefined_preview_table)
 
-        dv_layout.addWidget(self.group_mean_controls)
-        self._set_group_mean_controls_visible(
-            self._dv_policy_name == ROSSION_POLICY_NAME
-        )
-
-        self.dv_variants_group = QWidget()
-        self.dv_variants_group.setObjectName("stats_comparison_exports")
-        self.dv_variants_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred))
-        dv_variants_layout = QVBoxLayout(self.dv_variants_group)
-        dv_variants_layout.setContentsMargins(0, 0, 0, 0)
-        dv_variants_layout.setSpacing(6)
-        dv_variants_note = QLabel(
-            "These exports are for consistency checks. Statistical results use the Primary DV only."
-        )
-        dv_variants_note.setWordWrap(True)
-        self.dv_variants_group.setToolTip(
-            "Optional exports that compare alternative DV definitions. "
-            "They do not change any statistical results."
-        )
-        dv_variants_layout.addWidget(dv_variants_note)
-
-        dv_variant_labels = {
-            FIXED_K_POLICY_NAME: "Fixed-K comparison export",
-        }
-        for policy_name in [FIXED_K_POLICY_NAME]:
-            checkbox = QCheckBox(dv_variant_labels[policy_name])
-            checkbox.setToolTip(
-                "Uses K=5 harmonics when no significant harmonics are found; exports only."
-            )
-            checkbox.setChecked(False)
-            checkbox.stateChanged.connect(self._on_dv_variant_toggled)
-            dv_variants_layout.addWidget(checkbox)
-            self._dv_variant_checkboxes[policy_name] = checkbox
-        self._sync_selected_dv_variants()
+        dv_layout.addWidget(self.fixed_predefined_controls)
+        self._set_fixed_predefined_controls_visible(True)
 
         self.outlier_group = QWidget()
         self.outlier_group.setObjectName("stats_outlier_flagging")
@@ -433,14 +337,13 @@ class StatsWindowUiMixin:
         outlier_section.content_layout.setSpacing(6)
         outlier_section.content_layout.addWidget(self.outlier_group)
 
-        comparison_exports_section = SectionCard("Comparison Exports")
+        comparison_exports_section = SectionCard("Exports")
         comparison_exports_section.setObjectName("stats_comparison_exports_section")
         comparison_exports_section.setSizePolicy(
             QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         )
         comparison_exports_layout = comparison_exports_section.content_layout
         comparison_exports_layout.setSpacing(8)
-        comparison_exports_layout.addWidget(self.dv_variants_group)
 
         export_options_actions = ActionRow(comparison_exports_section, alignment=Qt.AlignLeft)
         export_options_actions.setObjectName("stats_export_options_actions")

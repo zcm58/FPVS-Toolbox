@@ -28,7 +28,6 @@ class StatsSummaryFrames:
     """In-memory result tables used to build a Stats summary."""
 
     single_posthoc: Optional[pd.DataFrame] = None
-    harmonic_results: Optional[pd.DataFrame] = None
     anova_terms: Optional[pd.DataFrame] = None
     mixed_model_terms: Optional[pd.DataFrame] = None
     pipeline_id: Optional[PipelineId] = None

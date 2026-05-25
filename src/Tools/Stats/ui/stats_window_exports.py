@@ -13,42 +13,10 @@ class StatsWindowExportsMixin:
             "anova": (export_rm_anova_results_to_excel, ANOVA_XLS),
             "lmm": (export_mixed_model_results_to_excel, LMM_XLS),
             "posthoc": (export_posthoc_results_to_excel, POSTHOC_XLS),
-            "harmonic": (export_harmonic_results_to_excel, HARMONIC_XLS),
             "baseline_vs_zero": (export_baseline_vs_zero_results_to_excel, BASELINE_VS_ZERO_XLS),
         }
         func, fname = mapping[kind]
 
-        # Special handling for harmonic exports
-        if kind == "harmonic":
-            grouped = group_harmonic_results(data)
-            has_rows = any(
-                roi_entries
-                for roi_data in grouped.values()
-                for roi_entries in roi_data.values()
-            )
-            if not has_rows:
-                self._set_status("No harmonic check results to export.")
-                return []
-
-            def _adapter(_ignored, *, save_path, log_func):
-                """Handle the adapter step for the Stats workflow."""
-                export_harmonic_results_to_excel(
-                    grouped,
-                    save_path,
-                    log_func,
-                    metric=self._harmonic_config.metric,
-                )
-
-            path = safe_export_call(
-                _adapter,
-                None,
-                out_dir,
-                fname,
-                log_func=self._set_status,
-            )
-            return [path]
-
-        # Non-harmonic exports: if there's no data, nothing to export
         if data is None:
             return []
 
@@ -76,22 +44,22 @@ class StatsWindowExportsMixin:
         conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
         base_freq = self._pipeline_base_freq.get(pipeline_id, self._current_base_freq)
         dv_meta = self._pipeline_dv_metadata.get(pipeline_id, {})
-        dv_variants = self._pipeline_dv_variants.get(pipeline_id, [])
         payload = {
-            "policy_name": dv_meta.get("policy_name", dv_policy.get("name", LEGACY_POLICY_NAME)),
-            "fixed_k": dv_meta.get("fixed_k", dv_policy.get("fixed_k", 5)),
-            "exclude_harmonic1": dv_meta.get("exclude_harmonic1", dv_policy.get("exclude_harmonic1", True)),
-            "exclude_base_harmonics": dv_meta.get(
-                "exclude_base_harmonics", dv_policy.get("exclude_base_harmonics", True)
+            "policy_name": dv_meta.get("policy_name", FIXED_PREDEFINED_POLICY_NAME),
+            "fixed_harmonic_frequencies_hz": dv_meta.get(
+                "fixed_harmonic_frequencies_hz",
+                dv_policy.get("fixed_harmonic_frequencies_hz", ""),
             ),
-            "z_threshold": dv_meta.get("z_threshold", dv_policy.get("z_threshold", 1.64)),
-            "empty_list_policy": dv_meta.get(
-                "empty_list_policy", dv_policy.get("empty_list_policy", EMPTY_LIST_FALLBACK_FIXED_K)
+            "fixed_harmonic_auto_exclude_base": dv_meta.get(
+                "fixed_harmonic_auto_exclude_base",
+                dv_policy.get("fixed_harmonic_auto_exclude_base", True),
             ),
             "base_frequency_hz": base_freq,
             "selected_conditions": list(conditions),
-            "variant_methods": list(dv_variants),
         }
+        fixed_meta = dv_meta.get("fixed_predefined_harmonics") if isinstance(dv_meta, dict) else None
+        if isinstance(fixed_meta, dict):
+            payload["fixed_predefined_harmonics"] = fixed_meta
         try:
             out_path = Path(out_dir) / "dv_metadata.json"
             out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -99,26 +67,43 @@ class StatsWindowExportsMixin:
             logger.exception("Failed to write DV metadata export.")
 
         rossion_meta = dv_meta.get("rossion_method") if isinstance(dv_meta, dict) else None
-        if not isinstance(rossion_meta, dict):
+        if not isinstance(rossion_meta, dict) and not isinstance(fixed_meta, dict):
             return
+        if not isinstance(rossion_meta, dict):
+            rossion_meta = {}
 
         try:
             summary_rows = [
                 {"key": "Primary DV method", "value": payload["policy_name"]},
                 {"key": "Base frequency (Hz)", "value": payload["base_frequency_hz"]},
-                {"key": "Z threshold", "value": payload.get("z_threshold")},
-                {"key": "Empty list policy", "value": payload.get("empty_list_policy")},
                 {"key": "Selected conditions", "value": ", ".join(payload["selected_conditions"])},
-                {
-                    "key": "DV variants (exported)",
-                    "value": ", ".join(payload.get("variant_methods", [])) or "None",
-                },
             ]
-            if isinstance(rossion_meta, dict):
+            if isinstance(fixed_meta, dict):
+                included = fixed_meta.get("fixed_harmonic_included_frequencies_hz", [])
+                summary_rows.extend(
+                    [
+                        {
+                            "key": "Selection rule",
+                            "value": fixed_meta.get(
+                                "harmonic_policy_label",
+                                "Fixed predefined harmonic list",
+                            ),
+                        },
+                        {
+                            "key": "Included harmonics (Hz)",
+                            "value": ", ".join(f"{float(freq):g}" for freq in included),
+                        },
+                        {
+                            "key": "SNR used for statistics",
+                            "value": fixed_meta.get("snr_used_for_statistics", False),
+                        },
+                    ]
+                )
+            elif isinstance(rossion_meta, dict):
                 summary_rows.append(
                     {
-                        "key": "Stop rule",
-                        "value": "Stop after 2 consecutive non-significant harmonics",
+                        "key": "Selection rule",
+                        "value": "All non-base oddball harmonics with z > threshold",
                     }
                 )
             summary_df = pd.DataFrame(summary_rows)
@@ -149,6 +134,12 @@ class StatsWindowExportsMixin:
                         "n_scanned": stop_info.get("n_scanned", "—"),
                     }
                 )
+            if isinstance(fixed_meta, dict):
+                roi_rows = [
+                    row
+                    for row in fixed_meta.get("selection_rows", []) or []
+                    if isinstance(row, dict)
+                ]
             roi_df = pd.DataFrame(roi_rows)
             mean_z_table = rossion_meta.get("mean_z_table")
 
@@ -265,7 +256,6 @@ class StatsWindowExportsMixin:
             ("lmm", self.mixed_model_results_data, "Mixed Model"),
             ("posthoc", self.posthoc_results_data, "Interaction Post-hocs"),
             ("baseline_vs_zero", self.baseline_vs_zero_results_payload, "Baseline vs Zero"),
-            ("harmonic", self._harmonic_results.get(PipelineId.SINGLE), "Harmonic Check"),
         ]
         out_dir = self._ensure_results_dir()
 
@@ -284,15 +274,6 @@ class StatsWindowExportsMixin:
                 result_paths = self.export_results(kind, data_obj, out_dir)
 
                 if not result_paths:
-                    # Only harmonic is allowed to “legitimately” export nothing
-                    if kind == "harmonic":
-                        self.append_log(
-                            section,
-                            f"  • Skipping export for {label} (no significant harmonics)",
-                            level="warning",
-                        )
-                        continue
-
                     self.append_log(
                         section,
                         f"  • Export produced no files for {label}",
@@ -301,10 +282,6 @@ class StatsWindowExportsMixin:
                     return False
 
                 paths.extend(result_paths)
-
-            dv_variant_paths = self._export_dv_variants(PipelineId.SINGLE, out_dir)
-            if dv_variant_paths:
-                paths.extend(dv_variant_paths)
 
             exclusion_paths = self._export_outlier_exclusions(PipelineId.SINGLE, out_dir)
             if exclusion_paths:
@@ -321,51 +298,6 @@ class StatsWindowExportsMixin:
         except Exception as exc:  # noqa: BLE001
             self.append_log(section, f"  • Export failed: {exc}", level="error")
             return False
-
-    def _export_dv_variants(self, pipeline_id: PipelineId, out_dir: str) -> list[Path]:
-        """Handle the export dv variants step for the Stats workflow."""
-        selected = self._pipeline_dv_variants.get(pipeline_id, [])
-        if not selected:
-            return []
-
-        payload = self._pipeline_dv_variant_payloads.get(pipeline_id, {})
-        if not payload:
-            section = self._section_label(pipeline_id)
-            self.append_log(
-                section,
-                "  • Skipping DV variants export (no variant payload).",
-                level="warning",
-            )
-            return []
-
-        primary_df = payload.get("primary_df")
-        variant_dfs = payload.get("variant_dfs", {}) or {}
-        summary_df = payload.get("summary_df")
-        errors = payload.get("errors", []) or []
-        primary_name = payload.get(
-            "primary_name", self._pipeline_dv_policy.get(pipeline_id, {}).get("name", "")
-        )
-
-        if not isinstance(primary_df, pd.DataFrame):
-            section = self._section_label(pipeline_id)
-            self.append_log(
-                section,
-                "  • DV variants export skipped (primary DV table missing).",
-                level="error",
-            )
-            return []
-
-        save_path = Path(out_dir) / "DV Variants.xlsx"
-        export_dv_variants_workbook(
-            save_path=save_path,
-            primary_name=str(primary_name),
-            primary_df=primary_df,
-            variant_dfs=variant_dfs,
-            summary_df=summary_df if isinstance(summary_df, pd.DataFrame) else pd.DataFrame(),
-            errors=errors if isinstance(errors, list) else [],
-            log_func=self._set_status,
-        )
-        return [save_path]
 
     def _export_outlier_exclusions(self, pipeline_id: PipelineId, out_dir: str) -> list[Path]:
         """Handle the export outlier exclusions step for the Stats workflow."""

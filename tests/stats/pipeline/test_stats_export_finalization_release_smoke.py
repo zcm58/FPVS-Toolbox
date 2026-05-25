@@ -94,12 +94,6 @@ def test_stats_export_finalization_release_smoke(
     )
     monkeypatch.setattr(win, "refresh_rois", lambda: None, raising=False)
     monkeypatch.setattr(win, "_get_analysis_settings", lambda: (6.0, 0.05), raising=False)
-    monkeypatch.setattr(
-        win,
-        "_get_harmonic_settings",
-        lambda: SimpleNamespace(metric="Z Score", threshold=1.64),
-        raising=False,
-    )
     monkeypatch.setattr(win, "_get_qc_settings", lambda: (25.0, 50.0), raising=False)
 
     def start_immediate(self, pipeline_id, step, *, finished_cb, error_cb, message_cb=None):
@@ -115,8 +109,6 @@ def test_stats_export_finalization_release_smoke(
     exported_paths: list[Path] = []
 
     def fake_export_results(kind, data_obj, out_dir):
-        if kind == "harmonic":
-            return []
         save_path = Path(out_dir) / f"{kind}.xlsx"
         pd.DataFrame(data_obj).to_excel(save_path, index=False)
         exported_paths.append(save_path)

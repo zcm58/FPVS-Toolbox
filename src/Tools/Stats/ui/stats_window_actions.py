@@ -189,10 +189,6 @@ class StatsWindowActionsMixin:
         """Handle the on condition toggled step for the Stats workflow."""
         self._sync_selected_conditions()
 
-    def _on_dv_variant_toggled(self, _state: int) -> None:
-        """Handle the on dv variant toggled step for the Stats workflow."""
-        self._sync_selected_dv_variants()
-
     def _select_all_conditions(self) -> None:
         """Handle the select all conditions step for the Stats workflow."""
         for checkbox in self._condition_checkboxes.values():

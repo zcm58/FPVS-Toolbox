@@ -74,7 +74,7 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         "Manual Exclusions",
         "Summed BCA definition",
         "Outlier Flagging",
-        "Comparison Exports",
+        "Exports",
         "Last Export",
         "ROI Context",
     ]:
@@ -83,7 +83,6 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
         "Data Folder",
         "Single Group Analysis",
         "Review",
-        "Significant Harmonics",
     ]:
         assert title not in group_boxes
     assert "Multi-Group Scan Summary" not in group_boxes
@@ -98,14 +97,11 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert window.conditions_scroll_area.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert advanced_page.isAncestorOf(group_boxes["Summed BCA definition"])
     assert advanced_page.isAncestorOf(group_boxes["Outlier Flagging"])
-    assert advanced_page.isAncestorOf(group_boxes["Comparison Exports"])
+    assert advanced_page.isAncestorOf(group_boxes["Exports"])
     assert advanced_page.isAncestorOf(group_boxes["Last Export"])
     assert advanced_page.isAncestorOf(group_boxes["ROI Context"])
     assert group_boxes["Outlier Flagging"].isAncestorOf(
         window.findChild(QWidget, "stats_outlier_flagging")
-    )
-    assert group_boxes["Comparison Exports"].isAncestorOf(
-        window.findChild(QWidget, "stats_comparison_exports")
     )
     assert group_boxes["Last Export"].isAncestorOf(
         window.findChild(QWidget, "stats_export_path_actions")
@@ -119,11 +115,11 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     )
     assert isinstance(window.manual_exclusion_candidates_list, QListWidget)
     assert group_boxes["Manual Exclusions"].isAncestorOf(window.manual_exclusion_candidates_list)
-    assert group_boxes["Summed BCA definition"].isAncestorOf(window.group_mean_preview_table)
-    assert window.group_mean_preview_table.sizePolicy().verticalPolicy() == QSizePolicy.Fixed
-    assert window.group_mean_preview_table.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
-    assert window.group_mean_preview_table.maximumHeight() <= 150
-    header = window.group_mean_preview_table.horizontalHeader()
+    assert group_boxes["Summed BCA definition"].isAncestorOf(window.fixed_predefined_preview_table)
+    assert window.fixed_predefined_preview_table.sizePolicy().verticalPolicy() == QSizePolicy.Fixed
+    assert window.fixed_predefined_preview_table.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
+    assert window.fixed_predefined_preview_table.maximumHeight() <= 150
+    header = window.fixed_predefined_preview_table.horizontalHeader()
     assert header.sectionResizeMode(0) == QHeaderView.Stretch
     assert header.sectionResizeMode(5) == QHeaderView.Stretch
 

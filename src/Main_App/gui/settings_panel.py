@@ -284,26 +284,6 @@ class SettingsDialog(QDialog):
         analysis_group.content_layout.addLayout(analysis_form)
         layout.addWidget(analysis_group)
 
-        harmonic_group = SectionCard(
-            "Harmonic Detection",
-            tab,
-            object_name="settings_stats_harmonics_card",
-        )
-        harmonic_form = make_form_layout()
-
-        self.harm_metric_combo = QComboBox()
-        self.harm_metric_combo.addItems(["Z Score"])
-        current_metric = self.manager.get("analysis", "harmonic_metric", "Z Score")
-        idx = self.harm_metric_combo.findText(current_metric)
-        if idx >= 0:
-            self.harm_metric_combo.setCurrentIndex(idx)
-        harmonic_form.addRow(QLabel("Detection metric:"), self.harm_metric_combo)
-
-        self.harm_threshold_edit = QLineEdit(self.manager.get("analysis", "harmonic_threshold", "1.64"))
-        harmonic_form.addRow(QLabel("Threshold:"), self.harm_threshold_edit)
-        harmonic_group.content_layout.addLayout(harmonic_form)
-        layout.addWidget(harmonic_group)
-
         layout.addStretch(1)
         self._add_settings_footer(tab, layout, "settings_stats_footer")
 
@@ -593,8 +573,6 @@ class SettingsDialog(QDialog):
         self.manager.set("analysis", "oddball_freq", self.oddball_freq_edit.text())
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
-        self.manager.set("analysis", "harmonic_metric", self.harm_metric_combo.currentText())
-        self.manager.set("analysis", "harmonic_threshold", self.harm_threshold_edit.text())
         self.manager.set_roi_montage(self._current_roi_montage())
         self.manager.set_roi_pairs(self.roi_editor.get_pairs())
         for montage_key, custom_presets in self._custom_roi_presets_by_montage.items():

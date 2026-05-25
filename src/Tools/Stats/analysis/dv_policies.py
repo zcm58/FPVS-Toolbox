@@ -5,39 +5,21 @@ import copy
 import threading
 from typing import Callable, Dict, List, Optional
 
-from Tools.Stats.analysis.stats_analysis import prepare_all_subject_summed_bca_data
-from Tools.Stats.analysis.dv_policy_fixed_k import _prepare_fixed_k_bca_data
-from Tools.Stats.analysis.dv_policy_rossion import (
-    _prepare_rossion_bca_data,
-    apply_empty_union_policy,
-    build_rossion_preview_payload,
-)
+from Tools.Stats.analysis.dv_policy_fixed_predefined import _prepare_fixed_predefined_bca_data
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
-    EMPTY_LIST_ERROR,
-    EMPTY_LIST_FALLBACK_FIXED_K,
-    EMPTY_LIST_SET_ZERO,
-    FIXED_K_POLICY_NAME,
-    GROUP_MEAN_Z_POLICY_NAME,
-    LEGACY_POLICY_NAME,
-    ROSSION_POLICY_NAME,
+    FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
+    FIXED_PREDEFINED_POLICY_NAME,
     _resolve_max_freq,
     normalize_dv_policy,
 )
 
 __all__ = [
     "DVPolicySettings",
-    "LEGACY_POLICY_NAME",
-    "FIXED_K_POLICY_NAME",
-    "ROSSION_POLICY_NAME",
-    "GROUP_MEAN_Z_POLICY_NAME",
-    "EMPTY_LIST_FALLBACK_FIXED_K",
-    "EMPTY_LIST_SET_ZERO",
-    "EMPTY_LIST_ERROR",
+    "FIXED_PREDEFINED_POLICY_NAME",
+    "FIXED_PREDEFINED_DEFAULT_FREQUENCIES",
     "normalize_dv_policy",
     "prepare_summed_bca_data",
-    "apply_empty_union_policy",
-    "build_rossion_preview_payload",
 ]
 
 _DV_DATA_CACHE: dict[tuple, tuple[Dict[str, Dict[str, Dict[str, float]]], dict]] = {}
@@ -85,11 +67,10 @@ def _build_cache_key(
         _freeze_rois(rois),
         float(max_freq) if max_freq is not None else None,
         settings.name,
-        settings.fixed_k,
-        settings.exclude_harmonic1,
-        settings.exclude_base_harmonics,
-        float(settings.z_threshold),
-        settings.empty_list_policy,
+        settings.fixed_harmonic_frequencies_hz,
+        settings.fixed_harmonic_auto_exclude_base,
+        float(settings.fixed_harmonic_base_tolerance_hz),
+        float(settings.fixed_harmonic_matching_tolerance_hz),
     )
 
 
@@ -132,53 +113,17 @@ def prepare_summed_bca_data(
             if dv_metadata is not None:
                 dv_metadata.update(copy.deepcopy(cached_meta))
             return cached_data
-    if settings.name == ROSSION_POLICY_NAME:
-        data = _prepare_rossion_bca_data(
-            subjects=subjects,
-            conditions=conditions,
-            subject_data=subject_data,
-            base_freq=base_freq,
-            log_func=log_func,
-            rois=rois,
-            provenance_map=provenance_map,
-            settings=settings,
-            dv_metadata=meta_target,
-            max_freq=resolved_max_freq,
-            selection_conditions=selection_conditions,
-        )
-    elif settings.name == FIXED_K_POLICY_NAME:
-        if meta_target is not None:
-            meta_target.update(
-                settings.to_metadata(
-                    base_freq=base_freq, selected_conditions=conditions
-                )
-            )
-        data = _prepare_fixed_k_bca_data(
-            subjects=subjects,
-            conditions=conditions,
-            subject_data=subject_data,
-            base_freq=base_freq,
-            log_func=log_func,
-            rois=rois,
-            provenance_map=provenance_map,
-            settings=settings,
-            max_freq=resolved_max_freq,
-        )
-    else:
-        if meta_target is not None:
-            meta_target.update(
-                settings.to_metadata(base_freq=base_freq, selected_conditions=conditions)
-            )
-        data = prepare_all_subject_summed_bca_data(
-            subjects=subjects,
-            conditions=conditions,
-            subject_data=subject_data,
-            base_freq=base_freq,
-            log_func=log_func,
-            rois=rois,
-            provenance_map=provenance_map,
-            max_freq=resolved_max_freq,
-        )
+    data = _prepare_fixed_predefined_bca_data(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_freq=base_freq,
+        log_func=log_func,
+        rois=rois,
+        provenance_map=provenance_map,
+        settings=settings,
+        dv_metadata=meta_target,
+    )
     if cache_key is not None and data is not None:
         if meta_target is None:
             meta_target = {}

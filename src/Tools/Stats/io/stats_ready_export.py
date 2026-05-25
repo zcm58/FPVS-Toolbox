@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 
 import pandas as pd
 
 from Tools.Stats.analysis.dv_policies import normalize_dv_policy, prepare_summed_bca_data
+from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_ID
 
+logger = logging.getLogger("Tools.Stats")
 STATS_READY_WORKBOOK_NAME = "Stats_Ready_Summed_BCA.xlsx"
 SINGLE_GROUP_LABEL = "single_group"
 
@@ -102,12 +106,23 @@ def _harmonics_for_roi(
             if isinstance(roi_freqs, (list, tuple, set)):
                 freqs = [_parse_frequency(freq) for freq in roi_freqs]
                 return sorted(freq for freq in freqs if freq is not None)
+    fixed_meta = _common_fixed_predefined_meta(dv_metadata)
+    if fixed_meta:
+        raw_freqs = fixed_meta.get("fixed_harmonic_included_frequencies_hz")
+        if isinstance(raw_freqs, (list, tuple, set)):
+            freqs = [_parse_frequency(freq) for freq in raw_freqs]
+            return [freq for freq in freqs if freq is not None]
     return _harmonics_from_provenance(provenance)
 
 
 def _common_rossion_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, object]:
     rossion_meta = dv_metadata.get("rossion_method")
     return rossion_meta if isinstance(rossion_meta, Mapping) else {}
+
+
+def _common_fixed_predefined_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, object]:
+    fixed_meta = dv_metadata.get("fixed_predefined_harmonics")
+    return fixed_meta if isinstance(fixed_meta, Mapping) else {}
 
 
 def _fallback_info_for_roi(
@@ -124,6 +139,8 @@ def _fallback_info_for_roi(
             if isinstance(roi_info, Mapping):
                 policy = _safe_text(roi_info.get("policy"), default=default_policy)
                 return policy, bool(roi_info.get("fallback_used", False))
+    if _common_fixed_predefined_meta(dv_metadata):
+        return "None", False
     return default_policy, False
 
 
@@ -209,15 +226,17 @@ def _build_long_frame(
 ) -> pd.DataFrame:
     settings = normalize_dv_policy(dict(dv_policy or {}))
     policy_name = _safe_text(dv_metadata.get("policy_name"), default=settings.name)
-    default_empty_policy = _safe_text(
-        dv_metadata.get("empty_list_policy"),
-        default=settings.empty_list_policy,
-    )
+    default_empty_policy = _safe_text(dv_metadata.get("empty_list_policy"), default="None")
     rossion_meta = _common_rossion_meta(dv_metadata)
+    fixed_meta = _common_fixed_predefined_meta(dv_metadata)
     selection_scope = _safe_text(rossion_meta.get("selection_scope"))
+    if fixed_meta:
+        selection_scope = FIXED_PREDEFINED_POLICY_ID
     z_scores = _format_z_scores(rossion_meta.get("selection_z_by_harmonic", {}))
     excluded_base = []
     raw_excluded = rossion_meta.get("excluded_base_harmonics_hz")
+    if fixed_meta:
+        raw_excluded = fixed_meta.get("excluded_base_overlap_frequencies_hz")
     if isinstance(raw_excluded, (list, tuple, set)):
         excluded_base = [_parse_frequency(freq) for freq in raw_excluded]
     excluded_base_text = _format_harmonics([freq for freq in excluded_base if freq is not None])
@@ -389,7 +408,7 @@ def _build_data_dictionary(
         {
             "sheet": RSTUDIO_LONG_SHEET,
             "column": "selection_z_scores",
-            "description": "Semicolon-delimited frequency:z-score pairs from the group-level harmonic-selection spectrum.",
+            "description": "Semicolon-delimited frequency:z-score pairs when the active DV policy uses z-score selection; blank for fixed predefined harmonic lists.",
             "units": "",
         },
         {
@@ -520,6 +539,10 @@ def build_stats_ready_frames(
 
 
 def _build_harmonic_selection_frame(dv_metadata: Mapping[str, object]) -> pd.DataFrame:
+    fixed_meta = _common_fixed_predefined_meta(dv_metadata)
+    if fixed_meta:
+        rows = _fixed_predefined_selection_rows(fixed_meta)
+        return pd.DataFrame(rows) if rows else pd.DataFrame()
     rossion_meta = _common_rossion_meta(dv_metadata)
     if not rossion_meta:
         return pd.DataFrame()
@@ -543,6 +566,95 @@ def _build_harmonic_selection_frame(dv_metadata: Mapping[str, object]) -> pd.Dat
             sensitivity=True,
         )
     return pd.DataFrame(rows).sort_values(["sensitivity", "harmonic_hz"]) if rows else pd.DataFrame()
+
+
+def _fixed_predefined_selection_rows(fixed_meta: Mapping[str, object]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for row_data in fixed_meta.get("selection_rows", []) or []:
+        if not isinstance(row_data, Mapping):
+            continue
+        requested = _parse_frequency(row_data.get("requested_frequency_hz"))
+        matched = _parse_frequency(row_data.get("matched_frequency_hz"))
+        rows.append(
+            {
+                "harmonic_policy": fixed_meta.get("harmonic_policy", FIXED_PREDEFINED_POLICY_ID),
+                "selection_scope": FIXED_PREDEFINED_POLICY_ID,
+                "base_frequency_hz": fixed_meta.get("base_frequency_hz"),
+                "oddball_frequency_hz": fixed_meta.get("oddball_frequency_hz"),
+                "base_overlap_exclusion_enabled": fixed_meta.get(
+                    "base_overlap_exclusion_enabled"
+                ),
+                "base_overlap_tolerance_hz": fixed_meta.get("base_overlap_tolerance_hz"),
+                "matching_tolerance_hz": fixed_meta.get("matching_tolerance_hz"),
+                "frequency_resolution_hz": fixed_meta.get("frequency_resolution_hz"),
+                "applied_uniformly_across_participants": fixed_meta.get(
+                    "applied_uniformly_across_participants"
+                ),
+                "applied_uniformly_across_conditions": fixed_meta.get(
+                    "applied_uniformly_across_conditions"
+                ),
+                "applied_uniformly_across_rois": fixed_meta.get(
+                    "applied_uniformly_across_rois"
+                ),
+                "snr_used_for_statistics": fixed_meta.get("snr_used_for_statistics"),
+                "bca_negative_values_retained": fixed_meta.get("bca_negative_values_retained"),
+                "bca_near_zero_values_retained": fixed_meta.get(
+                    "bca_near_zero_values_retained"
+                ),
+                "requested_harmonic_hz": requested,
+                "harmonic_hz": matched if matched is not None else requested,
+                "matched_bca_frequency_hz": matched,
+                "matched_bca_column": row_data.get("matched_column"),
+                "matched_bca_bin_index": row_data.get("matched_bin_index"),
+                "selected": bool(row_data.get("included")),
+                "excluded_base_rate": row_data.get("exclusion_reason") == "base_rate_overlap",
+                "exclusion_reason": row_data.get("exclusion_reason", ""),
+                "warning": row_data.get("warning", ""),
+                "z_score": math.nan,
+                "sensitivity": False,
+            }
+        )
+    if rows:
+        rows.append(
+            {
+                "harmonic_policy": fixed_meta.get("harmonic_policy", FIXED_PREDEFINED_POLICY_ID),
+                "selection_scope": "methods_summary",
+                "base_frequency_hz": fixed_meta.get("base_frequency_hz"),
+                "oddball_frequency_hz": fixed_meta.get("oddball_frequency_hz"),
+                "base_overlap_exclusion_enabled": fixed_meta.get(
+                    "base_overlap_exclusion_enabled"
+                ),
+                "base_overlap_tolerance_hz": fixed_meta.get("base_overlap_tolerance_hz"),
+                "matching_tolerance_hz": fixed_meta.get("matching_tolerance_hz"),
+                "frequency_resolution_hz": fixed_meta.get("frequency_resolution_hz"),
+                "applied_uniformly_across_participants": fixed_meta.get(
+                    "applied_uniformly_across_participants"
+                ),
+                "applied_uniformly_across_conditions": fixed_meta.get(
+                    "applied_uniformly_across_conditions"
+                ),
+                "applied_uniformly_across_rois": fixed_meta.get(
+                    "applied_uniformly_across_rois"
+                ),
+                "snr_used_for_statistics": fixed_meta.get("snr_used_for_statistics"),
+                "bca_negative_values_retained": fixed_meta.get("bca_negative_values_retained"),
+                "bca_near_zero_values_retained": fixed_meta.get(
+                    "bca_near_zero_values_retained"
+                ),
+                "requested_harmonic_hz": math.nan,
+                "harmonic_hz": math.nan,
+                "matched_bca_frequency_hz": math.nan,
+                "matched_bca_column": "",
+                "matched_bca_bin_index": math.nan,
+                "selected": False,
+                "excluded_base_rate": False,
+                "exclusion_reason": "methods_summary",
+                "warning": fixed_meta.get("methods_summary", ""),
+                "z_score": math.nan,
+                "sensitivity": False,
+            }
+        )
+    return rows
 
 
 def _append_selection_rows(
@@ -622,6 +734,15 @@ def prepare_stats_ready_export(
 ) -> StatsReadyExport:
     """Prepare and optionally write the external-statistics Summed BCA export."""
 
+    started_at = perf_counter()
+    log_func(
+        "Stats-ready export: preparing Summed BCA data "
+        f"for {len(subjects)} participants x {len(conditions)} selected conditions."
+    )
+    logger.info(
+        "stats_ready_prepare_summed_bca_start",
+        extra={"subjects": len(subjects), "conditions": len(conditions)},
+    )
     provenance_map: dict[tuple[str, str, str], dict[str, object]] = {}
     dv_metadata: dict[str, object] = {}
     summed_bca = prepare_summed_bca_data(
@@ -640,6 +761,15 @@ def prepare_stats_ready_export(
     if not summed_bca:
         raise RuntimeError("Stats-ready export could not prepare Summed BCA data.")
 
+    log_func(
+        "Stats-ready export: Summed BCA data prepared "
+        f"in {perf_counter() - started_at:.1f}s; building workbook frames."
+    )
+    logger.info(
+        "stats_ready_prepare_summed_bca_done",
+        extra={"elapsed_s": perf_counter() - started_at},
+    )
+    frames_started = perf_counter()
     frames = build_stats_ready_frames(
         subjects=list(subjects),
         conditions=list(conditions),
@@ -651,7 +781,33 @@ def prepare_stats_ready_export(
         dv_policy=dv_policy,
         group_map=group_map,
     )
-    workbook_path = write_stats_ready_workbook(save_path, frames) if save_path else None
+    log_func(
+        "Stats-ready export: workbook frames built "
+        f"in {perf_counter() - frames_started:.1f}s."
+    )
+    logger.info(
+        "stats_ready_frames_built",
+        extra={"elapsed_s": perf_counter() - frames_started, "sheets": len(frames)},
+    )
+    workbook_path = None
+    if save_path:
+        write_started = perf_counter()
+        log_func(f"Stats-ready export: writing workbook to {save_path}.")
+        logger.info("stats_ready_workbook_write_start", extra={"path": str(save_path)})
+        workbook_path = write_stats_ready_workbook(save_path, frames)
+        log_func(
+            "Stats-ready export: workbook write finished "
+            f"in {perf_counter() - write_started:.1f}s."
+        )
+        logger.info(
+            "stats_ready_workbook_write_done",
+            extra={"elapsed_s": perf_counter() - write_started, "path": str(save_path)},
+        )
+    log_func(
+        "Stats-ready export: finished "
+        f"in {perf_counter() - started_at:.1f}s."
+    )
+    logger.info("stats_ready_export_done", extra={"elapsed_s": perf_counter() - started_at})
     return StatsReadyExport(
         frames=frames,
         workbook_path=workbook_path,

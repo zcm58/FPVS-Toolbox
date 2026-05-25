@@ -19,7 +19,6 @@ class StepId(Enum):
     RM_ANOVA = auto()
     MIXED_MODEL = auto()
     INTERACTION_POSTHOCS = auto()
-    HARMONIC_CHECK = auto()
     BASELINE_VS_ZERO = auto()
 
 
@@ -28,7 +27,6 @@ RESULTS_SUBFOLDER_NAME: Final[str] = STATS_SUBFOLDER_NAME
 ANOVA_XLS: Final[str] = "RM-ANOVA Results.xlsx"
 LMM_XLS: Final[str] = "Mixed Model Results.xlsx"
 POSTHOC_XLS: Final[str] = "Posthoc Results.xlsx"
-HARMONIC_XLS: Final[str] = "Harmonic Results.xlsx"
 BASELINE_VS_ZERO_XLS: Final[str] = "Baseline vs Zero Tests.xlsx"
 
 
@@ -49,7 +47,6 @@ __all__ = [
     "ANOVA_XLS",
     "LMM_XLS",
     "POSTHOC_XLS",
-    "HARMONIC_XLS",
     "BASELINE_VS_ZERO_XLS",
     "PipelineStep",
 ]

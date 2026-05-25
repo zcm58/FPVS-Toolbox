@@ -38,19 +38,14 @@ def patched_workers(monkeypatch):
     def fake_baseline(*_args, **_kwargs):
         return {"results_df": dummy_df.copy(), "output_text": "baseline"}
 
-    def fake_harmonic(*_args, **_kwargs):
-        return {"harmonic_results": [], "output_text": "harmonic"}
-
     monkeypatch.setattr(stats_workers, "run_rm_anova", fake_rm_anova, raising=False)
     monkeypatch.setattr(stats_workers, "run_lmm", fake_lmm, raising=False)
     monkeypatch.setattr(stats_workers, "run_posthoc", fake_posthoc, raising=False)
     monkeypatch.setattr(stats_workers, "run_baseline_vs_zero", fake_baseline, raising=False)
-    monkeypatch.setattr(stats_workers, "run_harmonic_check", fake_harmonic, raising=False)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.RM_ANOVA, fake_rm_anova)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.MIXED_MODEL, fake_lmm)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.INTERACTION_POSTHOCS, fake_posthoc)
     monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.BASELINE_VS_ZERO, fake_baseline)
-    monkeypatch.setitem(WORKER_FN_BY_STEP, StepId.HARMONIC_CHECK, fake_harmonic)
     return dummy_df
 
 

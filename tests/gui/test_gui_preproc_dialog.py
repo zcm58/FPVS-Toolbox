@@ -109,7 +109,6 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
     assert "Preprocessing Parameters" in cards
     assert "Diagnostics" in cards
     assert "Analysis Defaults" in cards
-    assert "Harmonic Detection" in cards
     assert "Quick Add" in cards
     assert "Regions of Interest" in cards
     assert [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())] == [
