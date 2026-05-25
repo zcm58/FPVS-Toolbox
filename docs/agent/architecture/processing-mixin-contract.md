@@ -20,7 +20,9 @@ For each selected data file, the worker thread preserves this order:
 2. Preprocess a raw copy with `Main_App.processing.preprocess.perform_preprocessing(...)`.
 3. Extract events from annotations for `.set` files or `mne.find_events(...)` for other files.
 4. Compute FFT crop diagnostics with `compute_fft_crop_from_events(...)`.
-5. Build per-condition `mne.EpochsArray` objects using 55-on-bin crops when available, otherwise fixed-epoch fallback.
+5. Build per-condition `mne.EpochsArray` objects. For normal processing and
+   Stats-bound exports, locked `55_onbin` crops are required; do not add or
+   extend silent fixed-epoch FFT fallbacks.
 6. Run post-processing/export through the host `post_process(labels)` callback.
 7. Clean per-file memory and emit progress.
 
@@ -42,6 +44,9 @@ Finalization preserves the existing success/error/cancel behavior, resets proces
 
 - Do not change load, preprocessing, event extraction, FFT crop, epoching, post-processing, or cleanup order.
 - Do not change generated files, sheet names, output paths, quality review file format, or FFT crop log format.
+- Do not use the compatibility mixin's historical fixed-epoch markers to justify
+  normal-pipeline behavior. Active Stats-bound processing must fail if locked
+  FFT crop behavior is unavailable.
 - Do not reintroduce Tkinter, CustomTkinter, or CTkMessagebox; user messages must use `Main_App.Shared.user_messages`.
 - `src/Main_App/Legacy_App/processing_utils.py` has been deleted; active callers should import `Main_App.Shared.processing_mixin`.
 - Active runtime code must not import `Main_App.Legacy_App.eeg_preprocessing`; see `docs/agent/architecture/preprocessing-contract.md`.

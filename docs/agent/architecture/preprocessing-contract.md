@@ -63,6 +63,15 @@ GUI processing must route through the active process runner. Single-file runs us
 the same runner with `max_workers=1`. Do not add a fallback path that bypasses
 the process runner or calls retired legacy preprocessing.
 
+Epoch building in the process runner must preserve locked FFT crop behavior.
+When valid `55_onbin` repetition crops exist for a condition, those repetitions
+must keep `N % N_step == 0` and metadata `N_mod_step == 0`. Do not downgrade
+the whole condition or any repetition to fixed-epoch fallback. Do not silently
+skip fallback repetitions. If a selected repetition cannot produce a valid
+`55_onbin` crop, the normal processing run must fail before post-export.
+Downstream `FullFFT Amplitude (uV)` columns are expected to include the exact
+nominal oddball harmonics from this crop behavior.
+
 The process runner logs `[TIMING] file=... section=... elapsed_ms=...` for
 cache lookup, load, pre-audit, preprocessing, cache store, events, epochs,
 export, post-audit, and cleanup when those stages run. The returned per-file
@@ -216,8 +225,9 @@ results.
   all active callers and compatibility exports.
 - Do not add `Legacy_App` or `PySide6_App` preprocessing imports.
 - Do not introduce GUI toolkit dependencies into preprocessing.
-- Do not convert warning-and-continue stages to hard failures without explicit
-  approval.
+- Do not convert unrelated warning-and-continue stages to hard failures without
+  explicit approval. The locked FFT crop contract is the exception already
+  approved here: missing `55_onbin` behavior must hard-fail.
 - If an internal mode cannot use the active process runner, fail clearly rather
   than silently falling back to legacy preprocessing.
 - Refactors may split or move files only after focused tests prove the public

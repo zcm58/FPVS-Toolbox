@@ -28,6 +28,8 @@ def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):
         fs=fs,
         n_samples=n_samples,
         target_freq=1.2,
+        crop_mode="55_onbin",
+        n_step=10,
     )
 
     neighbor_columns = [
@@ -84,3 +86,26 @@ def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):
         "sheet_column_widths",
         "workbook_write_total",
     }
+
+
+def test_fft_neighbors_rejects_nearest_bin_fallback() -> None:
+    fs = 256.0
+    n_samples = 32256
+    freqs = np.fft.rfftfreq(n_samples, d=1.0 / fs)
+    fft_amplitudes = np.zeros((1, len(freqs)), dtype=float)
+
+    with pytest.raises(ValueError, match="Nearest-bin fallback is disabled"):
+        build_fft_neighbors_rows(
+            file_name="demo.bdf",
+            condition_label="Condition A",
+            condition_id="Condition A",
+            repetition_index="1",
+            electrode_names=["Oz"],
+            fft_amplitudes=fft_amplitudes,
+            freqs=freqs,
+            fs=fs,
+            n_samples=n_samples,
+            target_freq=1.2,
+            crop_mode="55_onbin",
+            n_step=640,
+        )

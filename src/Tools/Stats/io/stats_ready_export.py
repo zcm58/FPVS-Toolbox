@@ -34,10 +34,22 @@ HARMONIC_SELECTION_COLUMNS = [
     "z_threshold",
     "requested_harmonic_hz",
     "harmonic_hz",
+    "matched_column",
+    "matched_bin_index",
     "z_score",
+    "target_amplitude_uv",
+    "noise_mean_uv",
+    "noise_std_uv",
+    "noise_bin_indices",
+    "noise_frequencies_hz",
+    "noise_amplitudes_uv",
+    "noise_used_bin_indices",
+    "noise_used_frequencies_hz",
+    "noise_used_amplitudes_uv",
     "selected",
     "excluded_base_rate",
     "exclusion_reason",
+    "warning",
 ]
 
 
@@ -75,6 +87,19 @@ def _parse_frequency(value: object) -> float | None:
     except ValueError:
         return None
     return number if math.isfinite(number) else None
+
+
+def _sequence_cell(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        return ";".join(f"{key}:{item}" for key, item in value.items())
+    try:
+        return ";".join(str(item) for item in value)
+    except TypeError:
+        return str(value)
 
 
 def _common_rossion_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, object]:
@@ -320,10 +345,22 @@ def _fixed_predefined_selection_rows(fixed_meta: Mapping[str, object]) -> list[d
                 "z_threshold": math.nan,
                 "requested_harmonic_hz": requested,
                 "harmonic_hz": matched if matched is not None else requested,
+                "matched_column": row_data.get("matched_column", ""),
+                "matched_bin_index": row_data.get("matched_bin_index"),
                 "z_score": math.nan,
+                "target_amplitude_uv": math.nan,
+                "noise_mean_uv": math.nan,
+                "noise_std_uv": math.nan,
+                "noise_bin_indices": "",
+                "noise_frequencies_hz": "",
+                "noise_amplitudes_uv": "",
+                "noise_used_bin_indices": "",
+                "noise_used_frequencies_hz": "",
+                "noise_used_amplitudes_uv": "",
                 "selected": bool(row_data.get("included")),
                 "excluded_base_rate": row_data.get("exclusion_reason") == "base_rate_overlap",
                 "exclusion_reason": row_data.get("exclusion_reason", ""),
+                "warning": row_data.get("warning", ""),
             }
         )
     return rows
@@ -347,10 +384,22 @@ def _group_significant_selection_rows(group_meta: Mapping[str, object]) -> list[
                 "z_threshold": group_meta.get("z_threshold"),
                 "requested_harmonic_hz": row_data.get("target_frequency_hz"),
                 "harmonic_hz": matched,
+                "matched_column": row_data.get("matched_column", ""),
+                "matched_bin_index": row_data.get("matched_bin_index"),
                 "z_score": _numeric_or_nan(row_data.get("z_score")),
+                "target_amplitude_uv": _numeric_or_nan(row_data.get("target_amplitude_uv")),
+                "noise_mean_uv": _numeric_or_nan(row_data.get("noise_mean_uv")),
+                "noise_std_uv": _numeric_or_nan(row_data.get("noise_std_uv")),
+                "noise_bin_indices": _sequence_cell(row_data.get("noise_bin_indices")),
+                "noise_frequencies_hz": _sequence_cell(row_data.get("noise_frequencies_hz")),
+                "noise_amplitudes_uv": _sequence_cell(row_data.get("noise_amplitudes_uv")),
+                "noise_used_bin_indices": _sequence_cell(row_data.get("noise_used_bin_indices")),
+                "noise_used_frequencies_hz": _sequence_cell(row_data.get("noise_used_frequencies_hz")),
+                "noise_used_amplitudes_uv": _sequence_cell(row_data.get("noise_used_amplitudes_uv")),
                 "selected": bool(row_data.get("selected")),
                 "excluded_base_rate": bool(row_data.get("excluded_base_rate")),
                 "exclusion_reason": row_data.get("exclusion_reason", ""),
+                "warning": row_data.get("warning", ""),
             }
         )
     return rows

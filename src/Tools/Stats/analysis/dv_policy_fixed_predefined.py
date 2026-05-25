@@ -17,7 +17,6 @@ from Tools.Stats.analysis.dv_policy_settings import (
 from Tools.Stats.analysis.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
     _current_rois_map,
-    _match_freq_column,
 )
 
 
@@ -200,26 +199,27 @@ def build_fixed_harmonic_selection(
                 )
                 continue
 
-        matched_freq, matched_column, matched_index, diff = _nearest_bca_frequency(bca_freqs, freq)
-        if diff > matching_tolerance_hz:
+        exact_match = _exact_bca_frequency(bca_freqs, freq)
+        if exact_match is None:
             validation_errors.append(
-                f"{freq:g} Hz has no BCA column within {matching_tolerance_hz:g} Hz."
+                f"{freq:g} Hz requires exact BCA column {float(freq):.4f}_Hz."
             )
             rows.append(
                 FixedHarmonicRow(
                     requested_frequency_hz=float(freq),
-                    matched_frequency_hz=matched_freq,
-                    matched_column=matched_column,
-                    matched_bin_index=matched_index,
+                    matched_frequency_hz=None,
+                    matched_column=None,
+                    matched_bin_index=None,
                     included=False,
-                    exclusion_reason="no_bca_column_within_tolerance",
+                    exclusion_reason="missing_exact_bca_column",
                     warning=(
-                        f"Nearest BCA column differs by {diff:g} Hz, "
-                        f"above tolerance {matching_tolerance_hz:g} Hz."
+                        f"Exact BCA column {float(freq):.4f}_Hz is missing. "
+                        "Nearest-column fallback is disabled."
                     ),
                 )
             )
             continue
+        matched_freq, matched_column, matched_index = exact_match
 
         if matched_column in seen_columns:
             warnings.append(f"Duplicate matched BCA column ignored: {matched_column}")
@@ -243,9 +243,6 @@ def build_fixed_harmonic_selection(
         included_freqs.append(float(matched_freq))
         included_columns.append(str(matched_column))
         included_indices.append(int(matched_index))
-        warning = "" if diff <= 1e-12 else f"Matched nearest BCA column; delta={diff:g} Hz."
-        if warning:
-            warnings.append(f"{freq:g} Hz matched to {matched_freq:g} Hz.")
         rows.append(
             FixedHarmonicRow(
                 requested_frequency_hz=float(freq),
@@ -254,7 +251,7 @@ def build_fixed_harmonic_selection(
                 matched_bin_index=int(matched_index),
                 included=True,
                 exclusion_reason="",
-                warning=warning,
+                warning="",
             )
         )
 
@@ -478,17 +475,14 @@ def _aggregate_bca_sum_harmonics(
             log_func(f"No data for ROI {roi_name} in {file_path}.")
             return np.nan
 
-        cols_to_sum: List[str] = []
-        for freq_val in harmonic_freqs:
-            col_bca = _match_freq_column(df_bca_roi.columns, freq_val)
-            if col_bca:
-                cols_to_sum.append(col_bca)
-
-        if not cols_to_sum:
-            log_func(f"No fixed harmonics found for ROI {roi_name} in {file_path}.")
-            if diag_meta is not None:
-                diag_meta["col_label"] = []
-            return np.nan
+        cols_to_sum = [f"{float(freq_val):.4f}_Hz" for freq_val in harmonic_freqs]
+        missing_columns = [column for column in cols_to_sum if column not in df_bca_roi.columns]
+        if missing_columns:
+            raise RuntimeError(
+                "Fixed predefined harmonic summation requires exact BCA harmonic "
+                f"columns in every included workbook. Missing columns in {file_path}: "
+                f"{missing_columns[:8]}"
+            )
 
         if diag_meta is not None:
             diag_meta["col_label"] = cols_to_sum
@@ -514,6 +508,8 @@ def _aggregate_bca_sum_harmonics(
         return out if np.isfinite(out) else np.nan
 
     except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, RuntimeError):
+            raise
         log_func(f"Error aggregating fixed predefined BCA for {file_path}, ROI {roi_name}: {exc}")
         return np.nan
 
@@ -530,16 +526,15 @@ def _parse_bca_frequency_columns(columns: Sequence[object]) -> list[tuple[float,
     return sorted(out, key=lambda item: item[0])
 
 
-def _nearest_bca_frequency(
+def _exact_bca_frequency(
     bca_freqs: Sequence[tuple[float, str, int]],
     requested_freq: float,
-) -> tuple[float, str, int, float]:
-    matched_freq, matched_column, matched_index = min(
-        bca_freqs,
-        key=lambda item: abs(float(item[0]) - float(requested_freq)),
-    )
-    diff = abs(float(matched_freq) - float(requested_freq))
-    return float(matched_freq), str(matched_column), int(matched_index), float(diff)
+) -> tuple[float, str, int] | None:
+    required_column = f"{float(requested_freq):.4f}_Hz"
+    for matched_freq, matched_column, matched_index in bca_freqs:
+        if str(matched_column) == required_column and abs(float(matched_freq) - float(requested_freq)) <= 1e-9:
+            return float(matched_freq), str(matched_column), int(matched_index)
+    return None
 
 
 def _frequency_resolution(freqs: Sequence[float]) -> float | None:

@@ -5,6 +5,7 @@ import pytest
 
 from Tools.Stats.io import stats_ready_export as export_mod
 from Tools.Stats.io.stats_ready_export import (
+    HARMONIC_SELECTION_COLUMNS,
     HARMONIC_SELECTION_SHEET,
     LONG_FORMAT_SHEET,
     WIDE_FORMAT_SHEET,
@@ -195,19 +196,7 @@ def test_build_stats_ready_frames_exports_fixed_predefined_metadata():
     assert "source_workbook" not in long_df.columns
 
     selection_df = frames[HARMONIC_SELECTION_SHEET]
-    assert list(selection_df.columns) == [
-        "harmonic_policy",
-        "selection_scope",
-        "base_frequency_hz",
-        "oddball_frequency_hz",
-        "z_threshold",
-        "requested_harmonic_hz",
-        "harmonic_hz",
-        "z_score",
-        "selected",
-        "excluded_base_rate",
-        "exclusion_reason",
-    ]
+    assert list(selection_df.columns) == HARMONIC_SELECTION_COLUMNS
     selected_row = selection_df[selection_df["requested_harmonic_hz"] == 1.2].iloc[0]
     excluded_row = selection_df[selection_df["requested_harmonic_hz"] == 6.0].iloc[0]
     assert bool(selected_row["selected"]) is True
@@ -253,6 +242,15 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
                 "matched_column": "1.2000_Hz",
                 "matched_bin_index": 2,
                 "z_score": 5.1,
+                "target_amplitude_uv": 4.2,
+                "noise_mean_uv": 1.0,
+                "noise_std_uv": 0.627451,
+                "noise_bin_indices": [0, 4],
+                "noise_frequencies_hz": [0.0, 2.4],
+                "noise_amplitudes_uv": [0.8, 1.2],
+                "noise_used_bin_indices": [0, 4],
+                "noise_used_frequencies_hz": [0.0, 2.4],
+                "noise_used_amplitudes_uv": [0.8, 1.2],
                 "selected": True,
                 "excluded_base_rate": False,
                 "exclusion_reason": "",
@@ -302,6 +300,11 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
     assert selected_row["harmonic_policy"] == GROUP_SIGNIFICANT_POLICY_ID
     assert bool(selected_row["selected"]) is True
     assert selected_row["z_threshold"] == pytest.approx(1.64)
+    assert selected_row["target_amplitude_uv"] == pytest.approx(4.2)
+    assert selected_row["noise_mean_uv"] == pytest.approx(1.0)
+    assert selected_row["noise_bin_indices"] == "0;4"
+    assert selected_row["noise_frequencies_hz"] == "0.0;2.4"
+    assert selected_row["noise_amplitudes_uv"] == "0.8;1.2"
     assert excluded_row["exclusion_reason"] == "base_rate_overlap"
 
 

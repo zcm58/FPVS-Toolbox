@@ -59,7 +59,7 @@ def build_fft_neighbors_rows(
     fs: float,
     n_samples: int,
     target_freq: float = 1.2,
-    crop_mode: str = "fixed_epoch_fallback",
+    crop_mode: str = "55_onbin",
     n55: Optional[int] = None,
     first55_samp: Optional[int] = None,
     last55_samp: Optional[int] = None,
@@ -71,13 +71,30 @@ def build_fft_neighbors_rows(
     if len(freqs) == 0:
         return rows
 
-    k0 = int(round(target_freq * n_samples / fs))
+    if crop_mode != "55_onbin":
+        raise ValueError(
+            "Locked FFT crop required for FFT-neighbor export: "
+            f"crop_mode={crop_mode}, fallback_reason={fallback_reason or 'unknown'}."
+        )
+    if not n_step:
+        raise ValueError("Locked FFT crop metadata requires N_step for FFT-neighbor export.")
+    exact_position = target_freq * n_samples / fs
+    k0 = int(round(exact_position))
+    if abs(exact_position - k0) >= 1e-9:
+        raise ValueError(
+            "FFT-neighbor target is not locked to an FFT bin: "
+            f"target={target_freq}, N={n_samples}, fs={fs}, k={exact_position:.12g}. "
+            "Nearest-bin fallback is disabled."
+        )
     if not (0 <= k0 < len(freqs)):
-        k0 = int(np.argmin(np.abs(freqs - target_freq)))
+        raise ValueError(
+            "FFT-neighbor target bin is outside the FFT frequency grid: "
+            f"target={target_freq}, N={n_samples}, fs={fs}, k={k0}."
+        )
     f_bin_hz = float(freqs[k0]) if 0 <= k0 < len(freqs) else np.nan
-    n_mod_step = int(n_samples % n_step) if n_step else np.nan
+    n_mod_step = int(n_samples % n_step)
 
-    if crop_mode == "55_onbin" and n_step and n_mod_step != 0:
+    if n_mod_step != 0:
         raise ValueError(
             f"Invalid on-bin metadata for FFT neighbors row: N={n_samples}, N_step={n_step}, N_mod_step={n_mod_step}"
         )
@@ -102,7 +119,7 @@ def build_fft_neighbors_rows(
             "last55_samp": int(last55_samp) if last55_samp is not None else np.nan,
             "N_step": int(n_step) if n_step is not None else np.nan,
             "N_mod_step": n_mod_step,
-            "fallback_reason": fallback_reason if crop_mode == "fixed_epoch_fallback" else "",
+            "fallback_reason": "",
             "warning": "",
         }
         out_of_bounds = []

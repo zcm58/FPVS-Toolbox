@@ -695,7 +695,11 @@ def _run_full_pipeline_for_file(
             rep_metadata: List[dict] = []
 
             n_common: Optional[int] = None
-            label_has_fallback_rep = any(crop_results[k].fallback for k in rep_keys)
+            fallback_rep_reasons = [
+                f"rep={int(rep_key[1])}:{crop_results[rep_key].fallback_reason or 'unknown'}"
+                for rep_key in rep_keys
+                if crop_results[rep_key].fallback
+            ]
             if n_step:
                 rep_lengths = [crop_results[k].n_samples for k in rep_keys if not crop_results[k].fallback and crop_results[k].n_samples > 0]
                 if rep_lengths:
@@ -703,32 +707,39 @@ def _run_full_pipeline_for_file(
                     if n_common <= 0:
                         n_common = None
 
-            label_uses_fallback = bool(label_has_fallback_rep or n_common is None or not n_step)
-            if label_uses_fallback:
-                if label_has_fallback_rep:
-                    label_fallback_reason = "label_has_fallback_rep"
-                elif n_common is None:
-                    label_fallback_reason = "missing_n_common"
-                else:
-                    label_fallback_reason = "missing_n_step"
-                crop_logger.warning(
-                    "file=%s condition=%s label_epoch_mode=fixed_epoch_fallback fallback_reps=%d n_common=%s n_step=%s reason=%s",
-                    file_path.name,
-                    label,
-                    sum(1 for k in rep_keys if crop_results[k].fallback),
-                    n_common,
-                    n_step,
-                    label_fallback_reason,
+            if not n_step:
+                raise RuntimeError(
+                    "Locked FFT crop required but no valid N_step is available "
+                    f"for {file_path.name} condition={label}. "
+                    "Fixed-epoch fallback is disabled for the normal processing pipeline."
                 )
-            else:
-                label_fallback_reason = ""
-                crop_logger.info(
-                    "file=%s condition=%s label_epoch_mode=55_onbin fallback_reps=0 n_common=%d n_step=%s",
-                    file_path.name,
-                    label,
-                    int(n_common),
-                    n_step,
+            if fallback_rep_reasons:
+                raise RuntimeError(
+                    "Locked FFT crop required but one or more repetitions could not be "
+                    f"cropped on-bin for {file_path.name} condition={label}: "
+                    f"{'; '.join(fallback_rep_reasons)}. "
+                    "Fixed-epoch fallback is disabled for the normal processing pipeline."
                 )
+            if n_common is None:
+                raise RuntimeError(
+                    "Locked FFT crop required but no common on-bin epoch length could be "
+                    f"computed for {file_path.name} condition={label}. "
+                    "Fixed-epoch fallback is disabled for the normal processing pipeline."
+                )
+            if int(n_common) % int(n_step) != 0:
+                raise RuntimeError(
+                    "Locked FFT crop invariant failed before epoching: "
+                    f"N_common={n_common}, N_step={n_step}, "
+                    f"file={file_path.name}, condition={label}."
+                )
+
+            crop_logger.info(
+                "file=%s condition=%s label_epoch_mode=55_onbin n_common=%d n_step=%s",
+                file_path.name,
+                label,
+                int(n_common),
+                n_step,
+            )
 
             for rep_key in rep_keys:
                 crop = crop_results[rep_key]
@@ -740,36 +751,33 @@ def _run_full_pipeline_for_file(
                 n_rep = int(crop.n_samples)
                 available_samples = int(crop.available_samples)
 
-                use_fallback = label_uses_fallback
-                if use_fallback:
-                    crop_mode = "fixed_epoch_fallback"
-                    if crop.fallback:
-                        fallback_reason = crop.fallback_reason or label_fallback_reason or "unknown"
-                    else:
-                        fallback_reason = label_fallback_reason or "unknown"
-                    start_samp = int(crop.block_start_sample + tmin * sfreq)
-                    stop_samp = int(crop.block_start_sample + tmax * sfreq)
-                    start_samp = max(0, start_samp)
-                    stop_samp = min(int(raw_proc.n_times), stop_samp)
-                else:
-                    start_samp = int(crop.crop_start_sample)
-                    stop_samp = int(start_samp + n_common)
+                if crop.fallback:
+                    raise RuntimeError(
+                        "Locked FFT crop required but a fallback repetition reached "
+                        f"epoch building for {file_path.name} condition={label} "
+                        f"rep={int(rep_key[1])}: {crop.fallback_reason or 'unknown'}."
+                    )
+
+                start_samp = int(crop.crop_start_sample)
+                stop_samp = int(start_samp + n_common)
 
                 expected_n = max(0, stop_samp - start_samp)
 
                 if stop_samp <= start_samp:
-                    crop_logger.warning(
-                        "file=%s condition=%s rep=%d skip_empty_segment start=%d stop=%d",
-                        file_path.name,
-                        label,
-                        int(rep_key[1]),
-                        start_samp,
-                        stop_samp,
+                    raise RuntimeError(
+                        "Locked FFT crop produced an empty segment: "
+                        f"file={file_path.name}, condition={label}, rep={int(rep_key[1])}, "
+                        f"start={start_samp}, stop={stop_samp}."
                     )
-                    continue
 
                 n_used = expected_n
-                n_mod_step = int(n_used % n_step) if n_step else -1
+                n_mod_step = int(n_used % n_step)
+                if n_mod_step != 0:
+                    raise RuntimeError(
+                        "Locked FFT crop invariant failed during epoching: "
+                        f"N={n_used}, N_step={n_step}, N_mod_step={n_mod_step}, "
+                        f"file={file_path.name}, condition={label}, rep={int(rep_key[1])}."
+                    )
                 df_hz = (sfreq / float(n_used)) if n_used > 0 else 0.0
                 k0 = (1.2 * float(n_used) / sfreq) if n_used > 0 else 0.0
                 f_bin_hz = (round(k0) * df_hz) if n_used > 0 else 0.0

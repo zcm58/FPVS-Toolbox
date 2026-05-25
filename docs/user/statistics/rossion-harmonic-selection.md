@@ -8,7 +8,8 @@ harmonics contributed to the Stats tool's Summed BCA dependent variable.
 The default and primary policy is **Fixed / predefined harmonic list**.
 By default it uses 1.2, 2.4, 3.6, 4.8, and 7.2 Hz. Base-rate overlaps
 such as 6, 12, and 18 Hz are excluded by default. The same fixed list is
-applied to every participant, selected condition, and ROI.
+applied to every participant, selected condition, and ROI. The source
+`BCA (uV)` sheets must contain those exact harmonic columns.
 
 An optional alternative is **Group-level significant harmonics
 (Volfart/Retter/Rossion style)**. This option selects one common harmonic
@@ -35,6 +36,16 @@ Selection is performed from the `FullFFT Amplitude (uV)` sheets:
 4. Participant-level Summed BCA is computed from the `BCA (uV)` sheets
    using the selected common harmonic list.
 
+The policy requires exact nominal oddball-harmonic columns in the
+`FullFFT Amplitude (uV)` sheet, such as `1.2000_Hz`, `2.4000_Hz`,
+and `3.6000_Hz`. If the FullFFT frequency grid is off-bin, the tool
+stops before reading amplitude rows or aggregating BCA values so the
+workbooks can be regenerated with locked FFT crop output.
+
+The selected participant-level `BCA (uV)` columns must also match exactly.
+The group-level policy does not use nearest frequency columns or silent
+fallback harmonics.
+
 The output remains Summed BCA in microvolts. SNR is not used as the
 dependent variable for the Stats models.
 
@@ -50,5 +61,6 @@ base-rate overlaps, and note that the same harmonic list was applied to
 all participants, selected conditions, and ROIs.
 
 The Stats-ready workbook includes a `Harmonic_Selection` sheet with the
-selected harmonics, z-scores, base-overlap exclusions, and selection
-scope.
+selected harmonics, z-scores, base-overlap exclusions, selection scope,
+matched FullFFT columns, grand-average candidate amplitudes, and local
+noise bins used for the group-level z-score calculation.

@@ -178,9 +178,9 @@ def _attempt_legacy_55_onbin_crop(
     cond_starts = [int(row[0]) for row in global_events if int(row[2]) == condition_id]
     all_starts = sorted([int(row[0]) for row in global_events if int(row[2]) in onset_ids])
     if not cond_starts:
-        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, "no_condition_starts"
+        raise ValueError("locked FFT crop unavailable: no_condition_starts")
     if not all_starts:
-        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, "no_onset_starts"
+        raise ValueError("locked FFT crop unavailable: no_onset_starts")
 
     rep_idx = min(data_idx, len(cond_starts) - 1)
     block_start = cond_starts[rep_idx]
@@ -197,10 +197,10 @@ def _attempt_legacy_55_onbin_crop(
 
     _, n_step, step_err = compute_onbin_step(fs=float(sfreq), f_oddball=ODDBALL_FREQ)
     if step_err or n_step is None:
-        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, step_err or "step_error"
+        raise ValueError(f"locked FFT crop unavailable: {step_err or 'step_error'}")
     if len(samples_55) < 2:
         reason = "no_55_in_block" if len(samples_55) == 0 else "insufficient_55"
-        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, reason
+        raise ValueError(f"locked FFT crop unavailable: {reason}")
 
     available_samples = int(block_end - first55_samp)
     n_used = int(compute_onbin_N(available_samples=available_samples, N_step=n_step))
@@ -210,7 +210,7 @@ def _attempt_legacy_55_onbin_crop(
     n_used = int(compute_onbin_N(available_samples=min(n_used, max_available_from_epoch), N_step=n_step))
 
     if n_used < n_step:
-        return avg_data, "fixed_epoch_fallback", n55, first55_samp, last55_samp, n_step, "too_short_for_step"
+        raise ValueError("locked FFT crop unavailable: too_short_for_step")
 
     cropped = avg_data[:, crop_start_idx:crop_start_idx + n_used]
     return cropped, "55_onbin", n55, first55_samp, last55_samp, n_step, ""
@@ -481,7 +481,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
 
                 sfreq = data_eeg.info["sfreq"]
 
-                crop_mode = "fixed_epoch_fallback"
+                crop_mode = "missing_locked_fft_crop"
                 n55 = None
                 first55_samp = None
                 last55_samp = None
@@ -537,7 +537,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         crop_mode = "55_onbin"
                         fallback_reason = ""
                     elif crop_modes:
-                        crop_mode = "fixed_epoch_fallback"
+                        crop_mode = "non_55_onbin_metadata"
                         fallback_reasons = [
                             r
                             for r in md.get("fallback_reason", pd.Series(dtype=object)).fillna("").astype(str).tolist()
@@ -579,6 +579,13 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         raise ValueError(
                             f"55_onbin data is not divisible by N_step in post_process: N={num_times}, N_step={n_step}"
                         )
+                else:
+                    raise ValueError(
+                        "Locked FFT crop required before post-processing export: "
+                        f"condition={cond_label_from_keys}, crop_mode={crop_mode}, "
+                        f"fallback_reason={fallback_reason or 'unknown'}. "
+                        "Fixed-epoch FFT fallback is disabled."
+                    )
 
                 avg_data_uv = avg_data * 1e6
                 if data_idx == 0:
@@ -662,15 +669,22 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                                 )
                             continue
 
-                        target_bin_index = int(np.argmin(np.abs(fft_frequencies - target_freq)))
-                        exact_k = int(round(target_freq * num_times / sfreq))
-                        on_bin = abs((target_freq * num_times / sfreq) - round(target_freq * num_times / sfreq)) < 1e-9
-                        if on_bin and 0 <= exact_k < len(fft_frequencies):
-                            if exact_k != target_bin_index:
-                                app.log(
-                                    f"WARN [fft_crop] bin_mismatch cond={cond_label_from_keys} target={target_freq} argmin={target_bin_index} exact={exact_k}"
-                                )
-                            target_bin_index = exact_k
+                        exact_position = target_freq * num_times / sfreq
+                        exact_k = int(round(exact_position))
+                        if abs(exact_position - exact_k) >= 1e-9:
+                            raise ValueError(
+                                "Target frequency is not locked to an FFT bin: "
+                                f"condition={cond_label_from_keys}, target={target_freq}, "
+                                f"N={num_times}, fs={sfreq}, k={exact_position:.12g}. "
+                                "Nearest-bin fallback is disabled."
+                            )
+                        if not (0 <= exact_k < len(fft_frequencies)):
+                            raise ValueError(
+                                "Target frequency bin is outside the FFT frequency grid: "
+                                f"condition={cond_label_from_keys}, target={target_freq}, "
+                                f"N={num_times}, fs={sfreq}, k={exact_k}."
+                            )
+                        target_bin_index = exact_k
 
                         # Shared noise-floor logic: ±10 bins, exclude neighbors, remove 2 extremes
                         noise_mean_val, noise_std_val = compute_noise_stats_for_bin(

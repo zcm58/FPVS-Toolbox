@@ -16,6 +16,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
     GROUP_SIGNIFICANT_POLICY_NAME,
     normalize_dv_policy,
 )
+from Tools.Stats.workers import stats_workers
 
 
 def _bca_columns() -> list[str]:
@@ -31,7 +32,7 @@ def _bca_columns() -> list[str]:
 
 def test_fixed_harmonic_selection_parses_dedupes_excludes_base_and_matches() -> None:
     selection = build_fixed_harmonic_selection(
-        requested_values="1.2, 2.4, 2.4, 3.60001, 4.8, 6.0, 7.2",
+        requested_values="1.2, 2.4, 2.4, 3.6, 4.8, 6.0, 7.2",
         bca_columns=_bca_columns(),
         base_frequency_hz=6.0,
         auto_exclude_base_overlaps=True,
@@ -56,6 +57,16 @@ def test_fixed_harmonic_selection_fails_when_requested_frequency_is_out_of_range
         build_fixed_harmonic_selection(
             requested_values="99.9",
             bca_columns=_bca_columns(),
+            base_frequency_hz=6.0,
+            matching_tolerance_hz=0.01,
+        )
+
+
+def test_fixed_harmonic_selection_rejects_nearest_bca_column_fallback() -> None:
+    with pytest.raises(RuntimeError, match="requires exact BCA column 1.2000_Hz"):
+        build_fixed_harmonic_selection(
+            requested_values="1.2",
+            bca_columns=["1.2001_Hz", "2.4000_Hz"],
             base_frequency_hz=6.0,
             matching_tolerance_hz=0.01,
         )
@@ -145,6 +156,12 @@ def test_group_significant_policy_selects_common_grand_average_harmonics(tmp_pat
     assert selection.selection_scope == "group_level_all_scalp_electrodes_all_selected_conditions"
     assert selection.z_by_harmonic[1.2] > settings.group_significant_z_threshold
     assert selection.z_by_harmonic[2.4] < settings.group_significant_z_threshold
+    first_row = next(row for row in selection.rows if row.target_frequency_hz == pytest.approx(1.2))
+    assert first_row.target_amplitude_uv == pytest.approx(20.0)
+    assert first_row.noise_mean_uv is not None
+    assert first_row.noise_std_uv is not None
+    assert first_row.noise_bin_indices
+    assert first_row.noise_used_bin_indices
 
 
 def test_group_significant_policy_reports_tested_candidates_when_none_selected(
@@ -172,6 +189,8 @@ def test_group_significant_policy_reports_tested_candidates_when_none_selected(
     assert "2.4000 Hz z=" in message
     assert "3.6000 Hz z=" in message
     assert any("tested candidates:" in item for item in messages)
+    assert any("grand_avg_amp_uv=" in item for item in messages)
+    assert any("noise_bins=[" in item for item in messages)
 
 
 def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_path: Path) -> None:
@@ -406,6 +425,141 @@ def test_group_significant_policy_rejects_offgrid_fullfft_frequency_grids(
     group_policy.clear_group_significant_selection_cache()
 
 
+def test_group_significant_policy_fails_fast_when_any_workbook_lacks_exact_harmonic_columns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    subjects = ["S1"]
+    conditions = ["C1", "C2"]
+    rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
+    first_path = tmp_path / "exact_grid.xlsx"
+    second_path = tmp_path / "near_but_not_exact_grid.xlsx"
+    _write_group_policy_workbook(first_path, scale=1, frequency_step=0.3)
+    _write_group_policy_workbook(second_path, scale=1, frequency_step=0.300025)
+    subject_data = {
+        "S1": {
+            "C1": str(first_path),
+            "C2": str(second_path),
+        }
+    }
+    fullfft_row_reads: list[str] = []
+    bca_reads: list[str] = []
+
+    def _unexpected_fullfft_row_read(*_args, **_kwargs):
+        fullfft_row_reads.append("called")
+        raise AssertionError("FullFFT row loading should not run before exact-column preflight fails")
+
+    def _unexpected_excel_read(path, sheet_name, **_kwargs):
+        bca_reads.append(f"{path}:{sheet_name}")
+        raise AssertionError("BCA sheets should not be read before exact-column preflight fails")
+
+    monkeypatch.setattr(
+        group_policy,
+        "_load_mean_amplitude_series",
+        _unexpected_fullfft_row_read,
+    )
+    monkeypatch.setattr(group_policy, "safe_read_excel", _unexpected_excel_read)
+
+    with pytest.raises(
+        RuntimeError,
+        match="requires exact nominal oddball harmonic columns in every included FullFFT sheet",
+    ):
+        dv_policies.prepare_summed_bca_data(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=6.0,
+            log_func=lambda _message: None,
+            rois=rois,
+            provenance_map={},
+            dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+            dv_metadata={},
+            max_freq=3.6,
+        )
+
+    assert fullfft_row_reads == []
+    assert bca_reads == []
+    group_policy.clear_group_significant_selection_cache()
+
+
+def test_group_significant_stats_worker_preflights_exact_columns_before_qc(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    subjects = ["S1"]
+    conditions = ["C1", "C2"]
+    rois = {"Posterior": ["O1", "O2"]}
+    first_path = tmp_path / "worker_exact_grid.xlsx"
+    second_path = tmp_path / "worker_near_grid.xlsx"
+    _write_group_policy_workbook(first_path, scale=1, frequency_step=0.3)
+    _write_group_policy_workbook(second_path, scale=1, frequency_step=0.300025)
+    subject_data = {
+        "S1": {
+            "C1": str(first_path),
+            "C2": str(second_path),
+        }
+    }
+    qc_calls: list[str] = []
+
+    def _unexpected_qc_screening(**_kwargs):
+        qc_calls.append("called")
+        raise AssertionError("QC screening should not run before exact-column preflight fails")
+
+    monkeypatch.setattr(stats_workers, "_apply_qc_screening", _unexpected_qc_screening)
+    monkeypatch.setattr(stats_workers, "_resolve_max_freq", lambda _value: 3.6)
+
+    with pytest.raises(
+        RuntimeError,
+        match="requires exact nominal oddball harmonic columns in every included FullFFT sheet",
+    ):
+        stats_workers._prepare_single_group_data(
+            subjects=subjects,
+            conditions=conditions,
+            conditions_all=conditions,
+            subject_data=subject_data,
+            base_freq=6.0,
+            rois=rois,
+            rois_all=rois,
+            dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+            outlier_exclusion_enabled=False,
+            outlier_abs_limit=50.0,
+            qc_config={},
+            qc_state={},
+            manual_excluded_pids=[],
+            message_cb=lambda _message: None,
+        )
+
+    assert qc_calls == []
+    group_policy.clear_group_significant_selection_cache()
+
+
+def test_group_significant_policy_requires_exact_selected_bca_columns(tmp_path: Path) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    path = tmp_path / "near_bca_columns.xlsx"
+    _write_group_policy_workbook(path, scale=1, frequency_step=0.3, bca_column_offset=0.0001)
+
+    with pytest.raises(
+        RuntimeError,
+        match="requires exact selected BCA harmonic columns",
+    ):
+        dv_policies.prepare_summed_bca_data(
+            subjects=["S1"],
+            conditions=["C1"],
+            subject_data={"S1": {"C1": str(path)}},
+            base_freq=6.0,
+            log_func=lambda _message: None,
+            rois={"Posterior": ["O1", "O2"]},
+            provenance_map={},
+            dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+            dv_metadata={},
+            max_freq=3.6,
+        )
+
+    group_policy.clear_group_significant_selection_cache()
+
+
 def _write_workbook(path: Path, *, subject_idx: int, condition_idx: int) -> None:
     scale = subject_idx + condition_idx - 1
     bca = pd.DataFrame(
@@ -436,6 +590,7 @@ def _write_group_policy_workbook(
     scale: int,
     frequency_step: float = 0.3,
     peak_targets: set[float] | None = None,
+    bca_column_offset: float = 0.0,
 ) -> None:
     if peak_targets is None:
         peak_targets = {1.2, 3.6, 7.2}
@@ -460,12 +615,12 @@ def _write_group_policy_workbook(
 
     bca = pd.DataFrame(
         {
-            "1.2000_Hz": [1.0 * scale, 2.0 * scale, 0.5],
-            "2.4000_Hz": [100.0, 100.0, 100.0],
-            "3.6000_Hz": [0.5, 0.5, 0.1],
-            "4.8000_Hz": [100.0, 100.0, 100.0],
-            "6.0000_Hz": [100.0, 100.0, 100.0],
-            "7.2000_Hz": [1.0, 1.0, 0.1],
+            f"{1.2 + bca_column_offset:.4f}_Hz": [1.0 * scale, 2.0 * scale, 0.5],
+            f"{2.4 + bca_column_offset:.4f}_Hz": [100.0, 100.0, 100.0],
+            f"{3.6 + bca_column_offset:.4f}_Hz": [0.5, 0.5, 0.1],
+            f"{4.8 + bca_column_offset:.4f}_Hz": [100.0, 100.0, 100.0],
+            f"{6.0 + bca_column_offset:.4f}_Hz": [100.0, 100.0, 100.0],
+            f"{7.2 + bca_column_offset:.4f}_Hz": [1.0, 1.0, 0.1],
         },
         index=["O1", "O2", "FZ"],
     )

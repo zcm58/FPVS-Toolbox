@@ -44,11 +44,25 @@ Rules:
   `Export Stats-Ready Workbook` as a distinct action, reuse the active Summed
   BCA DV facade, preserve `subject_id` and group labels, and surface missing
   metadata instead of silently changing values. Fixed/predefined harmonic
-  summation is the default and primary DV policy. The optional
+  summation is the default and primary DV policy. Fixed/predefined summation
+  also requires exact selected `BCA (uV)` harmonic columns; do not use
+  nearest-column matching for requested fixed harmonics. The optional
   group-level significant-harmonics policy selects one common non-base oddball
   harmonic list from grand-averaged `FullFFT Amplitude (uV)` spectra, then
   applies that common list uniformly to every participant, selected condition,
-  and ROI.
+  and ROI. This policy expects exact nominal oddball-harmonic columns generated
+  by the locked FFT crop behavior in
+  `docs/agent/architecture/fft-crop-method.md`; do not add a nearest-bin
+  workaround in Stats for off-grid FullFFT workbooks.
+- The group-level significant-harmonics policy must fail fast from workbook
+  headers when exact nominal oddball-harmonic columns are missing. Header
+  preflight happens in the Stats worker before QC screening, grand-average
+  amplitude row loading, and `BCA (uV)` aggregation, so an off-grid FullFFT
+  workbook should not trigger expensive downstream sheet reads.
+- After group-level harmonics are selected, the `BCA (uV)` sheet must also
+  contain exact selected harmonic columns such as `1.2000_Hz`. Do not use
+  tolerance matching, nearest-column matching, or policy fallbacks for selected
+  group harmonics; missing exact selected columns are hard failures.
 - Stats folder scans may rebind the window to the manifest-owning project root
   only when the selected Excel folder belongs to that manifest-defined Excel
   subfolder. When rebinding, clear project-bound scan/results/export state so

@@ -139,7 +139,7 @@ def test_mp_worker_uses_onbin_crop_and_stamps_metadata(tmp_path, monkeypatch):
     assert md["N_mod_step"].tolist() == [0, 0]
 
 
-def test_mp_worker_fallback_metadata_when_55_missing(tmp_path, monkeypatch):
+def test_mp_worker_hard_fails_when_55_onbin_crop_missing(tmp_path, monkeypatch):
     raw = _FakeRaw(sfreq=256.0, n_times=3000)
     raw._events = np.array([
         [1000, 0, 10],
@@ -155,7 +155,8 @@ def test_mp_worker_fallback_metadata_when_55_missing(tmp_path, monkeypatch):
         project_root=tmp_path,
     )
 
-    assert result["status"] == "ok"
-    md = capture.ctx.preprocessed_data["odd"][0].metadata
-    assert md["crop_mode"].tolist() == ["fixed_epoch_fallback"]
-    assert md["fallback_reason"].iloc[0]
+    assert result["status"] == "error"
+    assert result["stage"] == "epochs"
+    assert "Locked FFT crop required" in result["error"]
+    assert "Fixed-epoch fallback is disabled" in result["error"]
+    assert capture.ctx is None

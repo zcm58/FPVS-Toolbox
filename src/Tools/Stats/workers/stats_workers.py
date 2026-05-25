@@ -14,11 +14,13 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 from Tools.Stats.analysis.baseline_vs_zero import run_baseline_vs_zero_tests
 from Tools.Stats.analysis.dv_policies import (
-    FIXED_PREDEFINED_POLICY_NAME,
+    GROUP_SIGNIFICANT_POLICY_NAME,
     normalize_dv_policy,
     prepare_summed_bca_data,
 )
 from Tools.Stats.analysis.dv_policy_fixed_predefined import build_fixed_predefined_preview_payload
+from Tools.Stats.analysis.dv_policy_group_significant import preflight_group_significant_full_fft_columns
+from Tools.Stats.analysis.dv_policy_settings import _resolve_max_freq
 from Tools.Stats.analysis.interpretation_helpers import generate_lme_summary
 from Tools.Stats.analysis.mixed_effects_model import run_mixed_effects_model
 from Tools.Stats.analysis.posthoc_tests import run_interaction_posthocs
@@ -376,6 +378,16 @@ def _prepare_single_group_data(
     list[str],
 ]:
     all_subjects = list(subjects) if subjects else []
+    settings = normalize_dv_policy(dv_policy)
+    if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
+        preflight_group_significant_full_fft_columns(
+            subjects=all_subjects,
+            conditions=list(conditions) if conditions else [],
+            subject_data=subject_data,
+            base_frequency_hz=base_freq,
+            log_func=message_cb,
+            max_freq=_resolve_max_freq(None),
+        )
     subjects, subject_data, qc_report = _apply_qc_screening(
         subjects=all_subjects,
         subject_data=subject_data,

@@ -21,7 +21,6 @@ from Tools.Stats.analysis.dv_policy_settings import (
 from Tools.Stats.analysis.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
     _current_rois_map,
-    _match_freq_column,
 )
 from Tools.Stats.io.excel_io import safe_read_excel
 
@@ -53,6 +52,23 @@ class GroupSignificantHarmonicRow:
     excluded_base_rate: bool
     exclusion_reason: str
     warning: str
+    target_amplitude_uv: float | None = None
+    noise_mean_uv: float | None = None
+    noise_std_uv: float | None = None
+    noise_bin_indices: tuple[int, ...] = ()
+    noise_frequencies_hz: tuple[float, ...] = ()
+    noise_amplitudes_uv: tuple[float, ...] = ()
+    noise_used_bin_indices: tuple[int, ...] = ()
+    noise_used_frequencies_hz: tuple[float, ...] = ()
+    noise_used_amplitudes_uv: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True)
+class GroupSignificantNoiseStats:
+    mean_uv: float
+    std_uv: float
+    candidate_bin_indices: tuple[int, ...]
+    used_bin_indices: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -125,6 +141,15 @@ class GroupSignificantHarmonicSelection:
                     "excluded_base_rate": row.excluded_base_rate,
                     "exclusion_reason": row.exclusion_reason,
                     "warning": row.warning,
+                    "target_amplitude_uv": row.target_amplitude_uv,
+                    "noise_mean_uv": row.noise_mean_uv,
+                    "noise_std_uv": row.noise_std_uv,
+                    "noise_bin_indices": list(row.noise_bin_indices),
+                    "noise_frequencies_hz": list(row.noise_frequencies_hz),
+                    "noise_amplitudes_uv": list(row.noise_amplitudes_uv),
+                    "noise_used_bin_indices": list(row.noise_used_bin_indices),
+                    "noise_used_frequencies_hz": list(row.noise_used_frequencies_hz),
+                    "noise_used_amplitudes_uv": list(row.noise_used_amplitudes_uv),
                 }
                 for row in self.rows
             ],
@@ -165,6 +190,33 @@ class GroupSignificantSelectionCacheKey:
 def clear_group_significant_selection_cache() -> None:
     with _GROUP_SELECTION_CACHE_LOCK:
         _GROUP_SELECTION_CACHE.clear()
+
+
+def preflight_group_significant_full_fft_columns(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    base_frequency_hz: float,
+    log_func: Callable[[str], None],
+    max_freq: float | None = None,
+) -> int:
+    """Validate exact FullFFT harmonic columns before expensive Stats reads."""
+    required = _plan_required_full_fft_columns(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_frequency_hz=base_frequency_hz,
+        max_freq=max_freq,
+        log_func=log_func,
+    )
+    return _preflight_required_full_fft_columns(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        required=required,
+        log_func=log_func,
+    )
 
 
 def _get_cached_group_significant_selection(
@@ -321,10 +373,18 @@ def build_group_significant_harmonic_selection(
         max_freq=max_freq,
         log_func=log_func,
     )
+    planned_workbook_count = _preflight_required_full_fft_columns(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        required=required,
+        log_func=log_func,
+    )
     log_func(
         "[PERF] Group harmonic selection column plan: "
         f"{len(required.usecols) - 1} FullFFT frequency columns needed "
-        f"from {len(required.frequency_columns)} available columns."
+        f"from {len(required.frequency_columns)} available columns "
+        f"across {planned_workbook_count} workbooks."
     )
     logger.info(
         "stats_group_harmonics_column_plan",
@@ -427,15 +487,39 @@ def build_group_significant_harmonic_selection(
             )
             continue
 
-        noise_mean, noise_std = _compute_noise_stats_for_planned_bin(
+        noise_stats = _compute_noise_stats_for_planned_bin(
             amplitude_by_bin,
             matched_idx,
             window_size=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
             min_bins=4,
         )
         target_amp = amplitude_by_bin.get(int(matched_idx), np.nan)
+        noise_mean = noise_stats.mean_uv
+        noise_std = noise_stats.std_uv
         z_score = (target_amp - noise_mean) / noise_std if noise_std > 1e-12 else np.nan
         z_value = float(z_score) if np.isfinite(z_score) else np.nan
+        noise_bin_indices = noise_stats.candidate_bin_indices
+        noise_used_bin_indices = noise_stats.used_bin_indices
+        noise_frequencies = tuple(
+            float(freq_by_bin[idx])
+            for idx in noise_bin_indices
+            if idx in freq_by_bin
+        )
+        noise_amplitudes = tuple(
+            float(amplitude_by_bin[idx])
+            for idx in noise_bin_indices
+            if idx in amplitude_by_bin
+        )
+        noise_used_frequencies = tuple(
+            float(freq_by_bin[idx])
+            for idx in noise_used_bin_indices
+            if idx in freq_by_bin
+        )
+        noise_used_amplitudes = tuple(
+            float(amplitude_by_bin[idx])
+            for idx in noise_used_bin_indices
+            if idx in amplitude_by_bin
+        )
         selected_frequency = float(target_freq)
         harmonic_domain.append(selected_frequency)
         z_by_harmonic[selected_frequency] = z_value
@@ -456,6 +540,15 @@ def build_group_significant_harmonic_selection(
                 excluded_base_rate=False,
                 exclusion_reason="" if selected else "z_below_threshold",
                 warning="" if selected else "Z-score did not exceed threshold.",
+                target_amplitude_uv=float(target_amp) if np.isfinite(target_amp) else None,
+                noise_mean_uv=float(noise_mean) if np.isfinite(noise_mean) else None,
+                noise_std_uv=float(noise_std) if np.isfinite(noise_std) else None,
+                noise_bin_indices=noise_bin_indices,
+                noise_frequencies_hz=noise_frequencies,
+                noise_amplitudes_uv=noise_amplitudes,
+                noise_used_bin_indices=noise_used_bin_indices,
+                noise_used_frequencies_hz=noise_used_frequencies,
+                noise_used_amplitudes_uv=noise_used_amplitudes,
             )
         )
 
@@ -466,6 +559,7 @@ def build_group_significant_harmonic_selection(
             f"Threshold z>{settings.group_significant_z_threshold:g}; "
             f"tested candidates: {candidate_summary}."
         )
+        _log_candidate_diagnostics(rows, log_func)
         logger.warning(
             "stats_group_harmonics_no_selection",
             extra={
@@ -848,6 +942,91 @@ def _plan_required_full_fft_columns(
     )
 
 
+def _preflight_required_full_fft_columns(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    required: RequiredFullFftColumns,
+    log_func: Callable[[str], None],
+) -> int:
+    candidate_columns = _columns_for_required_indices(
+        required.frequency_columns,
+        required.candidate_indices,
+    )
+    required_columns = _columns_for_required_indices(
+        required.frequency_columns,
+        required.required_indices,
+    )
+    planned_workbooks = 0
+
+    for pid in subjects:
+        for cond_name in conditions:
+            file_path = subject_data.get(pid, {}).get(cond_name)
+            if not file_path or not Path(file_path).exists():
+                continue
+            planned_workbooks += 1
+            header_columns = _read_full_fft_header(file_path)
+            header_names = {
+                str(column)
+                for column in header_columns
+                if isinstance(column, str)
+            }
+
+            missing_candidates = [
+                column
+                for column in candidate_columns
+                if column not in header_names
+            ]
+            if missing_candidates:
+                raise RuntimeError(
+                    "Group-level significant harmonic selection requires exact "
+                    "nominal oddball harmonic columns in every included "
+                    "FullFFT sheet before reading amplitude or BCA data. "
+                    f"Missing candidate columns in {file_path}: "
+                    f"{missing_candidates[:8]}"
+                )
+
+            missing_required = [
+                column
+                for column in required_columns
+                if column not in header_names
+            ]
+            if missing_required:
+                raise RuntimeError(
+                    "Group-level significant harmonic selection requires matching "
+                    "FullFFT candidate and neighboring-noise columns in every "
+                    "included workbook before reading amplitude or BCA data. "
+                    f"Missing columns in {file_path}: {missing_required[:8]}"
+                )
+
+    if planned_workbooks <= 0:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires workbooks with a "
+            f"'{FULL_FFT_AMPLITUDE_SHEET_NAME}' sheet for included participants and conditions."
+        )
+
+    log_func(
+        "[PERF] FullFFT exact-column preflight passed: "
+        f"{planned_workbooks} workbooks, "
+        f"{len(candidate_columns)} exact oddball harmonic columns, "
+        f"{len(required_columns)} total candidate/noise columns."
+    )
+    return planned_workbooks
+
+
+def _columns_for_required_indices(
+    frequency_columns: Sequence[tuple[float, str, int]],
+    required_indices: Sequence[int],
+) -> list[str]:
+    requested = {int(idx) for idx in required_indices}
+    return [
+        str(column)
+        for _freq, column, idx in frequency_columns
+        if int(idx) in requested
+    ]
+
+
 def _find_first_full_fft_columns(
     subjects: List[str],
     conditions: List[str],
@@ -908,22 +1087,32 @@ def _load_mean_amplitude_series(
             reference_frequency_columns=reference_frequency_columns,
             required_indices=required_indices,
         )
-        if len(usecols) <= 1:
-            required_columns = [
-                str(column)
-                for _freq, column, idx in reference_frequency_columns
-                if int(idx) in set(required_indices)
-            ]
+        required_columns = [
+            str(column)
+            for _freq, column, idx in reference_frequency_columns
+            if int(idx) in set(required_indices)
+        ]
+        matched_reference_columns = {
+            str(reference_column)
+            for reference_items in local_to_reference.values()
+            for _reference_freq, reference_column in reference_items
+        }
+        missing_columns = [
+            column
+            for column in required_columns
+            if column not in matched_reference_columns
+        ]
+        if missing_columns:
             raise RuntimeError(
-                "Group-level significant harmonic selection requires exact nominal "
+                "Group-level significant harmonic selection requires matching "
                 f"FullFFT columns in every included workbook. Missing columns in {file_path}: "
-                f"{required_columns[:8]}"
+                f"{missing_columns[:8]}"
             )
 
         ordered_local_columns = [column for column in usecols[1:] if column in header_columns]
         if not ordered_local_columns:
             raise RuntimeError(
-                "Group-level significant harmonic selection requires exact nominal "
+                "Group-level significant harmonic selection requires matching "
                 f"FullFFT columns in every included workbook: {file_path}"
             )
 
@@ -1049,14 +1238,14 @@ def _aggregate_bca_for_all_rois(
 
     read_elapsed = perf_counter() - started
     df_bca.index = df_bca.index.astype(str).str.upper().str.strip()
-    cols_to_sum: List[str] = []
-    for freq_val in harmonic_freqs:
-        col_bca = _match_freq_column(df_bca.columns, freq_val)
-        if col_bca:
-            cols_to_sum.append(col_bca)
-    if not cols_to_sum:
-        log_func(f"No group-selected harmonics found in BCA sheet for {file_path}.")
-        return values, provenance
+    cols_to_sum = [f"{float(freq_val):.4f}_Hz" for freq_val in harmonic_freqs]
+    missing_bca_columns = [column for column in cols_to_sum if column not in df_bca.columns]
+    if missing_bca_columns:
+        raise RuntimeError(
+            "Group-level significant harmonic summation requires exact selected "
+            f"BCA harmonic columns in every included workbook. Missing columns in {file_path}: "
+            f"{missing_bca_columns[:8]}"
+        )
 
     numeric_bca = (
         df_bca[cols_to_sum]
@@ -1145,30 +1334,55 @@ def _compute_noise_stats_for_planned_bin(
     *,
     window_size: int,
     min_bins: int,
-) -> tuple[float, float]:
+) -> GroupSignificantNoiseStats:
     indices = _noise_indices_for_bin(
         int(target_idx),
         available_indices=set(amplitude_by_bin.keys()),
         window_size=window_size,
     )
     if len(indices) < min_bins:
-        return 0.0, 0.0
-    noise_vals = np.asarray(
-        [amplitude_by_bin[idx] for idx in indices if np.isfinite(amplitude_by_bin.get(idx, np.nan))],
-        dtype=float,
-    )
-    if noise_vals.size < min_bins:
-        return 0.0, 0.0
-    if noise_vals.size > 2:
+        return GroupSignificantNoiseStats(
+            mean_uv=0.0,
+            std_uv=0.0,
+            candidate_bin_indices=tuple(indices),
+            used_bin_indices=(),
+        )
+    finite_pairs = [
+        (idx, amplitude_by_bin[idx])
+        for idx in indices
+        if np.isfinite(amplitude_by_bin.get(idx, np.nan))
+    ]
+    if len(finite_pairs) < min_bins:
+        return GroupSignificantNoiseStats(
+            mean_uv=0.0,
+            std_uv=0.0,
+            candidate_bin_indices=tuple(idx for idx, _value in finite_pairs),
+            used_bin_indices=(),
+        )
+    used_pairs = list(finite_pairs)
+    if len(used_pairs) > 2:
+        noise_vals = np.asarray([value for _idx, value in used_pairs], dtype=float)
         max_idx = int(noise_vals.argmax())
         min_idx = int(noise_vals.argmin())
-        mask = np.ones(noise_vals.shape[0], dtype=bool)
-        mask[max_idx] = False
-        mask[min_idx] = False
-        noise_vals = noise_vals[mask]
-    if noise_vals.size == 0:
-        return 0.0, 0.0
-    return float(noise_vals.mean()), float(noise_vals.std(ddof=0))
+        used_pairs = [
+            pair
+            for pair_index, pair in enumerate(used_pairs)
+            if pair_index not in {max_idx, min_idx}
+        ]
+    if not used_pairs:
+        return GroupSignificantNoiseStats(
+            mean_uv=0.0,
+            std_uv=0.0,
+            candidate_bin_indices=tuple(idx for idx, _value in finite_pairs),
+            used_bin_indices=(),
+        )
+    used_values = np.asarray([value for _idx, value in used_pairs], dtype=float)
+    return GroupSignificantNoiseStats(
+        mean_uv=float(used_values.mean()),
+        std_uv=float(used_values.std(ddof=0)),
+        candidate_bin_indices=tuple(idx for idx, _value in finite_pairs),
+        used_bin_indices=tuple(idx for idx, _value in used_pairs),
+    )
 
 
 def _electrodes_for_scope(
@@ -1217,11 +1431,8 @@ def _find_exact_frequency_column(
     frequency_columns: Sequence[tuple[float, str, int]],
     target_freq: float,
 ) -> tuple[float, str, int] | None:
-    matched_column = _match_freq_column([column for _freq, column, _idx in frequency_columns], target_freq)
-    if matched_column is None:
-        return None
     for freq, column, idx in frequency_columns:
-        if str(column) == str(matched_column):
+        if abs(float(freq) - float(target_freq)) <= 1e-9:
             return float(freq), str(column), int(idx)
     return None
 
@@ -1265,6 +1476,56 @@ def _format_candidate_z_summary(rows: Sequence[GroupSignificantHarmonicRow]) -> 
             continue
         parts.append(f"{row.target_frequency_hz:.4f} Hz z={row.z_score:.3f}")
     return "; ".join(parts) if parts else "none"
+
+
+def _log_candidate_diagnostics(
+    rows: Sequence[GroupSignificantHarmonicRow],
+    log_func: Callable[[str], None],
+) -> None:
+    for row in rows:
+        if row.excluded_base_rate:
+            log_func(
+                "[DEBUG] Group harmonic candidate "
+                f"{row.target_frequency_hz:.4f} Hz skipped: base-rate overlap "
+                f"(column={row.matched_column}, bin={row.matched_bin_index})."
+            )
+            continue
+        if row.target_amplitude_uv is None:
+            log_func(
+                "[DEBUG] Group harmonic candidate "
+                f"{row.target_frequency_hz:.4f} Hz not tested: "
+                f"{row.exclusion_reason or row.warning or 'missing amplitude'} "
+                f"(column={row.matched_column}, bin={row.matched_bin_index})."
+            )
+            continue
+        log_func(
+            "[DEBUG] Group harmonic candidate "
+            f"{row.target_frequency_hz:.4f} Hz "
+            f"(column={row.matched_column}, bin={row.matched_bin_index}, "
+            f"matched={_format_optional_float(row.matched_frequency_hz)} Hz): "
+            f"grand_avg_amp_uv={row.target_amplitude_uv:.10g}, "
+            f"noise_mean_uv={_format_optional_float(row.noise_mean_uv)}, "
+            f"noise_std_uv={_format_optional_float(row.noise_std_uv)}, "
+            f"z={_format_optional_float(row.z_score)}, "
+            f"noise_bins={_format_noise_pairs(row.noise_frequencies_hz, row.noise_amplitudes_uv)}, "
+            f"noise_used_bins={_format_noise_pairs(row.noise_used_frequencies_hz, row.noise_used_amplitudes_uv)}."
+        )
+
+
+def _format_optional_float(value: float | None) -> str:
+    if value is None or not np.isfinite(value):
+        return "nan"
+    return f"{float(value):.10g}"
+
+
+def _format_noise_pairs(freqs: Sequence[float], amplitudes: Sequence[float]) -> str:
+    if not freqs or not amplitudes:
+        return "[]"
+    parts = [
+        f"{float(freq):.4f}:{float(amplitude):.10g}"
+        for freq, amplitude in zip(freqs, amplitudes)
+    ]
+    return "[" + ", ".join(parts) + "]"
 
 
 def _is_base_overlap(freq: float, base: float, tolerance_hz: float) -> bool:

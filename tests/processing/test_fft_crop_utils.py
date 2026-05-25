@@ -1,6 +1,11 @@
 import numpy as np
+import pytest
 
-from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events
+from Main_App.Shared.fft_crop_utils import (
+    compute_fft_crop_from_events,
+    compute_onbin_N,
+    compute_onbin_step,
+)
 
 
 def _build_events(fs: int, onset_ids=(1,), reps=1, cycles=10, include_dups=False, missing_gap=False):
@@ -33,6 +38,22 @@ def test_clean_runs_multiple_sampling_rates():
         assert n_step is not None
         assert crop.n_samples % n_step == 0
         assert abs((1.2 * crop.n_samples / fs) - round(1.2 * crop.n_samples / fs)) < 1e-9
+
+
+def test_supported_256_family_sampling_rates_use_three_oddball_cycle_steps():
+    for fs, expected_step in [(256, 640), (512, 1280), (1024, 2560), (2048, 5120)]:
+        _, n_step, warning = compute_onbin_step(fs=fs)
+
+        assert warning is None
+        assert n_step == expected_step
+        assert 1.2 * n_step / fs == pytest.approx(3.0)
+
+        samples_for_146_cycles = int(146 * fs / 1.2)
+        assert 1.2 * samples_for_146_cycles / fs != pytest.approx(146.0)
+
+        locked_n = compute_onbin_N(samples_for_146_cycles, n_step)
+        assert locked_n % n_step == 0
+        assert 1.2 * locked_n / fs == pytest.approx(144.0)
 
 
 def test_duplicates_are_deduped():
