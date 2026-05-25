@@ -34,6 +34,33 @@ def _settings_float(value: object, fallback: float) -> float:
         return fallback
 
 
+def _project_has_groups(project: Project | None) -> bool:
+    """Return True when the loaded project declares experimental groups."""
+
+    if project is None:
+        return False
+    groups = getattr(project, "groups", None)
+    if isinstance(groups, dict) and groups:
+        return True
+    manifest = getattr(project, "manifest", None)
+    if isinstance(manifest, dict):
+        raw_groups = manifest.get("groups")
+        return isinstance(raw_groups, dict) and bool(raw_groups)
+    return False
+
+
+def _project_plot_input_folder(
+    canonical_input: str,
+    project_settings: dict[str, object],
+    project: Project | None,
+) -> str:
+    """Return the startup input folder for project-backed Plot Generator runs."""
+
+    if _project_has_groups(project):
+        return canonical_input
+    return str(project_settings.get("input_folder") or canonical_input)
+
+
 class PlotGeneratorSettingsMixin:
     """Project and legend settings helpers for PlotGeneratorWindow."""
 
@@ -42,8 +69,13 @@ class PlotGeneratorSettingsMixin:
         return f"{label} Peaks" if label else fallback
 
     def _legend_default_values(self) -> dict[str, str]:
-        condition_a = self.condition_combo.currentText().strip()
-        condition_b = self.condition_b_combo.currentText().strip()
+        if hasattr(self, "_group_overlay_enabled") and self._group_overlay_enabled():
+            groups = self._selected_groups()
+            condition_a = groups[0] if groups else ""
+            condition_b = groups[1] if len(groups) > 1 else ""
+        else:
+            condition_a = self.condition_combo.currentText().strip()
+            condition_b = self.condition_b_combo.currentText().strip()
         return {
             "condition_a_label": condition_a,
             "condition_b_label": condition_b,
@@ -85,7 +117,8 @@ class PlotGeneratorSettingsMixin:
             "title_b_template": self.scalp_title_b_edit.text(),
         }
         if include_paths:
-            payload["input_folder"] = self.folder_edit.text()
+            if not _project_has_groups(self._project):
+                payload["input_folder"] = self.folder_edit.text()
             payload["output_folder"] = self.out_edit.text()
         return payload
 
@@ -98,7 +131,10 @@ class PlotGeneratorSettingsMixin:
             if key not in cursor or not isinstance(cursor.get(key), dict):
                 cursor[key] = {}
             cursor = cursor[key]
-        cursor.update(self._project_plot_settings_payload(include_paths=include_paths))
+        payload = self._project_plot_settings_payload(include_paths=include_paths)
+        if include_paths and "input_folder" not in payload:
+            cursor.pop("input_folder", None)
+        cursor.update(payload)
         try:
             self._project.save()
         except Exception as exc:
@@ -135,6 +171,17 @@ class PlotGeneratorSettingsMixin:
         for key, text in defaults.items():
             self._set_legend_text_auto(key, text)
 
+    def _force_legend_defaults(self) -> None:
+        defaults = self._legend_default_values()
+        self._syncing_legend_defaults = True
+        try:
+            for key, text in defaults.items():
+                self._legend_manual_overrides.discard(key)
+                self._legend_auto_values[key] = text
+                self._legend_fields[key].setText(text)
+        finally:
+            self._syncing_legend_defaults = False
+
     def _prefill_legend_defaults_if_empty(self) -> None:
         self._sync_legend_defaults_with_conditions()
 
@@ -163,7 +210,9 @@ class PlotGeneratorSettingsMixin:
     def _toggle_custom_legend_labels(self, checked: bool) -> None:
         self.legend_condition_a_edit.setEnabled(checked)
         self.legend_a_peaks_edit.setEnabled(checked)
-        show_b = self.overlay_check.isChecked()
+        show_b = self.overlay_check.isChecked() or (
+            hasattr(self, "_group_overlay_enabled") and self._group_overlay_enabled()
+        )
         self.legend_condition_b_edit.setEnabled(checked and show_b)
         self.legend_b_peaks_edit.setEnabled(checked and show_b)
         if checked:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -17,7 +18,6 @@ from Tools.Stats.analysis.dv_policy_settings import (
     GROUP_SIGNIFICANT_POLICY_LABEL,
     GROUP_SIGNIFICANT_POLICY_NAME,
 )
-from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 from Tools.Stats.analysis.stats_analysis import (
     SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
     _current_rois_map,
@@ -31,6 +31,14 @@ FULL_FFT_AMPLITUDE_SHEET_NAME = "FullFFT Amplitude (uV)"
 GROUP_SIGNIFICANT_BASE_TOLERANCE_HZ = 0.01
 GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ = 0.01
 GROUP_SIGNIFICANT_NOISE_WINDOW_BINS = 10
+GROUP_SIGNIFICANT_FULLFFT_PROGRESS_INTERVAL = 5
+GROUP_SIGNIFICANT_BCA_PROGRESS_INTERVAL = 10
+GROUP_SIGNIFICANT_SELECTION_CACHE_MAX_ENTRIES = 8
+_GROUP_SELECTION_CACHE_LOCK = threading.Lock()
+_GROUP_SELECTION_CACHE: dict[
+    "GroupSignificantSelectionCacheKey",
+    "GroupSignificantHarmonicSelection",
+] = {}
 
 
 @dataclass(frozen=True)
@@ -130,6 +138,129 @@ class RequiredFullFftColumns:
     frequency_columns: list[tuple[float, str, int]]
     candidate_indices: list[int]
     excluded_base_indices: list[int]
+    required_indices: list[int]
+
+
+@dataclass(frozen=True)
+class WorkbookSignature:
+    subject: str
+    condition: str
+    path: str
+    size_bytes: int | None
+    mtime_ns: int | None
+
+
+@dataclass(frozen=True)
+class GroupSignificantSelectionCacheKey:
+    subjects: tuple[str, ...]
+    conditions: tuple[str, ...]
+    workbooks: tuple[WorkbookSignature, ...]
+    rois: tuple[tuple[str, tuple[str, ...]], ...]
+    base_frequency_hz: float
+    max_freq_hz: float | None
+    z_threshold: float
+    electrode_scope: str
+
+
+def clear_group_significant_selection_cache() -> None:
+    with _GROUP_SELECTION_CACHE_LOCK:
+        _GROUP_SELECTION_CACHE.clear()
+
+
+def _get_cached_group_significant_selection(
+    cache_key: GroupSignificantSelectionCacheKey,
+) -> GroupSignificantHarmonicSelection | None:
+    with _GROUP_SELECTION_CACHE_LOCK:
+        return _GROUP_SELECTION_CACHE.get(cache_key)
+
+
+def _store_group_significant_selection(
+    cache_key: GroupSignificantSelectionCacheKey,
+    selection: GroupSignificantHarmonicSelection,
+) -> None:
+    with _GROUP_SELECTION_CACHE_LOCK:
+        if (
+            cache_key not in _GROUP_SELECTION_CACHE
+            and len(_GROUP_SELECTION_CACHE) >= GROUP_SIGNIFICANT_SELECTION_CACHE_MAX_ENTRIES
+        ):
+            oldest_key = next(iter(_GROUP_SELECTION_CACHE))
+            _GROUP_SELECTION_CACHE.pop(oldest_key, None)
+        _GROUP_SELECTION_CACHE[cache_key] = selection
+
+
+def _group_significant_selection_cache_key(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    rois: Dict[str, List[str]],
+    base_frequency_hz: float,
+    max_freq: float | None,
+    settings: DVPolicySettings,
+) -> GroupSignificantSelectionCacheKey:
+    subject_key = tuple(str(subject) for subject in subjects)
+    condition_key = tuple(str(condition) for condition in conditions)
+    workbook_signatures = tuple(
+        _workbook_signature(
+            subject=subject,
+            condition=condition,
+            file_path=subject_data.get(subject, {}).get(condition),
+        )
+        for subject in subject_key
+        for condition in condition_key
+    )
+    rois_key = tuple(
+        (str(roi_name), tuple(str(channel).upper().strip() for channel in channels or ()))
+        for roi_name, channels in sorted((rois or {}).items())
+    )
+    return GroupSignificantSelectionCacheKey(
+        subjects=subject_key,
+        conditions=condition_key,
+        workbooks=workbook_signatures,
+        rois=rois_key,
+        base_frequency_hz=float(base_frequency_hz),
+        max_freq_hz=float(max_freq) if max_freq is not None else None,
+        z_threshold=float(settings.group_significant_z_threshold),
+        electrode_scope=str(settings.group_significant_electrode_scope),
+    )
+
+
+def _workbook_signature(
+    *,
+    subject: str,
+    condition: str,
+    file_path: str | None,
+) -> WorkbookSignature:
+    if not file_path:
+        return WorkbookSignature(
+            subject=str(subject),
+            condition=str(condition),
+            path="",
+            size_bytes=None,
+            mtime_ns=None,
+        )
+    path = Path(file_path)
+    try:
+        resolved = str(path.resolve(strict=False))
+    except OSError:
+        resolved = str(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return WorkbookSignature(
+            subject=str(subject),
+            condition=str(condition),
+            path=resolved,
+            size_bytes=None,
+            mtime_ns=None,
+        )
+    return WorkbookSignature(
+        subject=str(subject),
+        condition=str(condition),
+        path=resolved,
+        size_bytes=int(stat.st_size),
+        mtime_ns=int(stat.st_mtime_ns),
+    )
 
 
 def build_group_significant_harmonic_selection(
@@ -144,6 +275,42 @@ def build_group_significant_harmonic_selection(
     max_freq: float | None = None,
 ) -> GroupSignificantHarmonicSelection:
     started = perf_counter()
+    cache_key = _group_significant_selection_cache_key(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        rois=rois,
+        base_frequency_hz=base_frequency_hz,
+        max_freq=max_freq,
+        settings=settings,
+    )
+    cached = _get_cached_group_significant_selection(cache_key)
+    if cached is not None:
+        elapsed = perf_counter() - started
+        log_func(
+            "[PERF] Group harmonic selection cache hit: "
+            f"reusing {len(cached.selected_harmonics_hz)} selected harmonics "
+            f"for {len(subjects) * len(conditions)} planned workbooks "
+            f"in {elapsed:.2f}s."
+        )
+        logger.info(
+            "stats_group_harmonics_selection_cache_hit",
+            extra={
+                "elapsed_s": elapsed,
+                "subjects": len(subjects),
+                "conditions": len(conditions),
+                "selected_harmonics": cached.selected_harmonics_hz,
+            },
+        )
+        return cached
+    log_func(
+        "[PERF] Group harmonic selection cache miss: "
+        "building selection from FullFFT amplitude spectra."
+    )
+    logger.info(
+        "stats_group_harmonics_selection_cache_miss",
+        extra={"subjects": len(subjects), "conditions": len(conditions)},
+    )
     base = float(base_frequency_hz)
     oddball = base / float(SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT)
     required = _plan_required_full_fft_columns(
@@ -174,8 +341,8 @@ def build_group_significant_harmonic_selection(
         rois=rois,
         electrode_scope=settings.group_significant_electrode_scope,
         log_func=log_func,
-        usecols=required.usecols,
         frequency_columns=required.frequency_columns,
+        required_indices=required.required_indices,
     )
     if grand_average.empty:
         raise RuntimeError("Group-level harmonic selection found no usable amplitude spectra.")
@@ -269,12 +436,13 @@ def build_group_significant_harmonic_selection(
         target_amp = amplitude_by_bin.get(int(matched_idx), np.nan)
         z_score = (target_amp - noise_mean) / noise_std if noise_std > 1e-12 else np.nan
         z_value = float(z_score) if np.isfinite(z_score) else np.nan
-        harmonic_domain.append(matched_freq)
-        z_by_harmonic[matched_freq] = z_value
+        selected_frequency = float(target_freq)
+        harmonic_domain.append(selected_frequency)
+        z_by_harmonic[selected_frequency] = z_value
         selected = bool(np.isfinite(z_value) and z_value > settings.group_significant_z_threshold)
         if selected:
-            selected_freqs.append(matched_freq)
-            selected_columns.append(matched_column)
+            selected_freqs.append(selected_frequency)
+            selected_columns.append(f"{selected_frequency:.4f}_Hz")
             selected_indices.append(matched_idx)
         rows.append(
             GroupSignificantHarmonicRow(
@@ -312,7 +480,7 @@ def build_group_significant_harmonic_selection(
         },
     )
 
-    return GroupSignificantHarmonicSelection(
+    selection = GroupSignificantHarmonicSelection(
         harmonic_domain_hz=harmonic_domain,
         selected_harmonics_hz=selected_freqs,
         selected_columns=selected_columns,
@@ -334,6 +502,8 @@ def build_group_significant_harmonic_selection(
         noise_window_bins=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
         rows=rows,
     )
+    _store_group_significant_selection(cache_key, selection)
+    return selection
 
 
 def _prepare_group_significant_bca_data(
@@ -380,34 +550,67 @@ def _prepare_group_significant_bca_data(
 
     bca_started = perf_counter()
     all_subject_data: Dict[str, Dict[str, Dict[str, float]]] = {}
-    for pid in subjects:
-        all_subject_data[pid] = {}
-        for cond_name in conditions:
-            file_path = subject_data.get(pid, {}).get(cond_name)
-            all_subject_data[pid].setdefault(cond_name, {})
-            roi_values, roi_provenance = _aggregate_bca_for_all_rois(
-                file_path=file_path,
-                rois=rois_map,
-                log_func=log_func,
-                harmonic_freqs=list(selection.selected_harmonics_hz),
-                provenance_enabled=provenance_map is not None,
+    bca_tasks = [
+        (pid, cond_name, subject_data.get(pid, {}).get(cond_name))
+        for pid in subjects
+        for cond_name in conditions
+    ]
+    total_bca_tasks = len(bca_tasks)
+    log_func(
+        "[PERF] Group policy BCA aggregation started: "
+        f"{total_bca_tasks} workbook reads across {len(rois_map)} ROIs."
+    )
+    for task_index, (pid, cond_name, file_path) in enumerate(bca_tasks, start=1):
+        all_subject_data.setdefault(pid, {})
+        all_subject_data[pid].setdefault(cond_name, {})
+        read_started = perf_counter()
+        roi_values, roi_provenance = _aggregate_bca_for_all_rois(
+            file_path=file_path,
+            rois=rois_map,
+            log_func=log_func,
+            harmonic_freqs=list(selection.selected_harmonics_hz),
+            provenance_enabled=provenance_map is not None,
+        )
+        read_elapsed = perf_counter() - read_started
+        for roi_name in rois_map.keys():
+            all_subject_data[pid][cond_name][roi_name] = roi_values.get(roi_name, np.nan)
+            if provenance_map is not None:
+                provenance = roi_provenance.get(
+                    roi_name,
+                    {
+                        "source_file": file_path,
+                        "sheet": "BCA (uV)",
+                        "row_label": None,
+                        "col_label": list(selection.selected_columns),
+                        "raw_cell": None,
+                        "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
+                    },
+                )
+                provenance["harmonic_policy"] = GROUP_SIGNIFICANT_POLICY_ID
+                provenance_map[(pid, cond_name, roi_name)] = provenance
+        if _should_log_progress(
+            task_index,
+            total_bca_tasks,
+            GROUP_SIGNIFICANT_BCA_PROGRESS_INTERVAL,
+        ):
+            elapsed = perf_counter() - bca_started
+            log_func(
+                "[PERF] Group policy BCA aggregation progress: "
+                f"{task_index}/{total_bca_tasks} workbooks "
+                f"(participant={pid}, condition={cond_name}, "
+                f"last_read={read_elapsed:.2f}s, elapsed={elapsed:.2f}s)."
             )
-            for roi_name in rois_map.keys():
-                all_subject_data[pid][cond_name][roi_name] = roi_values.get(roi_name, np.nan)
-                if provenance_map is not None:
-                    provenance = roi_provenance.get(
-                        roi_name,
-                        {
-                            "source_file": file_path,
-                            "sheet": "BCA (uV)",
-                            "row_label": None,
-                            "col_label": list(selection.selected_columns),
-                            "raw_cell": None,
-                            "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
-                        },
-                    )
-                    provenance["harmonic_policy"] = GROUP_SIGNIFICANT_POLICY_ID
-                    provenance_map[(pid, cond_name, roi_name)] = provenance
+            logger.info(
+                "stats_group_harmonics_bca_progress",
+                extra={
+                    "index": task_index,
+                    "total": total_bca_tasks,
+                    "participant": pid,
+                    "condition": cond_name,
+                    "last_read_s": read_elapsed,
+                    "elapsed_s": elapsed,
+                },
+            )
     log_func(
         "[PERF] Group policy BCA aggregation finished: "
         f"{len(subjects) * len(conditions)} workbook reads for "
@@ -442,8 +645,8 @@ def _build_grand_average_amplitude(
     rois: Dict[str, List[str]],
     electrode_scope: str,
     log_func: Callable[[str], None],
-    usecols: list[str],
     frequency_columns: list[tuple[float, str, int]],
+    required_indices: list[int],
 ) -> tuple[pd.Series, list[str], list[int], int, int]:
     started = perf_counter()
     spectra: list[pd.Series] = []
@@ -451,29 +654,70 @@ def _build_grand_average_amplitude(
     bin_indices: list[int] = []
     electrode_count = 0
     read_elapsed = 0.0
-    for pid in subjects:
-        for cond_name in conditions:
-            file_path = subject_data.get(pid, {}).get(cond_name)
-            if not file_path or not Path(file_path).exists():
-                log_func(f"Missing file for {pid} {cond_name}: {file_path}")
-                continue
-            read_started = perf_counter()
-            series, file_columns, n_electrodes = _load_mean_amplitude_series(
-                file_path,
-                rois=rois,
-                electrode_scope=electrode_scope,
-                usecols=usecols,
+    max_frequency_columns_read = 0
+    fft_tasks = [
+        (pid, cond_name, subject_data.get(pid, {}).get(cond_name))
+        for pid in subjects
+        for cond_name in conditions
+    ]
+    total_fft_tasks = len(fft_tasks)
+    log_func(
+        "[PERF] FullFFT grand-average read started: "
+        f"{total_fft_tasks} workbook reads; "
+        f"{len(required_indices)} planned frequency columns per reference grid."
+    )
+    for task_index, (pid, cond_name, file_path) in enumerate(fft_tasks, start=1):
+        if not file_path or not Path(file_path).exists():
+            log_func(f"Missing file for {pid} {cond_name}: {file_path}")
+            continue
+        read_started = perf_counter()
+        series, file_columns, n_electrodes = _load_mean_amplitude_series(
+            file_path,
+            rois=rois,
+            electrode_scope=electrode_scope,
+            reference_frequency_columns=frequency_columns,
+            required_indices=required_indices,
+        )
+        file_read_elapsed = perf_counter() - read_started
+        read_elapsed += file_read_elapsed
+        if series.empty:
+            log_func(f"No usable full-spectrum amplitude data for {pid} {cond_name}.")
+            continue
+        spectra.append(series)
+        max_frequency_columns_read = max(max_frequency_columns_read, len(file_columns))
+        if not columns:
+            columns = file_columns
+            bin_lookup = {column: int(idx) for _freq, column, idx in frequency_columns}
+            bin_indices = [bin_lookup[column] for column in file_columns if column in bin_lookup]
+        electrode_count = max(electrode_count, int(n_electrodes))
+        if _should_log_progress(
+            task_index,
+            total_fft_tasks,
+            GROUP_SIGNIFICANT_FULLFFT_PROGRESS_INTERVAL,
+        ):
+            elapsed = perf_counter() - started
+            log_func(
+                "[PERF] FullFFT grand-average read progress: "
+                f"{task_index}/{total_fft_tasks} workbooks "
+                f"(participant={pid}, condition={cond_name}, "
+                f"columns={len(file_columns)}, electrodes={n_electrodes}, "
+                f"spectra={len(spectra)}, last_read={file_read_elapsed:.2f}s, "
+                f"elapsed={elapsed:.2f}s)."
             )
-            read_elapsed += perf_counter() - read_started
-            if series.empty:
-                log_func(f"No usable full-spectrum amplitude data for {pid} {cond_name}.")
-                continue
-            spectra.append(series)
-            if not columns:
-                columns = file_columns
-                bin_lookup = {column: int(idx) for _freq, column, idx in frequency_columns}
-                bin_indices = [bin_lookup[column] for column in file_columns if column in bin_lookup]
-            electrode_count = max(electrode_count, int(n_electrodes))
+            logger.info(
+                "stats_group_harmonics_fullfft_progress",
+                extra={
+                    "index": task_index,
+                    "total": total_fft_tasks,
+                    "participant": pid,
+                    "condition": cond_name,
+                    "columns": len(file_columns),
+                    "electrodes": n_electrodes,
+                    "spectra_count": len(spectra),
+                    "last_read_s": file_read_elapsed,
+                    "elapsed_s": elapsed,
+                },
+            )
 
     if not spectra:
         raise RuntimeError(
@@ -488,7 +732,7 @@ def _build_grand_average_amplitude(
     elapsed = perf_counter() - started
     log_func(
         "[PERF] FullFFT grand-average read: "
-        f"{len(spectra)} workbooks x {max(len(usecols) - 1, 0)} frequency columns "
+        f"{len(spectra)} workbooks x up to {max_frequency_columns_read} frequency columns "
         f"in {elapsed:.2f}s (read phase {read_elapsed:.2f}s)."
     )
     logger.info(
@@ -497,7 +741,7 @@ def _build_grand_average_amplitude(
             "elapsed_s": elapsed,
             "read_elapsed_s": read_elapsed,
             "spectra_count": len(spectra),
-            "frequency_columns": max(len(usecols) - 1, 0),
+            "frequency_columns": max_frequency_columns_read,
         },
     )
     return grand_average, columns, bin_indices, len(spectra), electrode_count
@@ -533,11 +777,10 @@ def _plan_required_full_fft_columns(
 
     for harmonic_index in range(1, highest_k + 1):
         target_freq = float(harmonic_index * oddball)
-        nearest_pos = int(np.argmin(np.abs(freq_axis - target_freq)))
-        matched_freq, _column, matched_idx = frequency_columns[nearest_pos]
-        diff = abs(float(matched_freq) - target_freq)
-        if diff > GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ:
+        exact_match = _find_exact_frequency_column(frequency_columns, target_freq)
+        if exact_match is None:
             continue
+        matched_freq, _column, matched_idx = exact_match
         candidate_indices.append(int(matched_idx))
         required_indices.add(int(matched_idx))
         if _is_base_overlap(matched_freq, base, GROUP_SIGNIFICANT_BASE_TOLERANCE_HZ):
@@ -552,8 +795,10 @@ def _plan_required_full_fft_columns(
 
     if not candidate_indices:
         raise RuntimeError(
-            "Group-level significant harmonic selection produced no candidate oddball "
-            "harmonic bins. Check base frequency and FullFFT frequency columns."
+            "Group-level significant harmonic selection requires exact nominal "
+            "oddball harmonic columns in the FullFFT sheet. Regenerate workbooks "
+            "with FFT crop/on-bin output; fixed-epoch fallback workbooks cannot "
+            "be used for this selection method."
         )
 
     column_by_idx = {int(idx): str(column) for _freq, column, idx in frequency_columns}
@@ -574,6 +819,7 @@ def _plan_required_full_fft_columns(
         frequency_columns=frequency_columns,
         candidate_indices=candidate_indices,
         excluded_base_indices=excluded_base_indices,
+        required_indices=sorted(required_indices),
     )
 
 
@@ -611,40 +857,143 @@ def _load_mean_amplitude_series(
     *,
     rois: Dict[str, List[str]],
     electrode_scope: str,
-    usecols: list[str],
+    reference_frequency_columns: list[tuple[float, str, int]],
+    required_indices: list[int],
 ) -> tuple[pd.Series, list[str], int]:
+    workbook = None
     try:
-        df_fft = safe_read_excel(
-            file_path,
-            sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME,
-            index_col="Electrode",
-            usecols=usecols,
-            use_cache=False,
-        )
-    except ValueError as exc:
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+        worksheet = workbook[FULL_FFT_AMPLITUDE_SHEET_NAME]
+        header_columns = [cell.value for cell in next(worksheet.iter_rows(max_row=1))]
+    except KeyError as exc:
+        if workbook is not None:
+            workbook.close()
         raise RuntimeError(
             "Group-level significant harmonic selection requires regenerated "
             f"workbooks with a '{FULL_FFT_AMPLITUDE_SHEET_NAME}' sheet: {file_path}"
         ) from exc
-
-    df_fft.index = df_fft.index.astype(str).str.upper().str.strip()
-    electrode_names = _electrodes_for_scope(df_fft, rois=rois, electrode_scope=electrode_scope)
-    if not electrode_names:
+    except StopIteration:
+        if workbook is not None:
+            workbook.close()
         return pd.Series(dtype=float), [], 0
 
-    freq_columns = _parse_frequency_columns(df_fft.columns)
-    if not freq_columns:
-        return pd.Series(dtype=float), [], 0
+    try:
+        usecols, local_to_reference = _plan_workbook_full_fft_usecols_from_header(
+            header_columns,
+            reference_frequency_columns=reference_frequency_columns,
+            required_indices=required_indices,
+        )
+        if len(usecols) <= 1:
+            required_columns = [
+                str(column)
+                for _freq, column, idx in reference_frequency_columns
+                if int(idx) in set(required_indices)
+            ]
+            raise RuntimeError(
+                "Group-level significant harmonic selection requires exact nominal "
+                f"FullFFT columns in every included workbook. Missing columns in {file_path}: "
+                f"{required_columns[:8]}"
+            )
 
-    ordered_columns = [column for _freq, column, _idx in freq_columns]
-    block = (
-        df_fft.loc[electrode_names, ordered_columns]
-        .apply(pd.to_numeric, errors="coerce")
-        .replace([np.inf, -np.inf], np.nan)
-    )
-    series = block.mean(axis=0, skipna=True)
-    series.index = [freq for freq, _column, _idx in freq_columns]
-    return pd.to_numeric(series, errors="coerce"), ordered_columns, len(electrode_names)
+        ordered_local_columns = [column for column in usecols[1:] if column in header_columns]
+        if not ordered_local_columns:
+            raise RuntimeError(
+                "Group-level significant harmonic selection requires exact nominal "
+                f"FullFFT columns in every included workbook: {file_path}"
+            )
+
+        wanted_electrodes = _wanted_electrodes_for_scope(
+            rois=rois,
+            electrode_scope=electrode_scope,
+        )
+        position_by_column = {
+            str(column): index
+            for index, column in enumerate(header_columns)
+            if isinstance(column, str)
+        }
+        selected_positions = {
+            column: position_by_column[column]
+            for column in ordered_local_columns
+            if column in position_by_column
+        }
+        local_values = {column: [] for column in selected_positions}
+        electrode_count = 0
+        for row in worksheet.iter_rows(min_row=2, values_only=True):
+            if not row:
+                continue
+            electrode = str(row[0]).upper().strip() if row[0] is not None else ""
+            if not electrode:
+                continue
+            if wanted_electrodes is not None and electrode not in wanted_electrodes:
+                continue
+            electrode_count += 1
+            for column, position in selected_positions.items():
+                value = row[position] if position < len(row) else np.nan
+                local_values[column].append(_numeric_or_nan(value))
+    finally:
+        if workbook is not None:
+            workbook.close()
+
+    values: dict[float, float] = {}
+    reference_columns: list[str] = []
+    for local_column in ordered_local_columns:
+        column_values = np.asarray(local_values.get(local_column, []), dtype=float)
+        finite_values = column_values[np.isfinite(column_values)]
+        value = float(finite_values.mean()) if finite_values.size else np.nan
+        for reference_freq, reference_column in local_to_reference.get(local_column, []):
+            values[reference_freq] = value
+            reference_columns.append(reference_column)
+
+    series = pd.Series(values, dtype=float)
+    return pd.to_numeric(series, errors="coerce"), reference_columns, electrode_count
+
+
+def _plan_workbook_full_fft_usecols_from_header(
+    header_columns: Sequence[object],
+    *,
+    reference_frequency_columns: list[tuple[float, str, int]],
+    required_indices: list[int],
+) -> tuple[list[str], dict[str, list[tuple[float, str]]]]:
+    local_frequency_columns = _parse_frequency_columns(header_columns)
+    if not local_frequency_columns:
+        return ["Electrode"], {}
+
+    reference_by_idx = {
+        int(idx): (float(freq), str(column))
+        for freq, column, idx in reference_frequency_columns
+        if int(idx) in set(required_indices)
+    }
+    local_by_column = {str(column): float(freq) for freq, column, _idx in local_frequency_columns}
+    local_to_reference: dict[str, list[tuple[float, str]]] = {}
+    for required_idx in sorted(set(required_indices)):
+        reference = reference_by_idx.get(int(required_idx))
+        if reference is None:
+            continue
+        reference_freq, reference_column = reference
+        local_freq = local_by_column.get(reference_column)
+        if local_freq is None:
+            continue
+        if abs(float(local_freq) - reference_freq) > GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ:
+            continue
+        local_to_reference.setdefault(str(reference_column), []).append(
+            (reference_freq, reference_column)
+        )
+
+    return ["Electrode", *local_to_reference.keys()], local_to_reference
+
+
+def _read_full_fft_header(file_path: str | Path) -> list[object]:
+    workbook = load_workbook(file_path, read_only=True, data_only=True)
+    try:
+        worksheet = workbook[FULL_FFT_AMPLITUDE_SHEET_NAME]
+        return [cell.value for cell in next(worksheet.iter_rows(max_row=1))]
+    except KeyError as exc:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires regenerated "
+            f"workbooks with a '{FULL_FFT_AMPLITUDE_SHEET_NAME}' sheet: {file_path}"
+        ) from exc
+    finally:
+        workbook.close()
 
 
 def _aggregate_bca_for_all_rois(
@@ -803,16 +1152,26 @@ def _electrodes_for_scope(
     rois: Dict[str, List[str]],
     electrode_scope: str,
 ) -> list[str]:
-    if electrode_scope == "union_roi_electrodes":
-        wanted = {
-            str(ch).strip().upper()
-            for channels in (rois or {}).values()
-            for ch in (channels or [])
-            if str(ch).strip()
-        }
+    wanted = _wanted_electrodes_for_scope(rois=rois, electrode_scope=electrode_scope)
+    if wanted is not None:
         return [idx for idx in df_fft.index.astype(str) if idx in wanted]
     _ = rois
     return list(df_fft.index.astype(str))
+
+
+def _wanted_electrodes_for_scope(
+    *,
+    rois: Dict[str, List[str]],
+    electrode_scope: str,
+) -> set[str] | None:
+    if electrode_scope != "union_roi_electrodes":
+        return None
+    return {
+        str(ch).strip().upper()
+        for channels in (rois or {}).values()
+        for ch in (channels or [])
+        if str(ch).strip()
+    }
 
 
 def _parse_frequency_columns(columns: Sequence[object]) -> list[tuple[float, str, int]]:
@@ -827,6 +1186,35 @@ def _parse_frequency_columns(columns: Sequence[object]) -> list[tuple[float, str
         except ValueError:
             continue
     return sorted(out, key=lambda item: item[0])
+
+
+def _find_exact_frequency_column(
+    frequency_columns: Sequence[tuple[float, str, int]],
+    target_freq: float,
+) -> tuple[float, str, int] | None:
+    matched_column = _match_freq_column([column for _freq, column, _idx in frequency_columns], target_freq)
+    if matched_column is None:
+        return None
+    for freq, column, idx in frequency_columns:
+        if str(column) == str(matched_column):
+            return float(freq), str(column), int(idx)
+    return None
+
+
+def _should_log_progress(index: int, total: int, interval: int) -> bool:
+    if total <= 0:
+        return False
+    if index in {1, total}:
+        return True
+    return interval > 0 and index % interval == 0
+
+
+def _numeric_or_nan(value: object) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return np.nan
+    return number if np.isfinite(number) else np.nan
 
 
 def _frequency_resolution(freqs: Sequence[float]) -> float | None:

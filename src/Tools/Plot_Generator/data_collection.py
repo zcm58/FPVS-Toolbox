@@ -200,7 +200,10 @@ class PlotDataCollectionMixin:
                 overall_total,
             )
 
-            subject_id = _infer_subject_id_from_path(excel_path)
+            subject_id = _infer_subject_id_from_path(
+                excel_path,
+                self.subject_groups.keys() if self.subject_groups else None,
+            )
             if not subject_id:
                 self._emit(
                     f"Skipping {excel_path.name}: unable to determine subject ID.",

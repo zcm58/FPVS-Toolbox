@@ -33,10 +33,21 @@ v2.1 project contract:
 - `project.json` is canonical for group assignments. Prefer participant
   `group_id` and resolve labels/folder names through `project.groups`; legacy
   participant `group` values are compatibility input only.
+- In multi-group project mode, the SNR Plot Generator input folder should come
+  from the project manifest's resolved Excel subfolder. Do not let saved
+  Plot Generator `input_folder` settings override that canonical project root.
+  Group Options should only activate when that canonical Excel root is selected.
+- Multi-group plotting is a one-condition, group-overlay workflow. Hide the
+  condition overlay and scalp-map checkboxes in multi-group mode; the existing
+  A/B colors, legend labels, and peak labels map to the first and second
+  selected groups.
 - Multi-group Excel files live under
   `<Excel Root>/<Condition>/<Group>/<Participant>_<Condition>_Results.xlsx`.
   Discovery may recurse within a condition folder, but group membership should
   come from `project.json`, not from output folder names.
+- When a project manifest provides participant IDs, Excel subject matching must
+  prefer those IDs before legacy `P#` parsing so names like `E2P2final` do not
+  collapse to `P2` and lose group assignments.
 - Single-group projects have no `groups` metadata and keep the flat
   `<Excel Root>/<Condition>/...xlsx` layout.
 

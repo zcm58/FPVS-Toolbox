@@ -4,7 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt
-from PySide6.QtWidgets import QListWidgetItem, QMessageBox
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QHBoxLayout,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QWidget,
+)
 
 from Tools.Plot_Generator.manifest_utils import (
     extract_group_names,
@@ -16,6 +23,26 @@ from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
 
 
 ALL_CONDITIONS_OPTION = "All Conditions"
+_UNSELECTED_GROUP_COLOR = "#d9dee8"
+_AUTO_GROUP_COLOR = "#9aa4b2"
+
+
+def _group_color_assignment(
+    group_name: str,
+    selected_groups: list[str],
+    color_a: str,
+    color_b: str,
+) -> tuple[str, bool, str]:
+    """Return ``(color, editable, role)`` for a group row color swatch."""
+
+    if group_name not in selected_groups:
+        return _UNSELECTED_GROUP_COLOR, False, "Not selected"
+    position = selected_groups.index(group_name)
+    if position == 0:
+        return color_a, True, "First selected group"
+    if position == 1:
+        return color_b, True, "Second selected group"
+    return _AUTO_GROUP_COLOR, False, "Automatic palette"
 
 
 class PlotGeneratorSelectionMixin:
@@ -64,7 +91,37 @@ class PlotGeneratorSelectionMixin:
 
     def _on_group_overlay_toggled(self, checked: bool) -> None:
         self.group_list.setEnabled(checked)
+        self._update_group_color_widgets()
+        if checked:
+            self._force_legend_defaults()
+        else:
+            self._sync_legend_defaults_with_conditions()
+        self._update_legend_group_visibility()
         self._check_required()
+
+    def _on_group_selection_changed(self, _item: QListWidgetItem) -> None:
+        if self._group_overlay_enabled():
+            self._update_group_color_widgets()
+            self._force_legend_defaults()
+            self._update_legend_group_visibility()
+        self._check_required()
+
+    def _on_group_check_toggled(self) -> None:
+        if self._group_overlay_enabled():
+            self._update_group_color_widgets()
+            self._force_legend_defaults()
+            self._update_legend_group_visibility()
+        self._check_required()
+
+    def _choose_group_color(self, group_name: str) -> None:
+        selected_groups = self._selected_groups()
+        if group_name not in selected_groups:
+            return
+        position = selected_groups.index(group_name)
+        if position == 0:
+            self._choose_color("a")
+        elif position == 1:
+            self._choose_color("b")
 
     def _on_condition_a_changed(self, condition: str) -> None:
         self._update_chart_title_state(condition)
@@ -154,24 +211,99 @@ class PlotGeneratorSelectionMixin:
         self._subject_groups_map = normalize_participants_map(manifest)
         groups = extract_group_names(manifest)
         self._available_groups = groups
-        self._has_multi_groups = has_multi_groups(manifest)
+        self._has_multi_groups = has_multi_groups(
+            manifest
+        ) and self._folder_is_canonical_project_excel_root(folder)
         self.group_box.setVisible(self._has_multi_groups)
+        self._update_multigroup_mode_controls()
         self.group_overlay_check.setChecked(False)
         self.group_overlay_check.setEnabled(
             self._has_multi_groups and not self.overlay_check.isChecked()
         )
         self.group_list.clear()
+        self._group_checkboxes = {}
+        self._group_color_buttons = {}
         if self._has_multi_groups:
             for name in groups:
                 item = QListWidgetItem(name)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
                 item.setCheckState(Qt.Checked)
                 self.group_list.addItem(item)
+                row = self._make_group_row_widget(name)
+                item.setSizeHint(row.sizeHint())
+                self.group_list.setItemWidget(item, row)
             self.group_list.setEnabled(False)
+            self._update_group_color_widgets()
         else:
             self.group_list.setEnabled(False)
 
+    def _make_group_row_widget(self, group_name: str):
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        checkbox = QCheckBox(group_name)
+        checkbox.setChecked(True)
+        checkbox.toggled.connect(self._on_group_check_toggled)
+        color_btn = QPushButton()
+        color_btn.setFixedSize(20, 20)
+        color_btn.clicked.connect(lambda: self._choose_group_color(group_name))
+        layout.addWidget(checkbox, 1)
+        layout.addWidget(color_btn)
+        self._group_checkboxes[group_name] = checkbox
+        self._group_color_buttons[group_name] = color_btn
+        return row
+
+    def _update_group_color_widgets(self) -> None:
+        buttons = getattr(self, "_group_color_buttons", {})
+        if not buttons:
+            return
+        selected_groups = self._selected_groups()
+        overlay_enabled = self._group_overlay_enabled()
+        for group_name, button in buttons.items():
+            color, editable, role = _group_color_assignment(
+                group_name,
+                selected_groups,
+                self.stem_color,
+                self.stem_color_b,
+            )
+            button.setStyleSheet(f"background-color: {color};")
+            button.setEnabled(overlay_enabled and editable)
+            button.setToolTip(f"{role}: {group_name}")
+
+    def _update_multigroup_mode_controls(self) -> None:
+        multi_group = bool(self._has_multi_groups)
+        if hasattr(self, "overlay_row"):
+            self.overlay_row.setVisible(not multi_group)
+        if multi_group:
+            if self.overlay_check.isChecked():
+                self.overlay_check.setChecked(False)
+            if self.scalp_check.isChecked():
+                self.scalp_check.setChecked(False)
+            self.include_scalp_maps = False
+            self._update_selector_columns(False)
+        self._update_scalp_title_b_visibility()
+        self._update_scalp_title_warnings()
+
+    def _folder_is_canonical_project_excel_root(self, folder: str) -> bool:
+        canonical = getattr(self, "_canonical_project_excel_root", None)
+        if canonical is None:
+            return True
+        try:
+            return Path(folder).resolve() == Path(canonical).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return False
+
     def _selected_groups(self) -> list[str]:
+        checkboxes = getattr(self, "_group_checkboxes", None)
+        if isinstance(checkboxes, dict) and checkboxes:
+            return [
+                group_name
+                for idx, group_name in enumerate(self._available_groups)
+                if group_name in checkboxes
+                and checkboxes[group_name].isChecked()
+                and self.group_list.item(idx).checkState() != Qt.Unchecked
+            ]
         selected: list[str] = []
         for idx in range(self.group_list.count()):
             item = self.group_list.item(idx)
@@ -187,7 +319,9 @@ class PlotGeneratorSelectionMixin:
     ) -> dict:
         if not overlay_enabled:
             return {
-                "subject_groups": None,
+                "subject_groups": dict(self._subject_groups_map)
+                if self._has_multi_groups
+                else None,
                 "selected_groups": None,
                 "enable_group_overlay": False,
                 "multi_group_mode": self._has_multi_groups,

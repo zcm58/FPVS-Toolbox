@@ -189,8 +189,8 @@ class PlotGeneratorUiSectionsMixin:
         self.overlay_check = QCheckBox("Overlay Comparison")
         self.overlay_check.toggled.connect(self._overlay_toggled)
 
-        overlay_row = QWidget()
-        overlay_layout = QHBoxLayout(overlay_row)
+        self.overlay_row = QWidget()
+        overlay_layout = QHBoxLayout(self.overlay_row)
         overlay_layout.setContentsMargins(0, 0, 0, 0)
         overlay_layout.setSpacing(8)
         overlay_layout.addStretch(1)
@@ -202,7 +202,7 @@ class PlotGeneratorUiSectionsMixin:
         overlay_layout.addWidget(self.scalp_check)
         overlay_layout.addStretch(1)
 
-        params_layout.addWidget(overlay_row)
+        params_layout.addWidget(self.overlay_row)
 
         self.legend_group = SectionCard("Legend labels (optional)")
         self.legend_group.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
@@ -289,6 +289,7 @@ class PlotGeneratorUiSectionsMixin:
         self._syncing_legend_defaults = False
 
         self.group_box = SectionCard("Group Options")
+        self.group_box.setMaximumHeight(180)
         group_layout = self.group_box.content_layout
         group_layout.setSpacing(6)
         self.group_overlay_check = QCheckBox("Overlay groups on plots")
@@ -296,7 +297,9 @@ class PlotGeneratorUiSectionsMixin:
         group_layout.addWidget(self.group_overlay_check)
         self.group_list = QListWidget()
         self.group_list.setSelectionMode(QListWidget.NoSelection)
-        self.group_list.setMinimumHeight(80)
+        self.group_list.itemChanged.connect(self._on_group_selection_changed)
+        self.group_list.setMinimumHeight(58)
+        self.group_list.setMaximumHeight(80)
         group_layout.addWidget(self.group_list)
         self.group_box.setVisible(False)
         # Added below the legend in the left column; hidden unless multi-group data is present.

@@ -300,6 +300,16 @@ class PlotGeneratorWorkflowMixin:
                 self.gen_btn.setEnabled(True)
                 self.cancel_btn.setEnabled(False)
                 return
+            if overlay_groups and not self._subject_groups_map:
+                QMessageBox.warning(
+                    self,
+                    "Group Overlay",
+                    "Group assignments were not found in project.json. "
+                    "Process or register participants before using group overlays.",
+                )
+                self.gen_btn.setEnabled(True)
+                self.cancel_btn.setEnabled(False)
+                return
             group_kwargs = self._group_worker_kwargs(overlay_groups, selected_groups)
             legend_payload = self._legend_settings_payload()
             if self._project is not None:

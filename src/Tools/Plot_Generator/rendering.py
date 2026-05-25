@@ -86,28 +86,39 @@ class PlotRenderingMixin:
                     vals = data.get(roi)
                     if not vals:
                         continue
-                    color = palette[idx % len(palette)]
+                    color = (
+                        self.stem_color
+                        if idx == 0
+                        else self.stem_color_b
+                        if idx == 1
+                        else palette[idx % len(palette)]
+                    )
+                    label = (
+                        self._resolve_legend_label(self.legend_condition_a, group_name)
+                        if idx == 0
+                        else self._resolve_legend_label(self.legend_condition_b, group_name)
+                        if idx == 1
+                        else group_name
+                    )
                     ax.plot(
                         freqs,
                         vals,
-                        label=group_name,
+                        label=label,
                         color=color,
                         linewidth=2.0,
                     )
                     plotted = True
-                ax.plot(
-                    freqs,
-                    amps,
-                    color=self.stem_color,
-                    linestyle="--",
-                    linewidth=1.5,
-                    label="All Subjects",
-                )
                 if not plotted:
                     self._emit(
                         "No group data available for overlay. Displaying overall average only.",
                         0,
                         0,
+                    )
+                    ax.plot(
+                        freqs,
+                        amps,
+                        color=self.stem_color,
+                        label=self._resolve_legend_label(self.legend_condition_a, self.condition),
                     )
             else:
                 ax.plot(
@@ -122,24 +133,68 @@ class PlotRenderingMixin:
 
             if odd_freqs:
                 freq_array = np.array(freqs)
-                for idx, odd in enumerate(odd_freqs):
-                    closest = int(np.abs(freq_array - odd).argmin())
-                    label = (
-                        self._resolve_legend_label(self.legend_a_peaks, _DEFAULT_A_PEAKS)
-                        if idx == 0
-                        else "_nolegend_"
+                if use_group_overlay and group_curves:
+                    for group_idx, group_name in enumerate(self.selected_groups or group_curves.keys()):
+                        vals = group_curves.get(group_name, {}).get(roi)
+                        if not vals:
+                            continue
+                        color = (
+                            self.stem_color
+                            if group_idx == 0
+                            else self.stem_color_b
+                            if group_idx == 1
+                            else palette[group_idx % len(palette)]
+                        )
+                        marker = "o" if group_idx == 0 else "^" if group_idx == 1 else "s"
+                        peak_label = (
+                            self._resolve_legend_label(self.legend_a_peaks, _DEFAULT_A_PEAKS)
+                            if group_idx == 0
+                            else self._resolve_legend_label(self.legend_b_peaks, _DEFAULT_B_PEAKS)
+                            if group_idx == 1
+                            else "_nolegend_"
+                        )
+                        for odd_idx, odd in enumerate(odd_freqs):
+                            closest = int(np.abs(freq_array - odd).argmin())
+                            label = peak_label if odd_idx == 0 else "_nolegend_"
+                            ax.scatter(
+                                freq_array[closest],
+                                vals[closest],
+                                marker=marker,
+                                facecolor=color,
+                                edgecolor="black",
+                                zorder=4,
+                                label=label,
+                            )
+                else:
+                    for idx, odd in enumerate(odd_freqs):
+                        closest = int(np.abs(freq_array - odd).argmin())
+                        label = (
+                            self._resolve_legend_label(self.legend_a_peaks, _DEFAULT_A_PEAKS)
+                            if idx == 0
+                            else "_nolegend_"
+                        )
+                        ax.scatter(
+                            freq_array[closest],
+                            amps[closest],
+                            marker="o",
+                            facecolor=self.stem_color,
+                            edgecolor="black",
+                            zorder=4,
+                            label=label,
+                        )
+                group_marker_count = (
+                    sum(
+                        1
+                        for group_name in (self.selected_groups or group_curves.keys())
+                        if group_curves.get(group_name, {}).get(roi)
                     )
-                    ax.scatter(
-                        freq_array[closest],
-                        amps[closest],
-                        marker="o",
-                        facecolor=self.stem_color,
-                        edgecolor="black",
-                        zorder=4,
-                        label=label,
-                    )
+                    if use_group_overlay and group_curves
+                    else 1
+                )
                 self._emit(
-                    f"Marked {len(odd_freqs)} oddball points on ROI {roi}", 0, 0
+                    f"Marked {len(odd_freqs) * group_marker_count} oddball points on ROI {roi}",
+                    0,
+                    0,
                 )
 
             tick_start = math.ceil(self.x_min)

@@ -202,6 +202,7 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    group_policy.clear_group_significant_selection_cache()
     subjects = ["S1"]
     conditions = ["C1", "C2"]
     rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
@@ -212,7 +213,11 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
         subject_data["S1"][condition] = str(path)
 
     original_read_excel = group_policy.safe_read_excel
+    original_fullfft_loader = group_policy._load_mean_amplitude_series
+    original_fullfft_plan = group_policy._plan_workbook_full_fft_usecols_from_header
     calls: list[dict[str, object]] = []
+    fullfft_load_count = 0
+    planned_fullfft_usecols: list[list[str]] = []
 
     def _recording_read_excel(path, sheet_name, *, index_col=None, usecols=None, use_cache=True):
         calls.append(
@@ -231,7 +236,27 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
             use_cache=use_cache,
         )
 
+    def _recording_fullfft_loader(*args, **kwargs):
+        nonlocal fullfft_load_count
+        fullfft_load_count += 1
+        return original_fullfft_loader(*args, **kwargs)
+
+    def _recording_fullfft_plan(*args, **kwargs):
+        usecols, mapping = original_fullfft_plan(*args, **kwargs)
+        planned_fullfft_usecols.append(list(usecols))
+        return usecols, mapping
+
     monkeypatch.setattr(group_policy, "safe_read_excel", _recording_read_excel)
+    monkeypatch.setattr(
+        group_policy,
+        "_load_mean_amplitude_series",
+        _recording_fullfft_loader,
+    )
+    monkeypatch.setattr(
+        group_policy,
+        "_plan_workbook_full_fft_usecols_from_header",
+        _recording_fullfft_plan,
+    )
 
     result = dv_policies.prepare_summed_bca_data(
         subjects=subjects,
@@ -247,19 +272,111 @@ def test_group_significant_policy_limits_fullfft_columns_and_reads_bca_once_per_
     )
 
     assert result is not None
-    fullfft_calls = [
-        call for call in calls if call["sheet_name"] == "FullFFT Amplitude (uV)"
-    ]
     bca_calls = [call for call in calls if call["sheet_name"] == "BCA (uV)"]
 
-    assert len(fullfft_calls) == len(conditions)
-    assert all(call["use_cache"] is False for call in fullfft_calls)
-    assert all(isinstance(call["usecols"], list) for call in fullfft_calls)
-    assert all("Electrode" in call["usecols"] for call in fullfft_calls)
-    assert all(len(call["usecols"]) < 36 for call in fullfft_calls)
+    assert not [call for call in calls if call["sheet_name"] == "FullFFT Amplitude (uV)"]
+    assert len(planned_fullfft_usecols) == len(conditions)
+    assert all("Electrode" in usecols for usecols in planned_fullfft_usecols)
+    assert all(len(usecols) < 36 for usecols in planned_fullfft_usecols)
 
     assert len(bca_calls) == len(conditions)
     assert all(call["use_cache"] is False for call in bca_calls)
+    group_policy.clear_group_significant_selection_cache()
+
+
+def test_group_significant_policy_reuses_cached_selection_between_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    subjects = ["S1"]
+    conditions = ["C1", "C2"]
+    rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
+    subject_data = {"S1": {}}
+    for idx, condition in enumerate(conditions, start=1):
+        path = tmp_path / f"cached_{condition}.xlsx"
+        _write_group_policy_workbook(path, scale=idx)
+        subject_data["S1"][condition] = str(path)
+
+    original_read_excel = group_policy.safe_read_excel
+    original_fullfft_loader = group_policy._load_mean_amplitude_series
+    calls: list[dict[str, object]] = []
+    fullfft_load_count = 0
+
+    def _recording_read_excel(path, sheet_name, *, index_col=None, usecols=None, use_cache=True):
+        calls.append({"path": str(path), "sheet_name": sheet_name})
+        return original_read_excel(
+            path,
+            sheet_name,
+            index_col=index_col,
+            usecols=usecols,
+            use_cache=use_cache,
+        )
+
+    def _recording_fullfft_loader(*args, **kwargs):
+        nonlocal fullfft_load_count
+        fullfft_load_count += 1
+        return original_fullfft_loader(*args, **kwargs)
+
+    monkeypatch.setattr(group_policy, "safe_read_excel", _recording_read_excel)
+    monkeypatch.setattr(
+        group_policy,
+        "_load_mean_amplitude_series",
+        _recording_fullfft_loader,
+    )
+    messages: list[str] = []
+
+    try:
+        for _run_idx in range(2):
+            result = dv_policies.prepare_summed_bca_data(
+                subjects=subjects,
+                conditions=conditions,
+                subject_data=subject_data,
+                base_freq=6.0,
+                log_func=messages.append,
+                rois=rois,
+                provenance_map={},
+                dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+                dv_metadata={},
+                max_freq=3.6,
+            )
+            assert result is not None
+    finally:
+        group_policy.clear_group_significant_selection_cache()
+
+    bca_calls = [call for call in calls if call["sheet_name"] == "BCA (uV)"]
+    assert fullfft_load_count == len(conditions)
+    assert len(bca_calls) == len(conditions) * 2
+    assert any("Group harmonic selection cache hit" in message for message in messages)
+
+
+def test_group_significant_policy_rejects_offgrid_fullfft_frequency_grids(
+    tmp_path: Path,
+) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    subjects = ["S1"]
+    conditions = ["C1", "C2"]
+    rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
+    subject_data = {"S1": {}}
+    for condition, frequency_step in [("C1", 0.0079365), ("C2", 0.0083333)]:
+        path = tmp_path / f"mixed_grid_{condition}.xlsx"
+        _write_group_policy_workbook(path, scale=1, frequency_step=frequency_step)
+        subject_data["S1"][condition] = str(path)
+
+    with pytest.raises(RuntimeError, match="requires exact nominal oddball harmonic columns"):
+        dv_policies.prepare_summed_bca_data(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=6.0,
+            log_func=lambda _message: None,
+            rois=rois,
+            provenance_map={},
+            dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+            dv_metadata={},
+            max_freq=3.6,
+        )
+    group_policy.clear_group_significant_selection_cache()
 
 
 def _write_workbook(path: Path, *, subject_idx: int, condition_idx: int) -> None:
@@ -286,12 +403,20 @@ def _write_workbook(path: Path, *, subject_idx: int, condition_idx: int) -> None
         z_score.to_excel(writer, sheet_name="Z Score")
 
 
-def _write_group_policy_workbook(path: Path, *, scale: int) -> None:
-    frequency_values = [round(0.3 * idx, 4) for idx in range(0, 35)]
+def _write_group_policy_workbook(
+    path: Path,
+    *,
+    scale: int,
+    frequency_step: float = 0.3,
+) -> None:
+    frequency_values = [
+        round(frequency_step * idx, 4)
+        for idx in range(0, int(round(10.2 / frequency_step)) + 1)
+    ]
     fft_values = []
     for idx, freq in enumerate(frequency_values):
         base_noise = 1.2 if idx % 2 == 0 else 0.8
-        if freq in {1.2, 3.6, 7.2}:
+        if any(abs(freq - target) <= frequency_step / 2 for target in {1.2, 3.6, 7.2}):
             base_noise = 20.0
         fft_values.append(base_noise)
     full_fft = pd.DataFrame(

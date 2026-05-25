@@ -24,6 +24,7 @@ from Tools.Stats.data.shared_rois import load_rois_from_settings
 from Tools.Plot_Generator.plot_settings import PlotSettingsManager
 from Tools.Plot_Generator.gui_settings import (
     PlotGeneratorSettingsMixin,
+    _project_plot_input_folder,
     _settings_bool,
     _settings_float,
 )
@@ -78,6 +79,7 @@ class PlotGeneratorWindow(
         self.scalp_title_b_template = self.plot_mgr.get_scalp_title_b_template()
         self._project_root: Path | None = None
         self._project: Project | None = None
+        self._canonical_project_excel_root: Path | None = None
 
 
         project_dir_path: Path | None = None
@@ -115,15 +117,15 @@ class PlotGeneratorWindow(
                     )
             try:
                 results_folder, subfolders = _load_manifest(project_dir_path)
-                default_in = str(
-                    _resolve_project_subfolder(
-                        project_dir_path,
-                        results_folder,
-                        subfolders,
-                        "excel",
-                        EXCEL_SUBFOLDER_NAME,
-                    )
+                excel_root = _resolve_project_subfolder(
+                    project_dir_path,
+                    results_folder,
+                    subfolders,
+                    "excel",
+                    EXCEL_SUBFOLDER_NAME,
                 )
+                self._canonical_project_excel_root = excel_root
+                default_in = str(excel_root)
                 default_out = str(
                     _resolve_project_subfolder(
                         project_dir_path,
@@ -137,7 +139,11 @@ class PlotGeneratorWindow(
                 pass
             project_settings = self._read_project_plot_settings()
             if project_settings:
-                default_in = str(project_settings.get("input_folder") or default_in)
+                default_in = _project_plot_input_folder(
+                    default_in,
+                    project_settings,
+                    self._project,
+                )
                 default_out = str(project_settings.get("output_folder") or default_out)
                 self.stem_color = str(project_settings.get("stem_color") or self.stem_color)
                 self.stem_color_b = str(project_settings.get("stem_color_b") or self.stem_color_b)
@@ -238,7 +244,14 @@ class PlotGeneratorWindow(
 
     def _update_legend_group_visibility(self) -> None:
         self.legend_group.setVisible(True)
-        show_b = self.overlay_check.isChecked()
+        group_overlay = self._group_overlay_enabled()
+        show_b = self.overlay_check.isChecked() or group_overlay
+        if group_overlay:
+            self.legend_condition_a_label.setText("First group label:")
+            self.legend_condition_b_label.setText("Second group label:")
+        else:
+            self.legend_condition_a_label.setText("Condition A label:")
+            self.legend_condition_b_label.setText("Condition B label:")
         self.legend_condition_b_label.setVisible(show_b)
         self.legend_condition_b_edit.setVisible(show_b)
         self.legend_b_peaks_label.setVisible(show_b)
@@ -337,6 +350,8 @@ class PlotGeneratorWindow(
                 self.stem_color_b = color.name()
                 self.color_b_btn.setStyleSheet(f"background-color: {self.stem_color_b};")
                 self.plot_mgr.set_second_color(self.stem_color_b)
+            if hasattr(self, "_update_group_color_widgets"):
+                self._update_group_color_widgets()
             if not self._persist_project_plot_settings(include_paths=False):
                 self.plot_mgr.save()
 
