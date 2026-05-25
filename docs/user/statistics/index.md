@@ -6,7 +6,7 @@ These pages are reference material. If you are not sure which method to run, sta
 
 | Page | Use this page when... |
 |---|---|
-| [Rossion Harmonic Selection](rossion-harmonic-selection.md) | You need to define which oddball harmonics contribute to Summed BCA. |
+| [Harmonic Selection](rossion-harmonic-selection.md) | You need to define which oddball harmonics contribute to Summed BCA. |
 | [RM-ANOVA](rm-anova.md) | Your repeated-measures dataset is complete and balanced. |
 | [Post-hoc Tests](posthoc-tests.md) | You need specific condition-pair comparisons within each ROI. |
 | [Mixed Model](mixed-model.md) | Your dataset has minor missing cells or needs flexible repeated-measures modeling. |

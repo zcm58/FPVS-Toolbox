@@ -10,7 +10,7 @@ class StatsWindowExclusionsMixin:
     def _get_dv_policy_payload(self) -> dict[str, object]:
         """Handle the get dv policy payload step for the Stats workflow."""
         return {
-            "name": FIXED_PREDEFINED_POLICY_NAME,
+            "name": self._dv_policy_name,
             "fixed_harmonic_frequencies_hz": str(self._dv_fixed_harmonic_frequencies_hz),
             "fixed_harmonic_auto_exclude_base": bool(
                 self._dv_fixed_harmonic_auto_exclude_base
@@ -207,6 +207,9 @@ class StatsWindowExclusionsMixin:
         widget = getattr(self, "fixed_predefined_controls", None)
         if widget is not None:
             widget.setVisible(visible)
+        note = getattr(self, "group_significant_note", None)
+        if note is not None:
+            note.setVisible(not visible)
 
     def _clear_fixed_predefined_preview(self) -> None:
         table = getattr(self, "fixed_predefined_preview_table", None)
@@ -310,8 +313,15 @@ class StatsWindowExclusionsMixin:
 
     def _on_dv_policy_changed(self, text: str) -> None:
         """Handle the on dv policy changed step for the Stats workflow."""
-        self._dv_policy_name = FIXED_PREDEFINED_POLICY_NAME
-        self._set_fixed_predefined_controls_visible(True)
+        self._dv_policy_name = (
+            GROUP_SIGNIFICANT_POLICY_NAME
+            if text == GROUP_SIGNIFICANT_POLICY_NAME
+            else FIXED_PREDEFINED_POLICY_NAME
+        )
+        self._set_fixed_predefined_controls_visible(
+            self._dv_policy_name == FIXED_PREDEFINED_POLICY_NAME
+        )
+        self._clear_fixed_predefined_preview()
 
     def _on_fixed_predefined_freqs_changed(self, text: str) -> None:
         self._dv_fixed_harmonic_frequencies_hz = text

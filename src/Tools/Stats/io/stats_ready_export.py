@@ -13,19 +13,32 @@ from time import perf_counter
 
 import pandas as pd
 
-from Tools.Stats.analysis.dv_policies import normalize_dv_policy, prepare_summed_bca_data
-from Tools.Stats.analysis.dv_policy_settings import FIXED_PREDEFINED_POLICY_ID
+from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
+from Tools.Stats.analysis.dv_policy_settings import (
+    FIXED_PREDEFINED_POLICY_ID,
+    GROUP_SIGNIFICANT_POLICY_ID,
+)
 
 logger = logging.getLogger("Tools.Stats")
 STATS_READY_WORKBOOK_NAME = "Stats_Ready_Summed_BCA.xlsx"
 SINGLE_GROUP_LABEL = "single_group"
 
-RSTUDIO_LONG_SHEET = "RStudio_Long"
-SAS_LONG_SHEET = "SAS_Long"
-JASP_RM_ANOVA_SHEET = "JASP_RM_ANOVA"
-JASP_LONG_MIXED_SHEET = "JASP_Long_Mixed"
-DATA_DICTIONARY_SHEET = "Data_Dictionary"
-ANALYSIS_RECIPES_SHEET = "Analysis_Recipes"
+LONG_FORMAT_SHEET = "Long_Format"
+WIDE_FORMAT_SHEET = "Wide_Format"
+HARMONIC_SELECTION_SHEET = "Harmonic_Selection"
+HARMONIC_SELECTION_COLUMNS = [
+    "harmonic_policy",
+    "selection_scope",
+    "base_frequency_hz",
+    "oddball_frequency_hz",
+    "z_threshold",
+    "requested_harmonic_hz",
+    "harmonic_hz",
+    "z_score",
+    "selected",
+    "excluded_base_rate",
+    "exclusion_reason",
+]
 
 
 @dataclass(frozen=True)
@@ -64,57 +77,6 @@ def _parse_frequency(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _format_harmonics(freqs: list[float]) -> str:
-    return ";".join(f"{freq:g}" for freq in freqs)
-
-
-def _format_z_scores(z_by_harmonic: Mapping[object, object]) -> str:
-    pairs: list[tuple[float, float]] = []
-    for raw_freq, raw_z in (z_by_harmonic or {}).items():
-        freq = _parse_frequency(raw_freq)
-        z_val = _numeric_or_nan(raw_z)
-        if freq is not None and math.isfinite(z_val):
-            pairs.append((freq, z_val))
-    return ";".join(f"{freq:g}:{z_val:.4g}" for freq, z_val in sorted(pairs))
-
-
-def _harmonics_from_provenance(provenance: Mapping[str, object]) -> list[float]:
-    labels = provenance.get("col_label")
-    if labels is None:
-        return []
-    if not isinstance(labels, (list, tuple, set)):
-        labels = [labels]
-    freqs: list[float] = []
-    for label in labels:
-        freq = _parse_frequency(label)
-        if freq is not None:
-            freqs.append(freq)
-    return sorted(set(freqs))
-
-
-def _harmonics_for_roi(
-    roi: str,
-    *,
-    dv_metadata: Mapping[str, object],
-    provenance: Mapping[str, object],
-) -> list[float]:
-    rossion_meta = dv_metadata.get("rossion_method")
-    if isinstance(rossion_meta, Mapping):
-        union_map = rossion_meta.get("union_harmonics_by_roi")
-        if isinstance(union_map, Mapping):
-            roi_freqs = union_map.get(roi)
-            if isinstance(roi_freqs, (list, tuple, set)):
-                freqs = [_parse_frequency(freq) for freq in roi_freqs]
-                return sorted(freq for freq in freqs if freq is not None)
-    fixed_meta = _common_fixed_predefined_meta(dv_metadata)
-    if fixed_meta:
-        raw_freqs = fixed_meta.get("fixed_harmonic_included_frequencies_hz")
-        if isinstance(raw_freqs, (list, tuple, set)):
-            freqs = [_parse_frequency(freq) for freq in raw_freqs]
-            return [freq for freq in freqs if freq is not None]
-    return _harmonics_from_provenance(provenance)
-
-
 def _common_rossion_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, object]:
     rossion_meta = dv_metadata.get("rossion_method")
     return rossion_meta if isinstance(rossion_meta, Mapping) else {}
@@ -125,23 +87,9 @@ def _common_fixed_predefined_meta(dv_metadata: Mapping[str, object]) -> Mapping[
     return fixed_meta if isinstance(fixed_meta, Mapping) else {}
 
 
-def _fallback_info_for_roi(
-    roi: str,
-    *,
-    dv_metadata: Mapping[str, object],
-    default_policy: str,
-) -> tuple[str, bool]:
-    rossion_meta = dv_metadata.get("rossion_method")
-    if isinstance(rossion_meta, Mapping):
-        fallback_map = rossion_meta.get("fallback_info_by_roi")
-        if isinstance(fallback_map, Mapping):
-            roi_info = fallback_map.get(roi)
-            if isinstance(roi_info, Mapping):
-                policy = _safe_text(roi_info.get("policy"), default=default_policy)
-                return policy, bool(roi_info.get("fallback_used", False))
-    if _common_fixed_predefined_meta(dv_metadata):
-        return "None", False
-    return default_policy, False
+def _common_group_significant_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, object]:
+    group_meta = dv_metadata.get("group_significant_harmonics")
+    return group_meta if isinstance(group_meta, Mapping) else {}
 
 
 def _resolve_group_labels(
@@ -175,17 +123,6 @@ def _resolve_group_labels(
             f"{joined}. Fix project participant metadata before exporting stats-ready data."
         )
     return {subject: str(group) for subject, group in labels.items()}
-
-
-def _subject_uids(subjects: list[str], group_labels: Mapping[str, str]) -> dict[str, str]:
-    counts = Counter(subjects)
-    out: dict[str, str] = {}
-    for subject in subjects:
-        if counts[subject] <= 1:
-            out[subject] = subject
-            continue
-        out[subject] = f"{_safe_identifier(group_labels[subject])}__{_safe_identifier(subject)}"
-    return out
 
 
 def _safe_identifier(value: object) -> str:
@@ -224,90 +161,30 @@ def _build_long_frame(
     dv_policy: Mapping[str, object] | None,
     group_map: Mapping[str, object] | None,
 ) -> pd.DataFrame:
-    settings = normalize_dv_policy(dict(dv_policy or {}))
-    policy_name = _safe_text(dv_metadata.get("policy_name"), default=settings.name)
-    default_empty_policy = _safe_text(dv_metadata.get("empty_list_policy"), default="None")
-    rossion_meta = _common_rossion_meta(dv_metadata)
-    fixed_meta = _common_fixed_predefined_meta(dv_metadata)
-    selection_scope = _safe_text(rossion_meta.get("selection_scope"))
-    if fixed_meta:
-        selection_scope = FIXED_PREDEFINED_POLICY_ID
-    z_scores = _format_z_scores(rossion_meta.get("selection_z_by_harmonic", {}))
-    excluded_base = []
-    raw_excluded = rossion_meta.get("excluded_base_harmonics_hz")
-    if fixed_meta:
-        raw_excluded = fixed_meta.get("excluded_base_overlap_frequencies_hz")
-    if isinstance(raw_excluded, (list, tuple, set)):
-        excluded_base = [_parse_frequency(freq) for freq in raw_excluded]
-    excluded_base_text = _format_harmonics([freq for freq in excluded_base if freq is not None])
+    _ = dv_metadata, dv_policy, provenance_map
     group_labels = _resolve_group_labels(subjects, group_map)
-    uid_map = _subject_uids(subjects, group_labels)
 
     rows: list[dict[str, object]] = []
     for subject in subjects:
-        for condition_order, condition in enumerate(conditions, start=1):
+        for condition in conditions:
             condition_data = summed_bca.get(subject, {}).get(condition, {})
-            source_file = subject_data.get(subject, {}).get(condition, "")
-            for roi_order, roi in enumerate(rois, start=1):
-                provenance = provenance_map.get((subject, condition, roi), {})
-                harmonics = _harmonics_for_roi(
-                    roi,
-                    dv_metadata=dv_metadata,
-                    provenance=provenance,
-                )
-                empty_policy, fallback_used = _fallback_info_for_roi(
-                    roi,
-                    dv_metadata=dv_metadata,
-                    default_policy=default_empty_policy,
-                )
-                source_workbook = _safe_text(
-                    provenance.get("source_file"),
-                    default=_safe_text(source_file),
-                )
+            for roi in rois:
                 rows.append(
                     {
-                        "subject_uid": uid_map[subject],
                         "subject_id": subject,
                         "group_id": group_labels[subject],
                         "condition": condition,
                         "roi": roi,
                         "summed_bca_uv": _numeric_or_nan(condition_data.get(roi)),
-                        "condition_order": condition_order,
-                        "roi_order": roi_order,
-                        "metric": "summed_bca",
-                        "value_units": "uV",
-                        "dv_policy": policy_name,
-                        "selected_harmonics_hz": _format_harmonics(harmonics),
-                        "harmonic_count": len(harmonics),
-                        "selection_scope": selection_scope,
-                        "selection_z_scores": z_scores,
-                        "excluded_base_harmonics_hz": excluded_base_text,
-                        "empty_harmonic_policy": empty_policy,
-                        "fallback_used": fallback_used,
-                        "source_workbook": source_workbook,
                     }
                 )
 
     columns = [
-        "subject_uid",
         "subject_id",
         "group_id",
         "condition",
         "roi",
         "summed_bca_uv",
-        "condition_order",
-        "roi_order",
-        "metric",
-        "value_units",
-        "dv_policy",
-        "selected_harmonics_hz",
-        "harmonic_count",
-        "selection_scope",
-        "selection_z_scores",
-        "excluded_base_harmonics_hz",
-        "empty_harmonic_policy",
-        "fallback_used",
-        "source_workbook",
     ]
     frame = pd.DataFrame(rows, columns=columns)
     if frame.empty:
@@ -320,47 +197,14 @@ def _build_long_frame(
     return frame
 
 
-def _build_sas_long_frame(long_df: pd.DataFrame) -> pd.DataFrame:
-    rename = {
-        "condition_order": "condition_n",
-        "roi_order": "roi_n",
-        "selected_harmonics_hz": "harmonics_hz",
-        "harmonic_count": "harmonic_n",
-        "selection_z_scores": "z_scores",
-        "excluded_base_harmonics_hz": "excluded_base_hz",
-        "empty_harmonic_policy": "empty_policy",
-        "source_workbook": "source_file",
-    }
-    columns = [
-        "subject_uid",
-        "subject_id",
-        "group_id",
-        "condition",
-        "roi",
-        "summed_bca_uv",
-        "condition_n",
-        "roi_n",
-        "dv_policy",
-        "harmonics_hz",
-        "harmonic_n",
-        "selection_scope",
-        "z_scores",
-        "excluded_base_hz",
-        "empty_policy",
-        "fallback_used",
-        "source_file",
-    ]
-    return long_df.rename(columns=rename).loc[:, columns].copy()
-
-
 def _build_jasp_wide_frame(
     long_df: pd.DataFrame,
     *,
     conditions: list[str],
     rois: list[str],
-) -> tuple[pd.DataFrame, dict[tuple[str, str], str]]:
+) -> pd.DataFrame:
     column_map = _wide_column_names(conditions, rois)
-    id_columns = ["subject_uid", "subject_id", "group_id"]
+    id_columns = ["subject_id", "group_id"]
     subjects_df = long_df.loc[:, id_columns].drop_duplicates().reset_index(drop=True)
 
     wide = subjects_df.copy()
@@ -369,116 +213,10 @@ def _build_jasp_wide_frame(
             column = column_map[(condition, roi)]
             values = long_df[
                 (long_df["condition"] == condition) & (long_df["roi"] == roi)
-            ].loc[:, ["subject_uid", "summed_bca_uv"]]
+            ].loc[:, id_columns + ["summed_bca_uv"]]
             values = values.rename(columns={"summed_bca_uv": column})
-            wide = wide.merge(values, on="subject_uid", how="left")
-    return wide, column_map
-
-
-def _build_data_dictionary(
-    *,
-    wide_column_map: Mapping[tuple[str, str], str],
-    long_df: pd.DataFrame,
-) -> pd.DataFrame:
-    rows = [
-        {
-            "sheet": RSTUDIO_LONG_SHEET,
-            "column": "subject_uid",
-            "description": "Unique subject key for analysis.",
-            "units": "",
-        },
-        {
-            "sheet": RSTUDIO_LONG_SHEET,
-            "column": "group_id",
-            "description": "Between-subject experimental group label.",
-            "units": "",
-        },
-        {
-            "sheet": RSTUDIO_LONG_SHEET,
-            "column": "summed_bca_uv",
-            "description": "Baseline-corrected amplitude summed across selected harmonics and averaged within ROI electrodes.",
-            "units": "uV",
-        },
-        {
-            "sheet": RSTUDIO_LONG_SHEET,
-            "column": "selected_harmonics_hz",
-            "description": "Semicolon-delimited harmonic frequencies selected by the active DV policy.",
-            "units": "Hz",
-        },
-        {
-            "sheet": RSTUDIO_LONG_SHEET,
-            "column": "selection_z_scores",
-            "description": "Semicolon-delimited frequency:z-score pairs when the active DV policy uses z-score selection; blank for fixed predefined harmonic lists.",
-            "units": "",
-        },
-        {
-            "sheet": RSTUDIO_LONG_SHEET,
-            "column": "excluded_base_harmonics_hz",
-            "description": "Base-rate harmonics excluded from oddball summation.",
-            "units": "Hz",
-        },
-        {
-            "sheet": RSTUDIO_LONG_SHEET,
-            "column": "fallback_used",
-            "description": "True when the active policy used an explicit empty-harmonic fallback for that ROI.",
-            "units": "",
-        },
-    ]
-    harmonic_lookup = (
-        long_df.groupby(["condition", "roi"], dropna=False)["selected_harmonics_hz"]
-        .first()
-        .to_dict()
-    )
-    for (condition, roi), column in wide_column_map.items():
-        rows.append(
-            {
-                "sheet": JASP_RM_ANOVA_SHEET,
-                "column": column,
-                "description": "Wide repeated-measures cell for one condition x ROI.",
-                "units": "uV",
-                "original_condition": condition,
-                "original_roi": roi,
-                "selected_harmonics_hz": harmonic_lookup.get((condition, roi), ""),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _build_analysis_recipes() -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "software": "RStudio",
-                "data_sheet": RSTUDIO_LONG_SHEET,
-                "analysis": "RM-ANOVA",
-                "recipe": "Import with readxl, treat subject_uid as the subject id, condition and roi as within-subject factors, and group_id as a between-subject factor when groups are present.",
-            },
-            {
-                "software": "RStudio",
-                "data_sheet": RSTUDIO_LONG_SHEET,
-                "analysis": "Linear mixed model",
-                "recipe": "Fit summed_bca_uv from group_id, condition, roi, and their interactions with a subject_uid random effect appropriate for the study design.",
-            },
-            {
-                "software": "SAS",
-                "data_sheet": SAS_LONG_SHEET,
-                "analysis": "PROC MIXED",
-                "recipe": "Import the sheet, declare subject_uid, group_id, condition, and roi as CLASS variables, then model summed_bca_uv with within- and between-subject terms.",
-            },
-            {
-                "software": "JASP",
-                "data_sheet": JASP_RM_ANOVA_SHEET,
-                "analysis": "Repeated-measures ANOVA",
-                "recipe": "Open the workbook, choose this wide sheet, assign condition x ROI columns to repeated-measures cells, and use group_id as the between-subject factor when groups are present.",
-            },
-            {
-                "software": "JASP",
-                "data_sheet": JASP_LONG_MIXED_SHEET,
-                "analysis": "Mixed model",
-                "recipe": "Use the long sheet for mixed-model workflows with subject_uid as the participant identifier and summed_bca_uv as the dependent variable.",
-            },
-        ]
-    )
+            wide = wide.merge(values, on=id_columns, how="left")
+    return wide
 
 
 def build_stats_ready_frames(
@@ -516,25 +254,15 @@ def build_stats_ready_frames(
         dv_policy=dv_policy,
         group_map=group_map,
     )
-    sas_df = _build_sas_long_frame(long_df)
-    jasp_wide_df, wide_column_map = _build_jasp_wide_frame(
+    jasp_wide_df = _build_jasp_wide_frame(
         long_df,
         conditions=condition_list,
         rois=roi_names,
     )
-    dictionary_df = _build_data_dictionary(
-        wide_column_map=wide_column_map,
-        long_df=long_df,
-    )
-    recipes_df = _build_analysis_recipes()
     return {
-        RSTUDIO_LONG_SHEET: long_df,
-        SAS_LONG_SHEET: sas_df,
-        JASP_RM_ANOVA_SHEET: jasp_wide_df,
-        JASP_LONG_MIXED_SHEET: long_df.copy(),
-        DATA_DICTIONARY_SHEET: dictionary_df,
-        ANALYSIS_RECIPES_SHEET: recipes_df,
-        "Harmonic_Selection": _build_harmonic_selection_frame(dv_metadata),
+        LONG_FORMAT_SHEET: long_df,
+        WIDE_FORMAT_SHEET: jasp_wide_df,
+        HARMONIC_SELECTION_SHEET: _build_harmonic_selection_frame(dv_metadata),
     }
 
 
@@ -542,7 +270,11 @@ def _build_harmonic_selection_frame(dv_metadata: Mapping[str, object]) -> pd.Dat
     fixed_meta = _common_fixed_predefined_meta(dv_metadata)
     if fixed_meta:
         rows = _fixed_predefined_selection_rows(fixed_meta)
-        return pd.DataFrame(rows) if rows else pd.DataFrame()
+        return _harmonic_selection_frame_from_rows(rows)
+    group_meta = _common_group_significant_meta(dv_metadata)
+    if group_meta:
+        rows = _group_significant_selection_rows(group_meta)
+        return _harmonic_selection_frame_from_rows(rows)
     rossion_meta = _common_rossion_meta(dv_metadata)
     if not rossion_meta:
         return pd.DataFrame()
@@ -565,7 +297,11 @@ def _build_harmonic_selection_frame(dv_metadata: Mapping[str, object]) -> pd.Dat
             excluded_harmonics=sensitivity_meta.get("excluded_base_harmonics_hz"),
             sensitivity=True,
         )
-    return pd.DataFrame(rows).sort_values(["sensitivity", "harmonic_hz"]) if rows else pd.DataFrame()
+    return _harmonic_selection_frame_from_rows(rows)
+
+
+def _harmonic_selection_frame_from_rows(rows: list[dict[str, object]]) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=HARMONIC_SELECTION_COLUMNS)
 
 
 def _fixed_predefined_selection_rows(fixed_meta: Mapping[str, object]) -> list[dict[str, object]]:
@@ -581,77 +317,40 @@ def _fixed_predefined_selection_rows(fixed_meta: Mapping[str, object]) -> list[d
                 "selection_scope": FIXED_PREDEFINED_POLICY_ID,
                 "base_frequency_hz": fixed_meta.get("base_frequency_hz"),
                 "oddball_frequency_hz": fixed_meta.get("oddball_frequency_hz"),
-                "base_overlap_exclusion_enabled": fixed_meta.get(
-                    "base_overlap_exclusion_enabled"
-                ),
-                "base_overlap_tolerance_hz": fixed_meta.get("base_overlap_tolerance_hz"),
-                "matching_tolerance_hz": fixed_meta.get("matching_tolerance_hz"),
-                "frequency_resolution_hz": fixed_meta.get("frequency_resolution_hz"),
-                "applied_uniformly_across_participants": fixed_meta.get(
-                    "applied_uniformly_across_participants"
-                ),
-                "applied_uniformly_across_conditions": fixed_meta.get(
-                    "applied_uniformly_across_conditions"
-                ),
-                "applied_uniformly_across_rois": fixed_meta.get(
-                    "applied_uniformly_across_rois"
-                ),
-                "snr_used_for_statistics": fixed_meta.get("snr_used_for_statistics"),
-                "bca_negative_values_retained": fixed_meta.get("bca_negative_values_retained"),
-                "bca_near_zero_values_retained": fixed_meta.get(
-                    "bca_near_zero_values_retained"
-                ),
+                "z_threshold": math.nan,
                 "requested_harmonic_hz": requested,
                 "harmonic_hz": matched if matched is not None else requested,
-                "matched_bca_frequency_hz": matched,
-                "matched_bca_column": row_data.get("matched_column"),
-                "matched_bca_bin_index": row_data.get("matched_bin_index"),
+                "z_score": math.nan,
                 "selected": bool(row_data.get("included")),
                 "excluded_base_rate": row_data.get("exclusion_reason") == "base_rate_overlap",
                 "exclusion_reason": row_data.get("exclusion_reason", ""),
-                "warning": row_data.get("warning", ""),
-                "z_score": math.nan,
-                "sensitivity": False,
             }
         )
-    if rows:
+    return rows
+
+
+def _group_significant_selection_rows(group_meta: Mapping[str, object]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for row_data in group_meta.get("selection_rows", []) or []:
+        if not isinstance(row_data, Mapping):
+            continue
+        matched = _parse_frequency(row_data.get("matched_frequency_hz"))
         rows.append(
             {
-                "harmonic_policy": fixed_meta.get("harmonic_policy", FIXED_PREDEFINED_POLICY_ID),
-                "selection_scope": "methods_summary",
-                "base_frequency_hz": fixed_meta.get("base_frequency_hz"),
-                "oddball_frequency_hz": fixed_meta.get("oddball_frequency_hz"),
-                "base_overlap_exclusion_enabled": fixed_meta.get(
-                    "base_overlap_exclusion_enabled"
+                "harmonic_policy": group_meta.get("harmonic_policy", GROUP_SIGNIFICANT_POLICY_ID),
+                "selection_scope": group_meta.get(
+                    "selection_scope",
+                    GROUP_SIGNIFICANT_POLICY_ID,
                 ),
-                "base_overlap_tolerance_hz": fixed_meta.get("base_overlap_tolerance_hz"),
-                "matching_tolerance_hz": fixed_meta.get("matching_tolerance_hz"),
-                "frequency_resolution_hz": fixed_meta.get("frequency_resolution_hz"),
-                "applied_uniformly_across_participants": fixed_meta.get(
-                    "applied_uniformly_across_participants"
-                ),
-                "applied_uniformly_across_conditions": fixed_meta.get(
-                    "applied_uniformly_across_conditions"
-                ),
-                "applied_uniformly_across_rois": fixed_meta.get(
-                    "applied_uniformly_across_rois"
-                ),
-                "snr_used_for_statistics": fixed_meta.get("snr_used_for_statistics"),
-                "bca_negative_values_retained": fixed_meta.get("bca_negative_values_retained"),
-                "bca_near_zero_values_retained": fixed_meta.get(
-                    "bca_near_zero_values_retained"
-                ),
-                "requested_harmonic_hz": math.nan,
-                "harmonic_hz": math.nan,
-                "matched_bca_frequency_hz": math.nan,
-                "matched_bca_column": "",
-                "matched_bca_bin_index": math.nan,
-                "selected": False,
-                "excluded_base_rate": False,
-                "exclusion_reason": "methods_summary",
-                "warning": fixed_meta.get("methods_summary", ""),
-                "z_score": math.nan,
-                "sensitivity": False,
+                "base_frequency_hz": group_meta.get("base_frequency_hz"),
+                "oddball_frequency_hz": group_meta.get("oddball_frequency_hz"),
+                "z_threshold": group_meta.get("z_threshold"),
+                "requested_harmonic_hz": row_data.get("target_frequency_hz"),
+                "harmonic_hz": matched,
+                "z_score": _numeric_or_nan(row_data.get("z_score")),
+                "selected": bool(row_data.get("selected")),
+                "excluded_base_rate": bool(row_data.get("excluded_base_rate")),
+                "exclusion_reason": row_data.get("exclusion_reason", ""),
             }
         )
     return rows
@@ -811,5 +510,5 @@ def prepare_stats_ready_export(
     return StatsReadyExport(
         frames=frames,
         workbook_path=workbook_path,
-        row_count=len(frames[RSTUDIO_LONG_SHEET]),
+        row_count=len(frames[LONG_FORMAT_SHEET]),
     )

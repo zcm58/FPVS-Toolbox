@@ -15,6 +15,13 @@ FIXED_PREDEFINED_POLICY_LABEL = (
 FIXED_PREDEFINED_DEFAULT_FREQUENCIES = "1.2, 2.4, 3.6, 4.8, 7.2"
 FIXED_PREDEFINED_BASE_OVERLAP_TOLERANCE_HZ = 0.01
 FIXED_PREDEFINED_MATCHING_TOLERANCE_HZ = 0.01
+GROUP_SIGNIFICANT_POLICY_NAME = "Group-level significant harmonics (Volfart/Retter/Rossion style)"
+GROUP_SIGNIFICANT_POLICY_ID = "group_level_significant_harmonics"
+GROUP_SIGNIFICANT_POLICY_LABEL = (
+    "Group-level significant oddball harmonics from a grand-averaged amplitude spectrum"
+)
+GROUP_SIGNIFICANT_Z_THRESHOLD = 2.32
+GROUP_SIGNIFICANT_ELECTRODE_SCOPE = "all_scalp_electrodes"
 
 
 @dataclass(frozen=True)
@@ -25,15 +32,19 @@ class DVPolicySettings:
     fixed_harmonic_auto_exclude_base: bool = True
     fixed_harmonic_base_tolerance_hz: float = FIXED_PREDEFINED_BASE_OVERLAP_TOLERANCE_HZ
     fixed_harmonic_matching_tolerance_hz: float = FIXED_PREDEFINED_MATCHING_TOLERANCE_HZ
+    group_significant_z_threshold: float = GROUP_SIGNIFICANT_Z_THRESHOLD
+    group_significant_electrode_scope: str = GROUP_SIGNIFICANT_ELECTRODE_SCOPE
 
     def to_metadata(self, *, base_freq: float, selected_conditions: list[str]) -> dict:
         """Handle the to metadata step for the Stats workflow."""
         return {
-            "policy_name": FIXED_PREDEFINED_POLICY_NAME,
+            "policy_name": self.name,
             "fixed_harmonic_frequencies_hz": str(self.fixed_harmonic_frequencies_hz),
             "fixed_harmonic_auto_exclude_base": bool(self.fixed_harmonic_auto_exclude_base),
             "fixed_harmonic_base_tolerance_hz": float(self.fixed_harmonic_base_tolerance_hz),
             "fixed_harmonic_matching_tolerance_hz": float(self.fixed_harmonic_matching_tolerance_hz),
+            "group_significant_z_threshold": float(self.group_significant_z_threshold),
+            "group_significant_electrode_scope": str(self.group_significant_electrode_scope),
             "base_frequency_hz": float(base_freq),
             "selected_conditions": list(selected_conditions),
         }
@@ -43,6 +54,12 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
     """Handle the normalize dv policy step for the Stats workflow."""
     if not settings:
         return DVPolicySettings()
+    raw_name = str(settings.get("name", FIXED_PREDEFINED_POLICY_NAME))
+    name = (
+        GROUP_SIGNIFICANT_POLICY_NAME
+        if raw_name == GROUP_SIGNIFICANT_POLICY_NAME
+        else FIXED_PREDEFINED_POLICY_NAME
+    )
     fixed_freqs = str(settings.get("fixed_harmonic_frequencies_hz", FIXED_PREDEFINED_DEFAULT_FREQUENCIES))
     fixed_base_tol = float(
         settings.get("fixed_harmonic_base_tolerance_hz", FIXED_PREDEFINED_BASE_OVERLAP_TOLERANCE_HZ)
@@ -50,12 +67,22 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
     fixed_match_tol = float(
         settings.get("fixed_harmonic_matching_tolerance_hz", FIXED_PREDEFINED_MATCHING_TOLERANCE_HZ)
     )
+    group_z = float(settings.get("group_significant_z_threshold", GROUP_SIGNIFICANT_Z_THRESHOLD))
+    if not np.isfinite(group_z) or group_z <= 0:
+        group_z = GROUP_SIGNIFICANT_Z_THRESHOLD
+    group_scope = str(
+        settings.get("group_significant_electrode_scope", GROUP_SIGNIFICANT_ELECTRODE_SCOPE)
+    )
+    if group_scope != GROUP_SIGNIFICANT_ELECTRODE_SCOPE:
+        group_scope = GROUP_SIGNIFICANT_ELECTRODE_SCOPE
     return DVPolicySettings(
-        name=FIXED_PREDEFINED_POLICY_NAME,
+        name=name,
         fixed_harmonic_frequencies_hz=fixed_freqs,
         fixed_harmonic_auto_exclude_base=bool(settings.get("fixed_harmonic_auto_exclude_base", True)),
         fixed_harmonic_base_tolerance_hz=fixed_base_tol,
         fixed_harmonic_matching_tolerance_hz=fixed_match_tol,
+        group_significant_z_threshold=group_z,
+        group_significant_electrode_scope=group_scope,
     )
 
 

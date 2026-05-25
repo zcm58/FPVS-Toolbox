@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Sequence, Tuple
 
 import pandas as pd
 
@@ -24,6 +24,7 @@ def safe_read_excel(
     sheet_name: str,
     *,
     index_col: str | None = None,
+    usecols: Sequence[str] | str | None = None,
     use_cache: bool = True,
 ) -> pd.DataFrame:
     """Thread-serialized Excel reader for Legacy stats.
@@ -35,13 +36,20 @@ def safe_read_excel(
 
     p = Path(path)
     key = _cache_key(p, sheet_name, index_col)
+    if usecols is not None:
+        use_cache = False
 
     if use_cache and key in _excel_cache:
         return _excel_cache[key].copy()
 
     with _EXCEL_IO_LOCK:
         with pd.ExcelFile(str(p), engine="openpyxl") as xls:
-            df = pd.read_excel(xls, sheet_name=sheet_name, index_col=index_col)
+            df = pd.read_excel(
+                xls,
+                sheet_name=sheet_name,
+                index_col=index_col,
+                usecols=usecols,
+            )
 
     if use_cache:
         _excel_cache[key] = df.copy()

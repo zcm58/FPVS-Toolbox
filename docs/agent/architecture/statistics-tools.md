@@ -24,7 +24,7 @@ Stats grouping:
 - `controller/`: run coordination, pipeline state, and worker scheduling.
 - `workers/`: Qt worker wrappers and GUI-agnostic statistical job execution.
 - `data/`: project scans, manifest lookup, project-root context, subject IDs, and missing input detection.
-- `analysis/`: fixed/predefined Summed BCA DV policy facade and helper, statistical engines, and vectorized FullSNR/SNR/noise helpers.
+- `analysis/`: Summed BCA DV policy facade and helpers, statistical engines, and vectorized FullSNR/SNR/noise helpers.
 - `qc/`: outlier, manual exclusion, QC exclusion, and QC report helpers.
 - `reporting/`: plain-language summaries, workbook formatting, run reports, and logging.
 - `reporting/summary/`: focused rule-based summary builders split by models, frame/file loading, ANOVA, posthoc, and mixed-model language. `reporting/summary_utils.py` is a compatibility facade only.
@@ -42,9 +42,13 @@ Rules:
 - New summary-reporting code should import from `Tools.Stats.reporting.summary`; keep `Tools.Stats.reporting.summary_utils` as a compatibility facade.
 - Stats-ready exports must stay explicit and additive. Keep
   `Export Stats-Ready Workbook` as a distinct action, reuse the active Summed
-  BCA DV facade, preserve group labels and `subject_uid`, and surface missing
-  metadata instead of silently changing values. The active Stats DV facade is
-  fixed/predefined harmonic summation only.
+  BCA DV facade, preserve `subject_id` and group labels, and surface missing
+  metadata instead of silently changing values. Fixed/predefined harmonic
+  summation is the default and primary DV policy. The optional
+  group-level significant-harmonics policy selects one common non-base oddball
+  harmonic list from grand-averaged `FullFFT Amplitude (uV)` spectra, then
+  applies that common list uniformly to every participant, selected condition,
+  and ROI.
 - Stats folder scans may rebind the window to the manifest-owning project root
   only when the selected Excel folder belongs to that manifest-defined Excel
   subfolder. When rebinding, clear project-bound scan/results/export state so

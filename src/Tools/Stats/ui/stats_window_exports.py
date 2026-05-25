@@ -60,6 +60,9 @@ class StatsWindowExportsMixin:
         fixed_meta = dv_meta.get("fixed_predefined_harmonics") if isinstance(dv_meta, dict) else None
         if isinstance(fixed_meta, dict):
             payload["fixed_predefined_harmonics"] = fixed_meta
+        group_meta = dv_meta.get("group_significant_harmonics") if isinstance(dv_meta, dict) else None
+        if isinstance(group_meta, dict):
+            payload["group_significant_harmonics"] = group_meta
         try:
             out_path = Path(out_dir) / "dv_metadata.json"
             out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -67,7 +70,11 @@ class StatsWindowExportsMixin:
             logger.exception("Failed to write DV metadata export.")
 
         rossion_meta = dv_meta.get("rossion_method") if isinstance(dv_meta, dict) else None
-        if not isinstance(rossion_meta, dict) and not isinstance(fixed_meta, dict):
+        if (
+            not isinstance(rossion_meta, dict)
+            and not isinstance(fixed_meta, dict)
+            and not isinstance(group_meta, dict)
+        ):
             return
         if not isinstance(rossion_meta, dict):
             rossion_meta = {}
@@ -96,6 +103,35 @@ class StatsWindowExportsMixin:
                         {
                             "key": "SNR used for statistics",
                             "value": fixed_meta.get("snr_used_for_statistics", False),
+                        },
+                    ]
+                )
+            elif isinstance(group_meta, dict):
+                included = group_meta.get("selected_harmonics_hz", [])
+                summary_rows.extend(
+                    [
+                        {
+                            "key": "Selection rule",
+                            "value": group_meta.get(
+                                "harmonic_policy_label",
+                                "Group-level significant harmonics",
+                            ),
+                        },
+                        {
+                            "key": "Included harmonics (Hz)",
+                            "value": ", ".join(f"{float(freq):g}" for freq in included),
+                        },
+                        {
+                            "key": "Selection scope",
+                            "value": group_meta.get("selection_scope", ""),
+                        },
+                        {
+                            "key": "Z threshold",
+                            "value": group_meta.get("z_threshold", ""),
+                        },
+                        {
+                            "key": "SNR used for statistics",
+                            "value": group_meta.get("snr_used_for_statistics", False),
                         },
                     ]
                 )
@@ -140,8 +176,23 @@ class StatsWindowExportsMixin:
                     for row in fixed_meta.get("selection_rows", []) or []
                     if isinstance(row, dict)
                 ]
+            if isinstance(group_meta, dict):
+                roi_rows = [
+                    row
+                    for row in group_meta.get("selection_rows", []) or []
+                    if isinstance(row, dict)
+                ]
             roi_df = pd.DataFrame(roi_rows)
             mean_z_table = rossion_meta.get("mean_z_table")
+            if isinstance(group_meta, dict):
+                z_map = group_meta.get("selection_z_by_harmonic", {}) or {}
+                if isinstance(z_map, dict):
+                    mean_z_table = pd.DataFrame(
+                        [
+                            {"harmonic_hz": float(freq), "z_score": float(z_score)}
+                            for freq, z_score in z_map.items()
+                        ]
+                    )
 
             dv_path = Path(out_dir) / "Summed BCA DV Definition.xlsx"
             with pd.ExcelWriter(dv_path, engine="openpyxl") as writer:

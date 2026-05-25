@@ -12,8 +12,8 @@ currently supported single-group workflow.
 ## How the methods work together (high-level)
 
 1. **Summed BCA DV is defined** from the ROI-aggregated spectral outputs.
-2. **Harmonics are selected** (e.g., Rossion method) to decide which
-   oddball harmonics contribute to the DV.
+2. **Harmonics are selected** using the default fixed/predefined list or
+   the optional group-level significant-harmonics policy.
 3. A **subject x condition x ROI table** of Summed BCA values is built.
 4. **RM-ANOVA** and/or a **linear mixed-effects model** summarize
    condition, ROI, and interaction effects.
@@ -38,8 +38,10 @@ Cautions:
 
 - **Multiple comparisons:** post-hoc tests are corrected for false
   discovery rate; still interpret effect sizes and confidence intervals.
-- **Harmonic sets can differ by ROI** (Rossion method). This can make ROI
-  differences partly reflect different harmonic selections.
+- **Harmonic policy matters:** the default fixed/predefined list and the
+  optional group-level significant-harmonics policy both apply one common
+  harmonic list across ROIs, so ROI differences are not driven by different
+  harmonic lists.
 - **Assumptions:** check normality and sphericity (RM-ANOVA) and residual
   diagnostics (mixed model) as part of reporting.
 
@@ -53,13 +55,14 @@ oddball amplitude (Summed BCA)**. It is computed per
 harmonics and then averaging across ROI channels.
 
 - **Source data:** The DV is computed from the **"BCA (uV)"** sheet in the
-  spectral/ROI output file; Z-score information used for harmonic
-  selection comes from the **"Z Score"** sheet.
+  spectral/ROI output file. The optional group-level policy computes
+  selection z-scores from the grand-averaged **"FullFFT Amplitude (uV)"**
+  spectrum.
 - **ROI aggregation:** The ROI mean is computed after summing selected
   harmonics for each channel within the ROI.
 
-For detailed harmonic selection rules (Rossion method), see:
-**[Rossion harmonic selection](../statistics/rossion-harmonic-selection.md)**.
+For detailed harmonic selection rules, see:
+**[Harmonic selection](../statistics/rossion-harmonic-selection.md)**.
 
 ---
 
@@ -124,7 +127,7 @@ The Stats tool can generate **QC and DV flags** and separate them from
   - RM-ANOVA tables (single-group workflow).
   - Mixed-model fixed-effects tables.
   - Post-hoc tables with raw and FDR-adjusted p-values plus effect sizes.
-  - Rossion DV definition export (when using Rossion selection).
+  - Summed BCA DV definition export.
   - Flagged and excluded participant reports (if QC/outlier checks are
     enabled).
 

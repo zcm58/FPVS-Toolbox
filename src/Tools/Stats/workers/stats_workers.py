@@ -147,12 +147,14 @@ def _log_dv_trace_policy_snapshot(
     logger.info(
         "DV_TRACE policy_snapshot policy_name=%s fixed_harmonics_hz=%s "
         "auto_exclude_base=%s base_freq=%s oddball_every_n=%s "
-        "selected_conditions=%s selected_conditions_count=%d rois=%s rois_count=%d n_subjects=%d",
+        "group_z_threshold=%s selected_conditions=%s selected_conditions_count=%d "
+        "rois=%s rois_count=%d n_subjects=%d",
         settings.name,
         settings.fixed_harmonic_frequencies_hz,
         settings.fixed_harmonic_auto_exclude_base,
         float(base_freq),
         SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
+        settings.group_significant_z_threshold,
         list(conditions),
         len(conditions),
         roi_list,
@@ -335,7 +337,7 @@ def run_stats_ready_export(
         log_func=message_cb,
         save_path=output_path,
         max_freq=max_freq,
-        selection_conditions=list(conditions_all) if conditions_all else list(conditions or []),
+        selection_conditions=list(conditions or []),
     )
     progress_cb(100)
     return {
@@ -403,7 +405,7 @@ def _prepare_single_group_data(
         rois=rois,
         dv_policy=dv_policy,
         dv_metadata=dv_metadata,
-        selection_conditions=list(conditions_all) if conditions_all else list(conditions or []),
+        selection_conditions=list(conditions or []),
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -477,6 +479,28 @@ def _summarize_dv_metadata_for_export(dv_metadata: dict[str, object]) -> dict[st
                 ),
                 "applied_uniformly_across_rois": bool(
                     fixed_meta.get("applied_uniformly_across_rois", False)
+                ),
+            }
+        )
+    group_meta = dv_metadata.get("group_significant_harmonics")
+    if isinstance(group_meta, dict):
+        included = group_meta.get("selected_harmonics_hz", []) or []
+        summary.update(
+            {
+                "harmonic_policy": group_meta.get("harmonic_policy", ""),
+                "harmonic_policy_label": group_meta.get("harmonic_policy_label", ""),
+                "selected_harmonics_hz": ";".join(f"{float(freq):g}" for freq in included),
+                "selection_scope": group_meta.get("selection_scope", ""),
+                "z_threshold": group_meta.get("z_threshold", ""),
+                "snr_used_for_statistics": bool(group_meta.get("snr_used_for_statistics", False)),
+                "applied_uniformly_across_participants": bool(
+                    group_meta.get("applied_uniformly_across_participants", False)
+                ),
+                "applied_uniformly_across_conditions": bool(
+                    group_meta.get("applied_uniformly_across_conditions", False)
+                ),
+                "applied_uniformly_across_rois": bool(
+                    group_meta.get("applied_uniformly_across_rois", False)
                 ),
             }
         )

@@ -65,14 +65,16 @@ class StatsWindowUiMixin:
         dv_method_row.addWidget(QLabel("Method:"))
         self.dv_policy_combo = QComboBox()
         self.dv_policy_combo.setToolTip(
-            "The primary DV is summed BCA over a fixed predefined harmonic list."
+            "Choose the Summed BCA harmonic policy. Fixed/predefined remains the default."
         )
-        self.dv_policy_combo.addItems([FIXED_PREDEFINED_POLICY_NAME])
+        self.dv_policy_combo.addItems(
+            [FIXED_PREDEFINED_POLICY_NAME, GROUP_SIGNIFICANT_POLICY_NAME]
+        )
         self.dv_policy_combo.setMinimumContentsLength(14)
         self.dv_policy_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.dv_policy_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.dv_policy_combo.setCurrentText(self._dv_policy_name)
-        self.dv_policy_combo.setEnabled(False)
+        self.dv_policy_combo.setEnabled(True)
         self.dv_policy_combo.currentTextChanged.connect(self._on_dv_policy_changed)
         dv_method_row.addWidget(self.dv_policy_combo, 1)
         dv_layout.addLayout(dv_method_row)
@@ -138,6 +140,18 @@ class StatsWindowUiMixin:
 
         dv_layout.addWidget(self.fixed_predefined_controls)
         self._set_fixed_predefined_controls_visible(True)
+
+        self.group_significant_note = QLabel(
+            "Uses one common z-significant oddball harmonic list selected from "
+            "grand-averaged FullFFT amplitude spectra; fixed/predefined remains the default."
+        )
+        self.group_significant_note.setWordWrap(True)
+        self.group_significant_note.setToolTip(
+            "Selection is group-level across final included participants and selected conditions, "
+            "with base-rate overlaps excluded."
+        )
+        dv_layout.addWidget(self.group_significant_note)
+        self.group_significant_note.setVisible(False)
 
         self.outlier_group = QWidget()
         self.outlier_group.setObjectName("stats_outlier_flagging")

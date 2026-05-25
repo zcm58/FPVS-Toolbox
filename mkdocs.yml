@@ -67,7 +67,7 @@ nav:
       - Outliers and QC: statistics/outliers-and-qc.md
   - Statistics Reference:
       - Overview: statistics/index.md
-      - Rossion Harmonic Selection: statistics/rossion-harmonic-selection.md
+      - Harmonic Selection: statistics/rossion-harmonic-selection.md
       - RM-ANOVA: statistics/rm-anova.md
       - Post-hoc Tests: statistics/posthoc-tests.md
       - Mixed Model: statistics/mixed-model.md

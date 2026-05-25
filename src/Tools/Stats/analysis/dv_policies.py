@@ -6,10 +6,12 @@ import threading
 from typing import Callable, Dict, List, Optional
 
 from Tools.Stats.analysis.dv_policy_fixed_predefined import _prepare_fixed_predefined_bca_data
+from Tools.Stats.analysis.dv_policy_group_significant import _prepare_group_significant_bca_data
 from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
     FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
     FIXED_PREDEFINED_POLICY_NAME,
+    GROUP_SIGNIFICANT_POLICY_NAME,
     _resolve_max_freq,
     normalize_dv_policy,
 )
@@ -18,6 +20,7 @@ __all__ = [
     "DVPolicySettings",
     "FIXED_PREDEFINED_POLICY_NAME",
     "FIXED_PREDEFINED_DEFAULT_FREQUENCIES",
+    "GROUP_SIGNIFICANT_POLICY_NAME",
     "normalize_dv_policy",
     "prepare_summed_bca_data",
 ]
@@ -71,6 +74,8 @@ def _build_cache_key(
         settings.fixed_harmonic_auto_exclude_base,
         float(settings.fixed_harmonic_base_tolerance_hz),
         float(settings.fixed_harmonic_matching_tolerance_hz),
+        float(settings.group_significant_z_threshold),
+        settings.group_significant_electrode_scope,
     )
 
 
@@ -113,17 +118,31 @@ def prepare_summed_bca_data(
             if dv_metadata is not None:
                 dv_metadata.update(copy.deepcopy(cached_meta))
             return cached_data
-    data = _prepare_fixed_predefined_bca_data(
-        subjects=subjects,
-        conditions=conditions,
-        subject_data=subject_data,
-        base_freq=base_freq,
-        log_func=log_func,
-        rois=rois,
-        provenance_map=provenance_map,
-        settings=settings,
-        dv_metadata=meta_target,
-    )
+    if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
+        data = _prepare_group_significant_bca_data(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            log_func=log_func,
+            rois=rois,
+            provenance_map=provenance_map,
+            settings=settings,
+            dv_metadata=meta_target,
+            max_freq=resolved_max_freq,
+        )
+    else:
+        data = _prepare_fixed_predefined_bca_data(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            log_func=log_func,
+            rois=rois,
+            provenance_map=provenance_map,
+            settings=settings,
+            dv_metadata=meta_target,
+        )
     if cache_key is not None and data is not None:
         if meta_target is None:
             meta_target = {}

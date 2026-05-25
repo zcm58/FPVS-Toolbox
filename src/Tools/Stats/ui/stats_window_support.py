@@ -111,6 +111,7 @@ from Tools.Stats.workers import stats_workers as stats_worker_funcs
 from Tools.Stats.analysis.dv_policies import (
     FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
     FIXED_PREDEFINED_POLICY_NAME,
+    GROUP_SIGNIFICANT_POLICY_NAME,
 )
 from Tools.Stats.qc.stats_outlier_exclusion import (
     build_flagged_details_map,

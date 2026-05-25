@@ -5,16 +5,17 @@ import pytest
 
 from Tools.Stats.io import stats_ready_export as export_mod
 from Tools.Stats.io.stats_ready_export import (
-    DATA_DICTIONARY_SHEET,
-    JASP_RM_ANOVA_SHEET,
-    RSTUDIO_LONG_SHEET,
-    SAS_LONG_SHEET,
+    HARMONIC_SELECTION_SHEET,
+    LONG_FORMAT_SHEET,
+    WIDE_FORMAT_SHEET,
     build_stats_ready_frames,
     prepare_stats_ready_export,
 )
 from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_POLICY_ID,
     FIXED_PREDEFINED_POLICY_NAME,
+    GROUP_SIGNIFICANT_POLICY_ID,
+    GROUP_SIGNIFICANT_POLICY_NAME,
 )
 
 
@@ -80,28 +81,25 @@ def test_build_stats_ready_frames_preserves_canonical_long_and_group_data():
         group_map={"S1": "Control", "S2": "Clinical"},
     )
 
-    long_df = frames[RSTUDIO_LONG_SHEET]
+    long_df = frames[LONG_FORMAT_SHEET]
     assert len(long_df) == 8
     row = long_df[
         (long_df["subject_id"] == "S2")
         & (long_df["condition"] == "Object")
         & (long_df["roi"] == "Frontal")
     ].iloc[0]
-    assert row["subject_uid"] == "S2"
     assert row["group_id"] == "Clinical"
     assert row["summed_bca_uv"] == pytest.approx(3.5)
-    assert row["selected_harmonics_hz"] == "6;12"
-    assert bool(row["fallback_used"]) is False
-    assert row["source_workbook"] == "S2_Object.xlsx"
+    assert list(long_df.columns) == [
+        "subject_id",
+        "group_id",
+        "condition",
+        "roi",
+        "summed_bca_uv",
+    ]
 
-    sas_df = frames[SAS_LONG_SHEET]
-    assert "condition_n" in sas_df.columns
-    assert "harmonics_hz" in sas_df.columns
-    assert "empty_harmonic_policy" not in sas_df.columns
-
-    jasp_df = frames[JASP_RM_ANOVA_SHEET]
-    assert list(jasp_df.columns) == [
-        "subject_uid",
+    wide_df = frames[WIDE_FORMAT_SHEET]
+    assert list(wide_df.columns) == [
         "subject_id",
         "group_id",
         "Face__Occipital",
@@ -109,11 +107,13 @@ def test_build_stats_ready_frames_preserves_canonical_long_and_group_data():
         "Object__Occipital",
         "Object__Frontal",
     ]
-    s1_wide = jasp_df[jasp_df["subject_uid"] == "S1"].iloc[0]
+    s1_wide = wide_df[wide_df["subject_id"] == "S1"].iloc[0]
     assert s1_wide["Object__Occipital"] == pytest.approx(2.0)
-
-    dictionary = frames[DATA_DICTIONARY_SHEET]
-    assert "Object__Frontal" in set(dictionary["column"])
+    assert set(frames) == {
+        LONG_FORMAT_SHEET,
+        WIDE_FORMAT_SHEET,
+        HARMONIC_SELECTION_SHEET,
+    }
 
 
 def test_build_stats_ready_frames_requires_complete_group_labels_when_groups_exist():
@@ -188,23 +188,120 @@ def test_build_stats_ready_frames_exports_fixed_predefined_metadata():
         group_map={},
     )
 
-    long_df = frames[RSTUDIO_LONG_SHEET]
-    assert set(long_df["selected_harmonics_hz"]) == {"1.2;2.4;3.6;4.8;7.2"}
-    assert set(long_df["selection_scope"]) == {FIXED_PREDEFINED_POLICY_ID}
-    assert set(long_df["selection_z_scores"]) == {""}
-    assert set(long_df["excluded_base_harmonics_hz"]) == {"6"}
+    long_df = frames[LONG_FORMAT_SHEET]
+    assert "selected_harmonics_hz" not in long_df.columns
+    assert "selection_scope" not in long_df.columns
+    assert "selection_z_scores" not in long_df.columns
+    assert "source_workbook" not in long_df.columns
 
-    selection_df = frames["Harmonic_Selection"]
+    selection_df = frames[HARMONIC_SELECTION_SHEET]
+    assert list(selection_df.columns) == [
+        "harmonic_policy",
+        "selection_scope",
+        "base_frequency_hz",
+        "oddball_frequency_hz",
+        "z_threshold",
+        "requested_harmonic_hz",
+        "harmonic_hz",
+        "z_score",
+        "selected",
+        "excluded_base_rate",
+        "exclusion_reason",
+    ]
     selected_row = selection_df[selection_df["requested_harmonic_hz"] == 1.2].iloc[0]
     excluded_row = selection_df[selection_df["requested_harmonic_hz"] == 6.0].iloc[0]
     assert bool(selected_row["selected"]) is True
     assert selected_row["base_frequency_hz"] == pytest.approx(6.0)
     assert selected_row["oddball_frequency_hz"] == pytest.approx(1.2)
-    assert bool(selected_row["base_overlap_exclusion_enabled"]) is True
-    assert bool(selected_row["applied_uniformly_across_participants"]) is True
-    assert bool(selected_row["applied_uniformly_across_conditions"]) is True
-    assert bool(selected_row["applied_uniformly_across_rois"]) is True
-    assert bool(selected_row["snr_used_for_statistics"]) is False
+    assert excluded_row["exclusion_reason"] == "base_rate_overlap"
+
+
+def test_build_stats_ready_frames_exports_group_significant_metadata():
+    subjects, conditions, rois, subject_data, summed_bca, provenance, _dv_metadata = _fixture_inputs()
+    group_meta = {
+        "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
+        "harmonic_policy_label": "Group-level significant oddball harmonics from a grand-averaged amplitude spectrum",
+        "selected_harmonics_hz": [1.2, 3.6, 7.2],
+        "selection_z_by_harmonic": {1.2: 5.1, 2.4: 0.4, 3.6: 4.2, 6.0: 9.0, 7.2: 3.1},
+        "excluded_base_harmonics_hz": [6.0],
+        "selection_scope": "group_level_all_scalp_electrodes_all_selected_conditions",
+        "selection_source_sheet": "FullFFT Amplitude (uV)",
+        "selection_amplitude_summary": "grand_average_raw_amplitude_spectrum",
+        "z_threshold": 2.32,
+        "z_score_source": "computed_from_grand_averaged_amplitude_spectrum",
+        "noise_window_bins": 10,
+        "base_frequency_hz": 6.0,
+        "oddball_frequency_hz": 1.2,
+        "base_overlap_exclusion_enabled": True,
+        "base_overlap_tolerance_hz": 0.01,
+        "matching_tolerance_hz": 0.01,
+        "frequency_resolution_hz": 0.6,
+        "selection_conditions": ["Face", "Object"],
+        "selection_spectra_count": 4,
+        "selection_electrode_count": 3,
+        "applied_uniformly_across_participants": True,
+        "applied_uniformly_across_conditions": True,
+        "applied_uniformly_across_rois": True,
+        "snr_used_for_statistics": False,
+        "bca_negative_values_retained": True,
+        "bca_near_zero_values_retained": True,
+        "selection_rows": [
+            {
+                "harmonic_index": 1,
+                "target_frequency_hz": 1.2,
+                "matched_frequency_hz": 1.2,
+                "matched_column": "1.2000_Hz",
+                "matched_bin_index": 2,
+                "z_score": 5.1,
+                "selected": True,
+                "excluded_base_rate": False,
+                "exclusion_reason": "",
+                "warning": "",
+            },
+            {
+                "harmonic_index": 5,
+                "target_frequency_hz": 6.0,
+                "matched_frequency_hz": 6.0,
+                "matched_column": "6.0000_Hz",
+                "matched_bin_index": 10,
+                "z_score": None,
+                "selected": False,
+                "excluded_base_rate": True,
+                "exclusion_reason": "base_rate_overlap",
+                "warning": "Base-rate overlap excluded from oddball summation.",
+            },
+        ],
+    }
+    frames = build_stats_ready_frames(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        rois=rois,
+        summed_bca=summed_bca,
+        provenance_map=provenance,
+        dv_metadata={
+            "policy_name": GROUP_SIGNIFICANT_POLICY_NAME,
+            "group_significant_harmonics": group_meta,
+        },
+        dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+        group_map={},
+    )
+
+    long_df = frames[LONG_FORMAT_SHEET]
+    assert list(long_df.columns) == [
+        "subject_id",
+        "group_id",
+        "condition",
+        "roi",
+        "summed_bca_uv",
+    ]
+
+    selection_df = frames[HARMONIC_SELECTION_SHEET]
+    selected_row = selection_df[selection_df["requested_harmonic_hz"] == 1.2].iloc[0]
+    excluded_row = selection_df[selection_df["requested_harmonic_hz"] == 6.0].iloc[0]
+    assert selected_row["harmonic_policy"] == GROUP_SIGNIFICANT_POLICY_ID
+    assert bool(selected_row["selected"]) is True
+    assert selected_row["z_threshold"] == pytest.approx(2.32)
     assert excluded_row["exclusion_reason"] == "base_rate_overlap"
 
 
@@ -251,10 +348,13 @@ def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook
     assert result.row_count == 8
 
     with pd.ExcelFile(target, engine="openpyxl") as workbook:
-        assert RSTUDIO_LONG_SHEET in workbook.sheet_names
-        assert SAS_LONG_SHEET in workbook.sheet_names
-        assert JASP_RM_ANOVA_SHEET in workbook.sheet_names
-        roundtrip = pd.read_excel(workbook, sheet_name=RSTUDIO_LONG_SHEET)
+        assert workbook.sheet_names == [
+            LONG_FORMAT_SHEET,
+            WIDE_FORMAT_SHEET,
+            HARMONIC_SELECTION_SHEET,
+        ]
+        assert WIDE_FORMAT_SHEET in workbook.sheet_names
+        roundtrip = pd.read_excel(workbook, sheet_name=LONG_FORMAT_SHEET)
 
     assert len(roundtrip) == 8
     assert set(roundtrip["group_id"]) == {"single_group"}
