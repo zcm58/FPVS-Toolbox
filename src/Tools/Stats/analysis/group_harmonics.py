@@ -5,7 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List
+from typing import Callable, Dict, Iterable, List, Sequence
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,7 @@ from Tools.Stats.analysis.stats_analysis import (
     filter_to_oddball_harmonics,
     get_included_freqs,
 )
+from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 
 logger = logging.getLogger("Tools.Stats")
 _DV_TRACE_ENV = "FPVS_STATS_DV_TRACE"
@@ -29,6 +30,23 @@ class RossionHarmonicsSummary:
     harmonic_freqs: List[float]
     mean_z_table: pd.DataFrame
     columns: pd.Index
+
+
+@dataclass(frozen=True)
+class CommonRossionHarmonicsSummary:
+    """Common group-level harmonic selection from a grand-average amplitude spectrum."""
+    harmonic_freqs: List[float]
+    selected_harmonics: List[float]
+    z_by_harmonic: Dict[float, float]
+    excluded_base_harmonics: List[float]
+    selection_scope: str
+    electrode_count: int
+    n_spectra: int
+    columns: pd.Index
+    stop_metadata: dict[str, object]
+
+
+FULL_FFT_AMPLITUDE_SHEET_NAME = "FullFFT Amplitude (uV)"
 
 
 def _find_first_z_columns(
@@ -109,6 +127,265 @@ def _dv_trace_enabled() -> bool:
     """Handle the dv trace enabled step for the Stats workflow."""
     value = os.getenv(_DV_TRACE_ENV, "").strip().lower()
     return value not in ("", "0", "false", "no", "off")
+
+
+def _parse_freq_columns(columns: Iterable[object]) -> dict[float, str]:
+    parsed: dict[float, str] = {}
+    for col_name in columns:
+        if isinstance(col_name, str) and col_name.endswith("_Hz"):
+            try:
+                parsed[round(float(col_name[:-3]), 4)] = col_name
+            except ValueError:
+                continue
+    return parsed
+
+
+def _is_base_multiple(freq_val: float, base_freq: float, tol: float = 1e-6) -> bool:
+    return abs(freq_val / base_freq - round(freq_val / base_freq)) < tol
+
+
+def _common_harmonic_domain(
+    columns: Sequence[object],
+    *,
+    base_freq: float,
+    exclude_harmonic1: bool,
+    max_freq: float | None,
+) -> tuple[list[float], list[float]]:
+    parsed = _parse_freq_columns(columns)
+    base = float(base_freq)
+    oddball = base / float(SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT)
+    harmonic_freqs: list[float] = []
+    excluded_base: list[float] = []
+    for freq_val in sorted(parsed.keys()):
+        if max_freq is not None and freq_val > float(max_freq):
+            continue
+        harmonic_number = int(round(freq_val / oddball))
+        if harmonic_number <= 0:
+            continue
+        if abs(freq_val - harmonic_number * oddball) > 1e-3:
+            continue
+        if exclude_harmonic1 and harmonic_number == 1:
+            continue
+        if _is_base_multiple(freq_val, base):
+            excluded_base.append(float(freq_val))
+            continue
+        harmonic_freqs.append(float(freq_val))
+    return harmonic_freqs, excluded_base
+
+
+def _electrodes_for_scope(
+    df_fft: pd.DataFrame,
+    *,
+    rois: Dict[str, List[str]],
+    electrode_scope: str,
+) -> list[str]:
+    if electrode_scope == "union_roi_electrodes":
+        wanted = {
+            str(ch).strip().upper()
+            for channels in (rois or {}).values()
+            for ch in (channels or [])
+            if str(ch).strip()
+        }
+        return [idx for idx in df_fft.index.astype(str) if idx in wanted]
+    return list(df_fft.index.astype(str))
+
+
+def _load_mean_amplitude_series(
+    file_path: str,
+    *,
+    rois: Dict[str, List[str]],
+    electrode_scope: str,
+) -> tuple[pd.Series, int]:
+    try:
+        df_fft = safe_read_excel(
+            file_path,
+            sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME,
+            index_col="Electrode",
+        )
+    except ValueError as exc:
+        raise RuntimeError(
+            "Rossion common-spectrum selection requires regenerated workbooks "
+            f"with a '{FULL_FFT_AMPLITUDE_SHEET_NAME}' sheet. Regenerate the "
+            "Excel Data Files for all included participants and conditions on "
+            f"this branch before running the stats-ready export: {file_path}"
+        ) from exc
+
+    df_fft.index = df_fft.index.astype(str).str.upper().str.strip()
+    electrode_names = _electrodes_for_scope(
+        df_fft,
+        rois=rois,
+        electrode_scope=electrode_scope,
+    )
+    if not electrode_names:
+        return pd.Series(dtype=float), 0
+
+    numeric_cols = _parse_freq_columns(df_fft.columns)
+    if not numeric_cols:
+        return pd.Series(dtype=float), 0
+
+    block = (
+        df_fft.loc[electrode_names, list(numeric_cols.values())]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    series = block.mean(axis=0, skipna=True)
+    series.index = [freq for freq, col_name in numeric_cols.items() if col_name in series.index]
+    return pd.to_numeric(series, errors="coerce"), len(electrode_names)
+
+
+def _build_grand_average_amplitude(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    rois: Dict[str, List[str]],
+    electrode_scope: str,
+    log_func: Callable[[str], None],
+) -> tuple[pd.Series, int, int]:
+    spectra: list[pd.Series] = []
+    electrode_count = 0
+    for pid in subjects:
+        for cond_name in conditions:
+            file_path = subject_data.get(pid, {}).get(cond_name)
+            if not file_path:
+                log_func(f"Missing file for {pid} {cond_name}: {file_path}")
+                continue
+            if not Path(file_path).exists():
+                log_func(f"Missing file for {pid} {cond_name}: {file_path}")
+                continue
+            series, n_electrodes = _load_mean_amplitude_series(
+                file_path,
+                rois=rois,
+                electrode_scope=electrode_scope,
+            )
+            if series.empty:
+                log_func(
+                    f"No usable full-spectrum amplitude data for {pid} {cond_name} "
+                    f"scope={electrode_scope}."
+                )
+                continue
+            spectra.append(series)
+            electrode_count = max(electrode_count, int(n_electrodes))
+
+    if not spectra:
+        raise RuntimeError(
+            "Rossion common-spectrum selection found no usable full-spectrum "
+            f"amplitude data for scope={electrode_scope}."
+        )
+    frame = pd.concat(spectra, axis=1)
+    return frame.mean(axis=1, skipna=True).sort_index(), electrode_count, len(spectra)
+
+
+def _select_common_harmonics(
+    harmonic_freqs: list[float],
+    z_by_harmonic: Dict[float, float],
+    *,
+    z_threshold: float,
+    stop_after_n: int,
+) -> tuple[list[float], dict[str, object]]:
+    selected: list[float] = []
+    nonsig_run = 0
+    found_any_sig = False
+    stop_reason = "end_of_domain"
+    fail_harmonics: list[float] = []
+    scanned = 0
+    for freq_val in harmonic_freqs:
+        scanned += 1
+        z_value = z_by_harmonic.get(float(freq_val), np.nan)
+        if np.isfinite(z_value) and z_value > float(z_threshold):
+            selected.append(float(freq_val))
+            found_any_sig = True
+            nonsig_run = 0
+            fail_harmonics = []
+            continue
+        if not found_any_sig:
+            continue
+        nonsig_run += 1
+        fail_harmonics.append(float(freq_val))
+        if nonsig_run >= stop_after_n:
+            stop_reason = "two_consecutive_nonsignificant"
+            fail_harmonics = fail_harmonics[-stop_after_n:]
+            break
+    if not found_any_sig:
+        stop_reason = "end_of_domain_no_sig"
+    return selected, {
+        "stop_reason": stop_reason,
+        "fail_harmonics": fail_harmonics,
+        "n_scanned": scanned,
+        "n_significant": len(selected),
+        "stop_after_n": int(stop_after_n),
+    }
+
+
+def build_common_rossion_harmonics_summary(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    base_freq: float,
+    rois: Dict[str, List[str]],
+    z_threshold: float,
+    exclude_harmonic1: bool,
+    max_freq: float | None = None,
+    electrode_scope: str = "all_scalp_electrodes",
+    log_func: Callable[[str], None],
+    stop_after_n: int = 2,
+) -> CommonRossionHarmonicsSummary:
+    """Select one common harmonic set from a grand-averaged amplitude spectrum."""
+    grand_amplitude, electrode_count, n_spectra = _build_grand_average_amplitude(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        rois=rois,
+        electrode_scope=electrode_scope,
+        log_func=log_func,
+    )
+    columns = pd.Index([f"{float(freq):.4f}_Hz" for freq in grand_amplitude.index])
+    harmonic_freqs, excluded_base = _common_harmonic_domain(
+        columns,
+        base_freq=base_freq,
+        exclude_harmonic1=exclude_harmonic1,
+        max_freq=max_freq,
+    )
+    if not harmonic_freqs:
+        raise RuntimeError(
+            "Rossion common-spectrum selection produced an empty oddball harmonic domain. "
+            "Verify base frequency, upper frequency limit, and regenerated full-spectrum workbooks."
+        )
+
+    amplitudes = grand_amplitude.to_numpy(dtype=float)
+    freq_axis = grand_amplitude.index.to_numpy(dtype=float)
+    z_by_harmonic: Dict[float, float] = {}
+    for freq_val in harmonic_freqs:
+        target_idx = int(np.argmin(np.abs(freq_axis - float(freq_val))))
+        noise_mean, noise_std = compute_noise_stats_for_bin(
+            amplitudes,
+            target_idx,
+            window_size=10,
+            min_bins=4,
+        )
+        target_amp = float(amplitudes[target_idx])
+        z_by_harmonic[float(freq_val)] = (
+            (target_amp - noise_mean) / noise_std if noise_std > 1e-12 else 0.0
+        )
+
+    selected, stop_meta = _select_common_harmonics(
+        harmonic_freqs,
+        z_by_harmonic,
+        z_threshold=z_threshold,
+        stop_after_n=stop_after_n,
+    )
+    return CommonRossionHarmonicsSummary(
+        harmonic_freqs=harmonic_freqs,
+        selected_harmonics=selected,
+        z_by_harmonic=z_by_harmonic,
+        excluded_base_harmonics=excluded_base,
+        selection_scope=electrode_scope,
+        electrode_count=electrode_count,
+        n_spectra=n_spectra,
+        columns=columns,
+        stop_metadata=stop_meta,
+    )
 
 
 def build_rossion_harmonics_summary(

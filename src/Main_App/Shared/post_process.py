@@ -13,7 +13,7 @@ from time import perf_counter
 import config
 from config import DEFAULT_ELECTRODE_NAMES_64  # Ensure these are correct
 from typing import List, Any, Dict
-from Tools.Stats.analysis.full_snr import compute_full_snr
+from Tools.Stats.analysis.full_snr import compute_full_snr_from_amplitudes
 from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 from Main_App.Shared.fft_crop_utils import compute_onbin_N, compute_onbin_step
 
@@ -380,6 +380,7 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
         # --- Metrics Calculation (largely unchanged) ---
         accum = {"fft": None, "snr": None, "z": None, "bca": None}
         full_snr_accum = None
+        full_fft_accum = None
         fft_neighbors_rows: List[Dict[str, Any]] = []
         valid_data_count = 0
         final_num_channels = 0
@@ -632,16 +633,16 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     extra=f"rows={len(fft_neighbors_rows)}",
                 )
 
-                # Full-spectrum SNR (uses shared noise logic via compute_full_snr)
+                # Full-spectrum SNR uses the already-computed FFT amplitudes.
                 full_snr_started = perf_counter()
-                full_snr_matrix = compute_full_snr(avg_data_uv, sfreq)
+                full_snr_matrix = compute_full_snr_from_amplitudes(fft_amplitudes)
                 _log_export_timing(
                     "full_snr_compute",
                     full_snr_started,
                     pid=pid,
                     condition=cond_label_from_keys,
                     object_index=data_idx + 1,
-                    extra=f"channels={num_channels} samples={num_times}",
+                    extra=f"channels={num_channels} bins={fft_amplitudes.shape[1]}",
                 )
 
                 num_target_freqs = len(target_frequencies)
@@ -724,12 +725,14 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                         "bca": metrics_bca,
                     }
                     full_snr_accum = full_snr_matrix
+                    full_fft_accum = fft_amplitudes
                 else:
                     accum["fft"] += metrics_fft
                     accum["snr"] += metrics_snr
                     accum["z"] += metrics_z
                     accum["bca"] += metrics_bca
                     full_snr_accum += full_snr_matrix
+                    full_fft_accum += fft_amplitudes
                 valid_data_count += 1
             except Exception as e:
                 app.log(
@@ -752,6 +755,9 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
             freq_column_names = [f"{f:.4f}_Hz" for f in target_frequencies]
             full_snr_avg = (
                 full_snr_accum / valid_data_count if full_snr_accum is not None else None
+            )
+            full_fft_avg = (
+                full_fft_accum / valid_data_count if full_fft_accum is not None else None
             )
             dataframes_to_save = {
                 "FFT Amplitude (uV)": pd.DataFrame(
@@ -801,6 +807,20 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
                     path=full_excel_path,
                     extra=f"channels={full_snr_avg.shape[0]} freqs={len(freq_grid)}",
                 )
+            if full_fft_avg is not None:
+                max_target = max(
+                    [float(freq) for freq in target_frequencies if float(freq) <= float(configured_upper_limit)],
+                    default=float(configured_upper_limit),
+                )
+                df_hz = float(fft_frequencies[1] - fft_frequencies[0]) if len(fft_frequencies) > 1 else 0.0
+                export_max_freq = min(float(fft_frequencies[-1]), max_target + (10.0 * df_hz))
+                full_fft_cols = np.where(fft_frequencies <= export_max_freq + 1e-12)[0]
+                full_fft_df = pd.DataFrame(
+                    full_fft_avg[:, full_fft_cols],
+                    index=final_electrode_names_ordered,
+                    columns=[f"{float(fft_frequencies[idx]):.4f}_Hz" for idx in full_fft_cols],
+                )
+                dataframes_to_save["FullFFT Amplitude (uV)"] = full_fft_df
             for df_name_iter in dataframes_to_save:
                 dataframes_to_save[df_name_iter].insert(
                     0, "Electrode", dataframes_to_save[df_name_iter].index

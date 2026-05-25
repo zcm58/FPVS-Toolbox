@@ -332,6 +332,7 @@ def run_stats_ready_export(
     *,
     subjects,
     conditions,
+    conditions_all=None,
     subject_data,
     base_freq,
     rois,
@@ -366,6 +367,7 @@ def run_stats_ready_export(
         log_func=message_cb,
         save_path=output_path,
         max_freq=max_freq,
+        selection_conditions=list(conditions_all) if conditions_all else list(conditions or []),
     )
     progress_cb(100)
     return {
@@ -433,6 +435,7 @@ def _prepare_single_group_data(
         rois=rois,
         dv_policy=dv_policy,
         dv_metadata=dv_metadata,
+        selection_conditions=list(conditions_all) if conditions_all else list(conditions or []),
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -994,6 +997,7 @@ def run_harmonics_preview(
     *,
     subjects,
     conditions,
+    conditions_all=None,
     subject_data,
     base_freq,
     rois,
@@ -1005,6 +1009,7 @@ def run_harmonics_preview(
         return build_rossion_preview_payload(
             subjects=subjects,
             conditions=conditions,
+            selection_conditions=list(conditions_all) if conditions_all else list(conditions or []),
             subject_data=subject_data,
             base_freq=base_freq,
             rois=rois,

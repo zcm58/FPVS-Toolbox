@@ -73,11 +73,13 @@ def _build_cache_key(
     rois: Optional[Dict[str, List[str]]],
     settings: DVPolicySettings,
     max_freq: float | None,
+    selection_conditions: Optional[List[str]],
 ) -> tuple:
     """Handle the build cache key step for the Stats workflow."""
     return (
         tuple(subjects),
         tuple(conditions),
+        tuple(selection_conditions or conditions),
         _freeze_nested_mapping(subject_data),
         float(base_freq),
         _freeze_rois(rois),
@@ -103,6 +105,7 @@ def prepare_summed_bca_data(
     dv_policy: dict[str, object] | None = None,
     dv_metadata: Optional[dict[str, object]] = None,
     max_freq: float | None = None,
+    selection_conditions: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Handle the prepare summed bca data step for the Stats workflow."""
     settings = normalize_dv_policy(dv_policy)
@@ -120,6 +123,7 @@ def prepare_summed_bca_data(
             rois=rois,
             settings=settings,
             max_freq=resolved_max_freq,
+            selection_conditions=selection_conditions,
         )
         with _DV_DATA_CACHE_LOCK:
             cached = _DV_DATA_CACHE.get(cache_key)
@@ -140,6 +144,7 @@ def prepare_summed_bca_data(
             settings=settings,
             dv_metadata=meta_target,
             max_freq=resolved_max_freq,
+            selection_conditions=selection_conditions,
         )
     elif settings.name == FIXED_K_POLICY_NAME:
         if meta_target is not None:

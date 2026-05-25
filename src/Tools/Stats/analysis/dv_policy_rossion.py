@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 
 from Tools.Stats.analysis.stats_analysis import (
     SUMMED_BCA_STOP_AFTER_N_CONSEC_NONSIG_DEFAULT,
@@ -28,8 +29,7 @@ from Tools.Stats.analysis.dv_policy_trace import (
     _log_dv_trace_empty_policy,
 )
 from Tools.Stats.analysis.group_harmonics import (
-    build_rossion_harmonics_summary,
-    select_rossion_harmonics_by_roi,
+    build_common_rossion_harmonics_summary,
 )
 
 
@@ -76,6 +76,7 @@ def build_rossion_preview_payload(
     log_func: Callable[[str], None],
     dv_policy: dict[str, object] | None = None,
     max_freq: float | None = None,
+    selection_conditions: List[str] | None = None,
 ) -> dict[str, object]:
     """Handle the build rossion preview payload step for the Stats workflow."""
     settings = normalize_dv_policy(dv_policy)
@@ -83,9 +84,10 @@ def build_rossion_preview_payload(
     if settings.name != ROSSION_POLICY_NAME:
         raise RuntimeError("Rossion preview requires the Rossion policy.")
 
-    summary = build_rossion_harmonics_summary(
+    selection_conditions = list(selection_conditions or conditions)
+    summary = build_common_rossion_harmonics_summary(
         subjects=subjects,
-        conditions=conditions,
+        conditions=selection_conditions,
         subject_data=subject_data,
         base_freq=base_freq,
         rois=rois,
@@ -93,12 +95,18 @@ def build_rossion_preview_payload(
         exclude_harmonic1=settings.exclude_harmonic1,
         max_freq=resolved_max_freq,
         log_func=log_func,
-    )
-    selected_map, stop_meta = select_rossion_harmonics_by_roi(
-        summary,
-        rois=rois.keys(),
-        z_threshold=settings.z_threshold,
+        electrode_scope="all_scalp_electrodes",
         stop_after_n=SUMMED_BCA_STOP_AFTER_N_CONSEC_NONSIG_DEFAULT,
+    )
+    sensitivity = _build_union_roi_sensitivity(
+        subjects=subjects,
+        conditions=selection_conditions,
+        subject_data=subject_data,
+        base_freq=base_freq,
+        rois=rois,
+        settings=settings,
+        max_freq=resolved_max_freq,
+        log_func=log_func,
     )
     fallback_freqs = _determine_fixed_k_freqs(
         columns=summary.columns,
@@ -107,6 +115,7 @@ def build_rossion_preview_payload(
         log_func=log_func,
         max_freq=resolved_max_freq,
     )
+    selected_map = {str(roi): list(summary.selected_harmonics) for roi in rois.keys()}
     final_map, fallback_info = apply_empty_union_policy(
         selected_map, policy=settings.empty_list_policy, fallback_freqs=fallback_freqs
     )
@@ -128,9 +137,71 @@ def build_rossion_preview_payload(
     return {
         "union_harmonics_by_roi": final_map,
         "fallback_info_by_roi": fallback_info,
-        "stop_metadata_by_roi": stop_meta,
-        "mean_z_table": summary.mean_z_table,
+        "stop_metadata_by_roi": {
+            str(roi): dict(summary.stop_metadata) for roi in rois.keys()
+        },
+        "mean_z_table": _common_mean_z_table(summary, rois.keys()),
         "harmonic_domain": summary.harmonic_freqs,
+        "common_harmonics_hz": list(next(iter(final_map.values()), [])),
+        "selection_scope": summary.selection_scope,
+        "selection_z_by_harmonic": dict(summary.z_by_harmonic),
+        "excluded_base_harmonics_hz": list(summary.excluded_base_harmonics),
+        "sensitivity_union_roi_electrodes": sensitivity,
+    }
+
+
+def _common_mean_z_table(summary, rois) -> pd.DataFrame:
+    rows = []
+    for roi_name in rois:
+        for freq_val in summary.harmonic_freqs:
+            z_value = float(summary.z_by_harmonic.get(float(freq_val), np.nan))
+            rows.append(
+                {
+                    "roi": str(roi_name),
+                    "harmonic_hz": float(freq_val),
+                    "mean_z": z_value,
+                    "n_cells": int(summary.n_spectra),
+                    "significant": bool(np.isfinite(z_value) and freq_val in summary.selected_harmonics),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _build_union_roi_sensitivity(
+    *,
+    subjects: List[str],
+    conditions: List[str],
+    subject_data: Dict[str, Dict[str, str]],
+    base_freq: float,
+    rois: Dict[str, List[str]],
+    settings: DVPolicySettings,
+    max_freq: float | None,
+    log_func: Callable[[str], None],
+) -> dict[str, object]:
+    try:
+        summary = build_common_rossion_harmonics_summary(
+            subjects=subjects,
+            conditions=conditions,
+            subject_data=subject_data,
+            base_freq=base_freq,
+            rois=rois,
+            z_threshold=settings.z_threshold,
+            exclude_harmonic1=settings.exclude_harmonic1,
+            max_freq=max_freq,
+            log_func=log_func,
+            electrode_scope="union_roi_electrodes",
+            stop_after_n=SUMMED_BCA_STOP_AFTER_N_CONSEC_NONSIG_DEFAULT,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "selection_scope": "union_roi_electrodes"}
+    return {
+        "selection_scope": summary.selection_scope,
+        "harmonics_hz": list(summary.selected_harmonics),
+        "selection_z_by_harmonic": dict(summary.z_by_harmonic),
+        "excluded_base_harmonics_hz": list(summary.excluded_base_harmonics),
+        "selection_electrode_count": int(summary.electrode_count),
+        "selection_spectra_count": int(summary.n_spectra),
+        "stop_metadata": dict(summary.stop_metadata),
     }
 
 
@@ -146,6 +217,7 @@ def _prepare_rossion_bca_data(
     settings: DVPolicySettings,
     dv_metadata: Optional[dict[str, object]] = None,
     max_freq: float | None = None,
+    selection_conditions: List[str] | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Handle the prepare rossion bca data step for the Stats workflow."""
     if not subjects or not subject_data:
@@ -157,9 +229,10 @@ def _prepare_rossion_bca_data(
         log_func("No ROIs defined or available.")
         return None
 
-    summary = build_rossion_harmonics_summary(
+    selection_conditions = list(selection_conditions or conditions)
+    summary = build_common_rossion_harmonics_summary(
         subjects=subjects,
-        conditions=conditions,
+        conditions=selection_conditions,
         subject_data=subject_data,
         base_freq=base_freq,
         rois=rois_map,
@@ -167,12 +240,18 @@ def _prepare_rossion_bca_data(
         exclude_harmonic1=settings.exclude_harmonic1,
         max_freq=max_freq,
         log_func=log_func,
-    )
-    selected_map, stop_meta = select_rossion_harmonics_by_roi(
-        summary,
-        rois=rois_map.keys(),
-        z_threshold=settings.z_threshold,
+        electrode_scope="all_scalp_electrodes",
         stop_after_n=SUMMED_BCA_STOP_AFTER_N_CONSEC_NONSIG_DEFAULT,
+    )
+    sensitivity = _build_union_roi_sensitivity(
+        subjects=subjects,
+        conditions=selection_conditions,
+        subject_data=subject_data,
+        base_freq=base_freq,
+        rois=rois_map,
+        settings=settings,
+        max_freq=max_freq,
+        log_func=log_func,
     )
     fallback_freqs = _determine_fixed_k_freqs(
         columns=summary.columns,
@@ -181,6 +260,7 @@ def _prepare_rossion_bca_data(
         log_func=log_func,
         max_freq=max_freq,
     )
+    selected_map = {str(roi): list(summary.selected_harmonics) for roi in rois_map.keys()}
     final_map, fallback_info = apply_empty_union_policy(
         selected_map, policy=settings.empty_list_policy, fallback_freqs=fallback_freqs
     )
@@ -248,10 +328,20 @@ def _prepare_rossion_bca_data(
             "z_threshold": float(settings.z_threshold),
             "empty_list_policy": settings.empty_list_policy,
             "harmonic_domain": list(summary.harmonic_freqs),
+            "common_harmonics_hz": list(next(iter(final_map.values()), [])),
             "union_harmonics_by_roi": final_map,
             "fallback_info_by_roi": fallback_info,
-            "mean_z_table": summary.mean_z_table,
-            "stop_metadata_by_roi": stop_meta,
+            "selection_scope": summary.selection_scope,
+            "selection_conditions": list(selection_conditions),
+            "selection_z_by_harmonic": dict(summary.z_by_harmonic),
+            "excluded_base_harmonics_hz": list(summary.excluded_base_harmonics),
+            "mean_z_table": _common_mean_z_table(summary, rois_map.keys()),
+            "stop_metadata_by_roi": {
+                str(roi): dict(summary.stop_metadata) for roi in rois_map.keys()
+            },
+            "selection_electrode_count": int(summary.electrode_count),
+            "selection_spectra_count": int(summary.n_spectra),
+            "sensitivity_union_roi_electrodes": sensitivity,
         }
 
     total = 0

@@ -64,6 +64,16 @@ def _format_harmonics(freqs: list[float]) -> str:
     return ";".join(f"{freq:g}" for freq in freqs)
 
 
+def _format_z_scores(z_by_harmonic: Mapping[object, object]) -> str:
+    pairs: list[tuple[float, float]] = []
+    for raw_freq, raw_z in (z_by_harmonic or {}).items():
+        freq = _parse_frequency(raw_freq)
+        z_val = _numeric_or_nan(raw_z)
+        if freq is not None and math.isfinite(z_val):
+            pairs.append((freq, z_val))
+    return ";".join(f"{freq:g}:{z_val:.4g}" for freq, z_val in sorted(pairs))
+
+
 def _harmonics_from_provenance(provenance: Mapping[str, object]) -> list[float]:
     labels = provenance.get("col_label")
     if labels is None:
@@ -93,6 +103,11 @@ def _harmonics_for_roi(
                 freqs = [_parse_frequency(freq) for freq in roi_freqs]
                 return sorted(freq for freq in freqs if freq is not None)
     return _harmonics_from_provenance(provenance)
+
+
+def _common_rossion_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, object]:
+    rossion_meta = dv_metadata.get("rossion_method")
+    return rossion_meta if isinstance(rossion_meta, Mapping) else {}
 
 
 def _fallback_info_for_roi(
@@ -198,6 +213,14 @@ def _build_long_frame(
         dv_metadata.get("empty_list_policy"),
         default=settings.empty_list_policy,
     )
+    rossion_meta = _common_rossion_meta(dv_metadata)
+    selection_scope = _safe_text(rossion_meta.get("selection_scope"))
+    z_scores = _format_z_scores(rossion_meta.get("selection_z_by_harmonic", {}))
+    excluded_base = []
+    raw_excluded = rossion_meta.get("excluded_base_harmonics_hz")
+    if isinstance(raw_excluded, (list, tuple, set)):
+        excluded_base = [_parse_frequency(freq) for freq in raw_excluded]
+    excluded_base_text = _format_harmonics([freq for freq in excluded_base if freq is not None])
     group_labels = _resolve_group_labels(subjects, group_map)
     uid_map = _subject_uids(subjects, group_labels)
 
@@ -237,6 +260,9 @@ def _build_long_frame(
                         "dv_policy": policy_name,
                         "selected_harmonics_hz": _format_harmonics(harmonics),
                         "harmonic_count": len(harmonics),
+                        "selection_scope": selection_scope,
+                        "selection_z_scores": z_scores,
+                        "excluded_base_harmonics_hz": excluded_base_text,
                         "empty_harmonic_policy": empty_policy,
                         "fallback_used": fallback_used,
                         "source_workbook": source_workbook,
@@ -257,6 +283,9 @@ def _build_long_frame(
         "dv_policy",
         "selected_harmonics_hz",
         "harmonic_count",
+        "selection_scope",
+        "selection_z_scores",
+        "excluded_base_harmonics_hz",
         "empty_harmonic_policy",
         "fallback_used",
         "source_workbook",
@@ -278,6 +307,8 @@ def _build_sas_long_frame(long_df: pd.DataFrame) -> pd.DataFrame:
         "roi_order": "roi_n",
         "selected_harmonics_hz": "harmonics_hz",
         "harmonic_count": "harmonic_n",
+        "selection_z_scores": "z_scores",
+        "excluded_base_harmonics_hz": "excluded_base_hz",
         "empty_harmonic_policy": "empty_policy",
         "source_workbook": "source_file",
     }
@@ -293,6 +324,9 @@ def _build_sas_long_frame(long_df: pd.DataFrame) -> pd.DataFrame:
         "dv_policy",
         "harmonics_hz",
         "harmonic_n",
+        "selection_scope",
+        "z_scores",
+        "excluded_base_hz",
         "empty_policy",
         "fallback_used",
         "source_file",
@@ -350,6 +384,18 @@ def _build_data_dictionary(
             "sheet": RSTUDIO_LONG_SHEET,
             "column": "selected_harmonics_hz",
             "description": "Semicolon-delimited harmonic frequencies selected by the active DV policy.",
+            "units": "Hz",
+        },
+        {
+            "sheet": RSTUDIO_LONG_SHEET,
+            "column": "selection_z_scores",
+            "description": "Semicolon-delimited frequency:z-score pairs from the group-level harmonic-selection spectrum.",
+            "units": "",
+        },
+        {
+            "sheet": RSTUDIO_LONG_SHEET,
+            "column": "excluded_base_harmonics_hz",
+            "description": "Base-rate harmonics excluded from oddball summation.",
             "units": "Hz",
         },
         {
@@ -469,7 +515,81 @@ def build_stats_ready_frames(
         JASP_LONG_MIXED_SHEET: long_df.copy(),
         DATA_DICTIONARY_SHEET: dictionary_df,
         ANALYSIS_RECIPES_SHEET: recipes_df,
+        "Harmonic_Selection": _build_harmonic_selection_frame(dv_metadata),
     }
+
+
+def _build_harmonic_selection_frame(dv_metadata: Mapping[str, object]) -> pd.DataFrame:
+    rossion_meta = _common_rossion_meta(dv_metadata)
+    if not rossion_meta:
+        return pd.DataFrame()
+    rows: list[dict[str, object]] = []
+    _append_selection_rows(
+        rows,
+        selection_scope=_safe_text(rossion_meta.get("selection_scope")),
+        z_map=rossion_meta.get("selection_z_by_harmonic"),
+        selected_harmonics=rossion_meta.get("common_harmonics_hz"),
+        excluded_harmonics=rossion_meta.get("excluded_base_harmonics_hz"),
+        sensitivity=False,
+    )
+    sensitivity_meta = rossion_meta.get("sensitivity_union_roi_electrodes")
+    if isinstance(sensitivity_meta, Mapping):
+        _append_selection_rows(
+            rows,
+            selection_scope=_safe_text(sensitivity_meta.get("selection_scope")),
+            z_map=sensitivity_meta.get("selection_z_by_harmonic"),
+            selected_harmonics=sensitivity_meta.get("harmonics_hz"),
+            excluded_harmonics=sensitivity_meta.get("excluded_base_harmonics_hz"),
+            sensitivity=True,
+        )
+    return pd.DataFrame(rows).sort_values(["sensitivity", "harmonic_hz"]) if rows else pd.DataFrame()
+
+
+def _append_selection_rows(
+    rows: list[dict[str, object]],
+    *,
+    selection_scope: str,
+    z_map: object,
+    selected_harmonics: object,
+    excluded_harmonics: object,
+    sensitivity: bool,
+) -> None:
+    selected = {
+        float(freq)
+        for freq in (selected_harmonics if isinstance(selected_harmonics, (list, tuple, set)) else [])
+    }
+    excluded = {
+        float(freq)
+        for freq in (excluded_harmonics if isinstance(excluded_harmonics, (list, tuple, set)) else [])
+    }
+    seen_harmonics: set[float] = set()
+    if isinstance(z_map, Mapping):
+        for raw_freq, raw_z in z_map.items():
+            freq = _parse_frequency(raw_freq)
+            if freq is None:
+                continue
+            seen_harmonics.add(freq)
+            rows.append(
+                {
+                    "selection_scope": selection_scope,
+                    "harmonic_hz": freq,
+                    "z_score": _numeric_or_nan(raw_z),
+                    "selected": freq in selected,
+                    "excluded_base_rate": freq in excluded,
+                    "sensitivity": sensitivity,
+                }
+            )
+    for freq in sorted(excluded.difference(seen_harmonics)):
+        rows.append(
+            {
+                "selection_scope": selection_scope,
+                "harmonic_hz": freq,
+                "z_score": math.nan,
+                "selected": False,
+                "excluded_base_rate": True,
+                "sensitivity": sensitivity,
+            }
+        )
 
 
 def write_stats_ready_workbook(
@@ -498,6 +618,7 @@ def prepare_stats_ready_export(
     log_func: Callable[[str], None],
     save_path: str | Path | None = None,
     max_freq: float | None = None,
+    selection_conditions: list[str] | None = None,
 ) -> StatsReadyExport:
     """Prepare and optionally write the external-statistics Summed BCA export."""
 
@@ -514,6 +635,7 @@ def prepare_stats_ready_export(
         dv_policy=dict(dv_policy or {}),
         dv_metadata=dv_metadata,
         max_freq=max_freq,
+        selection_conditions=selection_conditions,
     )
     if not summed_bca:
         raise RuntimeError("Stats-ready export could not prepare Summed BCA data.")

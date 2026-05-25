@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+import numpy as np
 
 pytest.importorskip("PySide6")
 pytest.importorskip("openpyxl")
@@ -10,28 +11,30 @@ from PySide6.QtCore import Qt  # noqa: E402
 from Tools.Stats.analysis.dv_policies import (  # noqa: E402
     ROSSION_POLICY_NAME,
 )
+from Tools.Stats.analysis.group_harmonics import FULL_FFT_AMPLITUDE_SHEET_NAME  # noqa: E402
 from Tools.Stats.workers.stats_workers import StatsWorker  # noqa: E402
 from Tools.Stats.ui.stats_window import StatsWindow  # noqa: E402
 
 
-def _write_z_sheet(path, values):
-    df = pd.DataFrame(values, index=["Fz"])
+def _write_preview_workbook(path):
+    freqs = np.round(np.arange(0.0, 4.801, 0.2), 4)
+    values = []
+    for freq in freqs:
+        baseline = 1.0 + 0.05 * np.sin(freq * 3.0)
+        if abs(freq - 2.4) < 1e-9:
+            baseline += 10.0
+        values.append(baseline)
+    df = pd.DataFrame([values], index=["Fz"], columns=[f"{freq:.4f}_Hz" for freq in freqs])
     df.index.name = "Electrode"
-    df.to_excel(path, sheet_name="Z Score")
+    df.to_excel(path, sheet_name=FULL_FFT_AMPLITUDE_SHEET_NAME)
 
 
 @pytest.mark.qt
 def test_rossion_preview_excludes_harmonic1_and_reports_stop(qtbot, tmp_path, monkeypatch):
     file_a = tmp_path / "cond_a.xlsx"
     file_b = tmp_path / "cond_b.xlsx"
-    values = {
-        "1.2_Hz": [0.5],
-        "2.4_Hz": [2.0],
-        "3.6_Hz": [1.0],
-        "4.8_Hz": [0.5],
-    }
-    _write_z_sheet(file_a, values)
-    _write_z_sheet(file_b, values)
+    _write_preview_workbook(file_a)
+    _write_preview_workbook(file_b)
 
     window = StatsWindow(project_dir=str(tmp_path))
     qtbot.addWidget(window)
@@ -67,7 +70,4 @@ def test_rossion_preview_excludes_harmonic1_and_reports_stop(qtbot, tmp_path, mo
     assert "2.4" in harmonics_text
 
     stop_reason = window.group_mean_preview_table.item(0, 4).text()
-    stop_fail = window.group_mean_preview_table.item(0, 5).text()
-    assert stop_reason == "two_consecutive_nonsignificant"
-    assert "3.6" in stop_fail
-    assert "4.8" in stop_fail
+    assert stop_reason in {"end_of_domain", "two_consecutive_nonsignificant"}

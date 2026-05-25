@@ -22,10 +22,10 @@ class DVPolicySettings:
     """Represent the DVPolicySettings part of the Stats tool."""
     name: str = LEGACY_POLICY_NAME
     fixed_k: int = 5
-    exclude_harmonic1: bool = True
+    exclude_harmonic1: bool = False
     exclude_base_harmonics: bool = True
     z_threshold: float = 1.64
-    empty_list_policy: str = EMPTY_LIST_FALLBACK_FIXED_K
+    empty_list_policy: str = EMPTY_LIST_ERROR
 
     def to_metadata(self, *, base_freq: float, selected_conditions: list[str]) -> dict:
         """Handle the to metadata step for the Stats workflow."""
@@ -55,20 +55,18 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
     fixed_k = int(settings.get("fixed_k", 5))
     if fixed_k < 1:
         fixed_k = 1
-    empty_list_policy = str(
-        settings.get("empty_list_policy", EMPTY_LIST_FALLBACK_FIXED_K)
-    )
+    empty_list_policy = str(settings.get("empty_list_policy", EMPTY_LIST_ERROR))
     if empty_list_policy not in (
         EMPTY_LIST_FALLBACK_FIXED_K,
         EMPTY_LIST_SET_ZERO,
         EMPTY_LIST_ERROR,
     ):
-        empty_list_policy = EMPTY_LIST_FALLBACK_FIXED_K
+        empty_list_policy = EMPTY_LIST_ERROR
     z_threshold = float(settings.get("z_threshold", 1.64))
     return DVPolicySettings(
         name=name,
         fixed_k=fixed_k,
-        exclude_harmonic1=bool(settings.get("exclude_harmonic1", True)),
+        exclude_harmonic1=bool(settings.get("exclude_harmonic1", False)),
         exclude_base_harmonics=bool(settings.get("exclude_base_harmonics", True)),
         z_threshold=z_threshold,
         empty_list_policy=empty_list_policy,

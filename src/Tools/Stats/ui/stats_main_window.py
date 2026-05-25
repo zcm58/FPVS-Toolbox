@@ -96,10 +96,10 @@ class StatsWindow(
         self._condition_checkboxes: dict[str, QCheckBox] = {}
         self._dv_policy_name: str = ROSSION_POLICY_NAME
         self._dv_fixed_k: int = 5
-        self._dv_exclude_harmonic1: bool = True
+        self._dv_exclude_harmonic1: bool = False
         self._dv_exclude_base_harmonics: bool = True
         self._dv_group_mean_z_threshold: float = 1.64
-        self._dv_empty_list_policy: str = EMPTY_LIST_FALLBACK_FIXED_K
+        self._dv_empty_list_policy: str = EMPTY_LIST_ERROR
         self._dv_variant_checkboxes: dict[str, QCheckBox] = {}
         self._dv_variants_selected: List[str] = []
         self._outlier_exclusion_enabled: bool = True

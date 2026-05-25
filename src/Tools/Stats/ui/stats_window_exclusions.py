@@ -344,6 +344,7 @@ class StatsWindowExclusionsMixin:
             stats_worker_funcs.run_harmonics_preview,
             subjects=self.subjects,
             conditions=self._get_selected_conditions(),
+            conditions_all=list(self.conditions),
             subject_data=self.subject_data,
             base_freq=self._current_base_freq,
             rois=self.rois,

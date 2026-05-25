@@ -100,7 +100,7 @@ class StatsWindowUiMixin:
         self.fixed_k_exclude_h1 = QCheckBox("Exclude harmonic 1")
         self.fixed_k_exclude_h1.setChecked(self._dv_exclude_harmonic1)
         self.fixed_k_exclude_h1.setToolTip(
-            "Skip the first harmonic when building the Fixed-K DV."
+            "Skip the first oddball harmonic when explicitly requested."
         )
         self.fixed_k_exclude_h1.stateChanged.connect(self._on_fixed_k_exclude_h1_changed)
         fixed_form.addRow("", self.fixed_k_exclude_h1)
@@ -162,12 +162,12 @@ class StatsWindowUiMixin:
             self._on_empty_list_policy_changed
         )
         self.group_mean_empty_policy_combo.setToolTip(
-            "What to do if no significant harmonics are found for an ROI."
+            "What to do if no significant common harmonics are found."
         )
         group_mean_form.addRow("Empty list policy:", self.group_mean_empty_policy_combo)
 
         union_label = QLabel(
-            "Selected conditions are used to estimate group-mean Z values for each ROI and harmonic."
+            "All detected conditions are used to estimate one common group-level harmonic set."
         )
         union_label.setWordWrap(True)
         group_mean_form.addRow("", union_label)

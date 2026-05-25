@@ -16,7 +16,11 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
-__all__ = ["compute_full_snr_df", "compute_full_snr"]
+__all__ = [
+    "compute_full_snr_df",
+    "compute_full_snr",
+    "compute_full_snr_from_amplitudes",
+]
 
 
 def _fft_amplitudes(data_uv: np.ndarray) -> np.ndarray:
@@ -138,7 +142,7 @@ def compute_full_snr_df(
 
     _ = exclude_radius
     amplitudes = _fft_amplitudes(data_uv)
-    snr_matrix = _compute_snr_matrix_for_amplitudes(
+    snr_matrix = compute_full_snr_from_amplitudes(
         amplitudes,
         window_size=window_size,
     )
@@ -159,6 +163,18 @@ def compute_full_snr(
 
     _ = sfreq, exclude_radius
     amplitudes = _fft_amplitudes(data_uv)
+    return compute_full_snr_from_amplitudes(
+        amplitudes,
+        window_size=window_size,
+    )
+
+
+def compute_full_snr_from_amplitudes(
+    amplitudes: np.ndarray,
+    window_size: int = 10,
+) -> np.ndarray:
+    """Return full-spectrum SNR from precomputed FFT amplitudes."""
+
     return _compute_snr_matrix_for_amplitudes(
         amplitudes,
         window_size=window_size,

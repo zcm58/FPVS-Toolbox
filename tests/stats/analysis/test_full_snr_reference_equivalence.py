@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from Tools.Stats.analysis.full_snr import compute_full_snr, compute_full_snr_df
+from Tools.Stats.analysis.full_snr import (
+    compute_full_snr,
+    compute_full_snr_df,
+    compute_full_snr_from_amplitudes,
+)
 from Tools.Stats.analysis.noise_utils import compute_noise_stats_for_bin
 
 
@@ -90,6 +94,19 @@ def test_compute_full_snr_matches_legacy_reference_for_realistic_shape() -> None
     expected = _legacy_compute_full_snr_reference(data_uv, sfreq=512.0)
 
     np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
+def test_compute_full_snr_from_amplitudes_reuses_precomputed_fft_values() -> None:
+    rng = np.random.default_rng(20260525)
+    data_uv = rng.normal(loc=0.0, scale=2.5, size=(5, 512))
+    num_times = data_uv.shape[1]
+    num_bins = num_times // 2 + 1
+    amplitudes = np.abs(np.fft.fft(data_uv, axis=1)[:, :num_bins]) / num_times * 2
+
+    from_data = compute_full_snr(data_uv, sfreq=512.0)
+    from_amplitudes = compute_full_snr_from_amplitudes(amplitudes)
+
+    np.testing.assert_allclose(from_amplitudes, from_data, rtol=1e-12, atol=1e-12)
 
 
 def test_compute_full_snr_df_matches_legacy_reference_values() -> None:

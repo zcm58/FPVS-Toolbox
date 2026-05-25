@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 from Tools.Stats.analysis.dv_policies import (  # noqa: E402
-    EMPTY_LIST_FALLBACK_FIXED_K,
+    EMPTY_LIST_ERROR,
     FIXED_K_POLICY_NAME,
     GROUP_MEAN_Z_POLICY_NAME,
     ROSSION_POLICY_NAME,
@@ -63,7 +63,8 @@ def test_stats_dv_policy_group_mean_z_defaults(qtbot):
 
     assert snapshot["name"] == GROUP_MEAN_Z_POLICY_NAME
     assert snapshot["z_threshold"] == pytest.approx(1.64)
-    assert snapshot["empty_list_policy"] == EMPTY_LIST_FALLBACK_FIXED_K
+    assert snapshot["empty_list_policy"] == EMPTY_LIST_ERROR
+    assert snapshot["exclude_harmonic1"] is False
 
 
 @pytest.mark.qt

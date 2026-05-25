@@ -184,7 +184,8 @@ class StatsWindowExportsMixin:
             if output_path.exists():
                 self.append_log(
                     "General",
-                    f"Replacing existing stats-ready workbook: {output_path}",
+                    "Existing stats-ready workbook will be replaced only if "
+                    f"the new export succeeds: {output_path}",
                 )
             _, max_freq_raw = self._safe_settings_get("analysis", "bca_upper_limit", None)
             max_freq = float(max_freq_raw) if max_freq_raw not in (None, "") else None
@@ -198,6 +199,7 @@ class StatsWindowExportsMixin:
             stats_worker_funcs.run_stats_ready_export,
             subjects=list(self.subjects),
             conditions=self._get_selected_conditions(),
+            conditions_all=list(self.conditions),
             subject_data=self.subject_data,
             base_freq=self._current_base_freq,
             rois=self.rois,
