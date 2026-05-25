@@ -140,16 +140,6 @@ def log_worker_timing_record(
 ) -> None:
     """Replay one structured worker timing record through the parent logger."""
     if record.get("source") == "excel":
-        log.info(
-            "[EXCEL TIMING] file=%s stage=%s elapsed_ms=%s sheet=%r rows=%s cols=%s path=%r",
-            file_name,
-            record.get("stage"),
-            record.get("elapsed_ms"),
-            record.get("sheet"),
-            record.get("rows"),
-            record.get("cols"),
-            record.get("path"),
-        )
         return
 
     log.info(

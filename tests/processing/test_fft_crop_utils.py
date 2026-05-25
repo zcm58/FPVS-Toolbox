@@ -5,6 +5,7 @@ from Main_App.Shared.fft_crop_utils import (
     compute_fft_crop_from_events,
     compute_onbin_N,
     compute_onbin_step,
+    resolve_oddball_ids_by_condition,
 )
 
 
@@ -72,6 +73,47 @@ def test_missing_gap_warns_but_does_not_crash():
     crop = results[(1, 0)]
     assert crop.missing_gap_count >= 1
     assert crop.n_samples >= 0
+
+
+def test_condition_specific_oddball_codes_are_resolved_per_condition():
+    fs = 256
+    events = np.asarray(
+        [
+            [100, 0, 1],
+            [200, 0, 51],
+            [840, 0, 51],
+            [1480, 0, 51],
+            [2200, 0, 2],
+            [2300, 0, 52],
+            [2940, 0, 52],
+            [3580, 0, 52],
+        ],
+        dtype=int,
+    )
+    oddball_ids = resolve_oddball_ids_by_condition(
+        events,
+        onset_ids={1, 2},
+        stream_end_sample=5000,
+    )
+
+    assert oddball_ids == {1: 51, 2: 52}
+
+    results, n_step, warns = compute_fft_crop_from_events(
+        events,
+        fs=fs,
+        onset_ids={1, 2},
+        oddball_id=oddball_ids,
+        stream_end_sample=5000,
+    )
+
+    assert warns == []
+    assert n_step == 640
+    assert results[(1, 0)].oddball_id == 51
+    assert results[(2, 0)].oddball_id == 52
+    assert not results[(1, 0)].fallback
+    assert not results[(2, 0)].fallback
+    assert results[(1, 0)].n_samples % n_step == 0
+    assert results[(2, 0)].n_samples % n_step == 0
 
 
 def test_differing_reps_common_n_minimum():

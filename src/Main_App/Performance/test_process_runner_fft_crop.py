@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 import types
 import importlib.util
-from pathlib import Path
 
 import numpy as np
 
@@ -81,7 +80,7 @@ class _Capture:
 
 def _install_worker_stubs(monkeypatch, raw, capture):
     fake_loader = types.ModuleType("Main_App.io.load_utils")
-    fake_loader.load_eeg_file = lambda _app, _path, ref_pair: raw
+    fake_loader.load_eeg_file = lambda _app, _path, ref_pair=None, first_n_channels=None: raw
     monkeypatch.setitem(sys.modules, "Main_App.io.load_utils", fake_loader)
 
     fake_adapter = types.ModuleType("Main_App.exports.post_export_adapter")
@@ -120,9 +119,11 @@ def test_mp_worker_uses_onbin_crop_and_stamps_metadata(tmp_path, monkeypatch):
     ], dtype=int)
     capture = _Capture()
     _install_worker_stubs(monkeypatch, raw, capture)
+    fake_bdf = tmp_path / "subject01.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
 
     result = process_runner._run_full_pipeline_for_file(
-        file_path=Path("subject01.bdf"),
+        file_path=fake_bdf,
         settings={"epoch_start": -1.0, "epoch_end": 1.0, "stim_channel": "Status"},
         event_map={"odd": 10},
         save_folder=tmp_path,
@@ -139,6 +140,43 @@ def test_mp_worker_uses_onbin_crop_and_stamps_metadata(tmp_path, monkeypatch):
     assert md["N_mod_step"].tolist() == [0, 0]
 
 
+def test_mp_worker_uses_condition_specific_oddball_markers(tmp_path, monkeypatch):
+    raw = _FakeRaw(sfreq=256.0, n_times=5000)
+    raw._events = np.array([
+        [100, 0, 1],
+        [200, 0, 51],
+        [840, 0, 51],
+        [1480, 0, 51],
+        [2200, 0, 2],
+        [2300, 0, 52],
+        [2940, 0, 52],
+        [3580, 0, 52],
+    ], dtype=int)
+    capture = _Capture()
+    _install_worker_stubs(monkeypatch, raw, capture)
+    fake_bdf = tmp_path / "subject_condition_specific.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
+
+    result = process_runner._run_full_pipeline_for_file(
+        file_path=fake_bdf,
+        settings={"epoch_start": -1.0, "epoch_end": 1.0, "stim_channel": "Status"},
+        event_map={"fruit": 1, "veg": 2},
+        save_folder=tmp_path,
+        project_root=tmp_path,
+    )
+
+    assert result["status"] == "ok"
+    fruit_md = capture.ctx.preprocessed_data["fruit"][0].metadata
+    veg_md = capture.ctx.preprocessed_data["veg"][0].metadata
+
+    assert fruit_md["crop_mode"].tolist() == ["55_onbin"]
+    assert veg_md["crop_mode"].tolist() == ["55_onbin"]
+    assert fruit_md["oddball_id"].tolist() == [51]
+    assert veg_md["oddball_id"].tolist() == [52]
+    assert int(capture.ctx.preprocessed_data["fruit"][0]._data.shape[2]) % 640 == 0
+    assert int(capture.ctx.preprocessed_data["veg"][0]._data.shape[2]) % 640 == 0
+
+
 def test_mp_worker_hard_fails_when_55_onbin_crop_missing(tmp_path, monkeypatch):
     raw = _FakeRaw(sfreq=256.0, n_times=3000)
     raw._events = np.array([
@@ -146,9 +184,11 @@ def test_mp_worker_hard_fails_when_55_onbin_crop_missing(tmp_path, monkeypatch):
     ], dtype=int)
     capture = _Capture()
     _install_worker_stubs(monkeypatch, raw, capture)
+    fake_bdf = tmp_path / "subject02.bdf"
+    fake_bdf.write_bytes(b"fake bdf")
 
     result = process_runner._run_full_pipeline_for_file(
-        file_path=Path("subject02.bdf"),
+        file_path=fake_bdf,
         settings={"epoch_start": -1.0, "epoch_end": 1.0, "stim_channel": "Status"},
         event_map={"odd": 10},
         save_folder=tmp_path,

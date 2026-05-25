@@ -62,9 +62,10 @@ Rules:
 - Loading a multi-group project must not silently recreate missing registered
   raw folders; after group lock, missing registered raw folders hard-block
   processing.
-- `Reprocess All` may delete only the managed Excel output root and must
-  recreate it before processing. Incremental stale reruns delete only the
-  planned participant's expected Excel outputs.
+- `Reprocess All` may delete generated Excel workbook files only under the
+  managed Excel output root. It must preserve condition/group directories and
+  non-workbook files, then recreate the root before processing. Incremental
+  stale reruns delete only the planned participant's expected Excel outputs.
 - User-facing warnings/errors must use PySide6-safe message helpers, not Tk dialogs. Worker/background callers should log rather than block on a GUI popup.
 
 Useful checks:

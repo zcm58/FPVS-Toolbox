@@ -35,20 +35,28 @@ Equivalently:
 
 This Toolbox enforces this rule by cropping the segment used for FFT to a sample count **N** that guarantees oddball bin alignment.
 
-## How the Toolbox defines the FFT segment using oddball triggers ("55")
+## How the Toolbox defines the FFT segment using oddball triggers
 
-During acquisition, the start of a condition is marked by a condition code (e.g., 1, 2, 3, ...). Every time an oddball stimulus is shown, an event code **55** is emitted. This creates a structure like:
+During acquisition, the start of a condition is marked by a condition code
+(e.g., 1, 2, 3, ...). Every time an oddball stimulus is shown, an oddball event
+code is emitted. In standard projects this code is **55**. Some projects encode
+the oddball marker by condition, such as condition codes **1, 2, 3, 4, 5** with
+oddball markers **51, 52, 53, 54, 55**.
+
+This creates a structure like:
 
 - condition start trigger (e.g., "1")
 - short blank / lead-in
-- 55, 55, 55, 55, ... (one per oddball at 1.2 Hz)
-- condition ends (no special "last oddball" trigger; the last 55 in the series is effectively the last oddball)
+- oddball markers such as 55, or 51 for condition 1, one per oddball at 1.2 Hz
+- condition ends (no special "last oddball" trigger; the last marker in the series is effectively the last oddball)
 
-To define a "steady stimulation" analysis window, the Toolbox can use the first and last 55 triggers for each condition repetition:
+To define a "steady stimulation" analysis window, the Toolbox can use the first
+and last oddball markers for each condition repetition:
 
-1) Find all 55 events that occur within the condition repetition.
-2) Identify the **first 55** and the **last 55**.
-3) Use this region as the basis for selecting the FFT segment.
+1) Resolve the oddball marker for the condition.
+2) Find all matching oddball marker events within the condition repetition.
+3) Identify the first and last matching oddball markers.
+4) Use this region as the basis for selecting the FFT segment.
 
 This avoids relying on a fixed "tmin/tmax in seconds" window that might include non-steady periods (e.g., lead-in blank screens) and it naturally adapts across sampling rates because everything is based on sample indices and event timing.
 
@@ -110,12 +118,12 @@ Key columns:
 - **k0**: bin index used for the target (nearest or exact)
 - **f_bin_hz**: actual bin frequency at k0 (k0 x df)
 - **crop_mode**:
-  - **55_onbin** means the segment was derived from oddball triggers and snapped to an on-bin N
-  - **fixed_epoch_fallback** means the system could not apply 55-based cropping and used the legacy fixed window (tmin/tmax) instead
-- **n55**, **first55_samp**, **last55_samp**: oddball trigger count and indices used to define the crop region
+  - **55_onbin** means the segment was derived from oddball triggers and snapped to an on-bin N. The name is retained for compatibility even when the actual marker was condition-specific, such as 51 or 52.
+  - **fixed_epoch_fallback** means the system could not apply marker-based cropping and used the legacy fixed window (tmin/tmax) instead. Normal Stats-bound processing treats this as invalid and fails before export.
+- **n55**, **first55_samp**, **last55_samp**: oddball trigger count and indices used to define the crop region. These field names are historical; in condition-specific projects they refer to the resolved oddball marker.
 - **N_step**: the on-bin step size in samples for this fs
 - **N_mod_step**: N % N_step (should be 0 in on-bin mode)
-- **fallback_reason**: why 55-based cropping was not used (e.g., missing triggers)
+- **fallback_reason**: why marker-based cropping was not used (e.g., missing triggers)
 
 Neighbor amplitude columns:
 - **amp_m11 ... amp_m1** are the amplitudes at bins below the target (k0-11 ... k0-1)
@@ -132,5 +140,5 @@ Many FPVS pipelines estimate a local noise floor using bins around the target fr
 - FFT bins are spaced by df = fs/N.
 - FPVS amplitude estimates at 1.2 Hz work best when 1.2 Hz lands exactly on a bin.
 - If the segment does not contain an integer number of oddball cycles, energy leaks into neighboring bins (spectral leakage).
-- The Toolbox avoids this by using oddball triggers (55) to define the stimulation segment and snapping N to an on-bin multiple for the current sampling rate.
+- The Toolbox avoids this by using oddball triggers to define the stimulation segment and snapping N to an on-bin multiple for the current sampling rate.
 - The "FFT and neighbors" export is a diagnostic view that shows amplitudes around the target bin to confirm bin-locking and evaluate leakage/noise.

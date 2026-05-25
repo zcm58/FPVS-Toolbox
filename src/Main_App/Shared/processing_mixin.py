@@ -23,7 +23,12 @@ from Main_App.Shared import user_messages
 from Main_App.Shared.post_process import post_process as _external_post_process
 from Main_App.processing.preprocess import perform_preprocessing
 from Main_App.io.load_utils import load_eeg_file
-from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step, ODDBALL_FREQ
+from Main_App.Shared.fft_crop_utils import (
+    compute_fft_crop_from_events,
+    compute_onbin_step,
+    ODDBALL_FREQ,
+    resolve_oddball_ids_by_condition,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -433,14 +438,21 @@ class ProcessingMixin:
                                        'message': f"DEBUG [{f_name}]: Starting epoching based on GUI event_id_map: {event_id_map_from_gui}"})
                     onset_ids = set(event_id_map_from_gui.values())
                     sfreq = float(raw_proc.info['sfreq'])
+                    oddball_ids_by_condition = resolve_oddball_ids_by_condition(
+                        events=events,
+                        onset_ids=onset_ids,
+                        default_oddball_id=55,
+                        stream_end_sample=int(raw_proc.n_times),
+                    )
                     crop_results, n_step, run_warnings = compute_fft_crop_from_events(
                         events=events,
                         fs=sfreq,
                         onset_ids=onset_ids,
-                        oddball_id=55,
+                        oddball_id=oddball_ids_by_condition,
                         stream_end_sample=int(raw_proc.n_times),
                     )
                     fft_crop_log("INFO", f"file={f_name} input={f_path} fs={sfreq:.6f} n_step={n_step}")
+                    fft_crop_log("INFO", f"file={f_name} oddball_ids_by_condition={oddball_ids_by_condition}")
                     for warning_msg in run_warnings:
                         fft_crop_log("WARN", f"file={f_name} run_warning={warning_msg}")
 
@@ -537,6 +549,7 @@ class ProcessingMixin:
                                     rep_diagnostics.append(
                                         {
                                             "crop_mode": "fixed_epoch_fallback" if use_fallback else "55_onbin",
+                                            "oddball_id": int(crop.oddball_id or 55),
                                             "n55": int(crop.n55_dedup),
                                             "first55_samp": int(crop.first55_sample) if crop.first55_sample is not None else np.nan,
                                             "last55_samp": int(crop.last55_sample) if crop.last55_sample is not None else np.nan,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.processing_ledger import (
@@ -242,21 +243,38 @@ def test_record_results_requires_expected_outputs_for_completed_status(tmp_path)
     assert ledger["entries"]["P01"]["status"] == "failed"
 
 
-def test_clean_managed_excel_root_only_removes_excel_root(tmp_path) -> None:
+def test_clean_managed_excel_root_removes_workbooks_and_preserves_folders(tmp_path) -> None:
     project, _info = _project_with_raw(tmp_path)
     excel_root = project.subfolders["excel"]
     keep_file = project.project_root / "keep.txt"
     stale_file = excel_root / "Old" / "P01_Old_Results.xlsx"
+    notes_file = excel_root / "Old" / "notes.txt"
     stale_file.parent.mkdir(parents=True)
     stale_file.write_text("old", encoding="utf-8")
+    notes_file.write_text("notes", encoding="utf-8")
     keep_file.write_text("keep", encoding="utf-8")
 
     cleaned_root = clean_managed_excel_root(project)
 
     assert cleaned_root == excel_root
     assert cleaned_root.exists()
+    assert stale_file.parent.exists()
     assert not stale_file.exists()
+    assert notes_file.exists()
     assert keep_file.exists()
+
+
+def test_clean_managed_excel_root_resolves_relative_subfolder_from_project_root(tmp_path) -> None:
+    project, _info = _project_with_raw(tmp_path)
+    project.subfolders["excel"] = Path("1 - Excel Data Files")
+    stale_file = project.project_root / "1 - Excel Data Files" / "Cond" / "P01_Cond_Results.xlsx"
+    stale_file.parent.mkdir(parents=True)
+    stale_file.write_text("old", encoding="utf-8")
+
+    cleaned_root = clean_managed_excel_root(project)
+
+    assert cleaned_root == (project.project_root / "1 - Excel Data Files").resolve()
+    assert not stale_file.exists()
 
 
 def test_clean_participant_outputs_deletes_only_planned_participant(tmp_path) -> None:

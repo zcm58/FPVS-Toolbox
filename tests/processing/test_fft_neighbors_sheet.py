@@ -77,10 +77,8 @@ def test_fft_neighbors_sheet_written_with_expected_columns(tmp_path, caplog):
         assert col_name in header
     assert len([c for c in header if c.startswith("amp_")]) == 22
     assert "amp_0" not in header
-    assert "[EXCEL TIMING]" in caplog.text
-    assert "stage=sheet_to_excel" in caplog.text
-    assert "stage=sheet_column_widths" in caplog.text
-    assert "stage=workbook_write_total" in caplog.text
+    assert "[EXCEL TIMING]" not in caplog.text
+    assert "[EXCEL STAGE]" not in caplog.text
     assert {record["stage"] for record in timing_records} >= {
         "sheet_to_excel",
         "sheet_column_widths",

@@ -32,7 +32,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import Main_App.processing.preprocess as backend_preprocess
 from Main_App.diagnostics import log_router
-from Main_App.Shared.fft_crop_utils import compute_fft_crop_from_events, compute_onbin_step
+from Main_App.Shared.fft_crop_utils import (
+    compute_fft_crop_from_events,
+    compute_onbin_step,
+    resolve_oddball_ids_by_condition,
+)
 
 import numpy as np
 import psutil  # soft memory cap
@@ -664,11 +668,22 @@ def _run_full_pipeline_for_file(
         # Which event codes are actually present in this recording?
         have_codes = {int(c) for c in events[:, 2].tolist()}
         onset_ids = set(int(v) for v in event_map.values())
+        oddball_ids_by_condition = resolve_oddball_ids_by_condition(
+            events=events,
+            onset_ids=onset_ids,
+            default_oddball_id=55,
+            stream_end_sample=int(raw_proc.n_times),
+        )
+        crop_logger.info(
+            "file=%s oddball_ids_by_condition=%s",
+            file_path.name,
+            oddball_ids_by_condition,
+        )
         crop_results, _, run_warnings = compute_fft_crop_from_events(
             events=events,
             fs=sfreq,
             onset_ids=onset_ids,
-            oddball_id=55,
+            oddball_id=oddball_ids_by_condition,
             stream_end_sample=int(raw_proc.n_times),
         )
         for run_warning in run_warnings:
@@ -750,6 +765,7 @@ def _run_full_pipeline_for_file(
                 n55 = int(crop.n55_dedup)
                 n_rep = int(crop.n_samples)
                 available_samples = int(crop.available_samples)
+                oddball_marker_id = int(crop.oddball_id or 55)
 
                 if crop.fallback:
                     raise RuntimeError(
@@ -784,7 +800,7 @@ def _run_full_pipeline_for_file(
 
                 crop_logger.info(
                     (
-                        "file=%s condition=%s rep=%d fs=%.6f N_step=%s n55=%d first55_samp=%s "
+                        "file=%s condition=%s rep=%d fs=%.6f N_step=%s oddball_id=%s n55=%d first55_samp=%s "
                         "last55_samp=%s available_samples=%d N_rep=%d N_common=%s N_common_mod_step=%s "
                         "df_hz=%.9f k0=%.9f f_bin_hz=%.9f crop_mode=%s fallback_reason=%s"
                     ),
@@ -793,6 +809,7 @@ def _run_full_pipeline_for_file(
                     int(rep_key[1]),
                     sfreq,
                     n_step,
+                    oddball_marker_id,
                     n55,
                     first55_samp,
                     last55_samp,
@@ -812,6 +829,7 @@ def _run_full_pipeline_for_file(
                 rep_metadata.append(
                     {
                         "crop_mode": crop_mode,
+                        "oddball_id": oddball_marker_id,
                         "n55": n55,
                         "first55_samp": first55_samp,
                         "last55_samp": last55_samp,

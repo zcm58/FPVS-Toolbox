@@ -77,7 +77,7 @@ def test_gui_log_line_uses_shared_format() -> None:
     assert line == "09:01:02.345 [GUI]: hello"
 
 
-def test_replay_worker_timing_records_routes_export_and_excel(caplog) -> None:
+def test_replay_worker_timing_records_routes_export_and_skips_excel(caplog) -> None:
     logger = logging.getLogger("tests.worker_timing_route")
     result = {
         "file": r"C:\data\demo.bdf",
@@ -98,5 +98,5 @@ def test_replay_worker_timing_records_routes_export_and_excel(caplog) -> None:
         log_router.replay_worker_timing_records(logger, result=result)
 
     assert "[EXPORT TIMING] file=demo.bdf stage=workbook_write" in caplog.text
-    assert "[EXCEL TIMING] file=demo.bdf stage=sheet_to_excel" in caplog.text
-    assert "sheet='FullSNR'" in caplog.text
+    assert "[EXCEL TIMING]" not in caplog.text
+    assert "sheet='FullSNR'" not in caplog.text

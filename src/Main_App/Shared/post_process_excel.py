@@ -1,4 +1,3 @@
-import logging
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
@@ -6,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 
-logger = logging.getLogger(__name__)
 NEIGHBOR_OFFSETS = [*range(-11, 0), *range(1, 12)]
 
 
@@ -36,15 +34,6 @@ def _log_excel_timing(
     }
     if timing_sink is not None:
         timing_sink.append(record)
-    logger.info(
-        "[EXCEL TIMING] stage=%s elapsed_ms=%d path=%r sheet=%r rows=%s cols=%s",
-        stage,
-        elapsed_ms,
-        path,
-        sheet_name,
-        rows,
-        cols,
-    )
 
 
 def build_fft_neighbors_rows(
@@ -148,12 +137,6 @@ def write_results_workbook(
 ) -> None:
     """Write results workbook with consistent formatting and optional debug sheet."""
     workbook_started = perf_counter()
-    logger.info(
-        "[EXCEL STAGE] workbook_write_start path=%r sheets=%d has_fft_neighbors=%s",
-        full_excel_path,
-        len(dataframes_to_save),
-        bool(fft_neighbors_df is not None and not fft_neighbors_df.empty),
-    )
     try:
         with pd.ExcelWriter(full_excel_path, engine="xlsxwriter") as writer:
             workbook = writer.book

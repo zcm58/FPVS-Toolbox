@@ -41,7 +41,11 @@ scopes that separate workflow.
 - `events`: MNE-style event rows where column 0 is sample index and column 2 is event id.
 - `fs`: sampling frequency in Hz.
 - `onset_ids`: condition onset event ids supplied by the event map.
-- `oddball_id`: oddball trigger id, currently `55`.
+- `oddball_id`: oddball trigger id or a per-condition mapping of condition
+  onset code to oddball marker code. Standard projects use global marker `55`.
+  Some task variants encode oddball markers as `50 + condition_id`, for
+  example condition starts `1, 2, 3, 4, 5` with oddball markers
+  `51, 52, 53, 54, 55`.
 - `stream_end_sample`: optional sample index used as the end boundary for the final repetition block.
 
 The oddball frequency constant is `6/5` Hz, equivalent to `1.2` Hz.
@@ -60,7 +64,7 @@ n_step = den_fs / gcd(f_oddball.numerator, den_fs)
 `compute_onbin_N(available_samples, n_step)` returns the largest multiple of `n_step` that fits in the available interval. Non-positive inputs return `0`.
 
 The returned `N` is intentionally allowed to be shorter than the full available
-55-to-55 interval so that `N % n_step == 0`. Do not replace this with "use all
+marker-to-marker interval so that `N % n_step == 0`. Do not replace this with "use all
 available samples", "use the nearest second count", or a fixed epoch duration;
 those changes can leak oddball power into neighboring FFT bins.
 
@@ -73,14 +77,18 @@ For each onset event whose id is in `onset_ids`:
 - Repetition indexes are tracked separately per condition id, starting at `0`.
 - The result key is `(condition_id, repetition_index)`.
 
-Within each block, only rows whose event id is `55` are treated as oddball events.
+Within each block, only rows whose event id matches the resolved oddball marker
+for that condition are treated as oddball events. The normal processing runner
+resolves this explicitly from the event stream: if a block contains at least
+two condition-specific oddball markers (`50 + condition_id`), that marker is
+used for the condition; otherwise the standard global marker `55` is used.
 
-## 55 Deduplication And Gap Warnings
+## Oddball-Marker Deduplication And Gap Warnings
 
-The expected 55 interval is `round(fs / 1.2)` samples.
+The expected oddball-marker interval is `round(fs / 1.2)` samples.
 
-- A 55 event is dropped as a duplicate when it occurs less than half the expected interval after the previous retained 55.
-- A missing-gap warning is counted when a retained 55 occurs more than 1.5 times the expected interval after the previous retained 55.
+- An oddball marker is dropped as a duplicate when it occurs less than half the expected interval after the previous retained marker.
+- A missing-gap warning is counted when a retained marker occurs more than 1.5 times the expected interval after the previous retained marker.
 - Per-block warning strings are exactly `dedup_dropped:{count}` and `missing_55_gaps:{count}`.
 
 ## Crop Result Behavior
@@ -88,20 +96,28 @@ The expected 55 interval is `round(fs / 1.2)` samples.
 For each repetition, `CropResult` records:
 
 - crop start sample and length;
-- raw and deduplicated 55 counts;
+- resolved oddball marker id;
+- raw and deduplicated oddball-marker counts;
 - cycle count as `max(0, len(dedup_55) - 1)`;
 - block start/end samples;
-- first and last deduplicated 55 samples;
+- first and last deduplicated oddball-marker samples;
 - available samples as `last55 - first55`;
 - dedup and missing-gap counts;
 - fallback flag, fallback reason, and warning strings.
 
-When at least two deduplicated 55 events exist and `n_step` is available, the crop starts at the first deduplicated 55 and uses `compute_onbin_N(last55 - first55, n_step)`. Any caller that stamps `crop_mode == "55_onbin"` must preserve the condition `N % n_step == 0`.
+When at least two deduplicated oddball markers exist and `n_step` is available,
+the crop starts at the first deduplicated oddball marker and uses
+`compute_onbin_N(last55 - first55, n_step)`. The metadata field names
+`crop_mode == "55_onbin"`, `n55`, `first55_samp`, and `last55_samp` are
+retained for workbook compatibility, but in condition-specific projects they
+refer to the resolved marker such as 51 or 52. Any caller that stamps
+`crop_mode == "55_onbin"` must preserve the condition `N % n_step == 0`.
 
 The helper still records fallback diagnostics for invalid repetition blocks:
 
 - `n_step is None`: fallback, reason is the non-integer sampling-rate warning.
-- fewer than two deduplicated 55 events: fallback, reason `insufficient_55`.
+- fewer than two deduplicated oddball markers: fallback, reason
+  `insufficient_<marker>`, for example `insufficient_55` or `insufficient_51`.
 - computed `n_samples <= 0`: fallback, reason `nonpositive_N`.
 
 These fallback flags are diagnostic only for the active normal processing

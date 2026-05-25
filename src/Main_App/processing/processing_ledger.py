@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import re
-import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +19,7 @@ PROCESSING_STATE_DIR = ".fpvs_processing"
 LEDGER_FILENAME = "processing_ledger.json"
 RUNS_FILENAME = "processing_runs.jsonl"
 PROCESSING_FINGERPRINT_VERSION = "processing_fingerprint_v1"
+GENERATED_EXCEL_SUFFIXES = {".xls", ".xlsx", ".xlsm", ".xlsb"}
 
 
 @dataclass(frozen=True)
@@ -96,11 +96,13 @@ def _canonical_json(data: Any) -> str:
 
 
 def _excel_root(project: Any) -> Path:
+    project_root = Path(project.project_root)
     subfolders = getattr(project, "subfolders", {}) or {}
     excel_subfolder = subfolders.get("excel") if isinstance(subfolders, Mapping) else None
     if excel_subfolder:
-        return Path(excel_subfolder)
-    return Path(project.project_root) / "1 - Excel Data Files"
+        root = Path(excel_subfolder)
+        return root if root.is_absolute() else project_root / root
+    return project_root / "1 - Excel Data Files"
 
 
 def _condition_folder_name(label: str) -> str:
@@ -349,7 +351,30 @@ def clean_managed_excel_root(project: Any) -> Path:
     if root == project_root or root.parent == root:
         raise ValueError(f"Refusing to delete unsafe Excel output root: {root}")
     if root.exists():
-        shutil.rmtree(root)
+        try:
+            candidates = [
+                path
+                for path in root.rglob("*")
+                if path.is_file() and path.suffix.lower() in GENERATED_EXCEL_SUFFIXES
+            ]
+        except OSError as exc:
+            raise RuntimeError(
+                "Unable to scan the managed Excel output folder for cleanup. "
+                f"Check OneDrive sync/permissions for: {root}. Original error: {exc}"
+            ) from exc
+        for path in candidates:
+            try:
+                path.unlink()
+            except PermissionError as exc:
+                raise RuntimeError(
+                    "Unable to remove an existing Excel output file. Close it in Excel "
+                    f"and pause OneDrive sync if needed, then retry: {path}"
+                ) from exc
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Unable to remove existing Excel output file: {path}. "
+                    f"Original error: {exc}"
+                ) from exc
     root.mkdir(parents=True, exist_ok=True)
     return root
 

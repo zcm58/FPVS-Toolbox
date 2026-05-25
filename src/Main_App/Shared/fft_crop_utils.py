@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from fractions import Fraction
 from math import gcd
@@ -25,9 +26,11 @@ class CropResult:
     fallback: bool = False
     fallback_reason: Optional[str] = None
     warnings: list[str] = field(default_factory=list)
+    oddball_id: Optional[int] = None
 
 
 ODDBALL_FREQ = Fraction(6, 5)
+CONDITION_SPECIFIC_ODDBALL_OFFSET = 50
 
 
 def compute_onbin_step(fs: float, f_oddball: Fraction = ODDBALL_FREQ) -> Tuple[Optional[int], Optional[int], Optional[str]]:
@@ -45,11 +48,76 @@ def compute_onbin_N(available_samples: int, N_step: int) -> int:
     return (available_samples // N_step) * N_step
 
 
+def condition_specific_oddball_id(
+    condition_id: int,
+    *,
+    offset: int = CONDITION_SPECIFIC_ODDBALL_OFFSET,
+) -> int:
+    return int(condition_id) + int(offset)
+
+
+def resolve_oddball_ids_by_condition(
+    events: np.ndarray,
+    onset_ids: Iterable[int],
+    *,
+    default_oddball_id: int = 55,
+    condition_specific_offset: int = CONDITION_SPECIFIC_ODDBALL_OFFSET,
+    stream_end_sample: Optional[int] = None,
+) -> dict[int, int]:
+    """Resolve the oddball marker code to use for each condition onset code.
+
+    Standard projects use a global oddball marker code of 55. Some older or
+    task-specific projects encode oddballs as 50 + condition code, such as
+    51, 52, 53, 54, and 55 for condition onset codes 1-5. This resolver makes
+    that choice explicit per condition from the observed event stream.
+    """
+    onset_set = {int(v) for v in onset_ids}
+    resolved = {condition_id: int(default_oddball_id) for condition_id in onset_set}
+    if events.size == 0 or not onset_set:
+        return resolved
+
+    onset_events = [row for row in events if int(row[2]) in onset_set]
+    for idx, onset_event in enumerate(onset_events):
+        cond_id = int(onset_event[2])
+        condition_oddball_id = condition_specific_oddball_id(
+            cond_id,
+            offset=condition_specific_offset,
+        )
+        if condition_oddball_id == int(default_oddball_id):
+            resolved[cond_id] = int(default_oddball_id)
+            continue
+
+        onset_sample = int(onset_event[0])
+        next_block_start = (
+            int(onset_events[idx + 1][0])
+            if idx + 1 < len(onset_events)
+            else int(stream_end_sample or events[-1][0] + 1)
+        )
+        condition_specific_count = sum(
+            1
+            for row in events
+            if onset_sample < int(row[0]) < next_block_start
+            and int(row[2]) == condition_oddball_id
+        )
+        if condition_specific_count >= 2:
+            resolved[cond_id] = condition_oddball_id
+    return resolved
+
+
+def _resolve_oddball_id_for_condition(
+    oddball_id: int | Mapping[int, int],
+    condition_id: int,
+) -> int:
+    if isinstance(oddball_id, Mapping):
+        return int(oddball_id.get(int(condition_id), 55))
+    return int(oddball_id)
+
+
 def compute_fft_crop_from_events(
     events: np.ndarray,
     fs: float,
     onset_ids: Iterable[int],
-    oddball_id: int = 55,
+    oddball_id: int | Mapping[int, int] = 55,
     stream_end_sample: Optional[int] = None,
 ) -> tuple[Dict[Tuple[int, int], CropResult], Optional[int], list[str]]:
     onset_set = {int(v) for v in onset_ids}
@@ -78,7 +146,13 @@ def compute_fft_crop_from_events(
         rep_index = rep_counter[cond_id] - 1
         next_block_start = int(onset_events[idx + 1][0]) if idx + 1 < len(onset_events) else int(stream_end_sample or events[-1][0] + 1)
 
-        block_rows = [row for row in events if onset_sample <= int(row[0]) < next_block_start and int(row[2]) == oddball_id]
+        block_oddball_id = _resolve_oddball_id_for_condition(oddball_id, cond_id)
+        block_rows = [
+            row
+            for row in events
+            if onset_sample < int(row[0]) < next_block_start
+            and int(row[2]) == block_oddball_id
+        ]
         raw_55 = [int(row[0]) for row in block_rows]
         dedup_55: list[int] = []
         dropped = 0
@@ -108,7 +182,7 @@ def compute_fft_crop_from_events(
             crop_start = onset_sample
         elif len(dedup_55) < 2:
             fallback = True
-            fallback_reason = "insufficient_55"
+            fallback_reason = f"insufficient_{block_oddball_id}"
             n_samples = 0
             crop_start = onset_sample
         else:
@@ -140,5 +214,6 @@ def compute_fft_crop_from_events(
             fallback=fallback,
             fallback_reason=fallback_reason,
             warnings=warnings,
+            oddball_id=block_oddball_id,
         )
     return results, n_step, run_warnings
