@@ -23,7 +23,7 @@ from Main_App.projects.fpvs_config_import import (
     FPVSConfigImportError,
     create_project_from_fpvs_config,
 )
-from Main_App.projects.project import Project
+from Main_App.projects.project import Project, make_group_id
 from Main_App.projects.project_metadata import ProjectMetadata, read_project_metadata
 from Main_App.projects.projects_root import ensure_projects_root
 
@@ -32,6 +32,12 @@ logger.addHandler(logging.NullHandler())
 
 _open_project_guard = OpGuard()
 _open_selected_project_guard = OpGuard()
+WINDOWS_FORBIDDEN_GROUP_FOLDER_CHARS = set('<>:"/\\|?*')
+WINDOWS_FORBIDDEN_GROUP_FOLDER_CHARS_TEXT = '< > : " / \\ | ? *'
+
+
+def _illegal_group_folder_chars(label: str) -> list[str]:
+    return sorted({ch for ch in label if ch in WINDOWS_FORBIDDEN_GROUP_FOLDER_CHARS})
 
 
 class _ProjectScanSignals(QObject):
@@ -133,46 +139,11 @@ def new_project(self) -> None:
     if not ok:
         return
 
-    group_names: list[str] = []
-    for idx in range(group_count):
-        while True:
-            default_name = f"Group {idx + 1}" if group_count > 1 else "Default"
-            group_name, ok = QInputDialog.getText(
-                self,
-                "Group Name",
-                f"Enter a name for group #{idx + 1}:",
-                text=default_name,
-            )
-            if not ok:
-                QMessageBox.information(
-                    self,
-                    "Project Creation Cancelled",
-                    "Project creation cancelled.",
-                )
-                return
-            group_name = group_name.strip()
-            if not group_name:
-                QMessageBox.warning(
-                    self,
-                    "Group Name Required",
-                    "Group names cannot be empty.",
-                )
-                continue
-            if group_name.lower() in {existing.lower() for existing in group_names}:
-                QMessageBox.warning(
-                    self,
-                    "Duplicate Group",
-                    "Each group must have a unique name.",
-                )
-                continue
-            group_names.append(group_name)
-            break
-
     group_folders: dict[str, str] = {}
-    for group_name in group_names:
+    if group_count == 1:
         folder = QFileDialog.getExistingDirectory(
             self,
-            f"Select Input Folder for {group_name}",
+            "Select Input Folder",
             "",
         )
         if not folder:
@@ -182,22 +153,104 @@ def new_project(self) -> None:
                 "Project creation cancelled.",
             )
             return
-        group_folders[group_name] = folder
+        group_folders["Input Folder"] = folder
+    else:
+        used_folder_paths: set[Path] = set()
+        for idx in range(group_count):
+            folder = QFileDialog.getExistingDirectory(
+                self,
+                f"Select Input Folder for group #{idx + 1}",
+                "",
+            )
+            if not folder:
+                QMessageBox.information(
+                    self,
+                    "Project Creation Cancelled",
+                    "Project creation cancelled.",
+                )
+                return
+            folder_path = Path(folder).resolve()
+            if folder_path in used_folder_paths:
+                QMessageBox.warning(
+                    self,
+                    "Duplicate Group Folder",
+                    "Each group must use a unique input folder.",
+                )
+                return
+            used_folder_paths.add(folder_path)
+            default_name = folder_path.name or f"Group {idx + 1}"
+            while True:
+                group_name, ok = QInputDialog.getText(
+                    self,
+                    "Group Name",
+                    f"Enter a name for group #{idx + 1}:",
+                    text=default_name,
+                )
+                if not ok:
+                    QMessageBox.information(
+                        self,
+                        "Project Creation Cancelled",
+                        "Project creation cancelled.",
+                    )
+                    return
+                group_name = group_name.strip()
+                if not group_name:
+                    QMessageBox.warning(
+                        self,
+                        "Group Name Required",
+                        "Group names cannot be empty.",
+                    )
+                    continue
+                illegal_chars = _illegal_group_folder_chars(group_name)
+                if illegal_chars:
+                    bad = " ".join(illegal_chars)
+                    QMessageBox.warning(
+                        self,
+                        "Invalid Group Folder Name",
+                        (
+                            "Group names become output folder names and cannot contain "
+                            "characters that are invalid for Windows folders.\n\n"
+                            f"Group: {group_name}\n"
+                            f"Illegal character(s): {bad}\n\n"
+                            "Please choose a group name using only allowed characters.\n"
+                            f"Not allowed: {WINDOWS_FORBIDDEN_GROUP_FOLDER_CHARS_TEXT}"
+                        ),
+                    )
+                    continue
+                if group_name.lower() in {existing.lower() for existing in group_folders}:
+                    QMessageBox.warning(
+                        self,
+                        "Duplicate Group",
+                        "Each group must have a unique name.",
+                    )
+                    continue
+                group_folders[group_name] = folder
+                break
 
     project_dir = self.projectsRoot / name.strip()
     project_dir.mkdir(parents=True, exist_ok=True)
 
     project = Project.load(project_dir)
     project.name = name.strip()
-    if group_names:
-        first_group = group_names[0]
-        project.input_folder = group_folders[first_group]
-    groups_payload = {
-        group_name: {"raw_input_folder": Path(folder), "description": ""}
-        for group_name, folder in group_folders.items()
-    }
-    project.groups = groups_payload
+    if group_count == 1:
+        project.input_folder = Path(group_folders["Input Folder"])
+        project.groups = {}
+    else:
+        first_group = next(iter(group_folders))
+        project.input_folder = Path(group_folders[first_group])
+        used_group_ids: set[str] = set()
+        groups_payload = {}
+        for group_name, folder in group_folders.items():
+            group_id = make_group_id(group_name, used_group_ids)
+            groups_payload[group_id] = {
+                "label": group_name,
+                "folder_name": group_name,
+                "raw_input_folder": Path(folder),
+            }
+        project.groups = groups_payload
     project.participants = {}
+    project.groups_locked = False
+    project.groups_locked_at = None
     project.save()
 
     self.currentProject = project

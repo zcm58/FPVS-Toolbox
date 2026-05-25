@@ -354,8 +354,18 @@ def post_process(app: Any, condition_labels_present: List[str]) -> None:
             # Original naming for FPVSApp might be different, adjust if needed
             excel_filename = f"{pid}_{filename_condition_part}_Results.xlsx"
 
+        output_group_folder = None
+        settings = getattr(app, "settings", None)
+        if isinstance(settings, dict):
+            output_group_folder = settings.get("output_group_folder")
+
         # Create subfolder
         output_subfolder_path = os.path.join(parent_folder, folder_name_base)
+        if output_group_folder:
+            output_subfolder_path = os.path.join(
+                output_subfolder_path,
+                str(output_group_folder),
+            )
         try:
             os.makedirs(output_subfolder_path, exist_ok=True)
         except OSError as e:

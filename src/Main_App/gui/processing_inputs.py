@@ -16,7 +16,13 @@ from PySide6.QtWidgets import (
 )
 
 import config
-from Main_App.processing.processing_controller import prepare_batch_files
+from Main_App.gui.participant_review import review_participants_for_processing
+from Main_App.processing.processing_controller import (
+    participant_review_rows,
+    prepare_batch_file_infos,
+    raw_file_info_for_path,
+    register_participants,
+)
 from Main_App.projects.preprocessing_settings import (
     PREPROCESSING_CANONICAL_KEYS,
     normalize_preprocessing_settings,
@@ -38,24 +44,39 @@ def validate_inputs(host: Any) -> bool:
 
     # File selection rules differ in Single vs Batch
     mode_now = (host.file_mode.get() if hasattr(host, "file_mode") else "Batch")
+    raw_file_infos = []
     if mode_now == "Single":
         # In single mode, require an explicit .bdf selection
         if not host.data_paths:
             QMessageBox.warning(host, "No File Selected", "Please choose one .bdf file first.")
+            return False
+        try:
+            raw_file_infos = [
+                raw_file_info_for_path(host.currentProject, Path(host.data_paths[0]))
+            ]
+        except Exception as exc:
+            logger.exception("Single-file source validation failed.")
+            QMessageBox.warning(host, "Invalid File Selection", str(exc))
             return False
 
     # Batch: always build the file list from the project definition
     # (multi-group aware via prepare_batch_files). This ensures that
     # all .bdf files from all configured group input folders are used.
     if mode_now == "Batch":
-        file_paths = prepare_batch_files(host.currentProject)
-        if not file_paths:
+        try:
+            raw_file_infos = prepare_batch_file_infos(host.currentProject)
+        except Exception as exc:
+            logger.exception("Batch raw-file discovery failed.")
+            QMessageBox.critical(host, "Project Data Error", str(exc))
+            return False
+        if not raw_file_infos:
             QMessageBox.warning(
                 host,
                 "No Data",
                 "No .bdf files found in the configured input folder(s).",
             )
             return False
+        file_paths = [info.path for info in raw_file_infos]
         host.data_paths = [str(p) for p in file_paths]
         host.log(f"Processing: {len(host.data_paths)} file(s) selected.")
 
@@ -92,6 +113,31 @@ def validate_inputs(host: Any) -> bool:
     if params is None:
         return False
     host.validated_params = params
+
+    review_rows = participant_review_rows(host.currentProject, raw_file_infos)
+    if review_rows:
+        if any("conflict" in row.status.casefold() for row in review_rows):
+            QMessageBox.warning(
+                host,
+                "Participant Assignment Conflict",
+                "One or more discovered files conflict with existing participant assignments. "
+                "Move or rename the raw files, then try processing again.",
+            )
+            return False
+        reviewer = getattr(host, "review_participants_for_processing", None)
+        if not callable(reviewer):
+            reviewer = review_participants_for_processing
+        if not reviewer(host, review_rows):
+            host.log("Participant review cancelled.")
+            return False
+        try:
+            register_participants(host.currentProject, raw_file_infos)
+        except Exception as exc:
+            logger.exception("Failed to save participant review updates.")
+            QMessageBox.critical(host, "Project Save Error", str(exc))
+            return False
+    host._processing_raw_file_infos = list(raw_file_infos)
+
     debug_enabled = bool(host.settings.debug_enabled()) if hasattr(host, "settings") else False
     project_preproc = getattr(host.currentProject, "preprocessing", {}) or {}
     project_snapshot = {key: project_preproc.get(key) for key in PREPROCESSING_CANONICAL_KEYS}
@@ -451,25 +497,20 @@ def select_single_file(host: Any) -> None:
         QMessageBox.warning(host, "Invalid File", "Please select a .bdf file.")
         host._update_start_enabled()
         return
-    # Must be inside the project's input folder
-    in_root = Path(host.currentProject.input_folder).resolve()
     try:
-        inside = in_root in p.resolve().parents
-    except Exception:
-        inside = False
-    if not inside:
+        info = raw_file_info_for_path(host.currentProject, p)
+    except Exception as exc:
         QMessageBox.warning(
             host,
             "Outside Project",
-            "Please choose a .bdf inside this project's input folder.\n"
-            f"Input folder:\n{in_root}",
+            str(exc),
         )
         host._update_start_enabled()
         return
     # Accept
     if hasattr(host, "le_input_file"):
-        host.le_input_file.setText(str(p))
-    host._selected_bdf = str(p)
-    host.data_paths = [str(p)]
-    host.log(f"Single-file selected: {p.name}")
+        host.le_input_file.setText(str(info.path))
+    host._selected_bdf = str(info.path)
+    host.data_paths = [str(info.path)]
+    host.log(f"Single-file selected: {info.path.name}")
     host._update_start_enabled()

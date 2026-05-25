@@ -14,6 +14,15 @@ from PySide6.QtWidgets import QMessageBox
 
 from Main_App.diagnostics.audit import format_audit_summary, write_audit_json
 from Main_App.gui.post_export_workflows import excel_snapshot
+from Main_App.processing.processing_ledger import (
+    ProcessingPlan,
+    classify_processing_inputs,
+    clean_managed_excel_root,
+    clean_participant_outputs,
+    output_group_folder_by_file,
+    record_processing_results,
+    with_processing_choice,
+)
 from Main_App.projects.preprocessing_settings import normalize_preprocessing_settings
 from Main_App.workers.mp_env import (
     compute_effective_max_workers,
@@ -60,6 +69,107 @@ def _format_timing_summary(result: dict) -> str | None:
 
     cache_part = f" cache={cache_status}" if cache_status else ""
     return f"[TIMING] {file_name}{cache_part} " + " ".join(parts)
+
+
+def _choose_processing_plan(
+    host: Any,
+    plan: ProcessingPlan,
+    *,
+    is_single_ui: bool,
+) -> ProcessingPlan | None:
+    if not plan.states:
+        return plan
+
+    has_prior_outputs = any(state.status != "new" for state in plan.states)
+    has_settings_change = any(state.status == "changed_settings" for state in plan.states)
+
+    if is_single_ui and len(plan.states) == 1 and plan.states[0].status == "completed":
+        state = plan.states[0]
+        message = (
+            f"{state.participant_id} already has completed outputs for the "
+            "current project settings."
+        )
+        box = QMessageBox(host)
+        box.setWindowTitle("File Already Processed")
+        box.setText(message)
+        skip_button = box.addButton("Skip", QMessageBox.AcceptRole)
+        reprocess_button = box.addButton("Reprocess This File", QMessageBox.DestructiveRole)
+        box.addButton("Cancel", QMessageBox.RejectRole)
+        box.setDefaultButton(skip_button)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked == reprocess_button:
+            return with_processing_choice(plan, "reprocess_this_file")
+        return None
+
+    if not has_prior_outputs:
+        return plan
+
+    total = len(plan.states)
+    completed = plan.completed_count
+    new_or_changed = len(plan.incremental_files)
+    if is_single_ui:
+        return with_processing_choice(plan, "incremental")
+
+    if has_settings_change:
+        detail = (
+            "Processing settings changed since a previous run. Reprocessing all "
+            "files is recommended because mixed settings can invalidate group "
+            "comparisons."
+        )
+    else:
+        detail = (
+            "Incremental processing will run only files that are new, changed, "
+            "incomplete, or missing expected Excel outputs."
+        )
+
+    box = QMessageBox(host)
+    box.setWindowTitle("Choose Processing Scope")
+    box.setText(
+        "FPVS Toolbox found "
+        f"{total} BDF file(s) in this project.\n\n"
+        f"{completed} file(s) already have completed outputs.\n"
+        f"{new_or_changed} file(s) need processing.\n\n"
+        f"{detail}"
+    )
+    incremental_button = box.addButton(
+        "Process New or Changed Only",
+        QMessageBox.AcceptRole,
+    )
+    reprocess_button = box.addButton("Reprocess All Files", QMessageBox.DestructiveRole)
+    box.addButton("Cancel", QMessageBox.RejectRole)
+    box.setDefaultButton(reprocess_button if has_settings_change else incremental_button)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked == reprocess_button:
+        return with_processing_choice(plan, "reprocess_all")
+    if clicked == incremental_button:
+        return with_processing_choice(plan, "incremental")
+    return None
+
+
+def _prepare_excel_outputs_for_plan(host: Any, plan: ProcessingPlan) -> bool:
+    if plan.choice == "reprocess_all":
+        excel_root = Path(host.currentProject.subfolders["excel"])
+        reply = QMessageBox.warning(
+            host,
+            "Reprocess All Files",
+            "Reprocess All will delete and recreate generated Excel outputs inside:\n\n"
+            f"{excel_root}\n\n"
+            "Raw data and files outside this managed Excel folder will not be touched.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return False
+        clean_managed_excel_root(host.currentProject)
+        host.log(f"Cleared managed Excel output folder: {excel_root}")
+        return True
+
+    deleted = clean_participant_outputs(host.currentProject, plan)
+    if deleted:
+        host.log(f"Cleared {len(deleted)} stale participant Excel output file(s).")
+    return True
 
 
 def stop_processing(host: Any) -> None:
@@ -134,6 +244,8 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
     host._last_job_success = False
     host._cancel_requested = False
     host._run_active = False
+    host._processing_plan = None
+    host._processing_user_choice = None
     host._snr_tick = 0
     host._run_had_successful_export = False
     host._run_excel_output_root = (
@@ -259,6 +371,31 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             _reset_failed_start(host)
             return
 
+        settings = host.validated_params.copy()
+        event_map = settings.pop("event_id_map", {})
+        raw_file_infos = list(getattr(host, "_processing_raw_file_infos", []) or [])
+        plan = classify_processing_inputs(
+            host.currentProject,
+            raw_file_infos,
+            settings,
+            event_map,
+        )
+        chosen_plan = _choose_processing_plan(host, plan, is_single_ui=is_single_ui)
+        if chosen_plan is None:
+            _reset_failed_start(host)
+            return
+        if not chosen_plan.run_files:
+            host.log("No new or changed files need processing.", level=logging.INFO)
+            _reset_failed_start(host)
+            return
+        if not _prepare_excel_outputs_for_plan(host, chosen_plan):
+            _reset_failed_start(host)
+            return
+        host._processing_plan = chosen_plan
+        host._processing_run_mode = "Single" if is_single_ui else "Batch"
+        host._processing_user_choice = chosen_plan.choice
+        host.data_paths = [str(path) for path in chosen_plan.run_files]
+
         host._set_controls_enabled(False)
         if hasattr(host, "progress_bar"):
             host.progress_bar.setRange(0, 100)
@@ -270,15 +407,16 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
 
         project_root = Path(host.currentProject.project_root)
         save_folder = Path(host.save_folder_path.get())
-        if is_single_ui:
-            files = [Path(host.data_paths[0])]
-        else:
-            files = [Path(p) for p in host.data_paths]
+        files = [Path(p) for p in host.data_paths]
         host._max_progress = len(files)
         if hasattr(host, "_prepare_processing_activity"):
             host._prepare_processing_activity(files)
-        settings = host.validated_params.copy()
-        event_map = settings.pop("event_id_map", {})
+        group_folder_by_file = output_group_folder_by_file(
+            host.currentProject,
+            raw_file_infos,
+        )
+        if group_folder_by_file:
+            settings["_fpvs_output_group_by_file"] = group_folder_by_file
 
         host._mp = MpRunnerBridge(host)
         host._mp.validated_fingerprint = getattr(
@@ -394,6 +532,21 @@ def on_processing_finished(host: Any, payload: dict | None = None) -> None:
             f"[AUDIT] Average number of channels rejected per file: "
             f"{avg_rejected:.2f} (n={files_with_reject_info}, total={total_rejected})"
         )
+
+    plan = getattr(host, "_processing_plan", None)
+    if plan is not None:
+        try:
+            record_processing_results(
+                host.currentProject,
+                plan,
+                results,
+                run_mode=str(getattr(host, "_processing_run_mode", "Batch")),
+                user_choice=str(getattr(host, "_processing_user_choice", "incremental")),
+                cancelled=cancelled,
+            )
+        except Exception as exc:
+            logger.exception("Failed to update processing ledger.")
+            host.log(f"Processing ledger update failed: {exc}", level=logging.WARNING)
 
     host._busy_stop()
     success = not cancelled

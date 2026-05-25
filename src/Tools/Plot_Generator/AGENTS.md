@@ -28,6 +28,18 @@ Current ownership map:
   configuration.
 - `snr_utils.py`: shared SNR calculation helpers.
 
+v2.1 project contract:
+
+- `project.json` is canonical for group assignments. Prefer participant
+  `group_id` and resolve labels/folder names through `project.groups`; legacy
+  participant `group` values are compatibility input only.
+- Multi-group Excel files live under
+  `<Excel Root>/<Condition>/<Group>/<Participant>_<Condition>_Results.xlsx`.
+  Discovery may recurse within a condition folder, but group membership should
+  come from `project.json`, not from output folder names.
+- Single-group projects have no `groups` metadata and keep the flat
+  `<Excel Root>/<Condition>/...xlsx` layout.
+
 Keep `_Worker` importable from `Tools.Plot_Generator.worker`. New worker helper
 logic should go in the focused helper modules above and remain PySide6-free
 unless it belongs in the QObject shell.

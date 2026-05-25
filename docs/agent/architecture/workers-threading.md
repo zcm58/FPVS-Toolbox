@@ -19,6 +19,11 @@ Common long-running work:
 - Plot generation and export.
 - Statistics pipeline runs.
 - File scanning over project folders.
+- Main App processing runs now receive a precomputed incremental plan from
+  `Main_App.processing.processing_ledger` before `MpRunnerBridge.start()`.
+  Workers receive only the files selected by that plan. Multi-group runs also
+  receive a per-file output group-folder map so post-export writes into the
+  condition-first/group-second Excel tree.
 
 Rules:
 
@@ -33,6 +38,9 @@ Rules:
   sets the shared cancel event, `run_project_parallel()` terminates active
   process-pool workers, cancels queued files, emits a cancelled done payload,
   and reports interrupted files so partial outputs are not treated as complete.
+- `processing_ledger.record_processing_results()` is the post-run authority for
+  marking participant outputs completed, failed, or incomplete. It requires
+  expected Excel files to exist before writing a completed ledger entry.
 
 Useful tests:
 

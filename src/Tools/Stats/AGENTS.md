@@ -18,6 +18,18 @@ that might be needed for a publication quality manuscript.
 
 The stats tool currently supports single-group statistical analysis only.
 
+v2.1 project contract:
+
+- `project.json` is canonical for group assignments. Prefer participant
+  `group_id` and resolve labels/folder names through `project.groups`; legacy
+  participant `group` values are compatibility input only.
+- Excel scanning should treat top-level folders under `1 - Excel Data Files/`
+  as conditions. Multi-group output may add a group folder inside each
+  condition; scan those files recursively while keeping the condition name from
+  the top-level folder.
+- Do not infer a participant's group assignment from the Excel folder name when
+  a manifest is available.
+
 
 IMPORTANT RULES for Codex:
 

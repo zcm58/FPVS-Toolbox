@@ -407,6 +407,12 @@ def _run_full_pipeline_for_file(
     t0 = time.perf_counter()
     timings_ms: Dict[str, int] = {}
     cache_status = "not_checked"
+    settings = dict(settings)
+    output_group_by_file = settings.get("_fpvs_output_group_by_file")
+    if isinstance(output_group_by_file, dict):
+        group_folder = output_group_by_file.get(str(file_path.resolve()))
+        if group_folder:
+            settings["output_group_folder"] = str(group_folder)
 
     def _record_timing(section: str, started_at: float) -> None:
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)

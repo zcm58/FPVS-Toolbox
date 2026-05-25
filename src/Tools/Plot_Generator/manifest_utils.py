@@ -63,6 +63,7 @@ def normalize_participants_map(manifest: dict | None) -> Dict[str, str]:
 
     if not isinstance(manifest, dict):
         return {}
+    group_labels = _group_label_aliases(manifest)
     participants = manifest.get("participants", {})
     if not isinstance(participants, dict):
         return {}
@@ -72,11 +73,43 @@ def normalize_participants_map(manifest: dict | None) -> Dict[str, str]:
             continue
         if not isinstance(info, dict):
             continue
-        group = info.get("group")
+        group = info.get("group_id")
+        if group is None:
+            group = info.get("group")
         if not isinstance(group, str) or not group.strip():
             continue
-        normalized[pid.strip().upper()] = group.strip()
+        group_key = group.strip()
+        normalized[pid.strip().upper()] = group_labels.get(group_key, group_key)
     return normalized
+
+
+def _group_label_aliases(manifest: dict | None) -> dict[str, str]:
+    if not isinstance(manifest, dict):
+        return {}
+    groups = manifest.get("groups")
+    if not isinstance(groups, dict):
+        return {}
+    aliases: dict[str, str] = {}
+    for raw_group_id, raw_info in groups.items():
+        if not isinstance(raw_group_id, str) or not raw_group_id.strip():
+            continue
+        info = raw_info if isinstance(raw_info, dict) else {}
+        label = str(
+            info.get("label")
+            or info.get("folder_name")
+            or raw_group_id
+        ).strip()
+        if not label:
+            label = raw_group_id.strip()
+        for alias in (
+            raw_group_id,
+            info.get("group_id"),
+            info.get("label"),
+            info.get("folder_name"),
+        ):
+            if isinstance(alias, str) and alias.strip():
+                aliases[alias.strip()] = label
+    return aliases
 
 
 def extract_group_names(manifest: dict | None) -> list[str]:
@@ -85,7 +118,12 @@ def extract_group_names(manifest: dict | None) -> list[str]:
     groups = manifest.get("groups")
     if not isinstance(groups, dict):
         return []
-    names = [name for name in groups.keys() if isinstance(name, str) and name.strip()]
+    aliases = _group_label_aliases(manifest)
+    names = [
+        aliases.get(name.strip(), name.strip())
+        for name in groups.keys()
+        if isinstance(name, str) and name.strip()
+    ]
     return sorted({name.strip() for name in names})
 
 

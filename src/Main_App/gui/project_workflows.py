@@ -150,11 +150,15 @@ def load_project(
 ) -> None:
     _load_project(host, project)
 
-    # Auto-populate data_paths from the project's input folder(s). For
-    # multi-group projects, this uses all configured group folders via
-    # prepare_batch_files; for legacy single-group projects, it falls back
-    # to the original input_folder behavior.
-    file_paths = prepare_batch_files(project)
+    # Auto-populate data_paths from the project's registered raw source(s).
+    # This scan must not mutate participant metadata; processing performs the
+    # explicit review/register step.
+    try:
+        file_paths = prepare_batch_files(project)
+    except Exception as exc:
+        logger.exception("Project raw-file discovery failed during load.")
+        QMessageBox.warning(host, "Project Data Warning", str(exc))
+        file_paths = []
     host.data_paths = [str(p) for p in file_paths]
 
     groups = getattr(project, "groups", {}) or {}

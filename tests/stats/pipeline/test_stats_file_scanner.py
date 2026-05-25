@@ -20,3 +20,17 @@ def test_scan_folder_ignores_default_dirs(tmp_path):
     assert subjects == ["P01"]
     assert set(conditions) == {"CondA", "CondB"}
     assert set(subject_data["P01"]) == {"CondA", "CondB"}
+
+
+def test_scan_folder_reads_condition_group_layout(tmp_path):
+    cond = tmp_path / "CondA"
+    group = cond / "Control Group"
+    group.mkdir(parents=True)
+    with open(group / "P01_CondA_Results.xlsx", "w") as f:
+        f.write("test")
+
+    subjects, conditions, subject_data = scan_folder_simple(str(tmp_path))
+
+    assert subjects == ["P01"]
+    assert conditions == ["CondA"]
+    assert subject_data["P01"]["CondA"].endswith("P01_CondA_Results.xlsx")

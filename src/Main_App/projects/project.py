@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
@@ -15,6 +16,7 @@ from .preprocessing_settings import (
 EXCEL_SUBFOLDER_NAME = "1 - Excel Data Files"
 SNR_SUBFOLDER_NAME = "2 - SNR Plots"
 STATS_SUBFOLDER_NAME = "3 - Statistical Analysis Results"
+PROJECT_SCHEMA_VERSION = "2.1.0"
 _LEGACY_BANDPASS_WARNED: set[Path] = set()
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,21 @@ DEFAULTS: Dict[str, Any] = {
     # Preprocessing parameters expected by GUI (dict)
     "preprocessing": {},
 }
+
+
+def make_group_id(value: object, used: set[str] | None = None) -> str:
+    """Return a readable, deterministic group_id slug with collision suffixes."""
+
+    text = str(value or "").strip().lower()
+    base = re.sub(r"[^a-z0-9]+", "_", text).strip("_") or "group"
+    used_ids = used if used is not None else set()
+    candidate = base
+    suffix = 2
+    while candidate in used_ids:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    used_ids.add(candidate)
+    return candidate
 
 
 def _resolve_subpath(project_root: Path, value: str) -> Path:
@@ -189,19 +206,34 @@ class Project:
         # Event map dict
         ev = manifest.get("event_map", {})
         self.event_map: Dict[str, Any] = ev if isinstance(ev, dict) else {}
+        self.groups_locked = bool(manifest.get("groups_locked", False))
+        locked_at = manifest.get("groups_locked_at")
+        self.groups_locked_at = str(locked_at).strip() if locked_at else None
 
         # Optional groups metadata normalized to runtime-friendly form
         groups_raw = manifest.get("groups", {})
         self.groups: Dict[str, Dict[str, Any]] = {}
+        group_aliases: Dict[str, str] = {}
+        used_group_ids: set[str] = set()
         if isinstance(groups_raw, Mapping):
-            for raw_name, raw_info in groups_raw.items():
+            for raw_key, raw_info in groups_raw.items():
                 try:
-                    name = str(raw_name).strip()
+                    raw_key_text = str(raw_key).strip()
                 except Exception:
                     continue
-                if not name:
+                if not raw_key_text:
                     continue
                 info = raw_info if isinstance(raw_info, Mapping) else {}
+                raw_group_id = info.get("group_id") or raw_key_text
+                group_id = make_group_id(raw_group_id, used_group_ids)
+                label_raw = info.get("label") or raw_key_text
+                label = str(label_raw).strip() if label_raw is not None else raw_key_text
+                if not label:
+                    label = group_id
+                folder_name_raw = info.get("folder_name") or label
+                folder_name = str(folder_name_raw).strip() if folder_name_raw is not None else label
+                if not folder_name:
+                    folder_name = label
                 folder_value = info.get("raw_input_folder") if info else ""
                 folder_path = (
                     _resolve_subpath(self.project_root, str(folder_value))
@@ -210,12 +242,20 @@ class Project:
                 )
                 description_raw = info.get("description", "") if info else ""
                 description = str(description_raw) if description_raw is not None else ""
-                self.groups[name] = {
+                group_entry: Dict[str, Any] = {
+                    "label": label,
+                    "folder_name": folder_name,
                     "raw_input_folder": folder_path,
-                    "description": description,
                 }
+                if description:
+                    group_entry["description"] = description
+                self.groups[group_id] = group_entry
+                for alias in (raw_key_text, raw_group_id, label, folder_name):
+                    alias_text = str(alias or "").strip()
+                    if alias_text:
+                        group_aliases[alias_text] = group_id
 
-        # Participants metadata placeholder (currently stored verbatim)
+        # Participants metadata. v2.1 stores group_id; legacy manifests may use group.
         participants_raw = manifest.get("participants", {})
         self.participants: Dict[str, Dict[str, Any]] = {}
         if isinstance(participants_raw, Mapping):
@@ -227,11 +267,26 @@ class Project:
                 if not participant_id:
                     continue
                 entry = raw_data if isinstance(raw_data, Mapping) else {}
-                group_name = entry.get("group") if entry else None
-                if group_name is None:
-                    self.participants[participant_id] = {}
-                else:
-                    self.participants[participant_id] = {"group": str(group_name)}
+                participant_entry: Dict[str, Any] = {}
+                group_value = (
+                    entry.get("group_id")
+                    if entry.get("group_id") is not None
+                    else entry.get("group")
+                )
+                if group_value is not None:
+                    raw_group_text = str(group_value).strip()
+                    if raw_group_text:
+                        participant_entry["group_id"] = group_aliases.get(
+                            raw_group_text,
+                            make_group_id(raw_group_text),
+                        )
+                raw_file_value = entry.get("raw_file") if entry else None
+                if raw_file_value:
+                    participant_entry["raw_file"] = _resolve_subpath(
+                        self.project_root,
+                        str(raw_file_value),
+                    )
+                self.participants[participant_id] = participant_entry
 
         # Results subfolders (absolute paths under results_folder)
         sub = manifest.get("subfolders", {})
@@ -292,10 +347,13 @@ class Project:
         merged: Dict[str, Any] = dict(DEFAULTS)
         merged.update(data)
 
-        # Ensure main directories exist using resolved absolute paths
+        # Ensure project-managed directories exist. Multi-group raw folders can
+        # live outside the project and must not be silently recreated if moved.
         input_dir = _resolve_subpath(project_root, merged.get("input_folder", DEFAULTS["input_folder"]))
         results_dir = _resolve_subpath(project_root, merged.get("results_folder", DEFAULTS["results_folder"]))
-        input_dir.mkdir(parents=True, exist_ok=True)
+        groups_raw = merged.get("groups", {})
+        if not isinstance(groups_raw, Mapping) or not groups_raw:
+            input_dir.mkdir(parents=True, exist_ok=True)
         results_dir.mkdir(parents=True, exist_ok=True)
 
         proj = Project(project_root, merged, manifest_path=resolved_manifest_path)
@@ -318,6 +376,7 @@ class Project:
 
         # Build from in-memory manifest once
         data: Dict[str, Any] = dict(self.manifest)
+        data["schema_version"] = PROJECT_SCHEMA_VERSION
 
         # Friendly name handling
         folder_name = self.project_root.name
@@ -388,17 +447,24 @@ class Project:
         merged_sub = DEFAULTS["subfolders"].copy()
         merged_sub.update(sub_out)
         data["subfolders"] = merged_sub
+        if getattr(self, "groups_locked", False):
+            data["groups_locked"] = True
+            if getattr(self, "groups_locked_at", None):
+                data["groups_locked_at"] = str(self.groups_locked_at)
+        else:
+            data.pop("groups_locked", None)
+            data.pop("groups_locked_at", None)
 
         # Groups metadata persisted with stable relative paths when possible
         groups_out: Dict[str, Dict[str, Any]] = {}
         groups_live = getattr(self, "groups", {}) or {}
         if isinstance(groups_live, Mapping):
-            for raw_name, raw_info in groups_live.items():
+            for raw_group_id, raw_info in groups_live.items():
                 try:
-                    name = str(raw_name).strip()
+                    group_id = str(raw_group_id).strip()
                 except Exception:
                     continue
-                if not name:
+                if not group_id:
                     continue
                 info = raw_info if isinstance(raw_info, Mapping) else {}
                 folder_value = info.get("raw_input_folder") if info else None
@@ -413,12 +479,21 @@ class Project:
                     if folder_path is not None
                     else ""
                 )
-                description = info.get("description", "") if info else ""
-                groups_out[name] = {
+                label = str(info.get("label") or group_id).strip() if info else group_id
+                folder_name = str(info.get("folder_name") or label).strip() if info else label
+                group_out: Dict[str, Any] = {
+                    "label": label or group_id,
+                    "folder_name": folder_name or label or group_id,
                     "raw_input_folder": folder_str,
-                    "description": str(description) if description is not None else "",
                 }
-        data["groups"] = groups_out
+                description = info.get("description", "") if info else ""
+                if description:
+                    group_out["description"] = str(description)
+                groups_out[group_id] = group_out
+        if groups_out:
+            data["groups"] = groups_out
+        else:
+            data.pop("groups", None)
 
         # Participants metadata
         participants_out: Dict[str, Dict[str, Any]] = {}
@@ -432,14 +507,29 @@ class Project:
                 if not participant_id:
                     continue
                 info = raw_info if isinstance(raw_info, Mapping) else {}
-                group_value = info.get("group") if info else None
-                if group_value is None:
-                    continue
-                group_name = str(group_value).strip()
-                if not group_name:
-                    continue
-                participants_out[participant_id] = {"group": group_name}
-        data["participants"] = participants_out
+                participant_out: Dict[str, Any] = {}
+                group_value = info.get("group_id") if info else None
+                if group_value is None and info:
+                    group_value = info.get("group")
+                if group_value is not None:
+                    group_id = str(group_value).strip()
+                    if group_id:
+                        participant_out["group_id"] = group_id
+                raw_file_value = info.get("raw_file") if info else None
+                if raw_file_value:
+                    try:
+                        participant_out["raw_file"] = _relativize(
+                            self.project_root,
+                            Path(raw_file_value),
+                        )
+                    except (TypeError, ValueError, OSError):
+                        participant_out["raw_file"] = str(raw_file_value)
+                if participant_out:
+                    participants_out[participant_id] = participant_out
+        if participants_out:
+            data["participants"] = participants_out
+        else:
+            data.pop("participants", None)
 
         # Keep in-memory manifest consistent for subsequent operations.
         self.manifest = data

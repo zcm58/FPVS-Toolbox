@@ -7,7 +7,6 @@ workers while remaining GUI-agnostic.
 
 from __future__ import annotations
 
-import glob
 import json
 import logging
 import os
@@ -150,6 +149,7 @@ def normalize_participants_map(manifest: dict | None) -> dict[str, str]:
 
     if not isinstance(manifest, dict):
         return {}
+    group_labels = _group_label_aliases(manifest)
     participants = manifest.get("participants", {})
     if not isinstance(participants, dict):
         return {}
@@ -159,10 +159,13 @@ def normalize_participants_map(manifest: dict | None) -> dict[str, str]:
             continue
         if not isinstance(info, dict):
             continue
-        group = info.get("group")
+        group = info.get("group_id")
+        if group is None:
+            group = info.get("group")
         if not isinstance(group, str) or not group.strip():
             continue
-        normalized[pid.strip().upper()] = group.strip()
+        group_key = group.strip()
+        normalized[pid.strip().upper()] = group_labels.get(group_key, group_key)
 
     # Example: manifest participants {"SCP7": "DEFAULT"} and Excel filename
     # "SCP7_Fruit vs Veg_Results.xlsx" (PID "P7").
@@ -185,6 +188,35 @@ def normalize_participants_map(manifest: dict | None) -> dict[str, str]:
                 existing_group,
             )
     return normalized
+
+
+def _group_label_aliases(manifest: dict | None) -> dict[str, str]:
+    if not isinstance(manifest, dict):
+        return {}
+    groups = manifest.get("groups")
+    if not isinstance(groups, dict):
+        return {}
+    aliases: dict[str, str] = {}
+    for raw_group_id, raw_info in groups.items():
+        if not isinstance(raw_group_id, str) or not raw_group_id.strip():
+            continue
+        info = raw_info if isinstance(raw_info, dict) else {}
+        label = str(
+            info.get("label")
+            or info.get("folder_name")
+            or raw_group_id
+        ).strip()
+        if not label:
+            label = raw_group_id.strip()
+        for alias in (
+            raw_group_id,
+            info.get("group_id"),
+            info.get("label"),
+            info.get("folder_name"),
+        ):
+            if isinstance(alias, str) and alias.strip():
+                aliases[alias.strip()] = label
+    return aliases
 
 
 def map_subjects_to_groups(subjects: Iterable[str], participants_map: dict[str, str]) -> dict[str, str | None]:
@@ -337,9 +369,10 @@ def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[s
             if not condition_clean:
                 continue
 
-            pattern = os.path.join(entry_path, "*.xlsx")
-            for filepath in glob.glob(pattern):
-                filename = os.path.basename(filepath)
+            for filepath in Path(entry_path).rglob("*.xlsx"):
+                if any(part.lower() in IGNORED_FOLDERS for part in filepath.parts):
+                    continue
+                filename = filepath.name
                 match = pid_pattern.search(filename)
                 if not match:
                     continue
@@ -348,7 +381,7 @@ def scan_folder_simple(parent_folder: str) -> Tuple[List[str], List[str], Dict[s
                 conditions_set.add(condition_clean)
 
                 subject_data.setdefault(pid, {})
-                subject_data[pid][condition_clean] = filepath
+                subject_data[pid][condition_clean] = str(filepath)
     except PermissionError as e:  # noqa: PERF203
         raise ScanError(f"Permission denied to access folder: {parent_folder}\n{e}")
     except Exception as e:  # noqa: BLE001
