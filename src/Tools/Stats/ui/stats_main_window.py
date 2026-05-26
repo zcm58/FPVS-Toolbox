@@ -88,7 +88,7 @@ class StatsWindow(
         self._current_alpha: float = 0.05
         self._active_pipeline: PipelineId | None = None
         self._condition_checkboxes: dict[str, QCheckBox] = {}
-        self._dv_policy_name: str = FIXED_PREDEFINED_POLICY_NAME
+        self._dv_policy_name: str = GROUP_SIGNIFICANT_POLICY_NAME
         self._dv_fixed_harmonic_frequencies_hz: str = FIXED_PREDEFINED_DEFAULT_FREQUENCIES
         self._dv_fixed_harmonic_auto_exclude_base: bool = True
         self._outlier_exclusion_enabled: bool = True

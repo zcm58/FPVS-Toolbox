@@ -65,6 +65,28 @@ class StatsWindowPipelineMixin:
             else:
                 spinner.stop()
                 spinner.hide()
+        notice = getattr(self, "stats_processing_notice", None)
+        animation = getattr(self, "stats_processing_animation", None)
+        message = getattr(self, "stats_processing_message", None)
+        if running and message is not None:
+            if getattr(self, "_dv_policy_name", "") == GROUP_SIGNIFICANT_POLICY_NAME:
+                message.setText(
+                    "FPVS Toolbox is currently calculating an average FFT spectrum across "
+                    "all electrodes and participants to determine which harmonics are "
+                    "considered statistically significant. This could take a few minutes."
+                )
+            else:
+                message.setText(
+                    "FPVS Toolbox is currently building Summed BCA values and running "
+                    "the selected statistical analyses. This could take a few minutes."
+                )
+        if notice is not None:
+            notice.setVisible(running)
+        if animation is not None:
+            if running:
+                animation.start()
+            else:
+                animation.stop()
 
     def _begin_run(self) -> bool:
         """Handle the begin run step for the Stats workflow."""

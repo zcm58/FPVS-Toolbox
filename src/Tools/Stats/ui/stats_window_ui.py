@@ -65,10 +65,10 @@ class StatsWindowUiMixin:
         dv_method_row.addWidget(QLabel("Method:"))
         self.dv_policy_combo = QComboBox()
         self.dv_policy_combo.setToolTip(
-            "Choose the Summed BCA harmonic policy. Fixed/predefined remains the default."
+            "Choose the Summed BCA harmonic policy. Group-level significant harmonics are the default."
         )
         self.dv_policy_combo.addItems(
-            [FIXED_PREDEFINED_POLICY_NAME, GROUP_SIGNIFICANT_POLICY_NAME]
+            [GROUP_SIGNIFICANT_POLICY_NAME, FIXED_PREDEFINED_POLICY_NAME]
         )
         self.dv_policy_combo.setMinimumContentsLength(14)
         self.dv_policy_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -139,11 +139,10 @@ class StatsWindowUiMixin:
         fixed_predefined_layout.addWidget(self.fixed_predefined_preview_table)
 
         dv_layout.addWidget(self.fixed_predefined_controls)
-        self._set_fixed_predefined_controls_visible(True)
 
         self.group_significant_note = QLabel(
             "Uses one common z-significant oddball harmonic list selected from "
-            "grand-averaged FullFFT amplitude spectra; fixed/predefined remains the default."
+            "grand-averaged FullFFT amplitude spectra; this is the default Stats DV policy."
         )
         self.group_significant_note.setWordWrap(True)
         self.group_significant_note.setToolTip(
@@ -151,7 +150,9 @@ class StatsWindowUiMixin:
             "with base-rate overlaps excluded."
         )
         dv_layout.addWidget(self.group_significant_note)
-        self.group_significant_note.setVisible(False)
+        self._set_fixed_predefined_controls_visible(
+            self._dv_policy_name == FIXED_PREDEFINED_POLICY_NAME
+        )
 
         self.outlier_group = QWidget()
         self.outlier_group.setObjectName("stats_outlier_flagging")
@@ -517,6 +518,37 @@ class StatsWindowUiMixin:
         self.setup_tabs.addTab(advanced_page, "Advanced")
         self.setup_tabs.currentChanged.connect(self._sync_summary_output_visibility)
         setup_layout.addWidget(self.setup_tabs, 1)
+
+        self.stats_processing_notice = SectionCard("Stats analysis in progress")
+        self.stats_processing_notice.setObjectName("stats_processing_notice")
+        self.stats_processing_notice.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        )
+        processing_notice_layout = QHBoxLayout()
+        processing_notice_layout.setContentsMargins(0, 0, 0, 0)
+        processing_notice_layout.setSpacing(14)
+        self.stats_processing_animation = BrainPulseWidget(self.stats_processing_notice)
+        self.stats_processing_animation.setObjectName("stats_processing_brain_animation")
+        processing_notice_layout.addWidget(
+            self.stats_processing_animation,
+            0,
+            Qt.AlignVCenter,
+        )
+        self.stats_processing_message = QLabel(
+            "FPVS Toolbox is currently calculating an average FFT spectrum across "
+            "all electrodes and participants to determine which harmonics are "
+            "considered statistically significant. This could take a few minutes."
+        )
+        self.stats_processing_message.setObjectName("stats_processing_message")
+        self.stats_processing_message.setWordWrap(True)
+        self.stats_processing_message.setSizePolicy(
+            QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        )
+        processing_notice_layout.addWidget(self.stats_processing_message, 1)
+        self.stats_processing_notice.content_layout.addLayout(processing_notice_layout)
+        self.stats_processing_notice.hide()
+        self.stats_processing_animation.stop()
+        setup_layout.addWidget(self.stats_processing_notice)
 
         self.run_action_bar = QWidget()
         self.run_action_bar.setObjectName("stats_run_action_bar")

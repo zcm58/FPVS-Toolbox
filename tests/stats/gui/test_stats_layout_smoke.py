@@ -168,6 +168,11 @@ def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     assert not hasattr(window, "single_status_lbl")
     assert window.lbl_status.objectName() == "stats_status_internal"
     assert not window.lbl_status.isVisible()
+    assert window.stats_processing_notice.objectName() == "stats_processing_notice"
+    assert not window.stats_processing_notice.isVisible()
+    assert window.stats_processing_message.text().startswith(
+        "FPVS Toolbox is currently calculating an average FFT spectrum"
+    )
     assert not setup_area.isAncestorOf(window.lbl_status)
     assert window.findChild(QWidget, "stats_status_chip") is None
     assert window.findChild(QWidget, "stats_status_footer") is None

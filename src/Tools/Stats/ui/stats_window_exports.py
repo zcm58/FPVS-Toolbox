@@ -45,7 +45,7 @@ class StatsWindowExportsMixin:
         base_freq = self._pipeline_base_freq.get(pipeline_id, self._current_base_freq)
         dv_meta = self._pipeline_dv_metadata.get(pipeline_id, {})
         payload = {
-            "policy_name": dv_meta.get("policy_name", FIXED_PREDEFINED_POLICY_NAME),
+            "policy_name": dv_meta.get("policy_name", GROUP_SIGNIFICANT_POLICY_NAME),
             "fixed_harmonic_frequencies_hz": dv_meta.get(
                 "fixed_harmonic_frequencies_hz",
                 dv_policy.get("fixed_harmonic_frequencies_hz", ""),

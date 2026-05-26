@@ -5,20 +5,20 @@ harmonics contributed to the Stats tool's Summed BCA dependent variable.
 
 ## Current options
 
-The default and primary policy is **Fixed / predefined harmonic list**.
-By default it uses 1.2, 2.4, 3.6, 4.8, and 7.2 Hz. Base-rate overlaps
-such as 6, 12, and 18 Hz are excluded by default. The same fixed list is
-applied to every participant, selected condition, and ROI. The source
-`BCA (uV)` sheets must contain those exact harmonic columns.
-
-An optional alternative is **Group-level significant harmonics
+The default and primary policy is **Group-level significant harmonics
 (Volfart/Retter/Rossion style)**. This option selects one common harmonic
 list at the group level, then applies that same list to every participant,
-selected condition, and ROI. It is not the default.
+selected condition, and ROI.
+
+The alternate policy is **Fixed / predefined harmonic list**. By default it
+uses 1.2, 2.4, 3.6, 4.8, and 7.2 Hz. Base-rate overlaps such as 6, 12, and
+18 Hz are excluded by default. The same fixed list is applied to every
+participant, selected condition, and ROI. The source `BCA (uV)` sheets must
+contain those exact harmonic columns.
 
 ## Group-level significant harmonics
 
-This optional policy follows the common FPVS idea that the oddball
+This default policy follows the common FPVS idea that the oddball
 response can appear at the oddball frequency and its harmonics. For a
 6 Hz base rate with every fifth image as the oddball, candidate oddball
 harmonics are 1.2, 2.4, 3.6, 4.8, 6.0, 7.2 Hz, and so on. Harmonics that

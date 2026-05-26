@@ -27,6 +27,14 @@ class BrainPulseWidget(QWidget):
         self._animation.setEasingCurve(QEasingCurve.InOutSine)
         self._animation.start()
 
+    def start(self) -> None:
+        if self._animation.state() != QPropertyAnimation.Running:
+            self._animation.start()
+
+    def stop(self) -> None:
+        self._animation.stop()
+        self.setDrawProgress(0.0)
+
     def sizeHint(self) -> QSize:
         return QSize(144, 124)
 

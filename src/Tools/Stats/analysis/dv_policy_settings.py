@@ -28,7 +28,7 @@ LOCKED_ODDBALL_FREQUENCY_HZ = 1.2
 @dataclass(frozen=True)
 class DVPolicySettings:
     """Represent the DVPolicySettings part of the Stats tool."""
-    name: str = FIXED_PREDEFINED_POLICY_NAME
+    name: str = GROUP_SIGNIFICANT_POLICY_NAME
     fixed_harmonic_frequencies_hz: str = FIXED_PREDEFINED_DEFAULT_FREQUENCIES
     fixed_harmonic_auto_exclude_base: bool = True
     fixed_harmonic_base_tolerance_hz: float = FIXED_PREDEFINED_BASE_OVERLAP_TOLERANCE_HZ
@@ -57,12 +57,23 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
     """Handle the normalize dv policy step for the Stats workflow."""
     if not settings:
         return DVPolicySettings()
-    raw_name = str(settings.get("name", FIXED_PREDEFINED_POLICY_NAME))
-    name = (
-        GROUP_SIGNIFICANT_POLICY_NAME
-        if raw_name == GROUP_SIGNIFICANT_POLICY_NAME
-        else FIXED_PREDEFINED_POLICY_NAME
-    )
+    raw_name = str(settings.get("name", GROUP_SIGNIFICANT_POLICY_NAME))
+    fixed_aliases = {
+        FIXED_PREDEFINED_POLICY_NAME,
+        "Current (Legacy)",
+        "Fixed-K harmonics",
+    }
+    group_aliases = {
+        GROUP_SIGNIFICANT_POLICY_NAME,
+        "Rossion Method (common group-level harmonics)",
+        "Rossion Method (Significant-only; stop after 2 failures)",
+    }
+    if raw_name in fixed_aliases:
+        name = FIXED_PREDEFINED_POLICY_NAME
+    elif raw_name in group_aliases:
+        name = GROUP_SIGNIFICANT_POLICY_NAME
+    else:
+        name = GROUP_SIGNIFICANT_POLICY_NAME
     fixed_freqs = str(settings.get("fixed_harmonic_frequencies_hz", FIXED_PREDEFINED_DEFAULT_FREQUENCIES))
     fixed_base_tol = float(
         settings.get("fixed_harmonic_base_tolerance_hz", FIXED_PREDEFINED_BASE_OVERLAP_TOLERANCE_HZ)

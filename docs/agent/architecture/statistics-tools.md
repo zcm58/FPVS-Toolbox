@@ -43,10 +43,11 @@ Rules:
 - Stats-ready exports must stay explicit and additive. Keep
   `Export Stats-Ready Workbook` as a distinct action, reuse the active Summed
   BCA DV facade, preserve `subject_id` and group labels, and surface missing
-  metadata instead of silently changing values. Fixed/predefined harmonic
-  summation is the default and primary DV policy. Fixed/predefined summation
-  also requires exact selected `BCA (uV)` harmonic columns; do not use
-  nearest-column matching for requested fixed harmonics. The optional
+  metadata instead of silently changing values. Group-level significant
+  harmonic summation (Volfart/Retter/Rossion style) is the default and primary
+  DV policy. Fixed/predefined summation remains available as an alternate
+  policy and also requires exact selected `BCA (uV)` harmonic columns; do not
+  use nearest-column matching for requested fixed harmonics. The default
   group-level significant-harmonics policy selects one common non-base oddball
   harmonic list from grand-averaged `FullFFT Amplitude (uV)` spectra, then
   applies that common list uniformly to every participant, selected condition,

@@ -40,8 +40,8 @@ harmonic summation have already happened.
 3. Select the conditions you want to analyze.
 4. Confirm the ROIs in Settings.
 5. Confirm the Summed BCA policy:
-   - Fixed / predefined harmonic list (default), or
-   - Group-level significant harmonics (optional).
+   - Group-level significant harmonics (default), or
+   - Fixed / predefined harmonic list.
 6. Click **Export Stats-Ready Workbook** in the Comparison Exports section.
 7. Use the Last Export path to open or copy the workbook location.
 
