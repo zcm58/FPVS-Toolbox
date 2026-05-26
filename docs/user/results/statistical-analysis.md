@@ -17,8 +17,8 @@ with `group_id` as the between-subjects factor.
 ## How the methods work together (high-level)
 
 1. **Summed BCA DV is defined** from the ROI-aggregated spectral outputs.
-2. **Harmonics are selected** using the default fixed/predefined list or
-   the optional group-level significant-harmonics policy.
+2. **Harmonics are selected** using the default group-level
+   significant-harmonics policy or the alternate fixed/predefined list.
 3. A **subject x condition x ROI table** of Summed BCA values is built.
 4. **RM-ANOVA** and/or a **linear mixed-effects model** summarize
    condition, ROI, and interaction effects.
@@ -43,10 +43,10 @@ Cautions:
 
 - **Multiple comparisons:** post-hoc tests are corrected for false
   discovery rate; still interpret effect sizes and confidence intervals.
-- **Harmonic policy matters:** the default fixed/predefined list and the
-  optional group-level significant-harmonics policy both apply one common
-  harmonic list across ROIs, so ROI differences are not driven by different
-  harmonic lists.
+- **Harmonic policy matters:** the default group-level significant-harmonics
+  policy and the alternate fixed/predefined list both apply one common harmonic
+  list across ROIs, so ROI differences are not driven by different harmonic
+  lists.
 - **Assumptions:** check normality and sphericity (RM-ANOVA) and residual
   diagnostics (mixed model) as part of reporting.
 
@@ -60,7 +60,7 @@ oddball amplitude (Summed BCA)**. It is computed per
 harmonics and then averaging across ROI channels.
 
 - **Source data:** The DV is computed from the **"BCA (uV)"** sheet in the
-  spectral/ROI output file. The optional group-level policy computes
+  spectral/ROI output file. The default group-level policy computes
   selection z-scores from the grand-averaged **"FullFFT Amplitude (uV)"**
   spectrum.
 - **ROI aggregation:** The ROI mean is computed after summing selected

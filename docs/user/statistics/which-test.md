@@ -12,7 +12,7 @@ The right test depends on the question you want to answer and whether every part
 | Do responses differ across conditions or ROIs when a few cells are missing? | A small number of participant-condition-ROI cells are missing. | Mixed model | Fixed-effect tests while accounting for participant differences. |
 | Which specific condition pairs differ? | You already have a meaningful main effect or interaction to follow up. | Post-hoc paired tests | Condition-pair comparisons within each ROI. |
 | Is a condition response above the no-response baseline? | You want detectability relative to zero BCA. | Baseline vs zero tests | Condition x ROI tests against baseline. |
-| Which harmonics should contribute to Summed BCA? | You need to confirm the fixed list or optional group-level selection. | Harmonic selection | Harmonic set used to build the dependent variable. |
+| Which harmonics should contribute to Summed BCA? | You need to confirm the default group-level selection or alternate fixed list. | Harmonic selection | Harmonic set used to build the dependent variable. |
 | Are there unusual values or exclusions to review? | Before final reporting. | Outliers and QC | Flagged and excluded participant reports. |
 
 !!! warning "Do not use RM-ANOVA for missing repeated-measures cells"

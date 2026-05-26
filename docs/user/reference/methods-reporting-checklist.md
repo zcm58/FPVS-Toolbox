@@ -202,8 +202,9 @@ its parameter is unset/disabled.
 
 **Noise window and baseline definition (used by SNR, BCA, Z)**
 
-For each target frequency, the toolbox finds the **nearest FFT bin** and defines
-noise bins as follows:
+For each target frequency, the toolbox requires the target to land on an
+**exact FFT bin** and defines noise bins as follows. If the target is off-grid,
+normal post-processing raises an error instead of using a nearest-bin fallback:
 
 - Window: +/-10 bins around the target bin.
 - Exclusions: target bin and its immediate neighbors (-1 and +1) are excluded.

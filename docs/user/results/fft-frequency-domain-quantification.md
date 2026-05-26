@@ -21,7 +21,7 @@ So if df is 0.00833 Hz, then bin k=144 corresponds exactly to 144 x 0.00833 ~ **
 
 ## Why FPVS needs "bin-locked" segment lengths (integer-cycle cropping)
 
-FPVS analysis often focuses on the amplitude at the **oddball frequency** (e.g., 1.2 Hz) and its harmonics (2.4 Hz, 3.6 Hz, ...). This works best when the oddball frequency lands **exactly on an FFT bin**.
+FPVS analysis often focuses on the amplitude at the **oddball frequency** (e.g., 1.2 Hz) and its harmonics (2.4 Hz, 3.6 Hz, ...). Normal Stats-bound processing requires the oddball frequency to land **exactly on an FFT bin**.
 
 If the analyzed segment length does *not* contain an integer number of oddball cycles, the oddball energy does not fall cleanly into a single bin. Instead, it spreads into neighboring bins. This is commonly called **spectral leakage**. Leakage makes the "target bin amplitude" smaller than it should be and can inflate or distort noise estimates around that bin.
 
@@ -115,11 +115,15 @@ Key columns:
 - **N**: number of samples in the FFT segment
 - **T_sec**: segment duration in seconds (N / fs)
 - **df_hz**: frequency resolution (fs / N)
-- **k0**: bin index used for the target (nearest or exact)
+- **k0**: exact bin index used for the target. Normal processing raises an
+  error instead of using a nearest-bin target when the target frequency is
+  off-grid.
 - **f_bin_hz**: actual bin frequency at k0 (k0 x df)
 - **crop_mode**:
   - **55_onbin** means the segment was derived from oddball triggers and snapped to an on-bin N. The name is retained for compatibility even when the actual marker was condition-specific, such as 51 or 52.
-  - **fixed_epoch_fallback** means the system could not apply marker-based cropping and used the legacy fixed window (tmin/tmax) instead. Normal Stats-bound processing treats this as invalid and fails before export.
+  - **fixed_epoch_fallback** is a legacy diagnostic label for fixed-window
+    crops. Normal Stats-bound processing treats this as invalid and fails
+    before export.
 - **n55**, **first55_samp**, **last55_samp**: oddball trigger count and indices used to define the crop region. These field names are historical; in condition-specific projects they refer to the resolved oddball marker.
 - **N_step**: the on-bin step size in samples for this fs
 - **N_mod_step**: N % N_step (should be 0 in on-bin mode)
@@ -138,7 +142,8 @@ Many FPVS pipelines estimate a local noise floor using bins around the target fr
 ## Summary
 
 - FFT bins are spaced by df = fs/N.
-- FPVS amplitude estimates at 1.2 Hz work best when 1.2 Hz lands exactly on a bin.
+- FPVS amplitude estimates at 1.2 Hz require 1.2 Hz to land exactly on a bin in
+  the normal Stats-bound processing path.
 - If the segment does not contain an integer number of oddball cycles, energy leaks into neighboring bins (spectral leakage).
 - The Toolbox avoids this by using oddball triggers to define the stimulation segment and snapping N to an on-bin multiple for the current sampling rate.
 - The "FFT and neighbors" export is a diagnostic view that shows amplitudes around the target bin to confirm bin-locking and evaluate leakage/noise.
