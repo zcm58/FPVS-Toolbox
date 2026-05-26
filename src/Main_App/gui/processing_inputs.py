@@ -295,6 +295,7 @@ def build_validated_params(host: Any) -> dict | None:
         )
     except Exception:
         oddball_freq = float(config.DEFAULT_ODDBALL_FREQ)
+    oddball_freq = config.validate_locked_oddball_frequency(oddball_freq)
     try:
         bca_upper_limit = float(
             host.settings.get(

@@ -121,6 +121,8 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
     assert dlg.group_preproc is cards["Preprocessing Parameters"]
     assert cards["Diagnostics"].isAncestorOf(dlg.debug_check)
     assert cards["Analysis Defaults"].isAncestorOf(dlg.oddball_freq_edit)
+    assert dlg.oddball_freq_edit.text() == "1.2"
+    assert dlg.oddball_freq_edit.isReadOnly()
     assert cards["Regions of Interest"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert cards["Regions of Interest"].isAncestorOf(dlg.roi_editor)
     assert dlg.roi_editor.sizePolicy().verticalPolicy() == QSizePolicy.Expanding

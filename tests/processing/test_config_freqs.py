@@ -13,3 +13,8 @@ def test_update_target_frequencies_full_range():
     freqs = update_target_frequencies(1.2, 16.8)
     expected = np.array([1.2 * i for i in range(1, 15)])
     assert np.allclose(freqs, expected)
+
+
+def test_update_target_frequencies_rejects_non_locked_oddball():
+    with pytest.raises(ValueError, match="locked at 1.2 Hz"):
+        update_target_frequencies(6.0, 30.0)

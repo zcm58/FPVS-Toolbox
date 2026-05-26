@@ -18,6 +18,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
+from Tools.Stats.analysis.dv_policy_settings import LOCKED_ODDBALL_FREQUENCY_HZ
+
 from Tools.Stats.io.excel_io import safe_read_excel
 from Tools.Stats.data.roi_resolver import ROI, resolve_active_rois
 from .repeated_m_anova import (
@@ -498,7 +500,7 @@ def filter_to_oddball_harmonics(
     except Exception:
         return []
 
-    fo = base / float(every_n)
+    fo = float(LOCKED_ODDBALL_FREQUENCY_HZ)
     out: List[Tuple[float, int]] = []
     for f in sorted(set(freq_list)):
         if max_freq is not None and f > float(max_freq):

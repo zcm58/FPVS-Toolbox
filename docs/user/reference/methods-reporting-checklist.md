@@ -189,9 +189,10 @@ its parameter is unset/disabled.
 
 - The toolbox computes metrics at **oddball harmonics** defined by
   `TARGET_FREQUENCIES`.
-- These are calculated as: `oddball_freq x 1..K`, where
-  `K = round(bca_upper_limit / oddball_freq)`.
-- `oddball_freq` and `bca_upper_limit` come from project settings.
+- These are calculated as: `1.2 Hz x 1..K`, where
+  `K = round(bca_upper_limit / 1.2)`.
+- `oddball_freq` is locked at **1.2 Hz**. `bca_upper_limit` only controls
+  the highest 1.2 Hz harmonic included in the exported FFT/BCA calculations.
 
 (Implementation verified in: `src/config.py`.)
 

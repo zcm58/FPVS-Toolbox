@@ -39,6 +39,15 @@ def test_resolve_target_frequencies_from_settings_getter() -> None:
     assert len(freqs) == 16
 
 
+def test_resolve_target_frequencies_rejects_non_locked_oddball() -> None:
+    app = SimpleNamespace(
+        settings={"analysis": {"oddball_freq": 6.0, "bca_upper_limit": 30.0}}
+    )
+
+    with pytest.raises(ValueError, match="locked at 1.2 Hz"):
+        _resolve_target_frequencies(app)
+
+
 def test_post_process_logs_export_timing_when_no_data(tmp_path, caplog) -> None:
     class _PathBox:
         def get(self):

@@ -273,7 +273,11 @@ class SettingsDialog(QDialog):
         self.base_freq_edit = QLineEdit(self.manager.get("analysis", "base_freq", "6.0"))
         analysis_form.addRow(QLabel("FPVS base frequency (Hz):"), self.base_freq_edit)
 
-        self.oddball_freq_edit = QLineEdit(self.manager.get("analysis", "oddball_freq", "1.2"))
+        self.oddball_freq_edit = QLineEdit(str(config.DEFAULT_ODDBALL_FREQ))
+        self.oddball_freq_edit.setReadOnly(True)
+        self.oddball_freq_edit.setToolTip(
+            "Locked at 1.2 Hz. Use BCA harmonic upper limit to choose how high harmonics are calculated."
+        )
         analysis_form.addRow(QLabel("Oddball frequency (Hz):"), self.oddball_freq_edit)
 
         self.bca_limit_edit = QLineEdit(self.manager.get("analysis", "bca_upper_limit", "16.8"))
@@ -570,7 +574,7 @@ class SettingsDialog(QDialog):
         if not using_project:
             self.manager.set("stim", "channel", config.DEFAULT_STIM_CHANNEL)
         self.manager.set("analysis", "base_freq", self.base_freq_edit.text())
-        self.manager.set("analysis", "oddball_freq", self.oddball_freq_edit.text())
+        self.manager.set("analysis", "oddball_freq", str(config.DEFAULT_ODDBALL_FREQ))
         self.manager.set("analysis", "bca_upper_limit", self.bca_limit_edit.text())
         self.manager.set("analysis", "alpha", self.alpha_edit.text())
         self.manager.set_roi_montage(self._current_roi_montage())
@@ -638,7 +642,7 @@ class SettingsDialog(QDialog):
             from config import update_target_frequencies
 
             update_target_frequencies(
-                float(self.oddball_freq_edit.text()),
+                config.DEFAULT_ODDBALL_FREQ,
                 float(self.bca_limit_edit.text()),
             )
         except Exception:

@@ -22,6 +22,7 @@ GROUP_SIGNIFICANT_POLICY_LABEL = (
 )
 GROUP_SIGNIFICANT_Z_THRESHOLD = 1.64
 GROUP_SIGNIFICANT_ELECTRODE_SCOPE = "all_scalp_electrodes"
+LOCKED_ODDBALL_FREQUENCY_HZ = 1.2
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,7 @@ class DVPolicySettings:
     fixed_harmonic_matching_tolerance_hz: float = FIXED_PREDEFINED_MATCHING_TOLERANCE_HZ
     group_significant_z_threshold: float = GROUP_SIGNIFICANT_Z_THRESHOLD
     group_significant_electrode_scope: str = GROUP_SIGNIFICANT_ELECTRODE_SCOPE
-    group_significant_oddball_frequency_hz: float | None = None
+    group_significant_oddball_frequency_hz: float = LOCKED_ODDBALL_FREQUENCY_HZ
 
     def to_metadata(self, *, base_freq: float, selected_conditions: list[str]) -> dict:
         """Handle the to metadata step for the Stats workflow."""
@@ -46,11 +47,7 @@ class DVPolicySettings:
             "fixed_harmonic_matching_tolerance_hz": float(self.fixed_harmonic_matching_tolerance_hz),
             "group_significant_z_threshold": float(self.group_significant_z_threshold),
             "group_significant_electrode_scope": str(self.group_significant_electrode_scope),
-            "group_significant_oddball_frequency_hz": (
-                float(self.group_significant_oddball_frequency_hz)
-                if self.group_significant_oddball_frequency_hz is not None
-                else None
-            ),
+            "group_significant_oddball_frequency_hz": LOCKED_ODDBALL_FREQUENCY_HZ,
             "base_frequency_hz": float(base_freq),
             "selected_conditions": list(selected_conditions),
         }
@@ -81,12 +78,6 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
     )
     if group_scope != GROUP_SIGNIFICANT_ELECTRODE_SCOPE:
         group_scope = GROUP_SIGNIFICANT_ELECTRODE_SCOPE
-    group_oddball = _coerce_optional_positive_float(
-        settings.get(
-            "group_significant_oddball_frequency_hz",
-            settings.get("oddball_frequency_hz", settings.get("oddball_freq")),
-        )
-    )
     return DVPolicySettings(
         name=name,
         fixed_harmonic_frequencies_hz=fixed_freqs,
@@ -95,20 +86,8 @@ def normalize_dv_policy(settings: dict[str, object] | None) -> DVPolicySettings:
         fixed_harmonic_matching_tolerance_hz=fixed_match_tol,
         group_significant_z_threshold=group_z,
         group_significant_electrode_scope=group_scope,
-        group_significant_oddball_frequency_hz=group_oddball,
+        group_significant_oddball_frequency_hz=LOCKED_ODDBALL_FREQUENCY_HZ,
     )
-
-
-def _coerce_optional_positive_float(value: object | None) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        number = float(value)
-    except Exception:
-        return None
-    if not np.isfinite(number) or number <= 0:
-        return None
-    return float(number)
 
 
 def _resolve_max_freq(max_freq: object | None) -> float | None:

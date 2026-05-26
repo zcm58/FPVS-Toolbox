@@ -113,6 +113,7 @@ def _read_analysis_float(app: Any, option: str, default: float) -> float:
 def _resolve_target_frequencies(app: Any) -> tuple[np.ndarray, float]:
     oddball_freq = _read_analysis_float(app, "oddball_freq", config.DEFAULT_ODDBALL_FREQ)
     upper_limit = _read_analysis_float(app, "bca_upper_limit", config.DEFAULT_BCA_UPPER_LIMIT)
+    config.validate_locked_oddball_frequency(oddball_freq)
     return config.update_target_frequencies(oddball_freq, upper_limit), upper_limit
 
 

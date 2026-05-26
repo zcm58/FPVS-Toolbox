@@ -13,11 +13,9 @@ from Tools.Stats.analysis.dv_policy_settings import (
     DVPolicySettings,
     FIXED_PREDEFINED_POLICY_ID,
     FIXED_PREDEFINED_POLICY_LABEL,
+    LOCKED_ODDBALL_FREQUENCY_HZ,
 )
-from Tools.Stats.analysis.stats_analysis import (
-    SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT,
-    _current_rois_map,
-)
+from Tools.Stats.analysis.stats_analysis import _current_rois_map
 
 
 @dataclass(frozen=True)
@@ -137,7 +135,7 @@ def build_fixed_harmonic_selection(
 ) -> FixedHarmonicSelection:
     requested_raw = parse_fixed_harmonic_frequency_list(requested_values)
     base = float(base_frequency_hz)
-    oddball = base / float(SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT)
+    oddball = float(LOCKED_ODDBALL_FREQUENCY_HZ)
     bca_freqs = _parse_bca_frequency_columns(bca_columns)
     if not bca_freqs:
         raise RuntimeError("No frequency columns found in the BCA (uV) sheet.")

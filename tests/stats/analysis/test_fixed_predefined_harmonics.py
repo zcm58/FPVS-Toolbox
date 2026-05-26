@@ -16,6 +16,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
     GROUP_SIGNIFICANT_POLICY_NAME,
     normalize_dv_policy,
 )
+from Tools.Stats.analysis.stats_analysis import filter_to_oddball_harmonics
 from Tools.Stats.workers import stats_workers
 
 
@@ -41,6 +42,7 @@ def test_fixed_harmonic_selection_parses_dedupes_excludes_base_and_matches() -> 
     )
 
     assert selection.included_frequencies_hz == pytest.approx([1.2, 2.4, 3.6, 4.8, 7.2])
+    assert selection.oddball_frequency_hz == pytest.approx(1.2)
     assert selection.excluded_base_overlap_frequencies_hz == pytest.approx([6.0])
     assert selection.duplicate_frequencies_hz == pytest.approx([2.4])
     assert selection.matched_columns == [
@@ -70,6 +72,17 @@ def test_fixed_harmonic_selection_rejects_nearest_bca_column_fallback() -> None:
             base_frequency_hz=6.0,
             matching_tolerance_hz=0.01,
         )
+
+
+def test_filter_to_oddball_harmonics_uses_locked_oddball_not_base_every_n() -> None:
+    result = filter_to_oddball_harmonics(
+        [1.2, 2.4, 3.6, 6.0],
+        base_freq=8.0,
+        every_n=5,
+        tol=1e-3,
+    )
+
+    assert result == [(1.2, 1), (2.4, 2), (3.6, 3), (6.0, 5)]
 
 
 def test_fixed_predefined_policy_sums_bca_uniformly_and_ignores_z(tmp_path: Path) -> None:
@@ -193,10 +206,10 @@ def test_group_significant_policy_reports_tested_candidates_when_none_selected(
     assert any("noise_bins=[" in item for item in messages)
 
 
-def test_group_significant_policy_rejects_oddball_frequency_at_base_rate(
+def test_group_significant_policy_uses_locked_oddball_independent_of_payload(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "invalid_oddball_group_policy.xlsx"
+    path = tmp_path / "locked_oddball_group_policy.xlsx"
     _write_group_policy_workbook(path, scale=1)
     settings = normalize_dv_policy(
         {
@@ -205,17 +218,21 @@ def test_group_significant_policy_rejects_oddball_frequency_at_base_rate(
         }
     )
 
-    with pytest.raises(RuntimeError, match="oddball frequency to be lower than the base frequency"):
-        build_group_significant_harmonic_selection(
-            subjects=["S1"],
-            conditions=["C1"],
-            subject_data={"S1": {"C1": str(path)}},
-            base_frequency_hz=6.0,
-            rois={"Posterior": ["O1", "O2"]},
-            log_func=lambda _message: None,
-            settings=settings,
-            max_freq=30.0,
-        )
+    selection = build_group_significant_harmonic_selection(
+        subjects=["S1"],
+        conditions=["C1"],
+        subject_data={"S1": {"C1": str(path)}},
+        base_frequency_hz=6.0,
+        rois={"Posterior": ["O1", "O2"]},
+        log_func=lambda _message: None,
+        settings=settings,
+        max_freq=3.6,
+    )
+
+    assert selection.oddball_frequency_hz == pytest.approx(1.2)
+    assert [row.target_frequency_hz for row in selection.rows] == pytest.approx(
+        [1.2, 2.4, 3.6]
+    )
 
 
 def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_path: Path) -> None:

@@ -12,6 +12,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
     FIXED_PREDEFINED_DEFAULT_FREQUENCIES,
     FIXED_PREDEFINED_POLICY_NAME,
     GROUP_SIGNIFICANT_POLICY_NAME,
+    LOCKED_ODDBALL_FREQUENCY_HZ,
     _resolve_max_freq,
     normalize_dv_policy,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "FIXED_PREDEFINED_POLICY_NAME",
     "FIXED_PREDEFINED_DEFAULT_FREQUENCIES",
     "GROUP_SIGNIFICANT_POLICY_NAME",
+    "LOCKED_ODDBALL_FREQUENCY_HZ",
     "normalize_dv_policy",
     "prepare_summed_bca_data",
 ]
@@ -76,9 +78,7 @@ def _build_cache_key(
         float(settings.fixed_harmonic_matching_tolerance_hz),
         float(settings.group_significant_z_threshold),
         settings.group_significant_electrode_scope,
-        float(settings.group_significant_oddball_frequency_hz)
-        if settings.group_significant_oddball_frequency_hz is not None
-        else None,
+        float(settings.group_significant_oddball_frequency_hz),
     )
 
 

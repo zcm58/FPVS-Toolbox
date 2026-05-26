@@ -20,10 +20,13 @@ The function logs start/end status, skips conditions without data, and logs a wa
 
 Target frequencies come from `settings["analysis"]`, `settings.get("analysis", key, fallback)`, flat dict keys, or attributes:
 
-- `oddball_freq`, default `config.DEFAULT_ODDBALL_FREQ`.
+- `oddball_freq`, locked at `config.DEFAULT_ODDBALL_FREQ` (`1.2` Hz).
 - `bca_upper_limit`, default `config.DEFAULT_BCA_UPPER_LIMIT`.
 
 The resolved frequencies come from `config.update_target_frequencies(oddball_freq, bca_upper_limit)`.
+Non-1.2 Hz `oddball_freq` values are hard failures. The BCA upper limit only
+sets the highest 1.2 Hz harmonic exported; it must not be used as oddball
+spacing or as a fallback when exact harmonic columns are missing.
 
 ## PID And Output Naming
 

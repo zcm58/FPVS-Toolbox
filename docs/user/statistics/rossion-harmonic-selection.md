@@ -25,6 +25,11 @@ harmonics are 1.2, 2.4, 3.6, 4.8, 6.0, 7.2 Hz, and so on. Harmonics that
 overlap the base rate, such as 6, 12, and 18 Hz, are excluded from the
 oddball sum.
 
+The oddball frequency is locked at 1.2 Hz. The BCA harmonic upper limit
+only sets where the 1.2 Hz harmonic list stops. For example, an upper
+limit of 30 Hz tests 1.2, 2.4, 3.6, ... through 30.0 Hz; it does not
+change the oddball frequency to 30 Hz, 6 Hz, or any other spacing.
+
 Selection is performed from the `FullFFT Amplitude (uV)` sheets:
 
 1. The tool builds a grand-averaged raw amplitude spectrum across the

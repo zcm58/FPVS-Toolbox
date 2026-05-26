@@ -24,15 +24,35 @@ FPVS_TOOLBOX_REPO_PAGE: str = "https://github.com/zcm58/FPVS-Toolbox-Repo/releas
 # — Defaults for analysis —
 DEFAULT_ODDBALL_FREQ: float = 1.2
 DEFAULT_BCA_UPPER_LIMIT: float = 40
+_ODDBALL_FREQ_TOLERANCE: float = 1e-9
+
+
+def validate_locked_oddball_frequency(value: float | str | None = None) -> float:
+    """Return the locked oddball frequency, rejecting non-1.2 Hz values."""
+    if value is None or value == "":
+        return DEFAULT_ODDBALL_FREQ
+    try:
+        odd = float(value)
+    except Exception as exc:
+        raise ValueError(
+            "Oddball frequency is locked at 1.2 Hz; invalid configured value "
+            f"{value!r} cannot be used."
+        ) from exc
+    if not np.isfinite(odd) or abs(odd - DEFAULT_ODDBALL_FREQ) > _ODDBALL_FREQ_TOLERANCE:
+        raise ValueError(
+            "Oddball frequency is locked at 1.2 Hz. The BCA upper limit only "
+            "controls the highest harmonic calculated; it does not change the "
+            f"oddball spacing. Received oddball_freq={odd!r}."
+        )
+    return DEFAULT_ODDBALL_FREQ
 
 def _load_frequency_settings() -> tuple[float, float]:
     """Return oddball frequency and upper limit from saved settings."""
     from Main_App import SettingsManager  # lazy to avoid cycles
     mgr = SettingsManager()
-    try:
-        odd = float(mgr.get("analysis", "oddball_freq", str(DEFAULT_ODDBALL_FREQ)))
-    except ValueError:
-        odd = DEFAULT_ODDBALL_FREQ
+    odd = validate_locked_oddball_frequency(
+        mgr.get("analysis", "oddball_freq", str(DEFAULT_ODDBALL_FREQ))
+    )
     try:
         upper = float(mgr.get("analysis", "bca_upper_limit", str(DEFAULT_BCA_UPPER_LIMIT)))
     except ValueError:
@@ -40,8 +60,7 @@ def _load_frequency_settings() -> tuple[float, float]:
     return odd, upper
 
 def _compute_freqs(odd: float, upper: float) -> np.ndarray:
-    if odd <= 0:
-        odd = DEFAULT_ODDBALL_FREQ
+    odd = validate_locked_oddball_frequency(odd)
     if upper < odd:
         upper = DEFAULT_BCA_UPPER_LIMIT
     steps = int(round(upper / odd))

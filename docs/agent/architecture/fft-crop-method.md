@@ -48,7 +48,9 @@ scopes that separate workflow.
   `51, 52, 53, 54, 55`.
 - `stream_end_sample`: optional sample index used as the end boundary for the final repetition block.
 
-The oddball frequency constant is `6/5` Hz, equivalent to `1.2` Hz.
+The oddball frequency constant is `6/5` Hz, equivalent to `1.2` Hz. The
+BCA harmonic upper limit does not change this constant; it only controls the
+highest 1.2 Hz harmonic calculated for FFT/BCA exports and later Stats use.
 
 ## On-Bin Length Rule
 
