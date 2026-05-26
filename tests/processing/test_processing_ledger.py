@@ -146,6 +146,29 @@ def test_classify_settings_change_stales_completed_entry(tmp_path) -> None:
     assert plan.incremental_files == (info.path,)
 
 
+def test_classify_old_processing_fingerprint_version_is_stale(tmp_path) -> None:
+    project, info = _project_with_raw(tmp_path)
+    initial_plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    _write_expected_outputs(initial_plan)
+    record_processing_results(
+        project,
+        initial_plan,
+        [{"status": "ok", "file": str(info.path)}],
+        run_mode="Batch",
+        user_choice="incremental",
+        cancelled=False,
+    )
+    ledger_path = project.project_root / ".fpvs_processing" / "processing_ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["entries"]["P01"]["processing_fingerprint_version"] = "processing_fingerprint_v1"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+
+    plan = classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    assert plan.states[0].status == "changed_settings"
+    assert plan.states[0].reason == "Processing fingerprint version changed."
+
+
 def test_record_results_locks_multigroup_project_after_success(tmp_path) -> None:
     project, info = _project_with_raw(tmp_path)
     project.groups = {
