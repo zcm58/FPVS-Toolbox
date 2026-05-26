@@ -224,8 +224,8 @@ The release should let users:
 64. Users may still choose incremental processing after the strong settings
     change warning, but stale classification applies to the whole completed
     output set.
-65. Ledger entries include a processing fingerprint version, such as
-    `processing_fingerprint_v1`.
+65. Ledger entries include a processing fingerprint version, currently
+    `processing_fingerprint_v2_filter_then_downsample`.
 66. If the fingerprint version changes in a future release, old ledger entries
     are stale by design rather than silently compared against a different
     fingerprint recipe.
@@ -517,7 +517,7 @@ Implementation:
 - Added `src/Main_App/processing/processing_ledger.py`.
 - Ledger state is stored under `.fpvs_processing/processing_ledger.json`.
 - Run records append to `.fpvs_processing/processing_runs.jsonl`.
-- Added `processing_fingerprint_v1` using validated processing settings,
+- Added `processing_fingerprint_v2_filter_then_downsample` using validated processing settings,
   event map, project preprocessing/options/subfolders/groups, and a deterministic
   hash.
 - Skip eligibility requires a completed ledger entry, matching raw path/size/

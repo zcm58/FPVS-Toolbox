@@ -235,6 +235,11 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
         "enable_preprocessed_cache": True,
     }
     audit_before = {"file": "fake.bdf", "ch_names": ["Cz", "EXG1", "EXG2", "Status"]}
+    payload = process_runner._preproc_cache_payload(
+        fake_bdf,
+        settings,
+        mne_version=str(mne.__version__),
+    )
 
     stored = process_runner._store_preprocessed_cache(
         raw=raw,
@@ -253,6 +258,7 @@ def test_preprocessed_cache_round_trip_preserves_audit_metadata(tmp_path: Path) 
     )
 
     assert stored == "stored"
+    assert payload["version"] == "preprocessed-raw-v2-filter-then-downsample"
     assert status == "hit"
     assert loaded is not None
     assert loaded.get_data().shape == raw.get_data().shape

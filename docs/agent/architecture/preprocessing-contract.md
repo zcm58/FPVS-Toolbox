@@ -80,19 +80,26 @@ first-run and cache-hit runtimes.
 
 ## Pipeline Order
 
-Do not change this order during ownership or file-organization refactors:
+This order is locked behavior. It matches the project decision to align the
+Toolbox preprocessing sequence with the Volfart et al. (2021) FPVS
+implementation: FIR filtering happens before downsampling. Do not change this
+order during ownership, file-organization, performance, cache, GUI, or
+documentation refactors:
 
 1. Initial reference using the selected reference pair.
 2. Drop the selected reference pair channels.
 3. Optional channel limit through `max_idx_keep`, preserving the stim channel
    when needed.
-4. Downsample when requested.
-5. FIR filter using the current PySide6/legacy-parity cutoff mapping.
+4. FIR filter using the current PySide6/legacy-parity cutoff mapping.
+5. Downsample when requested.
 6. Kurtosis-based bad-channel rejection and interpolation.
 7. Final average reference.
 
 The order is part of the app contract. A refactor that preserves each individual
-operation but reorders stages is a behavior change.
+operation but reorders stages is a statistical-method behavior change. Any
+future reorder requires an explicit user request, a fingerprint/cache version
+bump, updates to this page and `docs/user/reference/methods-reporting-checklist.md`,
+and focused tests equivalent to `tests/processing/test_filter_downsample_order.py`.
 
 ## Locked Behavior
 
@@ -105,9 +112,9 @@ The `params` dictionary is also mutable during a run:
 
 - `_fpvs_initial_ref_ok` and `_fpvs_initial_ref_pair` are removed at run start.
 - On successful selected-pair referencing, those audit keys are written back.
-- The filter fingerprint is computed from `high_pass`, `low_pass`,
-  `downsample_rate` or `downsample`, `reject_thresh`, reference channels, and
-  stim channel.
+- The filter fingerprint is computed from the preprocessing order version,
+  `high_pass`, `low_pass`, `downsample_rate` or `downsample`, `reject_thresh`,
+  reference channels, and stim channel.
 
 Invalid filter cutoff ordering is intentionally fail-fast: if both cutoffs are
 present and `high_pass >= low_pass`, `perform_preprocessing` raises
@@ -147,13 +154,6 @@ Channel limiting:
   64-channel EEG surface plus `EXG1`/`EXG2` references and avoids loading
   unused `EXG3` through `EXG8` before the existing channel-drop stage.
 
-Downsampling:
-
-- Downsampling runs before filtering.
-- It runs only when `downsample_rate` is truthy and the current sampling
-  frequency is greater than the requested target.
-- It uses MNE `raw.resample(..., npad="auto", window="hann", verbose=False)`.
-
 Filtering:
 
 - `l_freq` is `high_pass` when `high_pass > 0`; otherwise it is `None`.
@@ -161,11 +161,21 @@ Filtering:
 - Filtering uses MNE FIR settings:
   `method="fir"`, `phase="zero-double"`, `fir_window="hamming"`,
   `fir_design="firwin"`, `l_trans_bandwidth=0.1`,
-  `h_trans_bandwidth=0.1`, `filter_length=8449`,
-  `skip_by_annotation="edge"`.
+  `h_trans_bandwidth=0.1`, `skip_by_annotation="edge"`.
+- The historical `filter_length=8449` sample kernel is preserved at the
+  downsample target rate. When filtering now runs before downsampling, the
+  sample count is scaled to the current sampling rate to preserve the same
+  filter duration and MNE transition-band validity.
 - The code logs filter snapshot, mutation, Nyquist, range, applied-cutoff, and
   mismatch diagnostics. These messages are part of the current regression
   surface because they help diagnose accidental cutoff changes.
+
+Downsampling:
+
+- Downsampling runs after filtering.
+- It runs only when `downsample_rate` is truthy and the current sampling
+  frequency is greater than the requested target.
+- It uses MNE `raw.resample(..., npad="auto", window="hann", verbose=False)`.
 
 Kurtosis rejection and interpolation:
 

@@ -25,7 +25,7 @@ Alt text: A linear workflow from a raw BDF file through preprocessing, event det
 | Step | What FPVS Toolbox does | What you should check |
 |---|---|---|
 | Load data | Opens BioSemi `.bdf` files and reads the configured trigger channel. | The file is readable and the stim channel is correct. |
-| Preprocess | Applies reference, filtering, downsampling, and bad-channel handling from project settings. | Settings match the method you intend to report. |
+| Preprocess | Applies reference, FIR filtering, downsampling, and bad-channel handling from project settings, in that locked order. | Settings match the method you intend to report. |
 | Find events | Matches trigger codes to your condition labels. | Every expected condition has events. |
 | Create epochs | Cuts the recording into time windows around events. | Warnings do not show zero usable epochs. |
 | Average and FFT | Averages epochs, converts the response to frequency-domain values, and computes metrics. | Excel sheets are created for each condition. |

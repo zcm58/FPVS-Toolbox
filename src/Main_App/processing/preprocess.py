@@ -2,16 +2,16 @@
 """
 Qt-side preprocessing module for the FPVS Toolbox.
 
-This module provides the core preprocessing pipeline designed to mirror legacy
-logic exactly. It handles data auditing, referencing, filtering, and
-automated artifact rejection via kurtosis.
+This module provides the core preprocessing pipeline for active Main App runs.
+It handles data auditing, referencing, filtering, and automated artifact
+rejection via kurtosis.
 
-Pipeline Order (Legacy Parity):
+Pipeline Order:
     1. Initial reference (user-selected pair).
     2. Drop the selected reference pair channels.
     3. Optional channel limit (max_idx_keep; keeps stim if needed).
-    4. Downsample (if requested).
-    5. FIR filter (legacy mapping and kernel).
+    4. FIR filter (legacy mapping and kernel).
+    5. Downsample (if requested).
     6. Kurtosis-based rejection & interpolation.
     7. Final average reference.
 """
@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["perform_preprocessing", "begin_preproc_audit", "finalize_preproc_audit"]
 
+PREPROCESSING_ORDER_VERSION = "filter_then_downsample_v1"
+
 # Import configuration with a graceful fallback when run standalone
 try:
     import config  # type: ignore
@@ -58,7 +60,31 @@ def _build_preproc_fingerprint(params: Dict[str, Any]) -> str:
     r1 = params.get("ref_channel1")
     r2 = params.get("ref_channel2")
     stim = params.get("stim_channel")
-    return f"hp={hp}|lp={lp}|ds={ds}|rz={rz}|ref={r1},{r2}|stim={stim}"
+    return (
+        f"order={PREPROCESSING_ORDER_VERSION}|hp={hp}|lp={lp}|ds={ds}|"
+        f"rz={rz}|ref={r1},{r2}|stim={stim}"
+    )
+
+
+def _scaled_filter_length(
+    base_length: int,
+    *,
+    current_sfreq: float,
+    downsample_rate: Any,
+) -> int:
+    """Preserve the historical filter duration when filtering before resample."""
+
+    try:
+        target_sfreq = float(downsample_rate)
+    except (TypeError, ValueError):
+        target_sfreq = 0.0
+    if target_sfreq <= 0 or current_sfreq <= target_sfreq:
+        return base_length
+
+    scaled = int(round((base_length - 1) * (current_sfreq / target_sfreq))) + 1
+    if scaled % 2 == 0:
+        scaled += 1
+    return max(base_length, scaled)
 
 
 def begin_preproc_audit(
@@ -204,9 +230,8 @@ def perform_preprocessing(
     """
     Apply the full preprocessing pipeline to an MNE Raw object.
 
-    This function performs referencing, channel selection, resampling,
-    filtering, and artifact rejection in a fixed order to maintain
-    compatibility with legacy FPVS analysis scripts.
+    This function performs referencing, channel selection, filtering,
+    resampling, and artifact rejection in a fixed order.
 
     Args:
         raw_input: Raw MNE data to process. This object is modified in place.
@@ -461,83 +486,29 @@ def perform_preprocessing(
                 extra={"file": filename_for_log},
             )
 
-        # 4) Downsample (legacy position: BEFORE filtering)
-        if downsample_rate:
-            sf = float(raw.info["sfreq"])
-            log_func(
-                f"Downsample check for {filename_for_log}: "
-                f"Curr {sf:.3f} Hz, Tgt {downsample_rate} Hz."
-            )
-            if sf > downsample_rate:
-                try:
-                    raw.resample(
-                        downsample_rate,
-                        npad="auto",
-                        window="hann",
-                        verbose=False,
-                    )
-                    new_sf = float(raw.info["sfreq"])
-                    log_func(
-                        f"Resampled {filename_for_log} to {new_sf:.3f} Hz."
-                    )
-                    if debug_enabled:
-                        print(
-                            f"[DS] {filename_for_log}: sfreq {sf:.3f} -> {new_sf:.3f}"
-                        )
-                except Exception as resample_err:
-                    log_func(
-                        f"Warn: Resampling failed for {filename_for_log}: "
-                        f"{resample_err}"
-                    )
-                    if debug_enabled:
-                        print(
-                            f"[DS] {filename_for_log}: RESAMPLE FAILED "
-                            f"(sfreq={sf:.3f}, target={downsample_rate})"
-                        )
-            else:
-                log_func(
-                    f"No downsampling needed for {filename_for_log} "
-                    f"(sfreq={sf:.3f}, target={downsample_rate})."
-                )
-                if debug_enabled:
-                    print(
-                        f"[DS] {filename_for_log}: no resample "
-                        f"(sfreq={sf:.3f}, target={downsample_rate})"
-                    )
-        else:
-            log_func(f"Skip downsample for {filename_for_log}.")
-            if debug_enabled:
-                print(f"[DS] {filename_for_log}: skip (no downsample_rate set)")
-        try:
-            logger.debug(
-                "preprocess_stage_after_downsample",
-                extra={
-                    "file": filename_for_log,
-                    "sfreq": float(raw.info.get("sfreq", -1.0)),
-                },
-            )
-        except Exception:
-            logger.debug(
-                "preprocess_stage_after_downsample_logging_failed",
-                extra={"file": filename_for_log},
-            )
-
-        # 5) FILTER at (possibly reduced) Fs
+        # 4) FILTER before downsampling
         l_freq = hp if (hp is not None and hp > 0) else None
         h_freq = lp
+        filter_info_to_preserve: Dict[str, float] = {}
         if l_freq or h_freq:
             try:
-                low_trans_bw, high_trans_bw, filter_len_points = 0.1, 0.1, 8449
+                low_trans_bw, high_trans_bw = 0.1, 0.1
                 effective_l = l_freq if l_freq is not None else "DC"
                 effective_h = h_freq if h_freq is not None else "Nyq"
                 sf_current = float(raw.info.get("sfreq", 0.0))
+                filter_len_points = _scaled_filter_length(
+                    8449,
+                    current_sfreq=sf_current,
+                    downsample_rate=downsample_rate,
+                )
                 snapshot_payload = (
                     f"file={filename_for_log} "
                     f"param_high_pass={high_pass!r} "
                     f"param_low_pass={low_pass!r} "
                     f"computed_l_freq={l_freq!r} "
                     f"computed_h_freq={h_freq!r} "
-                    f"sfreq={sf_current}"
+                    f"sfreq={sf_current} "
+                    f"filter_length={filter_len_points}"
                 )
                 snapshot_message = f"FILTER_SNAPSHOT {snapshot_payload}"
                 log_func(snapshot_message)
@@ -597,6 +568,10 @@ def perform_preprocessing(
                 )
                 applied_highpass = raw.info.get("highpass", None)
                 applied_lowpass = raw.info.get("lowpass", None)
+                if l_freq is not None and applied_highpass is not None:
+                    filter_info_to_preserve["highpass"] = float(applied_highpass)
+                if h_freq is not None and applied_lowpass is not None:
+                    filter_info_to_preserve["lowpass"] = float(applied_lowpass)
                 applied_payload = (
                     f"file={filename_for_log} "
                     f"applied_highpass={applied_highpass!r} "
@@ -664,6 +639,85 @@ def perform_preprocessing(
         except Exception:
             logger.debug(
                 "preprocess_stage_after_filter_logging_failed",
+                extra={"file": filename_for_log},
+            )
+
+        # 5) Downsample after filtering
+        if downsample_rate:
+            sf = float(raw.info["sfreq"])
+            log_func(
+                f"Downsample check for {filename_for_log}: "
+                f"Curr {sf:.3f} Hz, Tgt {downsample_rate} Hz."
+            )
+            if sf > downsample_rate:
+                try:
+                    raw.resample(
+                        downsample_rate,
+                        npad="auto",
+                        window="hann",
+                        verbose=False,
+                    )
+                    new_sf = float(raw.info["sfreq"])
+                    if filter_info_to_preserve:
+                        try:
+                            with raw.info._unlock():
+                                for key, value in filter_info_to_preserve.items():
+                                    raw.info[key] = value
+                        except (AttributeError, RuntimeError, TypeError, ValueError):
+                            logger.debug(
+                                "preprocess_restore_filter_info_after_downsample_failed",
+                                extra={"file": filename_for_log},
+                                exc_info=True,
+                            )
+                    log_func(
+                        f"Resampled {filename_for_log} to {new_sf:.3f} Hz."
+                    )
+                    if debug_enabled:
+                        logger.debug(
+                            "[DS] %s: sfreq %.3f -> %.3f",
+                            filename_for_log,
+                            sf,
+                            new_sf,
+                        )
+                except Exception as resample_err:
+                    log_func(
+                        f"Warn: Resampling failed for {filename_for_log}: "
+                        f"{resample_err}"
+                    )
+                    if debug_enabled:
+                        logger.debug(
+                            "[DS] %s: RESAMPLE FAILED (sfreq=%.3f, target=%s)",
+                            filename_for_log,
+                            sf,
+                            downsample_rate,
+                        )
+            else:
+                log_func(
+                    f"No downsampling needed for {filename_for_log} "
+                    f"(sfreq={sf:.3f}, target={downsample_rate})."
+                )
+                if debug_enabled:
+                    logger.debug(
+                        "[DS] %s: no resample (sfreq=%.3f, target=%s)",
+                        filename_for_log,
+                        sf,
+                        downsample_rate,
+                    )
+        else:
+            log_func(f"Skip downsample for {filename_for_log}.")
+            if debug_enabled:
+                logger.debug("[DS] %s: skip (no downsample_rate set)", filename_for_log)
+        try:
+            logger.debug(
+                "preprocess_stage_after_downsample",
+                extra={
+                    "file": filename_for_log,
+                    "sfreq": float(raw.info.get("sfreq", -1.0)),
+                },
+            )
+        except (TypeError, ValueError, RuntimeError):
+            logger.debug(
+                "preprocess_stage_after_downsample_logging_failed",
                 extra={"file": filename_for_log},
             )
 

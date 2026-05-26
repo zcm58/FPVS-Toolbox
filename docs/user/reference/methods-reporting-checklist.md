@@ -13,8 +13,9 @@ For each recording, the toolbox loads data with disk-backed memory mapping when
 available, assigns channel types (including a configured stimulus/trigger channel),
 and applies a standard 10-10 montage. Preprocessing follows a fixed sequence:
 initial re-reference to a user-specified pair of electrodes (default EXG1 and EXG2),
-removal of those EXG channels, optional channel-count limiting, optional downsampling,
-zero-phase FIR bandpass filtering, kurtosis-based bad-channel detection with interpolation,
+removal of those EXG channels, optional channel-count limiting,
+zero-phase FIR bandpass filtering, optional downsampling,
+kurtosis-based bad-channel detection with interpolation,
 and a final average re-reference. Events are extracted from the stim channel then epochs are created
 for each user-defined condition label using a configured time window without baseline
 correction. The time-domain data are averaged across epochs per condition,
@@ -87,12 +88,15 @@ its parameter is unset/disabled.
 3. **Optional channel limit**: if `max_idx_keep` is set and smaller than the
    current channel count, only the first N channels are retained **plus** the
    stim channel (if present).
-4. **Optional downsampling**: if `downsample_rate` is set and lower than the
-   current sampling rate, the data are resampled with a Hann window.
-5. **FIR bandpass filter** (zero-phase, forward/backward):
+4. **FIR bandpass filter** (zero-phase, forward/backward):
    - Method: `fir` with `firwin` design, `hamming` window, `phase="zero-double"`.
    - Transition bandwidths: 0.1 Hz (low and high).
-   - Fixed filter length: 8449 points.
+   - The historical 8449-point filter duration is preserved at the requested
+     downsample target. When the raw file is sampled above the target rate, the
+     point count is scaled before filtering so the filter runs before
+     downsampling without shortening the FIR duration.
+5. **Optional downsampling**: if `downsample_rate` is set and lower than the
+   current sampling rate, the data are resampled with a Hann window.
 6. **Kurtosis-based bad-channel detection & interpolation**:
    - Kurtosis (Fisher, `bias=False`) is computed per EEG channel.
    - A **trimmed mean/std** is computed by removing 10% of the highest and lowest
@@ -118,7 +122,7 @@ its parameter is unset/disabled.
 
 **Logged/audited items**
 
-- A preprocessing fingerprint string (HP/LP/downsample/reject/ref/stim).
+- A preprocessing fingerprint string (order version/HP/LP/downsample/reject/ref/stim).
 - Filter snapshot (computed cutoffs and sampling rate).
 - Number of bad channels rejected by kurtosis.
 - Final sampling rate and channel count.

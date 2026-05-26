@@ -134,7 +134,10 @@ Run-level warnings are exactly `empty_events`, `no_onsets`, or `non_integer_fs:{
 ## Refactor Constraints
 
 - Do not change `ODDBALL_FREQ`, `CropResult`, function signatures, fallback reasons, warning strings, result keys, or sample arithmetic.
-- Do not change processing order, epoch metadata fields, FFT crop diagnostics, output filenames, Excel sheets, or exported values.
+- Do not change the preprocessing order except through the locked
+  `preprocessing-contract.md` behavior-change process. Do not change epoch
+  metadata fields, FFT crop diagnostics, output filenames, Excel sheets, or
+  exported values.
 - Do not downgrade an entire condition or any repetition to fixed-epoch
   fallback. If a selected repetition cannot produce a valid `55_onbin` crop,
   fail the normal processing run before export.

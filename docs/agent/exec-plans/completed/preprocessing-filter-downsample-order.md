@@ -2,7 +2,33 @@
 
 ## Status
 
-Future plan. Not active implementation work.
+Completed on `codex/Edit-Pipeline-Order`.
+
+Activated after review on 2026-05-26. The user approved changing the pipeline
+order and requested numerical before/after comparison with no other processing
+changes.
+
+## Completion Notes
+
+- The locked preprocessing order is now: initial reference, drop selected
+  references, optional channel limit preserving stim, FIR filter, downsample,
+  kurtosis/interpolation, final average reference.
+- The FIR filter still uses the same cutoff mapping, transition bandwidths,
+  window/design, phase, and skip-by-annotation behavior. The historical
+  8449-point kernel duration is preserved at the requested downsample rate by
+  scaling the point count when filtering happens at the original sampling rate
+  before downsampling.
+- Preprocessed Raw cache version is now
+  `preprocessed-raw-v2-filter-then-downsample`.
+- Processing ledger fingerprint version is now
+  `processing_fingerprint_v2_filter_then_downsample`.
+- Synthetic comparison with identical settings preserved shape `(5, 10240)`,
+  channel list `['E1', 'E2', 'E3', 'E4', 'Status']`, sampling rate `256 Hz`,
+  and rejected-channel count `0`, while the numerical head hash changed from
+  `d5613c4d7988f72f` to `a109e4dc8b357ccf`; `diff_l2` was
+  `4.102142580322e-06`.
+- Focused FFT crop tests still pass; locked crop metadata tests preserve
+  `crop_mode == "55_onbin"` and `N_mod_step == 0`.
 
 ## Target
 
@@ -15,7 +41,7 @@ Future plan. Not active implementation work.
 - `docs/user/study/processing-pipeline.md`
 - Focused tests under `tests/processing/`
 
-## Current State
+## Pre-Change State
 
 The active normal-processing route is:
 
@@ -67,18 +93,19 @@ filtering before downsampling, while preserving the user's scoped decisions:
 
 ## Open Decisions Before Activation
 
-1. Should filtering definitely move before downsampling for all normal
-   processing, or should the current order stay and only manuscript wording be
-   updated?
-2. If the order changes, should the preprocessing fingerprint version be bumped
-   so existing cache/ledger entries are invalidated even when numeric settings
-   are unchanged?
-3. Should any UI or project metadata expose the processing-order version, or is
-   a log/audit-field update enough?
-4. What regression tolerance is acceptable for comparing old-order and new-order
-   outputs on a small synthetic or real sample?
-5. Does Average Preprocessing need the same order change in its compatibility
-   route, or is only the normal Main App processing route in scope?
+Resolved on activation:
+
+1. Filtering moves before downsampling for the active preprocessing owner.
+2. Preprocessed Raw cache and processing ledger fingerprint versions are bumped
+   so old-order artifacts are stale even when numeric settings are unchanged.
+3. No new UI or project metadata is exposed; the order version is carried by
+   diagnostic preprocessing fingerprints plus cache/ledger versions.
+4. Numerical comparison uses identical synthetic input and settings, expects
+   stable shape/channel/sampling metadata, and expects numerical values to
+   differ because the order changed.
+5. Average Preprocessing compatibility routes inherit the change through
+   `Main_App.processing.preprocess.perform_preprocessing`; no separate
+   compatibility implementation was added.
 
 ## Suggested Slices
 
@@ -98,8 +125,10 @@ filtering before downsampling, while preserving the user's scoped decisions:
 3. Order change:
    - Move FIR filtering before downsampling inside
      `Main_App.processing.preprocess.perform_preprocessing`.
-   - Preserve current FIR parameters, cutoff mapping, logging content where
-     practical, and continuation behavior on stage failures.
+   - Preserve current FIR cutoff mapping, logging content where practical, and
+     continuation behavior on stage failures. Preserve the historical 8449-point
+     filter duration at the downsample target by scaling the point count when
+     filtering at the original sampling rate.
    - Preserve the stim-channel and channel-limit behavior before both stages.
 
 4. Cache and audit updates:

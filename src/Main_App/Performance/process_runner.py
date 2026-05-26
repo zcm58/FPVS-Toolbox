@@ -44,7 +44,7 @@ from .mp_env import set_blas_threads_multiprocess
 
 logger = logging.getLogger(__name__)
 ODDBALL_FREQ = Fraction(6, 5)
-PREPROC_CACHE_VERSION = "preprocessed-raw-v1"
+PREPROC_CACHE_VERSION = "preprocessed-raw-v2-filter-then-downsample"
 BDF_FIRST_N_CHANNELS = 64
 
 
@@ -536,7 +536,7 @@ def _run_full_pipeline_for_file(
 
             # 4) Preprocessing via PySide6 backend (handles:
             #    initial EXG ref -> drop EXGs -> channel limit keeping stim ->
-            #    downsample -> filter -> kurtosis/interp -> final avg ref)
+            #    filter -> downsample -> kurtosis/interp -> final avg ref)
             logger.info(
                 "RUNNER_SETTINGS_SNAPSHOT file=%s high_pass=%r low_pass=%r downsample_rate=%r "
                 "reject_thresh=%r ref=(%r,%r) stim=%r",
