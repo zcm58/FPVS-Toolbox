@@ -7,6 +7,11 @@ This page summarizes the statistical methods used by the FPVS Toolbox
 output measure (**Summed BCA**) and how to interpret results in the
 currently supported single-group workflow.
 
+For projects configured with two or more experimental groups, the built-in
+single-group analyses are disabled. Use **Export Stats-Ready Workbook** and run
+the between-group model in JASP, R/RStudio, SAS, or another statistics package
+with `group_id` as the between-subjects factor.
+
 ---
 
 ## How the methods work together (high-level)

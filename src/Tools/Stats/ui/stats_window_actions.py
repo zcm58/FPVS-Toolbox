@@ -38,6 +38,39 @@ class StatsWindowActionsMixin:
         if hasattr(self, "export_copy_btn"):
             self.export_copy_btn.setEnabled(bool(self._last_export_path))
 
+    def _single_group_disabled_message(self) -> str:
+        return (
+            "Single-group statistical analysis is disabled for multi-group projects. "
+            "Use Export Stats-Ready Workbook and analyze group effects in external "
+            "statistics software."
+        )
+
+    def _is_single_group_analysis_disabled(self) -> bool:
+        return bool(getattr(self, "_project_is_multi_group", False))
+
+    def _update_single_group_analysis_availability(self, *, running: bool = False) -> None:
+        """Keep single-group controls disabled for true multi-group projects."""
+        disabled = self._is_single_group_analysis_disabled()
+        message = self._single_group_disabled_message()
+        default_tooltips = {
+            "analyze_single_btn": "Run the full single-group analysis pipeline using the selected settings.",
+            "single_advanced_btn": "Run or export individual single-group steps.",
+        }
+        for name, default_tooltip in default_tooltips.items():
+            button = getattr(self, name, None)
+            if button is None:
+                continue
+            button.setEnabled(not running and not disabled)
+            button.setToolTip(message if disabled else default_tooltip)
+
+    def _block_single_group_analysis_if_needed(self) -> bool:
+        if not self._is_single_group_analysis_disabled():
+            return False
+        message = self._single_group_disabled_message()
+        self._set_status(message)
+        self.append_log("Single", message, level="warning")
+        return True
+
     def _copy_text_to_clipboard(self, text: str, *, context: str) -> None:
         """Handle the copy text to clipboard step for the Stats workflow."""
         try:
@@ -209,6 +242,8 @@ class StatsWindowActionsMixin:
 
     def on_analyze_single_group_clicked(self) -> None:
         """Handle the on analyze single group clicked step for the Stats workflow."""
+        if self._block_single_group_analysis_if_needed():
+            return
         self._controller.run_single_group_analysis()
 
     def _open_advanced_dialog(self, title: str, actions: list[tuple[str, Callable[[], None], bool]]) -> None:
@@ -231,6 +266,8 @@ class StatsWindowActionsMixin:
 
     def on_single_advanced_clicked(self) -> None:
         """Handle the on single advanced clicked step for the Stats workflow."""
+        if self._block_single_group_analysis_if_needed():
+            return
         actions = [
             ("Run RM-ANOVA", self.on_run_rm_anova, True),
             ("Run Mixed Model", self.on_run_mixed_model, True),
@@ -271,6 +308,8 @@ class StatsWindowActionsMixin:
 
     def on_run_rm_anova(self) -> None:
         """Handle the on run rm anova step for the Stats workflow."""
+        if self._block_single_group_analysis_if_needed():
+            return
         self._clear_output_views()
         self.rm_anova_results_data = None
         self._update_export_buttons()
@@ -278,6 +317,8 @@ class StatsWindowActionsMixin:
 
     def on_run_mixed_model(self) -> None:
         """Handle the on run mixed model step for the Stats workflow."""
+        if self._block_single_group_analysis_if_needed():
+            return
         self._clear_output_views()
         self.mixed_model_results_data = None
         self._update_export_buttons()
@@ -285,6 +326,8 @@ class StatsWindowActionsMixin:
 
     def on_run_interaction_posthocs(self) -> None:
         """Handle the on run interaction posthocs step for the Stats workflow."""
+        if self._block_single_group_analysis_if_needed():
+            return
         self._clear_output_views()
         self.posthoc_results_data = None
         our = self._update_export_buttons  # keep line short
@@ -369,6 +412,8 @@ class StatsWindowActionsMixin:
                 self._populate_conditions_panel(self.conditions)
                 self.subject_data = scan_result.subject_data
                 self._participants_map = dict(scan_result.participants_map)
+                self._project_is_multi_group = bool(scan_result.project_is_multi_group)
+                self._update_single_group_analysis_availability()
                 self._subject_group_map = map_subjects_to_groups(
                     self.subjects,
                     self._participants_map,

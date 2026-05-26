@@ -39,6 +39,7 @@ class ProjectScanResult:
     manifest: dict | None
     participants_map: Dict[str, str]
     project_root: Path | None = None
+    project_is_multi_group: bool = False
 
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,14 @@ def load_project_manifest_for_excel_root(excel_root: Path) -> dict | None:
 
     _project_root, manifest = find_project_manifest_for_excel_root(excel_root)
     return manifest
+
+
+def is_multi_group_project_config(manifest: dict | None) -> bool:
+    """Return whether a project manifest represents a true multi-group project."""
+    if not isinstance(manifest, dict):
+        return False
+    groups = manifest.get("groups")
+    return isinstance(groups, dict) and len(groups) >= 2
 
 
 def normalize_participants_map(manifest: dict | None) -> dict[str, str]:
@@ -526,5 +535,6 @@ def load_project_scan(folder: str) -> ProjectScanResult:
         manifest=manifest,
         participants_map=participants_map,
         project_root=project_root,
+        project_is_multi_group=is_multi_group_project_config(manifest),
     )
 

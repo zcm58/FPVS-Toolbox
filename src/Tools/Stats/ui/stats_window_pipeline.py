@@ -49,14 +49,10 @@ class StatsWindowPipelineMixin:
 
     def _set_running(self, running: bool) -> None:
         """Handle the set running step for the Stats workflow."""
-        buttons = [
-            getattr(self, "analyze_single_btn", None),
-            getattr(self, "single_advanced_btn", None),
-            getattr(self, "stats_ready_export_btn", None),
-        ]
-        for b in buttons:
-            if b:
-                b.setEnabled(not running)
+        self._update_single_group_analysis_availability(running=running)
+        stats_ready_btn = getattr(self, "stats_ready_export_btn", None)
+        if stats_ready_btn:
+            stats_ready_btn.setEnabled(not running)
         spinner = getattr(self, "spinner", None)
         if spinner:
             if running:
@@ -608,6 +604,13 @@ class StatsWindowPipelineMixin:
     ) -> bool:
         """Handle the ensure pipeline ready step for the Stats workflow."""
         self._log_pipeline_event(pipeline=pipeline_id, event="start")
+        if pipeline_id is PipelineId.SINGLE and self._block_single_group_analysis_if_needed():
+            self._log_pipeline_event(
+                pipeline=pipeline_id,
+                event="end",
+                extra={"reason": "single_group_disabled_for_multi_group_project"},
+            )
+            return False
         if not self._precheck(require_anova=require_anova, start_guard=False):
             self._log_pipeline_event(
                 pipeline=pipeline_id, event="end", extra={"reason": "precheck_failed"}
@@ -655,7 +658,6 @@ class StatsWindowPipelineMixin:
                 "exports_ran": bool(exports_ran),
             },
         )
-        btn = self.analyze_single_btn
         try:
             if success:
                 ts = datetime.now().strftime("%H:%M:%S")
@@ -700,8 +702,7 @@ class StatsWindowPipelineMixin:
             )
         finally:
             try:
-                if btn:
-                    btn.setEnabled(True)
+                self._update_single_group_analysis_availability()
             except Exception:  # noqa: BLE001
                 logger.exception("stats_finish_button_enable_failed", exc_info=True)
             try:

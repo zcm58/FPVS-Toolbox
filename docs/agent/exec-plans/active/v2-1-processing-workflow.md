@@ -242,6 +242,12 @@ The release should let users:
     and rerun that participant.
 72. If the user chooses `Skip` for an already-complete unchanged single-file
     selection, do not append a no-op run record and do not mutate the ledger.
+73. The built-in Stats analysis pipeline remains single-group only for v2.1.
+    Projects with two or more configured `groups` must disable built-in
+    single-group RM-ANOVA, mixed-model, post-hoc, and baseline-vs-zero actions.
+    Multi-group projects should use the stats-ready workbook export and analyze
+    `group_id` in external statistics software until a native multi-group Stats
+    model is explicitly scoped.
 
 ## Current Repo Evidence
 
@@ -913,3 +919,33 @@ After each implementation slice:
   `.\.venv1\Scripts\python.exe -m pytest tests\processing\test_processing_ledger.py -q`;
   `.\.venv1\Scripts\python.exe -m pytest tests\plot_generator\test_plot_generator_manifest_utils.py tests\stats\data\test_stats_project_context.py tests\stats\pipeline\test_stats_file_scanner.py -q`;
   `.\.venv1\Scripts\python.exe -m ruff check src\Main_App\processing\processing_ledger.py src\Main_App\gui\processing_workflows.py src\Main_App\Performance\process_runner.py src\Main_App\Shared\post_process.py src\Tools\Plot_Generator\manifest_utils.py src\Tools\Stats\data\stats_data_loader.py tests\processing\test_processing_ledger.py tests\plot_generator\test_plot_generator_manifest_utils.py tests\stats\data\test_stats_project_context.py tests\stats\pipeline\test_stats_file_scanner.py`.
+
+### 2026-05-26 - Multi-Group Stats Single-Group Guard Added
+
+- Status: complete for the single-group Stats guard.
+- Files changed: `src/Tools/Stats/data/stats_data_loader.py`,
+  `src/Tools/Stats/ui/stats_main_window.py`,
+  `src/Tools/Stats/ui/stats_window_actions.py`,
+  `src/Tools/Stats/ui/stats_window_pipeline.py`,
+  `src/Tools/Stats/ui/stats_window_support.py`,
+  `tests/stats/data/test_stats_project_context.py`,
+  `tests/stats/gui/test_stats_window_smoke_phase0.py`,
+  `docs/agent/architecture/statistics-tools.md`,
+  `docs/user/results/statistical-analysis.md`, and this plan.
+- Implementation: Stats now detects true multi-group manifests with two or
+  more configured groups, disables the built-in single-group analysis and
+  advanced single-group actions, and guards direct/programmatic single-group
+  runs. Stats-ready workbook export remains available for external
+  between-group analyses.
+- Verification:
+  `.\.venv1\Scripts\python.exe -m py_compile src\Tools\Stats\data\stats_data_loader.py src\Tools\Stats\ui\stats_window_support.py src\Tools\Stats\ui\stats_main_window.py src\Tools\Stats\ui\stats_window_actions.py src\Tools\Stats\ui\stats_window_pipeline.py tests\stats\data\test_stats_project_context.py tests\stats\gui\test_stats_window_smoke_phase0.py`;
+  `.\.venv1\Scripts\python.exe -m pytest tests\stats\data\test_stats_project_context.py -q`;
+  `.\.venv1\Scripts\python.exe -m ruff check src\Tools\Stats\data\stats_data_loader.py tests\stats\data\test_stats_project_context.py tests\stats\gui\test_stats_window_smoke_phase0.py`;
+  `.\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check stats-structure`;
+  `.\.venv1\Scripts\python.exe .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py`.
+- Skipped local GUI execution: pytest-qt/offscreen GUI tests are not run in
+  this Windows environment per repo rule. Manual visible smoke path: open a
+  multi-group project, open Statistics, confirm `Analyze Single Group` and
+  `Advanced...` are disabled, confirm `Export Stats-Ready Workbook` remains
+  enabled after scanning data, and confirm a single-group project still enables
+  the single-group actions.

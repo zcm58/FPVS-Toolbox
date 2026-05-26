@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -86,3 +87,40 @@ def test_single_group_advanced_actions_keep_anova_and_lmm(qtbot, monkeypatch, ap
     labels = [label for label, _cb, _enabled in captured["actions"]]
     assert "Run RM-ANOVA" in labels
     assert "Run Mixed Model" in labels
+
+
+@pytest.mark.qt
+def test_single_group_actions_disabled_for_multi_group_project(qtbot, monkeypatch, app, tmp_path):
+    project_dir = tmp_path / "multi-group-project"
+    project_dir.mkdir()
+    (project_dir / "project.json").write_text(
+        json.dumps(
+            {
+                "name": "Multi Group Project",
+                "groups": {
+                    "control": {"label": "Control"},
+                    "clinical": {"label": "Clinical"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    win = StatsWindow(project_dir=str(project_dir))
+    qtbot.addWidget(win)
+    _prepare_window(win, monkeypatch)
+    captured: list[dict] = []
+
+    monkeypatch.setattr(
+        win._controller,
+        "run_single_group_analysis",
+        lambda **kwargs: captured.append(kwargs),
+        raising=False,
+    )
+
+    assert win.analyze_single_btn.isEnabled() is False
+    assert win.single_advanced_btn.isEnabled() is False
+
+    win.on_analyze_single_group_clicked()
+
+    assert captured == []
+    assert "disabled for multi-group projects" in win.lbl_status.text()

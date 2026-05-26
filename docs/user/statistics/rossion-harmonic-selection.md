@@ -33,13 +33,23 @@ change the oddball frequency to 30 Hz, 6 Hz, or any other spacing.
 Selection is performed from the `FullFFT Amplitude (uV)` sheets:
 
 1. The tool builds a grand-averaged raw amplitude spectrum across the
-   final included participants and selected conditions.
+   final included participants and selected conditions. Within each workbook,
+   the FullFFT amplitudes are averaged across scalp electrodes before entering
+   the group average.
 2. Z-scores are computed at candidate oddball harmonics from that
    grand-averaged amplitude spectrum using neighboring-bin noise.
 3. Non-base oddball harmonics above the group-level z threshold are
    selected.
 4. Participant-level Summed BCA is computed from the `BCA (uV)` sheets
    using the selected common harmonic list.
+
+The neighboring-bin noise calculation is fixed for this policy. For each
+candidate harmonic, the tool uses the 10 FFT bins below and 10 FFT bins above
+the target, excludes the immediately adjacent bins and the target bin itself,
+then removes the single lowest and single highest finite amplitude values from
+the remaining noise bins. The noise mean and population standard deviation are
+computed from the remaining values, and the candidate harmonic is selected only
+when `(target amplitude - noise mean) / noise SD` is greater than 1.64.
 
 The policy requires exact nominal oddball-harmonic columns in the
 `FullFFT Amplitude (uV)` sheet, such as `1.2000_Hz`, `2.4000_Hz`,

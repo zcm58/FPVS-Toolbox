@@ -41,6 +41,7 @@ class StatsWindow(
             )
 
         self._project_path = Path(self.project_dir).resolve()
+        self._project_is_multi_group = False
         self._results_folder_hint: str | None = None
         self._subfolder_hints: dict[str, str] = {}
         self.project_title = os.path.basename(self.project_dir)
@@ -120,6 +121,7 @@ class StatsWindow(
 
         # UI
         self._init_ui()
+        self._update_single_group_analysis_availability()
         self.results_textbox = self.summary_text
         self._update_manual_exclusion_summary()
 
@@ -142,8 +144,10 @@ class StatsWindow(
             cfg = json.loads(config_path.read_text(encoding="utf-8"))
             self.project_title = cfg.get("name", cfg.get("title", os.path.basename(self.project_dir)))
             self._results_folder_hint, self._subfolder_hints = load_manifest_data(self._project_path, cfg)
+            self._project_is_multi_group = is_multi_group_project_config(cfg)
         except Exception:
             self.project_title = os.path.basename(self.project_dir)
+            self._project_is_multi_group = False
 
     def rebind_project_context(
         self,
@@ -206,6 +210,8 @@ class StatsWindow(
             self._update_manual_exclusion_summary()
         if hasattr(self, "_update_export_buttons"):
             self._update_export_buttons()
+        if hasattr(self, "_update_single_group_analysis_availability"):
+            self._update_single_group_analysis_availability()
 
     # --------- ROI + status helpers ---------
 

@@ -90,6 +90,7 @@ from Tools.Stats.common.stats_core import (
 from Tools.Stats.data.stats_data_loader import (
     check_for_open_excel_files,
     ensure_results_dir,
+    is_multi_group_project_config,
     map_subjects_to_groups,
     ScanError,
     auto_detect_project_dir,
