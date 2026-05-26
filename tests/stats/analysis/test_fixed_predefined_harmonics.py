@@ -193,6 +193,31 @@ def test_group_significant_policy_reports_tested_candidates_when_none_selected(
     assert any("noise_bins=[" in item for item in messages)
 
 
+def test_group_significant_policy_rejects_oddball_frequency_at_base_rate(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "invalid_oddball_group_policy.xlsx"
+    _write_group_policy_workbook(path, scale=1)
+    settings = normalize_dv_policy(
+        {
+            "name": GROUP_SIGNIFICANT_POLICY_NAME,
+            "oddball_frequency_hz": "6.0",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="oddball frequency to be lower than the base frequency"):
+        build_group_significant_harmonic_selection(
+            subjects=["S1"],
+            conditions=["C1"],
+            subject_data={"S1": {"C1": str(path)}},
+            base_frequency_hz=6.0,
+            rois={"Posterior": ["O1", "O2"]},
+            log_func=lambda _message: None,
+            settings=settings,
+            max_freq=30.0,
+        )
+
+
 def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_path: Path) -> None:
     subjects = ["S1", "S2"]
     conditions = ["C1", "C2"]

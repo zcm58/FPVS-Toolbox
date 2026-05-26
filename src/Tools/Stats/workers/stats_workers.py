@@ -387,6 +387,7 @@ def _prepare_single_group_data(
             base_frequency_hz=base_freq,
             log_func=message_cb,
             max_freq=_resolve_max_freq(None),
+            oddball_frequency_hz=settings.group_significant_oddball_frequency_hz,
         )
     subjects, subject_data, qc_report = _apply_qc_screening(
         subjects=all_subjects,

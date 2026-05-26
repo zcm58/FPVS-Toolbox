@@ -57,10 +57,13 @@ def test_normalize_dv_policy_coerces_deprecated_names_to_fixed_predefined():
 
 
 def test_normalize_dv_policy_accepts_group_significant_policy():
-    settings = normalize_dv_policy({"name": GROUP_SIGNIFICANT_POLICY_NAME})
+    settings = normalize_dv_policy(
+        {"name": GROUP_SIGNIFICANT_POLICY_NAME, "oddball_frequency_hz": "1.2"}
+    )
 
     assert settings.name == GROUP_SIGNIFICANT_POLICY_NAME
     assert settings.fixed_harmonic_frequencies_hz == FIXED_PREDEFINED_DEFAULT_FREQUENCIES
+    assert settings.group_significant_oddball_frequency_hz == pytest.approx(1.2)
 
 
 @pytest.mark.qt

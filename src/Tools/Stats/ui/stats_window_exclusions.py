@@ -9,12 +9,14 @@ logger = logging.getLogger(__name__)
 class StatsWindowExclusionsMixin:
     def _get_dv_policy_payload(self) -> dict[str, object]:
         """Handle the get dv policy payload step for the Stats workflow."""
+        _ok, oddball_freq = self._safe_settings_get("analysis", "oddball_freq", 1.2)
         return {
             "name": self._dv_policy_name,
             "fixed_harmonic_frequencies_hz": str(self._dv_fixed_harmonic_frequencies_hz),
             "fixed_harmonic_auto_exclude_base": bool(
                 self._dv_fixed_harmonic_auto_exclude_base
             ),
+            "oddball_frequency_hz": oddball_freq,
         }
 
     def get_dv_policy_snapshot(self) -> dict[str, object]:

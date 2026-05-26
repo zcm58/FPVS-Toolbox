@@ -182,6 +182,7 @@ class GroupSignificantSelectionCacheKey:
     workbooks: tuple[WorkbookSignature, ...]
     rois: tuple[tuple[str, tuple[str, ...]], ...]
     base_frequency_hz: float
+    oddball_frequency_hz: float | None
     max_freq_hz: float | None
     z_threshold: float
     electrode_scope: str
@@ -200,6 +201,7 @@ def preflight_group_significant_full_fft_columns(
     base_frequency_hz: float,
     log_func: Callable[[str], None],
     max_freq: float | None = None,
+    oddball_frequency_hz: float | None = None,
 ) -> int:
     """Validate exact FullFFT harmonic columns before expensive Stats reads."""
     required = _plan_required_full_fft_columns(
@@ -207,6 +209,7 @@ def preflight_group_significant_full_fft_columns(
         conditions=conditions,
         subject_data=subject_data,
         base_frequency_hz=base_frequency_hz,
+        oddball_frequency_hz=oddball_frequency_hz,
         max_freq=max_freq,
         log_func=log_func,
     )
@@ -271,6 +274,11 @@ def _group_significant_selection_cache_key(
         workbooks=workbook_signatures,
         rois=rois_key,
         base_frequency_hz=float(base_frequency_hz),
+        oddball_frequency_hz=(
+            float(settings.group_significant_oddball_frequency_hz)
+            if settings.group_significant_oddball_frequency_hz is not None
+            else None
+        ),
         max_freq_hz=float(max_freq) if max_freq is not None else None,
         z_threshold=float(settings.group_significant_z_threshold),
         electrode_scope=str(settings.group_significant_electrode_scope),
@@ -364,12 +372,16 @@ def build_group_significant_harmonic_selection(
         extra={"subjects": len(subjects), "conditions": len(conditions)},
     )
     base = float(base_frequency_hz)
-    oddball = base / float(SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT)
+    oddball = _resolve_group_oddball_frequency(
+        base_frequency_hz=base,
+        oddball_frequency_hz=settings.group_significant_oddball_frequency_hz,
+    )
     required = _plan_required_full_fft_columns(
         subjects=subjects,
         conditions=conditions,
         subject_data=subject_data,
         base_frequency_hz=base,
+        oddball_frequency_hz=oddball,
         max_freq=max_freq,
         log_func=log_func,
     )
@@ -874,8 +886,14 @@ def _plan_required_full_fft_columns(
     base_frequency_hz: float,
     max_freq: float | None,
     log_func: Callable[[str], None],
+    oddball_frequency_hz: float | None = None,
 ) -> RequiredFullFftColumns:
     started = perf_counter()
+    base = float(base_frequency_hz)
+    oddball = _resolve_group_oddball_frequency(
+        base_frequency_hz=base,
+        oddball_frequency_hz=oddball_frequency_hz,
+    )
     header_columns = _find_first_full_fft_columns(subjects, conditions, subject_data)
     frequency_columns = _parse_frequency_columns(header_columns)
     if not frequency_columns:
@@ -885,8 +903,6 @@ def _plan_required_full_fft_columns(
         )
 
     freq_axis = np.asarray([freq for freq, _column, _idx in frequency_columns], dtype=float)
-    base = float(base_frequency_hz)
-    oddball = base / float(SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT)
     max_limit = float(max_freq) if max_freq is not None else float(np.nanmax(freq_axis))
     highest_k = int(np.floor(max_limit / oddball))
     candidate_indices: list[int] = []
@@ -940,6 +956,44 @@ def _plan_required_full_fft_columns(
         excluded_base_indices=excluded_base_indices,
         required_indices=sorted(required_indices),
     )
+
+
+def _resolve_group_oddball_frequency(
+    *,
+    base_frequency_hz: float,
+    oddball_frequency_hz: float | None,
+) -> float:
+    base = float(base_frequency_hz)
+    if not np.isfinite(base) or base <= 0:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires a positive finite "
+            f"base frequency. Received base_frequency_hz={base_frequency_hz!r}."
+        )
+    oddball = (
+        float(oddball_frequency_hz)
+        if oddball_frequency_hz is not None
+        else base / float(SUMMED_BCA_ODDBALL_EVERY_N_DEFAULT)
+    )
+    if not np.isfinite(oddball) or oddball <= 0:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires a positive finite "
+            f"oddball frequency. Received oddball_frequency_hz={oddball_frequency_hz!r}."
+        )
+    if oddball >= base:
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires the oddball "
+            "frequency to be lower than the base frequency. "
+            f"Received base_frequency_hz={base:g} and oddball_frequency_hz={oddball:g}. "
+            "Check Settings > FPVS base frequency and Oddball frequency."
+        )
+    if _is_base_overlap(oddball, base, GROUP_SIGNIFICANT_BASE_TOLERANCE_HZ):
+        raise RuntimeError(
+            "Group-level significant harmonic selection requires an oddball "
+            "frequency that is not itself a base-rate overlap. "
+            f"Received base_frequency_hz={base:g} and oddball_frequency_hz={oddball:g}. "
+            "Check Settings > FPVS base frequency and Oddball frequency."
+        )
+    return float(oddball)
 
 
 def _preflight_required_full_fft_columns(
