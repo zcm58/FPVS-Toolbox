@@ -249,8 +249,9 @@ Use these checks for preprocessing ownership, routing, or behavior changes:
 
 ```powershell
 python -m py_compile src\Main_App\processing\preprocess.py src\Main_App\Performance\process_runner.py src\Main_App\Shared\processing_mixin.py src\Main_App\gui\main_window.py src\Main_App\__init__.py
-.venv\Scripts\python -m pytest tests\processing\test_single_file_process_mode.py tests\gui\test_main_window_processing.py -q
-.venv\Scripts\python -m pytest tests\processing\test_preproc_audit.py tests\processing\test_fif_flag_audit.py tests\processing\test_process_runner_epoch_contract.py -q
+.\.venv1\Scripts\python -m pytest tests\processing\test_filter_downsample_order.py tests\processing\test_process_runner_epoch_contract.py -q
+.\.venv1\Scripts\python -m pytest tests\processing\test_single_file_process_mode.py tests\gui\test_main_window_processing.py -q
+.\.venv1\Scripts\python -m pytest tests\processing\test_preproc_audit.py tests\processing\test_fif_flag_audit.py -q
 python .agents\\scripts\\audit\\agent_audit.py
 python .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py
 python .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py

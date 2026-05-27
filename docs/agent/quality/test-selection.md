@@ -63,6 +63,7 @@ pytest-qt/offscreen unless explicitly approved.
 
 ## Processing Pipeline
 
+- Processing order and cache fingerprint: `tests/processing/test_filter_downsample_order.py`
 - Preprocessing persistence and snapshots: `tests/processing/test_preproc_persistence.py`, `tests/processing/test_preproc_settings_snapshot.py`
 - Pipeline speed and safety: `tests/processing/test_pipeline_speed_safety.py`
 - FFT crop/bin-lock contract: `tests/processing/test_fft_crop_utils.py`
