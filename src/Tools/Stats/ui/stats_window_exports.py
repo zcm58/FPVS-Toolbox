@@ -286,18 +286,41 @@ class StatsWindowExportsMixin:
             self._end_run()
             return
 
-        self._set_last_export_path(str(path))
+        workbook_path = Path(path)
+        self._set_last_export_path(str(workbook_path))
         self.append_log(
             "General",
-            f"Stats-ready workbook exported: {path}",
+            f"Stats-ready workbook exported: {workbook_path}",
         )
         if sheet_names:
             self.append_log(
                 "General",
                 "  Sheets: " + ", ".join(str(name) for name in sheet_names),
             )
-        self._set_status(f"Stats-ready workbook exported ({row_count} rows): {path}")
+        self._set_status(f"Stats-ready workbook exported ({row_count} rows): {workbook_path}")
         self._end_run()
+        self._prompt_open_stats_ready_export(workbook_path, row_count=row_count)
+
+    def _prompt_open_stats_ready_export(self, workbook_path: Path, *, row_count: object) -> None:
+        """Ask whether to open the folder containing a completed stats-ready export."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Stats-Ready Workbook Exported")
+        msg.setIcon(QMessageBox.Information)
+        msg.setText("Stats-ready workbook exported successfully.")
+        msg.setInformativeText(f"Rows: {row_count}\n\n{workbook_path}\n\nOpen the file location?")
+        open_button = msg.addButton("Open Folder", QMessageBox.AcceptRole)
+        msg.addButton("Close", QMessageBox.RejectRole)
+        msg.setDefaultButton(open_button)
+        msg.exec()
+
+        if msg.clickedButton() != open_button:
+            return
+
+        folder = workbook_path.parent
+        if folder.is_dir():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+            return
+        self.append_log("General", f"Stats-ready export folder not found: {folder}", "error")
 
     def _export_single_pipeline(self) -> bool:
         """Handle the export single pipeline step for the Stats workflow."""

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
+from Tools.Stats.ui.stats_window_error_messages import build_worker_error_guidance
 
 logger = logging.getLogger(__name__)
 
@@ -889,14 +890,23 @@ class StatsWindowPipelineMixin:
     @Slot(str)
     def _on_worker_error(self, msg: str) -> None:
         """Handle the on worker error step for the Stats workflow."""
-        self.output_text.appendPlainText(f"Error: {msg}")
+        guidance = build_worker_error_guidance(msg)
+        display_msg = guidance.message if guidance is not None else msg
+        self.output_text.appendPlainText(f"Error: {display_msg}")
         section = "General"
         try:
             if self._controller.is_running(PipelineId.SINGLE):
                 section = "Single"
         except Exception:
             section = "General"
-        self.append_log(section, f"Worker error: {msg}", level="error")
+        self.append_log(section, f"Worker error: {display_msg}", level="error")
+        if guidance is not None:
+            self.append_log(section, f"Technical detail: {msg}", level="error")
+            self._set_status(guidance.status)
+            try:
+                QMessageBox.critical(self, guidance.title, guidance.message)
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to display guided worker error dialog", exc_info=True)
         self._end_run()
 
     def _store_dv_metadata(self, pipeline_id: PipelineId, payload: dict) -> None:
