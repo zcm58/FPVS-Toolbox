@@ -5,8 +5,8 @@ from datetime import datetime
 import pytest
 pd = pytest.importorskip("pandas")
 
-from Tools.Stats.analysis import repeated_m_anova as rm_mod
-from Tools.Stats.reporting import reporting_summary as report_mod
+from Tools.Stats.analysis import repeated_m_anova as rm_mod  # noqa: E402
+from Tools.Stats.reporting import reporting_summary as report_mod  # noqa: E402
 
 
 def test_tidy_from_pingouin_maps_eps_and_sphericity_fields():

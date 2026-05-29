@@ -1,7 +1,9 @@
 The stats directory contains scripts related to statistical analysis of FPVS
-EEG BCA values. The active Summed BCA DV uses the fixed/predefined harmonic
-list policy only; deprecated legacy, Fixed-K, and Rossion/group-significance
-DV policies are not active Stats options.
+EEG BCA values. The active Summed BCA DV defaults to the group-level
+significant-harmonics policy (Volfart/Retter/Rossion style). Fixed/predefined
+harmonic summation remains available as an alternate policy. Preserve the
+locked exact-column, common-harmonic-list, z > 1.64, and neighboring-noise
+rules documented in `docs/agent/architecture/statistics-tools.md`.
 
 Before broad manual inspection, run:
 

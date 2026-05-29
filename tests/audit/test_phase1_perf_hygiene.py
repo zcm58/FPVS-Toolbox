@@ -1,7 +1,6 @@
 import os
 import sys
 import types
-from pathlib import Path
 import pytest
 
 from tests import repo_root

@@ -28,7 +28,6 @@ from Main_App.gui.components import (
     make_action_button,
     make_action_row,
     make_form_layout,
-    make_section_grid_layout,
     show_warning,
 )
 from Main_App.gui.theme import apply_fpvs_theme
