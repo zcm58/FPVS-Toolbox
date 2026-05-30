@@ -2,13 +2,15 @@
 
 ## Status
 
-Active planning and implementation plan. Created on 2026-05-24.
+Completed plan. Created on 2026-05-24 and completed on 2026-05-30 after
+commit `318184d53f70c87f7a30add2a853eaffa2d3d60b` prepared the FPVS Toolbox
+2.1.0 release.
 
-This plan captures the v2.1 processing workflow decisions before code changes.
-Keep it current as new decisions are made. Future agents should read this plan
-before changing project setup, project manifests, raw-file discovery, single-file
-or batch processing, Excel output layout, processing ledger behavior, Plot
-Generator multi-group support, or Stats-ready group metadata.
+This plan captures the v2.1 processing workflow decisions and implementation
+history. Future agents should read this completed plan before changing project
+setup, project manifests, raw-file discovery, single-file or batch processing,
+Excel output layout, processing ledger behavior, Plot Generator multi-group
+support, or Stats-ready group metadata.
 
 ## Goal
 
@@ -616,6 +618,8 @@ Verification:
 
 ### Slice 7 - Docs And Release Readiness
 
+Status: Complete on 2026-05-30 after the 2.1.0 release-preparation commit.
+
 Goal: make user and agent docs match the implemented workflow.
 
 Tasks:
@@ -636,6 +640,16 @@ Verification:
 .\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py
 .\.venv1\Scripts\python.exe -m mkdocs build --strict
 ```
+
+Implementation:
+
+- Current docs describe v2.1 group metadata in
+  `docs/agent/architecture/project-io.md`, Stats multi-group guard behavior in
+  `docs/agent/architecture/statistics-tools.md`, user-facing multi-group
+  Stats-ready workflows under `docs/user/statistics/`, and the 2.1.0 release
+  version in `src/config.py` plus the Inno installer script.
+- `docs/agent/agent-index.md` now routes future v2.1 workflow changes to this
+  completed plan instead of the active-plan directory.
 
 ## Update Protocol
 
@@ -949,3 +963,15 @@ After each implementation slice:
   `Advanced...` are disabled, confirm `Export Stats-Ready Workbook` remains
   enabled after scanning data, and confirm a single-group project still enables
   the single-group actions.
+
+### 2026-05-30 - Plan Archived After 2.1.0 Release Preparation
+
+- Status: complete.
+- Files changed: this plan and `docs/agent/agent-index.md`.
+- Evidence: commit `318184d53f70c87f7a30add2a853eaffa2d3d60b` updated
+  `src/config.py` and `scripts/packaging/FPVS Toolbox Setup Script.iss` to
+  `2.1.0`, and the earlier progress log records the v2.1 implementation,
+  downstream-tool alignment, docs, and Stats multi-group guard slices.
+- Decision: move this plan from `docs/agent/exec-plans/active/` to
+  `docs/agent/exec-plans/completed/`; future agents should treat it as
+  historical source-of-truth context rather than active implementation work.
