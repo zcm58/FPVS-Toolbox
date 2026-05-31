@@ -32,7 +32,6 @@ KNOWLEDGE_BASE_PATHS = (
     "docs/agent/generated/README.md",
     "docs/agent/design-docs/DESIGN.md",
     "docs/agent/design-docs/FRONTEND.md",
-    "docs/agent/exec-plans/PLANS.md",
     "docs/agent/design-docs/PRODUCT_SENSE.md",
     "docs/agent/quality/QUALITY_SCORE.md",
     "docs/agent/quality/RELIABILITY.md",

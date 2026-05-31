@@ -19,6 +19,9 @@ $rootTargets = @(
     ".pytest_cache",
     ".codex-pytest-tmp",
     ".codex-tmp",
+    ".codex_pytest_phase1_a",
+    ".codex_pytest_phase1_b",
+    ".codex_pytest_tmp",
     ".tmp",
     "codex_pytest_tmp",
     "test_tmp_processing_output.txt",
@@ -64,21 +67,26 @@ function Remove-Target {
     Write-Output "REMOVED $RelativePath"
 }
 
+function Test-SkippedTraversalPath {
+    param([string]$RelativePath)
+
+    foreach ($skipped in ($preservedRelPaths + $rootTargets)) {
+        if ($RelativePath.Equals($skipped, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $RelativePath.StartsWith("$skipped\", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Get-PycacheDirs {
     param([string]$Directory)
 
     foreach ($child in Get-ChildItem -LiteralPath $Directory -Force -Directory -ErrorAction Stop) {
         $relative = $child.FullName.Substring($repoRoot.Length + 1)
-        $isPreserved = $false
-        foreach ($preserved in $preservedRelPaths) {
-            if ($relative.Equals($preserved, [System.StringComparison]::OrdinalIgnoreCase) -or
-                $relative.StartsWith("$preserved\", [System.StringComparison]::OrdinalIgnoreCase)) {
-                $isPreserved = $true
-                break
-            }
-        }
 
-        if ($isPreserved) {
+        if (Test-SkippedTraversalPath -RelativePath $relative) {
             continue
         }
 

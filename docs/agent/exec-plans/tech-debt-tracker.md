@@ -6,8 +6,6 @@ Use this page for known debt that is not yet an active execution plan.
 
 - `Legacy_App` and `PySide6_App` have been retired. The active guardrail is
   `.agents/scripts/audit/agent_audit.py`; do not restore those package paths.
-- `.agents/scripts/smoke/gui_wave3_smoke.py` hung during the first Legacy cleanup slice and
-  should be reassessed before it is used as a required gate again.
 - Broad exception handling is concentrated in high-risk processing/GUI
   orchestration modules. A read-only scan found many existing `except Exception`
   or silent `pass` patterns in `process_runner.py`, `preprocess.py`,

@@ -31,7 +31,7 @@ Command examples that use `python` assume that environment is active.
 - `design-docs/DESIGN.md`: design-system and UX guidance.
 - `design-docs/FRONTEND.md`: PySide6 frontend implementation guidance.
 - `design-docs/PRODUCT_SENSE.md`: product goals and user workflow priorities.
-- `exec-plans/PLANS.md`: plan index and planning rules.
+- `exec-plans/README.md`: plan index and planning rules.
 - `guides/development.md`: developer setup and verification notes.
 - `quality/QUALITY_SCORE.md`: current quality posture and gaps.
 - `quality/RELIABILITY.md`: reliability and verification expectations.
