@@ -13,7 +13,7 @@ Command examples that use `python` assume that environment is active.
 
 - `architecture/`: durable architecture maps, ownership boundaries, and behavior contracts.
 - `design-docs/`: product and engineering beliefs that guide future design choices.
-- `exec-plans/`: active, future, completed, and technical-debt plans.
+- `exec-plans/`: active plans, future plans, and technical-debt tracking.
 - `generated/`: generated reference artifacts. Do not edit generated files by hand.
 - `guides/`: developer setup and maintenance guidance.
 - `product-specs/`: durable product behavior and workflow specifications.

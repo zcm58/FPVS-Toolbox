@@ -4,10 +4,8 @@ Use this page for known debt that is not yet an active execution plan.
 
 ## Active Debt
 
-- `Legacy_App` has been retired under
-  `docs/agent/exec-plans/completed/main-app-folder-retirement.md`.
-- `PySide6_App` has been retired under
-  `docs/agent/exec-plans/completed/main-app-folder-retirement.md`.
+- `Legacy_App` and `PySide6_App` have been retired. The active guardrail is
+  `.agents/scripts/audit/agent_audit.py`; do not restore those package paths.
 - `.agents/scripts/smoke/gui_wave3_smoke.py` hung during the first Legacy cleanup slice and
   should be reassessed before it is used as a required gate again.
 - Broad exception handling is concentrated in high-risk processing/GUI
@@ -42,4 +40,7 @@ Run after adding the mechanical garbage-collection gate:
 - Promote debt to `exec-plans/active/` when implementation starts.
 - Keep entries short and link to a focused architecture doc or plan when one
   exists.
+- Remove completed plans when implementation finishes. Do not reference
+  completed plans in routine agent routing unless the user explicitly asks for
+  historical plan context.
 - Remove entries when the debt is fixed or deliberately accepted.

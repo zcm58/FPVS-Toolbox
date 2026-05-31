@@ -17,7 +17,7 @@ AGENT_INDEX = REPO_ROOT / "docs" / "agent" / "agent-index.md"
 ARCHITECTURE_MAP = REPO_ROOT / "ARCHITECTURE.md"
 EXEC_PLANS_README = REPO_ROOT / "docs" / "agent" / "exec-plans" / "README.md"
 TECH_DEBT_TRACKER = REPO_ROOT / "docs" / "agent" / "exec-plans" / "tech-debt-tracker.md"
-MAIN_APP_REFACTOR_PLAN = REPO_ROOT / "docs" / "agent" / "exec-plans" / "completed" / "main-app-refactor.md"
+COMPLETED_PLANS_DIR = REPO_ROOT / "docs" / "agent" / "exec-plans" / "completed"
 SKILL_SCRIPT_PATHS = (
     ".agents/skills/pyside6-gui-cleanup/scripts/audit_gui_imports.py",
     ".agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py",
@@ -337,11 +337,11 @@ def check_protected_edits() -> list[Issue]:
     changed = {_normalize(path) for path in _changed_files()}
     has_migration_context = bool(
         {
-            "docs/agent/exec-plans/completed/main-app-refactor.md",
             "docs/agent/architecture/legacy-boundaries.md",
             "AGENTS.md",
         }
         & changed
+        or any(path.startswith("docs/agent/exec-plans/active/") for path in changed)
     )
     for path in _changed_files():
         normalized = _normalize(path)
@@ -382,13 +382,13 @@ def check_agent_harness() -> list[Issue]:
                         f"agent index does not mention {script_path}",
                     )
                 )
-        if "docs/agent/exec-plans/completed/main-app-refactor.md" not in text:
+        if "docs/agent/exec-plans/completed/" in text:
             issues.append(
                 Issue(
                     "agent-harness",
                     _repo_path(AGENT_INDEX),
                     None,
-                    "agent index does not mention the completed Main_App refactor plan",
+                    "agent index should not route routine work through completed execution plans",
                 )
             )
 
@@ -426,7 +426,6 @@ def check_agent_harness() -> list[Issue]:
     for plan_path, message in (
         (EXEC_PLANS_README, "missing execution-plan directory README"),
         (TECH_DEBT_TRACKER, "missing technical debt tracker"),
-        (MAIN_APP_REFACTOR_PLAN, "missing completed Main_App refactor plan"),
     ):
         if not plan_path.exists():
             issues.append(
@@ -435,6 +434,16 @@ def check_agent_harness() -> list[Issue]:
                     _repo_path(plan_path),
                     None,
                     message,
+                )
+            )
+    if COMPLETED_PLANS_DIR.exists():
+        for plan_path in sorted(COMPLETED_PLANS_DIR.glob("*.md")):
+            issues.append(
+                Issue(
+                    "agent-harness",
+                    _repo_path(plan_path),
+                    None,
+                    "completed execution plans should be removed; use git history only when the user asks for historical plan context",
                 )
             )
     for required_path in KNOWLEDGE_BASE_PATHS:
