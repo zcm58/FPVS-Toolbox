@@ -28,8 +28,10 @@ from Main_App.gui.components import (
     make_action_button,
     make_action_row,
     make_form_layout,
+    make_remove_button,
     show_warning,
 )
+from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.gui.theme import apply_fpvs_theme
 
 EXPECTED_COMPONENT_EXPORTS = (
@@ -51,6 +53,7 @@ EXPECTED_COMPONENT_EXPORTS = (
     "make_action_button",
     "make_action_row",
     "make_form_layout",
+    "make_remove_button",
     "make_section_grid_layout",
     "show_error",
     "show_info",
@@ -83,6 +86,7 @@ def test_component_consumer_import_style_remains_available() -> None:
     from Main_App.gui.components import make_action_button as imported_make_action_button
     from Main_App.gui.components import make_action_row as imported_make_action_row
     from Main_App.gui.components import make_form_layout as imported_make_form_layout
+    from Main_App.gui.components import make_remove_button as imported_make_remove_button
     from Main_App.gui.components import make_section_grid_layout as imported_make_section_grid_layout
     from Main_App.gui.components import show_error as imported_show_error
     from Main_App.gui.components import show_info as imported_show_info
@@ -107,6 +111,7 @@ def test_component_consumer_import_style_remains_available() -> None:
         "make_action_button": imported_make_action_button,
         "make_action_row": imported_make_action_row,
         "make_form_layout": imported_make_form_layout,
+        "make_remove_button": imported_make_remove_button,
         "make_section_grid_layout": imported_make_section_grid_layout,
         "show_error": imported_show_error,
         "show_info": imported_show_info,
@@ -175,6 +180,22 @@ def test_action_button_preserves_contract_when_disabled(qtbot) -> None:
     assert not button.isEnabled()
     assert button.property("variant") == "danger"
     assert button.property("danger") is True
+
+
+def test_make_remove_button_uses_outlined_icon_button_contract(qtbot) -> None:
+    button = make_remove_button(tooltip="Remove ROI", object_name="remove_roi")
+    qtbot.addWidget(button)
+
+    assert button.objectName() == "remove_roi"
+    assert button.text() == "x"
+    assert button.toolTip() == "Remove ROI"
+    assert button.property("variant") == "secondary"
+    assert button.property("secondary") is True
+    assert button.property("compact") is True
+    assert button.property("iconButton") is True
+    assert button.width() == EVENT_REMOVE_BUTTON_SIZE
+    assert button.height() == EVENT_REMOVE_BUTTON_SIZE
+    assert button.font().bold()
 
 
 def test_section_card_exposes_header_and_content_layout(qtbot) -> None:
@@ -340,6 +361,7 @@ def test_apply_fpvs_theme_sets_app_stylesheet_and_preserves_button_properties(qt
         assert 'QPushButton[secondary="true"]' in app.styleSheet()
         assert 'QPushButton[tertiary="true"]' in app.styleSheet()
         assert 'QPushButton[variant="danger"]' in app.styleSheet()
+        assert 'QPushButton[iconButton="true"]' in app.styleSheet()
         assert 'QWidget[statusVariant="info"]' in app.styleSheet()
         assert 'QWidget[statusVariant="warning"]' in app.styleSheet()
         assert 'QWidget[statusVariant="error"]' in app.styleSheet()

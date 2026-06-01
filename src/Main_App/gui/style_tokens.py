@@ -59,7 +59,7 @@ CORNER_RADIUS = 9
 SIDEBAR_WIDTH = 244
 BROWSE_BUTTON_WIDTH = 156
 EVENT_ID_COLUMN_WIDTH = 88
-EVENT_REMOVE_BUTTON_SIZE = 24
+EVENT_REMOVE_BUTTON_SIZE = 30
 
 
 def build_main_page_stylesheet() -> str:
@@ -178,6 +178,18 @@ def build_main_page_stylesheet() -> str:
         QToolButton[compact="true"] {{
             padding: 5px 10px;
             border-radius: 7px;
+        }}
+
+        QPushButton[iconButton="true"],
+        QToolButton[iconButton="true"] {{
+            min-width: {EVENT_REMOVE_BUTTON_SIZE}px;
+            max-width: {EVENT_REMOVE_BUTTON_SIZE}px;
+            min-height: {EVENT_REMOVE_BUTTON_SIZE}px;
+            max-height: {EVENT_REMOVE_BUTTON_SIZE}px;
+            padding: 0;
+            text-align: center;
+            font-size: 15px;
+            font-weight: {css_font_weight("icon_glyph")};
         }}
 
         QPushButton[primary="true"],
@@ -360,22 +372,6 @@ def build_main_page_stylesheet() -> str:
         QLineEdit[event_map_role="id"] {{
             padding-left: 0;
             padding-right: 0;
-        }}
-
-        QToolButton#event_map_remove_button {{
-            border: none;
-            background: transparent;
-            color: {TEXT_SECONDARY};
-            padding: 0;
-        }}
-
-        QToolButton#event_map_remove_button:hover {{
-            background: #F4E7E7;
-            color: #974242;
-        }}
-
-        QToolButton#event_map_remove_button:pressed {{
-            background: #EAD8D8;
         }}
 
         QGroupBox[diagnosticsCard="true"] {{

@@ -23,6 +23,7 @@ from Main_App.gui.style_tokens import (
     DANGER_COLOR_HOVER,
     DANGER_SOFT_BG,
     DANGER_SOFT_BORDER,
+    EVENT_REMOVE_BUTTON_SIZE,
     INFO_BG,
     INFO_BORDER,
     LOG_BG,
@@ -189,6 +190,18 @@ def build_fpvs_app_stylesheet() -> str:
         QToolButton[compact="true"] {{
             padding: 5px 10px;
             border-radius: 7px;
+        }}
+
+        QPushButton[iconButton="true"],
+        QToolButton[iconButton="true"] {{
+            min-width: {EVENT_REMOVE_BUTTON_SIZE}px;
+            max-width: {EVENT_REMOVE_BUTTON_SIZE}px;
+            min-height: {EVENT_REMOVE_BUTTON_SIZE}px;
+            max-height: {EVENT_REMOVE_BUTTON_SIZE}px;
+            padding: 0;
+            text-align: center;
+            font-size: 15px;
+            font-weight: {css_font_weight("icon_glyph")};
         }}
 
         QPushButton[primary="true"],

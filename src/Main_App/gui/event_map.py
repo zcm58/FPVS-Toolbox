@@ -9,11 +9,11 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
-    QToolButton,
     QWidget,
 )
 
-from .style_tokens import EVENT_ID_COLUMN_WIDTH, EVENT_REMOVE_BUTTON_SIZE
+from Main_App.gui.components import make_remove_button
+from .style_tokens import EVENT_ID_COLUMN_WIDTH
 
 EntryAdapterT = TypeVar("EntryAdapterT")
 
@@ -181,13 +181,11 @@ def add_event_row(owner: object, label: str = "", ident: str = "") -> None:
     le_id.setFixedWidth(EVENT_ID_COLUMN_WIDTH)
     le_id.setAlignment(Qt.AlignCenter)
 
-    btn_rm = QToolButton(row)
-    btn_rm.setObjectName("event_map_remove_button")
-    btn_rm.setText("x")
-    btn_rm.setAutoRaise(True)
-    btn_rm.setToolTip("Remove condition")
-    btn_rm.setCursor(Qt.PointingHandCursor)
-    btn_rm.setFixedSize(EVENT_REMOVE_BUTTON_SIZE, EVENT_REMOVE_BUTTON_SIZE)
+    btn_rm = make_remove_button(
+        parent=row,
+        tooltip="Remove condition",
+        object_name="event_map_remove_button",
+    )
 
     def _remove() -> None:
         getattr(owner, "event_layout").removeWidget(row)

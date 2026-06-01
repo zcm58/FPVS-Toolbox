@@ -8,11 +8,12 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QSizePolicy, QWidget
+from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QWidget
 
 from Main_App.projects.project import Project
 from Main_App.gui.main_window import MainWindow
 from Main_App.gui.components import ActionRow, SectionCard, SubsectionHeaderLabel
+from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 import Main_App.gui.settings_panel as settings_panel
 from Main_App.gui.settings_panel import SettingsDialog
 
@@ -126,6 +127,14 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
     assert cards["Regions of Interest"].sizePolicy().verticalPolicy() == QSizePolicy.Expanding
     assert cards["Regions of Interest"].isAncestorOf(dlg.roi_editor)
     assert dlg.roi_editor.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
+    remove_buttons = dlg.roi_editor.findChildren(QPushButton, "settings_rois_remove_roi")
+    assert remove_buttons
+    assert all(button.text() == "x" for button in remove_buttons)
+    assert all(button.property("variant") == "secondary" for button in remove_buttons)
+    assert all(button.property("compact") is True for button in remove_buttons)
+    assert all(button.property("iconButton") is True for button in remove_buttons)
+    assert all(button.width() == EVENT_REMOVE_BUTTON_SIZE for button in remove_buttons)
+    assert all(button.height() == EVENT_REMOVE_BUTTON_SIZE for button in remove_buttons)
     assert dlg.btn_changeRoot.property("secondary") is True
     preproc_tab = dlg.tabs.widget(dlg._preproc_tab_index)
     stats_tab_index = next(

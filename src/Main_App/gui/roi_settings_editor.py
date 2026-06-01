@@ -8,8 +8,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLineEdit,
-    QPushButton,
 )
+
+from Main_App.gui.components import make_remove_button
 
 
 class ROISettingsEditor(QWidget):
@@ -46,8 +47,11 @@ class ROISettingsEditor(QWidget):
         elec_edit = QLineEdit()
         elec_edit.setPlaceholderText("Electrodes comma sep")
         elec_edit.setText(electrodes)
-        remove_btn = QPushButton("\u2715")
-        remove_btn.setFixedWidth(24)
+        remove_btn = make_remove_button(
+            parent=row,
+            tooltip="Remove ROI",
+            object_name="settings_rois_remove_roi",
+        )
         remove_btn.clicked.connect(lambda _, r=row: self.remove_entry(r))
 
         row_layout.addWidget(name_edit)

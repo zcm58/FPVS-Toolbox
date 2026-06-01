@@ -12,6 +12,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel,
+    QPushButton,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
 from Main_App.gui.components import SubsectionHeaderLabel
+from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
 import Main_App.gui.update_manager as update_manager
 from Tools.Average_Preprocessing.New_PySide6.main_window import AdvancedAveragingWindow
@@ -167,6 +169,14 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     event_rows = win._live_event_map_rows()
     assert event_rows
     assert event_rows[0].layout().contentsMargins().left() == 0
+    event_remove_buttons = win.findChildren(QPushButton, "event_map_remove_button")
+    assert event_remove_buttons
+    assert all(button.text() == "x" for button in event_remove_buttons)
+    assert all(button.property("variant") == "secondary" for button in event_remove_buttons)
+    assert all(button.property("compact") is True for button in event_remove_buttons)
+    assert all(button.property("iconButton") is True for button in event_remove_buttons)
+    assert all(button.width() == EVENT_REMOVE_BUTTON_SIZE for button in event_remove_buttons)
+    assert all(button.height() == EVENT_REMOVE_BUTTON_SIZE for button in event_remove_buttons)
 
     assert hasattr(win, "row_single_file")
     assert hasattr(win, "row_input_folder")

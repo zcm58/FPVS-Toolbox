@@ -30,6 +30,7 @@ from Main_App.gui.menu_bar import build_menu_bar
 from .style_tokens import (
     BROWSE_BUTTON_WIDTH,
     EVENT_ID_COLUMN_WIDTH,
+    EVENT_REMOVE_BUTTON_SIZE,
     PAGE_MARGIN,
     SECTION_GAP,
     SIDEBAR_WIDTH,
@@ -335,7 +336,7 @@ def init_ui(self) -> None:
     lbl_id = SubsectionHeaderLabel("Trigger ID", event_header, alignment=Qt.AlignCenter)
     lbl_id.setFixedWidth(EVENT_ID_COLUMN_WIDTH)
     lbl_actions = QLabel("", event_header)
-    lbl_actions.setFixedWidth(24)
+    lbl_actions.setFixedWidth(EVENT_REMOVE_BUTTON_SIZE)
 
     header_layout.addWidget(lbl_condition, 1)
     header_layout.addWidget(self.btn_add_row, 0)
