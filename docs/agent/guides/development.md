@@ -55,7 +55,8 @@ folder containing `FPVS_Toolbox.exe`, required DLLs, and configuration files.
 Release packaging definitions live in `scripts/packaging/`.
 
 The supported maintainer workflow is script-driven. Do not open the Inno Setup
-GUI for normal releases.
+GUI for normal releases. Do not add or maintain ad-hoc PyInstaller compiler
+helpers under `src/`; packaging changes belong in `scripts/packaging/`.
 
 ```powershell
 .\scripts\packaging\build_release.ps1 -SkipInstall -SkipSmoke
