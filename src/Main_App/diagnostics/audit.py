@@ -1,7 +1,7 @@
 """Runtime preprocessing audit helpers for the Main App."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -253,7 +253,7 @@ def write_audit_json(
     """Write the audit payload to disk and return the file path."""
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     safe = basename.replace(" ", "_") if basename else "unknown"
     safe = safe.replace("/", "_").replace("\\", "_")
     out_path = root / f"preproc_{timestamp}_{safe}.json"

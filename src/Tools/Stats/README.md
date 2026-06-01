@@ -18,7 +18,7 @@ Implementation files belong in the functional subpackages below.
 ## Removed Namespaces
 
 * `Tools.Stats.PySide6` and `Tools.Stats.Legacy` are no longer supported import paths.
-* Reference source for the removed CustomTkinter Stats UI remains under `src/quarantine/Tools/Stats/Legacy_UI/`.
+* Removed CustomTkinter Stats UI source is not part of the active tree; use Git history for reference if needed.
 * New code should import from the active functional packages only.
 
 ## Adding Statistical Features

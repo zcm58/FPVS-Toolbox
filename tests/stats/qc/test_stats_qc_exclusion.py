@@ -3,7 +3,10 @@ from __future__ import annotations
 import pandas as pd
 
 from Tools.Stats.io import excel_io
-from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
+from Tools.Stats.analysis.dv_policies import (
+    FIXED_PREDEFINED_POLICY_NAME,
+    prepare_summed_bca_data,
+)
 from Tools.Stats.qc.stats_qc_exclusion import (
     QC_REASON_MAXABS,
     QC_REASON_SUMABS,
@@ -15,11 +18,11 @@ from Tools.Stats.qc.stats_qc_exclusion import (
 
 def _make_bca_df(max_value: float) -> pd.DataFrame:
     data = {
-        "1.2_Hz": [0.1, 0.1],
-        "2.4_Hz": [0.1, 0.1],
-        "3.6_Hz": [0.1, 0.1],
-        "4.8_Hz": [0.1, 0.1],
-        "7.2_Hz": [max_value, max_value],
+        "1.2000_Hz": [0.1, 0.1],
+        "2.4000_Hz": [0.1, 0.1],
+        "3.6000_Hz": [0.1, 0.1],
+        "4.8000_Hz": [0.1, 0.1],
+        "7.2000_Hz": [max_value, max_value],
     }
     df = pd.DataFrame(data, index=["O1", "O2"])
     df.index.name = "Electrode"
@@ -58,6 +61,10 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) 
         return normal_df.copy()
 
     monkeypatch.setattr(excel_io, "safe_read_excel", _fake_read_excel)
+    monkeypatch.setattr(
+        "Tools.Stats.analysis.dv_policy_fixed_predefined.safe_read_excel",
+        _fake_read_excel,
+    )
 
     report = run_qc_exclusion(
         subjects=list(subject_data.keys()),
@@ -83,7 +90,7 @@ def test_qc_exclusion_independent_of_selected_conditions(monkeypatch, tmp_path) 
         base_freq=6.0,
         log_func=lambda _m: None,
         rois=rois,
-        dv_policy=None,
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
     )
 
     assert dv_data is not None

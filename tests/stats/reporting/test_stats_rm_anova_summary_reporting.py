@@ -12,6 +12,7 @@ except ModuleNotFoundError:  # pragma: no cover - lightweight test env
 
 from Tools.Stats.reporting.reporting_summary import ReportingSummaryContext, build_reporting_summary
 from Tools.Stats.common.stats_core import PipelineId
+from Tools.Stats.analysis.dv_policies import FIXED_PREDEFINED_POLICY_NAME
 from Tools.Stats.workers.stats_workers import run_rm_anova
 from Tools.Stats.reporting.summary_utils import StatsSummaryFrames, SummaryConfig, build_summary_from_frames
 
@@ -169,6 +170,7 @@ def test_rm_anova_text_report_exports_to_results_dir_used_by_stats_outputs(tmp_p
         base_freq=6.0,
         rois={"ROI1": ["O1"]},
         rois_all={"ROI1": ["O1"]},
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
         results_dir=str(results_dir),
     )
 
@@ -219,6 +221,7 @@ def test_single_file_rm_anova_still_excludes_required_nonfinite_subjects(monkeyp
         base_freq=6.0,
         rois={"ROI1": ["O1"]},
         rois_all={"ROI1": ["O1"]},
+        dv_policy={"name": FIXED_PREDEFINED_POLICY_NAME},
     )
 
     assert seen["subjects"] == ["P1"]

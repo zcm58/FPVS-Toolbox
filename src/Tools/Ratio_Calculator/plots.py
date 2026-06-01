@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 
 import numpy as np
 import pandas as pd
-from matplotlib import cm, colors as mcolors
+from matplotlib import colormaps, colors as mcolors
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -39,7 +39,7 @@ def build_roi_palette(palette_choice: str, rois: list[str]) -> dict[str, str]:
         if key != "Default":
             out[key] = value
 
-    cmap = cm.get_cmap("tab20")
+    cmap = colormaps["tab20"]
     cmap_n = getattr(cmap, "N", 20)
     idx = 0
 

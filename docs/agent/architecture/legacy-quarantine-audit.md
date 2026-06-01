@@ -73,9 +73,7 @@ Recent migration slices:
 
 - `src/Main_App/Legacy_App/app_logic.py` -> moved to `src/quarantine/Main_App/Legacy_App/app_logic.py`
 - `src/Main_App/Legacy_App/validation_mixins.py` -> moved to `src/quarantine/Main_App/Legacy_App/validation_mixins.py`
-- `src/Tools/Stats/Quarantined/Legacy_UI/stats.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/stats.py`
-- `src/Tools/Stats/Quarantined/Legacy_UI/stats_ui.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/stats_ui.py`
-- `src/Tools/Stats/Quarantined/Legacy_UI/__init__.py` -> moved to `src/quarantine/Tools/Stats/Legacy_UI/__init__.py`
+- Removed CustomTkinter Stats UI source is no longer retained in the active tree or tracked quarantine; use Git history for reference if needed.
 
 ## Source Localization/eLORETA removal
 

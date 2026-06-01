@@ -6,7 +6,7 @@ Primary paths:
 
 - `src/Tools/Stats/`: active single-group statistics GUI, controller, workers, analysis helpers, QC helpers, reporting, I/O, and shared helpers grouped by function. The root contains only package/docs files.
 - `src/Tools/Stats/data/shared_rois.py` and `src/Tools/Stats/data/roi_resolver.py`: shared ROI helpers.
-- `src/quarantine/Tools/Stats/Legacy_UI/`: reference-only source for the removed CustomTkinter Stats UI.
+- Removed CustomTkinter Stats UI source is not part of the active tree; use Git history for reference if needed.
 - `src/Tools/Plot_Generator/`: plot generation GUI, QThread launch workflow,
   `_Worker` QObject shell, worker config, Excel input/data collection helpers,
   ROI/group aggregation helpers, scalp rendering helpers, Matplotlib rendering,
