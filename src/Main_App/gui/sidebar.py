@@ -265,6 +265,13 @@ def init_sidebar(self) -> None:
     make_button(tools_layout, "btn_graphs", "SNR Plots", sidebar_icon("chart", ICON_PX), self.open_plot_generator)
     make_button(
         tools_layout,
+        "btn_publication_maps",
+        "Scalp Maps",
+        sidebar_icon("scalp", ICON_PX),
+        self.open_publication_maps,
+    )
+    make_button(
+        tools_layout,
         "btn_ratio",
         "Ratio Calculator",
         sidebar_icon("ratio", ICON_PX),

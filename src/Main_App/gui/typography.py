@@ -28,6 +28,10 @@ FontRole = Literal[
     "tab",
     "tab_selected",
     "icon_glyph",
+    "figure_title",
+    "figure_axis_label",
+    "figure_tick",
+    "figure_note",
 ]
 
 
@@ -55,6 +59,10 @@ FONT_ROLES: dict[FontRole, FontRoleSpec] = {
     "tab": FontRoleSpec(10, 13, QFont.Normal, 400),
     "tab_selected": FontRoleSpec(10, 13, QFont.DemiBold, 600),
     "icon_glyph": FontRoleSpec(10, 13, QFont.Bold, 700),
+    "figure_title": FontRoleSpec(13, 17, QFont.DemiBold, 600),
+    "figure_axis_label": FontRoleSpec(12, 16, QFont.DemiBold, 600),
+    "figure_tick": FontRoleSpec(11, 14, QFont.Normal, 400),
+    "figure_note": FontRoleSpec(9, 12, QFont.Normal, 400),
 }
 
 
@@ -109,3 +117,20 @@ def css_font_declaration(role: FontRole, *, include_family: bool = False) -> str
         f"font-size: {css_font_size(role)};\n"
         f"font-weight: {css_font_weight(role)};"
     )
+
+
+def matplotlib_font_kwargs(
+    role: FontRole,
+    *,
+    include_family: bool = True,
+) -> dict[str, object]:
+    """Return shared Matplotlib text kwargs for GUI-generated figures."""
+
+    spec = FONT_ROLES[role]
+    kwargs: dict[str, object] = {
+        "fontsize": spec.point_size,
+        "fontweight": spec.css_weight,
+    }
+    if include_family:
+        kwargs["fontfamily"] = APP_FONT_FAMILY
+    return kwargs

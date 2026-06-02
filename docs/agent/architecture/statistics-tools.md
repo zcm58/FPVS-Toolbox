@@ -16,6 +16,16 @@ Primary paths:
   own condition selection, section assembly, ROI state, participant state,
   settings/validation, and run/status/log workflow.
 - `src/Tools/Individual_Detectability/`: detectability tool core, GUI, and worker.
+- `src/Tools/Publication_Maps/`: embedded Scalp Maps tool. Current scope is
+  BCA-only publication scalp maps. It calls the Stats group-significant harmonic
+  selection builder so significant harmonics and cache reuse stay aligned with
+  the locked Stats method, then sums exact selected `BCA (uV)` columns per
+  electrode before condition-level averaging and PNG/SVG/source-data export.
+  Its GUI reads base frequency and BCA upper-limit values from Settings and
+  exposes low/high BCA color selectors plus an optional fixed BCA colorbar
+  range for rendered palette endpoints and scaling. Rendered labels use shared
+  component typography roles and the BCA colorbar label is
+  `Baseline-corrected amplitude (µV)`.
 
 Stats grouping:
 

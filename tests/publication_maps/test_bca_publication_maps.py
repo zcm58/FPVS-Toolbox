@@ -1,0 +1,260 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from matplotlib.colors import to_hex
+import numpy as np
+import pandas as pd
+from PIL import Image
+import pytest
+
+from Main_App.gui.components import matplotlib_font_kwargs
+from Tools.Stats.analysis import dv_policy_group_significant as group_policy
+from Tools.Publication_Maps.excel_inputs import discover_conditions
+from Tools.Publication_Maps.metrics import build_publication_map_result
+from Tools.Publication_Maps.models import (
+    ColorBounds,
+    PublicationMapRequest,
+    PublicationMetric,
+)
+from Tools.Publication_Maps.rendering import (
+    JOURNAL_TEXT_WIDTH_IN,
+    _metric_limits,
+    colorbar_label_for_metric,
+    colormap_for_metric,
+    export_source_workbook,
+    render_publication_figures,
+)
+
+
+def test_discovers_condition_workbooks_and_skips_excel_lock_files(tmp_path: Path) -> None:
+    root = tmp_path / "1 - Excel Data Files"
+    cond = root / "Faces"
+    cond.mkdir(parents=True)
+    (cond / "P01_Faces_Results.xlsx").touch()
+    (cond / "~$P02_Faces_Results.xlsx").touch()
+
+    conditions = discover_conditions(root)
+
+    assert [condition.name for condition in conditions] == ["Faces"]
+    assert [path.name for path in conditions[0].files] == ["P01_Faces_Results.xlsx"]
+
+
+def test_bca_maps_use_stats_group_significant_selection_and_sum_per_electrode(
+    tmp_path: Path,
+) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1", "S2"))
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=project_root / "4 - Scalp Maps",
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=8.4,
+        project_root=project_root,
+    )
+
+    result = build_publication_map_result(request)
+
+    assert result.selected_harmonics_hz == pytest.approx((1.2, 3.6, 7.2))
+    assert result.selection_metadata["harmonic_policy"] == "group_level_significant_harmonics"
+    o1 = result.grand_average_values[
+        (result.grand_average_values["condition"] == "Faces")
+        & (result.grand_average_values["electrode"] == "O1")
+    ].iloc[0]
+    assert o1["aggregate_value"] == pytest.approx(3.0)
+    assert o1["valid_subject_count"] == 2
+    assert o1["render_value"] == pytest.approx(3.0)
+    assert set(result.long_values["source_column"]) == {
+        "1.2000_Hz",
+        "3.6000_Hz",
+        "7.2000_Hz",
+    }
+
+
+def test_bca_maps_can_reuse_saved_stats_harmonic_cache(tmp_path: Path) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=project_root / "4 - Scalp Maps",
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=3.6,
+        project_root=project_root,
+    )
+
+    first = build_publication_map_result(request)
+    group_policy.clear_group_significant_selection_cache()
+    second = build_publication_map_result(request)
+
+    assert first.selected_harmonics_hz == pytest.approx((1.2, 3.6))
+    assert second.selected_harmonics_hz == pytest.approx((1.2, 3.6))
+    assert second.selection_metadata["selection_cache_source"] == "saved_project_metadata"
+
+
+def test_exports_source_workbook_and_nonblank_figures(tmp_path: Path) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
+    output_root = project_root / "4 - Scalp Maps"
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=output_root,
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=3.6,
+        project_root=project_root,
+    )
+    result = build_publication_map_result(request)
+
+    workbook_path = export_source_workbook(result, request)
+    figures = render_publication_figures(result, request)
+
+    assert workbook_path.exists()
+    assert workbook_path.stat().st_size > 0
+    assert figures
+    assert all(path.exists() and path.stat().st_size > 0 for path in figures)
+    svg = next(path for path in figures if path.suffix == ".svg")
+    svg_text = svg.read_text(encoding="utf-8")
+    assert "fill: #ffffff" not in svg_text.lower()
+    png = next(path for path in figures if path.suffix == ".png")
+    with Image.open(png) as image:
+        assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
+
+
+def test_exports_paired_condition_figure_with_two_maps_on_one_page(tmp_path: Path) -> None:
+    project_root, excel_root = _write_project_workbooks(
+        tmp_path,
+        subjects=("S1",),
+        conditions=("Faces", "Objects"),
+    )
+    output_root = project_root / "4 - Scalp Maps"
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=output_root,
+        conditions=("Faces", "Objects"),
+        base_frequency_hz=6.0,
+        max_frequency_hz=3.6,
+        project_root=project_root,
+        export_paired_figures=True,
+    )
+    result = build_publication_map_result(request)
+
+    figures = render_publication_figures(result, request)
+
+    paired = [path for path in figures if "_and_" in path.stem]
+    assert {path.suffix for path in paired} == {".png", ".svg"}
+    paired_png = next(path for path in paired if path.suffix == ".png")
+    with Image.open(paired_png) as image:
+        assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
+
+
+def test_bca_colormap_defaults_and_custom_endpoints() -> None:
+    default_cmap = colormap_for_metric(PublicationMetric.BCA, ColorBounds())
+
+    assert to_hex(default_cmap(0.0)).lower() == "#2166ac"
+    assert to_hex(default_cmap(1.0)).lower() == "#b2182b"
+
+    custom_cmap = colormap_for_metric(
+        PublicationMetric.BCA,
+        ColorBounds(low_color="#000000", high_color="#ffffff"),
+    )
+
+    assert to_hex(custom_cmap(0.0)).lower() == "#000000"
+    assert to_hex(custom_cmap(1.0)).lower() == "#ffffff"
+
+
+def test_bca_metric_limits_auto_or_fixed() -> None:
+    data = np.asarray([0.0, 0.25, 0.75])
+
+    assert _metric_limits(data, metric=PublicationMetric.BCA, bounds=ColorBounds()) == (
+        0.0,
+        0.75,
+    )
+    assert _metric_limits(
+        data,
+        metric=PublicationMetric.BCA,
+        bounds=ColorBounds(auto_scale=False, vmin=0.0, vmax=0.4),
+    ) == (0.0, 0.4)
+
+
+def test_bca_colorbar_label_and_fonts_use_shared_component_typography() -> None:
+    axis_font = matplotlib_font_kwargs("figure_axis_label")
+    title_font = matplotlib_font_kwargs("figure_title")
+
+    assert colorbar_label_for_metric(PublicationMetric.BCA) == (
+        "Baseline-corrected amplitude (µV)"
+    )
+    assert axis_font["fontsize"] >= 12
+    assert title_font["fontsize"] >= axis_font["fontsize"]
+
+
+def _write_project_workbooks(
+    tmp_path: Path,
+    *,
+    subjects: tuple[str, ...],
+    conditions: tuple[str, ...] = ("Faces",),
+) -> tuple[Path, Path]:
+    project_root = tmp_path / "Project"
+    excel_root = project_root / "1 - Excel Data Files"
+    project_root.mkdir(parents=True)
+    (project_root / "project.json").write_text(
+        (
+            "{\n"
+            '  "schema_version": "2.1.0",\n'
+            '  "subfolders": {"excel": "1 - Excel Data Files"}\n'
+            "}\n"
+        ),
+        encoding="utf-8",
+    )
+    for condition_idx, condition in enumerate(conditions, start=1):
+        condition_root = excel_root / condition
+        condition_root.mkdir(parents=True)
+        for subject_idx, subject in enumerate(subjects, start=1):
+            _write_group_policy_workbook(
+                condition_root / f"{subject}_{condition}_Results.xlsx",
+                scale=subject_idx + condition_idx - 1,
+            )
+    return project_root, excel_root
+
+
+def _write_group_policy_workbook(
+    path: Path,
+    *,
+    scale: int,
+    frequency_step: float = 0.3,
+    peak_targets: set[float] | None = None,
+) -> None:
+    if peak_targets is None:
+        peak_targets = {1.2, 3.6, 7.2}
+    frequency_values = [
+        round(frequency_step * idx, 4)
+        for idx in range(0, int(round(10.2 / frequency_step)) + 1)
+    ]
+    fft_values = []
+    for idx, freq in enumerate(frequency_values):
+        base_noise = 1.2 if idx % 2 == 0 else 0.8
+        if any(abs(freq - target) <= frequency_step / 2 for target in peak_targets):
+            base_noise = 20.0
+        fft_values.append(base_noise)
+    full_fft = pd.DataFrame(
+        {
+            f"{freq:.4f}_Hz": [value, value, value]
+            for freq, value in zip(frequency_values, fft_values)
+        },
+        index=["O1", "O2", "FZ"],
+    )
+    full_fft.index.name = "Electrode"
+
+    bca = pd.DataFrame(
+        {
+            "1.2000_Hz": [1.0 * scale, 2.0 * scale, 0.5 * scale],
+            "2.4000_Hz": [100.0, 100.0, 100.0],
+            "3.6000_Hz": [0.5, 0.5, 0.1],
+            "4.8000_Hz": [100.0, 100.0, 100.0],
+            "6.0000_Hz": [100.0, 100.0, 100.0],
+            "7.2000_Hz": [1.0, 1.0, 0.1],
+        },
+        index=["O1", "O2", "FZ"],
+    )
+    bca.index.name = "Electrode"
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        bca.to_excel(writer, sheet_name="BCA (uV)")
+        full_fft.to_excel(writer, sheet_name="FullFFT Amplitude (uV)")

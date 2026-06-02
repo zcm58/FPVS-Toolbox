@@ -63,6 +63,14 @@ def sidebar_icon(kind: str, size: int = 20) -> QIcon:
         painter.drawLine(QPointF(size * 0.50, size * 0.72), QPointF(size * 0.50, size * 0.86))
         painter.drawLine(QPointF(size * 0.14, size * 0.50), QPointF(size * 0.28, size * 0.50))
         painter.drawLine(QPointF(size * 0.72, size * 0.50), QPointF(size * 0.86, size * 0.50))
+    elif kind == "scalp":
+        center = QPointF(size * 0.50, size * 0.50)
+        painter.drawEllipse(center, size * 0.34, size * 0.34)
+        painter.drawArc(QRectF(size * 0.28, size * 0.28, size * 0.44, size * 0.44), 25 * 16, 300 * 16)
+        painter.drawArc(QRectF(size * 0.38, size * 0.36, size * 0.24, size * 0.28), 25 * 16, 300 * 16)
+        _draw_dot(painter, QPointF(size * 0.36, size * 0.38), size * 0.035)
+        _draw_dot(painter, QPointF(size * 0.64, size * 0.38), size * 0.035)
+        _draw_dot(painter, QPointF(size * 0.50, size * 0.62), size * 0.035)
     elif kind == "image":
         painter.drawRoundedRect(QRectF(size * 0.18, size * 0.24, size * 0.64, size * 0.52), 2, 2)
         painter.drawEllipse(QPointF(size * 0.38, size * 0.40), size * 0.055, size * 0.055)

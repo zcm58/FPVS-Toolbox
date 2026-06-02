@@ -17,7 +17,12 @@ from Main_App.gui.widgets.cards import CardHeader, SectionCard, make_section_gri
 from Main_App.gui.widgets.forms import PathPickerRow, make_form_layout
 from Main_App.gui.widgets.labels import SubsectionHeaderLabel
 from Main_App.gui.widgets.status import StatusBanner
-from Main_App.gui.typography import apply_font_role, fixed_width_font, font_for_role
+from Main_App.gui.typography import (
+    apply_font_role,
+    fixed_width_font,
+    font_for_role,
+    matplotlib_font_kwargs,
+)
 
 __all__ = (
     "ActionRow",
@@ -40,6 +45,7 @@ __all__ = (
     "make_form_layout",
     "make_remove_button",
     "make_section_grid_layout",
+    "matplotlib_font_kwargs",
     "show_error",
     "show_info",
     "show_warning",

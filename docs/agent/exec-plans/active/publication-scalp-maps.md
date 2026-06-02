@@ -10,16 +10,17 @@ for this feature.
 
 ## Goal
 
-Add a publication-focused embedded tool that builds condition-level grand
-average scalp maps from FPVS Excel workbooks.
+Add a publication-focused embedded **Scalp Maps** tool that builds
+condition-level grand average BCA scalp maps from FPVS Excel workbooks.
 
-Required map families:
+Current MVP map family:
 
-- SNR scalp maps in the style requested for Stothart et al. (2020), with
-  0/near-0 values rendered as the low blue color.
 - BCA scalp maps in the style requested for David et al. (2025), with
   0/near-0 values rendered as the low blue color.
-- Z-score scalp maps for the David et al. (2025)-style reporting workflow.
+
+SNR and z-score scalp maps are intentionally out of scope for the current
+implementation. Do not add those map families unless a later plan explicitly
+restores them.
 
 The tool must export both publication figures and a rectangular source-data
 workbook so figures can be audited from workbook -> condition -> subject ->
@@ -27,14 +28,14 @@ electrode -> harmonic -> rendered value.
 
 ## Current Code Anchors
 
-Stats code that can be reused:
+Stats code that must be reused:
 
-- `src/Tools/Stats/analysis/full_snr.py`
-  - `compute_full_snr_from_amplitudes(...)` preserves the locked neighboring-bin
-    SNR behavior and is the only acceptable fallback when `FullSNR` is missing.
 - `src/Tools/Stats/analysis/dv_policy_group_significant.py`
   - `build_group_significant_harmonic_selection(...)` selects one common
     group-level significant harmonic list from `FullFFT Amplitude (uV)`.
+  - The new Scalp Maps tool must call this function for significant-harmonic
+    selection so it preserves the locked Stats calculation and can reuse the
+    existing in-memory/project significant-harmonic cache.
   - `GroupSignificantHarmonicSelection.to_metadata(...)` exposes selected
     harmonics, z scores, noise bins, and provenance-ready selection rows.
   - `_build_grand_average_amplitude(...)` is for Stats harmonic selection only:
@@ -57,13 +58,7 @@ Plot Generator code that can be reused carefully:
   - `_plot_scalp_map(...)` has useful MNE `plot_topomap` compatibility
     fallbacks.
   - `_SCALP_CMAP` is blue-green-red centered around 0 and is not acceptable for
-    SNR or BCA maps where 0/near-0 must be blue.
-- `src/Tools/Plot_Generator/data_collection.py`
-  - Existing line-plot data loading prefers `FullSNR` and falls back to
-    `FFT Amplitude (uV)`.
-  - Existing scalp loading requires `BCA (uV)` and `Z Score` and silently skips
-    maps after one warning. The new tool must surface missing sheets/columns as
-    per-workbook diagnostics.
+    BCA maps where 0/near-0 must be blue.
 
 Main App embedding anchors:
 
@@ -77,14 +72,12 @@ Existing tests:
 
 - `tests/plot_generator/test_plot_generator_scalp_utils.py` only covers
   duplicate electrode handling and cached BioSemi64 info reuse.
-- `tests/stats/analysis/test_full_snr_reference_equivalence.py` protects SNR
-  helper behavior.
 - `tests/stats/analysis/test_fixed_predefined_harmonics.py` protects the locked
   Stats group-significant harmonic policy.
 
 ## Scope Decision
 
-Build a separate embedded publication-map tool. Do not overload the current
+Build a separate embedded Scalp Maps tool. Do not overload the current
 Stats single-group analysis pipeline and do not add more behavior to the SNR
 line Plot Generator.
 
@@ -99,9 +92,10 @@ Suggested module split:
   diagnostics, and exported frame names.
 - `excel_inputs.py`: workbook discovery, exact frequency-column parsing, and
   sheet reads.
-- `metrics.py`: SNR, BCA, and z-score per-electrode value builders.
-- `harmonics.py`: manual list, highest-harmonic expansion, and optional Stats
-  group-significant selection integration.
+- `metrics.py`: BCA per-electrode value builder using Stats-selected
+  significant harmonics.
+- `harmonics.py`: optional helper surface for future harmonic modes. The active
+  GUI should use Stats group-significant harmonics only.
 - `scalp_io.py`: BioSemi64 alignment and source-data frame building.
 - `rendering.py`: MNE topomap rendering and metric-specific color scales.
 - `worker.py`: QObject worker or QRunnable wrapper with progress/error signals.
@@ -117,6 +111,11 @@ purpose-based and update this plan plus the nearest scoped `AGENTS.md`.
   the locked 1.2 Hz oddball spacing, exact-column requirements, noise-window
   bins, base-rate exclusion, candidate generation, or BCA summation in
   `Tools.Stats`.
+- Significant harmonics for Scalp Maps must come from the Stats group-significant
+  selection builder, not from workbook `Z Score`, SNR values, nearest-bin
+  matching, or a local copy of the z/noise algorithm.
+- If a matching Stats significant-harmonics cache exists in project metadata,
+  Scalp Maps must be able to reuse it through the Stats selection builder.
 - Do not use nearest-bin matching for Stats group-significant selection or
   selected BCA summation. For publication maps, only allow nearest-bin behavior
   if it is a user-visible option with exported provenance; default must be exact
@@ -149,39 +148,40 @@ Use these defaults unless the user explicitly changes the publication method:
 - Frequency columns: exact `"{freq:.4f}_Hz"` columns are preferred. Accept
   existing workbook labels with parseable numeric prefixes, but record the
   original column label in provenance.
-- Harmonic modes for MVP, in this order:
-  1. Single frequency in Hz.
-  2. Explicit comma-separated frequency list.
-  3. Highest oddball harmonic mode: expand locked 1.2 Hz multiples up to the
-     entered highest frequency and exclude base-rate overlaps using the Stats
-     base-overlap tolerance.
-  4. Stats selected significant harmonics: call
-     `build_group_significant_harmonic_selection(...)` or the Stats DV policy
-     facade and use its `selected_harmonics_hz`.
-- SNR map: read `FullSNR` at selected harmonics. If `FullSNR` is missing, read
-  `FullFFT Amplitude (uV)` and use `compute_full_snr_from_amplitudes(...)`.
+- Harmonic mode for MVP: Stats selected significant harmonics. Call
+  `build_group_significant_harmonic_selection(...)` and use its
+  `selected_harmonics_hz`; this is what enables cache reuse and method parity
+  with Stats.
 - BCA map: read `BCA (uV)` and sum selected harmonic columns per electrode
   before condition-level subject averaging.
-- Z-score map MVP: read workbook `Z Score` values at selected harmonics and
-  average within condition. If recomputed grand-average z maps are later added,
-  make them a separate mode with a distinct export label.
-- Multi-harmonic SNR and Z maps: do not silently collapse across harmonics.
-  Either render one map per harmonic or use an explicitly labeled aggregate mode.
 - Missing subject/electrode cells: ignore NaN values during subject averaging,
   keep per-electrode valid-subject counts, and export those counts.
 
 ## Color And Rendering Rules
 
-- SNR and BCA maps must use a sequential scale where `vmin=0` maps to blue by
-  default. Do not use `TwoSlopeNorm(vcenter=0)` for these maps.
+- BCA maps must use a sequential scale where `vmin=0` maps to blue by default.
+  Do not use `TwoSlopeNorm(vcenter=0)` for BCA maps.
+- The Scalp Maps GUI should source base frequency and BCA upper-limit from
+  Settings rather than asking users to duplicate those analysis defaults.
+- The Scalp Maps GUI should expose low/high BCA color selectors instead of
+  numeric color-bound controls. Defaults must preserve the current blue-to-red
+  BCA palette.
+- The Scalp Maps GUI may expose an optional fixed BCA range. It is checked by
+  default with limits of 0.0 and 0.4 BCA; when unchecked, BCA maps use
+  automatic scaling.
 - Export signed BCA source values even if the rendered BCA map clips negative
   values to the low blue color. The source workbook must make clipping visible.
-- Z-score maps may use a diverging scale only if the label and colorbar make the
-  interpretation clear. If using a threshold, show/export the threshold value.
-- Colorbar labels must be metric-specific: `SNR`, `BCA (uV)`, or `z score`.
+- Colorbar label must be `Baseline-corrected amplitude (µV)`.
+- Figure title, label, tick, and note fonts should come from shared component
+  typography roles rather than one-off Matplotlib defaults.
 - Save PNG and SVG. Default PNG should be at least 300 DPI.
-- Every exported figure title or metadata block must name condition, metric,
-  harmonic mode, selected harmonics, and subject count.
+- Exported figure titles should show only the condition name. Harmonic
+  provenance belongs in the source-data workbook and diagnostics, not in the
+  visible figure title.
+- Exported scalp-map figure widths should fit a standard journal page width:
+  assume US letter paper with 1-inch margins, giving a 6.5-inch usable width.
+- The tool may optionally export paired condition figures with two scalp maps
+  on one 6.5-inch-wide page using a shared BCA color scale.
 - Rendering failures from MNE must surface as worker errors or per-map
   diagnostics, not disappear behind a blank saved image.
 
@@ -198,15 +198,14 @@ Minimum outputs from the core:
   source sheet, source column, and raw value.
 - `grand_average_values`: one row per condition, electrode, metric, aggregate
   value, valid subject count, selected harmonics, and render value.
-- `diagnostics`: missing sheets, missing columns, missing montage electrodes,
-  empty maps, and fallback SNR calculations.
+- `diagnostics`: missing sheets, missing selected BCA columns, missing montage
+  electrodes, empty maps, Stats harmonic selection messages, and cache reuse.
 
 ### 2. Harmonic Selection
 
-Implement manual/single/highest-harmonic modes first. Then add Stats selected
-harmonics by calling the existing Stats selection path. When using Stats
-selection, pass the same selected participants, conditions, base frequency,
-ROIs, and max frequency that the user selected in the publication tool.
+Use Stats selected harmonics by calling the existing Stats selection path. Pass
+the selected participants, conditions, base frequency, all-scalp electrode
+scope, max frequency, and active project root so cache keys match Stats.
 
 Do not copy/paste the Stats z/noise algorithm into the new package.
 
@@ -231,11 +230,12 @@ Required controls:
 
 - Input project/folder display and refresh.
 - Conditions multi-select.
-- Metric checkboxes for SNR, BCA, and z score.
-- Harmonic mode selector and exact-frequency entry/highest-harmonic entry.
-- Base frequency display/input if needed for base-rate exclusion.
-- Color bounds per metric with an auto-scale option.
-- Output folder and format selection.
+- Read-only base frequency and BCA upper-limit values sourced from Settings for
+  Stats harmonic selection.
+- BCA low/high color selectors using the same Qt color-dialog pattern as the
+  SNR Plot Generator, defaulting to the current blue/red endpoints.
+- Optional fixed BCA range checkbox with lower/upper numeric controls.
+- Output folder, format selection, and paired-condition figure option.
 - Run/cancel buttons and visible diagnostics/status log.
 
 ### 6. Main App Registration
@@ -245,7 +245,7 @@ After the embedded page exists:
 - Add a public import surface for the tool.
 - Add an `_ensure_publication_maps_page(...)` method to `main_window.py`.
 - Add an `open_publication_maps(...)` method that switches the workspace stack.
-- Add a Workspace Tools sidebar button in `sidebar.py`.
+- Add a Workspace Tools sidebar button in `sidebar.py` labeled `Scalp Maps`.
 - Avoid subprocess launch plumbing unless packaging requires it; if required,
   mirror `tool_workflows.open_plot_generator(...)` and pass `FPVS_PROJECT_ROOT`.
 
@@ -256,31 +256,23 @@ Update docs only after behavior is settled:
 - New scoped `src/Tools/Publication_Maps/AGENTS.md`.
 - `docs/agent/architecture/statistics-tools.md` if ownership or tool layout
   changes.
-- User-facing docs for publication map inputs, harmonic modes, color scales,
+- User-facing docs for publication map inputs, Stats-selected harmonics, color scales,
   and exported workbook interpretation.
 
 ## Tests To Add
 
 Suggested focused tests:
 
-- `tests/publication_maps/test_harmonic_modes.py`
-  - exact list parsing;
-  - highest-harmonic expansion using locked 1.2 Hz spacing;
-  - base-rate overlap exclusion;
-  - Stats selected-harmonics integration with a stub selection.
 - `tests/publication_maps/test_excel_inputs.py`
   - condition workbook discovery;
-  - exact column parsing;
-  - missing `FullSNR`, `BCA (uV)`, or `Z Score` diagnostics.
+  - Excel temp-lock file exclusion.
 - `tests/publication_maps/test_metric_values.py`
-  - SNR from `FullSNR`;
-  - SNR fallback from `FullFFT Amplitude (uV)`;
+  - Stats group-significant harmonic selection and project-cache reuse;
   - BCA per-electrode harmonic summation;
-  - Z Score workbook mode;
   - valid-subject counts and NaN handling.
 - `tests/publication_maps/test_rendering.py`
   - BioSemi64 alignment;
-  - low values map to blue for SNR/BCA colormaps;
+  - low values map to blue for BCA colormap;
   - PNG/SVG non-empty output.
 - `tests/publication_maps/test_worker.py`
   - worker emits diagnostics and completion without widget access.
@@ -293,7 +285,7 @@ leave local verification to non-GUI tests and a visible manual smoke path.
 Use `.venv` in this checkout unless `.venv1` is restored.
 
 ```powershell
-.\.venv\Scripts\python.exe -m py_compile src\Tools\Publication_Maps\*.py
+Get-ChildItem src\Tools\Publication_Maps\*.py | ForEach-Object { .\.venv\Scripts\python.exe -m py_compile $_.FullName }
 .\.venv\Scripts\python.exe -m pytest tests\publication_maps -q
 .\.venv\Scripts\python.exe -m pytest tests\stats\analysis\test_full_snr_reference_equivalence.py tests\stats\analysis\test_fixed_predefined_harmonics.py -q
 .\.venv\Scripts\python.exe -m pytest tests\plot_generator\test_plot_generator_scalp_utils.py -q
@@ -306,19 +298,20 @@ Manual visible smoke path after GUI wiring:
 
 1. Launch FPVS Toolbox normally.
 2. Open a project with generated Excel workbooks.
-3. Open the Publication Scalp Maps page from Workspace Tools.
-4. Select one condition, SNR/BCA/z metrics, and one exact harmonic.
+3. Open the Scalp Maps page from Workspace Tools.
+4. Select one condition and confirm BCA harmonic settings.
 5. Generate maps.
 6. Confirm PNG/SVG figures and source-data workbook exist in the selected output
    folder.
 7. Confirm diagnostics report selected harmonics, subject counts, missing
-   electrodes, and any fallback SNR behavior.
+   electrodes, and cache reuse/source-workbook behavior.
 
 ## Completion Criteria
 
-- Condition-level grand averages are computed per electrode for SNR, BCA, and
-  z-score maps.
-- SNR and BCA maps render 0/near-0 values in blue.
+- Condition-level grand averages are computed per electrode for BCA scalp maps.
+- Significant harmonics are selected through the Stats group-significant path
+  and can reuse matching Stats project metadata caches.
+- BCA maps render 0/near-0 values in blue.
 - Exported source data traces every plotted value to condition, subject,
   electrode, metric, harmonic, source sheet, and source column.
 - The tool is embedded in the Main App without blocking the UI thread.
