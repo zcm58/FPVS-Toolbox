@@ -16,6 +16,7 @@ from Tools.Stats.analysis.dv_policy_settings import (
     _resolve_max_freq,
     normalize_dv_policy,
 )
+from Tools.Stats.data.group_harmonic_cache import project_processing_signature_hash
 
 __all__ = [
     "DVPolicySettings",
@@ -61,6 +62,7 @@ def _build_cache_key(
     settings: DVPolicySettings,
     max_freq: float | None,
     selection_conditions: Optional[List[str]],
+    project_processing_hash: str | None,
 ) -> tuple:
     """Handle the build cache key step for the Stats workflow."""
     return (
@@ -79,6 +81,7 @@ def _build_cache_key(
         float(settings.group_significant_z_threshold),
         settings.group_significant_electrode_scope,
         float(settings.group_significant_oddball_frequency_hz),
+        project_processing_hash,
     )
 
 
@@ -95,6 +98,7 @@ def prepare_summed_bca_data(
     dv_metadata: Optional[dict[str, object]] = None,
     max_freq: float | None = None,
     selection_conditions: Optional[List[str]] = None,
+    project_root: str | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     """Handle the prepare summed bca data step for the Stats workflow."""
     settings = normalize_dv_policy(dv_policy)
@@ -102,6 +106,7 @@ def prepare_summed_bca_data(
     meta_target: dict[str, object] | None = dv_metadata if dv_metadata is not None else {}
     if meta_target is not None and resolved_max_freq is not None:
         meta_target["max_frequency_hz"] = float(resolved_max_freq)
+    processing_hash = project_processing_signature_hash(project_root)
     cache_key = None
     if provenance_map is None:
         cache_key = _build_cache_key(
@@ -113,6 +118,7 @@ def prepare_summed_bca_data(
             settings=settings,
             max_freq=resolved_max_freq,
             selection_conditions=selection_conditions,
+            project_processing_hash=processing_hash,
         )
         with _DV_DATA_CACHE_LOCK:
             cached = _DV_DATA_CACHE.get(cache_key)
@@ -133,6 +139,7 @@ def prepare_summed_bca_data(
             settings=settings,
             dv_metadata=meta_target,
             max_freq=resolved_max_freq,
+            project_root=project_root,
         )
     else:
         data = _prepare_fixed_predefined_bca_data(

@@ -8,6 +8,7 @@ from Tools.Stats.io.stats_ready_export import (
     HARMONIC_SELECTION_COLUMNS,
     HARMONIC_SELECTION_SHEET,
     LONG_FORMAT_SHEET,
+    SELECTION_SUMMARY_SHEET,
     WIDE_FORMAT_SHEET,
     build_stats_ready_frames,
     prepare_stats_ready_export,
@@ -113,8 +114,13 @@ def test_build_stats_ready_frames_preserves_canonical_long_and_group_data():
     assert set(frames) == {
         LONG_FORMAT_SHEET,
         WIDE_FORMAT_SHEET,
+        SELECTION_SUMMARY_SHEET,
         HARMONIC_SELECTION_SHEET,
     }
+    summary_df = frames[SELECTION_SUMMARY_SHEET]
+    summary = dict(zip(summary_df["key"], summary_df["value"]))
+    assert summary["selected_harmonics_hz"] == "6.0;12.0"
+    assert summary["highest_selected_harmonic_hz"] == pytest.approx(12.0)
 
 
 def test_build_stats_ready_frames_requires_complete_group_labels_when_groups_exist():
@@ -211,6 +217,8 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
         "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
         "harmonic_policy_label": "Group-level significant oddball harmonics from a grand-averaged amplitude spectrum",
         "selected_harmonics_hz": [1.2, 3.6, 7.2],
+        "highest_significant_harmonic_hz": 7.2,
+        "highest_significant_harmonic_index": 6,
         "selection_z_by_harmonic": {1.2: 5.1, 2.4: 0.4, 3.6: 4.2, 6.0: 9.0, 7.2: 3.1},
         "excluded_base_harmonics_hz": [6.0],
         "selection_scope": "group_level_all_scalp_electrodes_all_selected_conditions",
@@ -293,6 +301,14 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
         "roi",
         "summed_bca_uv",
     ]
+    assert "highest_significant_harmonic_hz" not in long_df.columns
+    assert "highest_significant_harmonic_index" not in long_df.columns
+
+    summary_df = frames[SELECTION_SUMMARY_SHEET]
+    summary = dict(zip(summary_df["key"], summary_df["value"]))
+    assert summary["selected_harmonics_hz"] == "1.2;3.6;7.2"
+    assert summary["highest_significant_harmonic_hz"] == pytest.approx(7.2)
+    assert summary["highest_significant_harmonic_index"] == 6
 
     selection_df = frames[HARMONIC_SELECTION_SHEET]
     selected_row = selection_df[selection_df["requested_harmonic_hz"] == 1.2].iloc[0]
@@ -354,6 +370,7 @@ def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook
         assert workbook.sheet_names == [
             LONG_FORMAT_SHEET,
             WIDE_FORMAT_SHEET,
+            SELECTION_SUMMARY_SHEET,
             HARMONIC_SELECTION_SHEET,
         ]
         assert WIDE_FORMAT_SHEET in workbook.sheet_names

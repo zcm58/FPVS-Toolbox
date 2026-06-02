@@ -110,6 +110,22 @@ def _write_manifest_if_changed(manifest_path: Path, data: Dict[str, Any]) -> boo
     return True
 
 
+def _preserve_disk_tools_metadata(manifest_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
+    if not manifest_path.exists():
+        return data
+    try:
+        current = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return data
+    if not isinstance(current, Mapping):
+        return data
+    current_tools = current.get("tools")
+    if not isinstance(current_tools, Mapping):
+        return data
+    data["tools"] = dict(current_tools)
+    return data
+
+
 class Project:
     """
     Project model for PySide6 GUI.
@@ -530,6 +546,8 @@ class Project:
             data["participants"] = participants_out
         else:
             data.pop("participants", None)
+
+        data = _preserve_disk_tools_metadata(manifest_path, data)
 
         # Keep in-memory manifest consistent for subsequent operations.
         self.manifest = data

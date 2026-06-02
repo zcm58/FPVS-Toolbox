@@ -115,6 +115,8 @@ from Tools.Stats.analysis.dv_policies import (
     FIXED_PREDEFINED_POLICY_NAME,
     GROUP_SIGNIFICANT_POLICY_NAME,
 )
+from Tools.Stats.analysis.dv_policy_group_significant import clear_group_significant_selection_cache
+from Tools.Stats.data.group_harmonic_cache import clear_cached_group_harmonic_selections
 from Tools.Stats.qc.stats_outlier_exclusion import (
     build_flagged_details_map,
     build_flagged_participant_summary,

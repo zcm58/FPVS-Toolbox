@@ -122,6 +122,22 @@ class StatsWindowExportsMixin:
                             "value": ", ".join(f"{float(freq):g}" for freq in included),
                         },
                         {
+                            "key": "Highest significant harmonic (Hz)",
+                            "value": group_meta.get("highest_significant_harmonic_hz", ""),
+                        },
+                        {
+                            "key": "Highest significant harmonic index",
+                            "value": group_meta.get("highest_significant_harmonic_index", ""),
+                        },
+                        {
+                            "key": "Selection cache source",
+                            "value": group_meta.get("selection_cache_source", ""),
+                        },
+                        {
+                            "key": "Selection cache saved at",
+                            "value": group_meta.get("selection_cache_saved_at", ""),
+                        },
+                        {
                             "key": "Selection scope",
                             "value": group_meta.get("selection_scope", ""),
                         },
@@ -250,6 +266,7 @@ class StatsWindowExportsMixin:
             output_path=str(output_path),
             manual_excluded_pids=sorted(self.manual_excluded_pids),
             max_freq=max_freq,
+            project_root=str(self._project_path),
             _op="stats_ready_export",
         )
         self._track_stats_ready_worker(worker)
@@ -287,6 +304,7 @@ class StatsWindowExportsMixin:
             return
 
         workbook_path = Path(path)
+        self._sync_parent_project_manifest_tools()
         self._set_last_export_path(str(workbook_path))
         self.append_log(
             "General",

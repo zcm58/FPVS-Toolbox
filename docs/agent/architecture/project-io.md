@@ -17,6 +17,13 @@ FPVS Toolbox uses a strict hybrid settings model:
 - App-level settings use `FPVS_CONFIG_HOME` when set, otherwise the user-writable app config root under `%LOCALAPPDATA%\FPVS Toolbox\settings\` on Windows.
 - `Main_App.Shared.settings_manager.SettingsManager` is the single active writer for app-level settings.
 - Project-specific settings stay in the active project's `project.json`.
+- Stats may store reusable analysis metadata in `project.json` under
+  `tools.stats`. The group-significant harmonics cache lives at
+  `tools.stats.group_significant_harmonics_cache`, is keyed by selected
+  participants/conditions, source workbook fingerprints, Stats harmonic
+  settings, and the current project preprocessing/event-map signature, and must
+  be invalidated when any of those inputs change. Project saves must preserve
+  this namespace when Stats updates it directly from a worker.
 - v2.1 multi-group projects store canonical group definitions in
   `project.json` under `groups`. Keys are stable readable `group_id` slugs;
   entries carry `label`, `folder_name`, and `raw_input_folder`. Participant

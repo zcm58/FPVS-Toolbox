@@ -503,6 +503,7 @@ class StatsWindowPipelineMixin:
                     },
                 )
                 finished_cb(pid, sid, payload)
+                self._sync_parent_project_manifest_tools()
                 logger.info(
                     "stats_view_finished_after_controller",
                     extra={
@@ -784,6 +785,7 @@ class StatsWindowPipelineMixin:
                     qc_config=qc_payload,
                     qc_state=qc_state,
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
+                    project_root=str(self._project_path),
                 )
                 if os.getenv("FPVS_RM_ANOVA_DIAG", "0").strip() == "1":
                     kwargs["results_dir"] = self._ensure_results_dir()
@@ -808,6 +810,7 @@ class StatsWindowPipelineMixin:
                     qc_config=qc_payload,
                     qc_state=qc_state,
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
+                    project_root=str(self._project_path),
                 )
                 def handler(payload):
                     """Handle the handler step for the Stats workflow."""
@@ -830,6 +833,7 @@ class StatsWindowPipelineMixin:
                     qc_config=qc_payload,
                     qc_state=qc_state,
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
+                    project_root=str(self._project_path),
                 )
                 def handler(payload):
                     """Handle the handler step for the Stats workflow."""
@@ -852,6 +856,7 @@ class StatsWindowPipelineMixin:
                     qc_config=qc_payload,
                     qc_state=qc_state,
                     manual_excluded_pids=sorted(self.manual_excluded_pids),
+                    project_root=str(self._project_path),
                 )
 
                 def handler(payload):

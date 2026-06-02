@@ -210,11 +210,57 @@ class StatsWindowExclusionsMixin:
         note = getattr(self, "group_significant_note", None)
         if note is not None:
             note.setVisible(not visible)
+        recalc_btn = getattr(self, "recalculate_harmonics_btn", None)
+        if recalc_btn is not None:
+            recalc_btn.setVisible(not visible)
 
     def _clear_fixed_predefined_preview(self) -> None:
         table = getattr(self, "fixed_predefined_preview_table", None)
         if table is not None:
             table.setRowCount(0)
+
+    def on_recalculate_harmonics_clicked(self) -> None:
+        """Clear saved group-significant harmonic metadata for this project."""
+        clear_group_significant_selection_cache()
+        project_root = getattr(self, "_project_path", None)
+        try:
+            cleared = clear_cached_group_harmonic_selections(project_root)
+            self._sync_parent_project_manifest_tools()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stats_clear_group_harmonic_cache_failed", exc_info=True)
+            QMessageBox.warning(
+                self,
+                "Recalculate Harmonics",
+                f"Saved harmonics could not be cleared: {exc}",
+            )
+            return
+        if cleared:
+            message = (
+                f"Cleared {cleared} saved significant-harmonics selection(s); "
+                "the next group-significant run will recalculate."
+            )
+        else:
+            message = "No saved significant-harmonics selections were found for this project."
+        self.append_log("General", message)
+        self._set_status(message)
+
+    def _sync_parent_project_manifest_tools(self) -> None:
+        """Keep embedded Project.manifest tools metadata aligned after Stats writes."""
+        parent = self.parent()
+        project = getattr(parent, "currentProject", None)
+        manifest = getattr(project, "manifest", None)
+        project_root = getattr(project, "project_root", None)
+        if not isinstance(manifest, dict) or project_root in (None, ""):
+            return
+        manifest_path = Path(project_root) / "project.json"
+        try:
+            disk_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            logger.debug("stats_project_manifest_tools_sync_skipped", exc_info=True)
+            return
+        tools = disk_manifest.get("tools") if isinstance(disk_manifest, dict) else None
+        if isinstance(tools, dict):
+            manifest["tools"] = tools
 
     def _update_fixed_predefined_preview_table(self, payload: dict[str, object]) -> None:
         table = getattr(self, "fixed_predefined_preview_table", None)

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
 from typing import Callable, Dict, List, Optional, Sequence
@@ -20,6 +20,12 @@ from Tools.Stats.analysis.dv_policy_settings import (
     LOCKED_ODDBALL_FREQUENCY_HZ,
 )
 from Tools.Stats.analysis.stats_analysis import _current_rois_map
+from Tools.Stats.data.group_harmonic_cache import (
+    GroupHarmonicCacheRequest,
+    build_group_harmonic_cache_request,
+    lookup_cached_group_harmonic_selection,
+    save_cached_group_harmonic_selection,
+)
 from Tools.Stats.io.excel_io import safe_read_excel
 
 logger = logging.getLogger("Tools.Stats")
@@ -91,8 +97,16 @@ class GroupSignificantHarmonicSelection:
     matching_tolerance_hz: float
     noise_window_bins: int
     rows: list[GroupSignificantHarmonicRow]
+    selection_cache_source: str = "computed_this_run"
+    selection_cache_saved_at: str | None = None
+    selection_cache_key: str | None = None
 
     def to_metadata(self) -> dict[str, object]:
+        highest_meta = _highest_selected_harmonic_metadata(
+            self.selected_harmonics_hz,
+            oddball_hz=self.oddball_frequency_hz,
+            prefix="highest_significant_harmonic",
+        )
         return {
             "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
             "harmonic_policy_label": GROUP_SIGNIFICANT_POLICY_LABEL,
@@ -117,6 +131,7 @@ class GroupSignificantHarmonicSelection:
             "harmonic_domain_hz": list(self.harmonic_domain_hz),
             "common_harmonics_hz": list(self.selected_harmonics_hz),
             "selected_harmonics_hz": list(self.selected_harmonics_hz),
+            **highest_meta,
             "selected_columns": list(self.selected_columns),
             "selected_bin_indices": list(self.selected_bin_indices),
             "selection_z_by_harmonic": dict(self.z_by_harmonic),
@@ -151,6 +166,9 @@ class GroupSignificantHarmonicSelection:
                 }
                 for row in self.rows
             ],
+            "selection_cache_source": self.selection_cache_source,
+            "selection_cache_saved_at": self.selection_cache_saved_at,
+            "selection_cache_key": self.selection_cache_key,
             "methods_summary": _methods_summary(self),
         }
 
@@ -184,6 +202,7 @@ class GroupSignificantSelectionCacheKey:
     max_freq_hz: float | None
     z_threshold: float
     electrode_scope: str
+    project_processing_signature_hash: str | None = None
 
 
 def clear_group_significant_selection_cache() -> None:
@@ -248,6 +267,7 @@ def _group_significant_selection_cache_key(
     base_frequency_hz: float,
     max_freq: float | None,
     settings: DVPolicySettings,
+    project_processing_signature_hash: str | None = None,
 ) -> GroupSignificantSelectionCacheKey:
     subject_key = tuple(str(subject) for subject in subjects)
     condition_key = tuple(str(condition) for condition in conditions)
@@ -274,7 +294,261 @@ def _group_significant_selection_cache_key(
         max_freq_hz=float(max_freq) if max_freq is not None else None,
         z_threshold=float(settings.group_significant_z_threshold),
         electrode_scope=str(settings.group_significant_electrode_scope),
+        project_processing_signature_hash=project_processing_signature_hash,
     )
+
+
+def _log_project_cache_warnings(
+    cache_request: GroupHarmonicCacheRequest | None,
+    log_func: Callable[[str], None],
+) -> None:
+    if cache_request is None:
+        return
+    for warning in cache_request.ledger_warnings:
+        log_func(f"Warning: {warning}")
+
+
+def _load_project_cached_selection(
+    cache_request: GroupHarmonicCacheRequest | None,
+    log_func: Callable[[str], None],
+) -> GroupSignificantHarmonicSelection | None:
+    lookup = lookup_cached_group_harmonic_selection(cache_request)
+    if lookup.hit is None:
+        reason = lookup.reason
+        if reason and reason != "No saved group-significant harmonics.":
+            log_func(f"Project harmonic cache miss: {reason}")
+        return None
+    try:
+        selection = group_significant_selection_from_metadata(
+            lookup.hit.selection_metadata,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log_func(
+            "Project harmonic cache entry could not be read; recalculating "
+            f"group-level significant harmonics. Error: {exc}"
+        )
+        logger.warning("stats_group_harmonics_project_cache_invalid", exc_info=True)
+        return None
+    return replace(
+        selection,
+        selection_cache_source="saved_project_metadata",
+        selection_cache_saved_at=lookup.hit.saved_at,
+        selection_cache_key=lookup.hit.cache_key,
+    )
+
+
+def _save_project_cached_selection(
+    cache_request: GroupHarmonicCacheRequest | None,
+    selection: GroupSignificantHarmonicSelection,
+    log_func: Callable[[str], None],
+) -> GroupSignificantHarmonicSelection:
+    if cache_request is None:
+        return selection
+    try:
+        saved_at = save_cached_group_harmonic_selection(
+            cache_request,
+            selection.to_metadata(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log_func(
+            "Warning: could not save selected significant harmonics to project metadata; "
+            f"future exports may need to recalculate. Error: {exc}"
+        )
+        logger.warning("stats_group_harmonics_project_cache_save_failed", exc_info=True)
+        return selection
+    if not saved_at:
+        return selection
+    log_func(
+        "Saved group-level significant harmonics to project metadata for future exports."
+    )
+    return replace(
+        selection,
+        selection_cache_source="computed_this_run_saved_project_metadata",
+        selection_cache_saved_at=saved_at,
+        selection_cache_key=cache_request.cache_key,
+    )
+
+
+def group_significant_selection_from_metadata(
+    metadata: Dict[str, object],
+) -> GroupSignificantHarmonicSelection:
+    """Rehydrate a saved group-significant selection from manifest metadata."""
+
+    if not isinstance(metadata, dict):
+        raise TypeError("selection metadata must be a dictionary")
+    selected_harmonics = _metadata_float_list(metadata.get("selected_harmonics_hz"))
+    if not selected_harmonics:
+        raise ValueError("saved selection contains no selected harmonics")
+    oddball = _metadata_float(
+        metadata.get("oddball_frequency_hz"),
+        default=LOCKED_ODDBALL_FREQUENCY_HZ,
+    )
+    rows = [
+        _group_significant_row_from_metadata(row_data)
+        for row_data in (metadata.get("selection_rows") or [])
+        if isinstance(row_data, dict)
+    ]
+    selected_columns = [
+        str(column)
+        for column in _metadata_sequence(metadata.get("selected_columns"))
+        if str(column).strip()
+    ]
+    if not selected_columns:
+        selected_columns = [f"{freq:.4f}_Hz" for freq in selected_harmonics]
+    return GroupSignificantHarmonicSelection(
+        harmonic_domain_hz=_metadata_float_list(metadata.get("harmonic_domain_hz")),
+        selected_harmonics_hz=selected_harmonics,
+        selected_columns=selected_columns,
+        selected_bin_indices=_metadata_int_list(metadata.get("selected_bin_indices")),
+        z_by_harmonic=_metadata_float_map(metadata.get("selection_z_by_harmonic")),
+        excluded_base_harmonics_hz=_metadata_float_list(
+            metadata.get("excluded_base_harmonics_hz")
+        ),
+        oddball_frequency_hz=oddball,
+        base_frequency_hz=_metadata_float(metadata.get("base_frequency_hz"), default=np.nan),
+        z_threshold=_metadata_float(metadata.get("z_threshold"), default=np.nan),
+        electrode_scope=str(metadata.get("electrode_scope") or ""),
+        selection_scope=str(metadata.get("selection_scope") or ""),
+        selection_conditions=[
+            str(value) for value in _metadata_sequence(metadata.get("selection_conditions"))
+        ],
+        selection_subjects=[
+            str(value) for value in _metadata_sequence(metadata.get("selection_subjects"))
+        ],
+        selection_spectra_count=_metadata_int(metadata.get("selection_spectra_count"), default=0),
+        selection_electrode_count=_metadata_int(
+            metadata.get("selection_electrode_count"),
+            default=0,
+        ),
+        frequency_resolution_hz=_metadata_optional_float(
+            metadata.get("frequency_resolution_hz")
+        ),
+        base_overlap_tolerance_hz=_metadata_float(
+            metadata.get("base_overlap_tolerance_hz"),
+            default=GROUP_SIGNIFICANT_BASE_TOLERANCE_HZ,
+        ),
+        matching_tolerance_hz=_metadata_float(
+            metadata.get("matching_tolerance_hz"),
+            default=GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ,
+        ),
+        noise_window_bins=_metadata_int(
+            metadata.get("noise_window_bins"),
+            default=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
+        ),
+        rows=rows,
+        selection_cache_source=str(metadata.get("selection_cache_source") or "saved_project_metadata"),
+        selection_cache_saved_at=(
+            str(metadata.get("selection_cache_saved_at"))
+            if metadata.get("selection_cache_saved_at") not in (None, "")
+            else None
+        ),
+        selection_cache_key=(
+            str(metadata.get("selection_cache_key"))
+            if metadata.get("selection_cache_key") not in (None, "")
+            else None
+        ),
+    )
+
+
+def _group_significant_row_from_metadata(row_data: dict[str, object]) -> GroupSignificantHarmonicRow:
+    return GroupSignificantHarmonicRow(
+        harmonic_index=_metadata_int(row_data.get("harmonic_index"), default=0),
+        target_frequency_hz=_metadata_float(row_data.get("target_frequency_hz"), default=np.nan),
+        matched_frequency_hz=_metadata_optional_float(row_data.get("matched_frequency_hz")),
+        matched_column=(
+            str(row_data.get("matched_column"))
+            if row_data.get("matched_column") not in (None, "")
+            else None
+        ),
+        matched_bin_index=_metadata_optional_int(row_data.get("matched_bin_index")),
+        z_score=_metadata_optional_float(row_data.get("z_score")),
+        selected=bool(row_data.get("selected")),
+        excluded_base_rate=bool(row_data.get("excluded_base_rate")),
+        exclusion_reason=str(row_data.get("exclusion_reason") or ""),
+        warning=str(row_data.get("warning") or ""),
+        target_amplitude_uv=_metadata_optional_float(row_data.get("target_amplitude_uv")),
+        noise_mean_uv=_metadata_optional_float(row_data.get("noise_mean_uv")),
+        noise_std_uv=_metadata_optional_float(row_data.get("noise_std_uv")),
+        noise_bin_indices=tuple(_metadata_int_list(row_data.get("noise_bin_indices"))),
+        noise_frequencies_hz=tuple(_metadata_float_list(row_data.get("noise_frequencies_hz"))),
+        noise_amplitudes_uv=tuple(_metadata_float_list(row_data.get("noise_amplitudes_uv"))),
+        noise_used_bin_indices=tuple(
+            _metadata_int_list(row_data.get("noise_used_bin_indices"))
+        ),
+        noise_used_frequencies_hz=tuple(
+            _metadata_float_list(row_data.get("noise_used_frequencies_hz"))
+        ),
+        noise_used_amplitudes_uv=tuple(
+            _metadata_float_list(row_data.get("noise_used_amplitudes_uv"))
+        ),
+    )
+
+
+def _metadata_sequence(value: object) -> list[object]:
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return []
+
+
+def _metadata_float(value: object, *, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return float(number) if np.isfinite(number) else float(default)
+
+
+def _metadata_optional_float(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return float(number) if np.isfinite(number) else None
+
+
+def _metadata_int(value: object, *, default: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return int(default)
+    return int(number)
+
+
+def _metadata_optional_int(value: object) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _metadata_float_list(value: object) -> list[float]:
+    out: list[float] = []
+    for item in _metadata_sequence(value):
+        number = _metadata_optional_float(item)
+        if number is not None:
+            out.append(float(number))
+    return out
+
+
+def _metadata_int_list(value: object) -> list[int]:
+    out: list[int] = []
+    for item in _metadata_sequence(value):
+        number = _metadata_optional_int(item)
+        if number is not None:
+            out.append(int(number))
+    return out
+
+
+def _metadata_float_map(value: object) -> dict[float, float]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[float, float] = {}
+    for raw_key, raw_value in value.items():
+        key = _metadata_optional_float(raw_key)
+        map_value = _metadata_optional_float(raw_value)
+        if key is not None and map_value is not None:
+            out[float(key)] = float(map_value)
+    return out
 
 
 def _workbook_signature(
@@ -325,8 +599,19 @@ def build_group_significant_harmonic_selection(
     log_func: Callable[[str], None],
     settings: DVPolicySettings,
     max_freq: float | None = None,
+    project_root: str | Path | None = None,
 ) -> GroupSignificantHarmonicSelection:
     started = perf_counter()
+    cache_request = build_group_harmonic_cache_request(
+        project_root=project_root,
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_frequency_hz=base_frequency_hz,
+        max_freq_hz=max_freq,
+        settings=settings,
+    )
+    _log_project_cache_warnings(cache_request, log_func)
     cache_key = _group_significant_selection_cache_key(
         subjects=subjects,
         conditions=conditions,
@@ -335,6 +620,11 @@ def build_group_significant_harmonic_selection(
         base_frequency_hz=base_frequency_hz,
         max_freq=max_freq,
         settings=settings,
+        project_processing_signature_hash=(
+            cache_request.project_processing_signature_hash
+            if cache_request is not None
+            else None
+        ),
     )
     cached = _get_cached_group_significant_selection(cache_key)
     if cached is not None:
@@ -355,6 +645,26 @@ def build_group_significant_harmonic_selection(
             },
         )
         return cached
+    project_cached = _load_project_cached_selection(cache_request, log_func)
+    if project_cached is not None:
+        elapsed = perf_counter() - started
+        log_func(
+            "[PERF] Project harmonic cache hit: "
+            f"using {len(project_cached.selected_harmonics_hz)} saved harmonics "
+            f"for {len(subjects) * len(conditions)} planned workbooks "
+            f"in {elapsed:.2f}s."
+        )
+        logger.info(
+            "stats_group_harmonics_project_cache_hit",
+            extra={
+                "elapsed_s": elapsed,
+                "subjects": len(subjects),
+                "conditions": len(conditions),
+                "selected_harmonics": project_cached.selected_harmonics_hz,
+            },
+        )
+        _store_group_significant_selection(cache_key, project_cached)
+        return project_cached
     log_func(
         "[PERF] Group harmonic selection cache miss: "
         "building selection from FullFFT amplitude spectra."
@@ -623,6 +933,7 @@ def build_group_significant_harmonic_selection(
         noise_window_bins=GROUP_SIGNIFICANT_NOISE_WINDOW_BINS,
         rows=rows,
     )
+    selection = _save_project_cached_selection(cache_request, selection, log_func)
     _store_group_significant_selection(cache_key, selection)
     return selection
 
@@ -639,6 +950,7 @@ def _prepare_group_significant_bca_data(
     settings: DVPolicySettings,
     dv_metadata: Optional[dict[str, object]] = None,
     max_freq: float | None = None,
+    project_root: str | Path | None = None,
 ) -> Optional[Dict[str, Dict[str, Dict[str, float]]]]:
     if not subjects or not subject_data:
         log_func("No subject data. Scan folder first.")
@@ -659,11 +971,28 @@ def _prepare_group_significant_bca_data(
         log_func=log_func,
         settings=settings,
         max_freq=max_freq,
+        project_root=project_root,
     )
     log_func(
         "Group-level significant harmonics selected: "
         + ", ".join(f"{freq:g} Hz" for freq in selection.selected_harmonics_hz)
     )
+    highest_meta = _highest_selected_harmonic_metadata(
+        selection.selected_harmonics_hz,
+        oddball_hz=selection.oddball_frequency_hz,
+        prefix="highest_significant_harmonic",
+    )
+    highest_hz = highest_meta.get("highest_significant_harmonic_hz")
+    highest_index = highest_meta.get("highest_significant_harmonic_index")
+    if highest_hz is not None and np.isfinite(float(highest_hz)):
+        if highest_index is not None:
+            log_func(
+                "Highest significant oddball harmonic: "
+                f"{float(highest_hz):g} Hz (index {int(highest_index)})."
+            )
+        else:
+            log_func(f"Highest significant oddball harmonic: {float(highest_hz):g} Hz.")
+
     log_func(
         "[PERF] Group harmonic selection phase complete in "
         f"{perf_counter() - started:.2f}s."
@@ -1330,6 +1659,55 @@ def _aggregate_bca_for_all_rois(
         },
     )
     return values, provenance
+
+
+def _finite_harmonic_values(values: Sequence[object]) -> list[float]:
+    finite_values: list[float] = []
+    if values is None:
+        return finite_values
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(number):
+            finite_values.append(number)
+    return finite_values
+
+
+def _harmonic_index_for_frequency(frequency_hz: float, oddball_hz: float) -> int | None:
+    try:
+        frequency = float(frequency_hz)
+        oddball = float(oddball_hz)
+    except (TypeError, ValueError):
+        return None
+    if not (np.isfinite(frequency) and np.isfinite(oddball)) or frequency <= 0 or oddball <= 0:
+        return None
+    harmonic_index = int(round(frequency / oddball))
+    if harmonic_index <= 0:
+        return None
+    if abs(float(harmonic_index * oddball) - frequency) > GROUP_SIGNIFICANT_MATCHING_TOLERANCE_HZ:
+        return None
+    return harmonic_index
+
+
+def _highest_selected_harmonic_metadata(
+    values: Sequence[object],
+    *,
+    oddball_hz: float,
+    prefix: str,
+) -> dict[str, object]:
+    finite_values = _finite_harmonic_values(values)
+    if not finite_values:
+        return {
+            f"{prefix}_hz": np.nan,
+            f"{prefix}_index": None,
+        }
+    highest_hz = float(max(finite_values))
+    return {
+        f"{prefix}_hz": highest_hz,
+        f"{prefix}_index": _harmonic_index_for_frequency(highest_hz, oddball_hz),
+    }
 
 
 def _empty_provenance(

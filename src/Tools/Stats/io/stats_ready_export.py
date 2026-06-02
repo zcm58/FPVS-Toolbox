@@ -25,6 +25,11 @@ SINGLE_GROUP_LABEL = "single_group"
 
 LONG_FORMAT_SHEET = "Long_Format"
 WIDE_FORMAT_SHEET = "Wide_Format"
+SELECTION_SUMMARY_SHEET = "Selection_Summary"
+SELECTION_SUMMARY_COLUMNS = [
+    "key",
+    "value",
+]
 HARMONIC_SELECTION_SHEET = "Harmonic_Selection"
 HARMONIC_SELECTION_COLUMNS = [
     "harmonic_policy",
@@ -287,8 +292,145 @@ def build_stats_ready_frames(
     return {
         LONG_FORMAT_SHEET: long_df,
         WIDE_FORMAT_SHEET: jasp_wide_df,
+        SELECTION_SUMMARY_SHEET: _build_selection_summary_frame(dv_metadata),
         HARMONIC_SELECTION_SHEET: _build_harmonic_selection_frame(dv_metadata),
     }
+
+
+def _build_selection_summary_frame(dv_metadata: Mapping[str, object]) -> pd.DataFrame:
+    fixed_meta = _common_fixed_predefined_meta(dv_metadata)
+    group_meta = _common_group_significant_meta(dv_metadata)
+    if group_meta:
+        rows = _group_significant_summary_rows(group_meta)
+    elif fixed_meta:
+        rows = _fixed_predefined_summary_rows(fixed_meta)
+    else:
+        rossion_meta = _common_rossion_meta(dv_metadata)
+        rows = _legacy_rossion_summary_rows(rossion_meta) if rossion_meta else []
+    return pd.DataFrame(rows, columns=SELECTION_SUMMARY_COLUMNS)
+
+
+def _summary_row(key: str, value: object) -> dict[str, object]:
+    return {"key": key, "value": _summary_value(value)}
+
+
+def _summary_value(value: object) -> object:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, set, Mapping)):
+        return _sequence_cell(value)
+    return value
+
+
+def _highest_harmonic_hz(values: object) -> float:
+    if not isinstance(values, (list, tuple, set)):
+        return math.nan
+    numeric = [_numeric_or_nan(value) for value in values]
+    finite = [value for value in numeric if math.isfinite(value)]
+    return max(finite) if finite else math.nan
+
+
+def _harmonic_index(frequency_hz: object, oddball_hz: object) -> int | float:
+    frequency = _numeric_or_nan(frequency_hz)
+    oddball = _numeric_or_nan(oddball_hz)
+    if (
+        not (math.isfinite(frequency) and math.isfinite(oddball))
+        or frequency <= 0
+        or oddball <= 0
+    ):
+        return math.nan
+    return int(round(frequency / oddball))
+
+
+def _group_significant_summary_rows(group_meta: Mapping[str, object]) -> list[dict[str, object]]:
+    selected = group_meta.get("selected_harmonics_hz", [])
+    highest_hz = group_meta.get("highest_significant_harmonic_hz")
+    if highest_hz in (None, ""):
+        highest_hz = _highest_harmonic_hz(selected)
+    highest_index = group_meta.get("highest_significant_harmonic_index")
+    if highest_index in (None, ""):
+        highest_index = _harmonic_index(highest_hz, group_meta.get("oddball_frequency_hz"))
+    rows = [
+        _summary_row(
+            "harmonic_policy",
+            group_meta.get("harmonic_policy", GROUP_SIGNIFICANT_POLICY_ID),
+        ),
+        _summary_row("harmonic_policy_label", group_meta.get("harmonic_policy_label", "")),
+        _summary_row("selection_scope", group_meta.get("selection_scope", "")),
+        _summary_row("base_frequency_hz", group_meta.get("base_frequency_hz")),
+        _summary_row("oddball_frequency_hz", group_meta.get("oddball_frequency_hz")),
+        _summary_row("z_threshold", group_meta.get("z_threshold")),
+        _summary_row("selected_harmonics_hz", selected),
+        _summary_row("highest_significant_harmonic_hz", highest_hz),
+        _summary_row("highest_significant_harmonic_index", highest_index),
+        _summary_row("selection_cache_source", group_meta.get("selection_cache_source", "")),
+        _summary_row("selection_cache_saved_at", group_meta.get("selection_cache_saved_at", "")),
+        _summary_row("selection_cache_key", group_meta.get("selection_cache_key", "")),
+        _summary_row("selection_source_sheet", group_meta.get("selection_source_sheet", "")),
+        _summary_row("z_score_source", group_meta.get("z_score_source", "")),
+        _summary_row("noise_window_bins", group_meta.get("noise_window_bins")),
+        _summary_row(
+            "applied_uniformly_across_participants",
+            group_meta.get("applied_uniformly_across_participants", ""),
+        ),
+        _summary_row(
+            "applied_uniformly_across_conditions",
+            group_meta.get("applied_uniformly_across_conditions", ""),
+        ),
+        _summary_row(
+            "applied_uniformly_across_rois",
+            group_meta.get("applied_uniformly_across_rois", ""),
+        ),
+        _summary_row(
+            "snr_used_for_statistics",
+            group_meta.get("snr_used_for_statistics", ""),
+        ),
+    ]
+    return rows
+
+
+def _fixed_predefined_summary_rows(fixed_meta: Mapping[str, object]) -> list[dict[str, object]]:
+    selected = fixed_meta.get("fixed_harmonic_included_frequencies_hz", [])
+    highest_hz = fixed_meta.get("highest_selected_harmonic_hz")
+    if highest_hz in (None, ""):
+        highest_hz = _highest_harmonic_hz(selected)
+    highest_index = fixed_meta.get("highest_selected_harmonic_index")
+    if highest_index in (None, ""):
+        highest_index = _harmonic_index(highest_hz, fixed_meta.get("oddball_frequency_hz"))
+    return [
+        _summary_row(
+            "harmonic_policy",
+            fixed_meta.get("harmonic_policy", FIXED_PREDEFINED_POLICY_ID),
+        ),
+        _summary_row("harmonic_policy_label", fixed_meta.get("harmonic_policy_label", "")),
+        _summary_row("selected_harmonics_hz", selected),
+        _summary_row("highest_selected_harmonic_hz", highest_hz),
+        _summary_row("highest_selected_harmonic_index", highest_index),
+        _summary_row(
+            "snr_used_for_statistics",
+            fixed_meta.get("snr_used_for_statistics", ""),
+        ),
+        _summary_row(
+            "applied_uniformly_across_participants",
+            fixed_meta.get("applied_uniformly_across_participants", ""),
+        ),
+        _summary_row(
+            "applied_uniformly_across_conditions",
+            fixed_meta.get("applied_uniformly_across_conditions", ""),
+        ),
+        _summary_row(
+            "applied_uniformly_across_rois",
+            fixed_meta.get("applied_uniformly_across_rois", ""),
+        ),
+    ]
+
+
+def _legacy_rossion_summary_rows(rossion_meta: Mapping[str, object]) -> list[dict[str, object]]:
+    return [
+        _summary_row("harmonic_policy", "legacy_rossion_method"),
+        _summary_row("selection_scope", rossion_meta.get("selection_scope", "")),
+        _summary_row("selected_harmonics_hz", rossion_meta.get("common_harmonics_hz", "")),
+    ]
 
 
 def _build_harmonic_selection_frame(dv_metadata: Mapping[str, object]) -> pd.DataFrame:
@@ -479,6 +621,7 @@ def prepare_stats_ready_export(
     save_path: str | Path | None = None,
     max_freq: float | None = None,
     selection_conditions: list[str] | None = None,
+    project_root: str | None = None,
 ) -> StatsReadyExport:
     """Prepare and optionally write the external-statistics Summed BCA export."""
 
@@ -505,6 +648,7 @@ def prepare_stats_ready_export(
         dv_metadata=dv_metadata,
         max_freq=max_freq,
         selection_conditions=selection_conditions,
+        project_root=project_root,
     )
     if not summed_bca:
         raise RuntimeError("Stats-ready export could not prepare Summed BCA data.")

@@ -149,7 +149,20 @@ class StatsWindowUiMixin:
             "Selection is group-level across final included participants and selected conditions, "
             "with base-rate overlaps excluded."
         )
-        dv_layout.addWidget(self.group_significant_note)
+        self.recalculate_harmonics_btn = make_action_button(
+            "Recalculate Harmonics",
+            compact=True,
+        )
+        self.recalculate_harmonics_btn.setObjectName("stats_recalculate_harmonics_button")
+        self.recalculate_harmonics_btn.setToolTip(
+            "Clear saved group-level significant harmonics for this project."
+        )
+        self.recalculate_harmonics_btn.clicked.connect(self.on_recalculate_harmonics_clicked)
+        group_significant_row = QHBoxLayout()
+        group_significant_row.setSpacing(8)
+        group_significant_row.addWidget(self.group_significant_note, 1)
+        group_significant_row.addWidget(self.recalculate_harmonics_btn, 0, Qt.AlignTop)
+        dv_layout.addLayout(group_significant_row)
         self._set_fixed_predefined_controls_visible(
             self._dv_policy_name == FIXED_PREDEFINED_POLICY_NAME
         )

@@ -21,6 +21,10 @@ from Tools.Stats.analysis.dv_policies import (
 from Tools.Stats.analysis.dv_policy_fixed_predefined import build_fixed_predefined_preview_payload
 from Tools.Stats.analysis.dv_policy_group_significant import preflight_group_significant_full_fft_columns
 from Tools.Stats.analysis.dv_policy_settings import _resolve_max_freq
+from Tools.Stats.data.group_harmonic_cache import (
+    build_group_harmonic_cache_request,
+    lookup_cached_group_harmonic_selection,
+)
 from Tools.Stats.analysis.interpretation_helpers import generate_lme_summary
 from Tools.Stats.analysis.mixed_effects_model import run_mixed_effects_model
 from Tools.Stats.analysis.posthoc_tests import run_interaction_posthocs
@@ -163,6 +167,29 @@ def _log_dv_trace_policy_snapshot(
         len(roi_list),
         len(subjects),
     )
+
+
+def _has_valid_project_group_harmonic_cache(
+    *,
+    project_root: str | None,
+    subjects: list[str],
+    conditions: list[str],
+    subject_data: dict,
+    base_freq: float,
+    max_freq: float | None,
+    settings,
+) -> bool:
+    request = build_group_harmonic_cache_request(
+        project_root=project_root,
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_frequency_hz=base_freq,
+        max_freq_hz=max_freq,
+        settings=settings,
+    )
+    lookup = lookup_cached_group_harmonic_selection(request)
+    return lookup.hit is not None
 
 
 def _long_format_from_bca(
@@ -313,6 +340,7 @@ def run_stats_ready_export(
     output_path: str,
     manual_excluded_pids: list[str] | None = None,
     max_freq: float | None = None,
+    project_root: str | None = None,
 ) -> dict[str, object]:
     """Write the optional external-statistics Summed BCA workbook."""
 
@@ -340,6 +368,7 @@ def run_stats_ready_export(
         save_path=output_path,
         max_freq=max_freq,
         selection_conditions=list(conditions or []),
+        project_root=project_root,
     )
     progress_cb(100)
     return {
@@ -366,6 +395,7 @@ def _prepare_single_group_data(
     qc_state,
     manual_excluded_pids,
     message_cb,
+    project_root: str | None = None,
 ) -> tuple[
     list[str],
     dict,
@@ -380,14 +410,29 @@ def _prepare_single_group_data(
     all_subjects = list(subjects) if subjects else []
     settings = normalize_dv_policy(dv_policy)
     if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
-        preflight_group_significant_full_fft_columns(
+        resolved_preflight_max = _resolve_max_freq(None)
+        if _has_valid_project_group_harmonic_cache(
+            project_root=project_root,
             subjects=all_subjects,
             conditions=list(conditions) if conditions else [],
             subject_data=subject_data,
-            base_frequency_hz=base_freq,
-            log_func=message_cb,
-            max_freq=_resolve_max_freq(None),
-        )
+            base_freq=base_freq,
+            max_freq=resolved_preflight_max,
+            settings=settings,
+        ):
+            message_cb(
+                "Project metadata contains matching significant harmonics; "
+                "skipping FullFFT preflight."
+            )
+        else:
+            preflight_group_significant_full_fft_columns(
+                subjects=all_subjects,
+                conditions=list(conditions) if conditions else [],
+                subject_data=subject_data,
+                base_frequency_hz=base_freq,
+                log_func=message_cb,
+                max_freq=resolved_preflight_max,
+            )
     subjects, subject_data, qc_report = _apply_qc_screening(
         subjects=all_subjects,
         subject_data=subject_data,
@@ -418,6 +463,7 @@ def _prepare_single_group_data(
         dv_policy=dv_policy,
         dv_metadata=dv_metadata,
         selection_conditions=list(conditions or []),
+        project_root=project_root,
     )
     if not all_subject_bca_data:
         raise RuntimeError("Data preparation failed (empty).")
@@ -502,6 +548,17 @@ def _summarize_dv_metadata_for_export(dv_metadata: dict[str, object]) -> dict[st
                 "harmonic_policy": group_meta.get("harmonic_policy", ""),
                 "harmonic_policy_label": group_meta.get("harmonic_policy_label", ""),
                 "selected_harmonics_hz": ";".join(f"{float(freq):g}" for freq in included),
+                "highest_significant_harmonic_hz": group_meta.get(
+                    "highest_significant_harmonic_hz",
+                    "",
+                ),
+                "highest_significant_harmonic_index": group_meta.get(
+                    "highest_significant_harmonic_index",
+                    "",
+                ),
+                "selection_cache_source": group_meta.get("selection_cache_source", ""),
+                "selection_cache_saved_at": group_meta.get("selection_cache_saved_at", ""),
+                "selection_cache_key": group_meta.get("selection_cache_key", ""),
                 "selection_scope": group_meta.get("selection_scope", ""),
                 "z_threshold": group_meta.get("z_threshold", ""),
                 "snr_used_for_statistics": bool(group_meta.get("snr_used_for_statistics", False)),
@@ -537,6 +594,7 @@ def run_rm_anova(
     qc_config: dict | None = None,
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
+    project_root: str | None = None,
 ):
     _ = progress_cb
     set_rois(rois)
@@ -572,6 +630,7 @@ def run_rm_anova(
         qc_config=qc_config,
         qc_state=qc_state,
         manual_excluded_pids=manual_excluded_pids,
+        project_root=project_root,
         message_cb=message_cb,
     )
     _diag_subject_data_structure(all_subject_bca_data, subjects, conditions, rois, message_cb)
@@ -632,6 +691,7 @@ def run_lmm(
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
     results_dir: str | None = None,
+    project_root: str | None = None,
 ):
     _ = progress_cb
     set_rois(rois)
@@ -667,6 +727,7 @@ def run_lmm(
         qc_config=qc_config,
         qc_state=qc_state,
         manual_excluded_pids=manual_excluded_pids,
+        project_root=project_root,
         message_cb=message_cb,
     )
     df_long = df_long.dropna(subset=["value"]).copy()
@@ -799,6 +860,7 @@ def run_posthoc(
     qc_config: dict | None = None,
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
+    project_root: str | None = None,
     **kwargs,
 ):
     _ = progress_cb
@@ -835,6 +897,7 @@ def run_posthoc(
         qc_config=qc_config,
         qc_state=qc_state,
         manual_excluded_pids=manual_excluded_pids,
+        project_root=project_root,
         message_cb=message_cb,
     )
     if df_long.empty:
@@ -887,6 +950,7 @@ def run_baseline_vs_zero(
     alternative: str = "greater",
     correction: str = "fdr_bh",
     correction_scope: str = "global",
+    project_root: str | None = None,
 ):
     _ = progress_cb
     set_rois(rois)
@@ -922,6 +986,7 @@ def run_baseline_vs_zero(
         qc_config=qc_config,
         qc_state=qc_state,
         manual_excluded_pids=manual_excluded_pids,
+        project_root=project_root,
         message_cb=message_cb,
     )
     if df_long.empty:

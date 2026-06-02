@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -169,6 +170,9 @@ def test_group_significant_policy_selects_common_grand_average_harmonics(tmp_pat
     assert selection.selection_scope == "group_level_all_scalp_electrodes_all_selected_conditions"
     assert selection.z_by_harmonic[1.2] > settings.group_significant_z_threshold
     assert selection.z_by_harmonic[2.4] < settings.group_significant_z_threshold
+    metadata = selection.to_metadata()
+    assert metadata["highest_significant_harmonic_hz"] == pytest.approx(7.2)
+    assert metadata["highest_significant_harmonic_index"] == 6
     first_row = next(row for row in selection.rows if row.target_frequency_hz == pytest.approx(1.2))
     assert first_row.target_amplitude_uv == pytest.approx(20.0)
     assert first_row.noise_mean_uv is not None
@@ -269,8 +273,13 @@ def test_group_significant_policy_sums_selected_common_bca_for_every_roi(tmp_pat
     assert result is not None
     group_meta = metadata["group_significant_harmonics"]
     assert group_meta["selected_harmonics_hz"] == pytest.approx([1.2, 3.6, 7.2])
+    assert group_meta["highest_significant_harmonic_hz"] == pytest.approx(7.2)
+    assert group_meta["highest_significant_harmonic_index"] == 6
     assert group_meta["snr_used_for_statistics"] is False
     assert group_meta["applied_uniformly_across_rois"] is True
+    worker_summary = stats_workers._summarize_dv_metadata_for_export(metadata)
+    assert worker_summary["highest_significant_harmonic_hz"] == pytest.approx(7.2)
+    assert worker_summary["highest_significant_harmonic_index"] == 6
 
     for subject in subjects:
         for condition in conditions:
@@ -438,6 +447,75 @@ def test_group_significant_policy_reuses_cached_selection_between_runs(
     assert any("Group harmonic selection cache hit" in message for message in messages)
 
 
+def test_group_significant_policy_reuses_project_metadata_cache_without_fullfft(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    group_policy.clear_group_significant_selection_cache()
+    dv_policies._DV_DATA_CACHE.clear()
+    project_root = tmp_path / "project"
+    _write_stats_project_manifest(project_root)
+    subjects = ["S1"]
+    conditions = ["C1", "C2"]
+    rois = {"Posterior": ["O1", "O2"], "Central": ["FZ"]}
+    subject_data = {"S1": {}}
+    for idx, condition in enumerate(conditions, start=1):
+        path = project_root / "1 - Excel Data Files" / condition / f"cached_project_{condition}.xlsx"
+        _write_group_policy_workbook(path, scale=idx)
+        subject_data["S1"][condition] = str(path)
+
+    first_metadata: dict[str, object] = {}
+    first_result = dv_policies.prepare_summed_bca_data(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_freq=6.0,
+        log_func=lambda _message: None,
+        rois=rois,
+        provenance_map={},
+        dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+        dv_metadata=first_metadata,
+        max_freq=3.6,
+        project_root=str(project_root),
+    )
+    assert first_result is not None
+    first_group_meta = first_metadata["group_significant_harmonics"]
+    assert first_group_meta["selection_cache_source"] == "computed_this_run_saved_project_metadata"
+
+    group_policy.clear_group_significant_selection_cache()
+    dv_policies._DV_DATA_CACHE.clear()
+
+    def _unexpected_fullfft_loader(*_args, **_kwargs):
+        raise AssertionError("FullFFT should not be read when project cache matches")
+
+    monkeypatch.setattr(
+        group_policy,
+        "_load_mean_amplitude_series",
+        _unexpected_fullfft_loader,
+    )
+    messages: list[str] = []
+    second_metadata: dict[str, object] = {}
+    second_result = dv_policies.prepare_summed_bca_data(
+        subjects=subjects,
+        conditions=conditions,
+        subject_data=subject_data,
+        base_freq=6.0,
+        log_func=messages.append,
+        rois={"Posterior": ["O1", "O2"]},
+        provenance_map={},
+        dv_policy={"name": GROUP_SIGNIFICANT_POLICY_NAME},
+        dv_metadata=second_metadata,
+        max_freq=3.6,
+        project_root=str(project_root),
+    )
+
+    assert second_result is not None
+    second_group_meta = second_metadata["group_significant_harmonics"]
+    assert second_group_meta["selection_cache_source"] == "saved_project_metadata"
+    assert second_group_meta["selected_harmonics_hz"] == pytest.approx([1.2, 3.6])
+    assert any("Project harmonic cache hit" in message for message in messages)
+
+
 def test_group_significant_policy_rejects_offgrid_fullfft_frequency_grids(
     tmp_path: Path,
 ) -> None:
@@ -602,6 +680,35 @@ def test_group_significant_policy_requires_exact_selected_bca_columns(tmp_path: 
     group_policy.clear_group_significant_selection_cache()
 
 
+def _write_stats_project_manifest(project_root: Path, *, high_pass: float = 0.1) -> None:
+    project_root.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema_version": "2.1.0",
+        "input_folder": "Input",
+        "results_folder": ".",
+        "subfolders": {"excel": "1 - Excel Data Files"},
+        "event_map": {"C1": 1, "C2": 2},
+        "preprocessing": {
+            "low_pass": 50.0,
+            "high_pass": high_pass,
+            "downsample": 256,
+            "rejection_z": 5.0,
+            "epoch_start_s": -1.0,
+            "epoch_end_s": 125.0,
+            "ref_chan1": "EXG1",
+            "ref_chan2": "EXG2",
+            "max_chan_idx_keep": 64,
+            "max_bad_chans": 10,
+            "max_parallel_workers_override": 0,
+            "stim_channel": "Status",
+        },
+    }
+    (project_root / "project.json").write_text(
+        json.dumps(manifest, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _write_workbook(path: Path, *, subject_idx: int, condition_idx: int) -> None:
     scale = subject_idx + condition_idx - 1
     bca = pd.DataFrame(
@@ -636,6 +743,7 @@ def _write_group_policy_workbook(
 ) -> None:
     if peak_targets is None:
         peak_targets = {1.2, 3.6, 7.2}
+    path.parent.mkdir(parents=True, exist_ok=True)
     frequency_values = [
         round(frequency_step * idx, 4)
         for idx in range(0, int(round(10.2 / frequency_step)) + 1)
