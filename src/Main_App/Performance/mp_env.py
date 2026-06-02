@@ -21,7 +21,7 @@ def get_ram_tier_recommendation(total_ram_bytes: int) -> tuple[str, Optional[int
 
     total_ram_gib = total_ram_bytes / float(1024 ** 3) if total_ram_bytes > 0 else 0.0
 
-    # Set your desired number of max parallel workers based on the amount of RAM
+    # Set your desired number of max parallel workers based on the amount of RAM.
     if total_ram_gib < 12.0:
         return "8GB", 2, total_ram_gib
     if total_ram_gib < 20.0:
