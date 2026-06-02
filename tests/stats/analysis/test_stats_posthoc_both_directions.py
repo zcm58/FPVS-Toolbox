@@ -1,4 +1,5 @@
 import numpy as np
+import openpyxl
 import pandas as pd
 import importlib.util
 from pathlib import Path
@@ -120,3 +121,9 @@ def test_posthoc_export_writes_directional_and_combined_sheets(tmp_path):
     combined_df = pd.read_excel(save_path, sheet_name="Combined")
     assert {"Direction", "Stratum", "FactorAnalyzed"}.issubset(combined_df.columns)
     assert np.isin(["condition_within_roi", "roi_within_condition"], combined_df["Direction"].dropna().unique()).all()
+
+    workbook = openpyxl.load_workbook(save_path)
+    combined_ws = workbook["Combined"]
+    assert combined_ws.auto_filter.ref == combined_ws.dimensions
+    assert combined_ws.column_dimensions["A"].width > 10
+    workbook.close()

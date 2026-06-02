@@ -11,6 +11,7 @@ from pathlib import Path
 
 import openpyxl
 import pandas as pd
+from openpyxl.utils import get_column_letter
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,20 @@ BASELINE_VS_ZERO_P_COLUMNS: tuple[str, ...] = (
     "p_raw",
     "p_corr",
 )
+
+
+def apply_sheet_autosize_and_filters(workbook: openpyxl.Workbook) -> None:
+    """Apply bounded column widths and filters to every non-empty workbook sheet."""
+
+    for worksheet in workbook.worksheets:
+        if worksheet.max_row >= 1 and worksheet.max_column >= 1:
+            worksheet.auto_filter.ref = worksheet.dimensions
+        for column_index, column_cells in enumerate(worksheet.columns, start=1):
+            max_length = max(len(str(cell.value or "")) for cell in column_cells)
+            worksheet.column_dimensions[get_column_letter(column_index)].width = min(
+                max(max_length + 2, 10),
+                80,
+            )
 
 
 def log_rm_anova_p_minima(anova_df: pd.DataFrame) -> None:
@@ -95,6 +110,7 @@ def apply_rm_anova_pvalue_number_formats(
                 else:
                     cell.number_format = DEFAULT_P_FMT
     finally:
+        apply_sheet_autosize_and_filters(workbook)
         workbook.save(path)
         workbook.close()
 
@@ -204,6 +220,7 @@ def apply_lmm_number_formats_and_metadata(
             width = max(len(str(c.value)) if c.value is not None else 0 for c in col) + 2
             ws_meta.column_dimensions[col[0].column_letter].width = min(width, 120)
     finally:
+        apply_sheet_autosize_and_filters(workbook)
         workbook.save(path)
         workbook.close()
 
@@ -247,5 +264,6 @@ def apply_baseline_vs_zero_number_formats(
                 else:
                     cell.number_format = "0.000000"
     finally:
+        apply_sheet_autosize_and_filters(workbook)
         workbook.save(path)
         workbook.close()

@@ -31,6 +31,9 @@ def _auto_format_and_write_excel(writer, df, sheet_name, log_func, default_col_w
     for col_num, value in enumerate(df.columns.values):
         worksheet.write(0, col_num, value, header_format)
 
+    if len(df.columns) > 0:
+        worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
+
     for col_idx, col_name in enumerate(df.columns):
         cell_format = center_format
         if df[col_name].dtype in [np.int64, np.int32]:

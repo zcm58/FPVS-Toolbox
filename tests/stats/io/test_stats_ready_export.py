@@ -382,7 +382,15 @@ def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook
         roundtrip = pd.read_excel(workbook, sheet_name=LONG_FORMAT_SHEET)
 
     workbook = load_workbook(target)
+    long_sheet = workbook[LONG_FORMAT_SHEET]
+    wide_sheet = workbook[WIDE_FORMAT_SHEET]
     summary_sheet = workbook[SELECTION_SUMMARY_SHEET]
+    selection_sheet = workbook[HARMONIC_SELECTION_SHEET]
+    assert long_sheet.auto_filter.ref == long_sheet.dimensions
+    assert wide_sheet.auto_filter.ref == wide_sheet.dimensions
+    assert summary_sheet.auto_filter.ref == summary_sheet.dimensions
+    assert selection_sheet.auto_filter.ref == selection_sheet.dimensions
+    assert long_sheet.column_dimensions["A"].width >= 14
     assert summary_sheet["A1"].alignment.horizontal == "center"
     assert summary_sheet["B2"].alignment.horizontal == "center"
     assert summary_sheet["A1"].font.bold is True

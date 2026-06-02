@@ -41,6 +41,8 @@ def test_rm_anova_excel_preserves_small_p_values(tmp_path: Path) -> None:
     assert float(p_cell.value) != 0.0
     assert p_cell.number_format == "0.00E+00"
     assert gg_cell.number_format == "0.00E+00"
+    assert ws.auto_filter.ref == ws.dimensions
+    assert ws.column_dimensions["A"].width > 10
 
     wb.close()
 

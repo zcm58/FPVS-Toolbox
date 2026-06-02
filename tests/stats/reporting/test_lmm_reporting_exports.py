@@ -148,6 +148,11 @@ def test_excel_p_format_scientific_for_small_p(tmp_path: Path) -> None:
     assert p_cell.value > 0
     assert p_cell.number_format == "0.00E+00"
     assert "Metadata" in wb.sheetnames
+    assert ws.auto_filter.ref == ws.dimensions
+    assert ws.column_dimensions["A"].width > 10
+    metadata_ws = wb["Metadata"]
+    assert metadata_ws.auto_filter.ref == metadata_ws.dimensions
+    assert metadata_ws.column_dimensions["A"].width > 10
     wb.close()
 
 

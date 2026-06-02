@@ -649,9 +649,22 @@ def write_stats_ready_workbook(
         for sheet_name, frame in frames.items():
             frame.to_excel(writer, sheet_name=sheet_name, index=False)
         workbook = writer.book
+        for worksheet in workbook.worksheets:
+            _format_table_sheet(worksheet)
         if SELECTION_SUMMARY_SHEET in workbook.sheetnames:
             _format_selection_summary_sheet(workbook[SELECTION_SUMMARY_SHEET])
     return target
+
+
+def _format_table_sheet(worksheet: object) -> None:
+    if worksheet.max_row >= 1 and worksheet.max_column >= 1:
+        worksheet.auto_filter.ref = worksheet.dimensions
+    for column_index, column_cells in enumerate(worksheet.columns, start=1):
+        max_length = max(len(str(cell.value or "")) for cell in column_cells)
+        worksheet.column_dimensions[get_column_letter(column_index)].width = min(
+            max(max_length + 2, 14),
+            72,
+        )
 
 
 def _format_selection_summary_sheet(worksheet: object) -> None:
@@ -664,12 +677,6 @@ def _format_selection_summary_sheet(worksheet: object) -> None:
         cell.font = Font(bold=True)
 
     worksheet.freeze_panes = "A2"
-    for column_index, column_cells in enumerate(worksheet.columns, start=1):
-        max_length = max(len(str(cell.value or "")) for cell in column_cells)
-        worksheet.column_dimensions[get_column_letter(column_index)].width = min(
-            max(max_length + 2, 14),
-            72,
-        )
 
 
 def prepare_stats_ready_export(
