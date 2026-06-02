@@ -22,6 +22,8 @@ Rules:
   subject counts, and cache/source provenance belong in exports and diagnostics.
 - Single-condition and paired-condition figures should fit a standard US letter
   journal text width: 8.5-inch page minus 1-inch margins = 6.5 inches.
+- Paired-condition figures are selected explicitly in the GUI with Condition A
+  and Condition B combo boxes populated from the checked condition list.
 - Default project input is the active project's Excel root. Default output is
   the selected folder, initially `<results root>/4 - Scalp Maps`.
 - BCA color endpoints are user-selectable. The fixed BCA range is optional:

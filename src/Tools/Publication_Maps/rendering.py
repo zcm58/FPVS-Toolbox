@@ -90,6 +90,7 @@ def export_source_workbook(
                 "value": bca_bounds.high_color,
             },
             {"key": "export_paired_figures", "value": request.export_paired_figures},
+            {"key": "paired_conditions", "value": "; ".join(request.paired_conditions)},
             {
                 "key": "selection_cache_source",
                 "value": result.selection_metadata.get("selection_cache_source", ""),
@@ -230,8 +231,7 @@ def _render_paired_condition_figures(
         return []
     rendered: list[Path] = []
     available_conditions = set(grand["condition"])
-    conditions = [condition for condition in request.conditions if condition in available_conditions]
-    condition_pairs = list(zip(conditions[0::2], conditions[1::2]))
+    condition_pairs = _paired_condition_pairs(request, available_conditions)
     if not condition_pairs:
         return []
 
@@ -275,6 +275,22 @@ def _render_paired_condition_figures(
             )
             rendered.append(svg_path)
     return rendered
+
+
+def _paired_condition_pairs(
+    request: PublicationMapRequest,
+    available_conditions: set[str],
+) -> list[tuple[str, str]]:
+    if len(request.paired_conditions) >= 2:
+        first, second = request.paired_conditions[:2]
+        if first in available_conditions and second in available_conditions and first != second:
+            return [(first, second)]
+        return []
+
+    conditions = [
+        condition for condition in request.conditions if condition in available_conditions
+    ]
+    return list(zip(conditions[0::2], conditions[1::2]))
 
 
 def _pair_group(grand: pd.DataFrame, condition: str) -> pd.DataFrame:

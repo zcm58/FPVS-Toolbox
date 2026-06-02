@@ -19,7 +19,7 @@ It is useful when you need:
   method;
 - transparent SVG figures for PowerPoint, Illustrator, Inkscape, Affinity
   Designer, or similar figure-composition software;
-- paired condition scalp maps on one figure;
+- a selected pair of condition scalp maps on one figure;
 - source data that documents exactly which values were plotted.
 
 The current Scalp Maps tool is BCA-only. It does not generate SNR or z-score
@@ -69,13 +69,24 @@ colorbar. Uncheck it when each scalp map should auto-scale to its own values.
 Use the low and high color selectors if a journal, slide deck, or collaborator
 requires a different palette.
 
+## Paired condition figures
+
+Check **Also export paired condition figures** when you want two scalp maps on
+one figure. The paired controls let you choose **Condition A** and
+**Condition B** from the checked condition list, following the same general
+condition-pair layout as the SNR Plot Generator.
+
+Keep both conditions checked in the Conditions list so the tool computes their
+grand-average maps before building the paired figure.
+
 ## Output files
 
 The output folder can contain:
 
 - `.png` figures for direct manuscript or presentation use;
 - transparent `.svg` figures for editing and figure composition;
-- paired-condition `.png` and `.svg` figures when the paired option is enabled;
+- selected paired-condition `.png` and `.svg` figures when the paired option is
+  enabled;
 - `Publication_Scalp_Maps_Source_Data.xlsx`.
 
 SVG files are saved without a white background so they can be placed over a

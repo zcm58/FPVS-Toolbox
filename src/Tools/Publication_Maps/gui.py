@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QColorDialog,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
@@ -35,6 +36,7 @@ from Main_App.gui.components import (
     PathPickerRow,
     SectionCard,
     StatusBanner,
+    SubsectionHeaderLabel,
     SurfaceSize,
     configure_window_surface,
     make_action_button,
@@ -259,7 +261,7 @@ class PublicationMapsWindow(QWidget):
 
     def _build_output_group(self) -> SectionCard:
         group = SectionCard("Output", object_name="publication_maps_output")
-        group.set_compact(245)
+        group.set_compact(360)
         form = make_form_layout()
 
         self.output_root_row = PathPickerRow(
@@ -285,11 +287,53 @@ class PublicationMapsWindow(QWidget):
         self.paired_figures_check.setToolTip(
             "When at least two conditions are selected, export side-by-side BCA scalp maps."
         )
+        self.paired_figures_check.toggled.connect(
+            lambda _checked: self._update_paired_controls_state()
+        )
+
+        self.paired_conditions_widget = QWidget(group)
+        paired_layout = QVBoxLayout(self.paired_conditions_widget)
+        paired_layout.setContentsMargins(0, 0, 0, 0)
+        paired_layout.setSpacing(8)
+
+        self.paired_condition_a_combo = QComboBox(self.paired_conditions_widget)
+        self.paired_condition_a_combo.setToolTip("Select the first condition for the paired scalp-map figure.")
+        self.paired_condition_a_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.paired_condition_a_combo.currentTextChanged.connect(lambda _text: self._update_run_state())
+
+        self.paired_condition_b_combo = QComboBox(self.paired_conditions_widget)
+        self.paired_condition_b_combo.setToolTip("Select the second condition for the paired scalp-map figure.")
+        self.paired_condition_b_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.paired_condition_b_combo.currentTextChanged.connect(lambda _text: self._update_run_state())
+
+        paired_a_container = QWidget(self.paired_conditions_widget)
+        paired_a_layout = QVBoxLayout(paired_a_container)
+        paired_a_layout.setContentsMargins(0, 0, 0, 0)
+        paired_a_layout.setSpacing(4)
+        paired_a_layout.addWidget(SubsectionHeaderLabel("Condition A", paired_a_container))
+        paired_a_layout.addWidget(self.paired_condition_a_combo)
+
+        paired_b_container = QWidget(self.paired_conditions_widget)
+        paired_b_layout = QVBoxLayout(paired_b_container)
+        paired_b_layout.setContentsMargins(0, 0, 0, 0)
+        paired_b_layout.setSpacing(4)
+        paired_b_layout.addWidget(SubsectionHeaderLabel("Condition B", paired_b_container))
+        paired_b_layout.addWidget(self.paired_condition_b_combo)
+
+        paired_selectors = QHBoxLayout()
+        paired_selectors.setContentsMargins(0, 0, 0, 0)
+        paired_selectors.setSpacing(8)
+        paired_selectors.addWidget(paired_a_container, 1)
+        paired_selectors.addWidget(paired_b_container, 1)
+        paired_layout.addLayout(paired_selectors)
+
         formats = ActionRow(group, alignment=Qt.AlignLeft, spacing=12)
         formats.row_layout.addWidget(self.export_png_check)
         formats.row_layout.addWidget(self.export_svg_check)
         group.content_layout.addWidget(formats)
         group.content_layout.addWidget(self.paired_figures_check)
+        group.content_layout.addWidget(self.paired_conditions_widget)
+        self.paired_conditions_widget.setVisible(False)
         return group
 
     def _build_run_group(self) -> SectionCard:
@@ -405,6 +449,7 @@ class PublicationMapsWindow(QWidget):
                 self.conditions_list.addItem(item)
         finally:
             self.conditions_list.blockSignals(False)
+        self._sync_paired_condition_selectors()
         self._update_condition_summary()
         self._update_run_state()
 
@@ -416,6 +461,7 @@ class PublicationMapsWindow(QWidget):
                 item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         finally:
             self.conditions_list.blockSignals(False)
+        self._sync_paired_condition_selectors()
         self._update_condition_summary()
         self._update_run_state()
 
@@ -428,13 +474,18 @@ class PublicationMapsWindow(QWidget):
         return tuple(selected)
 
     def _update_condition_summary(self) -> None:
-        selected = set(self._selected_conditions())
+        selected_conditions = self._selected_conditions()
+        selected = set(selected_conditions)
         total_files = sum(len(condition.files) for condition in self._conditions if condition.name in selected)
         self.conditions_summary.setText(
             f"Selected conditions: {len(selected)} | Total files: {total_files}"
         )
         if hasattr(self, "paired_figures_check"):
-            self.paired_figures_check.setEnabled(len(selected) >= 2 and not self._busy)
+            self._sync_paired_condition_selectors(selected_conditions)
+            if len(selected_conditions) < 2 and self.paired_figures_check.isChecked():
+                self.paired_figures_check.setChecked(False)
+            self.paired_figures_check.setEnabled(len(selected_conditions) >= 2 and not self._busy)
+            self._update_paired_controls_state()
 
     def _update_run_state(self) -> None:
         self._refresh_analysis_setting_labels()
@@ -443,7 +494,67 @@ class PublicationMapsWindow(QWidget):
         ready = ready and bool(self.output_root_edit.text().strip())
         ready = ready and bool(self._selected_conditions())
         ready = ready and (self.export_png_check.isChecked() or self.export_svg_check.isChecked())
+        ready = ready and self._paired_conditions_valid()
         self.run_btn.setEnabled(ready and self._thread is None and not self._busy)
+
+    def _sync_paired_condition_selectors(
+        self,
+        selected_conditions: tuple[str, ...] | None = None,
+    ) -> None:
+        if not hasattr(self, "paired_condition_a_combo"):
+            return
+        if selected_conditions is None:
+            selected_conditions = self._selected_conditions()
+
+        previous_a = self.paired_condition_a_combo.currentText()
+        previous_b = self.paired_condition_b_combo.currentText()
+        self.paired_condition_a_combo.blockSignals(True)
+        self.paired_condition_b_combo.blockSignals(True)
+        try:
+            self.paired_condition_a_combo.clear()
+            self.paired_condition_b_combo.clear()
+            self.paired_condition_a_combo.addItems(selected_conditions)
+            self.paired_condition_b_combo.addItems(selected_conditions)
+            if previous_a in selected_conditions:
+                self.paired_condition_a_combo.setCurrentText(previous_a)
+            elif selected_conditions:
+                self.paired_condition_a_combo.setCurrentIndex(0)
+            if previous_b in selected_conditions and previous_b != self.paired_condition_a_combo.currentText():
+                self.paired_condition_b_combo.setCurrentText(previous_b)
+            elif len(selected_conditions) > 1:
+                default_b = 1 if self.paired_condition_a_combo.currentIndex() == 0 else 0
+                self.paired_condition_b_combo.setCurrentIndex(default_b)
+            elif selected_conditions:
+                self.paired_condition_b_combo.setCurrentIndex(0)
+        finally:
+            self.paired_condition_a_combo.blockSignals(False)
+            self.paired_condition_b_combo.blockSignals(False)
+
+    def _update_paired_controls_state(self) -> None:
+        if not hasattr(self, "paired_conditions_widget"):
+            return
+        selected_count = len(self._selected_conditions())
+        checked = self.paired_figures_check.isChecked()
+        enabled = checked and selected_count >= 2 and not self._busy
+        self.paired_conditions_widget.setVisible(checked)
+        self.paired_condition_a_combo.setEnabled(enabled)
+        self.paired_condition_b_combo.setEnabled(enabled)
+
+    def _selected_paired_conditions(self) -> tuple[str, ...]:
+        if not hasattr(self, "paired_condition_a_combo"):
+            return ()
+        first = self.paired_condition_a_combo.currentText().strip()
+        second = self.paired_condition_b_combo.currentText().strip()
+        if first and second:
+            return (first, second)
+        return ()
+
+    def _paired_conditions_valid(self) -> bool:
+        if not hasattr(self, "paired_figures_check") or not self.paired_figures_check.isChecked():
+            return True
+        first, second = (*self._selected_paired_conditions(), "", "")[:2]
+        selected = set(self._selected_conditions())
+        return bool(first and second and first != second and first in selected and second in selected)
 
     def _settings_manager(self):
         host = self._embedded_host()
@@ -519,6 +630,8 @@ class PublicationMapsWindow(QWidget):
             self.export_png_check,
             self.export_svg_check,
             self.paired_figures_check,
+            self.paired_condition_a_combo,
+            self.paired_condition_b_combo,
         )
 
     def _embedded_host(self) -> QWidget | None:
@@ -562,6 +675,7 @@ class PublicationMapsWindow(QWidget):
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(busy)
         self._toggle_bca_range_controls()
+        self._update_paired_controls_state()
 
         if not busy:
             self._update_run_state()
@@ -588,6 +702,12 @@ class PublicationMapsWindow(QWidget):
             export_paired_figures=(
                 self.paired_figures_check.isChecked()
                 and len(self._selected_conditions()) >= 2
+                and self._paired_conditions_valid()
+            ),
+            paired_conditions=(
+                self._selected_paired_conditions()
+                if self.paired_figures_check.isChecked()
+                else ()
             ),
             project_root=self._project_root,
         )
@@ -603,6 +723,13 @@ class PublicationMapsWindow(QWidget):
                 self,
                 "Scalp Maps",
                 "The upper BCA range limit must be greater than the lower limit.",
+            )
+            return
+        if self.paired_figures_check.isChecked() and not self._paired_conditions_valid():
+            show_error(
+                self,
+                "Scalp Maps",
+                "Select two different checked conditions for the paired scalp-map figure.",
             )
             return
         request = self._collect_request()

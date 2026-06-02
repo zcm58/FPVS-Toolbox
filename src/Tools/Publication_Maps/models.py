@@ -76,6 +76,7 @@ class PublicationMapRequest:
     export_png: bool = True
     export_svg: bool = True
     export_paired_figures: bool = False
+    paired_conditions: tuple[str, ...] = ()
     png_dpi: int = 300
     project_root: Path | None = None
 

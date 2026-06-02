@@ -529,6 +529,9 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     excel_dir = project_root / "1 - Excel Data Files"
     excel_dir.mkdir(parents=True)
     (excel_dir / "CondA").mkdir()
+    (excel_dir / "CondA" / "P01_CondA_Results.xlsx").touch()
+    (excel_dir / "CondB").mkdir()
+    (excel_dir / "CondB" / "P01_CondB_Results.xlsx").touch()
     win.currentProject = SimpleNamespace(
         project_root=project_root,
         input_folder=project_root,
@@ -555,6 +558,13 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.bca_vmax_spin.value() == pytest.approx(0.4)
     assert page.bca_vmin_spin.isEnabled()
     assert page.bca_vmax_spin.isEnabled()
+    assert page.paired_condition_a_combo.currentText() == "CondA"
+    assert page.paired_condition_b_combo.currentText() == "CondB"
+    assert not page.paired_conditions_widget.isVisible()
+    page.paired_figures_check.setChecked(True)
+    assert page.paired_conditions_widget.isVisible()
+    assert page.paired_condition_a_combo.isEnabled()
+    assert page.paired_condition_b_combo.isEnabled()
     page._set_busy_state(True)
     qtbot.wait(20)
 
@@ -570,6 +580,8 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert not page.export_png_check.isEnabled()
     assert not page.export_svg_check.isEnabled()
     assert not page.paired_figures_check.isEnabled()
+    assert not page.paired_condition_a_combo.isEnabled()
+    assert not page.paired_condition_b_combo.isEnabled()
     assert not page.run_btn.isEnabled()
     assert page.cancel_btn.isEnabled()
     assert not win.menuBar().isEnabled()
@@ -589,6 +601,8 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.output_root_row.isEnabled()
     assert page.export_png_check.isEnabled()
     assert page.export_svg_check.isEnabled()
+    assert page.paired_condition_a_combo.isEnabled()
+    assert page.paired_condition_b_combo.isEnabled()
     assert not page.cancel_btn.isEnabled()
     assert win.menuBar().isEnabled()
     assert win.sidebar.property("processingLocked") is False

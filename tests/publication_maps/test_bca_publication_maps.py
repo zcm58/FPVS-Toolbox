@@ -125,17 +125,18 @@ def test_exports_paired_condition_figure_with_two_maps_on_one_page(tmp_path: Pat
     project_root, excel_root = _write_project_workbooks(
         tmp_path,
         subjects=("S1",),
-        conditions=("Faces", "Objects"),
+        conditions=("Faces", "Objects", "Places"),
     )
     output_root = project_root / "4 - Scalp Maps"
     request = PublicationMapRequest(
         input_root=excel_root,
         output_root=output_root,
-        conditions=("Faces", "Objects"),
+        conditions=("Faces", "Objects", "Places"),
         base_frequency_hz=6.0,
         max_frequency_hz=3.6,
         project_root=project_root,
         export_paired_figures=True,
+        paired_conditions=("Objects", "Faces"),
     )
     result = build_publication_map_result(request)
 
@@ -143,6 +144,7 @@ def test_exports_paired_condition_figure_with_two_maps_on_one_page(tmp_path: Pat
 
     paired = [path for path in figures if "_and_" in path.stem]
     assert {path.suffix for path in paired} == {".png", ".svg"}
+    assert {path.stem for path in paired} == {"Objects_and_Faces_bca_paired"}
     paired_png = next(path for path in paired if path.suffix == ".png")
     with Image.open(paired_png) as image:
         assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
