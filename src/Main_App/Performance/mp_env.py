@@ -6,9 +6,9 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-# Increased from 8 to 16 to allow future-proofing for workstations (128GB+),
-# while still preventing excessive Python process overhead.
-GLOBAL_MAX_WORKERS = 16
+# Hard cap of 20 parallel workers on 128GB + workstations
+
+GLOBAL_MAX_WORKERS = 20
 
 
 def get_ram_tier_recommendation(total_ram_bytes: int) -> tuple[str, Optional[int], float]:
@@ -21,7 +21,7 @@ def get_ram_tier_recommendation(total_ram_bytes: int) -> tuple[str, Optional[int
 
     total_ram_gib = total_ram_bytes / float(1024 ** 3) if total_ram_bytes > 0 else 0.0
 
-    # Cumulative tiers with no gaps.
+    # Set your desired number of max parallel workers based on the amount of RAM
     if total_ram_gib < 12.0:
         return "8GB", 2, total_ram_gib
     if total_ram_gib < 20.0:
@@ -31,7 +31,7 @@ def get_ram_tier_recommendation(total_ram_bytes: int) -> tuple[str, Optional[int
     if total_ram_gib < 80.0:
         return "64GB", 7, total_ram_gib
     if total_ram_gib < 140.0:
-        return "128GB", 12, total_ram_gib
+        return "128GB", 16, total_ram_gib
     return "140GB+", None, total_ram_gib
 
 
