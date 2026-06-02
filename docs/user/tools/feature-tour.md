@@ -17,6 +17,7 @@ This page lists the main FPVS Toolbox features and when to use each one.
 | Baseline vs zero tests | Tests whether a condition ROI response is above no-response baseline | Detectability checks | Baseline vs Zero workbook |
 | Outliers and QC | Flags unusual values and separates flags from exclusions | Before final inferential reporting | Flagged and excluded participant reports |
 | SNR Plot Generator | Builds publication-oriented SNR or BCA plots from processed Excel outputs | After processing when you need ROI or condition figures | Plot image files |
+| Scalp Maps | Builds publication-ready BCA scalp maps with Statistics-selected significant harmonics | After processing when you need condition-level scalp figures | PNG/SVG scalp maps and source-data workbook |
 | Ratio Calculator | Compares two condition folders and computes participant-level ratios | When a ratio between two processed conditions is part of the analysis | Ratio tables and plots |
 | Image Resizer | Batch-resizes stimulus images and converts file formats | Before running an FPVS experiment that needs standardized image dimensions | Resized stimulus image folder |
 | Epoch Averaging | Combines preprocessed epochs before post-processing | When multiple preprocessed files should contribute to one averaged response | Averaged files for downstream processing |
@@ -36,6 +37,7 @@ This page lists the main FPVS Toolbox features and when to use each one.
 - [Statistical Analysis Overview](../results/statistical-analysis.md)
 - [Output Files](../study/outputs-reference.md)
 - [SNR Plot Generator](snr-plot-generator.md)
+- [Scalp Maps](scalp-maps.md)
 - [Ratio Calculator](ratio-calculator.md)
 - [Image Resizer](image-resizer.md)
 - [Epoch Averaging](epoch-averaging.md)

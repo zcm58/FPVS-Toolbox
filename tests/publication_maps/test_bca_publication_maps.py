@@ -15,6 +15,7 @@ from Tools.Publication_Maps.metrics import build_publication_map_result
 from Tools.Publication_Maps.models import (
     ColorBounds,
     PublicationMapRequest,
+    PublicationMapResult,
     PublicationMetric,
 )
 from Tools.Publication_Maps.rendering import (
@@ -25,6 +26,7 @@ from Tools.Publication_Maps.rendering import (
     export_source_workbook,
     render_publication_figures,
 )
+from Tools.Publication_Maps.worker import PublicationMapsWorker
 
 
 def test_discovers_condition_workbooks_and_skips_excel_lock_files(tmp_path: Path) -> None:
@@ -184,6 +186,77 @@ def test_bca_colorbar_label_and_fonts_use_shared_component_typography() -> None:
     )
     assert axis_font["fontsize"] >= 12
     assert title_font["fontsize"] >= axis_font["fontsize"]
+
+
+def test_worker_emits_progress_messages_and_finished_without_widgets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = PublicationMapRequest(
+        input_root=tmp_path / "1 - Excel Data Files",
+        output_root=tmp_path / "4 - Scalp Maps",
+        conditions=("Faces",),
+        project_root=tmp_path,
+    )
+    result = PublicationMapResult(
+        long_values=pd.DataFrame(),
+        grand_average_values=pd.DataFrame(),
+    )
+    calls: list[str] = []
+
+    def fake_build(seen_request: PublicationMapRequest) -> PublicationMapResult:
+        assert seen_request is request
+        calls.append("build")
+        return result
+
+    def fake_export(
+        seen_result: PublicationMapResult,
+        seen_request: PublicationMapRequest,
+    ) -> Path:
+        assert seen_result is result
+        assert seen_request is request
+        calls.append("export")
+        return seen_request.output_root / "Publication_Scalp_Maps_Source_Data.xlsx"
+
+    def fake_render(
+        seen_result: PublicationMapResult,
+        seen_request: PublicationMapRequest,
+    ) -> list[Path]:
+        assert seen_result is result
+        assert seen_request is request
+        calls.append("render")
+        return [seen_request.output_root / "Faces_bca_BCA_significant-harmonic_sum.svg"]
+
+    monkeypatch.setattr(
+        "Tools.Publication_Maps.worker.build_publication_map_result",
+        fake_build,
+    )
+    monkeypatch.setattr("Tools.Publication_Maps.worker.export_source_workbook", fake_export)
+    monkeypatch.setattr("Tools.Publication_Maps.worker.render_publication_figures", fake_render)
+
+    worker = PublicationMapsWorker(request)
+    progress: list[int] = []
+    messages: list[str] = []
+    errors: list[str] = []
+    finished: list[object] = []
+    worker.progress.connect(progress.append)
+    worker.message.connect(messages.append)
+    worker.error.connect(errors.append)
+    worker.finished.connect(finished.append)
+
+    worker.run()
+
+    assert calls == ["build", "export", "render"]
+    assert progress == [5, 55, 70, 100]
+    assert messages == [
+        "Reading workbooks...",
+        "Writing source-data workbook...",
+        "Rendering scalp maps...",
+        "Complete.",
+    ]
+    assert errors == []
+    assert len(finished) == 1
+    assert finished[0] is result
 
 
 def _write_project_workbooks(

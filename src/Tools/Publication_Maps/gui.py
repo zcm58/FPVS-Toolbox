@@ -39,7 +39,6 @@ from Main_App.gui.components import (
     configure_window_surface,
     make_action_button,
     make_form_layout,
-    make_section_grid_layout,
     show_error,
 )
 from Tools.Publication_Maps.excel_inputs import discover_conditions
@@ -90,19 +89,30 @@ class PublicationMapsWindow(QWidget):
         self._conditions = []
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        grid = make_section_grid_layout(
-            row_stretches=(0, 2, 1),
-            column_stretches=(1, 1),
-        )
-        layout.addLayout(grid, 1)
-        grid.addWidget(self._build_input_group(), 0, 0, 1, 2)
-        grid.addWidget(self._build_conditions_group(), 1, 0)
-        grid.addWidget(self._build_settings_group(), 1, 1)
-        grid.addWidget(self._build_output_group(), 2, 0)
-        grid.addWidget(self._build_run_group(), 2, 1)
+        layout.addWidget(self._build_input_group(), 0)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(8)
+        layout.addLayout(body, 1)
+
+        left_column = QVBoxLayout()
+        left_column.setContentsMargins(0, 0, 0, 0)
+        left_column.setSpacing(8)
+        right_column = QVBoxLayout()
+        right_column.setContentsMargins(0, 0, 0, 0)
+        right_column.setSpacing(8)
+
+        body.addLayout(left_column, 1)
+        body.addLayout(right_column, 1)
+
+        left_column.addWidget(self._build_conditions_group(), 1)
+        right_column.addWidget(self._build_settings_group(), 0)
+        right_column.addWidget(self._build_output_group(), 0)
+        right_column.addWidget(self._build_run_group(), 1)
 
         self._apply_button_icons()
         self._set_default_paths()
@@ -173,7 +183,7 @@ class PublicationMapsWindow(QWidget):
 
     def _build_settings_group(self) -> SectionCard:
         group = SectionCard("BCA significant harmonics", object_name="publication_maps_settings")
-        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         form = make_form_layout()
 
         self.base_freq_value = QLabel(group)

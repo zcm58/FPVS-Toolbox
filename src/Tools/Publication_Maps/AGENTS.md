@@ -25,8 +25,8 @@ Rules:
 - Default project input is the active project's Excel root. Default output is
   the selected folder, initially `<results root>/4 - Scalp Maps`.
 - BCA color endpoints are user-selectable. The fixed BCA range is optional:
-  unchecked maps auto-scale, checked maps use the supplied lower/upper
-  colorbar range.
+  it starts checked with a `0.0` to `0.4 BCA` range; unchecked maps
+  auto-scale.
 - The BCA colorbar label is `Baseline-corrected amplitude (µV)`. Figure fonts
   should use shared component typography roles, not one-off Matplotlib defaults.
 - Do not run offscreen Qt workflows locally.

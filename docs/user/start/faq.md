@@ -144,6 +144,7 @@ See [Output Files](../study/outputs-reference.md). The most common folders are:
 - `1 - Excel Data Files` for processing exports.
 - `2 - SNR Plots` for generated plot outputs.
 - `3 - Statistical Analysis Results` for statistics exports.
+- `4 - Scalp Maps` for BCA scalp-map figures and source-data exports.
 
 Folder names may vary slightly depending on project setup.
 
