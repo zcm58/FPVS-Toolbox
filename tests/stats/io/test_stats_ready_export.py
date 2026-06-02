@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+from openpyxl import load_workbook
 
 from Tools.Stats.io import stats_ready_export as export_mod
 from Tools.Stats.io.stats_ready_export import (
@@ -19,6 +20,10 @@ from Tools.Stats.analysis.dv_policy_settings import (
     GROUP_SIGNIFICANT_POLICY_ID,
     GROUP_SIGNIFICANT_POLICY_NAME,
 )
+
+
+def _summary_map(summary_df: pd.DataFrame) -> dict[str, object]:
+    return dict(zip(summary_df["Summary Item"], summary_df["Value"]))
 
 
 def _fixture_inputs():
@@ -118,9 +123,9 @@ def test_build_stats_ready_frames_preserves_canonical_long_and_group_data():
         HARMONIC_SELECTION_SHEET,
     }
     summary_df = frames[SELECTION_SUMMARY_SHEET]
-    summary = dict(zip(summary_df["key"], summary_df["value"]))
-    assert summary["selected_harmonics_hz"] == "6.0;12.0"
-    assert summary["highest_selected_harmonic_hz"] == pytest.approx(12.0)
+    summary = _summary_map(summary_df)
+    assert summary["Selected harmonics (Hz)"] == "6; 12"
+    assert summary["Highest selected harmonic (Hz)"] == pytest.approx(12.0)
 
 
 def test_build_stats_ready_frames_requires_complete_group_labels_when_groups_exist():
@@ -305,10 +310,14 @@ def test_build_stats_ready_frames_exports_group_significant_metadata():
     assert "highest_significant_harmonic_index" not in long_df.columns
 
     summary_df = frames[SELECTION_SUMMARY_SHEET]
-    summary = dict(zip(summary_df["key"], summary_df["value"]))
-    assert summary["selected_harmonics_hz"] == "1.2;3.6;7.2"
-    assert summary["highest_significant_harmonic_hz"] == pytest.approx(7.2)
-    assert summary["highest_significant_harmonic_index"] == 6
+    summary = _summary_map(summary_df)
+    assert summary["Significant harmonic frequencies (Hz)"] == "1.2; 3.6; 7.2"
+    assert summary["Highest significant harmonic (Hz)"] == pytest.approx(7.2)
+    assert summary["Highest significant harmonic index"] == 6
+    assert summary["Harmonic 1 (1.2 Hz) significant?"] == "Yes"
+    assert summary["All harmonics 1 through highest index significant?"] == "No"
+    assert summary["Non-significant harmonic indices within 1..highest"] == "2; 4; 5"
+    assert summary["Significant harmonic indices"] == "1; 3; 6"
 
     selection_df = frames[HARMONIC_SELECTION_SHEET]
     selected_row = selection_df[selection_df["requested_harmonic_hz"] == 1.2].iloc[0]
@@ -328,17 +337,13 @@ def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook
     tmp_path,
     monkeypatch,
 ):
-    subjects, conditions, rois, subject_data, summed_bca, provenance, _dv_metadata = _fixture_inputs()
+    subjects, conditions, rois, subject_data, summed_bca, provenance, dv_metadata = _fixture_inputs()
     captured: dict[str, object] = {}
 
     def fake_prepare_summed_bca_data(**kwargs):
         captured.update(kwargs)
         kwargs["provenance_map"].update(provenance)
-        kwargs["dv_metadata"].update(
-            {
-                "policy_name": FIXED_PREDEFINED_POLICY_NAME,
-            }
-        )
+        kwargs["dv_metadata"].update(dv_metadata)
         return summed_bca
 
     monkeypatch.setattr(
@@ -375,6 +380,13 @@ def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook
         ]
         assert WIDE_FORMAT_SHEET in workbook.sheet_names
         roundtrip = pd.read_excel(workbook, sheet_name=LONG_FORMAT_SHEET)
+
+    workbook = load_workbook(target)
+    summary_sheet = workbook[SELECTION_SUMMARY_SHEET]
+    assert summary_sheet["A1"].alignment.horizontal == "center"
+    assert summary_sheet["B2"].alignment.horizontal == "center"
+    assert summary_sheet["A1"].font.bold is True
+    assert summary_sheet.freeze_panes == "A2"
 
     assert len(roundtrip) == 8
     assert set(roundtrip["group_id"]) == {"single_group"}

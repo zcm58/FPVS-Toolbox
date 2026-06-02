@@ -12,6 +12,8 @@ from pathlib import Path
 from time import perf_counter
 
 import pandas as pd
+from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
 
 from Tools.Stats.analysis.dv_policies import prepare_summed_bca_data
 from Tools.Stats.analysis.dv_policy_settings import (
@@ -27,8 +29,8 @@ LONG_FORMAT_SHEET = "Long_Format"
 WIDE_FORMAT_SHEET = "Wide_Format"
 SELECTION_SUMMARY_SHEET = "Selection_Summary"
 SELECTION_SUMMARY_COLUMNS = [
-    "key",
-    "value",
+    "Summary Item",
+    "Value",
 ]
 HARMONIC_SELECTION_SHEET = "Harmonic_Selection"
 HARMONIC_SELECTION_COLUMNS = [
@@ -105,6 +107,31 @@ def _sequence_cell(value: object) -> str:
         return ";".join(str(item) for item in value)
     except TypeError:
         return str(value)
+
+
+def _format_number(value: object) -> object:
+    number = _numeric_or_nan(value)
+    if math.isfinite(number):
+        rounded = float(f"{number:.12g}")
+        return int(rounded) if rounded.is_integer() else rounded
+    return value
+
+
+def _format_sequence_cell(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return "; ".join(str(_format_number(item)) for item in value)
+    except TypeError:
+        return str(_format_number(value))
+
+
+def _yes_no(value: bool | None) -> str:
+    if value is None:
+        return ""
+    return "Yes" if value else "No"
 
 
 def _common_rossion_meta(dv_metadata: Mapping[str, object]) -> Mapping[str, object]:
@@ -311,7 +338,7 @@ def _build_selection_summary_frame(dv_metadata: Mapping[str, object]) -> pd.Data
 
 
 def _summary_row(key: str, value: object) -> dict[str, object]:
-    return {"key": key, "value": _summary_value(value)}
+    return {"Summary Item": key, "Value": _summary_value(value)}
 
 
 def _summary_value(value: object) -> object:
@@ -342,49 +369,62 @@ def _harmonic_index(frequency_hz: object, oddball_hz: object) -> int | float:
     return int(round(frequency / oddball))
 
 
+def _selected_harmonic_indices(values: object, oddball_hz: object) -> list[int]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    indices = {
+        int(index)
+        for value in values
+        if math.isfinite(index := _harmonic_index(value, oddball_hz))
+    }
+    return sorted(index for index in indices if index > 0)
+
+
+def _missing_harmonic_indices(selected_indices: list[int], highest_index: object) -> list[int]:
+    highest = _numeric_or_nan(highest_index)
+    if not math.isfinite(highest) or highest <= 0:
+        return []
+    selected_set = set(selected_indices)
+    return [index for index in range(1, int(round(highest)) + 1) if index not in selected_set]
+
+
 def _group_significant_summary_rows(group_meta: Mapping[str, object]) -> list[dict[str, object]]:
     selected = group_meta.get("selected_harmonics_hz", [])
+    oddball_hz = group_meta.get("oddball_frequency_hz")
     highest_hz = group_meta.get("highest_significant_harmonic_hz")
     if highest_hz in (None, ""):
         highest_hz = _highest_harmonic_hz(selected)
     highest_index = group_meta.get("highest_significant_harmonic_index")
     if highest_index in (None, ""):
-        highest_index = _harmonic_index(highest_hz, group_meta.get("oddball_frequency_hz"))
+        highest_index = _harmonic_index(highest_hz, oddball_hz)
+    selected_indices = _selected_harmonic_indices(selected, oddball_hz)
+    missing_indices = _missing_harmonic_indices(selected_indices, highest_index)
+    harmonic_one_label = f"Harmonic 1 ({_format_number(oddball_hz)} Hz) significant?"
     rows = [
         _summary_row(
-            "harmonic_policy",
-            group_meta.get("harmonic_policy", GROUP_SIGNIFICANT_POLICY_ID),
+            "Harmonic policy",
+            group_meta.get("harmonic_policy_label")
+            or group_meta.get("harmonic_policy", GROUP_SIGNIFICANT_POLICY_ID),
         ),
-        _summary_row("harmonic_policy_label", group_meta.get("harmonic_policy_label", "")),
-        _summary_row("selection_scope", group_meta.get("selection_scope", "")),
-        _summary_row("base_frequency_hz", group_meta.get("base_frequency_hz")),
-        _summary_row("oddball_frequency_hz", group_meta.get("oddball_frequency_hz")),
-        _summary_row("z_threshold", group_meta.get("z_threshold")),
-        _summary_row("selected_harmonics_hz", selected),
-        _summary_row("highest_significant_harmonic_hz", highest_hz),
-        _summary_row("highest_significant_harmonic_index", highest_index),
-        _summary_row("selection_cache_source", group_meta.get("selection_cache_source", "")),
-        _summary_row("selection_cache_saved_at", group_meta.get("selection_cache_saved_at", "")),
-        _summary_row("selection_cache_key", group_meta.get("selection_cache_key", "")),
-        _summary_row("selection_source_sheet", group_meta.get("selection_source_sheet", "")),
-        _summary_row("z_score_source", group_meta.get("z_score_source", "")),
-        _summary_row("noise_window_bins", group_meta.get("noise_window_bins")),
+        _summary_row("Selection scope", group_meta.get("selection_scope", "")),
+        _summary_row("Base frequency (Hz)", _format_number(group_meta.get("base_frequency_hz"))),
+        _summary_row("Oddball frequency (Hz)", _format_number(oddball_hz)),
+        _summary_row("Z threshold", _format_number(group_meta.get("z_threshold"))),
+        _summary_row("Highest significant harmonic (Hz)", _format_number(highest_hz)),
+        _summary_row("Highest significant harmonic index", _format_number(highest_index)),
+        _summary_row(harmonic_one_label, _yes_no(1 in selected_indices)),
         _summary_row(
-            "applied_uniformly_across_participants",
-            group_meta.get("applied_uniformly_across_participants", ""),
+            "All harmonics 1 through highest index significant?",
+            _yes_no(not missing_indices and bool(selected_indices)),
         ),
         _summary_row(
-            "applied_uniformly_across_conditions",
-            group_meta.get("applied_uniformly_across_conditions", ""),
+            "Non-significant harmonic indices within 1..highest",
+            _format_sequence_cell(missing_indices) if missing_indices else "None",
         ),
-        _summary_row(
-            "applied_uniformly_across_rois",
-            group_meta.get("applied_uniformly_across_rois", ""),
-        ),
-        _summary_row(
-            "snr_used_for_statistics",
-            group_meta.get("snr_used_for_statistics", ""),
-        ),
+        _summary_row("Significant harmonic indices", _format_sequence_cell(selected_indices)),
+        _summary_row("Significant harmonic frequencies (Hz)", _format_sequence_cell(selected)),
+        _summary_row("Selection source", group_meta.get("selection_cache_source", "")),
+        _summary_row("Selection saved at", group_meta.get("selection_cache_saved_at", "")),
     ]
     return rows
 
@@ -399,37 +439,40 @@ def _fixed_predefined_summary_rows(fixed_meta: Mapping[str, object]) -> list[dic
         highest_index = _harmonic_index(highest_hz, fixed_meta.get("oddball_frequency_hz"))
     return [
         _summary_row(
-            "harmonic_policy",
-            fixed_meta.get("harmonic_policy", FIXED_PREDEFINED_POLICY_ID),
+            "Harmonic policy",
+            fixed_meta.get("harmonic_policy_label")
+            or fixed_meta.get("harmonic_policy", FIXED_PREDEFINED_POLICY_ID),
         ),
-        _summary_row("harmonic_policy_label", fixed_meta.get("harmonic_policy_label", "")),
-        _summary_row("selected_harmonics_hz", selected),
-        _summary_row("highest_selected_harmonic_hz", highest_hz),
-        _summary_row("highest_selected_harmonic_index", highest_index),
+        _summary_row("Selected harmonics (Hz)", _format_sequence_cell(selected)),
+        _summary_row("Highest selected harmonic (Hz)", _format_number(highest_hz)),
+        _summary_row("Highest selected harmonic index", _format_number(highest_index)),
         _summary_row(
-            "snr_used_for_statistics",
-            fixed_meta.get("snr_used_for_statistics", ""),
-        ),
-        _summary_row(
-            "applied_uniformly_across_participants",
-            fixed_meta.get("applied_uniformly_across_participants", ""),
+            "SNR used for statistics?",
+            _yes_no(bool(fixed_meta.get("snr_used_for_statistics"))),
         ),
         _summary_row(
-            "applied_uniformly_across_conditions",
-            fixed_meta.get("applied_uniformly_across_conditions", ""),
+            "Applied uniformly across participants?",
+            _yes_no(bool(fixed_meta.get("applied_uniformly_across_participants"))),
         ),
         _summary_row(
-            "applied_uniformly_across_rois",
-            fixed_meta.get("applied_uniformly_across_rois", ""),
+            "Applied uniformly across conditions?",
+            _yes_no(bool(fixed_meta.get("applied_uniformly_across_conditions"))),
+        ),
+        _summary_row(
+            "Applied uniformly across ROIs?",
+            _yes_no(bool(fixed_meta.get("applied_uniformly_across_rois"))),
         ),
     ]
 
 
 def _legacy_rossion_summary_rows(rossion_meta: Mapping[str, object]) -> list[dict[str, object]]:
     return [
-        _summary_row("harmonic_policy", "legacy_rossion_method"),
-        _summary_row("selection_scope", rossion_meta.get("selection_scope", "")),
-        _summary_row("selected_harmonics_hz", rossion_meta.get("common_harmonics_hz", "")),
+        _summary_row("Harmonic policy", "legacy_rossion_method"),
+        _summary_row("Selection scope", rossion_meta.get("selection_scope", "")),
+        _summary_row(
+            "Selected harmonics (Hz)",
+            _format_sequence_cell(rossion_meta.get("common_harmonics_hz", "")),
+        ),
     ]
 
 
@@ -598,14 +641,35 @@ def write_stats_ready_workbook(
     save_path: str | Path,
     frames: Mapping[str, pd.DataFrame],
 ) -> Path:
-    """Write the stats-ready workbook as plain rectangular Excel sheets."""
+    """Write the stats-ready workbook and format the harmonic summary sheet."""
 
     target = Path(save_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(target, engine="openpyxl") as writer:
         for sheet_name, frame in frames.items():
             frame.to_excel(writer, sheet_name=sheet_name, index=False)
+        workbook = writer.book
+        if SELECTION_SUMMARY_SHEET in workbook.sheetnames:
+            _format_selection_summary_sheet(workbook[SELECTION_SUMMARY_SHEET])
     return target
+
+
+def _format_selection_summary_sheet(worksheet: object) -> None:
+    center_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for row in worksheet.iter_rows():
+        for cell in row:
+            cell.alignment = center_alignment
+
+    for cell in worksheet[1]:
+        cell.font = Font(bold=True)
+
+    worksheet.freeze_panes = "A2"
+    for column_index, column_cells in enumerate(worksheet.columns, start=1):
+        max_length = max(len(str(cell.value or "")) for cell in column_cells)
+        worksheet.column_dimensions[get_column_letter(column_index)].width = min(
+            max(max_length + 2, 14),
+            72,
+        )
 
 
 def prepare_stats_ready_export(
