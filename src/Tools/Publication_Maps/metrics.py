@@ -1,4 +1,4 @@
-"""BCA metric builder for publication scalp maps."""
+"""Metric builders for publication scalp maps."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from Tools.Stats.analysis.dv_policy_group_significant import (
 )
 from Tools.Stats.analysis.dv_policy_settings import DVPolicySettings
 from Tools.Publication_Maps.excel_inputs import (
-    BCA_SHEET,
     ELECTRODE_COLUMN,
     discover_workbooks,
 )
@@ -58,9 +57,10 @@ GRAND_COLUMNS = [
 
 
 def build_publication_map_result(request: PublicationMapRequest) -> PublicationMapResult:
-    """Build BCA long and grand-average frames using Stats-selected harmonics."""
+    """Build selected metric frames using Stats-selected harmonics."""
 
     diagnostics: list[Diagnostic] = []
+    requested_metrics = _request_metrics(request)
     workbooks = discover_workbooks(
         request.input_root,
         request.conditions,
@@ -85,15 +85,20 @@ def build_publication_map_result(request: PublicationMapRequest) -> PublicationM
         workbooks=workbooks,
         diagnostics=diagnostics,
     )
-    long_rows = _collect_bca_rows(
-        workbooks=workbooks,
-        harmonics_hz=selected_harmonics,
-        diagnostics=diagnostics,
-    )
+    long_rows: list[dict[str, object]] = []
+    for metric in requested_metrics:
+        long_rows.extend(
+            _collect_metric_rows(
+                metric=metric,
+                workbooks=workbooks,
+                harmonics_hz=selected_harmonics,
+                diagnostics=diagnostics,
+            )
+        )
     long_df = pd.DataFrame(long_rows, columns=LONG_COLUMNS)
     grand_df = _build_grand_average_frame(long_df, selected_harmonics)
     if grand_df.empty and not any(diag.level == "error" for diag in diagnostics):
-        diagnostics.append(Diagnostic(level="error", message="No renderable BCA scalp-map values were found."))
+        diagnostics.append(Diagnostic(level="error", message="No renderable scalp-map values were found."))
     return PublicationMapResult(
         long_values=long_df,
         grand_average_values=grand_df,
@@ -101,6 +106,15 @@ def build_publication_map_result(request: PublicationMapRequest) -> PublicationM
         selected_harmonics_hz=selected_harmonics,
         selection_metadata=selection_metadata,
     )
+
+
+def _request_metrics(request: PublicationMapRequest) -> tuple[PublicationMetric, ...]:
+    metrics: list[PublicationMetric] = []
+    for metric in request.metrics:
+        normalized = PublicationMetric(metric)
+        if normalized not in metrics:
+            metrics.append(normalized)
+    return tuple(metrics) or (PublicationMetric.BCA,)
 
 
 def _select_stats_significant_harmonics(
@@ -135,53 +149,59 @@ def _select_stats_significant_harmonics(
     diagnostics.append(
         Diagnostic(
             level="info",
-            message="Stats group-significant harmonics selected for BCA scalp maps.",
+            message="Stats group-significant harmonics selected for scalp maps.",
             detail=", ".join(f"{freq:g} Hz" for freq in selected),
         )
     )
     return selected, metadata
 
 
-def _collect_bca_rows(
+def _collect_metric_rows(
     *,
+    metric: PublicationMetric,
     workbooks: list[WorkbookEntry],
     harmonics_hz: tuple[float, ...],
     diagnostics: list[Diagnostic],
 ) -> list[dict[str, object]]:
     montage_names = biosemi64_names_upper()
     rows: list[dict[str, object]] = []
+    source_sheet = metric.source_sheet
     for workbook in workbooks:
         try:
-            df_bca = pd.read_excel(workbook.path, sheet_name=BCA_SHEET)
+            df_metric = pd.read_excel(workbook.path, sheet_name=source_sheet)
         except Exception as exc:
             diagnostics.append(
                 Diagnostic(
                     level="error",
                     condition=workbook.condition,
                     workbook=workbook.path.name,
-                    message=f"Failed reading sheet: {BCA_SHEET}.",
+                    message=f"Failed reading sheet: {source_sheet}.",
                     detail=str(exc),
                 )
             )
             continue
-        if ELECTRODE_COLUMN not in df_bca.columns:
+        if ELECTRODE_COLUMN not in df_metric.columns:
             diagnostics.append(
                 Diagnostic(
                     level="error",
                     condition=workbook.condition,
                     workbook=workbook.path.name,
-                    message=f"Missing Electrode column in {BCA_SHEET}.",
+                    message=f"Missing Electrode column in {source_sheet}.",
                 )
             )
             continue
-        missing_columns = [f"{float(freq):.4f}_Hz" for freq in harmonics_hz if f"{float(freq):.4f}_Hz" not in df_bca.columns]
+        missing_columns = [
+            f"{float(freq):.4f}_Hz"
+            for freq in harmonics_hz
+            if f"{float(freq):.4f}_Hz" not in df_metric.columns
+        ]
         if missing_columns:
             diagnostics.append(
                 Diagnostic(
                     level="error",
                     condition=workbook.condition,
                     workbook=workbook.path.name,
-                    message="Missing exact selected BCA harmonic columns.",
+                    message=f"Missing exact selected {metric.display_name} harmonic columns.",
                     detail=", ".join(missing_columns[:8]),
                 )
             )
@@ -189,7 +209,7 @@ def _collect_bca_rows(
         unmapped = sorted(
             {
                 normalize_electrode_name(electrode)
-                for electrode in df_bca[ELECTRODE_COLUMN]
+                for electrode in df_metric[ELECTRODE_COLUMN]
                 if normalize_electrode_name(electrode)
                 and normalize_electrode_name(electrode) not in montage_names
             }
@@ -208,7 +228,9 @@ def _collect_bca_rows(
             source_column = f"{float(harmonic):.4f}_Hz"
             rows.extend(
                 _rows_for_frequency(
-                    df=df_bca,
+                    df=df_metric,
+                    metric=metric,
+                    source_sheet=source_sheet,
                     workbook_path=workbook.path,
                     condition=workbook.condition,
                     subject_id=workbook.subject_id,
@@ -223,6 +245,8 @@ def _collect_bca_rows(
 def _rows_for_frequency(
     *,
     df: pd.DataFrame,
+    metric: PublicationMetric,
+    source_sheet: str,
     workbook_path: Path,
     condition: str,
     subject_id: str,
@@ -244,10 +268,10 @@ def _rows_for_frequency(
                 "electrode": electrode,
                 "original_electrode": original_electrode,
                 "is_montage_electrode": electrode in montage_names,
-                "metric": PublicationMetric.BCA.value,
-                "metric_label": PublicationMetric.BCA.display_name,
+                "metric": metric.value,
+                "metric_label": metric.display_name,
                 "harmonic_hz": round(float(harmonic_hz), 4),
-                "source_sheet": BCA_SHEET,
+                "source_sheet": source_sheet,
                 "source_column": source_column,
                 "source_column_hz": round(float(harmonic_hz), 4),
                 "exact_column_label": True,
@@ -265,28 +289,44 @@ def _build_grand_average_frame(
         return pd.DataFrame(columns=GRAND_COLUMNS)
     metric_df = long_df.copy()
     metric_df["value"] = pd.to_numeric(metric_df["value"], errors="coerce")
-    subject_values = (
-        metric_df.groupby(
-            ["condition", "subject_id", "electrode", "is_montage_electrode"],
-            dropna=False,
-        )["value"]
-        .agg(_safe_sum)
-        .reset_index(name="subject_value")
-    )
-    grouped = (
-        subject_values.groupby(["condition", "electrode", "is_montage_electrode"], dropna=False)[
-            "subject_value"
-        ]
-        .agg(aggregate_value=_safe_mean, valid_subject_count=_finite_count)
-        .reset_index()
-    )
-    grouped["metric"] = PublicationMetric.BCA.value
-    grouped["metric_label"] = PublicationMetric.BCA.display_name
-    grouped["map_harmonic_hz"] = np.nan
-    grouped["map_label"] = "BCA significant-harmonic sum"
-    grouped["selected_harmonics_hz"] = ", ".join(f"{freq:g}" for freq in selected_harmonics_hz)
-    grouped["render_value"] = grouped["aggregate_value"].clip(lower=0)
-    return grouped[GRAND_COLUMNS]
+    frames: list[pd.DataFrame] = []
+    for metric_value, group in metric_df.groupby("metric", dropna=False):
+        metric = PublicationMetric(metric_value)
+        subject_aggregator = _safe_sum if metric is PublicationMetric.BCA else _safe_mean
+        subject_values = (
+            group.groupby(
+                ["condition", "subject_id", "electrode", "is_montage_electrode"],
+                dropna=False,
+            )["value"]
+            .agg(subject_aggregator)
+            .reset_index(name="subject_value")
+        )
+        grouped = (
+            subject_values.groupby(["condition", "electrode", "is_montage_electrode"], dropna=False)[
+                "subject_value"
+            ]
+            .agg(aggregate_value=_safe_mean, valid_subject_count=_finite_count)
+            .reset_index()
+        )
+        grouped["metric"] = metric.value
+        grouped["metric_label"] = metric.display_name
+        grouped["map_harmonic_hz"] = np.nan
+        grouped["map_label"] = _map_label(metric)
+        grouped["selected_harmonics_hz"] = ", ".join(f"{freq:g}" for freq in selected_harmonics_hz)
+        if metric is PublicationMetric.BCA:
+            grouped["render_value"] = grouped["aggregate_value"].clip(lower=0)
+        else:
+            grouped["render_value"] = grouped["aggregate_value"]
+        frames.append(grouped[GRAND_COLUMNS])
+    if not frames:
+        return pd.DataFrame(columns=GRAND_COLUMNS)
+    return pd.concat(frames, ignore_index=True)[GRAND_COLUMNS]
+
+
+def _map_label(metric: PublicationMetric) -> str:
+    if metric is PublicationMetric.SNR:
+        return "SNR significant-harmonic mean"
+    return "BCA significant-harmonic sum"
 
 
 def _safe_sum(values: pd.Series) -> float:

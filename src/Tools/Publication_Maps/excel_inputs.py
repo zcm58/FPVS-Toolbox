@@ -13,6 +13,7 @@ from Tools.Publication_Maps.models import ConditionInfo, FrequencyColumn, Workbo
 from Tools.Ratio_Calculator.utils import is_excel_temp_lock_file
 
 BCA_SHEET = "BCA (uV)"
+SNR_SHEET = "SNR"
 ELECTRODE_COLUMN = "Electrode"
 
 _NUMERIC_PREFIX_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)")

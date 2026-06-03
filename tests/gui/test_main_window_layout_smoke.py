@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from Main_App.gui import main_window as main_window_module
 from Main_App.gui.components import ActionRow
+from Main_App.gui.components import SectionCard
 from Main_App.gui.components import SubsectionHeaderLabel
 from Main_App.gui.style_tokens import EVENT_REMOVE_BUTTON_SIZE
 from Main_App.gui.settings_panel import EmbeddedSettingsPage
@@ -551,13 +552,51 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
         project_root / "4 - Scalp Maps"
     )
     page = win._publication_maps_page
-    assert page.base_freq_value.text().endswith("Hz")
-    assert page.bca_limit_value.text().endswith("Hz")
+    assert page.conditions_list.minimumHeight() == 140
+    assert page.conditions_list.maximumHeight() == 220
+    conditions_card = page.findChild(SectionCard, "publication_maps_conditions")
+    settings_card = page.findChild(SectionCard, "publication_maps_settings")
+    output_card = page.findChild(SectionCard, "publication_maps_output")
+    run_card = page.findChild(SectionCard, "publication_maps_run")
+    assert conditions_card is not None
+    assert settings_card is not None
+    assert output_card is not None
+    assert run_card is not None
+    assert conditions_card.geometry().top() == settings_card.geometry().top()
+    assert output_card.geometry().top() == run_card.geometry().top()
+    assert not settings_card.header.isVisible()
+    assert not hasattr(page, "base_freq_value")
+    assert not hasattr(page, "bca_limit_value")
+    assert page.metric_bca_check.isChecked()
+    assert page.metric_snr_check.isChecked()
     assert page.fixed_bca_range_check.isChecked()
     assert page.bca_vmin_spin.value() == pytest.approx(0.0)
     assert page.bca_vmax_spin.value() == pytest.approx(0.4)
+    assert page.bca_vmin_spin.minimumWidth() >= 132
+    assert page.bca_vmax_spin.minimumWidth() >= 132
     assert page.bca_vmin_spin.isEnabled()
     assert page.bca_vmax_spin.isEnabled()
+    assert page.fixed_snr_range_check.isChecked()
+    assert page.snr_vmin_spin.value() == pytest.approx(1.0)
+    assert page.snr_vmax_spin.value() == pytest.approx(1.5)
+    assert page.snr_vmin_spin.minimumWidth() >= 132
+    assert page.snr_vmax_spin.minimumWidth() >= 132
+    assert page.fixed_snr_range_check.isEnabled()
+    assert page.snr_vmin_spin.isEnabled()
+    assert page.snr_vmax_spin.isEnabled()
+    assert page.run_btn.isEnabled()
+    page.metric_bca_check.setChecked(False)
+    assert page.run_btn.isEnabled()
+    page.metric_snr_check.setChecked(False)
+    assert not page.run_btn.isEnabled()
+    page.metric_bca_check.setChecked(True)
+    page.metric_snr_check.setChecked(True)
+    assert page.fixed_snr_range_check.isEnabled()
+    assert page.snr_vmin_spin.isEnabled()
+    assert page.snr_vmax_spin.isEnabled()
+    page.metric_snr_check.setChecked(False)
+    assert not page.fixed_snr_range_check.isEnabled()
+    page.metric_snr_check.setChecked(True)
     assert page.paired_condition_a_combo.currentText() == "CondA"
     assert page.paired_condition_b_combo.currentText() == "CondB"
     assert not page.paired_conditions_widget.isVisible()
@@ -565,17 +604,23 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.paired_conditions_widget.isVisible()
     assert page.paired_condition_a_combo.isEnabled()
     assert page.paired_condition_b_combo.isEnabled()
+    assert not page.status_label.isVisible()
     page._set_busy_state(True)
     qtbot.wait(20)
 
     assert not page.input_root_row.isEnabled()
     assert not page.refresh_btn.isEnabled()
     assert not page.conditions_list.isEnabled()
+    assert not page.metric_bca_check.isEnabled()
+    assert not page.metric_snr_check.isEnabled()
     assert not page.color_low_btn.isEnabled()
     assert not page.color_high_btn.isEnabled()
     assert not page.fixed_bca_range_check.isEnabled()
     assert not page.bca_vmin_spin.isEnabled()
     assert not page.bca_vmax_spin.isEnabled()
+    assert not page.fixed_snr_range_check.isEnabled()
+    assert not page.snr_vmin_spin.isEnabled()
+    assert not page.snr_vmax_spin.isEnabled()
     assert not page.output_root_row.isEnabled()
     assert not page.export_png_check.isEnabled()
     assert not page.export_svg_check.isEnabled()
@@ -593,11 +638,16 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert page.input_root_row.isEnabled()
     assert page.refresh_btn.isEnabled()
     assert page.conditions_list.isEnabled()
+    assert page.metric_bca_check.isEnabled()
+    assert page.metric_snr_check.isEnabled()
     assert page.color_low_btn.isEnabled()
     assert page.color_high_btn.isEnabled()
     assert page.fixed_bca_range_check.isEnabled()
     assert page.bca_vmin_spin.isEnabled()
     assert page.bca_vmax_spin.isEnabled()
+    assert page.fixed_snr_range_check.isEnabled()
+    assert page.snr_vmin_spin.isEnabled()
+    assert page.snr_vmax_spin.isEnabled()
     assert page.output_root_row.isEnabled()
     assert page.export_png_check.isEnabled()
     assert page.export_svg_check.isEnabled()
@@ -606,6 +656,23 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
     assert not page.cancel_btn.isEnabled()
     assert win.menuBar().isEnabled()
     assert win.sidebar.property("processingLocked") is False
+
+    opened: list[bool] = []
+
+    def fake_confirm(parent, title, message):
+        assert parent is page
+        assert title == "Finished"
+        assert message == "Plots have been successfully generated. View plots?"
+        return True
+
+    monkeypatch.setattr("Tools.Publication_Maps.gui.confirm", fake_confirm)
+    monkeypatch.setattr(page, "_open_output_folder", lambda: opened.append(True))
+    page._last_generated_figure_count = 2
+    page._cleanup_worker()
+
+    assert opened == [True]
+    assert page._last_generated_figure_count == 0
+
     selected_roles = [
         widget.property("role")
         for widget in win.sidebar.findChildren(QWidget)

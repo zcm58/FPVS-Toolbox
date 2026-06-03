@@ -26,17 +26,24 @@ class PublicationMetric(str, Enum):
     """Supported publication scalp-map metric families."""
 
     BCA = "bca"
+    SNR = "snr"
 
     @property
     def display_name(self) -> str:
+        if self is PublicationMetric.SNR:
+            return "SNR"
         return "BCA"
 
     @property
     def source_sheet(self) -> str:
+        if self is PublicationMetric.SNR:
+            return "SNR"
         return "BCA (uV)"
 
     @property
     def value_column(self) -> str:
+        if self is PublicationMetric.SNR:
+            return "SNR"
         return "BCA (uV)"
 
 
@@ -72,6 +79,7 @@ class PublicationMapRequest:
     base_frequency_hz: float = 6.0
     max_frequency_hz: float | None = None
     subject_exclusions: frozenset[str] = frozenset()
+    metrics: tuple[PublicationMetric, ...] = (PublicationMetric.BCA,)
     color_bounds: dict[PublicationMetric, ColorBounds] = field(default_factory=dict)
     export_png: bool = True
     export_svg: bool = True

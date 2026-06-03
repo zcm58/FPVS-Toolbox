@@ -1,4 +1,4 @@
-"""Embedded PySide6 page for BCA scalp maps."""
+"""Embedded PySide6 page for publication scalp maps."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -41,6 +42,7 @@ from Main_App.gui.components import (
     configure_window_surface,
     make_action_button,
     make_form_layout,
+    confirm,
     show_error,
 )
 from Tools.Publication_Maps.excel_inputs import discover_conditions
@@ -59,7 +61,7 @@ SCALP_MAPS_OUTPUT_FOLDER = "4 - Scalp Maps"
 
 
 class PublicationMapsWindow(QWidget):
-    """Embedded tool page for Stats-selected BCA scalp maps."""
+    """Embedded tool page for Stats-selected publication scalp maps."""
 
     def __init__(
         self,
@@ -85,6 +87,7 @@ class PublicationMapsWindow(QWidget):
         self._worker: PublicationMapsWorker | None = None
         self._busy = False
         self._host_navigation_locked = False
+        self._last_generated_figure_count = 0
         self._settings_fallback: SettingsManager | None = None
         self.bca_low_color = DEFAULT_BCA_LOW_COLOR
         self.bca_high_color = DEFAULT_BCA_HIGH_COLOR
@@ -96,25 +99,21 @@ class PublicationMapsWindow(QWidget):
 
         layout.addWidget(self._build_input_group(), 0)
 
-        body = QHBoxLayout()
+        body = QGridLayout()
         body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(8)
+        body.setHorizontalSpacing(8)
+        body.setVerticalSpacing(8)
         layout.addLayout(body, 1)
 
-        left_column = QVBoxLayout()
-        left_column.setContentsMargins(0, 0, 0, 0)
-        left_column.setSpacing(8)
-        right_column = QVBoxLayout()
-        right_column.setContentsMargins(0, 0, 0, 0)
-        right_column.setSpacing(8)
-
-        body.addLayout(left_column, 1)
-        body.addLayout(right_column, 1)
-
-        left_column.addWidget(self._build_conditions_group(), 1)
-        right_column.addWidget(self._build_settings_group(), 0)
-        right_column.addWidget(self._build_output_group(), 0)
-        right_column.addWidget(self._build_run_group(), 1)
+        body.setColumnStretch(0, 4)
+        body.setColumnStretch(1, 6)
+        body.setRowStretch(0, 0)
+        body.setRowStretch(1, 0)
+        body.setRowStretch(2, 1)
+        body.addWidget(self._build_conditions_group(), 0, 0, Qt.AlignTop)
+        body.addWidget(self._build_settings_group(), 0, 1, Qt.AlignTop)
+        body.addWidget(self._build_output_group(), 1, 0, Qt.AlignTop)
+        body.addWidget(self._build_run_group(), 1, 1, Qt.AlignTop)
 
         self._apply_button_icons()
         self._set_default_paths()
@@ -163,9 +162,11 @@ class PublicationMapsWindow(QWidget):
 
     def _build_conditions_group(self) -> SectionCard:
         group = SectionCard("Conditions", object_name="publication_maps_conditions")
-        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        group.set_compact(330)
 
         self.conditions_list = QListWidget(group)
+        self.conditions_list.setMinimumHeight(140)
+        self.conditions_list.setMaximumHeight(220)
         self.conditions_list.itemChanged.connect(lambda _item: self._update_run_state())
         self.conditions_summary = QLabel("Selected conditions: 0 | Total files: 0")
         self.conditions_summary.setProperty("caption", True)
@@ -184,23 +185,32 @@ class PublicationMapsWindow(QWidget):
         return group
 
     def _build_settings_group(self) -> SectionCard:
-        group = SectionCard("BCA significant harmonics", object_name="publication_maps_settings")
+        group = SectionCard("", object_name="publication_maps_settings")
+        group.header.hide()
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         form = make_form_layout()
 
-        self.base_freq_value = QLabel(group)
-        self.base_freq_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.bca_limit_value = QLabel(group)
-        self.bca_limit_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.metric_bca_check = QCheckBox("BCA", group)
+        self.metric_bca_check.setChecked(True)
+        self.metric_bca_check.setToolTip("Export BCA scalp maps.")
+        self.metric_bca_check.toggled.connect(
+            lambda _checked: self._on_metric_selection_changed()
+        )
+        self.metric_snr_check = QCheckBox("SNR", group)
+        self.metric_snr_check.setChecked(True)
+        self.metric_snr_check.setToolTip("Export SNR scalp maps.")
+        self.metric_snr_check.toggled.connect(
+            lambda _checked: self._on_metric_selection_changed()
+        )
 
         self.color_low_btn = QPushButton(group)
         self.color_low_btn.setFixedSize(20, 20)
-        self.color_low_btn.setToolTip("Low BCA color")
+        self.color_low_btn.setToolTip("Low value color")
         self.color_low_btn.clicked.connect(lambda: self._choose_bca_color("low"))
 
         self.color_high_btn = QPushButton(group)
         self.color_high_btn.setFixedSize(20, 20)
-        self.color_high_btn.setToolTip("High BCA color")
+        self.color_high_btn.setToolTip("High value color")
         self.color_high_btn.clicked.connect(lambda: self._choose_bca_color("high"))
 
         self.fixed_bca_range_check = QCheckBox("Use fixed BCA range", group)
@@ -209,7 +219,7 @@ class PublicationMapsWindow(QWidget):
         )
         self.fixed_bca_range_check.setChecked(True)
         self.fixed_bca_range_check.stateChanged.connect(
-            lambda _state: self._toggle_bca_range_controls()
+            lambda _state: self._toggle_metric_range_controls()
         )
 
         self.bca_vmin_spin = QDoubleSpinBox(group)
@@ -226,6 +236,29 @@ class PublicationMapsWindow(QWidget):
         self.bca_vmax_spin.setSuffix(" BCA")
         self.bca_vmax_spin.setValue(0.4)
 
+        self.fixed_snr_range_check = QCheckBox("Use fixed SNR range", group)
+        self.fixed_snr_range_check.setToolTip(
+            "When checked, every SNR scalp map uses the same colorbar range."
+        )
+        self.fixed_snr_range_check.setChecked(True)
+        self.fixed_snr_range_check.stateChanged.connect(
+            lambda _state: self._toggle_metric_range_controls()
+        )
+
+        self.snr_vmin_spin = QDoubleSpinBox(group)
+        self.snr_vmin_spin.setDecimals(3)
+        self.snr_vmin_spin.setRange(-1_000_000.0, 1_000_000.0)
+        self.snr_vmin_spin.setSingleStep(0.1)
+        self.snr_vmin_spin.setSuffix(" SNR")
+        self.snr_vmin_spin.setValue(1.0)
+
+        self.snr_vmax_spin = QDoubleSpinBox(group)
+        self.snr_vmax_spin.setDecimals(3)
+        self.snr_vmax_spin.setRange(-1_000_000.0, 1_000_000.0)
+        self.snr_vmax_spin.setSingleStep(0.1)
+        self.snr_vmax_spin.setSuffix(" SNR")
+        self.snr_vmax_spin.setValue(1.5)
+
         color_row = QWidget(group)
         color_layout = QHBoxLayout(color_row)
         color_layout.setContentsMargins(0, 0, 0, 0)
@@ -237,27 +270,58 @@ class PublicationMapsWindow(QWidget):
         color_layout.addWidget(self.color_high_btn)
         color_layout.addStretch(1)
 
-        range_row = QWidget(group)
-        range_layout = QHBoxLayout(range_row)
-        range_layout.setContentsMargins(0, 0, 0, 0)
-        range_layout.setSpacing(8)
-        range_layout.addWidget(QLabel("Lower", range_row))
-        range_layout.addWidget(self.bca_vmin_spin)
-        range_layout.addSpacing(8)
-        range_layout.addWidget(QLabel("Upper", range_row))
-        range_layout.addWidget(self.bca_vmax_spin)
-        range_layout.addStretch(1)
+        metrics_row = QWidget(group)
+        metrics_layout = QHBoxLayout(metrics_row)
+        metrics_layout.setContentsMargins(0, 0, 0, 0)
+        metrics_layout.setSpacing(12)
+        metrics_layout.addWidget(self.metric_bca_check)
+        metrics_layout.addWidget(self.metric_snr_check)
+        metrics_layout.addStretch(1)
 
-        form.addRow("Base frequency:", self.base_freq_value)
-        form.addRow("BCA upper limit:", self.bca_limit_value)
+        range_row = self._build_range_control_grid(
+            group,
+            lower_spin=self.bca_vmin_spin,
+            upper_spin=self.bca_vmax_spin,
+        )
+        snr_range_row = self._build_range_control_grid(
+            group,
+            lower_spin=self.snr_vmin_spin,
+            upper_spin=self.snr_vmax_spin,
+        )
+
+        form.addRow("Metrics:", metrics_row)
         form.addRow("Color scale:", color_row)
         form.addRow("", self.fixed_bca_range_check)
         form.addRow("BCA range:", range_row)
+        form.addRow("", self.fixed_snr_range_check)
+        form.addRow("SNR range:", snr_range_row)
         group.content_layout.addLayout(form)
-        self._refresh_analysis_setting_labels()
         self._apply_bca_color_button_styles()
-        self._toggle_bca_range_controls()
+        self._toggle_metric_range_controls()
         return group
+
+    def _build_range_control_grid(
+        self,
+        parent: QWidget,
+        *,
+        lower_spin: QDoubleSpinBox,
+        upper_spin: QDoubleSpinBox,
+    ) -> QWidget:
+        row = QWidget(parent)
+        layout = QGridLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(4)
+        for spin in (lower_spin, upper_spin):
+            spin.setMinimumWidth(132)
+            spin.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        layout.addWidget(QLabel("Lower", row), 0, 0)
+        layout.addWidget(lower_spin, 0, 1)
+        layout.addWidget(QLabel("Upper", row), 1, 0)
+        layout.addWidget(upper_spin, 1, 1)
+        layout.setColumnStretch(1, 1)
+        return row
 
     def _build_output_group(self) -> SectionCard:
         group = SectionCard("Output", object_name="publication_maps_output")
@@ -285,7 +349,7 @@ class PublicationMapsWindow(QWidget):
         self.export_svg_check.setChecked(True)
         self.paired_figures_check = QCheckBox("Also export paired condition figures", group)
         self.paired_figures_check.setToolTip(
-            "When at least two conditions are selected, export side-by-side BCA scalp maps."
+            "When at least two conditions are selected, export side-by-side scalp maps."
         )
         self.paired_figures_check.toggled.connect(
             lambda _checked: self._update_paired_controls_state()
@@ -344,6 +408,7 @@ class PublicationMapsWindow(QWidget):
         self.progress.setValue(0)
         self.status_label = StatusBanner("Ready.", group)
         self.status_label.setObjectName("publication_maps_status")
+        self.status_label.hide()
         self.run_btn = make_action_button("Run", variant="primary", parent=group)
         self.cancel_btn = make_action_button("Cancel", compact=True, parent=group)
         self.cancel_btn.setEnabled(False)
@@ -361,7 +426,6 @@ class PublicationMapsWindow(QWidget):
         self.log_box.setProperty("logSurface", True)
 
         group.content_layout.addWidget(row)
-        group.content_layout.addWidget(self.status_label)
         group.content_layout.addWidget(self.log_box)
         return group
 
@@ -473,6 +537,14 @@ class PublicationMapsWindow(QWidget):
                 selected.append(str(item.data(Qt.UserRole)))
         return tuple(selected)
 
+    def _selected_metrics(self) -> tuple[PublicationMetric, ...]:
+        selected: list[PublicationMetric] = []
+        if self.metric_bca_check.isChecked():
+            selected.append(PublicationMetric.BCA)
+        if self.metric_snr_check.isChecked():
+            selected.append(PublicationMetric.SNR)
+        return tuple(selected)
+
     def _update_condition_summary(self) -> None:
         selected_conditions = self._selected_conditions()
         selected = set(selected_conditions)
@@ -493,6 +565,7 @@ class PublicationMapsWindow(QWidget):
         ready = bool(self.input_root_edit.text().strip())
         ready = ready and bool(self.output_root_edit.text().strip())
         ready = ready and bool(self._selected_conditions())
+        ready = ready and bool(self._selected_metrics())
         ready = ready and (self.export_png_check.isChecked() or self.export_svg_check.isChecked())
         ready = ready and self._paired_conditions_valid()
         self.run_btn.setEnabled(ready and self._thread is None and not self._busy)
@@ -606,13 +679,35 @@ class PublicationMapsWindow(QWidget):
             self.bca_high_color = color.name()
         self._apply_bca_color_button_styles()
 
-    def _toggle_bca_range_controls(self) -> None:
-        enabled = self.fixed_bca_range_check.isChecked() and not self._busy
-        self.bca_vmin_spin.setEnabled(enabled)
-        self.bca_vmax_spin.setEnabled(enabled)
+    def _on_metric_selection_changed(self) -> None:
+        self._toggle_metric_range_controls()
+        self._update_run_state()
+
+    def _toggle_metric_range_controls(self) -> None:
+        bca_selected = self.metric_bca_check.isChecked()
+        snr_selected = self.metric_snr_check.isChecked()
+        bca_fixed_enabled = bca_selected and not self._busy
+        snr_fixed_enabled = snr_selected and not self._busy
+        self.fixed_bca_range_check.setEnabled(bca_fixed_enabled)
+        self.fixed_snr_range_check.setEnabled(snr_fixed_enabled)
+        self.bca_vmin_spin.setEnabled(
+            bca_fixed_enabled and self.fixed_bca_range_check.isChecked()
+        )
+        self.bca_vmax_spin.setEnabled(
+            bca_fixed_enabled and self.fixed_bca_range_check.isChecked()
+        )
+        self.snr_vmin_spin.setEnabled(
+            snr_fixed_enabled and self.fixed_snr_range_check.isChecked()
+        )
+        self.snr_vmax_spin.setEnabled(
+            snr_fixed_enabled and self.fixed_snr_range_check.isChecked()
+        )
 
     def _fixed_bca_range_is_valid(self) -> bool:
         return float(self.bca_vmax_spin.value()) > float(self.bca_vmin_spin.value())
+
+    def _fixed_snr_range_is_valid(self) -> bool:
+        return float(self.snr_vmax_spin.value()) > float(self.snr_vmin_spin.value())
 
     def _lockable_widgets(self) -> tuple[QWidget, ...]:
         return (
@@ -621,11 +716,16 @@ class PublicationMapsWindow(QWidget):
             self.conditions_list,
             self.select_all_btn,
             self.select_none_btn,
+            self.metric_bca_check,
+            self.metric_snr_check,
             self.color_low_btn,
             self.color_high_btn,
             self.fixed_bca_range_check,
             self.bca_vmin_spin,
             self.bca_vmax_spin,
+            self.fixed_snr_range_check,
+            self.snr_vmin_spin,
+            self.snr_vmax_spin,
             self.output_root_row,
             self.export_png_check,
             self.export_svg_check,
@@ -674,7 +774,7 @@ class PublicationMapsWindow(QWidget):
 
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(busy)
-        self._toggle_bca_range_controls()
+        self._toggle_metric_range_controls()
         self._update_paired_controls_state()
 
         if not busy:
@@ -682,21 +782,34 @@ class PublicationMapsWindow(QWidget):
 
     def _collect_request(self) -> PublicationMapRequest:
         self._refresh_analysis_setting_labels()
-        use_fixed_range = self.fixed_bca_range_check.isChecked()
-        bounds = ColorBounds(
-            auto_scale=not use_fixed_range,
-            vmin=float(self.bca_vmin_spin.value()) if use_fixed_range else None,
-            vmax=float(self.bca_vmax_spin.value()) if use_fixed_range else None,
-            low_color=self.bca_low_color,
-            high_color=self.bca_high_color,
-        )
+        metrics = self._selected_metrics()
+        color_bounds: dict[PublicationMetric, ColorBounds] = {}
+        if PublicationMetric.BCA in metrics:
+            use_fixed_bca_range = self.fixed_bca_range_check.isChecked()
+            color_bounds[PublicationMetric.BCA] = ColorBounds(
+                auto_scale=not use_fixed_bca_range,
+                vmin=float(self.bca_vmin_spin.value()) if use_fixed_bca_range else None,
+                vmax=float(self.bca_vmax_spin.value()) if use_fixed_bca_range else None,
+                low_color=self.bca_low_color,
+                high_color=self.bca_high_color,
+            )
+        if PublicationMetric.SNR in metrics:
+            use_fixed_snr_range = self.fixed_snr_range_check.isChecked()
+            color_bounds[PublicationMetric.SNR] = ColorBounds(
+                auto_scale=not use_fixed_snr_range,
+                vmin=float(self.snr_vmin_spin.value()) if use_fixed_snr_range else None,
+                vmax=float(self.snr_vmax_spin.value()) if use_fixed_snr_range else None,
+                low_color=self.bca_low_color,
+                high_color=self.bca_high_color,
+            )
         return PublicationMapRequest(
             input_root=Path(self.input_root_edit.text().strip()),
             output_root=Path(self.output_root_edit.text().strip()),
             conditions=self._selected_conditions(),
             base_frequency_hz=self._analysis_base_frequency_hz(),
             max_frequency_hz=self._analysis_bca_upper_limit_hz(),
-            color_bounds={PublicationMetric.BCA: bounds},
+            metrics=metrics,
+            color_bounds=color_bounds,
             export_png=self.export_png_check.isChecked(),
             export_svg=self.export_svg_check.isChecked(),
             export_paired_figures=(
@@ -718,11 +831,30 @@ class PublicationMapsWindow(QWidget):
         if not self._selected_conditions():
             show_error(self, "Scalp Maps", "Select at least one condition.")
             return
-        if self.fixed_bca_range_check.isChecked() and not self._fixed_bca_range_is_valid():
+        selected_metrics = self._selected_metrics()
+        if not selected_metrics:
+            show_error(self, "Scalp Maps", "Select at least one metric.")
+            return
+        if (
+            PublicationMetric.BCA in selected_metrics
+            and self.fixed_bca_range_check.isChecked()
+            and not self._fixed_bca_range_is_valid()
+        ):
             show_error(
                 self,
                 "Scalp Maps",
                 "The upper BCA range limit must be greater than the lower limit.",
+            )
+            return
+        if (
+            PublicationMetric.SNR in selected_metrics
+            and self.fixed_snr_range_check.isChecked()
+            and not self._fixed_snr_range_is_valid()
+        ):
+            show_error(
+                self,
+                "Scalp Maps",
+                "The upper SNR range limit must be greater than the lower limit.",
             )
             return
         if self.paired_figures_check.isChecked() and not self._paired_conditions_valid():
@@ -733,6 +865,7 @@ class PublicationMapsWindow(QWidget):
             )
             return
         request = self._collect_request()
+        self._last_generated_figure_count = 0
         self.log_box.clear()
         self.progress.setValue(0)
         self.status_label.set_text("Starting...")
@@ -783,7 +916,9 @@ class PublicationMapsWindow(QWidget):
         source_path = getattr(result, "source_workbook_path", None)
         if source_path:
             self._append_log(f"Source workbook: {source_path}")
-        for path in getattr(result, "figure_paths", []):
+        figure_paths = list(getattr(result, "figure_paths", []))
+        self._last_generated_figure_count = len(figure_paths)
+        for path in figure_paths:
             self._append_log(f"Figure: {path}")
         self.progress.setValue(100)
 
@@ -795,6 +930,17 @@ class PublicationMapsWindow(QWidget):
         self._worker = None
         self._thread = None
         self._set_busy_state(False)
+        if self._last_generated_figure_count > 0:
+            self._prompt_open_output_folder()
+        self._last_generated_figure_count = 0
+
+    def _prompt_open_output_folder(self) -> None:
+        if confirm(
+            self,
+            "Finished",
+            "Plots have been successfully generated. View plots?",
+        ):
+            self._open_output_folder()
 
     def _open_output_folder(self) -> None:
         path = self.output_root_edit.text().strip()

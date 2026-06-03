@@ -1,7 +1,7 @@
 # Scalp Maps
 
-Use this page when you want publication-ready BCA scalp maps from processed
-FPVS Toolbox Excel outputs.
+Use this page when you want publication-ready BCA or SNR scalp maps from
+processed FPVS Toolbox Excel outputs.
 
 The Scalp Maps tool opens from the main app sidebar as **Scalp Maps**. It reads
 condition folders from `1 - Excel Data Files` and saves figures plus an audit
@@ -14,7 +14,7 @@ workbooks for each condition.
 
 It is useful when you need:
 
-- condition-level grand-average BCA scalp maps;
+- condition-level grand-average BCA and SNR scalp maps;
 - one shared significant-harmonic list selected with the Statistics tool
   method;
 - transparent SVG figures for PowerPoint, Illustrator, Inkscape, Affinity
@@ -22,8 +22,8 @@ It is useful when you need:
 - a selected pair of condition scalp maps on one figure;
 - source data that documents exactly which values were plotted.
 
-The current Scalp Maps tool is BCA-only. It does not generate SNR or z-score
-scalp maps.
+The current Scalp Maps tool generates BCA and SNR scalp maps. It does not
+generate z-score scalp maps.
 
 ## Inputs
 
@@ -35,7 +35,8 @@ The tool reads:
 
 - `FullFFT Amplitude (uV)` to select significant harmonics with the Statistics
   tool group-level harmonic-selection method;
-- `BCA (uV)` to sum the selected harmonic amplitudes for each electrode.
+- `BCA (uV)` to sum the selected harmonic amplitudes for each electrode;
+- `SNR` to calculate the mean selected-harmonic SNR for each electrode.
 
 Base frequency and the BCA upper frequency limit come from project settings, so
 you do not need to re-enter them in this tool. Change those settings in the main
@@ -51,20 +52,31 @@ If a matching Statistics significant-harmonics cache is already saved for the
 project, Scalp Maps can reuse it. If no matching cache is available, the tool
 computes the selection using the same locked Statistics method.
 
-Only exact selected frequency columns are summed from `BCA (uV)`. The tool does
-not use nearest-bin matching for BCA values.
+Only exact selected frequency columns are used. The tool sums selected
+`BCA (uV)` columns and averages selected `SNR` columns; it does not use
+nearest-bin matching for plotted values.
 
 ## Color scale
 
-The default BCA palette maps low values to blue and high values to red.
+Choose the metrics to export with the **BCA** and **SNR** checkboxes. Both
+metrics start checked.
+
+The default palette maps low values to blue and high values to red for both
+metrics.
 
 The fixed BCA range is checked by default with:
 
 - lower limit: `0.0 BCA`;
 - upper limit: `0.4 BCA`.
 
-Keep the fixed range checked when you want all exported maps to use the same
-colorbar. Uncheck it when each scalp map should auto-scale to its own values.
+The fixed SNR range is checked by default with:
+
+- lower limit: `1.0 SNR`;
+- upper limit: `1.5 SNR`.
+
+Keep the fixed range checked when you want all exported maps for that metric to
+use the same colorbar. Uncheck it when each scalp map should auto-scale to its
+own values.
 
 Use the low and high color selectors if a journal, slide deck, or collaborator
 requires a different palette.
@@ -97,7 +109,7 @@ slide, panel background, or multipart figure design.
 The source workbook is the audit trail for the exported figures. It includes:
 
 - one row per condition, participant, electrode, selected harmonic, source
-  sheet, source column, and raw BCA value;
+  sheet, source column, metric, and raw value;
 - grand-average values per condition and electrode;
 - diagnostics for missing sheets, missing columns, missing montage electrodes,
   and rendering notes;

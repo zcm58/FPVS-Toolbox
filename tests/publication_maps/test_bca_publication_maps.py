@@ -14,6 +14,9 @@ from Tools.Publication_Maps.excel_inputs import discover_conditions
 from Tools.Publication_Maps.metrics import build_publication_map_result
 from Tools.Publication_Maps.models import (
     ColorBounds,
+    GRAND_AVERAGE_SHEET,
+    LONG_VALUES_SHEET,
+    PARAMETERS_SHEET,
     PublicationMapRequest,
     PublicationMapResult,
     PublicationMetric,
@@ -73,6 +76,68 @@ def test_bca_maps_use_stats_group_significant_selection_and_sum_per_electrode(
     }
 
 
+def test_snr_maps_use_stats_significant_selection_and_mean_per_electrode(
+    tmp_path: Path,
+) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1", "S2"))
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=project_root / "4 - Scalp Maps",
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=8.4,
+        project_root=project_root,
+        metrics=(PublicationMetric.SNR,),
+    )
+
+    result = build_publication_map_result(request)
+
+    assert result.selected_harmonics_hz == pytest.approx((1.2, 3.6, 7.2))
+    assert set(result.long_values["metric"]) == {PublicationMetric.SNR.value}
+    assert set(result.long_values["source_sheet"]) == {"SNR"}
+    assert set(result.long_values["source_column"]) == {
+        "1.2000_Hz",
+        "3.6000_Hz",
+        "7.2000_Hz",
+    }
+    o1 = result.grand_average_values[
+        (result.grand_average_values["condition"] == "Faces")
+        & (result.grand_average_values["electrode"] == "O1")
+        & (result.grand_average_values["metric"] == PublicationMetric.SNR.value)
+    ].iloc[0]
+    assert o1["aggregate_value"] == pytest.approx(1.35)
+    assert o1["render_value"] == pytest.approx(1.35)
+    assert o1["valid_subject_count"] == 2
+    assert o1["map_label"] == "SNR significant-harmonic mean"
+
+
+def test_snr_maps_report_missing_exact_selected_columns(tmp_path: Path) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
+    workbook = excel_root / "Faces" / "S1_Faces_Results.xlsx"
+    _drop_sheet_column(workbook, sheet_name="SNR", column="3.6000_Hz")
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=project_root / "4 - Scalp Maps",
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=3.6,
+        project_root=project_root,
+        metrics=(PublicationMetric.SNR,),
+    )
+
+    result = build_publication_map_result(request)
+
+    diagnostic = next(
+        diag
+        for diag in result.diagnostics
+        if diag.message == "Missing exact selected SNR harmonic columns."
+    )
+    assert diagnostic.workbook == workbook.name
+    assert "3.6000_Hz" in diagnostic.detail
+    assert result.long_values.empty
+    assert result.grand_average_values.empty
+
+
 def test_bca_maps_can_reuse_saved_stats_harmonic_cache(tmp_path: Path) -> None:
     project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
     request = PublicationMapRequest(
@@ -121,7 +186,46 @@ def test_exports_source_workbook_and_nonblank_figures(tmp_path: Path) -> None:
         assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
 
 
-def test_exports_paired_condition_figure_with_two_maps_on_one_page(tmp_path: Path) -> None:
+def test_source_workbook_includes_bca_and_snr_when_both_selected(tmp_path: Path) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
+    output_root = project_root / "4 - Scalp Maps"
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=output_root,
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=3.6,
+        project_root=project_root,
+        metrics=(PublicationMetric.BCA, PublicationMetric.SNR),
+        color_bounds={
+            PublicationMetric.BCA: ColorBounds(auto_scale=False, vmin=0.0, vmax=0.4),
+            PublicationMetric.SNR: ColorBounds(auto_scale=False, vmin=1.0, vmax=1.5),
+        },
+    )
+    result = build_publication_map_result(request)
+
+    workbook_path = export_source_workbook(result, request)
+
+    long_values = pd.read_excel(workbook_path, sheet_name=LONG_VALUES_SHEET)
+    grand_values = pd.read_excel(workbook_path, sheet_name=GRAND_AVERAGE_SHEET)
+    params = pd.read_excel(workbook_path, sheet_name=PARAMETERS_SHEET)
+    params_by_key = dict(zip(params["key"], params["value"]))
+    assert set(long_values["metric"]) == {
+        PublicationMetric.BCA.value,
+        PublicationMetric.SNR.value,
+    }
+    assert set(long_values["source_sheet"]) == {"BCA (uV)", "SNR"}
+    assert set(grand_values["metric"]) == {
+        PublicationMetric.BCA.value,
+        PublicationMetric.SNR.value,
+    }
+    assert params_by_key["metrics"] == "bca; snr"
+    assert params_by_key["bca_range_max"] == pytest.approx(0.4)
+    assert params_by_key["snr_range_min"] == pytest.approx(1.0)
+    assert params_by_key["snr_range_max"] == pytest.approx(1.5)
+
+
+def test_exports_paired_condition_figure_per_selected_metric(tmp_path: Path) -> None:
     project_root, excel_root = _write_project_workbooks(
         tmp_path,
         subjects=("S1",),
@@ -135,6 +239,7 @@ def test_exports_paired_condition_figure_with_two_maps_on_one_page(tmp_path: Pat
         base_frequency_hz=6.0,
         max_frequency_hz=3.6,
         project_root=project_root,
+        metrics=(PublicationMetric.BCA, PublicationMetric.SNR),
         export_paired_figures=True,
         paired_conditions=("Objects", "Faces"),
     )
@@ -144,7 +249,10 @@ def test_exports_paired_condition_figure_with_two_maps_on_one_page(tmp_path: Pat
 
     paired = [path for path in figures if "_and_" in path.stem]
     assert {path.suffix for path in paired} == {".png", ".svg"}
-    assert {path.stem for path in paired} == {"Objects_and_Faces_bca_paired"}
+    assert {path.stem for path in paired} == {
+        "Objects_and_Faces_bca_paired",
+        "Objects_and_Faces_snr_paired",
+    }
     paired_png = next(path for path in paired if path.suffix == ".png")
     with Image.open(paired_png) as image:
         assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
@@ -179,6 +287,20 @@ def test_bca_metric_limits_auto_or_fixed() -> None:
     ) == (0.0, 0.4)
 
 
+def test_snr_metric_limits_auto_or_fixed() -> None:
+    data = np.asarray([1.1, 1.25, 1.4])
+
+    assert _metric_limits(data, metric=PublicationMetric.SNR, bounds=ColorBounds()) == (
+        1.1,
+        1.4,
+    )
+    assert _metric_limits(
+        data,
+        metric=PublicationMetric.SNR,
+        bounds=ColorBounds(auto_scale=False, vmin=1.0, vmax=1.5),
+    ) == (1.0, 1.5)
+
+
 def test_bca_colorbar_label_and_fonts_use_shared_component_typography() -> None:
     axis_font = matplotlib_font_kwargs("figure_axis_label")
     title_font = matplotlib_font_kwargs("figure_title")
@@ -186,6 +308,7 @@ def test_bca_colorbar_label_and_fonts_use_shared_component_typography() -> None:
     assert colorbar_label_for_metric(PublicationMetric.BCA) == (
         "Baseline-corrected amplitude (µV)"
     )
+    assert colorbar_label_for_metric(PublicationMetric.SNR) == "Signal to Noise Ratio"
     assert axis_font["fontsize"] >= 12
     assert title_font["fontsize"] >= axis_font["fontsize"]
 
@@ -330,6 +453,27 @@ def _write_group_policy_workbook(
         index=["O1", "O2", "FZ"],
     )
     bca.index.name = "Electrode"
+    snr = pd.DataFrame(
+        {
+            "1.2000_Hz": [1.0 + 0.1 * scale, 1.2 + 0.1 * scale, 1.4 + 0.1 * scale],
+            "2.4000_Hz": [9.0, 9.0, 9.0],
+            "3.6000_Hz": [1.2 + 0.1 * scale, 1.4 + 0.1 * scale, 1.6 + 0.1 * scale],
+            "4.8000_Hz": [9.0, 9.0, 9.0],
+            "6.0000_Hz": [9.0, 9.0, 9.0],
+            "7.2000_Hz": [1.4 + 0.1 * scale, 1.6 + 0.1 * scale, 1.8 + 0.1 * scale],
+        },
+        index=["O1", "O2", "FZ"],
+    )
+    snr.index.name = "Electrode"
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         bca.to_excel(writer, sheet_name="BCA (uV)")
+        snr.to_excel(writer, sheet_name="SNR")
         full_fft.to_excel(writer, sheet_name="FullFFT Amplitude (uV)")
+
+
+def _drop_sheet_column(path: Path, *, sheet_name: str, column: str) -> None:
+    sheets = pd.read_excel(path, sheet_name=None)
+    sheets[sheet_name] = sheets[sheet_name].drop(columns=[column])
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        for current_sheet_name, sheet in sheets.items():
+            sheet.to_excel(writer, sheet_name=current_sheet_name, index=False)

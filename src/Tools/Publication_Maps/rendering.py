@@ -46,6 +46,7 @@ BCA_CMAP = LinearSegmentedColormap.from_list(
 JOURNAL_TEXT_WIDTH_IN = 6.5
 SINGLE_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 5.6)
 PAIRED_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 3.4)
+SNR_COLORBAR_LABEL = "Signal to Noise Ratio"
 BCA_COLORBAR_LABEL = "Baseline-corrected amplitude (µV)"
 
 
@@ -58,13 +59,17 @@ def export_source_workbook(
     request.output_root.mkdir(parents=True, exist_ok=True)
     workbook_path = request.output_root / SOURCE_WORKBOOK_NAME
     diagnostics_df = pd.DataFrame([diag.to_row() for diag in result.diagnostics])
-    bca_bounds = request.color_bounds.get(PublicationMetric.BCA, ColorBounds())
+    requested_metrics = _request_metrics(request)
+    metric_params = _metric_parameter_rows(request, requested_metrics)
     params_df = pd.DataFrame(
         [
             {"key": "input_root", "value": str(request.input_root)},
             {"key": "output_root", "value": str(request.output_root)},
             {"key": "conditions", "value": "; ".join(request.conditions)},
-            {"key": "metrics", "value": PublicationMetric.BCA.value},
+            {
+                "key": "metrics",
+                "value": "; ".join(metric.value for metric in requested_metrics),
+            },
             {"key": "harmonic_mode", "value": request.harmonic_mode.value},
             {
                 "key": "selected_harmonics_hz",
@@ -72,23 +77,7 @@ def export_source_workbook(
             },
             {"key": "base_frequency_hz", "value": request.base_frequency_hz},
             {"key": "max_frequency_hz", "value": request.max_frequency_hz or ""},
-            {"key": "bca_auto_scale", "value": bca_bounds.auto_scale},
-            {
-                "key": "bca_range_min",
-                "value": "" if bca_bounds.vmin is None else bca_bounds.vmin,
-            },
-            {
-                "key": "bca_range_max",
-                "value": "" if bca_bounds.vmax is None else bca_bounds.vmax,
-            },
-            {
-                "key": "bca_low_color",
-                "value": bca_bounds.low_color,
-            },
-            {
-                "key": "bca_high_color",
-                "value": bca_bounds.high_color,
-            },
+            *metric_params,
             {"key": "export_paired_figures", "value": request.export_paired_figures},
             {"key": "paired_conditions", "value": "; ".join(request.paired_conditions)},
             {
@@ -104,6 +93,41 @@ def export_source_workbook(
         params_df.to_excel(writer, sheet_name=PARAMETERS_SHEET, index=False)
     result.source_workbook_path = workbook_path
     return workbook_path
+
+
+def _request_metrics(request: PublicationMapRequest) -> tuple[PublicationMetric, ...]:
+    metrics: list[PublicationMetric] = []
+    for metric in request.metrics:
+        normalized = PublicationMetric(metric)
+        if normalized not in metrics:
+            metrics.append(normalized)
+    return tuple(metrics) or (PublicationMetric.BCA,)
+
+
+def _metric_parameter_rows(
+    request: PublicationMapRequest,
+    metrics: tuple[PublicationMetric, ...],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for metric in metrics:
+        bounds = request.color_bounds.get(metric, ColorBounds())
+        prefix = metric.value
+        rows.extend(
+            [
+                {"key": f"{prefix}_auto_scale", "value": bounds.auto_scale},
+                {
+                    "key": f"{prefix}_range_min",
+                    "value": "" if bounds.vmin is None else bounds.vmin,
+                },
+                {
+                    "key": f"{prefix}_range_max",
+                    "value": "" if bounds.vmax is None else bounds.vmax,
+                },
+                {"key": f"{prefix}_low_color", "value": bounds.low_color},
+                {"key": f"{prefix}_high_color", "value": bounds.high_color},
+            ]
+        )
+    return rows
 
 
 def render_publication_figures(
@@ -235,45 +259,47 @@ def _render_paired_condition_figures(
     if not condition_pairs:
         return []
 
-    metric = PublicationMetric.BCA
-    bounds = request.color_bounds.get(metric, ColorBounds())
-    for first, second in condition_pairs:
-        first_group = _pair_group(grand, first)
-        second_group = _pair_group(grand, second)
-        if first_group.empty or second_group.empty:
-            result.diagnostics.append(
-                Diagnostic(
-                    level="warning",
-                    message="Skipped paired scalp-map figure because one condition had no renderable values.",
-                    detail=f"{first}; {second}",
+    for metric in _request_metrics(request):
+        bounds = request.color_bounds.get(metric, ColorBounds())
+        for first, second in condition_pairs:
+            first_group = _pair_group(grand, first, metric=metric)
+            second_group = _pair_group(grand, second, metric=metric)
+            if first_group.empty or second_group.empty:
+                result.diagnostics.append(
+                    Diagnostic(
+                        level="warning",
+                        message="Skipped paired scalp-map figure because one condition had no renderable values.",
+                        detail=f"{metric.display_name}: {first}; {second}",
+                    )
                 )
-            )
-            continue
-        stem = sanitize_filename_stem(f"{first}_and_{second}_{metric.value}_paired")
-        if request.export_png:
-            png_path = request.output_root / f"{stem}.png"
-            _render_paired_topomap(
-                first_group,
-                second_group,
-                first_title=str(first),
-                second_title=str(second),
-                output_path=png_path,
-                bounds=bounds,
-                dpi=request.png_dpi,
-            )
-            rendered.append(png_path)
-        if request.export_svg:
-            svg_path = request.output_root / f"{stem}.svg"
-            _render_paired_topomap(
-                first_group,
-                second_group,
-                first_title=str(first),
-                second_title=str(second),
-                output_path=svg_path,
-                bounds=bounds,
-                dpi=request.png_dpi,
-            )
-            rendered.append(svg_path)
+                continue
+            stem = sanitize_filename_stem(f"{first}_and_{second}_{metric.value}_paired")
+            if request.export_png:
+                png_path = request.output_root / f"{stem}.png"
+                _render_paired_topomap(
+                    first_group,
+                    second_group,
+                    metric=metric,
+                    first_title=str(first),
+                    second_title=str(second),
+                    output_path=png_path,
+                    bounds=bounds,
+                    dpi=request.png_dpi,
+                )
+                rendered.append(png_path)
+            if request.export_svg:
+                svg_path = request.output_root / f"{stem}.svg"
+                _render_paired_topomap(
+                    first_group,
+                    second_group,
+                    metric=metric,
+                    first_title=str(first),
+                    second_title=str(second),
+                    output_path=svg_path,
+                    bounds=bounds,
+                    dpi=request.png_dpi,
+                )
+                rendered.append(svg_path)
     return rendered
 
 
@@ -293,10 +319,15 @@ def _paired_condition_pairs(
     return list(zip(conditions[0::2], conditions[1::2]))
 
 
-def _pair_group(grand: pd.DataFrame, condition: str) -> pd.DataFrame:
+def _pair_group(
+    grand: pd.DataFrame,
+    condition: str,
+    *,
+    metric: PublicationMetric,
+) -> pd.DataFrame:
     group = grand[
         (grand["condition"] == condition)
-        & (grand["metric"] == PublicationMetric.BCA.value)
+        & (grand["metric"] == metric.value)
         & (grand["is_montage_electrode"] == True)  # noqa: E712
     ]
     return group
@@ -306,6 +337,7 @@ def _render_paired_topomap(
     first_values: pd.DataFrame,
     second_values: pd.DataFrame,
     *,
+    metric: PublicationMetric,
     first_title: str,
     second_title: str,
     output_path: Path,
@@ -313,9 +345,13 @@ def _render_paired_topomap(
     dpi: int,
 ) -> None:
     fig, axes = plt.subplots(1, 2, figsize=PAIRED_MAP_FIGSIZE, dpi=dpi)
-    metric = PublicationMetric.BCA
     cmap = colormap_for_metric(metric, bounds)
-    shared_vlim = _paired_vlim(first_values, second_values, bounds=bounds)
+    shared_vlim = _paired_vlim(
+        first_values,
+        second_values,
+        metric=metric,
+        bounds=bounds,
+    )
     try:
         im, first_missing = _draw_topomap(
             first_values,
@@ -372,12 +408,13 @@ def _paired_vlim(
     first_values: pd.DataFrame,
     second_values: pd.DataFrame,
     *,
+    metric: PublicationMetric,
     bounds: ColorBounds,
 ) -> tuple[float, float]:
     first_data, _first_info, _first_missing, _first_diag = align_render_values(first_values)
     second_data, _second_info, _second_missing, _second_diag = align_render_values(second_values)
     data = np.concatenate([first_data, second_data])
-    return _metric_limits(data, metric=PublicationMetric.BCA, bounds=bounds)
+    return _metric_limits(data, metric=metric, bounds=bounds)
 
 
 def _add_missing_note(ax: plt.Axes, missing_count: int) -> None:
@@ -397,6 +434,8 @@ def colorbar_label_for_metric(metric: PublicationMetric) -> str:
 
     if metric is PublicationMetric.BCA:
         return BCA_COLORBAR_LABEL
+    if metric is PublicationMetric.SNR:
+        return SNR_COLORBAR_LABEL
     return metric.display_name
 
 
@@ -437,15 +476,19 @@ def _metric_limits(
 ) -> tuple[float, float]:
     finite = data[np.isfinite(data)]
     if not len(finite):
-        finite = np.asarray([0.0])
+        finite = np.asarray([1.0, 1.5] if metric is PublicationMetric.SNR else [0.0])
     if not bounds.auto_scale and bounds.vmin is not None and bounds.vmax is not None:
         vmin = float(bounds.vmin)
         vmax = float(bounds.vmax)
     else:
-        vmin = 0.0
-        vmax = float(np.nanmax(finite))
-        if vmax <= 0:
-            vmax = 1.0
+        if metric is PublicationMetric.SNR:
+            vmin = float(np.nanmin(finite))
+            vmax = float(np.nanmax(finite))
+        else:
+            vmin = 0.0
+            vmax = float(np.nanmax(finite))
+            if vmax <= 0:
+                vmax = 1.0
     if vmax <= vmin:
         vmax = vmin + 1.0
     return (vmin, vmax)
