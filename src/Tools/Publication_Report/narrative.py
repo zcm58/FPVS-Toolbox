@@ -18,6 +18,8 @@ from Tools.Publication_Report.models import (
     INDIVIDUAL_DETECTABILITY_COUNTS_SHEET,
     PLANNED_LATERALIZATION_SHEET,
     ROI_RESPONSE_SUMMARY_SHEET,
+    SEMANTIC_COLOR_RATIO_SUMMARY_SHEET,
+    STATISTICAL_TEST_DECISIONS_SHEET,
     STATS_POSTHOC_SHEET,
     STATS_RM_ANOVA_SHEET,
     Z_SCORE_REPORT_SHEET,
@@ -75,7 +77,7 @@ def build_markdown(
         f"- Base-rate frequency: {request.base_frequency_hz:g} Hz",
         f"- BCA upper limit: {request.bca_upper_limit_hz:g} Hz",
         "- Z thresholds: " + ", ".join(f"{value:g}" for value in request.z_thresholds),
-        "- Individual-level BH-FDR: enabled by default",
+        "- Individual-level method: ROI-averaged summed-harmonic Z; electrode summaries use BH-FDR within participant x condition",
         "",
         "## Warnings",
         "",
@@ -91,7 +93,9 @@ def build_markdown(
 def _analysis_sections(frames: Mapping[str, pd.DataFrame]) -> list[str]:
     sections: list[str] = []
     sections.extend(_harmonic_selection_lines(frames.get(HARMONIC_SELECTION_SHEET)))
+    sections.extend(_test_decision_lines(frames.get(STATISTICAL_TEST_DECISIONS_SHEET)))
     sections.extend(_roi_response_lines(frames.get(ROI_RESPONSE_SUMMARY_SHEET)))
+    sections.extend(_semantic_color_ratio_lines(frames.get(SEMANTIC_COLOR_RATIO_SUMMARY_SHEET)))
     sections.extend(_stats_anova_lines(frames.get(STATS_RM_ANOVA_SHEET)))
     sections.extend(_stats_posthoc_lines(frames.get(STATS_POSTHOC_SHEET)))
     sections.extend(_planned_lateralization_lines(frames.get(PLANNED_LATERALIZATION_SHEET)))
@@ -127,6 +131,57 @@ def _harmonic_selection_lines(frame: pd.DataFrame | None) -> list[str]:
     ]
 
 
+def _test_decision_lines(frame: pd.DataFrame | None) -> list[str]:
+    if frame is None or frame.empty:
+        return []
+    normality_source = frame["normality_p"] if "normality_p" in frame.columns else pd.Series(index=frame.index)
+    normality_p = pd.to_numeric(normality_source, errors="coerce")
+    selected_source = frame["selected_test"] if "selected_test" in frame.columns else pd.Series(index=frame.index)
+    selected_tests = selected_source.astype(str)
+    finite_normality = frame.loc[normality_p.notna()]
+    nonnormal = frame.loc[normality_p < 0.05]
+    wilcoxon_selected = frame.loc[selected_tests == "wilcoxon_signed_rank"]
+    normality_not_tested = int(len(frame) - len(finite_normality))
+
+    lines = ["", "### Statistical Test Decisions", ""]
+    if finite_normality.empty:
+        lines.append(
+            "Shapiro-Wilk normality checks could not be completed for the planned "
+            "ROI tests, usually because too few finite observations were available."
+        )
+    elif nonnormal.empty:
+        lines.append(
+            "All planned manuscript ROI tests with Shapiro-Wilk results met the "
+            "normality assumption (all p >= .05); Wilcoxon signed-rank sensitivity "
+            "p-values are exported in the source workbook."
+        )
+    else:
+        labels = "; ".join(str(value) for value in nonnormal["comparison_id"].head(10))
+        extra = len(nonnormal) - min(len(nonnormal), 10)
+        suffix = f"; plus {extra} additional test(s)" if extra > 0 else ""
+        lines.append(
+            "Shapiro-Wilk indicated non-normality for "
+            f"{len(nonnormal)} planned ROI test(s): {labels}{suffix}. "
+            "Those rows select the Wilcoxon signed-rank result while retaining "
+            "the parametric t-test as a sensitivity result."
+        )
+    if not wilcoxon_selected.empty and nonnormal.empty:
+        labels = "; ".join(str(value) for value in wilcoxon_selected["comparison_id"].head(10))
+        lines.append(
+            f"Wilcoxon signed-rank was selected for {len(wilcoxon_selected)} row(s): {labels}."
+        )
+    if normality_not_tested:
+        lines.append(
+            f"Normality was not testable for {normality_not_tested} planned row(s); "
+            "the workbook records the selected-test reason for each row."
+        )
+    lines.append(
+        "Planned ROI manuscript comparisons use Holm correction on the selected "
+        "p-values. BH-FDR is reserved for electrode-level individual detectability."
+    )
+    return lines
+
+
 def _roi_response_lines(frame: pd.DataFrame | None) -> list[str]:
     if frame is None or frame.empty:
         return []
@@ -138,7 +193,43 @@ def _roi_response_lines(frame: pd.DataFrame | None) -> list[str]:
                 f"selected harmonic list was {_fmt(row.mean_summed_bca_uv)} +/- "
                 f"{_fmt(row.sd_summed_bca_uv)} uV (n = {int(row.n)}; "
                 f"t({ _fmt(row.df, decimals=0) }) = {_fmt(row.t_statistic)}, "
-                f"p = {_format_p(row.p_value_two_tailed)}, dz = {_fmt(row.cohens_dz)})."
+                f"parametric p = {_format_p(row.parametric_p)}, "
+                f"Wilcoxon p = {_format_p(row.nonparametric_p)}, "
+                f"selected {_test_label(row.selected_test)} p = {_format_p(row.selected_p)}, "
+                f"Holm p = {_format_p(row.p_holm_planned_family)}, "
+                f"Shapiro-Wilk p = {_format_p(row.normality_p)}, dz = {_fmt(row.cohens_dz)})."
+            )
+        )
+    return lines
+
+
+def _semantic_color_ratio_lines(frame: pd.DataFrame | None) -> list[str]:
+    if frame is None or frame.empty:
+        return []
+    lines = ["", "### Semantic-to-Color Response Ratio", ""]
+    lines.append(
+        "The semantic/color ratio was computed per participant as Semantic Response "
+        "summed BCA divided by Color Response summed BCA using the same selected "
+        "harmonic list. Descriptive summaries are shown both before and after "
+        "dropping the single minimum and single maximum valid ratio per ROI."
+    )
+    for row in frame.itertuples(index=False):
+        if int(row.n_valid_ratios) == 0:
+            lines.append(f"No valid semantic/color ratios were available for {row.roi}.")
+            continue
+        lines.append(
+            (
+                f"For {row.roi}, the raw ratio distribution was "
+                f"M = {_fmt(row.mean_ratio)}, median = {_fmt(row.median_ratio)}, "
+                f"SD = {_fmt(row.sd_ratio)}, min = {_fmt(row.min_ratio)}, "
+                f"max = {_fmt(row.max_ratio)} (n = {int(row.n_valid_ratios)}). "
+                f"After excluding the minimum and maximum, the ratio was "
+                f"M = {_fmt(row.trimmed_mean_ratio)}, median = {_fmt(row.trimmed_median_ratio)}, "
+                f"SD = {_fmt(row.trimmed_sd_ratio)}, min = {_fmt(row.trimmed_min_ratio)}, "
+                f"max = {_fmt(row.trimmed_max_ratio)} (n = {int(row.trimmed_n)}). "
+                f"Participant-level stability: {_ratio_note_text(row.stability_note)} "
+                f"({ _fmt(row.percent_within_20pct_of_median * 100 if pd.notna(row.percent_within_20pct_of_median) else None, decimals=0) }% "
+                "within 20% of the ROI median)."
             )
         )
     return lines
@@ -149,8 +240,8 @@ def _planned_lateralization_lines(frame: pd.DataFrame | None) -> list[str]:
         return []
     lines = ["", "### Planned LOT-ROT Lateralization", ""]
     lines.append(
-        "These planned contrasts are reported outside the full exploratory posthoc "
-        "FDR family."
+        "These planned contrasts are reported outside the exploratory Stats posthoc "
+        "source table and use Holm correction within the planned lateralization family."
     )
     condition_rows = frame.loc[frame["contrast_type"].astype(str) == "condition_lateralization"]
     for _index, row in condition_rows.iterrows():
@@ -162,8 +253,11 @@ def _planned_lateralization_lines(frame: pd.DataFrame | None) -> list[str]:
                 f"{row['left_roi']} M = {_fmt(row['mean_left_uv'])}; "
                 f"n = {int(row['n_complete'])}; "
                 f"t({_fmt(row['df'], decimals=0)}) = {_fmt(row['t_statistic'])}, "
-                f"p = {_format_p(row['p_value_two_tailed'])}, "
-                f"two-test Holm p = {_format_p(row['p_holm_planned_family'])}, "
+                f"parametric p = {_format_p(row['parametric_p'])}, "
+                f"Wilcoxon p = {_format_p(row['nonparametric_p'])}, "
+                f"selected {_test_label(row['selected_test'])} p = {_format_p(row['selected_p'])}, "
+                f"Holm p = {_format_p(row['p_holm_planned_family'])}, "
+                f"Shapiro-Wilk p = {_format_p(row['normality_p'])}, "
                 f"dz = {_fmt(row['cohens_dz'])}; {row['direction']})."
             )
         )
@@ -178,7 +272,11 @@ def _planned_lateralization_lines(frame: pd.DataFrame | None) -> list[str]:
                 f"was {_fmt(row['mean_difference_of_lateralization_uv'])} uV "
                 f"(n = {int(row['n_complete'])}; "
                 f"t({_fmt(row['df'], decimals=0)}) = {_fmt(row['t_statistic'])}, "
-                f"p = {_format_p(row['p_value_two_tailed'])}, "
+                f"parametric p = {_format_p(row['parametric_p'])}, "
+                f"Wilcoxon p = {_format_p(row['nonparametric_p'])}, "
+                f"selected {_test_label(row['selected_test'])} p = {_format_p(row['selected_p'])}, "
+                f"Holm p = {_format_p(row['p_holm_planned_family'])}, "
+                f"Shapiro-Wilk p = {_format_p(row['normality_p'])}, "
                 f"dz = {_fmt(row['cohens_dz'])}; {row['direction']})."
             )
         )
@@ -201,7 +299,12 @@ def _condition_comparison_lines(frame: pd.DataFrame | None) -> list[str]:
                 f"At {row.roi}, {row.condition_a} vs {row.condition_b} showed a "
                 f"mean paired difference of {_fmt(row.mean_difference_a_minus_b)} uV "
                 f"(t({ _fmt(row.df, decimals=0) }) = {_fmt(row.t_statistic)}, "
-                f"p = {_format_p(row.p_value_two_tailed)}, dz = {_fmt(row.cohens_dz)}; "
+                f"parametric p = {_format_p(row.parametric_p)}, "
+                f"Wilcoxon p = {_format_p(row.nonparametric_p)}, "
+                f"selected {_test_label(row.selected_test)} p = {_format_p(row.selected_p)}, "
+                f"Holm p = {_format_p(row.p_holm_planned_family)}, "
+                f"Shapiro-Wilk p = {_format_p(row.normality_p)}, "
+                f"dz = {_fmt(row.cohens_dz)}; "
                 f"{row.direction})."
             )
         )
@@ -231,31 +334,16 @@ def _stats_anova_lines(frame: pd.DataFrame | None) -> list[str]:
 def _stats_posthoc_lines(frame: pd.DataFrame | None) -> list[str]:
     if frame is None or frame.empty:
         return []
-    lines = ["", "### Stats Posthoc Tests", ""]
-    if "Significant" not in frame.columns:
-        lines.append(f"Stats posthoc rows written: {len(frame)}.")
-        return lines
-    significant = frame.loc[frame["Significant"].map(_is_true)]
-    lines.append(
-        f"Stats posthoc rows written: {len(frame)} total; {len(significant)} significant after BH-FDR."
-    )
-    for _index, row in significant.head(20).iterrows():
-        direction = _cell(row, "Direction", "")
-        context = _posthoc_context(row)
-        lines.append(
-            (
-                f"{direction}{context}: {_cell(row, 'Level_A', '')} vs "
-                f"{_cell(row, 'Level_B', '')}, mean diff = "
-                f"{_fmt(_cell(row, 'mean_diff'))}, "
-                f"t = {_fmt(_cell(row, 't_statistic'))}, "
-                f"p = {_format_p(_cell(row, 'p_value'))}, "
-                f"p_fdr_bh = {_format_p(_cell(row, 'p_fdr_bh'))}, "
-                f"dz = {_fmt(_cell(row, 'cohens_dz'))}."
-            )
-        )
-    if len(significant) > 20:
-        lines.append(f"Additional significant posthoc rows: {len(significant) - 20}.")
-    return lines
+    return [
+        "",
+        "### Exploratory Stats Posthoc Source Rows",
+        "",
+        (
+            f"Stats posthoc source rows written: {len(frame)}. Planned manuscript ROI "
+            "comparisons are reported separately with Shapiro-Wilk diagnostics, "
+            "parametric and Wilcoxon signed-rank results, and Holm correction."
+        ),
+    ]
 
 
 def _agreement_lines(frame: pd.DataFrame | None) -> list[str]:
@@ -276,12 +364,12 @@ def _individual_count_lines(frame: pd.DataFrame | None) -> list[str]:
         return []
     lines = ["", "### Individual Detectability Counts", ""]
     for row in frame.itertuples(index=False):
+        method = str(getattr(row, "threshold_method", "summed-harmonic Z"))
         lines.append(
             (
                 f"{row.condition} / {row.roi}: "
-                f"{int(row.participants_with_fdr_significant_electrodes)}/"
-                f"{int(row.participant_count)} participants had at least one "
-                "BH-FDR significant electrode."
+                f"{int(row.participants_detectable)}/"
+                f"{int(row.participant_count)} participants met {method}."
             )
         )
     return lines
@@ -300,7 +388,8 @@ def _electrode_summary_lines(frame: pd.DataFrame | None) -> list[str]:
                 f"{row.condition} / {row.roi} / {row.threshold_method}: "
                 f"{int(row.participants_with_significant_electrodes)}/"
                 f"{int(row.participant_count)} participants had significant electrodes; "
-                f"mean count = {_fmt(row.mean_significant_electrode_count)}."
+                f"mean count = {_fmt(row.mean_significant_electrode_count)} "
+                "using electrode-level summed-harmonic Z."
             )
         )
     if len(key_rows) > 30:
@@ -373,6 +462,27 @@ def _format_p(value: object) -> str:
     if p_value < 0.001:
         return "< .001"
     return f"{p_value:.3f}".replace("0.", ".")
+
+
+def _test_label(value: object) -> str:
+    key = str(value or "").strip().casefold()
+    labels = {
+        "one_sample_t": "one-sample t",
+        "paired_t": "paired t",
+        "wilcoxon_signed_rank": "Wilcoxon signed-rank",
+    }
+    return labels.get(key, key or "test")
+
+
+def _ratio_note_text(value: object) -> str:
+    key = str(value or "").strip().casefold()
+    labels = {
+        "high_stability_across_participants": "high stability across participants",
+        "moderate_stability_across_participants": "moderate stability across participants",
+        "variable_ratio_across_participants": "variable ratio across participants",
+        "insufficient_valid_ratios_for_stability": "insufficient valid ratios for stability review",
+    }
+    return labels.get(key, key.replace("_", " ") or "stability not evaluated")
 
 
 def _posthoc_context(row: pd.Series) -> str:

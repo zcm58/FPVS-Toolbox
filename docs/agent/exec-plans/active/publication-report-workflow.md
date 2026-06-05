@@ -19,9 +19,9 @@ Implemented in `codex/publication-report-workflow` initial slice:
   headless requests can pass the same exclusion sets directly.
 - Additive source tables for Stats-selected harmonic selection, ROI harmonic
   values/summaries, summed-BCA baseline-vs-zero summaries, existing Stats
-  RM-ANOVA and BH-FDR posthoc outputs, direct condition-pair comparisons within
+  RM-ANOVA and exploratory posthoc source outputs, direct condition-pair comparisons within
   ROI, comparison agreement, participant-first individual
-  detectability/electrode counts, electrode-level combined Z scores,
+  detectability/electrode counts, electrode-level summed-harmonic Z scores,
   manuscript-facing Z-score inventories, and base-rate summaries.
 - Focused headless tests for generated Markdown, DOCX, workbook, audit JSON,
   missing selected conditions, and single-group enforcement.
@@ -230,13 +230,21 @@ Initial workbook sheets:
 - `ROI_Harmonic_Summary`: condition x ROI x harmonic summary values.
 - `ROI_Response_Summary`: condition x ROI participant-level Summed BCA, mean,
   SD, median, range, baseline-vs-zero tests, and effect sizes.
+- `Semantic_Color_Ratio_Values`: participant x ROI Semantic Response divided by
+  Color Response ratio values using the same participant-level Summed BCA values
+  and selected harmonic list.
+- `Semantic_Color_Ratio_Summary`: ROI-level semantic/color ratio summaries
+  reporting min, max, mean, median, and SD before and after dropping the single
+  minimum and single maximum valid ratio, plus participant-level stability
+  diagnostics.
 - `Condition_Comparisons`: supported within-subject condition comparisons from
   existing Stats outputs, including test statistics, p-values, corrected
   p-values, and effect sizes.
 - `Stats_RM_ANOVA`: direct table returned by the existing Stats RM-ANOVA
   workflow for the selected conditions and report ROIs.
 - `Stats_Posthoc`: direct table returned by the existing Stats posthoc workflow,
-  including BH-FDR corrected p-values where available.
+  retained as an exploratory source table where available; planned manuscript
+  ROI comparisons use the dedicated Holm-corrected Publication Report sheets.
 - `Stats_Workflow_Summary`: run status, participant-set, exclusion, and
   backend notes from the embedded Stats workflow calls.
 - `Condition_Pairs_By_ROI`: direct condition-pair comparisons within each ROI,
@@ -247,13 +255,31 @@ Initial workbook sheets:
   lateralization contrasts plus the direct asymmetry-difference contrast
   testing whether `(ROT - LOT)` differs between the semantic and color
   responses.
+- `Normality_Checks`: Shapiro-Wilk diagnostics for planned manuscript ROI
+  tests, including condition x ROI responses, paired condition differences,
+  planned lateralization differences, and direct asymmetry-difference contrasts.
+- `Parametric_vs_Nonparametric_Tests`: side-by-side t-test and Wilcoxon
+  signed-rank results for planned manuscript ROI tests, with selected-test
+  decisions and decision reasons.
+- `Planned_ROI_Comparisons_Holm`: selected planned manuscript ROI p-values
+  corrected with Holm by planned family; Bonferroni reference p-values may be
+  exported for auditability, but Holm is the manuscript-facing correction.
+- `Statistical_Test_Decisions`: compact selected-test, normality, and Holm
+  decision table for manuscript review.
 - `Group_Electrode_Significance`: threshold x condition x electrode summaries.
 - `Individual_Detectability`: participant x condition x ROI or whole-head
   detectability flags and significant-electrode counts.
 - `Individual_Detectability_Counts`: condition x ROI participant counts and
   proportions with at least one BH-FDR significant electrode.
-- `Electrode_Z_Scores`: participant x condition x ROI x electrode combined Z
-  scores, one-tailed p-values, BH-FDR q-values, and threshold flags.
+- `Individual_ROI_Summed_Z`: participant x condition x ROI ROI-averaged
+  summed-harmonic Z scores and one-tailed p-values.
+- `Individual_Electrode_Summed_Z`: participant x condition x electrode
+  summed-harmonic Z scores and one-tailed p-values.
+- `Individual_Electrode_FDR`: participant x condition x electrode
+  summed-harmonic Z scores, one-tailed p-values, BH-FDR q-values, and
+  threshold flags.
+- `Old_vs_New_Detectability_Comparison`: legacy Stouffer values labeled
+  `Legacy_Stouffer` for validation only.
 - `Z_Score_Report`: consolidated report-facing Z scores and one-tailed p-values
   from harmonic selection, ROI harmonic summaries, and base-rate summaries.
 - `Base_Rate_Summary`: 6 Hz and harmonic summaries by condition and base-rate
@@ -293,6 +319,43 @@ Add report-specific summaries that do not alter the Stats DV policy:
 These summaries are descriptive/reporting outputs only unless explicitly wired
 to a statistical test.
 
+### Planned Manuscript ROI Tests
+
+Publication Report planned manuscript ROI tests keep the existing participant-
+level Summed BCA dependent values unchanged, then add diagnostics and
+correction labels around those values:
+
+- condition x ROI one-sample response tests run Shapiro-Wilk on participant-
+  level summed BCA, a one-sample t-test against zero, and a Wilcoxon
+  signed-rank sensitivity/fallback test against zero;
+- direct condition-pair comparisons run Shapiro-Wilk on paired difference
+  scores, paired t-tests, and Wilcoxon signed-rank tests on the same
+  differences;
+- planned LOT/ROT lateralization tests use right-minus-left difference scores
+  for each condition, plus the direct asymmetry-difference contrast;
+- planned manuscript ROI p-values are selected from the parametric test when
+  Shapiro-Wilk supports the normality assumption and from Wilcoxon when
+  Shapiro-Wilk indicates non-normality;
+- planned manuscript ROI comparison families use Holm correction on selected
+  p-values, while BH-FDR remains reserved for electrode-level individual
+  detectability maps/counts.
+
+### Semantic/Color Ratio Summaries
+
+For semantic-category reports with both Semantic Response and Color Response
+conditions, add a descriptive participant-level ratio output:
+
+- compute `Semantic Response summed BCA / Color Response summed BCA` for each
+  participant x ROI after Summed BCA has already been calculated over the
+  selected significant harmonics;
+- keep the numerator, denominator, ratio, validity flag, invalid-denominator
+  reason, and deviation from the ROI median in the participant-level sheet;
+- summarize each ROI with valid-ratio min, max, mean, median, and SD;
+- repeat the same min, max, mean, median, and SD after dropping the single
+  minimum and single maximum valid ratio;
+- export descriptive stability diagnostics such as CV, IQR, MAD, and the
+  percentage of participant ratios within 10% and 20% of the ROI median.
+
 ### Significant Electrodes
 
 Add threshold-based summaries for manuscript language:
@@ -313,12 +376,16 @@ electrode map should be clearly labeled as group-level descriptive topography.
 
 ### Individual Detectability
 
-Reuse the Individual Detectability combined-Z logic where possible:
+Use the David/Rossion-compatible summed-harmonic Z logic:
 
-- Stouffer combined Z across the Stats-selected group harmonic list by default;
-- one-tailed positive-direction threshold;
-- BH-FDR across electrodes within participant x condition enabled by default;
-- participant-level significant yes/no and significant-electrode counts.
+- use raw participant `FullFFT Amplitude (uV)` spectra and the Stats-selected
+  group harmonic list;
+- compute ROI-level participant detectability from ROI-averaged amplitude
+  spectra before calculating summed-harmonic Z;
+- compute electrode-level summed-harmonic Z for significant-electrode maps;
+- apply BH-FDR across electrodes within participant x condition;
+- keep legacy Stouffer values only in explicitly labeled `Legacy_Stouffer`
+  comparison outputs.
 
 Add table exports so the figures are not the only source of individual-level
 results.

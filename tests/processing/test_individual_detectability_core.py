@@ -3,9 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from Tools.Individual_Detectability.core import (
+    ELECTRODE_COL,
+    build_fullfft_harmonic_plan,
     discover_conditions,
+    electrode_summed_z_from_fullfft_frame,
     _plot_topomap_compat,
     parse_participant_id,
+    roi_summed_z_from_fullfft_frame,
+    summed_harmonic_z_from_bin_amplitudes,
 )
 
 
@@ -101,3 +106,99 @@ def test_topomap_wrapper_saves_svg(tmp_path: Path) -> None:
 
     assert output.exists()
     assert output.stat().st_size > 100
+
+
+def _amplitude_by_bin(harmonic_bins: tuple[int, ...], target_value: float) -> dict[int, float]:
+    values: dict[int, float] = {}
+    for bin_index in harmonic_bins:
+        values[bin_index] = target_value
+        for offset in [*range(-10, -1), *range(2, 11)]:
+            values[bin_index + offset] = 1.0 + (abs(offset) * 0.02)
+    return values
+
+
+def test_summed_harmonic_z_increases_with_target_amplitude() -> None:
+    bins = (20, 40)
+    low = summed_harmonic_z_from_bin_amplitudes(_amplitude_by_bin(bins, 1.2), bins)
+    high = summed_harmonic_z_from_bin_amplitudes(_amplitude_by_bin(bins, 2.2), bins)
+
+    assert high.z_sum > low.z_sum
+    assert high.p_one_tailed < low.p_one_tailed
+
+
+def test_null_summed_harmonic_z_is_centered_near_zero() -> None:
+    bins = (20, 40)
+    amplitudes = _amplitude_by_bin(bins, 1.0)
+    noise_sums = []
+    for offset in [*range(-10, -1), *range(2, 11)]:
+        noise_sums.append(sum(amplitudes[b + offset] for b in bins))
+    trimmed = sorted(noise_sums)[1:-1]
+    target_each = sum(trimmed) / len(trimmed) / len(bins)
+    for bin_index in bins:
+        amplitudes[bin_index] = target_each
+
+    result = summed_harmonic_z_from_bin_amplitudes(amplitudes, bins)
+
+    assert abs(result.z_sum) < 1e-12
+
+
+def test_summed_harmonic_z_differs_from_legacy_stouffer_on_same_data() -> None:
+    bins = (20, 40)
+    amplitudes = _amplitude_by_bin(bins, 1.7)
+    amplitudes[20] = 2.4
+    amplitudes[40] = 1.4
+
+    summed = summed_harmonic_z_from_bin_amplitudes(amplitudes, bins)
+    harmonic_z = []
+    for bin_index in bins:
+        one_bin = summed_harmonic_z_from_bin_amplitudes(amplitudes, (bin_index,))
+        harmonic_z.append(one_bin.z_sum)
+    legacy_stouffer = sum(harmonic_z) / (len(harmonic_z) ** 0.5)
+
+    assert summed.z_sum != legacy_stouffer
+
+
+def test_roi_detectability_uses_roi_averaged_spectrum_not_averaged_z() -> None:
+    import pandas as pd
+
+    columns = [ELECTRODE_COL, *[f"{idx / 10:.4f}_Hz" for idx in range(51)]]
+    plan = build_fullfft_harmonic_plan(columns, [1.2, 2.4])
+    base = {f"{idx / 10:.4f}_Hz": 1.0 + (idx % 5) * 0.03 for idx in range(51)}
+    e1 = dict(base)
+    e2 = dict(base)
+    e1[ELECTRODE_COL] = "P7"
+    e2[ELECTRODE_COL] = "PO7"
+    e1["1.2000_Hz"] = 4.0
+    e1["2.4000_Hz"] = 4.0
+    e2["1.2000_Hz"] = 0.2
+    e2["2.4000_Hz"] = 0.2
+    frame = pd.DataFrame([e1, e2])
+
+    roi_result = roi_summed_z_from_fullfft_frame(frame, plan, ["P7", "PO7"])
+    electrode_z = electrode_summed_z_from_fullfft_frame(frame, plan)
+    averaged_electrode_z = electrode_z["z_sum"].mean()
+
+    assert roi_result["valid_electrode_count"] == 2
+    assert roi_result["z_sum"] != averaged_electrode_z
+
+
+def test_summed_z_plan_preserves_original_bins_after_minimal_fullfft_read() -> None:
+    import pandas as pd
+
+    columns = [ELECTRODE_COL, *[f"{idx / 10:.4f}_Hz" for idx in range(51)]]
+    plan = build_fullfft_harmonic_plan(columns, [1.2, 2.4])
+    full_row = {
+        column: 1.0 + (idx % 7) * 0.02
+        for idx, column in enumerate(columns)
+        if column != ELECTRODE_COL
+    }
+    full_row[ELECTRODE_COL] = "P7"
+    full_row["1.2000_Hz"] = 3.0
+    full_row["2.4000_Hz"] = 3.0
+    full_frame = pd.DataFrame([full_row], columns=columns)
+    minimal_frame = full_frame.loc[:, list(plan.usecols)]
+
+    full_result = electrode_summed_z_from_fullfft_frame(full_frame, plan)
+    minimal_result = electrode_summed_z_from_fullfft_frame(minimal_frame, plan)
+
+    assert minimal_result["z_sum"].iloc[0] == full_result["z_sum"].iloc[0]

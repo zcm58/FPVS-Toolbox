@@ -13,6 +13,12 @@ from scipy import stats
 
 from Tools.Publication_Maps.excel_inputs import ELECTRODE_COLUMN, find_frequency_column
 from Tools.Publication_Maps.scalp_io import biosemi64_names_upper, normalize_electrode_name
+from Tools.Individual_Detectability.core import (
+    SHEET_FULLFFT,
+    build_fullfft_harmonic_plan,
+    electrode_summed_z_from_fullfft_frame,
+    roi_summed_z_from_fullfft_frame,
+)
 from Tools.Publication_Report.discovery import WorkbookEntry
 from Tools.Publication_Report.models import (
     BASE_RATE_SUMMARY_SHEET,
@@ -24,10 +30,20 @@ from Tools.Publication_Report.models import (
     HARMONIC_SELECTION_SHEET,
     INDIVIDUAL_DETECTABILITY_SHEET,
     INDIVIDUAL_DETECTABILITY_COUNTS_SHEET,
+    INDIVIDUAL_ELECTRODE_FDR_SHEET,
+    INDIVIDUAL_ELECTRODE_SUMMED_Z_SHEET,
+    INDIVIDUAL_ROI_SUMMED_Z_SHEET,
+    NORMALITY_CHECKS_SHEET,
+    OLD_VS_NEW_DETECTABILITY_COMPARISON_SHEET,
+    PARAMETRIC_VS_NONPARAMETRIC_TESTS_SHEET,
     PLANNED_LATERALIZATION_SHEET,
+    PLANNED_ROI_COMPARISONS_HOLM_SHEET,
     ROI_HARMONIC_SUMMARY_SHEET,
     ROI_HARMONIC_VALUES_SHEET,
     ROI_RESPONSE_SUMMARY_SHEET,
+    SEMANTIC_COLOR_RATIO_SUMMARY_SHEET,
+    SEMANTIC_COLOR_RATIO_VALUES_SHEET,
+    STATISTICAL_TEST_DECISIONS_SHEET,
     STATS_POSTHOC_SHEET,
     STATS_RM_ANOVA_SHEET,
     STATS_WORKFLOW_SUMMARY_SHEET,
@@ -43,6 +59,12 @@ from Tools.Stats.analysis.dv_policy_settings import (
     GROUP_SIGNIFICANT_POLICY_NAME,
 )
 from Tools.Stats.workers import stats_workers
+from Tools.Publication_Report.statistical_tests import (
+    bonferroni_adjust,
+    holm_adjust,
+    one_sample_against_zero,
+    paired_difference_test,
+)
 
 BCA_SHEET = "BCA (uV)"
 SNR_SHEET = "SNR"
@@ -86,6 +108,7 @@ def build_analysis_frames(
         roi_value_frame,
         selected_harmonics=selected_harmonics,
     )
+    semantic_color_ratio_values, semantic_color_ratio_summary = _semantic_color_ratio_frames(response_values)
     stats_rm_anova, stats_posthoc, stats_workflow_summary = _stats_rm_anova_workflow(
         request=request,
         workbooks=included_workbooks,
@@ -95,17 +118,38 @@ def build_analysis_frames(
     )
     condition_comparisons = _condition_comparisons_from_stats(stats_rm_anova)
     condition_pairs = _condition_pairs_by_roi(response_values)
+    roi_response_summary = _apply_holm_to_frame(
+        roi_response_summary,
+        family="planned_condition_roi_response_vs_zero",
+    )
+    condition_pairs = _apply_holm_to_frame(
+        condition_pairs,
+        family="planned_condition_pairs_by_roi",
+    )
     agreement = _comparison_agreement(stats_posthoc, condition_pairs)
     planned_lateralization = _planned_lateralization_contrasts(response_values)
-    individual_detectability, electrode_z_scores = _individual_detectability_frame(
+    normality_checks, parametric_vs_nonparametric, planned_roi_holm, test_decisions = _statistical_test_exports(
+        roi_response_summary=roi_response_summary,
+        condition_pairs=condition_pairs,
+        planned_lateralization=planned_lateralization,
+    )
+    (
+        individual_roi_summed_z,
+        individual_electrode_summed_z,
+        individual_electrode_fdr,
+        legacy_comparison,
+    ) = _individual_detectability_frames(
         request=request,
         workbooks=included_workbooks,
         selected_harmonics=selected_harmonics,
         warnings=warnings,
     )
-    individual_detectability_counts = _individual_detectability_counts(individual_detectability)
+    individual_detectability_counts = _individual_detectability_counts(
+        individual_roi_summed_z,
+        individual_electrode_fdr,
+    )
     group_electrode_significance = _group_electrode_significance(
-        electrode_z_scores,
+        individual_electrode_fdr,
         request.z_thresholds,
     )
     base_rate_summary = _base_rate_summary(
@@ -124,6 +168,8 @@ def build_analysis_frames(
         ROI_HARMONIC_VALUES_SHEET: roi_value_frame,
         ROI_HARMONIC_SUMMARY_SHEET: roi_harmonic_summary,
         ROI_RESPONSE_SUMMARY_SHEET: roi_response_summary,
+        SEMANTIC_COLOR_RATIO_VALUES_SHEET: semantic_color_ratio_values,
+        SEMANTIC_COLOR_RATIO_SUMMARY_SHEET: semantic_color_ratio_summary,
         CONDITION_COMPARISONS_SHEET: condition_comparisons,
         STATS_RM_ANOVA_SHEET: stats_rm_anova,
         STATS_POSTHOC_SHEET: stats_posthoc,
@@ -131,9 +177,17 @@ def build_analysis_frames(
         CONDITION_PAIRS_BY_ROI_SHEET: condition_pairs,
         COMPARISON_AGREEMENT_SHEET: agreement,
         PLANNED_LATERALIZATION_SHEET: planned_lateralization,
-        ELECTRODE_Z_SCORES_SHEET: electrode_z_scores,
+        NORMALITY_CHECKS_SHEET: normality_checks,
+        PARAMETRIC_VS_NONPARAMETRIC_TESTS_SHEET: parametric_vs_nonparametric,
+        PLANNED_ROI_COMPARISONS_HOLM_SHEET: planned_roi_holm,
+        STATISTICAL_TEST_DECISIONS_SHEET: test_decisions,
+        INDIVIDUAL_ROI_SUMMED_Z_SHEET: individual_roi_summed_z,
+        INDIVIDUAL_ELECTRODE_SUMMED_Z_SHEET: individual_electrode_summed_z,
+        INDIVIDUAL_ELECTRODE_FDR_SHEET: individual_electrode_fdr,
+        OLD_VS_NEW_DETECTABILITY_COMPARISON_SHEET: legacy_comparison,
+        ELECTRODE_Z_SCORES_SHEET: individual_electrode_fdr,
         GROUP_ELECTRODE_SIGNIFICANCE_SHEET: group_electrode_significance,
-        INDIVIDUAL_DETECTABILITY_SHEET: individual_detectability,
+        INDIVIDUAL_DETECTABILITY_SHEET: individual_roi_summed_z,
         INDIVIDUAL_DETECTABILITY_COUNTS_SHEET: individual_detectability_counts,
         Z_SCORE_REPORT_SHEET: z_score_report,
         BASE_RATE_SUMMARY_SHEET: base_rate_summary,
@@ -351,6 +405,22 @@ def _roi_response_summary(
         "t_statistic",
         "df",
         "p_value_two_tailed",
+        "normality_statistic",
+        "normality_p",
+        "normality_met",
+        "parametric_test",
+        "parametric_statistic",
+        "parametric_p",
+        "nonparametric_test",
+        "nonparametric_statistic",
+        "nonparametric_p",
+        "selected_test",
+        "selected_p",
+        "decision_reason",
+        "planned_family",
+        "p_bonferroni_planned_family",
+        "p_holm_planned_family",
+        "significant_holm",
         "cohens_dz",
     ]
     if roi_values.empty or not selected_harmonics:
@@ -371,7 +441,7 @@ def _roi_response_summary(
     for keys, group in response.groupby(["condition", "roi", "roi_role"], dropna=False):
         condition, roi, role = keys
         numeric = _finite_array(group["summed_bca_uv"])
-        t_stat, p_value = _one_sample_t(numeric)
+        diagnostics = one_sample_against_zero(numeric)
         rows.append(
             {
                 "condition": condition,
@@ -384,13 +454,291 @@ def _roi_response_summary(
                 "median_summed_bca_uv": float(np.median(numeric)) if len(numeric) else np.nan,
                 "min_summed_bca_uv": float(np.min(numeric)) if len(numeric) else np.nan,
                 "max_summed_bca_uv": float(np.max(numeric)) if len(numeric) else np.nan,
-                "t_statistic": t_stat,
-                "df": int(len(numeric) - 1) if len(numeric) >= 2 else np.nan,
-                "p_value_two_tailed": p_value,
+                "t_statistic": diagnostics.parametric_statistic,
+                "df": diagnostics.df,
+                "p_value_two_tailed": diagnostics.parametric_p,
+                **diagnostics.as_columns(),
+                "planned_family": "planned_condition_roi_response_vs_zero",
+                "p_bonferroni_planned_family": np.nan,
+                "p_holm_planned_family": np.nan,
+                "significant_holm": False,
                 "cohens_dz": _cohens_dz(numeric),
             }
         )
     return pd.DataFrame(rows, columns=summary_columns), response
+
+
+def _semantic_color_ratio_frames(response_values: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    value_columns = [
+        "subject_id",
+        "roi",
+        "roi_role",
+        "selected_harmonics_hz",
+        "semantic_condition",
+        "color_condition",
+        "semantic_summed_bca_uv",
+        "color_summed_bca_uv",
+        "semantic_color_ratio",
+        "ratio_valid",
+        "invalid_reason",
+        "roi_median_ratio",
+        "deviation_from_roi_median",
+        "absolute_deviation_from_roi_median",
+        "percent_deviation_from_roi_median",
+        "stability_band",
+    ]
+    summary_columns = [
+        "roi",
+        "roi_role",
+        "selected_harmonics_hz",
+        "semantic_condition",
+        "color_condition",
+        "n_participants",
+        "n_valid_ratios",
+        "n_invalid_denominator",
+        "min_ratio",
+        "max_ratio",
+        "mean_ratio",
+        "median_ratio",
+        "sd_ratio",
+        "trimmed_n",
+        "trimmed_min_ratio",
+        "trimmed_max_ratio",
+        "trimmed_mean_ratio",
+        "trimmed_median_ratio",
+        "trimmed_sd_ratio",
+        "iqr_ratio",
+        "mad_from_median",
+        "coefficient_of_variation",
+        "trimmed_mean_shift_abs",
+        "trimmed_mean_shift_percent",
+        "percent_within_10pct_of_median",
+        "percent_within_20pct_of_median",
+        "stability_note",
+        "min_max_exclusion_rule",
+    ]
+    if response_values.empty:
+        return pd.DataFrame(columns=value_columns), pd.DataFrame(columns=summary_columns)
+
+    semantic_condition = _find_named_level(response_values["condition"], _semantic_condition_match)
+    color_condition = _find_color_condition(response_values["condition"])
+    if not semantic_condition or not color_condition:
+        return pd.DataFrame(columns=value_columns), pd.DataFrame(columns=summary_columns)
+
+    rows: list[dict[str, object]] = []
+    for roi, group in response_values.groupby("roi", dropna=False):
+        wide = group.pivot_table(
+            index="subject_id",
+            columns="condition",
+            values="summed_bca_uv",
+            aggfunc="mean",
+        )
+        if semantic_condition not in wide.columns or color_condition not in wide.columns:
+            continue
+        meta = (
+            group.drop_duplicates(subset=["subject_id"])
+            .set_index("subject_id")[["roi_role", "selected_harmonics_hz"]]
+        )
+        for subject_id, pair in wide[[semantic_condition, color_condition]].iterrows():
+            semantic_value = _coerce_float(pair[semantic_condition])
+            color_value = _coerce_float(pair[color_condition])
+            ratio, ratio_valid, invalid_reason = _safe_semantic_color_ratio(
+                semantic_value,
+                color_value,
+            )
+            rows.append(
+                {
+                    "subject_id": str(subject_id),
+                    "roi": roi,
+                    "roi_role": _row_value(meta.loc[subject_id], "roi_role", "") if subject_id in meta.index else "",
+                    "selected_harmonics_hz": (
+                        _row_value(meta.loc[subject_id], "selected_harmonics_hz", "")
+                        if subject_id in meta.index
+                        else ""
+                    ),
+                    "semantic_condition": semantic_condition,
+                    "color_condition": color_condition,
+                    "semantic_summed_bca_uv": semantic_value,
+                    "color_summed_bca_uv": color_value,
+                    "semantic_color_ratio": ratio,
+                    "ratio_valid": ratio_valid,
+                    "invalid_reason": invalid_reason,
+                    "roi_median_ratio": np.nan,
+                    "deviation_from_roi_median": np.nan,
+                    "absolute_deviation_from_roi_median": np.nan,
+                    "percent_deviation_from_roi_median": np.nan,
+                    "stability_band": "not_evaluable",
+                }
+            )
+
+    values = pd.DataFrame(rows, columns=value_columns)
+    if values.empty:
+        return values, pd.DataFrame(columns=summary_columns)
+
+    summary_rows: list[dict[str, object]] = []
+    for roi, group in values.groupby("roi", dropna=False):
+        ratio_values = _finite_array(group.loc[group["ratio_valid"].fillna(False).astype(bool), "semantic_color_ratio"])
+        summary = _ratio_distribution_summary(ratio_values)
+        median_ratio = summary["median_ratio"]
+        valid_mask = (
+            values["roi"].astype(str).eq(str(roi))
+            & values["ratio_valid"].fillna(False).astype(bool)
+            & np.isfinite(pd.to_numeric(values["semantic_color_ratio"], errors="coerce"))
+        )
+        values.loc[valid_mask, "roi_median_ratio"] = median_ratio
+        values.loc[valid_mask, "deviation_from_roi_median"] = (
+            pd.to_numeric(values.loc[valid_mask, "semantic_color_ratio"], errors="coerce") - median_ratio
+        )
+        values.loc[valid_mask, "absolute_deviation_from_roi_median"] = values.loc[
+            valid_mask,
+            "deviation_from_roi_median",
+        ].abs()
+        if np.isfinite(median_ratio) and median_ratio != 0:
+            values.loc[valid_mask, "percent_deviation_from_roi_median"] = (
+                values.loc[valid_mask, "absolute_deviation_from_roi_median"] / abs(median_ratio)
+            )
+        values.loc[valid_mask, "stability_band"] = values.loc[
+            valid_mask,
+            "percent_deviation_from_roi_median",
+        ].map(_ratio_stability_band)
+
+        first = group.iloc[0]
+        summary_rows.append(
+            {
+                "roi": roi,
+                "roi_role": first.get("roi_role", ""),
+                "selected_harmonics_hz": first.get("selected_harmonics_hz", ""),
+                "semantic_condition": semantic_condition,
+                "color_condition": color_condition,
+                "n_participants": int(len(group)),
+                "n_valid_ratios": int(len(ratio_values)),
+                "n_invalid_denominator": int((~group["ratio_valid"].fillna(False).astype(bool)).sum()),
+                **summary,
+                "stability_note": _ratio_stability_note(summary),
+                "min_max_exclusion_rule": "Drop the single minimum and single maximum valid ratio per ROI.",
+            }
+        )
+    return values[value_columns], pd.DataFrame(summary_rows, columns=summary_columns)
+
+
+def _safe_semantic_color_ratio(
+    semantic_value: float,
+    color_value: float,
+) -> tuple[float, bool, str]:
+    if not np.isfinite(semantic_value):
+        return np.nan, False, "missing_or_nonfinite_semantic_value"
+    if not np.isfinite(color_value):
+        return np.nan, False, "missing_or_nonfinite_color_value"
+    if np.isclose(color_value, 0.0):
+        return np.nan, False, "zero_color_denominator"
+    return float(semantic_value / color_value), True, ""
+
+
+def _ratio_distribution_summary(values: np.ndarray) -> dict[str, object]:
+    trimmed = _drop_single_min_max(values)
+    mean_ratio = float(np.mean(values)) if len(values) else np.nan
+    trimmed_mean = float(np.mean(trimmed)) if len(trimmed) else np.nan
+    if np.isfinite(mean_ratio) and mean_ratio != 0 and np.isfinite(trimmed_mean):
+        trimmed_shift_percent = float(abs(trimmed_mean - mean_ratio) / abs(mean_ratio))
+    else:
+        trimmed_shift_percent = np.nan
+    return {
+        "min_ratio": float(np.min(values)) if len(values) else np.nan,
+        "max_ratio": float(np.max(values)) if len(values) else np.nan,
+        "mean_ratio": mean_ratio,
+        "median_ratio": float(np.median(values)) if len(values) else np.nan,
+        "sd_ratio": _sd(values),
+        "trimmed_n": int(len(trimmed)),
+        "trimmed_min_ratio": float(np.min(trimmed)) if len(trimmed) else np.nan,
+        "trimmed_max_ratio": float(np.max(trimmed)) if len(trimmed) else np.nan,
+        "trimmed_mean_ratio": trimmed_mean,
+        "trimmed_median_ratio": float(np.median(trimmed)) if len(trimmed) else np.nan,
+        "trimmed_sd_ratio": _sd(trimmed),
+        "iqr_ratio": _iqr(values),
+        "mad_from_median": _mad_from_median(values),
+        "coefficient_of_variation": _coefficient_of_variation(values),
+        "trimmed_mean_shift_abs": (
+            float(abs(trimmed_mean - mean_ratio))
+            if np.isfinite(trimmed_mean) and np.isfinite(mean_ratio)
+            else np.nan
+        ),
+        "trimmed_mean_shift_percent": trimmed_shift_percent,
+        "percent_within_10pct_of_median": _percent_within_median(values, proportion=0.10),
+        "percent_within_20pct_of_median": _percent_within_median(values, proportion=0.20),
+    }
+
+
+def _drop_single_min_max(values: np.ndarray) -> np.ndarray:
+    numeric = _finite_array(values)
+    if len(numeric) <= 2:
+        return np.array([], dtype=float)
+    ordered = np.sort(numeric)
+    return ordered[1:-1]
+
+
+def _iqr(values: np.ndarray) -> float:
+    numeric = _finite_array(values)
+    if len(numeric) < 2:
+        return np.nan
+    return float(np.percentile(numeric, 75) - np.percentile(numeric, 25))
+
+
+def _mad_from_median(values: np.ndarray) -> float:
+    numeric = _finite_array(values)
+    if len(numeric) == 0:
+        return np.nan
+    median = float(np.median(numeric))
+    return float(np.median(np.abs(numeric - median)))
+
+
+def _coefficient_of_variation(values: np.ndarray) -> float:
+    numeric = _finite_array(values)
+    if len(numeric) < 2:
+        return np.nan
+    mean_value = float(np.mean(numeric))
+    if mean_value == 0 or not np.isfinite(mean_value):
+        return np.nan
+    return float(np.std(numeric, ddof=1) / abs(mean_value))
+
+
+def _percent_within_median(values: np.ndarray, *, proportion: float) -> float:
+    numeric = _finite_array(values)
+    if len(numeric) == 0:
+        return np.nan
+    median = float(np.median(numeric))
+    if median == 0 or not np.isfinite(median):
+        return np.nan
+    return float(np.mean(np.abs(numeric - median) <= abs(median) * proportion))
+
+
+def _ratio_stability_band(value: object) -> str:
+    numeric = _coerce_float(value)
+    if not np.isfinite(numeric):
+        return "not_evaluable"
+    if numeric <= 0.10:
+        return "within_10pct_of_roi_median"
+    if numeric <= 0.20:
+        return "within_20pct_of_roi_median"
+    return "outside_20pct_of_roi_median"
+
+
+def _ratio_stability_note(summary: dict[str, object]) -> str:
+    n = int(summary.get("trimmed_n", 0) or 0)
+    pct20 = _coerce_float(summary.get("percent_within_20pct_of_median"))
+    cv = _coerce_float(summary.get("coefficient_of_variation"))
+    trimmed_shift = _coerce_float(summary.get("trimmed_mean_shift_percent"))
+    if n < 3:
+        return "insufficient_valid_ratios_for_stability"
+    if np.isfinite(pct20) and pct20 >= 0.80 and np.isfinite(cv) and cv <= 0.25:
+        return "high_stability_across_participants"
+    if (
+        np.isfinite(pct20)
+        and pct20 >= 0.60
+        and np.isfinite(trimmed_shift)
+        and trimmed_shift <= 0.20
+    ):
+        return "moderate_stability_across_participants"
+    return "variable_ratio_across_participants"
 
 
 def _stats_rm_anova_workflow(
@@ -489,7 +837,10 @@ def _stats_rm_anova_workflow(
             {
                 "step": "interaction_posthoc",
                 "status": posthoc_status,
-                "note": "BH-FDR posthocs from Tools.Stats.analysis.posthoc_tests.",
+                "note": (
+                    "Exploratory posthoc rows from Tools.Stats.analysis.posthoc_tests; "
+                    "planned manuscript ROI comparisons are corrected with Holm."
+                ),
             },
             {
                 "step": "stats_messages",
@@ -554,6 +905,22 @@ def _condition_pairs_by_roi(response_values: pd.DataFrame) -> pd.DataFrame:
         "t_statistic",
         "df",
         "p_value_two_tailed",
+        "normality_statistic",
+        "normality_p",
+        "normality_met",
+        "parametric_test",
+        "parametric_statistic",
+        "parametric_p",
+        "nonparametric_test",
+        "nonparametric_statistic",
+        "nonparametric_p",
+        "selected_test",
+        "selected_p",
+        "decision_reason",
+        "planned_family",
+        "p_bonferroni_planned_family",
+        "p_holm_planned_family",
+        "significant_holm",
         "cohens_dz",
         "direction",
     ]
@@ -569,16 +936,14 @@ def _condition_pairs_by_roi(response_values: pd.DataFrame) -> pd.DataFrame:
         )
         for condition_a, condition_b in combinations(sorted(wide.columns), 2):
             paired = wide[[condition_a, condition_b]].dropna(axis=0, how="any")
-            a = _finite_array(paired[condition_a])
-            b = _finite_array(paired[condition_b])
-            if len(a) != len(b) or len(a) < 2:
-                t_stat = p_value = dz = np.nan
+            a, b, diff, diagnostics = paired_difference_test(
+                paired[condition_a],
+                paired[condition_b],
+            )
+            if len(diff) < 2:
+                dz = np.nan
                 direction = "insufficient_complete_pairs"
             else:
-                result = stats.ttest_rel(a, b, nan_policy="omit")
-                t_stat = float(result.statistic)
-                p_value = float(result.pvalue)
-                diff = a - b
                 dz = _cohens_dz(diff)
                 direction = _direction(float(np.mean(diff)))
             rows.append(
@@ -592,9 +957,14 @@ def _condition_pairs_by_roi(response_values: pd.DataFrame) -> pd.DataFrame:
                     "mean_difference_a_minus_b": (
                         float(np.mean(a - b)) if len(a) == len(b) and len(a) else np.nan
                     ),
-                    "t_statistic": t_stat,
-                    "df": int(len(a) - 1) if len(a) >= 2 else np.nan,
-                    "p_value_two_tailed": p_value,
+                    "t_statistic": diagnostics.parametric_statistic,
+                    "df": diagnostics.df,
+                    "p_value_two_tailed": diagnostics.parametric_p,
+                    **diagnostics.as_columns(),
+                    "planned_family": "planned_condition_pairs_by_roi",
+                    "p_bonferroni_planned_family": np.nan,
+                    "p_holm_planned_family": np.nan,
+                    "significant_holm": False,
                     "cohens_dz": dz,
                     "direction": direction,
                 }
@@ -621,9 +991,21 @@ def _planned_lateralization_contrasts(response_values: pd.DataFrame) -> pd.DataF
         "t_statistic",
         "df",
         "p_value_two_tailed",
+        "normality_statistic",
+        "normality_p",
+        "normality_met",
+        "parametric_test",
+        "parametric_statistic",
+        "parametric_p",
+        "nonparametric_test",
+        "nonparametric_statistic",
+        "nonparametric_p",
+        "selected_test",
+        "selected_p",
+        "decision_reason",
         "p_bonferroni_planned_family",
         "p_holm_planned_family",
-        "p_bh_planned_family",
+        "significant_holm",
         "cohens_dz",
         "direction",
         "interpretation_note",
@@ -640,8 +1022,7 @@ def _planned_lateralization_contrasts(response_values: pd.DataFrame) -> pd.DataF
         return pd.DataFrame(columns=columns)
 
     family = "planned_semantic_color_lot_rot_lateralization"
-    rows: list[dict[str, object]] = []
-    lateralization_rows = [
+    rows: list[dict[str, object]] = [
         _single_condition_lateralization_row(
             frame,
             planned_family=family,
@@ -650,7 +1031,7 @@ def _planned_lateralization_contrasts(response_values: pd.DataFrame) -> pd.DataF
             right_roi=right_roi,
             note=(
                 "Planned semantic LOT-ROT lateralization contrast; not included "
-                "in the full exploratory posthoc FDR family."
+                "in the exploratory Stats posthoc source table."
             ),
         ),
         _single_condition_lateralization_row(
@@ -664,16 +1045,6 @@ def _planned_lateralization_contrasts(response_values: pd.DataFrame) -> pd.DataF
                 "only with the semantic lateralization contrast."
             ),
         ),
-    ]
-    valid_family_p = [row["p_value_two_tailed"] for row in lateralization_rows]
-    bonferroni, holm, bh = _adjust_p_values(valid_family_p)
-    for index, row in enumerate(lateralization_rows):
-        row["p_bonferroni_planned_family"] = bonferroni[index]
-        row["p_holm_planned_family"] = holm[index]
-        row["p_bh_planned_family"] = bh[index]
-        rows.append(row)
-
-    rows.append(
         _lateralization_difference_row(
             frame,
             planned_family=family,
@@ -681,8 +1052,15 @@ def _planned_lateralization_contrasts(response_values: pd.DataFrame) -> pd.DataF
             condition_b=color_condition,
             left_roi=left_roi,
             right_roi=right_roi,
-        )
-    )
+        ),
+    ]
+    selected_p = [row["selected_p"] for row in rows]
+    bonferroni = bonferroni_adjust(selected_p)
+    holm = holm_adjust(selected_p)
+    for index, row in enumerate(rows):
+        row["p_bonferroni_planned_family"] = bonferroni[index]
+        row["p_holm_planned_family"] = holm[index]
+        row["significant_holm"] = _p_is_sig(holm[index])
     return pd.DataFrame(rows, columns=columns)
 
 
@@ -696,11 +1074,15 @@ def _single_condition_lateralization_row(
     note: str,
 ) -> dict[str, object]:
     wide = _condition_roi_wide(response_values, condition=condition)
-    paired = wide[[left_roi, right_roi]].dropna(axis=0, how="any") if {left_roi, right_roi} <= set(wide.columns) else pd.DataFrame()
-    left = _finite_array(paired[left_roi]) if left_roi in paired else np.array([], dtype=float)
-    right = _finite_array(paired[right_roi]) if right_roi in paired else np.array([], dtype=float)
-    diff = right - left if len(left) == len(right) else np.array([], dtype=float)
-    t_stat, p_value = _one_sample_t(diff)
+    paired = (
+        wide[[left_roi, right_roi]].dropna(axis=0, how="any")
+        if {left_roi, right_roi} <= set(wide.columns)
+        else pd.DataFrame()
+    )
+    right, left, diff, diagnostics = paired_difference_test(
+        paired[right_roi] if right_roi in paired else pd.Series(dtype=float),
+        paired[left_roi] if left_roi in paired else pd.Series(dtype=float),
+    )
     mean_diff = float(np.mean(diff)) if len(diff) else np.nan
     return {
         "planned_family": planned_family,
@@ -717,12 +1099,13 @@ def _single_condition_lateralization_row(
         "mean_right_minus_left_condition_a_uv": np.nan,
         "mean_right_minus_left_condition_b_uv": np.nan,
         "mean_difference_of_lateralization_uv": np.nan,
-        "t_statistic": t_stat,
-        "df": int(len(diff) - 1) if len(diff) >= 2 else np.nan,
-        "p_value_two_tailed": p_value,
+        "t_statistic": diagnostics.parametric_statistic,
+        "df": diagnostics.df,
+        "p_value_two_tailed": diagnostics.parametric_p,
+        **diagnostics.as_columns(),
         "p_bonferroni_planned_family": np.nan,
         "p_holm_planned_family": np.nan,
-        "p_bh_planned_family": np.nan,
+        "significant_holm": False,
         "cohens_dz": _cohens_dz(diff),
         "direction": _right_left_direction(mean_diff),
         "interpretation_note": note,
@@ -758,7 +1141,7 @@ def _lateralization_difference_row(
         diff_a = _finite_array(paired[(condition_a, right_roi)] - paired[(condition_a, left_roi)])
         diff_b = _finite_array(paired[(condition_b, right_roi)] - paired[(condition_b, left_roi)])
         contrast = diff_a - diff_b if len(diff_a) == len(diff_b) else np.array([], dtype=float)
-    t_stat, p_value = _one_sample_t(contrast)
+    diagnostics = one_sample_against_zero(contrast)
     mean_contrast = float(np.mean(contrast)) if len(contrast) else np.nan
     return {
         "planned_family": planned_family,
@@ -775,12 +1158,13 @@ def _lateralization_difference_row(
         "mean_right_minus_left_condition_a_uv": float(np.mean(diff_a)) if len(diff_a) else np.nan,
         "mean_right_minus_left_condition_b_uv": float(np.mean(diff_b)) if len(diff_b) else np.nan,
         "mean_difference_of_lateralization_uv": mean_contrast,
-        "t_statistic": t_stat,
-        "df": int(len(contrast) - 1) if len(contrast) >= 2 else np.nan,
-        "p_value_two_tailed": p_value,
+        "t_statistic": diagnostics.parametric_statistic,
+        "df": diagnostics.df,
+        "p_value_two_tailed": diagnostics.parametric_p,
+        **diagnostics.as_columns(),
         "p_bonferroni_planned_family": np.nan,
         "p_holm_planned_family": np.nan,
-        "p_bh_planned_family": np.nan,
+        "significant_holm": False,
         "cohens_dz": _cohens_dz(contrast),
         "direction": _lateralization_difference_direction(mean_contrast, condition_a, condition_b),
         "interpretation_note": (
@@ -893,6 +1277,251 @@ def _adjust_p_values(p_values: list[object]) -> tuple[list[float], list[float], 
     return bonferroni, holm, bh
 
 
+def _apply_holm_to_frame(
+    frame: pd.DataFrame,
+    *,
+    family: str,
+) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    target = frame.copy()
+    if "planned_family" not in target.columns:
+        target["planned_family"] = family
+    else:
+        target["planned_family"] = target["planned_family"].fillna(family).replace("", family)
+    p_source = "selected_p" if "selected_p" in target.columns else "p_value_two_tailed"
+    p_values = target[p_source].tolist() if p_source in target.columns else []
+    target["p_bonferroni_planned_family"] = bonferroni_adjust(p_values)
+    target["p_holm_planned_family"] = holm_adjust(p_values)
+    target["significant_holm"] = target["p_holm_planned_family"].map(_p_is_sig)
+    return target
+
+
+def _statistical_test_exports(
+    *,
+    roi_response_summary: pd.DataFrame,
+    condition_pairs: pd.DataFrame,
+    planned_lateralization: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    entries: list[dict[str, object]] = []
+    entries.extend(_roi_response_test_entries(roi_response_summary))
+    entries.extend(_condition_pair_test_entries(condition_pairs))
+    entries.extend(_planned_lateralization_test_entries(planned_lateralization))
+    normality = pd.DataFrame(entries, columns=_normality_columns())
+    parametric_vs_nonparametric = pd.DataFrame(entries, columns=_parametric_vs_nonparametric_columns())
+    planned_holm = pd.DataFrame(entries, columns=_planned_holm_columns())
+    decisions = pd.DataFrame(entries, columns=_decision_columns())
+    return normality, parametric_vs_nonparametric, planned_holm, decisions
+
+
+def _roi_response_test_entries(frame: pd.DataFrame) -> list[dict[str, object]]:
+    if frame.empty:
+        return []
+    rows: list[dict[str, object]] = []
+    for _index, row in frame.iterrows():
+        condition = str(_row_value(row, "condition"))
+        roi = str(_row_value(row, "roi"))
+        rows.append(
+            _test_export_entry(
+                row,
+                comparison_id=f"{condition} / {roi} summed BCA vs zero",
+                comparison_type="one_sample_vs_zero",
+                condition=condition,
+                roi=roi,
+                mean_effect_uv=_row_value(row, "mean_summed_bca_uv"),
+                planned_family="planned_condition_roi_response_vs_zero",
+            )
+        )
+    return rows
+
+
+def _condition_pair_test_entries(frame: pd.DataFrame) -> list[dict[str, object]]:
+    if frame.empty:
+        return []
+    rows: list[dict[str, object]] = []
+    for _index, row in frame.iterrows():
+        roi = str(_row_value(row, "roi"))
+        condition_a = str(_row_value(row, "condition_a"))
+        condition_b = str(_row_value(row, "condition_b"))
+        rows.append(
+            _test_export_entry(
+                row,
+                comparison_id=f"{roi}: {condition_a} minus {condition_b}",
+                comparison_type="paired_condition_difference",
+                condition="",
+                condition_a=condition_a,
+                condition_b=condition_b,
+                roi=roi,
+                mean_effect_uv=_row_value(row, "mean_difference_a_minus_b"),
+                planned_family="planned_condition_pairs_by_roi",
+            )
+        )
+    return rows
+
+
+def _planned_lateralization_test_entries(frame: pd.DataFrame) -> list[dict[str, object]]:
+    if frame.empty:
+        return []
+    rows: list[dict[str, object]] = []
+    for _index, row in frame.iterrows():
+        contrast_type = str(_row_value(row, "contrast_type"))
+        left_roi = str(_row_value(row, "left_roi"))
+        right_roi = str(_row_value(row, "right_roi"))
+        roi = f"{right_roi} minus {left_roi}"
+        if contrast_type == "lateralization_difference":
+            condition_a = str(_row_value(row, "condition_a"))
+            condition_b = str(_row_value(row, "condition_b"))
+            comparison_id = f"({roi}) {condition_a} minus {condition_b}"
+            mean_effect_uv = _row_value(row, "mean_difference_of_lateralization_uv")
+            condition = ""
+        else:
+            condition = str(_row_value(row, "condition"))
+            condition_a = ""
+            condition_b = ""
+            comparison_id = f"{condition}: {roi}"
+            mean_effect_uv = _row_value(row, "mean_right_minus_left_uv")
+        rows.append(
+            _test_export_entry(
+                row,
+                comparison_id=comparison_id,
+                comparison_type=contrast_type,
+                condition=condition,
+                condition_a=condition_a,
+                condition_b=condition_b,
+                roi=roi,
+                mean_effect_uv=mean_effect_uv,
+                planned_family=str(_row_value(row, "planned_family")),
+            )
+        )
+    return rows
+
+
+def _test_export_entry(
+    row: pd.Series,
+    *,
+    comparison_id: str,
+    comparison_type: str,
+    condition: str,
+    roi: str,
+    mean_effect_uv: object,
+    planned_family: str,
+    condition_a: str = "",
+    condition_b: str = "",
+) -> dict[str, object]:
+    selected_p = _row_value(row, "selected_p")
+    holm_p = _row_value(row, "p_holm_planned_family")
+    return {
+        "planned_family": planned_family,
+        "comparison_id": comparison_id,
+        "comparison_type": comparison_type,
+        "condition": condition,
+        "condition_a": condition_a,
+        "condition_b": condition_b,
+        "roi": roi,
+        "n": _row_value(row, "n", _row_value(row, "n_complete")),
+        "mean_effect_uv": mean_effect_uv,
+        "normality_statistic": _row_value(row, "normality_statistic"),
+        "normality_p": _row_value(row, "normality_p"),
+        "normality_met": _row_value(row, "normality_met"),
+        "normality_alpha": P_ALPHA,
+        "parametric_test": _row_value(row, "parametric_test"),
+        "parametric_statistic": _row_value(row, "parametric_statistic"),
+        "parametric_df": _row_value(row, "df"),
+        "parametric_p": _row_value(row, "parametric_p"),
+        "nonparametric_test": _row_value(row, "nonparametric_test"),
+        "nonparametric_statistic": _row_value(row, "nonparametric_statistic"),
+        "nonparametric_p": _row_value(row, "nonparametric_p"),
+        "selected_test": _row_value(row, "selected_test"),
+        "selected_p": selected_p,
+        "decision_reason": _row_value(row, "decision_reason"),
+        "correction_method": "Holm",
+        "p_bonferroni_planned_family": _row_value(row, "p_bonferroni_planned_family"),
+        "p_holm_planned_family": holm_p,
+        "significant_holm": _p_is_sig(holm_p),
+        "significant_uncorrected_selected": _p_is_sig(selected_p),
+    }
+
+
+def _normality_columns() -> list[str]:
+    return [
+        "planned_family",
+        "comparison_id",
+        "comparison_type",
+        "condition",
+        "condition_a",
+        "condition_b",
+        "roi",
+        "n",
+        "normality_statistic",
+        "normality_p",
+        "normality_met",
+        "normality_alpha",
+        "decision_reason",
+    ]
+
+
+def _parametric_vs_nonparametric_columns() -> list[str]:
+    return [
+        "planned_family",
+        "comparison_id",
+        "comparison_type",
+        "condition",
+        "condition_a",
+        "condition_b",
+        "roi",
+        "n",
+        "mean_effect_uv",
+        "parametric_test",
+        "parametric_statistic",
+        "parametric_df",
+        "parametric_p",
+        "nonparametric_test",
+        "nonparametric_statistic",
+        "nonparametric_p",
+        "selected_test",
+        "selected_p",
+        "decision_reason",
+    ]
+
+
+def _planned_holm_columns() -> list[str]:
+    return [
+        "planned_family",
+        "comparison_id",
+        "comparison_type",
+        "condition",
+        "condition_a",
+        "condition_b",
+        "roi",
+        "n",
+        "mean_effect_uv",
+        "selected_test",
+        "selected_p",
+        "correction_method",
+        "p_bonferroni_planned_family",
+        "p_holm_planned_family",
+        "significant_holm",
+        "parametric_p",
+        "nonparametric_p",
+        "decision_reason",
+    ]
+
+
+def _decision_columns() -> list[str]:
+    return [
+        "planned_family",
+        "comparison_id",
+        "comparison_type",
+        "selected_test",
+        "selected_p",
+        "p_holm_planned_family",
+        "significant_holm",
+        "normality_p",
+        "normality_met",
+        "decision_reason",
+    ]
+
+
 def _comparison_agreement(
     stats_posthoc: pd.DataFrame,
     condition_pairs: pd.DataFrame,
@@ -965,148 +1594,329 @@ def _comparison_agreement(
     return pd.DataFrame(rows, columns=columns)
 
 
-def _individual_detectability_frame(
+def _individual_detectability_frames(
     *,
     request: PublicationReportRequest,
     workbooks: list[WorkbookEntry],
     selected_harmonics: tuple[float, ...],
     warnings: list[str],
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    columns = [
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    roi_columns = [
+        "participant_id",
         "condition",
-        "subject_id",
         "roi",
-        "electrode_scope",
-        "selected_harmonics_hz",
-        "tested_electrode_count",
-        "mean_combined_z_all_electrodes",
-        "fdr_alpha",
-        "fdr_significant_electrode_count",
-        "fdr_significant_electrodes",
-        "mean_combined_z_fdr_significant",
-        *[f"uncorrected_z_gt_{threshold:g}_count" for threshold in request.z_thresholds],
+        "harmonic_list",
+        "n_harmonics",
+        "z_sum",
+        "p_one_tailed",
+        "p_fdr_bh",
+        "significant_z164",
+        "significant_z232",
+        "significant_z310",
+        "significant_fdr_q05",
+        "valid_electrode_count",
+        "missing_electrodes",
+        "signal_sum_uv",
+        "noise_mean_uv",
+        "noise_std_uv",
+        "candidate_noise_count",
+        "used_noise_count",
+        "method",
         "workbook_path",
     ]
     electrode_columns = [
+        "participant_id",
         "condition",
-        "subject_id",
-        "roi",
         "electrode",
-        "selected_harmonics_hz",
-        "combined_z",
+        "roi",
+        "harmonic_list",
+        "n_harmonics",
+        "z_sum",
         "p_one_tailed",
-        "fdr_q",
-        "fdr_significant",
-        *[f"z_gt_{threshold:g}" for threshold in request.z_thresholds],
+        "p_fdr_bh",
+        "significant_z164",
+        "significant_z232",
+        "significant_z310",
+        "significant_fdr_q05",
+        "signal_sum_uv",
+        "noise_mean_uv",
+        "noise_std_uv",
+        "candidate_noise_count",
+        "used_noise_count",
+        "method",
+        "workbook_path",
+    ]
+    comparison_columns = [
+        "participant_id",
+        "condition",
+        "electrode",
+        "harmonic_list",
+        "n_harmonics",
+        "z_sum",
+        "p_one_tailed",
+        "Legacy_Stouffer_z",
+        "Legacy_Stouffer_p_one_tailed",
+        "Legacy_Stouffer_delta_z",
+        "method",
         "workbook_path",
     ]
     if not selected_harmonics:
-        return pd.DataFrame(columns=columns), pd.DataFrame(columns=electrode_columns)
+        return (
+            pd.DataFrame(columns=roi_columns),
+            pd.DataFrame(columns=electrode_columns),
+            pd.DataFrame(columns=electrode_columns),
+            pd.DataFrame(columns=comparison_columns),
+        )
+
+    harmonic_list = ", ".join(f"{freq:g}" for freq in selected_harmonics)
     report_rois = tuple(roi for roi in request.rois if roi.selected)
-    rows: list[dict[str, object]] = []
+    roi_rows: list[dict[str, object]] = []
     electrode_rows: list[dict[str, object]] = []
+    comparison_rows: list[dict[str, object]] = []
+
     for workbook in workbooks:
-        frame = _read_sheet(workbook.path, Z_SHEET, warnings)
-        if frame is None:
+        fullfft = _read_sheet(workbook.path, SHEET_FULLFFT, warnings)
+        if fullfft is None:
             continue
-        combined = _combined_z_by_electrode(frame, selected_harmonics, warnings, workbook.path)
-        if combined.empty:
+        try:
+            plan = build_fullfft_harmonic_plan(fullfft.columns, selected_harmonics)
+        except ValueError as exc:
+            warnings.append(f"{workbook.path.name}: {exc}")
             continue
-        combined["p_one_tailed"] = combined["combined_z"].map(_z_p_value)
-        combined["fdr_q"] = _bh_fdr(combined["p_one_tailed"].to_numpy(dtype=float))
-        combined["fdr_significant"] = combined["fdr_q"] <= P_ALPHA
-        for roi in (ReportRoi(WHOLE_SCALP_ROI, tuple(combined["electrode"]), "detectability"), *report_rois):
-            subset = _combined_subset(combined, roi)
-            if subset.empty:
-                continue
-            for electrode_row in subset.itertuples(index=False):
-                base_row = {
+
+        electrode_summed = electrode_summed_z_from_fullfft_frame(fullfft, plan)
+        if electrode_summed.empty:
+            continue
+        electrode_summed["electrode"] = electrode_summed["electrode"].map(normalize_electrode_name)
+        electrode_summed["p_fdr_bh"] = _bh_fdr(electrode_summed["p_one_tailed"].to_numpy(dtype=float))
+        electrode_summed["significant_fdr_q05"] = electrode_summed["p_fdr_bh"] <= P_ALPHA
+        for threshold, suffix in ((1.64, "164"), (2.32, "232"), (3.10, "310")):
+            electrode_summed[f"significant_z{suffix}"] = electrode_summed["z_sum"] > threshold
+
+        roi_names_by_electrode = _roi_names_by_electrode(report_rois)
+        for row in electrode_summed.itertuples(index=False):
+            electrode = getattr(row, "electrode")
+            electrode_rows.append(
+                {
+                    "participant_id": workbook.subject_id,
                     "condition": workbook.condition,
-                    "subject_id": workbook.subject_id,
-                    "roi": roi.name,
-                    "electrode": getattr(electrode_row, "electrode"),
-                    "selected_harmonics_hz": ", ".join(f"{freq:g}" for freq in selected_harmonics),
-                    "combined_z": getattr(electrode_row, "combined_z"),
-                    "p_one_tailed": getattr(electrode_row, "p_one_tailed"),
-                    "fdr_q": getattr(electrode_row, "fdr_q"),
-                    "fdr_significant": getattr(electrode_row, "fdr_significant"),
+                    "electrode": electrode,
+                    "roi": ", ".join(roi_names_by_electrode.get(electrode, ())),
+                    "harmonic_list": harmonic_list,
+                    "n_harmonics": len(plan.harmonic_list),
+                    "z_sum": getattr(row, "z_sum"),
+                    "p_one_tailed": getattr(row, "p_one_tailed"),
+                    "p_fdr_bh": getattr(row, "p_fdr_bh"),
+                    "significant_z164": getattr(row, "significant_z164"),
+                    "significant_z232": getattr(row, "significant_z232"),
+                    "significant_z310": getattr(row, "significant_z310"),
+                    "significant_fdr_q05": getattr(row, "significant_fdr_q05"),
+                    "signal_sum_uv": getattr(row, "signal_sum_uv"),
+                    "noise_mean_uv": getattr(row, "noise_mean_uv"),
+                    "noise_std_uv": getattr(row, "noise_std_uv"),
+                    "candidate_noise_count": getattr(row, "candidate_noise_count"),
+                    "used_noise_count": getattr(row, "used_noise_count"),
+                    "method": "Summed-harmonic Z from participant FullFFT amplitude",
                     "workbook_path": str(workbook.path),
                 }
-                for threshold in request.z_thresholds:
-                    base_row[f"z_gt_{threshold:g}"] = bool(
-                        getattr(electrode_row, "combined_z") > threshold
-                    )
-                electrode_rows.append(base_row)
-            sig = subset.loc[subset["fdr_significant"]]
-            row = {
+            )
+
+        for roi in report_rois:
+            result = roi_summed_z_from_fullfft_frame(fullfft, plan, roi.electrodes)
+            z_sum = _coerce_float(result.get("z_sum"))
+            roi_rows.append(
+                {
+                    "participant_id": workbook.subject_id,
+                    "condition": workbook.condition,
+                    "roi": roi.name,
+                    "harmonic_list": harmonic_list,
+                    "n_harmonics": len(plan.harmonic_list),
+                    "z_sum": z_sum,
+                    "p_one_tailed": result.get("p_one_tailed"),
+                    "p_fdr_bh": np.nan,
+                    "significant_z164": bool(np.isfinite(z_sum) and z_sum > 1.64),
+                    "significant_z232": bool(np.isfinite(z_sum) and z_sum > 2.32),
+                    "significant_z310": bool(np.isfinite(z_sum) and z_sum > 3.10),
+                    "significant_fdr_q05": np.nan,
+                    "valid_electrode_count": result.get("valid_electrode_count"),
+                    "missing_electrodes": result.get("missing_electrodes"),
+                    "signal_sum_uv": result.get("signal_sum_uv"),
+                    "noise_mean_uv": result.get("noise_mean_uv"),
+                    "noise_std_uv": result.get("noise_std_uv"),
+                    "candidate_noise_count": result.get("candidate_noise_count"),
+                    "used_noise_count": result.get("used_noise_count"),
+                    "method": "ROI-averaged FullFFT amplitude, then summed-harmonic Z",
+                    "workbook_path": str(workbook.path),
+                }
+            )
+
+        comparison_rows.extend(
+            _legacy_stouffer_comparison(
+                workbook=workbook,
+                selected_harmonics=selected_harmonics,
+                new_electrode_frame=electrode_summed,
+                warnings=warnings,
+            )
+        )
+
+    electrode_frame = pd.DataFrame(electrode_rows, columns=electrode_columns)
+    return (
+        pd.DataFrame(roi_rows, columns=roi_columns),
+        electrode_frame,
+        electrode_frame.copy(),
+        pd.DataFrame(comparison_rows, columns=comparison_columns),
+    )
+
+
+def _roi_names_by_electrode(rois: tuple[ReportRoi, ...]) -> dict[str, tuple[str, ...]]:
+    names: dict[str, list[str]] = {}
+    for roi in rois:
+        for electrode in roi.electrodes:
+            names.setdefault(normalize_electrode_name(electrode), []).append(roi.name)
+    return {electrode: tuple(values) for electrode, values in names.items()}
+
+
+def _legacy_stouffer_comparison(
+    *,
+    workbook: WorkbookEntry,
+    selected_harmonics: tuple[float, ...],
+    new_electrode_frame: pd.DataFrame,
+    warnings: list[str],
+) -> list[dict[str, object]]:
+    z_frame = _read_sheet(workbook.path, Z_SHEET, warnings)
+    if z_frame is None:
+        return []
+    legacy = _combined_z_by_electrode(z_frame, selected_harmonics, warnings, workbook.path)
+    if legacy.empty:
+        return []
+    legacy = legacy.rename(columns={"combined_z": "Legacy_Stouffer_z"})
+    legacy["Legacy_Stouffer_p_one_tailed"] = legacy["Legacy_Stouffer_z"].map(_z_p_value)
+    merged = new_electrode_frame.merge(legacy, on="electrode", how="inner")
+    rows: list[dict[str, object]] = []
+    harmonic_list = ", ".join(f"{freq:g}" for freq in selected_harmonics)
+    for row in merged.itertuples(index=False):
+        z_sum = getattr(row, "z_sum")
+        legacy_z = getattr(row, "Legacy_Stouffer_z")
+        rows.append(
+            {
+                "participant_id": workbook.subject_id,
                 "condition": workbook.condition,
-                "subject_id": workbook.subject_id,
-                "roi": roi.name,
-                "electrode_scope": "all-workbook-electrodes" if roi.name == WHOLE_SCALP_ROI else "roi",
-                "selected_harmonics_hz": ", ".join(f"{freq:g}" for freq in selected_harmonics),
-                "tested_electrode_count": int(len(subset)),
-                "mean_combined_z_all_electrodes": float(subset["combined_z"].mean()),
-                "fdr_alpha": P_ALPHA,
-                "fdr_significant_electrode_count": int(len(sig)),
-                "fdr_significant_electrodes": ", ".join(sig["electrode"].astype(str)),
-                "mean_combined_z_fdr_significant": (
-                    float(sig["combined_z"].mean()) if not sig.empty else np.nan
+                "electrode": getattr(row, "electrode"),
+                "harmonic_list": harmonic_list,
+                "n_harmonics": len(selected_harmonics),
+                "z_sum": z_sum,
+                "p_one_tailed": getattr(row, "p_one_tailed"),
+                "Legacy_Stouffer_z": legacy_z,
+                "Legacy_Stouffer_p_one_tailed": getattr(row, "Legacy_Stouffer_p_one_tailed"),
+                "Legacy_Stouffer_delta_z": (
+                    float(z_sum) - float(legacy_z)
+                    if np.isfinite(z_sum) and np.isfinite(legacy_z)
+                    else np.nan
                 ),
+                "method": "Legacy_Stouffer comparison only; not used for publication detectability",
                 "workbook_path": str(workbook.path),
             }
-            for threshold in request.z_thresholds:
-                row[f"uncorrected_z_gt_{threshold:g}_count"] = int(
-                    (subset["combined_z"] > threshold).sum()
-                )
-            rows.append(row)
-    return pd.DataFrame(rows, columns=columns), pd.DataFrame(electrode_rows, columns=electrode_columns)
+        )
+    return rows
 
 
-def _individual_detectability_counts(individual: pd.DataFrame) -> pd.DataFrame:
+def _individual_detectability_counts(roi_summed_z: pd.DataFrame, electrode_fdr: pd.DataFrame) -> pd.DataFrame:
     columns = [
         "condition",
         "roi",
+        "threshold_method",
         "participant_count",
-        "participants_with_fdr_significant_electrodes",
-        "percent_with_fdr_significant_electrodes",
-        "mean_fdr_significant_electrode_count",
-        "sd_fdr_significant_electrode_count",
-        "max_fdr_significant_electrode_count",
+        "participants_detectable",
+        "percent_detectable",
+        "mean_significant_electrode_count",
+        "sd_significant_electrode_count",
+        "max_significant_electrode_count",
+        "method",
     ]
-    if individual.empty:
+    if roi_summed_z.empty and electrode_fdr.empty:
         return pd.DataFrame(columns=columns)
-    frame = individual.copy()
-    for column in (
-        "fdr_significant_electrode_count",
-        "mean_combined_z_all_electrodes",
-        "mean_combined_z_fdr_significant",
-    ):
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
     rows: list[dict[str, object]] = []
-    for keys, group in frame.groupby(["condition", "roi"], dropna=False):
-        condition, roi = keys
-        counts = _finite_array(group["fdr_significant_electrode_count"])
-        participant_count = int(group["subject_id"].nunique())
-        participants_with = int((counts > 0).sum())
-        rows.append(
-            {
-                "condition": condition,
-                "roi": roi,
-                "participant_count": participant_count,
-                "participants_with_fdr_significant_electrodes": participants_with,
-                "percent_with_fdr_significant_electrodes": (
-                    participants_with / participant_count if participant_count else np.nan
-                ),
-                "mean_fdr_significant_electrode_count": (
-                    float(np.mean(counts)) if len(counts) else np.nan
-                ),
-                "sd_fdr_significant_electrode_count": _sd(counts),
-                "max_fdr_significant_electrode_count": (
-                    float(np.max(counts)) if len(counts) else np.nan
-                ),
-            }
-        )
+
+    if not roi_summed_z.empty:
+        roi_frame = roi_summed_z.copy()
+        for method, column in (
+            ("roi_summed_z>1.64_uncorrected", "significant_z164"),
+            ("roi_summed_z>2.32_uncorrected", "significant_z232"),
+            ("roi_summed_z>3.10_uncorrected", "significant_z310"),
+        ):
+            for keys, group in roi_frame.groupby(["condition", "roi"], dropna=False):
+                condition, roi = keys
+                participant_count = int(group["participant_id"].nunique())
+                detectable = int(group[column].fillna(False).astype(bool).sum())
+                rows.append(
+                    {
+                        "condition": condition,
+                        "roi": roi,
+                        "threshold_method": method,
+                        "participant_count": participant_count,
+                        "participants_detectable": detectable,
+                        "percent_detectable": (
+                            detectable / participant_count if participant_count else np.nan
+                        ),
+                        "mean_significant_electrode_count": np.nan,
+                        "sd_significant_electrode_count": np.nan,
+                        "max_significant_electrode_count": np.nan,
+                        "method": "ROI-averaged summed-harmonic Z",
+                    }
+                )
+
+    if not electrode_fdr.empty:
+        electrode_frame = _electrode_frame_with_roi_rows(electrode_fdr)
+        for keys, group in electrode_frame.groupby(["condition", "roi"], dropna=False):
+            condition, roi = keys
+            participant_ids = sorted(group["participant_id"].dropna().astype(str).unique())
+            sig = group.loc[group["significant_fdr_q05"].fillna(False).astype(bool)]
+            counts = (
+                sig.groupby("participant_id")["electrode"].nunique()
+                .reindex(participant_ids, fill_value=0)
+                .to_numpy(dtype=float)
+            )
+            participant_count = len(participant_ids)
+            detectable = int((counts > 0).sum())
+            rows.append(
+                {
+                    "condition": condition,
+                    "roi": roi,
+                    "threshold_method": "electrode_fdr_q<=0.05",
+                    "participant_count": participant_count,
+                    "participants_detectable": detectable,
+                    "percent_detectable": (
+                        detectable / participant_count if participant_count else np.nan
+                    ),
+                    "mean_significant_electrode_count": (
+                        float(np.mean(counts)) if len(counts) else np.nan
+                    ),
+                    "sd_significant_electrode_count": _sd(counts),
+                    "max_significant_electrode_count": (
+                        float(np.max(counts)) if len(counts) else np.nan
+                    ),
+                    "method": "Electrode-level summed-harmonic Z with BH-FDR",
+                }
+            )
     return pd.DataFrame(rows, columns=columns)
+
+
+def _electrode_frame_with_roi_rows(electrode_frame: pd.DataFrame) -> pd.DataFrame:
+    if electrode_frame.empty:
+        return electrode_frame.copy()
+    rows: list[dict[str, object]] = []
+    for row in electrode_frame.to_dict(orient="records"):
+        whole = dict(row)
+        whole["roi"] = WHOLE_SCALP_ROI
+        rows.append(whole)
+        roi_text = str(row.get("roi") or "").strip()
+        if not roi_text:
+            continue
+        for roi_name in [part.strip() for part in roi_text.split(",") if part.strip()]:
+            roi_row = dict(row)
+            roi_row["roi"] = roi_name
+            rows.append(roi_row)
+    return pd.DataFrame(rows)
 
 
 def _group_electrode_significance(
@@ -1130,24 +1940,32 @@ def _group_electrode_significance(
     ]
     if electrode_z_scores.empty:
         return pd.DataFrame(columns=columns)
-    frame = electrode_z_scores.copy()
+    frame = _electrode_frame_with_roi_rows(electrode_z_scores)
     rows: list[dict[str, object]] = []
-    threshold_specs = [("fdr_q<=0.05", "fdr_significant", np.nan)]
-    threshold_specs.extend(
-        (f"z>{threshold:g}", f"z_gt_{threshold:g}", _z_p_value(float(threshold)))
-        for threshold in z_thresholds
-    )
+    threshold_specs = [("fdr_q<=0.05", "significant_fdr_q05", np.nan)]
+    for threshold in z_thresholds:
+        suffix = {1.64: "164", 2.32: "232", 3.1: "310"}.get(
+            round(float(threshold), 2),
+            str(float(threshold)).replace(".", ""),
+        )
+        threshold_specs.append(
+            (
+                f"z>{threshold:g}_uncorrected",
+                f"significant_z{suffix}",
+                _z_p_value(float(threshold)),
+            )
+        )
     for keys, group in frame.groupby(["condition", "roi"], dropna=False):
         condition, roi = keys
-        participant_count = int(group["subject_id"].nunique())
+        participant_count = int(group["participant_id"].nunique())
         tested_count = int(group["electrode"].nunique())
         for method, column, p_threshold in threshold_specs:
             if column not in group.columns:
                 continue
             sig = group.loc[group[column].fillna(False).astype(bool)]
             counts = (
-                sig.groupby("subject_id")["electrode"].nunique()
-                .reindex(sorted(group["subject_id"].unique()), fill_value=0)
+                sig.groupby("participant_id")["electrode"].nunique()
+                .reindex(sorted(group["participant_id"].unique()), fill_value=0)
                 .to_numpy(dtype=float)
             )
             any_electrodes = sorted(sig["electrode"].dropna().astype(str).unique())
@@ -1402,13 +2220,6 @@ def _combined_z_by_electrode(
     ).dropna(subset=["combined_z"])
 
 
-def _combined_subset(combined: pd.DataFrame, roi: ReportRoi) -> pd.DataFrame:
-    if roi.name == WHOLE_SCALP_ROI:
-        return combined
-    electrodes = {normalize_electrode_name(electrode) for electrode in roi.electrodes}
-    return combined.loc[combined["electrode"].isin(electrodes)]
-
-
 def _base_rate_harmonics(base_hz: float, upper_hz: float) -> tuple[float, ...]:
     base = float(base_hz)
     upper = float(upper_hz)
@@ -1535,9 +2346,9 @@ def _attrs_note(frame: pd.DataFrame) -> str:
     return f"backend={backend}; correction_outputs_available={correction}"
 
 
-def _row_value(row: object, name: str) -> object:
+def _row_value(row: object, name: str, default: object = np.nan) -> object:
     if isinstance(row, pd.Series):
-        return row.get(name, np.nan)
+        return row.get(name, default)
     normalized = name.replace(" ", "_").replace(">", "_").replace("(", "_").replace(")", "_")
     normalized = normalized.replace("/", "_").replace("-", "_")
     if hasattr(row, normalized):
@@ -1548,9 +2359,9 @@ def _row_value(row: object, name: str) -> object:
         fields = getattr(row, "_fields", ())
         values = tuple(row)
         mapping = dict(zip(fields, values))
-        return mapping.get(normalized, mapping.get(name, np.nan))
+        return mapping.get(normalized, mapping.get(name, default))
     except Exception:
-        return np.nan
+        return default
 
 
 def _coerce_float(value: object) -> float:

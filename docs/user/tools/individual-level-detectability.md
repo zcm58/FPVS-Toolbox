@@ -6,19 +6,20 @@ Use this page when you want participant-level detectability figures or diagnosti
 
 ### Purpose and scope
 The individual-level detectability tool generates per-condition, participant-level detectability figures from
-**existing FPVS Toolbox Excel exports**. It **does not recompute** FFT/BCA/SNR/Z metrics; it only reads the exported
-sheets and produces figures. Each participant panel contains (i) a scalp topomap of Stouffer-combined Z scores across
-oddball harmonics and (ii) a centered SNR mini-spectrum panel around each harmonic, averaged across significant
+**existing FPVS Toolbox Excel exports**. It reads participant-level raw FullFFT amplitude spectra and computes
+summed-harmonic Z scores across the selected oddball harmonic list. Each participant panel contains (i) a scalp
+topomap of electrode-level summed-harmonic Z scores and (ii) a centered SNR mini-spectrum panel around each harmonic,
+averaged across significant
 electrodes and then across harmonics.
 
 ### Required inputs (Excel format)
 The script expects that you have already run the processing pipeline on your dataset, which generates .xlsx files
 for each participant. This tool reads data from these excel sheets to generate figures.
 
-- **Sheet `Z Score`**
+- **Sheet `FullFFT Amplitude (uV)`**
   - Electrode column: `Electrode`.
-  - Harmonic columns named like `1.2000_Hz`. Only the frequencies in `ODDBALL_HARMONICS_HZ` are required. Missing
-    harmonic columns raise a hard error.
+  - Frequency columns named like `1.2000_Hz`, including each selected oddball harmonic and the neighboring FFT bins
+    needed for the local-noise window. Missing selected harmonic columns raise a hard error.
 
 - **Sheet `FullSNR`**
   - Electrode column: `Electrode`.
@@ -28,33 +29,34 @@ for each participant. This tool reads data from these excel sheets to generate f
 
 The tool uses the oddball harmonic list, excluding the base frequency and its harmonics, for figure generation.
 
-### Z-score combination across harmonics (Stouffer)
-For each electrode, the script combines Z-scores across the oddball harmonics via Stouffer's method:
+### Summed-harmonic Z across harmonics
+For each electrode, the script computes a David/Rossion-compatible summed-harmonic Z score from raw FullFFT
+amplitudes:
 
-- Let **k** be the number of oddball harmonics.
-- For each electrode, collect Z values `z_i` at each harmonic.
+- Let **k** be the number of selected oddball harmonics.
+- Sum the raw amplitudes at the selected harmonic target bins.
+- For each eligible neighboring-bin offset, sum the raw amplitudes at that offset across all selected harmonics.
+- Exclude offsets where any harmonic's neighbor bin is missing or non-finite.
+- After building this summed-noise distribution, remove one minimum and one maximum value.
 - Compute:
 
 ```
-Z_comb = (sum_{i=1..k} z_i) / sqrt(k)
+Z_sum = (summed_signal - mean(summed_noise)) / sd(summed_noise)
 ```
 
 Significance thresholding is one-tailed and positive direction only:
 
-- Significant if `Z_comb >= Z_THRESHOLD` (default `1.64`).
+- Significant if `Z_sum >= Z_THRESHOLD` (default `1.64`).
 
 ### FDR correction (Benjamini-Hochberg)
-If `USE_BH_FDR` is enabled (default `True`), the script applies BH-FDR correction to the combined Z values:
+If `USE_BH_FDR` is enabled (default `True`), the script applies BH-FDR correction to electrode-level summed-harmonic
+Z values:
 
-- Convert combined Z to one-tailed p-values: `p = 1 - Phi(Z_comb)`.
+- Convert summed-harmonic Z to one-tailed p-values: `p = 1 - Phi(Z_sum)`.
 - Apply BH-FDR at `alpha = FDR_ALPHA` (default `0.05`).
 - **Scope:** across electrodes **within a participant file** (per participant, per condition).
 - Final significance mask is the **intersection** of the Z threshold and BH reject decisions:
-  `(Z_comb >= Z_THRESHOLD) AND (BH reject)`.
-
-Dependency behavior:
-
-- Uses `statsmodels.stats.multitest.multipletests(method="fdr_bh")`
+  `(Z_sum >= Z_THRESHOLD) AND (BH reject)`.
 
 Montage behavior:
 
@@ -66,7 +68,7 @@ Montage behavior:
 ### SNR mini-spectrum computation
 For each participant:
 
-1. Determine significant electrodes from the combined Z significance mask.
+1. Determine significant electrodes from the summed-harmonic Z significance mask.
 2. Pull the `FullSNR` values for those electrodes.
 3. For each harmonic `f`:
    - Extract bins in `[f - HALF_WINDOW_HZ, f + HALF_WINDOW_HZ]`.
@@ -99,7 +101,9 @@ Export behavior:
 When reporting results generated with this tool, include:
 
 - Harmonics list: `ODDBALL_HARMONICS_HZ` and exclusion of `SKIP_BASE_FREQ_HZ` (6 Hz).
-- Stouffer combination formula for `Z_comb` and one-tailed threshold (`Z_THRESHOLD = 1.64`).
+- Summed-harmonic Z formula for `Z_sum` and one-tailed threshold (`Z_THRESHOLD = 1.64`).
+- Local-noise rule: +/-10 FFT bins, exclude target and immediate neighbors, require at least 4 finite candidates,
+  trim one minimum and one maximum, population SD.
 - BH-FDR settings (`USE_BH_FDR = True`, `FDR_ALPHA = 0.05`) and per-participant electrode scope.
 - SNR window (`HALF_WINDOW_HZ = 0.2 Hz`), fixed SNR y-axis (`0-2`), and reference lines.
 - Montage (`biosemi64`) and finite-vector topomap rendering strategy (non-sig set to threshold).
@@ -114,11 +118,13 @@ disease.** *Clinical Neurophysiology*, 170, 98-109. https://doi.org/10.1016/j.cl
 
 ## Manuscript / thesis-ready text (copy/paste)
 
-The individual-level detectability tool generates participant-level detectability figures. For each participant and condition,
-Z scores at the oddball harmonics are combined with Stouffer's method (Z_comb = sum(z_i)/sqrt(k)), thresholded one-tailed in the positive direction
-(Z_comb >= 1.64), and further filtered via Benjamini-Hochberg FDR across electrodes within each participant
-file (alpha = 0.05). The resulting topomap is rendered with a finite vector: non-significant electrodes are rendered as
-white. A centered SNR mini-spectrum is computed by averaging FullSNR bins within +/-0.2 Hz of each oddball harmonic
+The individual-level detectability tool generates participant-level detectability figures. For each participant and
+condition, raw FullFFT amplitudes are summed across the selected oddball harmonics and tested against a summed
+neighboring-bin noise distribution to compute a one-tailed summed-harmonic Z score (`Z_sum`). Electrode-level
+`Z_sum` values are thresholded in the positive direction (`Z_sum >= 1.64`) and further filtered via
+Benjamini-Hochberg FDR across electrodes within each participant file (alpha = 0.05). The resulting topomap is
+rendered with a finite vector: non-significant electrodes are rendered as white. A centered SNR mini-spectrum is
+computed by averaging FullSNR bins within +/-0.2 Hz of each oddball harmonic
 across significant electrodes, aligning relative-frequency bins across harmonics, and averaging across harmonics, with
 fixed axes and reference lines for interpretability.
 

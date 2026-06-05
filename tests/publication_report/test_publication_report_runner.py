@@ -9,7 +9,11 @@ import pytest
 from openpyxl import load_workbook
 
 from Tools.Publication_Report.analysis_tables import (
+    _condition_pairs_by_roi,
+    _individual_detectability_frames,
+    _roi_response_summary,
     _planned_lateralization_contrasts,
+    _semantic_color_ratio_frames,
     _z_score_report,
 )
 from Tools.Publication_Report.models import (
@@ -24,13 +28,23 @@ from Tools.Publication_Report.models import (
     HARMONIC_SELECTION_SHEET,
     INDIVIDUAL_DETECTABILITY_SHEET,
     INDIVIDUAL_DETECTABILITY_COUNTS_SHEET,
+    INDIVIDUAL_ELECTRODE_FDR_SHEET,
+    INDIVIDUAL_ELECTRODE_SUMMED_Z_SHEET,
+    INDIVIDUAL_ROI_SUMMED_Z_SHEET,
+    NORMALITY_CHECKS_SHEET,
+    OLD_VS_NEW_DETECTABILITY_COMPARISON_SHEET,
+    PARAMETRIC_VS_NONPARAMETRIC_TESTS_SHEET,
     PARTICIPANT_INCLUSION_SHEET,
     PLANNED_LATERALIZATION_SHEET,
+    PLANNED_ROI_COMPARISONS_HOLM_SHEET,
     ROI_HARMONIC_SUMMARY_SHEET,
     ROI_HARMONIC_VALUES_SHEET,
     ROI_DEFINITIONS_SHEET,
     ROI_RESPONSE_SUMMARY_SHEET,
     RUN_SUMMARY_SHEET,
+    SEMANTIC_COLOR_RATIO_SUMMARY_SHEET,
+    SEMANTIC_COLOR_RATIO_VALUES_SHEET,
+    STATISTICAL_TEST_DECISIONS_SHEET,
     STATS_POSTHOC_SHEET,
     STATS_RM_ANOVA_SHEET,
     STATS_WORKFLOW_SUMMARY_SHEET,
@@ -38,9 +52,11 @@ from Tools.Publication_Report.models import (
     Z_SCORE_REPORT_SHEET,
     PublicationReportRequest,
     ReportOutputOptions,
+    ReportRoi,
     report_rois_from_settings_pairs,
 )
 from Tools.Publication_Report.runner import generate_publication_report
+from Tools.Publication_Report.discovery import WorkbookEntry
 
 
 def _write_result_workbook(path: Path) -> None:
@@ -120,6 +136,8 @@ def test_generate_publication_report_writes_initial_bundle(tmp_path: Path) -> No
         ROI_HARMONIC_VALUES_SHEET,
         ROI_HARMONIC_SUMMARY_SHEET,
         ROI_RESPONSE_SUMMARY_SHEET,
+        SEMANTIC_COLOR_RATIO_VALUES_SHEET,
+        SEMANTIC_COLOR_RATIO_SUMMARY_SHEET,
         CONDITION_COMPARISONS_SHEET,
         STATS_RM_ANOVA_SHEET,
         STATS_POSTHOC_SHEET,
@@ -127,10 +145,18 @@ def test_generate_publication_report_writes_initial_bundle(tmp_path: Path) -> No
         CONDITION_PAIRS_BY_ROI_SHEET,
         COMPARISON_AGREEMENT_SHEET,
         PLANNED_LATERALIZATION_SHEET,
+        NORMALITY_CHECKS_SHEET,
+        PARAMETRIC_VS_NONPARAMETRIC_TESTS_SHEET,
+        PLANNED_ROI_COMPARISONS_HOLM_SHEET,
+        STATISTICAL_TEST_DECISIONS_SHEET,
         ELECTRODE_Z_SCORES_SHEET,
         GROUP_ELECTRODE_SIGNIFICANCE_SHEET,
         INDIVIDUAL_DETECTABILITY_SHEET,
         INDIVIDUAL_DETECTABILITY_COUNTS_SHEET,
+        INDIVIDUAL_ROI_SUMMED_Z_SHEET,
+        INDIVIDUAL_ELECTRODE_SUMMED_Z_SHEET,
+        INDIVIDUAL_ELECTRODE_FDR_SHEET,
+        OLD_VS_NEW_DETECTABILITY_COMPARISON_SHEET,
         Z_SCORE_REPORT_SHEET,
         BASE_RATE_SUMMARY_SHEET,
     }.issubset(set(workbook.sheetnames))
@@ -147,6 +173,89 @@ def test_generate_publication_report_writes_initial_bundle(tmp_path: Path) -> No
     assert audit["manual_excluded_subjects"] == ["P02"]
     assert audit["qc_excluded_subjects"] == ["P03"]
     assert [roi["roi"] for roi in audit["rois"]] == ["LOT", "ROT", "Central"]
+
+
+def _write_fullfft_detectability_workbook(
+    path: Path,
+    *,
+    target_scale: float,
+    weak_scale: float = 0.8,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    freq_cols = [f"{idx / 10:.4f}_Hz" for idx in range(51)]
+    rows = []
+    for electrode, scale in [("P7", target_scale), ("PO7", weak_scale), ("Cz", weak_scale)]:
+        row = {"Electrode": electrode}
+        for idx, column in enumerate(freq_cols):
+            row[column] = 1.0 + (idx % 7) * 0.02
+        row["1.2000_Hz"] = scale
+        row["2.4000_Hz"] = scale
+        rows.append(row)
+    fullfft = pd.DataFrame(rows)
+    z_score = pd.DataFrame(
+        {
+            "Electrode": ["P7", "PO7", "Cz"],
+            "1.2000_Hz": [3.0, 0.2, 0.1],
+            "2.4000_Hz": [0.4, 0.2, 0.1],
+        }
+    )
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        fullfft.to_excel(writer, sheet_name="FullFFT Amplitude (uV)", index=False)
+        z_score.to_excel(writer, sheet_name="Z Score", index=False)
+
+
+def test_individual_detectability_frames_use_participant_fullfft_without_grand_average(tmp_path: Path) -> None:
+    p1 = tmp_path / "P01_CondA_Results.xlsx"
+    p2 = tmp_path / "P02_CondA_Results.xlsx"
+    _write_fullfft_detectability_workbook(p1, target_scale=4.0)
+    _write_fullfft_detectability_workbook(p2, target_scale=1.1)
+    workbooks = [
+        WorkbookEntry(condition="CondA", subject_id="P01", path=p1),
+        WorkbookEntry(condition="CondA", subject_id="P02", path=p2),
+    ]
+
+    roi, electrode, fdr, legacy = _individual_detectability_frames(
+        request=PublicationReportRequest(
+            project_root=tmp_path,
+            rois=(ReportRoi("LOT", ("P7", "PO7"), "primary"),),
+        ),
+        workbooks=workbooks,
+        selected_harmonics=(1.2, 2.4),
+        warnings=[],
+    )
+
+    assert set(roi["harmonic_list"]) == {"1.2, 2.4"}
+    assert set(electrode["harmonic_list"]) == {"1.2, 2.4"}
+    p1_z = electrode.loc[(electrode["participant_id"] == "P01") & (electrode["electrode"] == "P7"), "z_sum"].iloc[0]
+    p2_z = electrode.loc[(electrode["participant_id"] == "P02") & (electrode["electrode"] == "P7"), "z_sum"].iloc[0]
+    assert p1_z > p2_z
+    assert not fdr.empty
+    assert "Legacy_Stouffer_z" in legacy.columns
+
+
+def test_individual_electrode_fdr_is_scoped_within_participant_condition(tmp_path: Path) -> None:
+    p1 = tmp_path / "P01_CondA_Results.xlsx"
+    p2 = tmp_path / "P02_CondB_Results.xlsx"
+    _write_fullfft_detectability_workbook(p1, target_scale=4.0, weak_scale=0.7)
+    _write_fullfft_detectability_workbook(p2, target_scale=4.0, weak_scale=0.7)
+
+    _roi, _electrode, fdr, _legacy = _individual_detectability_frames(
+        request=PublicationReportRequest(
+            project_root=tmp_path,
+            rois=(ReportRoi("LOT", ("P7", "PO7"), "primary"),),
+        ),
+        workbooks=[
+            WorkbookEntry(condition="CondA", subject_id="P01", path=p1),
+            WorkbookEntry(condition="CondB", subject_id="P02", path=p2),
+        ],
+        selected_harmonics=(1.2, 2.4),
+        warnings=[],
+    )
+
+    cond_a_q = fdr.loc[fdr["condition"] == "CondA", "p_fdr_bh"].tolist()
+    cond_b_q = fdr.loc[fdr["condition"] == "CondB", "p_fdr_bh"].tolist()
+    assert cond_a_q == cond_b_q
+    assert len(cond_a_q) == 3
 
 
 def test_generate_publication_report_rejects_missing_selected_condition(tmp_path: Path) -> None:
@@ -204,6 +313,115 @@ def test_z_score_report_preserves_mean_column_values() -> None:
     )
 
     assert report["z_score"].tolist() == [3.25, 12.5]
+
+
+def test_roi_response_summary_exports_normality_and_wilcoxon_sensitivity() -> None:
+    rows = [
+        {
+            "condition": "CondA",
+            "subject_id": f"S{index:02d}",
+            "roi": "LOT",
+            "roi_role": "primary",
+            "harmonic_hz": 1.2,
+            "metric": "BCA_uV",
+            "value": value,
+        }
+        for index, value in enumerate([1, 2, 3, 4, 5, 100], start=1)
+    ]
+
+    summary, response = _roi_response_summary(
+        pd.DataFrame(rows),
+        selected_harmonics=(1.2,),
+    )
+
+    assert len(response) == 6
+    row = summary.iloc[0]
+    assert row["normality_p"] < 0.05
+    assert row["parametric_test"] == "one_sample_t"
+    assert row["nonparametric_test"] == "wilcoxon_signed_rank"
+    assert row["selected_test"] == "wilcoxon_signed_rank"
+    assert row["parametric_p"] == pytest.approx(row["p_value_two_tailed"])
+    assert pd.notna(row["nonparametric_p"])
+    assert "Shapiro-Wilk p < .05" in row["decision_reason"]
+
+
+def test_condition_pairs_export_difference_normality_and_wilcoxon() -> None:
+    rows = []
+    for index, difference in enumerate([1, 2, 3, 4, 5, 100], start=1):
+        subject = f"S{index:02d}"
+        rows.append(
+            {
+                "condition": "CondA",
+                "subject_id": subject,
+                "roi": "LOT",
+                "roi_role": "primary",
+                "selected_harmonics_hz": "1.2",
+                "summed_bca_uv": float(difference),
+            }
+        )
+        rows.append(
+            {
+                "condition": "CondB",
+                "subject_id": subject,
+                "roi": "LOT",
+                "roi_role": "primary",
+                "selected_harmonics_hz": "1.2",
+                "summed_bca_uv": 0.0,
+            }
+        )
+
+    pairs = _condition_pairs_by_roi(pd.DataFrame(rows))
+
+    row = pairs.iloc[0]
+    assert row["mean_difference_a_minus_b"] == pytest.approx(19.1666666667)
+    assert row["normality_p"] < 0.05
+    assert row["parametric_test"] == "paired_t"
+    assert row["nonparametric_test"] == "wilcoxon_signed_rank"
+    assert row["selected_test"] == "wilcoxon_signed_rank"
+    assert pd.notna(row["nonparametric_p"])
+
+
+def test_semantic_color_ratio_frames_report_raw_trimmed_and_stability() -> None:
+    rows = []
+    for index, semantic_value in enumerate([1, 2, 3, 4, 5, 20, 7], start=1):
+        subject = f"S{index:02d}"
+        color_value = 0.0 if subject == "S07" else 1.0
+        for condition, value in [
+            ("Semantic Response", float(semantic_value)),
+            ("Color Response", color_value),
+        ]:
+            rows.append(
+                {
+                    "condition": condition,
+                    "subject_id": subject,
+                    "roi": "Left Occipito-Temporal",
+                    "roi_role": "primary",
+                    "selected_harmonics_hz": "1.2, 2.4",
+                    "summed_bca_uv": value,
+                }
+            )
+
+    values, summary = _semantic_color_ratio_frames(pd.DataFrame(rows))
+
+    summary_row = summary.iloc[0]
+    assert summary_row["n_participants"] == 7
+    assert summary_row["n_valid_ratios"] == 6
+    assert summary_row["n_invalid_denominator"] == 1
+    assert summary_row["min_ratio"] == pytest.approx(1.0)
+    assert summary_row["max_ratio"] == pytest.approx(20.0)
+    assert summary_row["mean_ratio"] == pytest.approx(35 / 6)
+    assert summary_row["median_ratio"] == pytest.approx(3.5)
+    assert summary_row["trimmed_n"] == 4
+    assert summary_row["trimmed_min_ratio"] == pytest.approx(2.0)
+    assert summary_row["trimmed_max_ratio"] == pytest.approx(5.0)
+    assert summary_row["trimmed_mean_ratio"] == pytest.approx(3.5)
+    assert summary_row["trimmed_median_ratio"] == pytest.approx(3.5)
+    assert summary_row["percent_within_20pct_of_median"] == pytest.approx(2 / 6)
+    assert summary_row["stability_note"] == "variable_ratio_across_participants"
+
+    invalid = values.loc[values["subject_id"] == "S07"].iloc[0]
+    assert bool(invalid["ratio_valid"]) is False
+    assert invalid["invalid_reason"] == "zero_color_denominator"
 
 
 def test_report_rois_from_settings_pairs_marks_semantic_defaults() -> None:
@@ -272,9 +490,14 @@ def test_planned_lateralization_contrasts_use_right_minus_left_and_interaction()
     assert semantic["direction"] == "right_greater_than_left"
     assert color["mean_right_minus_left_uv"] == pytest.approx(0.0)
     assert color["direction"] == "no_direction"
-    assert semantic["p_holm_planned_family"] == pytest.approx(
-        min(float(semantic["p_value_two_tailed"]) * 2, 1.0)
-    )
+    assert "p_bh_planned_family" not in contrasts.columns
+    assert pd.notna(semantic["normality_p"])
+    assert pd.notna(semantic["nonparametric_p"])
+    assert semantic["selected_test"] in {"paired_t", "wilcoxon_signed_rank"}
+    assert semantic["p_holm_planned_family"] >= semantic["selected_p"]
     assert interaction["mean_difference_of_lateralization_uv"] == pytest.approx(0.35)
     assert interaction["condition_a"] == "Semantic Response"
     assert interaction["condition_b"] == "Color Response"
+    assert pd.notna(interaction["normality_p"])
+    assert pd.notna(interaction["nonparametric_p"])
+    assert interaction["p_holm_planned_family"] >= interaction["selected_p"]

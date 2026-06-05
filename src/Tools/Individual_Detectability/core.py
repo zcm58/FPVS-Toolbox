@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 SHEET_Z = "Z Score"
 SHEET_FULLSNR = "FullSNR"
+SHEET_FULLFFT = "FullFFT Amplitude (uV)"
 ELECTRODE_COL = "Electrode"
 
 # Participant ID parsing
@@ -41,7 +42,7 @@ _PARALLEL_WORKERS = 3
 
 # Disk cache (persists next to the Excel inputs)
 _CACHE_DIRNAME = "_individual_detectability_cache"
-_CACHE_VERSION = "v1"  # bump if cache format changes
+_CACHE_VERSION = "v2_summed_harmonic_z"  # bump if cache format changes
 
 # -----------------------------------------------------------------------------
 # Plot layout constants (tuned to improve alignment + reduce wasted vertical space)
@@ -111,6 +112,26 @@ class DetectabilitySettings:
 
     # Keep original Word-friendly page layout
     use_letter_portrait: bool = True
+
+
+@dataclass(frozen=True)
+class FullFftHarmonicPlan:
+    harmonic_list: tuple[float, ...]
+    harmonic_bins: tuple[int, ...]
+    harmonic_columns: tuple[str, ...]
+    usecols: tuple[str, ...]
+    column_bin_pairs: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
+class SummedHarmonicZResult:
+    z_sum: float
+    p_one_tailed: float
+    signal_sum: float
+    noise_mean: float
+    noise_std: float
+    candidate_noise_count: int
+    used_noise_count: int
 
 
 @dataclass(frozen=True)
@@ -257,6 +278,229 @@ def _bh_fdr_reject(pvals, alpha: float):
     kmax = int(np.max(np.where(passed)[0]))
     cutoff = float(ranked[kmax])
     return p <= cutoff
+
+
+def _frequency_entries(columns: Sequence[object]) -> list[tuple[int, float, str]]:
+    entries: list[tuple[int, float, str]] = []
+    for column in columns:
+        if column == ELECTRODE_COL or not isinstance(column, str):
+            continue
+        match = _FREQ_COL_RE.match(column)
+        if not match:
+            continue
+        try:
+            freq = float(match.group(1))
+        except ValueError:
+            continue
+        entries.append((len(entries), round(freq, 4), column))
+    return entries
+
+
+def build_fullfft_harmonic_plan(
+    columns: Sequence[object],
+    harmonics_hz: Sequence[float],
+    *,
+    window_size: int = 10,
+) -> FullFftHarmonicPlan:
+    """Build exact FullFFT target/noise-bin read plan for selected harmonics."""
+
+    entries = _frequency_entries(columns)
+    by_freq = {freq: (bin_index, column) for bin_index, freq, column in entries}
+    by_bin = {bin_index: column for bin_index, _freq, column in entries}
+
+    harmonic_list: list[float] = []
+    harmonic_bins: list[int] = []
+    harmonic_columns: list[str] = []
+    missing: list[str] = []
+    for harmonic in harmonics_hz:
+        rounded = round(float(harmonic), 4)
+        matched = by_freq.get(rounded)
+        if matched is None:
+            missing.append(f"{rounded:.4f}_Hz")
+            continue
+        bin_index, column = matched
+        harmonic_list.append(rounded)
+        harmonic_bins.append(int(bin_index))
+        harmonic_columns.append(column)
+
+    if missing:
+        raise ValueError(
+            f"Missing harmonic column(s) in '{SHEET_FULLFFT}': {', '.join(missing)}"
+        )
+    if not harmonic_bins:
+        raise ValueError("No selected oddball harmonic columns were found in FullFFT.")
+
+    needed_bins: set[int] = set(harmonic_bins)
+    for bin_index in harmonic_bins:
+        for offset in range(-int(window_size), int(window_size) + 1):
+            if -1 <= offset <= 1:
+                continue
+            neighbor_bin = bin_index + offset
+            if neighbor_bin in by_bin:
+                needed_bins.add(neighbor_bin)
+
+    usecols = [ELECTRODE_COL]
+    for bin_index, _freq, column in entries:
+        if bin_index in needed_bins:
+            usecols.append(column)
+
+    return FullFftHarmonicPlan(
+        harmonic_list=tuple(harmonic_list),
+        harmonic_bins=tuple(harmonic_bins),
+        harmonic_columns=tuple(harmonic_columns),
+        usecols=tuple(usecols),
+        column_bin_pairs=tuple((by_bin[bin_index], int(bin_index)) for bin_index in sorted(needed_bins)),
+    )
+
+
+def summed_harmonic_z_from_bin_amplitudes(
+    amplitude_by_bin: dict[int, float],
+    harmonic_bins: Sequence[int],
+    *,
+    window_size: int = 10,
+    min_bins: int = 4,
+) -> SummedHarmonicZResult:
+    """Compute David/Rossion-style summed-harmonic Z from one amplitude spectrum."""
+    import numpy as np
+
+    target_values: list[float] = []
+    for bin_index in harmonic_bins:
+        value = float(amplitude_by_bin.get(int(bin_index), np.nan))
+        if not np.isfinite(value):
+            return SummedHarmonicZResult(np.nan, np.nan, np.nan, np.nan, np.nan, 0, 0)
+        target_values.append(value)
+    signal_sum = float(np.sum(target_values))
+
+    summed_noise: list[float] = []
+    for offset in range(-int(window_size), int(window_size) + 1):
+        if -1 <= offset <= 1:
+            continue
+        offset_values: list[float] = []
+        for bin_index in harmonic_bins:
+            value = float(amplitude_by_bin.get(int(bin_index) + offset, np.nan))
+            if not np.isfinite(value):
+                break
+            offset_values.append(value)
+        else:
+            summed_noise.append(float(np.sum(offset_values)))
+
+    candidate_count = len(summed_noise)
+    if candidate_count < int(min_bins):
+        return SummedHarmonicZResult(np.nan, np.nan, signal_sum, np.nan, np.nan, candidate_count, 0)
+
+    noise_values = np.asarray(summed_noise, dtype=float)
+    if noise_values.size > 2:
+        max_idx = int(noise_values.argmax())
+        min_idx = int(noise_values.argmin())
+        keep = np.ones(noise_values.shape[0], dtype=bool)
+        keep[max_idx] = False
+        keep[min_idx] = False
+        noise_values = noise_values[keep]
+    if noise_values.size == 0:
+        return SummedHarmonicZResult(np.nan, np.nan, signal_sum, np.nan, np.nan, candidate_count, 0)
+
+    noise_mean = float(noise_values.mean())
+    noise_std = float(noise_values.std(ddof=0))
+    z_sum = (signal_sum - noise_mean) / noise_std if noise_std > 1e-12 else np.nan
+    z_sum = float(z_sum) if np.isfinite(z_sum) else np.nan
+    p_one = float(1.0 - _norm_cdf(np.asarray([z_sum], dtype=float))[0]) if np.isfinite(z_sum) else np.nan
+    return SummedHarmonicZResult(
+        z_sum=z_sum,
+        p_one_tailed=p_one,
+        signal_sum=signal_sum,
+        noise_mean=noise_mean,
+        noise_std=noise_std,
+        candidate_noise_count=candidate_count,
+        used_noise_count=int(noise_values.size),
+    )
+
+
+def electrode_summed_z_from_fullfft_frame(
+    frame,
+    plan: FullFftHarmonicPlan,
+):
+    """Return electrode-level summed-harmonic Z values from a FullFFT sheet."""
+    import numpy as np
+    import pandas as pd
+
+    bin_by_column = {
+        column: bin_index
+        for column, bin_index in plan.column_bin_pairs
+        if column in frame.columns
+    }
+    rows: list[dict[str, object]] = []
+    for _index, row in frame.iterrows():
+        amplitude_by_bin: dict[int, float] = {}
+        for column, bin_index in bin_by_column.items():
+            value = pd.to_numeric(pd.Series([row.get(column)]), errors="coerce").iloc[0]
+            if np.isfinite(value):
+                amplitude_by_bin[int(bin_index)] = float(value)
+        result = summed_harmonic_z_from_bin_amplitudes(amplitude_by_bin, plan.harmonic_bins)
+        rows.append(
+            {
+                "electrode": str(row[ELECTRODE_COL]),
+                "z_sum": result.z_sum,
+                "p_one_tailed": result.p_one_tailed,
+                "signal_sum_uv": result.signal_sum,
+                "noise_mean_uv": result.noise_mean,
+                "noise_std_uv": result.noise_std,
+                "candidate_noise_count": result.candidate_noise_count,
+                "used_noise_count": result.used_noise_count,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def roi_summed_z_from_fullfft_frame(
+    frame,
+    plan: FullFftHarmonicPlan,
+    roi_electrodes: Sequence[str],
+) -> dict[str, object]:
+    """Average FullFFT amplitudes across ROI electrodes, then compute summed Z."""
+    import numpy as np
+    import pandas as pd
+
+    wanted = {_normalize_electrode_name(electrode) for electrode in roi_electrodes}
+    source = frame.copy()
+    source["_normalized_electrode"] = source[ELECTRODE_COL].map(_normalize_electrode_name)
+    subset = source.loc[source["_normalized_electrode"].isin(wanted)].copy()
+    present = set(subset["_normalized_electrode"].astype(str))
+    missing = tuple(sorted(electrode for electrode in wanted if electrode not in present))
+    if subset.empty:
+        return {
+            "z_sum": np.nan,
+            "p_one_tailed": np.nan,
+            "signal_sum_uv": np.nan,
+            "noise_mean_uv": np.nan,
+            "noise_std_uv": np.nan,
+            "valid_electrode_count": 0,
+            "missing_electrodes": ", ".join(missing),
+            "candidate_noise_count": 0,
+            "used_noise_count": 0,
+        }
+
+    bin_by_column = {
+        column: bin_index
+        for column, bin_index in plan.column_bin_pairs
+        if column in frame.columns
+    }
+    amplitude_by_bin: dict[int, float] = {}
+    for column, bin_index in bin_by_column.items():
+        values = pd.to_numeric(subset[column], errors="coerce").replace([np.inf, -np.inf], np.nan)
+        if values.notna().any():
+            amplitude_by_bin[int(bin_index)] = float(values.mean(skipna=True))
+    result = summed_harmonic_z_from_bin_amplitudes(amplitude_by_bin, plan.harmonic_bins)
+    return {
+        "z_sum": result.z_sum,
+        "p_one_tailed": result.p_one_tailed,
+        "signal_sum_uv": result.signal_sum,
+        "noise_mean_uv": result.noise_mean,
+        "noise_std_uv": result.noise_std,
+        "valid_electrode_count": int(subset[ELECTRODE_COL].nunique()),
+        "missing_electrodes": ", ".join(missing),
+        "candidate_noise_count": result.candidate_noise_count,
+        "used_noise_count": result.used_noise_count,
+    }
 
 
 def _make_thresholded_cmap(base_name: str = "YlOrRd", white_frac: float = 0.08):
@@ -473,25 +717,16 @@ def _excel_minimal_read(excel_path: Path, settings: DetectabilitySettings):
 
     xl = pd.ExcelFile(excel_path)
 
-    if SHEET_Z not in xl.sheet_names:
-        raise ValueError(f"Missing required sheet '{SHEET_Z}'.")
+    if SHEET_FULLFFT not in xl.sheet_names:
+        raise ValueError(f"Missing required sheet '{SHEET_FULLFFT}'.")
     if SHEET_FULLSNR not in xl.sheet_names:
         raise ValueError(f"Missing required sheet '{SHEET_FULLSNR}'.")
 
-    z_head = xl.parse(SHEET_Z, nrows=0)
-    if ELECTRODE_COL not in z_head.columns:
-        raise ValueError(f"Missing column '{ELECTRODE_COL}' in '{SHEET_Z}'.")
-
-    freq_cols = _parse_freq_columns(z_head.columns)
-    needed = [round(float(f), 4) for f in settings.oddball_harmonics_hz]
-    missing = [f for f in needed if f not in freq_cols]
-    if missing:
-        miss_str = ", ".join([f"{f:.4f}_Hz" for f in missing])
-        raise ValueError(f"Missing harmonic column(s) in '{SHEET_Z}': {miss_str}")
-
-    z_cols = [freq_cols[round(float(f), 4)] for f in settings.oddball_harmonics_hz]
-    z_usecols = [ELECTRODE_COL] + z_cols
-    df_z = xl.parse(SHEET_Z, usecols=z_usecols)
+    fft_head = xl.parse(SHEET_FULLFFT, nrows=0)
+    if ELECTRODE_COL not in fft_head.columns:
+        raise ValueError(f"Missing column '{ELECTRODE_COL}' in '{SHEET_FULLFFT}'.")
+    plan = build_fullfft_harmonic_plan(fft_head.columns, settings.oddball_harmonics_hz)
+    df_fft = xl.parse(SHEET_FULLFFT, usecols=list(plan.usecols))
 
     snr_head = xl.parse(SHEET_FULLSNR, nrows=0)
     if ELECTRODE_COL not in snr_head.columns:
@@ -523,47 +758,30 @@ def _excel_minimal_read(excel_path: Path, settings: DetectabilitySettings):
         keep2.append(c)
 
     df_snr = xl.parse(SHEET_FULLSNR, usecols=keep2)
-    return df_z, df_snr
+    return df_fft, df_snr, plan
 
 
-def _load_combined_z_from_df(df, settings: DetectabilitySettings):
+def _load_summed_z_from_df(df, plan: FullFftHarmonicPlan, settings: DetectabilitySettings):
     """
     Returns:
       electrodes_raw: list[str]
-      z_comb: np.ndarray (per electrode)
+      z_sum: np.ndarray (per electrode)
       sig_mask: np.ndarray (bool per electrode)
     """
-    import numpy as np
-    import pandas as pd
-
     if ELECTRODE_COL not in df.columns:
-        raise ValueError(f"Missing column '{ELECTRODE_COL}' in '{SHEET_Z}'.")
-
-    freq_cols = _parse_freq_columns(df.columns)
-    needed = [round(float(f), 4) for f in settings.oddball_harmonics_hz]
-    missing = [f for f in needed if f not in freq_cols]
-    if missing:
-        miss_str = ", ".join([f"{f:.4f}_Hz" for f in missing])
-        raise ValueError(f"Missing harmonic column(s) in '{SHEET_Z}': {miss_str}")
-
-    z_cols = [freq_cols[round(float(f), 4)] for f in settings.oddball_harmonics_hz]
+        raise ValueError(f"Missing column '{ELECTRODE_COL}' in '{SHEET_FULLFFT}'.")
     electrodes_raw = df[ELECTRODE_COL].astype(str).tolist()
 
-    z_mat = df[z_cols].apply(pd.to_numeric, errors="raise").to_numpy(dtype=float)
-    if np.isnan(z_mat).any():
-        raise ValueError(f"Found NaNs in '{SHEET_Z}' harmonic columns.")
-
-    k = int(z_mat.shape[1])
-    z_comb = z_mat.sum(axis=1) / math.sqrt(k) if k > 0 else np.full((z_mat.shape[0],), np.nan, dtype=float)
-
-    sig = z_comb >= float(settings.z_threshold)
+    summed = electrode_summed_z_from_fullfft_frame(df, plan)
+    z_sum = summed["z_sum"].to_numpy(dtype=float)
+    sig = z_sum >= float(settings.z_threshold)
 
     if settings.use_bh_fdr:
-        p_one = 1.0 - _norm_cdf(z_comb)  # one-tailed, positive direction
+        p_one = summed["p_one_tailed"].to_numpy(dtype=float)
         reject = _bh_fdr_reject(p_one, alpha=float(settings.fdr_alpha))
         sig = sig & reject.astype(bool)
 
-    return electrodes_raw, z_comb.astype(float), sig.astype(bool)
+    return electrodes_raw, z_sum.astype(float), sig.astype(bool)
 
 
 def _build_topomap_vector_finite(
@@ -575,7 +793,7 @@ def _build_topomap_vector_finite(
 ):
     """
     Build montage-aligned vector with NO NaNs:
-      - significant: Z_comb
+      - significant: summed-harmonic Z
       - non-significant/missing: Z_THRESHOLD (renders white)
     """
     import numpy as np
@@ -634,7 +852,7 @@ def _load_snr_spectrum_from_df(
 
     df_electrodes = df[ELECTRODE_COL].astype(str).tolist()
     if [str(e).strip() for e in electrodes_raw] != [str(e).strip() for e in df_electrodes]:
-        raise ValueError("Electrode ordering mismatch between Z Score and FullSNR sheets.")
+        raise ValueError("Electrode ordering mismatch between FullFFT and FullSNR sheets.")
 
     sig_indices = np.where(np.asarray(sig_mask, dtype=bool))[0]
     if sig_indices.size == 0:
@@ -705,14 +923,14 @@ def _process_one_participant(
             pass
 
     try:
-        df_z, df_snr = _excel_minimal_read(excel_path, settings)
+        df_fft, df_snr, plan = _excel_minimal_read(excel_path, settings)
 
-        electrodes_raw, z_comb, sig_mask = _load_combined_z_from_df(df_z, settings)
+        electrodes_raw, z_sum, sig_mask = _load_summed_z_from_df(df_fft, plan, settings)
         n_sig = int(np.sum(sig_mask))
 
         z_topo = _build_topomap_vector_finite(
             electrodes_raw=electrodes_raw,
-            z_comb=z_comb,
+            z_comb=z_sum,
             sig_mask=sig_mask,
             z_threshold=float(settings.z_threshold),
         )
@@ -1017,13 +1235,13 @@ def generate_condition_figure(
     cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
     cb.set_ticks([])
     cb.ax.tick_params(length=0)
-    cb.set_label("Z-Score", fontsize=_LEGEND_LABEL_FONTSIZE, labelpad=3)
+    cb.set_label("Summed-harmonic Z", fontsize=_LEGEND_LABEL_FONTSIZE, labelpad=3)
 
     y_text = max(0.0, cbar_bottom - _CBAR_TEXT_PAD_FRAC)
     fig.text(
         cbar_left,
         y_text,
-        f"White = z < {settings.z_threshold:g}",
+        f"White = not significant at z >= {settings.z_threshold:g}",
         ha="left",
         va="top",
         fontsize=_LEGEND_SIDE_TEXT_FONTSIZE,
