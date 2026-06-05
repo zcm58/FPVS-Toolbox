@@ -132,6 +132,7 @@ def reset_project_context_workspace(host: Any) -> None:
         "_individual_detectability_page",
         "_plot_generator_page",
         "_publication_maps_page",
+        "_loreta_visualizer_page",
         "_publication_report_page",
         "_epoch_page",
         "_epoch_win",

@@ -272,6 +272,13 @@ def init_sidebar(self) -> None:
     )
     make_button(
         tools_layout,
+        "btn_loreta_visualizer",
+        "LORETA Visualizer",
+        sidebar_icon("loreta", ICON_PX),
+        self.open_loreta_visualizer,
+    )
+    make_button(
+        tools_layout,
         "btn_publication_report",
         "Publication Report",
         sidebar_icon("report", ICON_PX),

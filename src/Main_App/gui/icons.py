@@ -71,6 +71,15 @@ def sidebar_icon(kind: str, size: int = 20) -> QIcon:
         _draw_dot(painter, QPointF(size * 0.36, size * 0.38), size * 0.035)
         _draw_dot(painter, QPointF(size * 0.64, size * 0.38), size * 0.035)
         _draw_dot(painter, QPointF(size * 0.50, size * 0.62), size * 0.035)
+    elif kind == "loreta":
+        center = QPointF(size * 0.50, size * 0.50)
+        painter.drawEllipse(center, size * 0.32, size * 0.36)
+        painter.drawLine(QPointF(size * 0.50, size * 0.20), QPointF(size * 0.50, size * 0.80))
+        painter.drawArc(QRectF(size * 0.26, size * 0.26, size * 0.25, size * 0.22), 20 * 16, 210 * 16)
+        painter.drawArc(QRectF(size * 0.49, size * 0.26, size * 0.25, size * 0.22), -50 * 16, 210 * 16)
+        painter.drawArc(QRectF(size * 0.28, size * 0.51, size * 0.22, size * 0.20), 30 * 16, 210 * 16)
+        painter.drawArc(QRectF(size * 0.50, size * 0.51, size * 0.22, size * 0.20), -60 * 16, 210 * 16)
+        _draw_dot(painter, QPointF(size * 0.61, size * 0.58), size * 0.045)
     elif kind == "image":
         painter.drawRoundedRect(QRectF(size * 0.18, size * 0.24, size * 0.64, size * 0.52), 2, 2)
         painter.drawEllipse(QPointF(size * 0.38, size * 0.40), size * 0.055, size * 0.055)

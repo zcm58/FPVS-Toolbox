@@ -619,6 +619,20 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self._publication_report_page = page
         return page
 
+    def _ensure_loreta_visualizer_page(self) -> QWidget:
+        page = getattr(self, "_loreta_visualizer_page", None)
+        if page is None:
+            from Tools.LORETA_Visualizer import LoretaVisualizerWindow
+
+            page = LoretaVisualizerWindow(
+                parent=self.workspace_stack,
+                embedded=True,
+            )
+            page.setObjectName("embedded_loreta_visualizer_page")
+            self.workspace_stack.addWidget(page)
+            self._loreta_visualizer_page = page
+        return page
+
     def _ensure_epoch_averaging_page(self) -> AdvancedAveragingWindow | None:
         paths = tool_workflows.resolve_epoch_averaging_paths(self)
         if paths is None:
@@ -660,6 +674,12 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_publication_report_page())
         self._set_sidebar_selection("btn_publication_report")
+
+    def open_loreta_visualizer(self) -> None:
+        if hasattr(self, "stacked"):
+            self.stacked.setCurrentIndex(1)
+        self.workspace_stack.setCurrentWidget(self._ensure_loreta_visualizer_page())
+        self._set_sidebar_selection("btn_loreta_visualizer")
 
     def open_epoch_averaging(self) -> None:
         page = self._ensure_epoch_averaging_page()
