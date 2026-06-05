@@ -150,6 +150,13 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_visible_check.toggled.connect(self._on_activation_visibility_changed)
         controls.content_layout.addWidget(self.activation_visible_check)
 
+        self.smooth_surface_check = QCheckBox("Smooth visual brain surface", controls)
+        self.smooth_surface_check.setObjectName("loreta_smooth_surface_check")
+        self.smooth_surface_check.setChecked(False)
+        self.smooth_surface_check.setToolTip("Display a smoothed visual duplicate; activation coordinates stay unchanged.")
+        self.smooth_surface_check.toggled.connect(self._on_smooth_surface_toggled)
+        controls.content_layout.addWidget(self.smooth_surface_check)
+
         zoom_row = QHBoxLayout()
         zoom_row.setContentsMargins(0, 0, 0, 0)
         zoom_row.setSpacing(6)
@@ -207,6 +214,7 @@ class LoretaVisualizerWindow(QWidget):
         self.transparency_slider.setEnabled(enabled)
         self.activation_opacity_slider.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
+        self.smooth_surface_check.setEnabled(enabled)
         self.zoom_out_btn.setEnabled(enabled)
         self.zoom_in_btn.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
@@ -234,6 +242,11 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is not None:
             renderer.set_activation_visible(checked)
+
+    def _on_smooth_surface_toggled(self, checked: bool) -> None:
+        renderer = self.renderer
+        if renderer is not None:
+            renderer.set_smooth_visual_enabled(checked)
 
     def _zoom_in(self) -> None:
         if self.renderer is not None:
@@ -281,6 +294,7 @@ class LoretaVisualizerWindow(QWidget):
         if renderer is None or not isinstance(result, FsaverageMeshResult):
             return
         renderer.replace_brain_mesh(result.mesh, reset_camera=True)
+        renderer.set_smooth_visual_enabled(self.smooth_surface_check.isChecked())
         self._refresh_dummy_activation()
         self.mesh_status.set_variant("success")
         self.mesh_status.set_text(

@@ -20,7 +20,7 @@ from Tools.LORETA_Visualizer.synthetic_brain import BrainMesh
 logger = logging.getLogger(__name__)
 
 DEFAULT_SURFACE = "pial"
-DEFAULT_MAX_TRIANGLES = 70000
+DEFAULT_MAX_TRIANGLES = 120000
 SURFACE_CHOICES = ("pial", "inflated", "white")
 
 
@@ -64,14 +64,13 @@ def load_fsaverage_brain_mesh(
         raise FsaverageMeshError(f"Unable to read fsaverage {surface} surface: {exc}") from exc
 
     points, faces = _combine_hemispheres(left_vertices, left_faces, right_vertices, right_faces)
-    points, faces = _downsample_faces(points, faces, max_triangles=max_triangles)
     points = _normalize_points(points)
-    mesh = BrainMesh(points=points, faces=_faces_to_vtk(faces))
+    mesh = _decimate_surface(points, faces, max_triangles=max_triangles)
     return FsaverageMeshResult(
         mesh=mesh,
         fsaverage_dir=fsaverage_dir,
         surface=surface,
-        triangle_count=len(faces),
+        triangle_count=len(mesh.faces) // 4,
         source_label=f"fsaverage {surface}",
     )
 
@@ -150,26 +149,41 @@ def _combine_hemispheres(
     return points, faces
 
 
-def _downsample_faces(
+def _decimate_surface(
     points: np.ndarray,
     faces: np.ndarray,
     *,
     max_triangles: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> BrainMesh:
     if max_triangles <= 0 or len(faces) <= max_triangles:
-        return points, faces
-    step = int(np.ceil(len(faces) / max_triangles))
-    sampled = faces[::step]
-    used_indices = np.unique(sampled.reshape(-1))
-    remap = np.full(len(points), -1, dtype=np.int64)
-    remap[used_indices] = np.arange(len(used_indices), dtype=np.int64)
-    compact_points = points[used_indices]
-    compact_faces = remap[sampled]
-    logger.debug(
-        "fsaverage_mesh_downsampled",
-        extra={"original_triangles": len(faces), "triangles": len(compact_faces), "step": step},
-    )
-    return compact_points, compact_faces
+        return BrainMesh(points=points, faces=_faces_to_vtk(faces))
+    try:
+        import pyvista as pv
+
+        surface = pv.PolyData(points, _faces_to_vtk(faces))
+        target_reduction = 1.0 - (max_triangles / max(len(faces), 1))
+        decimated = surface.decimate_pro(
+            target_reduction,
+            preserve_topology=True,
+            boundary_vertex_deletion=False,
+            splitting=False,
+        )
+        decimated = decimated.triangulate()
+        decimated_faces = _vtk_faces_to_triangles(np.asarray(decimated.faces, dtype=np.int64))
+        logger.debug(
+            "fsaverage_mesh_decimated",
+            extra={"original_triangles": len(faces), "triangles": len(decimated_faces)},
+        )
+        return BrainMesh(
+            points=np.asarray(decimated.points, dtype=float),
+            faces=_faces_to_vtk(decimated_faces),
+        )
+    except (AttributeError, RuntimeError, TypeError, ValueError, ImportError, ModuleNotFoundError) as exc:
+        logger.warning(
+            "fsaverage_mesh_decimation_failed",
+            extra={"error": str(exc), "original_triangles": len(faces)},
+        )
+        return BrainMesh(points=points, faces=_faces_to_vtk(faces))
 
 
 def _normalize_points(points: np.ndarray) -> np.ndarray:
@@ -183,3 +197,10 @@ def _normalize_points(points: np.ndarray) -> np.ndarray:
 def _faces_to_vtk(faces: np.ndarray) -> np.ndarray:
     counts = np.full((len(faces), 1), 3, dtype=np.int64)
     return np.hstack((counts, faces.astype(np.int64))).reshape(-1)
+
+
+def _vtk_faces_to_triangles(vtk_faces: np.ndarray) -> np.ndarray:
+    faces = np.asarray(vtk_faces, dtype=np.int64).reshape(-1, 4)
+    if not np.all(faces[:, 0] == 3):
+        raise FsaverageMeshError("Expected triangulated fsaverage display mesh.")
+    return faces[:, 1:4]
