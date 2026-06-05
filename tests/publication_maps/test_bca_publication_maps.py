@@ -10,6 +10,7 @@ import pytest
 
 from Main_App.gui.components import matplotlib_font_kwargs
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
+from Tools.Publication_Maps.colormaps import SCALP_COLORMAP_STOPS
 from Tools.Publication_Maps.excel_inputs import discover_conditions
 from Tools.Publication_Maps.metrics import build_publication_map_result
 from Tools.Publication_Maps.models import (
@@ -22,7 +23,9 @@ from Tools.Publication_Maps.models import (
     PublicationMetric,
 )
 from Tools.Publication_Maps.rendering import (
+    COMBINED_PAIRED_MAP_FIGSIZE,
     JOURNAL_TEXT_WIDTH_IN,
+    _combined_paired_layout_rects,
     _metric_limits,
     colorbar_label_for_metric,
     colormap_for_metric,
@@ -225,7 +228,9 @@ def test_source_workbook_includes_bca_and_snr_when_both_selected(tmp_path: Path)
     assert params_by_key["snr_range_max"] == pytest.approx(1.5)
 
 
-def test_exports_paired_condition_figure_per_selected_metric(tmp_path: Path) -> None:
+def test_exports_combined_paired_condition_figure_when_bca_and_snr_selected(
+    tmp_path: Path,
+) -> None:
     project_root, excel_root = _write_project_workbooks(
         tmp_path,
         subjects=("S1",),
@@ -249,20 +254,42 @@ def test_exports_paired_condition_figure_per_selected_metric(tmp_path: Path) -> 
 
     paired = [path for path in figures if "_and_" in path.stem]
     assert {path.suffix for path in paired} == {".png", ".svg"}
-    assert {path.stem for path in paired} == {
-        "Objects_and_Faces_bca_paired",
-        "Objects_and_Faces_snr_paired",
-    }
+    assert {path.stem for path in paired} == {"Objects_and_Faces_bca_snr_paired"}
     paired_png = next(path for path in paired if path.suffix == ".png")
     with Image.open(paired_png) as image:
         assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
+        assert image.height == int(COMBINED_PAIRED_MAP_FIGSIZE[1] * request.png_dpi)
+
+
+def test_combined_paired_layout_balances_outer_spacing() -> None:
+    layout = _combined_paired_layout_rects()
+    bca_row = layout[PublicationMetric.BCA]
+    snr_row = layout[PublicationMetric.SNR]
+
+    assert bca_row["first"][0] == snr_row["first"][0]
+    assert bca_row["second"][0] == snr_row["second"][0]
+    assert bca_row["colorbar"][0] == snr_row["colorbar"][0]
+    assert bca_row["first"][0] == pytest.approx(0.07)
+    assert bca_row["second"][0] == pytest.approx(0.49)
+    assert bca_row["second"][0] > bca_row["first"][0] + bca_row["first"][2]
+    assert bca_row["colorbar"][0] > bca_row["second"][0] + bca_row["second"][2]
+    assert 1.0 - (bca_row["colorbar"][0] + bca_row["colorbar"][2]) >= 0.10
 
 
 def test_bca_colormap_defaults_and_custom_endpoints() -> None:
     default_cmap = colormap_for_metric(PublicationMetric.BCA, ColorBounds())
 
+    assert default_cmap.name == "FpvsDetailedScalpSequentialCustom"
     assert to_hex(default_cmap(0.0)).lower() == "#2166ac"
     assert to_hex(default_cmap(1.0)).lower() == "#b2182b"
+    assert SCALP_COLORMAP_STOPS == (
+        (0.0, "#2166ac"),
+        (0.25, "#67a9cf"),
+        (0.4, "#1a9850"),
+        (0.6, "#fee08b"),
+        (0.8, "#fdae61"),
+        (1.0, "#b2182b"),
+    )
 
     custom_cmap = colormap_for_metric(
         PublicationMetric.BCA,
@@ -271,6 +298,14 @@ def test_bca_colormap_defaults_and_custom_endpoints() -> None:
 
     assert to_hex(custom_cmap(0.0)).lower() == "#000000"
     assert to_hex(custom_cmap(1.0)).lower() == "#ffffff"
+
+
+def test_snr_uses_detailed_scalp_colormap() -> None:
+    snr_cmap = colormap_for_metric(PublicationMetric.SNR, ColorBounds())
+
+    assert snr_cmap.name == "FpvsDetailedScalpSequentialCustom"
+    assert to_hex(snr_cmap(0.0)).lower() == "#2166ac"
+    assert to_hex(snr_cmap(1.0)).lower() == "#b2182b"
 
 
 def test_bca_metric_limits_auto_or_fixed() -> None:

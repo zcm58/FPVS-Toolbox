@@ -23,6 +23,9 @@ Rules:
   journal text width: 8.5-inch page minus 1-inch margins = 6.5 inches.
 - Paired-condition figures are selected explicitly in the GUI with Condition A
   and Condition B combo boxes populated from the checked condition list.
+- When both BCA and SNR are selected, paired-condition export should render one
+  2x2 figure: BCA on the first row, SNR on the second row, with condition
+  titles only above the first row.
 - Default project input is the active project's Excel root. Default output is
   the selected folder, initially `<results root>/4 - Scalp Maps`.
 - BCA color endpoints are user-selectable. The fixed BCA range is optional:
@@ -30,6 +33,10 @@ Rules:
   auto-scale.
 - SNR uses the same color endpoints. The fixed SNR range is optional: it starts
   checked with a `1.0` to `1.5 SNR` range; unchecked maps auto-scale.
+- Shared BCA/SNR scalp-map color stops live in
+  `src/Tools/Publication_Maps/colormaps.py`; keep Publication Maps and Plot
+  Generator scalp renderers on the same ramp unless a task explicitly scopes a
+  split.
 - The BCA colorbar label is `Baseline-corrected amplitude (µV)`. Figure fonts
   should use shared component typography roles, not one-off Matplotlib defaults.
 - The SNR colorbar label is `Signal to Noise Ratio`.

@@ -10,12 +10,12 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, is_color_like
 import mne
 import numpy as np
 import pandas as pd
 
 from Main_App.gui.components import matplotlib_font_kwargs
+from Tools.Publication_Maps.colormaps import scalp_colormap
 from Tools.Publication_Maps.models import (
     DIAGNOSTICS_SHEET,
     GRAND_AVERAGE_SHEET,
@@ -23,10 +23,6 @@ from Tools.Publication_Maps.models import (
     PARAMETERS_SHEET,
     SOURCE_WORKBOOK_NAME,
     ColorBounds,
-    DEFAULT_BCA_HIGH_COLOR,
-    DEFAULT_BCA_HIGH_MID_COLOR,
-    DEFAULT_BCA_LOW_COLOR,
-    DEFAULT_BCA_LOW_MID_COLOR,
     Diagnostic,
     PublicationMapRequest,
     PublicationMapResult,
@@ -34,18 +30,18 @@ from Tools.Publication_Maps.models import (
 )
 from Tools.Publication_Maps.scalp_io import align_render_values
 
-BCA_CMAP = LinearSegmentedColormap.from_list(
-    "FpvsLowBlueSequential",
-    [
-        DEFAULT_BCA_LOW_COLOR,
-        DEFAULT_BCA_LOW_MID_COLOR,
-        DEFAULT_BCA_HIGH_MID_COLOR,
-        DEFAULT_BCA_HIGH_COLOR,
-    ],
-)
+BCA_CMAP = scalp_colormap(name="FpvsDetailedScalpSequential")
 JOURNAL_TEXT_WIDTH_IN = 6.5
 SINGLE_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 5.6)
 PAIRED_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 3.4)
+COMBINED_PAIRED_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 5.8)
+COMBINED_PAIRED_MAP_LEFT = 0.07
+COMBINED_PAIRED_MAP_WIDTH = 0.31
+COMBINED_PAIRED_SECOND_COL_LEFT = 0.49
+COMBINED_PAIRED_COLORBAR_LEFT = 0.86
+COMBINED_PAIRED_COLORBAR_WIDTH = 0.025
+COMBINED_PAIRED_TOP_ROW_BOTTOM = 0.555
+COMBINED_PAIRED_BOTTOM_ROW_BOTTOM = 0.10
 SNR_COLORBAR_LABEL = "Signal to Noise Ratio"
 BCA_COLORBAR_LABEL = "Baseline-corrected amplitude (µV)"
 
@@ -233,16 +229,10 @@ def colormap_for_metric(metric: PublicationMetric, bounds: ColorBounds | None = 
     _ = metric
     if bounds is None:
         return BCA_CMAP
-    low_color = _valid_color(bounds.low_color, DEFAULT_BCA_LOW_COLOR)
-    high_color = _valid_color(bounds.high_color, DEFAULT_BCA_HIGH_COLOR)
-    return LinearSegmentedColormap.from_list(
-        "FpvsLowBlueSequentialCustom",
-        [
-            low_color,
-            DEFAULT_BCA_LOW_MID_COLOR,
-            DEFAULT_BCA_HIGH_MID_COLOR,
-            high_color,
-        ],
+    return scalp_colormap(
+        name="FpvsDetailedScalpSequentialCustom",
+        low_color=bounds.low_color,
+        high_color=bounds.high_color,
     )
 
 
@@ -259,7 +249,15 @@ def _render_paired_condition_figures(
     if not condition_pairs:
         return []
 
-    for metric in _request_metrics(request):
+    metrics = _request_metrics(request)
+    if PublicationMetric.BCA in metrics and PublicationMetric.SNR in metrics:
+        return _render_combined_paired_condition_figures(
+            result,
+            request,
+            condition_pairs=condition_pairs,
+        )
+
+    for metric in metrics:
         bounds = request.color_bounds.get(metric, ColorBounds())
         for first, second in condition_pairs:
             first_group = _pair_group(grand, first, metric=metric)
@@ -300,6 +298,60 @@ def _render_paired_condition_figures(
                     dpi=request.png_dpi,
                 )
                 rendered.append(svg_path)
+    return rendered
+
+
+def _render_combined_paired_condition_figures(
+    result: PublicationMapResult,
+    request: PublicationMapRequest,
+    *,
+    condition_pairs: list[tuple[str, str]],
+) -> list[Path]:
+    grand = result.grand_average_values
+    rendered: list[Path] = []
+    metrics = (PublicationMetric.BCA, PublicationMetric.SNR)
+    for first, second in condition_pairs:
+        groups: dict[PublicationMetric, tuple[pd.DataFrame, pd.DataFrame]] = {}
+        for metric in metrics:
+            first_group = _pair_group(grand, first, metric=metric)
+            second_group = _pair_group(grand, second, metric=metric)
+            if first_group.empty or second_group.empty:
+                result.diagnostics.append(
+                    Diagnostic(
+                        level="warning",
+                        message="Skipped combined paired scalp-map figure because one condition had no renderable values.",
+                        detail=f"{metric.display_name}: {first}; {second}",
+                    )
+                )
+                groups = {}
+                break
+            groups[metric] = (first_group, second_group)
+        if not groups:
+            continue
+
+        stem = sanitize_filename_stem(f"{first}_and_{second}_bca_snr_paired")
+        if request.export_png:
+            png_path = request.output_root / f"{stem}.png"
+            _render_combined_paired_topomap(
+                groups,
+                first_title=str(first),
+                second_title=str(second),
+                output_path=png_path,
+                bounds_by_metric=request.color_bounds,
+                dpi=request.png_dpi,
+            )
+            rendered.append(png_path)
+        if request.export_svg:
+            svg_path = request.output_root / f"{stem}.svg"
+            _render_combined_paired_topomap(
+                groups,
+                first_title=str(first),
+                second_title=str(second),
+                output_path=svg_path,
+                bounds_by_metric=request.color_bounds,
+                dpi=request.png_dpi,
+            )
+            rendered.append(svg_path)
     return rendered
 
 
@@ -382,6 +434,97 @@ def _render_paired_topomap(
         plt.close(fig)
 
 
+def _render_combined_paired_topomap(
+    values_by_metric: dict[PublicationMetric, tuple[pd.DataFrame, pd.DataFrame]],
+    *,
+    first_title: str,
+    second_title: str,
+    output_path: Path,
+    bounds_by_metric: dict[PublicationMetric, ColorBounds],
+    dpi: int,
+) -> None:
+    fig = plt.figure(figsize=COMBINED_PAIRED_MAP_FIGSIZE, dpi=dpi)
+    layout = _combined_paired_layout_rects()
+    try:
+        for row_idx, metric in enumerate((PublicationMetric.BCA, PublicationMetric.SNR)):
+            first_values, second_values = values_by_metric[metric]
+            row_layout = layout[metric]
+            row_axes = [
+                fig.add_axes(row_layout["first"]),
+                fig.add_axes(row_layout["second"]),
+            ]
+            cax = fig.add_axes(row_layout["colorbar"])
+            bounds = bounds_by_metric.get(metric, ColorBounds())
+            cmap = colormap_for_metric(metric, bounds)
+            shared_vlim = _paired_vlim(
+                first_values,
+                second_values,
+                metric=metric,
+                bounds=bounds,
+            )
+            im, first_missing = _draw_topomap(
+                first_values,
+                ax=row_axes[0],
+                metric=metric,
+                cmap=cmap,
+                bounds=bounds,
+                vlim_override=shared_vlim,
+            )
+            _, second_missing = _draw_topomap(
+                second_values,
+                ax=row_axes[1],
+                metric=metric,
+                cmap=cmap,
+                bounds=bounds,
+                vlim_override=shared_vlim,
+            )
+            if row_idx == 0:
+                row_axes[0].set_title(first_title, pad=8, **matplotlib_font_kwargs("figure_title"))
+                row_axes[1].set_title(second_title, pad=8, **matplotlib_font_kwargs("figure_title"))
+            if first_missing:
+                _add_missing_note(row_axes[0], first_missing)
+            if second_missing:
+                _add_missing_note(row_axes[1], second_missing)
+            cbar = fig.colorbar(im, cax=cax)
+            _style_colorbar(cbar, metric=metric)
+        _save_figure(fig, output_path, dpi=dpi)
+    finally:
+        plt.close(fig)
+
+
+def _combined_paired_layout_rects() -> dict[PublicationMetric, dict[str, tuple[float, float, float, float]]]:
+    map_height = COMBINED_PAIRED_MAP_WIDTH * (
+        COMBINED_PAIRED_MAP_FIGSIZE[0] / COMBINED_PAIRED_MAP_FIGSIZE[1]
+    )
+    rows = {
+        PublicationMetric.BCA: COMBINED_PAIRED_TOP_ROW_BOTTOM,
+        PublicationMetric.SNR: COMBINED_PAIRED_BOTTOM_ROW_BOTTOM,
+    }
+    return {
+        metric: {
+            "first": (
+                COMBINED_PAIRED_MAP_LEFT,
+                bottom,
+                COMBINED_PAIRED_MAP_WIDTH,
+                map_height,
+            ),
+            "second": (
+                COMBINED_PAIRED_SECOND_COL_LEFT,
+                bottom,
+                COMBINED_PAIRED_MAP_WIDTH,
+                map_height,
+            ),
+            "colorbar": (
+                COMBINED_PAIRED_COLORBAR_LEFT,
+                bottom,
+                COMBINED_PAIRED_COLORBAR_WIDTH,
+                map_height,
+            ),
+        }
+        for metric, bottom in rows.items()
+    }
+
+
 def _draw_topomap(
     values: pd.DataFrame,
     *,
@@ -439,10 +582,17 @@ def colorbar_label_for_metric(metric: PublicationMetric) -> str:
     return metric.display_name
 
 
-def _style_colorbar(cbar, *, metric: PublicationMetric) -> None:
+def _style_colorbar(
+    cbar,
+    *,
+    metric: PublicationMetric,
+    label_position: str = "right",
+) -> None:
     label_kwargs = matplotlib_font_kwargs("figure_axis_label")
     tick_kwargs = matplotlib_font_kwargs("figure_tick")
     cbar.ax.set_ylabel(colorbar_label_for_metric(metric), **label_kwargs)
+    cbar.ax.yaxis.set_label_position(label_position)
+    cbar.ax.yaxis.set_ticks_position("right")
     cbar.ax.tick_params(labelsize=tick_kwargs["fontsize"])
     for tick_label in cbar.ax.get_yticklabels():
         tick_label.set_fontfamily(str(tick_kwargs["fontfamily"]))
@@ -492,13 +642,6 @@ def _metric_limits(
     if vmax <= vmin:
         vmax = vmin + 1.0
     return (vmin, vmax)
-
-
-def _valid_color(value: str, fallback: str) -> str:
-    color = str(value).strip()
-    if is_color_like(color):
-        return color
-    return fallback
 
 
 def _plot_topomap_compat(
