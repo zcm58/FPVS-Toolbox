@@ -15,10 +15,9 @@ class ROI:
 
 
 DEFAULT_ROIS: Dict[str, List[str]] = {
-    "Frontal Lobe": ["F3", "F4", "Fz"],
-    "Occipital Lobe": ["O1", "O2", "Oz"],
-    "Parietal Lobe": ["P3", "P4", "Pz"],
-    "Central Lobe": ["C3", "C4", "Cz"],
+    "LOT": ["P7", "P9", "PO7", "PO3", "O1"],
+    "ROT": ["P8", "P10", "PO8", "PO4", "O2"],
+    "Central": ["FCZ", "CZ", "CPZ", "CP1", "C1", "FC1"],
 }
 
 

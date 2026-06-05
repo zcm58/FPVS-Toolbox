@@ -13,7 +13,7 @@ def test_custom_roi_presets_roundtrip_excludes_default_names(tmp_path) -> None:
         ROI_MONTAGE_10_10,
         [
             ("Custom Occipito Temporal", ["po7", "po8"]),
-            ("Frontal Lobe", ["bad"]),
+            ("LOT", ["bad"]),
         ],
     )
     manager.save()
@@ -37,8 +37,30 @@ def test_10_10_default_roi_presets_are_available() -> None:
     presets = default_roi_presets(ROI_MONTAGE_10_10)
 
     assert [(preset.name, list(preset.electrodes)) for preset in presets] == [
-        ("Frontal Lobe", ["F3", "F4", "FZ"]),
-        ("Central Lobe", ["C3", "C4", "CZ"]),
-        ("Parietal Lobe", ["P3", "P4", "PZ"]),
-        ("Occipital Lobe", ["O1", "O2", "OZ"]),
+        ("LOT", ["P7", "P9", "PO7", "PO3", "O1"]),
+        ("ROT", ["P8", "P10", "PO8", "PO4", "O2"]),
+        ("Central", ["FCZ", "CZ", "CPZ", "CP1", "C1", "FC1"]),
+    ]
+
+
+def test_legacy_lobe_roi_defaults_migrate_to_semantic_defaults(tmp_path) -> None:
+    path = tmp_path / "settings.ini"
+    path.write_text(
+        "\n".join(
+            [
+                "[rois]",
+                "montage = 10-10",
+                "names = Frontal Lobe;Central Lobe;Parietal Lobe;Occipital Lobe",
+                "electrodes = F3,F4,Fz;C3,C4,Cz;P3,P4,Pz;O1,O2,Oz",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    manager = SettingsManager(str(path))
+
+    assert manager.get_roi_pairs() == [
+        ("LOT", ["P7", "P9", "PO7", "PO3", "O1"]),
+        ("ROT", ["P8", "P10", "PO8", "PO4", "O2"]),
+        ("Central", ["FCZ", "CZ", "CPZ", "CP1", "C1", "FC1"]),
     ]

@@ -47,6 +47,12 @@ Current `Legacy_App` runtime couplings:
   `gui_sections.py`, `gui_rois.py`, `gui_participants.py`,
   `gui_settings.py`, and `gui_run_workflow.py` own focused GUI-only behavior.
 - `src/Tools/Individual_Detectability/`: individual-level detectability workflow.
+- `src/Tools/Publication_Maps/`: publication-oriented scalp-map source workbook and figure generation.
+- `src/Tools/Publication_Report/`: embedded single-group report workflow. `runner.py`
+  owns GUI-agnostic report generation, `gui.py` owns the manually-run sidebar
+  page, `worker.py` wraps the runner for QThread use, and the other modules own
+  discovery, typed request/result contracts, narrative/DOCX writing, and source
+  workbook/audit exports.
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`: UI-agnostic average-preprocessing behavior used by the PySide6 tool.
 - `src/Tools/Image_Resizer/`: image resizing utility.

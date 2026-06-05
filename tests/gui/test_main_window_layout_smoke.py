@@ -32,6 +32,7 @@ from Tools.Image_Resizer.pyside_resizer import FPVSImageResizerQt
 from Tools.Individual_Detectability.main_window import IndividualDetectabilityWindow
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Publication_Maps.gui import PublicationMapsWindow
+from Tools.Publication_Report.gui import PublicationReportWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Stats import StatsWindow
 
@@ -679,6 +680,96 @@ def test_sidebar_scalp_maps_embeds_in_main_workspace(
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_publication_maps"]
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert win.workspace_stack.currentWidget() is win.homeWidget
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_publication_report_embeds_in_main_workspace(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    excel_dir = project_root / "1 - Excel Data Files"
+    excel_dir.mkdir(parents=True)
+    (excel_dir / "CondA").mkdir()
+    (excel_dir / "CondA" / "P01_CondA_Results.xlsx").touch()
+    (excel_dir / "CondB").mkdir()
+    (excel_dir / "CondB" / "P01_CondB_Results.xlsx").touch()
+    win.currentProject = SimpleNamespace(
+        project_root=project_root,
+        input_folder=project_root,
+        subfolders={"excel": "1 - Excel Data Files"},
+    )
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_publication_report"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert isinstance(win.workspace_stack.currentWidget(), PublicationReportWindow)
+    assert win.workspace_stack.currentWidget().objectName() == "embedded_publication_report_page"
+    assert win._publication_report_page.parent() is win.workspace_stack
+    assert win._publication_report_page.input_root_edit.text() == str(excel_dir)
+    assert win._publication_report_page.output_root_edit.text() == str(
+        project_root / "5 - Publication Report"
+    )
+    page = win._publication_report_page
+    assert page.report_label_edit.text() == "Semantic categories"
+    assert page.target_response_edit.text() == "semantic categorization response"
+    assert page.markdown_check.isChecked()
+    assert page.docx_check.isChecked()
+    assert page.workbook_check.isChecked()
+    assert page.spectra_check.isChecked()
+    assert page.scalp_maps_check.isChecked()
+    assert page.individual_figures_check.isChecked()
+    assert page.roi_checks["LOT"].isChecked()
+    assert page.roi_checks["ROT"].isChecked()
+    assert page.roi_checks["Central"].isChecked()
+    assert page.base_rate_check.isChecked()
+    assert page.run_btn.isEnabled()
+
+    page._set_busy_state(True)
+    qtbot.wait(20)
+
+    assert not page.input_root_row.isEnabled()
+    assert not page.output_root_row.isEnabled()
+    assert not page.conditions_list.isEnabled()
+    assert not page.report_label_edit.isEnabled()
+    assert not page.target_response_edit.isEnabled()
+    assert not page.markdown_check.isEnabled()
+    assert not page.docx_check.isEnabled()
+    assert not page.workbook_check.isEnabled()
+    assert not page.run_btn.isEnabled()
+    assert page.cancel_btn.isEnabled()
+    assert win.sidebar.property("processingLocked") is True
+
+    page._set_busy_state(False)
+    qtbot.wait(20)
+
+    assert page.input_root_row.isEnabled()
+    assert page.output_root_row.isEnabled()
+    assert page.conditions_list.isEnabled()
+    assert page.run_btn.isEnabled()
+    assert not page.cancel_btn.isEnabled()
+    assert win.sidebar.property("processingLocked") is False
+
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_publication_report"]
 
     qtbot.mouseClick(_sidebar_button(win, "btn_home"), Qt.LeftButton)
     qtbot.wait(20)

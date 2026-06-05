@@ -395,6 +395,7 @@ def _prepare_single_group_data(
     qc_state,
     manual_excluded_pids,
     message_cb,
+    max_freq: float | None = None,
     project_root: str | None = None,
 ) -> tuple[
     list[str],
@@ -409,8 +410,8 @@ def _prepare_single_group_data(
 ]:
     all_subjects = list(subjects) if subjects else []
     settings = normalize_dv_policy(dv_policy)
+    resolved_preflight_max = _resolve_max_freq(max_freq)
     if settings.name == GROUP_SIGNIFICANT_POLICY_NAME:
-        resolved_preflight_max = _resolve_max_freq(None)
         if _has_valid_project_group_harmonic_cache(
             project_root=project_root,
             subjects=all_subjects,
@@ -462,6 +463,7 @@ def _prepare_single_group_data(
         rois=rois,
         dv_policy=dv_policy,
         dv_metadata=dv_metadata,
+        max_freq=resolved_preflight_max,
         selection_conditions=list(conditions or []),
         project_root=project_root,
     )
@@ -594,6 +596,7 @@ def run_rm_anova(
     qc_config: dict | None = None,
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
+    max_freq: float | None = None,
     project_root: str | None = None,
 ):
     _ = progress_cb
@@ -630,6 +633,7 @@ def run_rm_anova(
         qc_config=qc_config,
         qc_state=qc_state,
         manual_excluded_pids=manual_excluded_pids,
+        max_freq=max_freq,
         project_root=project_root,
         message_cb=message_cb,
     )
@@ -691,6 +695,7 @@ def run_lmm(
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
     results_dir: str | None = None,
+    max_freq: float | None = None,
     project_root: str | None = None,
 ):
     _ = progress_cb
@@ -727,6 +732,7 @@ def run_lmm(
         qc_config=qc_config,
         qc_state=qc_state,
         manual_excluded_pids=manual_excluded_pids,
+        max_freq=max_freq,
         project_root=project_root,
         message_cb=message_cb,
     )
@@ -860,6 +866,7 @@ def run_posthoc(
     qc_config: dict | None = None,
     qc_state: dict | None = None,
     manual_excluded_pids: list[str] | None = None,
+    max_freq: float | None = None,
     project_root: str | None = None,
     **kwargs,
 ):
@@ -897,6 +904,7 @@ def run_posthoc(
         qc_config=qc_config,
         qc_state=qc_state,
         manual_excluded_pids=manual_excluded_pids,
+        max_freq=max_freq,
         project_root=project_root,
         message_cb=message_cb,
     )
@@ -950,6 +958,7 @@ def run_baseline_vs_zero(
     alternative: str = "greater",
     correction: str = "fdr_bh",
     correction_scope: str = "global",
+    max_freq: float | None = None,
     project_root: str | None = None,
 ):
     _ = progress_cb
@@ -986,6 +995,7 @@ def run_baseline_vs_zero(
         qc_config=qc_config,
         qc_state=qc_state,
         manual_excluded_pids=manual_excluded_pids,
+        max_freq=max_freq,
         project_root=project_root,
         message_cb=message_cb,
     )

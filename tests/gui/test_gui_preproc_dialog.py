@@ -160,15 +160,15 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot):
     assert rois_tab.findChild(ActionRow, "settings_rois_quick_add_actions") is not None
     assert dlg.roi_montage_combo.count() == 1
     assert dlg.roi_montage_combo.currentData() == "10-10"
-    assert dlg.roi_preset_combo.findText("Frontal Lobe (Default)") >= 0
-    assert dlg.roi_preset_combo.findText("Occipital Lobe (Default)") >= 0
+    assert dlg.roi_preset_combo.findText("LOT (Default)") >= 0
+    assert dlg.roi_preset_combo.findText("ROT (Default)") >= 0
     assert dlg.roi_preset_electrodes_edit.isReadOnly()
-    dlg.roi_preset_combo.setCurrentIndex(dlg.roi_preset_combo.findText("Occipital Lobe (Default)"))
+    dlg.roi_preset_combo.setCurrentIndex(dlg.roi_preset_combo.findText("ROT (Default)"))
     dlg._add_selected_roi_preset()
-    assert ("Occipital Lobe", ["O1", "O2", "OZ"]) in dlg.roi_editor.get_pairs()
+    assert ("ROT", ["P8", "P10", "PO8", "PO4", "O2"]) in dlg.roi_editor.get_pairs()
     dlg.roi_editor.set_pairs([
         ("Custom Occipito Temporal", ["PO7", "PO8"]),
-        ("Frontal Lobe", ["BAD"]),
+        ("LOT", ["BAD"]),
     ])
     dlg._save_roi_editor_as_custom_presets()
     assert dlg._custom_roi_presets_by_montage["10-10"] == [

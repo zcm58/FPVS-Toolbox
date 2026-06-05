@@ -77,6 +77,11 @@ def sidebar_icon(kind: str, size: int = 20) -> QIcon:
         painter.drawLine(QPointF(size * 0.28, size * 0.68), QPointF(size * 0.43, size * 0.55))
         painter.drawLine(QPointF(size * 0.43, size * 0.55), QPointF(size * 0.55, size * 0.64))
         painter.drawLine(QPointF(size * 0.55, size * 0.64), QPointF(size * 0.68, size * 0.48))
+    elif kind == "report":
+        painter.drawRoundedRect(QRectF(size * 0.24, size * 0.16, size * 0.52, size * 0.68), 2, 2)
+        painter.drawLine(QPointF(size * 0.35, size * 0.34), QPointF(size * 0.65, size * 0.34))
+        painter.drawLine(QPointF(size * 0.35, size * 0.48), QPointF(size * 0.65, size * 0.48))
+        painter.drawLine(QPointF(size * 0.35, size * 0.62), QPointF(size * 0.56, size * 0.62))
     elif kind == "epoch":
         painter.drawArc(QRectF(size * 0.20, size * 0.20, size * 0.60, size * 0.60), 35 * 16, 285 * 16)
         painter.drawLine(QPointF(size * 0.76, size * 0.24), QPointF(size * 0.80, size * 0.42))

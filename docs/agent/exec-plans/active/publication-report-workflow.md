@@ -2,7 +2,29 @@
 
 ## Status
 
-Active planning.
+Active implementation.
+
+Implemented in `codex/publication-report-workflow` initial slice:
+
+- `src/Tools/Publication_Report/` package with typed request/result models,
+  project/workbook discovery, a GUI-agnostic report runner, source workbook and
+  audit writers, Markdown and dependency-free DOCX narrative writers, a Qt
+  worker, and an embedded PySide6 page.
+- Main sidebar entry: `Publication Report`, manually run after processing.
+- Multiple selected condition folders, editable report/target labels, editable
+  LOT/ROT/Central/base-rate ROI electrode lists, Markdown/Excel/DOCX outputs, and
+  default figure-family options recorded in the manifest.
+- Initial audit/inclusion workflow that mirrors active Stats manual exclusions
+  and required non-finite exclusions when an embedded Stats page has that state;
+  headless requests can pass the same exclusion sets directly.
+- Additive source tables for Stats-selected harmonic selection, ROI harmonic
+  values/summaries, summed-BCA baseline-vs-zero summaries, existing Stats
+  RM-ANOVA and BH-FDR posthoc outputs, direct condition-pair comparisons within
+  ROI, comparison agreement, participant-first individual
+  detectability/electrode counts, electrode-level combined Z scores,
+  manuscript-facing Z-score inventories, and base-rate summaries.
+- Focused headless tests for generated Markdown, DOCX, workbook, audit JSON,
+  missing selected conditions, and single-group enforcement.
 
 Initial scope decisions captured from user discussion:
 
@@ -10,17 +32,19 @@ Initial scope decisions captured from user discussion:
 - The user selects which processed conditions are included.
 - The semantic-categories use case is a user-editable report label, not a
   hard-coded named preset.
-- LOT and Central are built-in report ROI options for the first semantic
-  report workflow.
+- LOT, ROT, and Central are built-in report ROI options for the first semantic
+  report workflow. The embedded report page reads the Settings-menu ROI list so
+  project-specific ROIs remain selectable.
 - LOT electrodes default to `P7, P9, PO7, PO3, O1`.
+- ROT electrodes default to `P8, P10, PO8, PO4, O2`.
 - Central electrodes default to `FCz, Cz, CPz, CP1, C1, FC1`.
-- LOT is selected as the primary ROI by default. Central is selected as a
-  supporting/exploratory ROI by default.
+- LOT and ROT are selected as primary ROIs by default. Central is selected as
+  a supporting/exploratory ROI by default.
 - The default base-rate ROI is bilateral occipito-temporal.
 - Bilateral occipito-temporal electrodes default to
   `P7, P9, PO7, PO3, O1, P8, P10, PO8, PO4, O2`.
-- LOT and Central are reported separately by default; LOT+Central is not a
-  built-in v1 ROI.
+- LOT, ROT, and Central are reported separately by default; LOT+Central is not
+  a built-in v1 ROI.
 - When Stats supports within-subject condition comparisons for selected
   conditions, include those comparisons in the draft report.
 - Condition comparisons should include both the supported RM-ANOVA/post-hoc
@@ -56,7 +80,7 @@ Build a modular embedded workflow that turns a processed single-group FPVS
 project into publication-oriented outputs after the user selects report options
 and runs the tool:
 
-- a readable draft Results section;
+- a readable Results information pack for manuscript drafting;
 - a source-data workbook containing every reported value;
 - manuscript-ready ROI spectra and scalp-map figures;
 - optional individual-level detectability figures;
@@ -130,19 +154,20 @@ Planned modules:
   runner is stable.
 
 Built-in ROI helpers should stay data-driven and reusable. Semantic-report
-defaults include LOT, Central, and bilateral OT, but the report runner should
-accept arbitrary project ROI definitions for other single-group studies.
+defaults include LOT, ROT, Central, and bilateral OT, but the report runner
+should accept arbitrary project ROI definitions for other single-group studies.
 
 v1 semantic-report defaults:
 
 - LOT: `P7, P9, PO7, PO3, O1`
+- ROT: `P8, P10, PO8, PO4, O2`
 - Central: `FCz, Cz, CPz, CP1, C1, FC1`
 - Bilateral OT: `P7, P9, PO7, PO3, O1, P8, P10, PO8, PO4, O2`
 
-LOT and Central are separate report ROIs. LOT+Central may be added later as a
-project-specific custom ROI, but it is not a built-in v1 default.
+LOT, ROT, and Central are separate report ROIs. LOT+Central may be added later
+as a project-specific custom ROI, but it is not a built-in v1 default.
 
-LOT is the default primary ROI for the semantic report label. Central is
+LOT and ROT are default primary ROIs for the semantic report label. Central is
 checked by default as a supporting/exploratory ROI, and the generated narrative
 should label it that way unless the user changes the role.
 
@@ -154,8 +179,8 @@ Default project output folder:
 
 Expected files:
 
-- `Publication_Report.md`: first implementation target for the draft narrative.
-- `Publication_Report.docx`: Word version of the draft narrative.
+- `Publication_Report.md`: readable information-pack narrative.
+- `Publication_Report.docx`: Word version of the information-pack narrative.
 - `Publication_Report_Data.xlsx`: source workbook for all reported numbers.
 - `Publication_Report_Audit.json`: machine-readable settings and provenance.
 - `figures/`: spectra, scalp maps, and optional individual-detectability figures.
@@ -208,13 +233,29 @@ Initial workbook sheets:
 - `Condition_Comparisons`: supported within-subject condition comparisons from
   existing Stats outputs, including test statistics, p-values, corrected
   p-values, and effect sizes.
+- `Stats_RM_ANOVA`: direct table returned by the existing Stats RM-ANOVA
+  workflow for the selected conditions and report ROIs.
+- `Stats_Posthoc`: direct table returned by the existing Stats posthoc workflow,
+  including BH-FDR corrected p-values where available.
+- `Stats_Workflow_Summary`: run status, participant-set, exclusion, and
+  backend notes from the embedded Stats workflow calls.
 - `Condition_Pairs_By_ROI`: direct condition-pair comparisons within each ROI,
   generated as a separate analysis from the RM-ANOVA/post-hoc workflow.
 - `Comparison_Agreement`: whether RM-ANOVA/post-hoc conclusions and direct
   ROI-wise condition-pair comparisons agree on significance and direction.
+- `Planned_Lateralization`: planned LOT/ROT semantic and low-level color
+  lateralization contrasts plus the direct asymmetry-difference contrast
+  testing whether `(ROT - LOT)` differs between the semantic and color
+  responses.
 - `Group_Electrode_Significance`: threshold x condition x electrode summaries.
 - `Individual_Detectability`: participant x condition x ROI or whole-head
   detectability flags and significant-electrode counts.
+- `Individual_Detectability_Counts`: condition x ROI participant counts and
+  proportions with at least one BH-FDR significant electrode.
+- `Electrode_Z_Scores`: participant x condition x ROI x electrode combined Z
+  scores, one-tailed p-values, BH-FDR q-values, and threshold flags.
+- `Z_Score_Report`: consolidated report-facing Z scores and one-tailed p-values
+  from harmonic selection, ROI harmonic summaries, and base-rate summaries.
 - `Base_Rate_Summary`: 6 Hz and harmonic summaries by condition and base-rate
   ROI.
 - `Figure_Manifest`: generated figures and source parameters.
@@ -473,19 +514,20 @@ Add new focused tests under:
 
 4. Which ROIs should be required defaults for the first semantic report?
 
-   Decision: LOT and Central are built-in options for the first semantic
-   report workflow. LOT defaults to `P7, P9, PO7, PO3, O1`. Central defaults
-   to `FCz, Cz, CPz, CP1, C1, FC1`.
+   Decision: LOT, ROT, and Central are built-in options for the first semantic
+   report workflow. LOT defaults to `P7, P9, PO7, PO3, O1`. ROT defaults to
+   `P8, P10, PO8, PO4, O2`. Central defaults to
+   `FCz, Cz, CPz, CP1, C1, FC1`.
 
 5. Should LOT be the primary target ROI by default?
 
-   Decision: yes. LOT is the default primary ROI. Central is selected by
+   Decision: yes. LOT and ROT are default primary ROIs. Central is selected by
    default as a supporting/exploratory ROI.
 
 6. Should central ROI and combined LOT+central ROI be built in as optional
    exploratory ROIs?
 
-   Decision: report LOT and Central separately by default. Do not add
+   Decision: report LOT, ROT, and Central separately by default. Do not add
    LOT+Central as a built-in v1 ROI.
 
 7. What should the default base-rate visual ROI be?
@@ -582,11 +624,12 @@ Add new focused tests under:
 - Decision: mirror Stats manual/QC exclusions for analysis and show
   inclusion/exclusion details to the user.
 - Default ROI roles and electrodes.
-- Decision: include LOT and Central options, plus bilateral OT for base-rate
+- Decision: include LOT, ROT, and Central options, plus bilateral OT for base-rate
   defaults.
-- Decision: LOT is the default primary ROI; Central is default
+- Decision: LOT and ROT are default primary ROIs; Central is default
   supporting/exploratory ROI.
-- Decision: LOT = `P7, P9, PO7, PO3, O1`; Central =
+- Decision: LOT = `P7, P9, PO7, PO3, O1`; ROT =
+  `P8, P10, PO8, PO4, O2`; Central =
   `FCz, Cz, CPz, CP1, C1, FC1`; bilateral OT =
   `P7, P9, PO7, PO3, O1, P8, P10, PO8, PO4, O2`.
 - Default individual-level harmonic source.
@@ -605,7 +648,7 @@ Add new focused tests under:
   in the workbook.
 - Whether central/combined ROIs are first-class presets or project-specific
   report settings.
-- Decision: LOT and Central are first-class separate presets; LOT+Central is
+- Decision: LOT, ROT, and Central are first-class separate presets; LOT+Central is
   not built in for v1.
 - GUI entry point.
 - Decision: manually-run embedded tool/page in the main sidebar.

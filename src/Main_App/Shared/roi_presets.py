@@ -18,10 +18,9 @@ class ROIPreset:
 
 DEFAULT_ROI_PRESETS_BY_MONTAGE: dict[str, tuple[ROIPreset, ...]] = {
     ROI_MONTAGE_10_10: (
-        ROIPreset("Frontal Lobe", ("F3", "F4", "FZ")),
-        ROIPreset("Central Lobe", ("C3", "C4", "CZ")),
-        ROIPreset("Parietal Lobe", ("P3", "P4", "PZ")),
-        ROIPreset("Occipital Lobe", ("O1", "O2", "OZ")),
+        ROIPreset("LOT", ("P7", "P9", "PO7", "PO3", "O1")),
+        ROIPreset("ROT", ("P8", "P10", "PO8", "PO4", "O2")),
+        ROIPreset("Central", ("FCZ", "CZ", "CPZ", "CP1", "C1", "FC1")),
     ),
 }
 

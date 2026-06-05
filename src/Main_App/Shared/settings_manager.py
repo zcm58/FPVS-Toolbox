@@ -53,8 +53,8 @@ DEFAULTS = {
     },
     'rois': {
         'montage': DEFAULT_ROI_MONTAGE,
-        'names': 'Frontal Lobe;Central Lobe;Parietal Lobe;Occipital Lobe',
-        'electrodes': 'F3,F4,Fz;C3,C4,Cz;P3,P4,Pz;O1,O2,Oz'
+        'names': 'LOT;ROT;Central',
+        'electrodes': 'P7,P9,PO7,PO3,O1;P8,P10,PO8,PO4,O2;FCZ,CZ,CPZ,CP1,C1,FC1'
     },
     'roi_presets': {
         'custom_10_10': '[]'
@@ -69,6 +69,9 @@ DEFAULTS = {
         'enabled': 'False'
     }
 }
+
+_LEGACY_DEFAULT_ROI_NAMES = 'Frontal Lobe;Central Lobe;Parietal Lobe;Occipital Lobe'
+_LEGACY_DEFAULT_ROI_ELECTRODES = 'F3,F4,Fz;C3,C4,Cz;P3,P4,Pz;O1,O2,Oz'
 
 _LEGACY_QT_KEYS = (
     ("paths/projectsRoot", "paths", "projectsRoot"),
@@ -174,6 +177,7 @@ class SettingsManager:
                 migrated = True
         if self._uses_default_path:
             migrated = self._migrate_legacy_qt_settings() or migrated
+        migrated = self._migrate_legacy_roi_defaults() or migrated
         if migrated:
             self.save()
 
@@ -192,6 +196,15 @@ class SettingsManager:
                 self.set(section, option, str(value))
             migrated = True
         return migrated
+
+    def _migrate_legacy_roi_defaults(self) -> bool:
+        names = self.get('rois', 'names', '').strip()
+        electrodes = self.get('rois', 'electrodes', '').strip()
+        if names != _LEGACY_DEFAULT_ROI_NAMES or electrodes != _LEGACY_DEFAULT_ROI_ELECTRODES:
+            return False
+        self.set('rois', 'names', DEFAULTS['rois']['names'])
+        self.set('rois', 'electrodes', DEFAULTS['rois']['electrodes'])
+        return True
 
     def save(self) -> None:
         """Write the current settings to disk."""
