@@ -55,6 +55,10 @@ class BrainRendererWidget(QWidget):
         plotter.setObjectName("loreta_pyvista_interactor")
         plotter.set_background("#f7f9fc")
         plotter.enable_trackball_style()
+        try:
+            plotter.enable_depth_peeling(number_of_peels=8, occlusion_ratio=0.0)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            logger.debug("loreta_depth_peeling_unavailable", exc_info=True)
         layout.addWidget(plotter)
         self._plotter = plotter
 
@@ -63,13 +67,17 @@ class BrainRendererWidget(QWidget):
         self._surface = self._to_polydata(pv, mesh)
         self._brain_actor = plotter.add_mesh(
             self._surface,
-            color="#c7d0df",
+            color="#efc7b7",
             opacity=initial_opacity,
             smooth_shading=True,
+            show_edges=False,
+            lighting=True,
             specular=0.22,
             specular_power=12,
-            ambient=0.35,
+            ambient=0.42,
+            diffuse=0.72,
         )
+        self._apply_brain_material(self._brain_actor)
         plotter.add_axes(interactive=False)
         plotter.camera_position = "xy"
         plotter.reset_camera()
@@ -79,10 +87,31 @@ class BrainRendererWidget(QWidget):
     def _to_polydata(pv: Any, mesh: BrainMesh) -> Any:
         surface = pv.PolyData(mesh.points, mesh.faces)
         try:
-            return surface.compute_normals(point_normals=True, cell_normals=False, inplace=False)
+            return surface.compute_normals(
+                point_normals=True,
+                cell_normals=False,
+                split_vertices=False,
+                consistent_normals=True,
+                auto_orient_normals=True,
+                feature_angle=90.0,
+                inplace=False,
+            )
         except (AttributeError, RuntimeError, TypeError, ValueError):
             logger.debug("loreta_mesh_normals_failed", exc_info=True)
             return surface
+
+    @staticmethod
+    def _apply_brain_material(actor: Any) -> None:
+        try:
+            prop = actor.GetProperty()
+            prop.SetInterpolationToPhong()
+            prop.SetEdgeVisibility(False)
+            prop.SetAmbient(0.42)
+            prop.SetDiffuse(0.72)
+            prop.SetSpecular(0.20)
+            prop.SetSpecularPower(16)
+        except (AttributeError, RuntimeError, TypeError):
+            logger.debug("loreta_brain_material_failed", exc_info=True)
 
     def set_brain_opacity(self, opacity: float) -> None:
         opacity = max(0.05, min(1.0, float(opacity)))
@@ -116,13 +145,17 @@ class BrainRendererWidget(QWidget):
         self._surface = self._to_polydata(pv, mesh)
         self._brain_actor = plotter.add_mesh(
             self._surface,
-            color="#c7d0df",
+            color="#efc7b7",
             opacity=self._brain_opacity,
             smooth_shading=True,
+            show_edges=False,
+            lighting=True,
             specular=0.22,
             specular_power=12,
-            ambient=0.35,
+            ambient=0.42,
+            diffuse=0.72,
         )
+        self._apply_brain_material(self._brain_actor)
         if reset_camera:
             plotter.reset_camera()
         plotter.render()
