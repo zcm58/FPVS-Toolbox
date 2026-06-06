@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from Tools.LORETA_Visualizer.conditions import DemoLoretaCondition, default_condition
+from Tools.LORETA_Visualizer.prepared_source_fixture import make_prepared_source_fixture_payload
 from Tools.LORETA_Visualizer.source_payloads import (
     COORDINATE_SPACE_DISPLAY,
     SOURCE_KIND_VOLUME_MESH,
@@ -46,6 +47,14 @@ def make_demo_condition_activation(
     points = np.asarray(mesh_points, dtype=float)
     if points.ndim != 2 or points.shape[1] != 3 or len(points) == 0:
         return empty_source_payload(label=f"Synthetic {condition.activation_region} demo activation")
+    if condition.activation_region == "prepared_source_fixture":
+        return make_prepared_source_fixture_payload(
+            points,
+            condition_id=condition.condition_id,
+            label="Synthetic prepared source-map fixture",
+            source_model=condition.source_model,
+            display_transform=display_transform,
+        )
     payload = _make_volume_region_activation(points, condition=condition)
     return _maybe_round_trip_through_native_space(payload, display_transform)
 

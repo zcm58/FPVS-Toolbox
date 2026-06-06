@@ -101,6 +101,9 @@ renderer.py
   dataclass.
 - `conditions.py`: synthetic demo condition metadata.
 - `dummy_activation.py`: deterministic demo-only scalar source maps.
+- `prepared_source_fixture.py`: in-memory fixture that is shaped like a
+  prepared source-map handoff from a future real calculation path. It validates
+  and adapts coordinates/scalars but does not calculate source estimates.
 - `source_payloads.py`: renderer-facing `SourcePayload` validation,
   finite-value filtering, metadata preservation, and payload conversion to
   display space.

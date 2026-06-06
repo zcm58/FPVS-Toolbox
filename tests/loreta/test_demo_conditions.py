@@ -112,3 +112,61 @@ def test_demo_condition_can_exercise_native_to_display_bridge() -> None:
     assert np.allclose(bridged_payload.points, direct_payload.points)
     assert np.allclose(bridged_payload.values, direct_payload.values)
     assert np.array_equal(bridged_payload.faces, direct_payload.faces)
+
+
+def test_prepared_source_fixture_condition_has_real_data_handoff_shape() -> None:
+    mesh = make_synthetic_brain_mesh()
+    payload = make_demo_condition_activation(
+        mesh.points,
+        condition=condition_by_id("prepared_source_fixture"),
+        display_transform=mesh.display_transform,
+    )
+
+    assert payload.kind == SOURCE_KIND_VOLUME_MESH
+    assert payload.source_model == "prepared_fsaverage_volume_fixture"
+    assert payload.coordinate_space == COORDINATE_SPACE_DISPLAY
+    assert payload.faces is not None
+    assert len(payload.faces) > 0
+    assert len(payload.points) == len(payload.values)
+    assert payload.metadata["fixture_kind"] == "prepared_source_map"
+    assert payload.metadata["source_file_format"] == "in_memory_fixture"
+    assert payload.metadata["source_lobes"] == 4
+    assert float(np.min(payload.values)) < 0.1
+    assert float(np.max(payload.values)) > 0.9
+    assert len(np.unique(np.round(payload.values, decimals=3))) > 30
+
+
+def test_prepared_source_fixture_uses_fsaverage_like_transform_bridge() -> None:
+    native_mesh_points = np.asarray(
+        [
+            [-65.0, -85.0, -40.0],
+            [-62.0, 48.0, 52.0],
+            [62.0, -82.0, -38.0],
+            [65.0, 50.0, 50.0],
+            [0.0, -18.0, 76.0],
+            [0.0, -22.0, -52.0],
+        ],
+        dtype=float,
+    )
+    transform = MeshDisplayTransform.from_native_points(
+        native_mesh_points,
+        native_coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+    )
+    display_mesh_points = transform.to_display_points(native_mesh_points)
+
+    direct_payload = make_demo_condition_activation(
+        display_mesh_points,
+        condition=condition_by_id("prepared_source_fixture"),
+    )
+    bridged_payload = make_demo_condition_activation(
+        display_mesh_points,
+        condition=condition_by_id("prepared_source_fixture"),
+        display_transform=transform,
+    )
+
+    assert bridged_payload.coordinate_space == COORDINATE_SPACE_DISPLAY
+    assert bridged_payload.metadata["source_space"] == COORDINATE_SPACE_FSAVERAGE
+    assert bridged_payload.metadata["adapted_through"] == "source_payload_to_display"
+    assert np.allclose(bridged_payload.points, direct_payload.points)
+    assert np.allclose(bridged_payload.values, direct_payload.values)
+    assert np.array_equal(bridged_payload.faces, direct_payload.faces)

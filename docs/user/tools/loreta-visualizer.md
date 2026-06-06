@@ -29,8 +29,8 @@ drawn inside the transparent anatomical shell.
 - Toggle a smoothed visual duplicate of the brain surface.
 - Show or hide the dummy source heatmap independently from the brain mesh.
 - Adjust dummy source-map opacity.
-- Switch among synthetic occipital, frontal, and deep medial temporal
-  conditions.
+- Switch among synthetic occipital, frontal, deep medial temporal, and prepared
+  source-map fixture conditions.
 - Auto-scale the source intensity map or set manual minimum/maximum intensity
   bounds.
 
@@ -54,6 +54,10 @@ for reporting neural source results.
 The deep medial temporal demo shows that the renderer can display a smooth
 internal 3D source blob inside the transparent brain. It is not a hippocampal
 source-localization result.
+
+The prepared source-map fixture is shaped like a future real-data handoff with
+coordinates, scalar values, faces, source-model metadata, and coordinate-space
+conversion. It is still synthetic and should be used only to inspect rendering.
 
 ## Future real-data direction
 

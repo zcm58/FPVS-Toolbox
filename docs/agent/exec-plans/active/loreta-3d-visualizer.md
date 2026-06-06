@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, and Phase 5C are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, and preserves native-to-display coordinate transforms before any real LORETA calculations are introduced.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, and Phase 5D are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, and includes a prepared source-map fixture before any real LORETA calculations are introduced.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -76,6 +76,7 @@ New tool implementation:
   - `source_payloads.py`: renderer-facing payload contract for cortical surface points, cortical/deep meshes, volume/deep source representations, and future ROI meshes.
   - `scalar_fields.py`: scalar-gradient color stops and scalp-map-style auto/manual color-limit helpers.
   - `transforms.py`: native/source coordinate to renderer display coordinate transform contract.
+  - `prepared_source_fixture.py`: in-memory prepared source-map fixture that validates the future adapter handoff shape without computing source estimates.
   - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
 
 Main App shell integration:
@@ -229,7 +230,7 @@ Done means:
 
 ## Phase 5: Optional Real Data Adapter
 
-Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Real LORETA calculation, real file discovery, and project-output integration remain out of scope.
+Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Phase 5D adds a selectable prepared source-map fixture that looks like a future real-data handoff. Real LORETA calculation, real file discovery, and project-output integration remain out of scope.
 
 Objective:
 
@@ -323,6 +324,30 @@ Done means:
 - Native fsaverage-like point arrays round-trip through display and native space.
 - Payload conversion preserves scalar values, faces, labels, and source model metadata while updating coordinates into display space.
 - Mismatched coordinate-space labels are rejected instead of silently rendering misaligned sources.
+
+### Phase 5D: Prepared Source Payload Fixture
+
+Status: Implemented. The condition selector includes a `Prepared source-map fixture` demo condition that routes prepared coordinates/scalars through the same adapter bridge future real source outputs should use.
+
+Objective:
+
+- Add a source-map fixture shaped like a future real calculation handoff: coordinates, scalar values, source model, coordinate-space label, faces, and metadata.
+- Keep fixture generation in the visualizer only and clearly synthetic.
+- Convert the fixture through `source_payload_to_display(...)` when a non-identity mesh transform is available.
+- Make the fixture selectable from the existing dummy condition combo so the render can be manually inspected.
+- Avoid real source-localization calculation, file discovery, project I/O, and Source Localization/eLORETA dependencies.
+
+Implementation notes:
+
+- `prepared_source_fixture.py` owns the in-memory prepared fixture and its adapter call.
+- The fixture uses multiple asymmetric smooth volume lobes with graded scalar values so it visually resembles a thresholded source map more than the simple regional demos.
+- The payload metadata marks the source as an in-memory synthetic fixture and records whether it was adapted through `source_payload_to_display(...)`.
+
+Done means:
+
+- Selecting `Prepared source-map fixture` immediately updates the heatmap layer.
+- The payload is a volume mesh with finite scalar gradients and VTK faces.
+- Focused tests prove the fixture condition exists, uses prepared fixture metadata, and preserves display alignment through a fsaverage-like native transform.
 
 ## Integration Safety
 

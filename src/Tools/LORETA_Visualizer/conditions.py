@@ -34,6 +34,12 @@ DEMO_LORETA_CONDITIONS: tuple[DemoLoretaCondition, ...] = (
         activation_region="deep_medial_temporal",
         source_model="volume_grid",
     ),
+    DemoLoretaCondition(
+        condition_id="prepared_source_fixture",
+        label="Prepared source-map fixture",
+        activation_region="prepared_source_fixture",
+        source_model="prepared_fsaverage_volume_fixture",
+    ),
 )
 
 
