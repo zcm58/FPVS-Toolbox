@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, and Phase 5E are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, and imports controlled prepared JSON payloads before any real LORETA calculations are introduced.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, and Phase 5F are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, and supports prepared payload manifests before any real LORETA calculations are introduced.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -77,7 +77,7 @@ New tool implementation:
   - `scalar_fields.py`: scalar-gradient color stops and scalp-map-style auto/manual color-limit helpers.
   - `transforms.py`: native/source coordinate to renderer display coordinate transform contract.
   - `prepared_source_fixture.py`: in-memory prepared source-map fixture that validates the future adapter handoff shape without computing source estimates.
-  - `prepared_payload_importer.py`: controlled JSON importer for already-prepared source payloads.
+  - `prepared_payload_importer.py`: controlled JSON importer for already-prepared source payloads and source-payload manifests.
   - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
 
 Main App shell integration:
@@ -231,7 +231,7 @@ Done means:
 
 ## Phase 5: Optional Real Data Adapter
 
-Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Phase 5D adds a selectable prepared source-map fixture that looks like a future real-data handoff. Phase 5E adds controlled prepared JSON payload import. Real LORETA calculation, project-output discovery, and project-output integration remain out of scope.
+Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Phase 5D adds a selectable prepared source-map fixture that looks like a future real-data handoff. Phase 5E adds controlled prepared JSON payload import. Phase 5F adds multi-condition prepared payload manifests. Real LORETA calculation, project-output discovery, and project-output integration remain out of scope.
 
 Objective:
 
@@ -374,6 +374,31 @@ Done means:
 - Focused tests load display-space and fsaverage-like native JSON payloads and confirm display-space output.
 - Invalid JSON/schema cases fail with `PreparedSourcePayloadImportError`.
 - The GUI can render the imported payload through the same activation actor, opacity controls, and scalar range controls used by synthetic payloads.
+
+### Phase 5F: Multi-Condition Prepared Payload Manifest
+
+Status: Implemented. The visualizer can load a user-selected manifest JSON that maps condition labels to prepared source payload JSON files, then adds those imported conditions to the existing condition dropdown.
+
+Objective:
+
+- Load multiple prepared source payloads as a named condition set.
+- Keep the manifest format separate from real LORETA calculation and project-output discovery.
+- Resolve manifest payload paths relative to the manifest file and reject paths that escape the manifest folder.
+- Let the condition selector switch among imported prepared source maps using the same renderer path as single-file imports.
+- Preserve existing synthetic demo conditions and the single-payload JSON import.
+
+Implementation notes:
+
+- `prepared_payload_importer.py` owns manifest parsing, path validation, duplicate-condition-id checks, and manifest examples.
+- The GUI exposes `Load manifest`; cancel leaves the current activation unchanged.
+- Loading a manifest replaces the previously imported manifest conditions, then selects and renders the first imported condition.
+- Switching the base brain mesh reloads the selected imported condition through the current mesh display transform.
+
+Done means:
+
+- Focused tests load a manifest, resolve relative payload files, load each listed payload, and reject path escapes and duplicate ids.
+- Imported manifest entries appear in the condition dropdown with `Imported:` labels.
+- Selecting an imported condition loads its payload, converts it to display space, and renders it through the existing activation actor.
 
 ## Integration Safety
 

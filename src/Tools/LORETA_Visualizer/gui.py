@@ -31,7 +31,9 @@ from Tools.LORETA_Visualizer.conditions import DEMO_LORETA_CONDITIONS, condition
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult, load_fsaverage_brain_mesh
 from Tools.LORETA_Visualizer.prepared_payload_importer import (
+    PreparedSourceManifestEntry,
     PreparedSourcePayloadImportError,
+    load_prepared_source_manifest_json,
     load_prepared_source_payload_json,
 )
 from Tools.LORETA_Visualizer.renderer import BrainRendererWidget, RenderBackendError
@@ -92,6 +94,7 @@ class LoretaVisualizerWindow(QWidget):
         self._selected_condition_id = default_condition().condition_id
         self._current_activation_payload: SourcePayload | None = None
         self._last_import_dir: Path | None = None
+        self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -247,6 +250,12 @@ class LoretaVisualizerWindow(QWidget):
         self.load_source_payload_btn.clicked.connect(self._load_prepared_source_payload)
         controls.content_layout.addWidget(self.load_source_payload_btn)
 
+        self.load_source_manifest_btn = make_action_button("Load manifest", compact=True, parent=controls)
+        self.load_source_manifest_btn.setObjectName("loreta_load_source_manifest_btn")
+        self.load_source_manifest_btn.setToolTip("Load a prepared source condition manifest.")
+        self.load_source_manifest_btn.clicked.connect(self._load_prepared_source_manifest)
+        controls.content_layout.addWidget(self.load_source_manifest_btn)
+
         self.load_fsaverage_btn = make_action_button("Fetch/load fsaverage", compact=True, parent=controls)
         self.load_fsaverage_btn.setObjectName("loreta_load_fsaverage_btn")
         self.load_fsaverage_btn.setToolTip("Load an external MNE fsaverage mesh.")
@@ -293,6 +302,7 @@ class LoretaVisualizerWindow(QWidget):
         self.zoom_in_btn.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
         self.load_source_payload_btn.setEnabled(enabled)
+        self.load_source_manifest_btn.setEnabled(enabled)
         self.load_fsaverage_btn.setEnabled(enabled)
 
     def _on_transparency_changed(self, value: int) -> None:
@@ -339,6 +349,10 @@ class LoretaVisualizerWindow(QWidget):
         self._refresh_dummy_activation()
 
     def _update_condition_status(self) -> None:
+        manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
+        if manifest_entry is not None:
+            self.condition_status_label.setText(f"Showing imported source condition: {manifest_entry.label}")
+            return
         condition = condition_by_id(self._selected_condition_id)
         region_label = condition.activation_region.replace("_", " ")
         self.condition_status_label.setText(f"Showing synthetic {region_label} activation.")
@@ -378,6 +392,21 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._import_prepared_source_payload(Path(file_name))
 
+    def _load_prepared_source_manifest(self) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        initial_dir = "" if self._last_import_dir is None else str(self._last_import_dir)
+        file_name, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Load prepared source manifest",
+            initial_dir,
+            "Prepared source manifest (*.json);;JSON files (*.json)",
+        )
+        if not file_name:
+            return
+        self._import_prepared_source_manifest(Path(file_name))
+
     def _import_prepared_source_payload(self, path: Path) -> None:
         renderer = self.renderer
         if renderer is None:
@@ -395,6 +424,39 @@ class LoretaVisualizerWindow(QWidget):
         self._last_import_dir = path.parent
         self._set_activation_payload(payload)
         self.condition_status_label.setText(f"Showing imported prepared source payload: {path.name}")
+
+    def _import_prepared_source_manifest(self, path: Path) -> None:
+        try:
+            entries = load_prepared_source_manifest_json(path)
+        except PreparedSourcePayloadImportError as exc:
+            logger.warning("loreta_prepared_source_manifest_import_failed", extra={"path": str(path), "error": str(exc)})
+            self.condition_status_label.setText(f"Prepared source manifest import failed: {exc}")
+            return
+        self._last_import_dir = path.parent
+        self._replace_manifest_conditions(entries)
+        first_entry = entries[0]
+        self._selected_condition_id = first_entry.condition_id
+        self._set_condition_combo_data(first_entry.condition_id)
+        self._refresh_dummy_activation()
+
+    def _replace_manifest_conditions(self, entries: tuple[PreparedSourceManifestEntry, ...]) -> None:
+        previous_block_state = self.condition_combo.blockSignals(True)
+        try:
+            for index in range(self.condition_combo.count() - 1, -1, -1):
+                item_data = self.condition_combo.itemData(index)
+                if isinstance(item_data, str) and item_data in self._manifest_conditions:
+                    self.condition_combo.removeItem(index)
+            self._manifest_conditions = {entry.condition_id: entry for entry in entries}
+            for entry in entries:
+                self.condition_combo.addItem(f"Imported: {entry.label}", entry.condition_id)
+        finally:
+            self.condition_combo.blockSignals(previous_block_state)
+
+    def _set_condition_combo_data(self, condition_id: str) -> None:
+        for index in range(self.condition_combo.count()):
+            if self.condition_combo.itemData(index) == condition_id:
+                self.condition_combo.setCurrentIndex(index)
+                return
 
     def _start_fsaverage_load(self, *, allow_fetch: bool) -> None:
         if self._mesh_thread is not None:
@@ -450,11 +512,17 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None:
             return
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None:
+            return
+        manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
+        if manifest_entry is not None:
+            self._render_manifest_condition(manifest_entry)
+            return
         mesh_points = renderer.mesh_points()
         if mesh_points is None:
             return
         mesh_faces = renderer.mesh_faces()
-        display_transform = renderer.mesh_display_transform()
         condition = condition_by_id(self._selected_condition_id)
         payload = make_demo_condition_activation(
             mesh_points,
@@ -463,6 +531,33 @@ class LoretaVisualizerWindow(QWidget):
             display_transform=display_transform,
         )
         self._set_activation_payload(payload)
+
+    def _render_manifest_condition(self, entry: PreparedSourceManifestEntry) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None:
+            self.condition_status_label.setText("Imported source condition failed: no mesh transform is available.")
+            return
+        try:
+            payload = load_prepared_source_payload_json(entry.payload_path, display_transform=display_transform)
+        except PreparedSourcePayloadImportError as exc:
+            logger.warning(
+                "loreta_manifest_condition_payload_failed",
+                extra={"path": str(entry.payload_path), "condition": entry.condition_id, "error": str(exc)},
+            )
+            self.condition_status_label.setText(f"Imported source condition failed: {exc}")
+            return
+        payload.metadata.update(
+            {
+                "manifest_condition_id": entry.condition_id,
+                "manifest_condition_label": entry.label,
+                "manifest_metadata": entry.metadata,
+            }
+        )
+        self._set_activation_payload(payload)
+        self.condition_status_label.setText(f"Showing imported source condition: {entry.label}")
 
     def _set_activation_payload(self, payload: SourcePayload) -> None:
         renderer = self.renderer

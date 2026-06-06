@@ -105,8 +105,10 @@ renderer.py
   prepared source-map handoff from a future real calculation path. It validates
   and adapts coordinates/scalars but does not calculate source estimates.
 - `prepared_payload_importer.py`: controlled JSON importer for prepared source
-  payloads with coordinates, scalar values, faces, coordinate-space labels, and
-  metadata. It is user-selected file input only, not project-output discovery.
+  payloads and source-payload manifests. Payload files include coordinates,
+  scalar values, faces, coordinate-space labels, and metadata; manifest files map
+  condition labels to relative payload JSON files. This is user-selected file
+  input only, not project-output discovery.
 - `source_payloads.py`: renderer-facing `SourcePayload` validation,
   finite-value filtering, metadata preservation, and payload conversion to
   display space.

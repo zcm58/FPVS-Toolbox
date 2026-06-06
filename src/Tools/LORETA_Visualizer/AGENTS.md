@@ -56,8 +56,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   future real-data handoff, with coordinates/scalars/faces/metadata adapted
   through the payload bridge and no inverse-solution math.
 - `prepared_payload_importer.py`: controlled JSON importer for already-prepared
-  source payloads. It validates file content and adapts into renderer payloads;
-  it must not discover project outputs or calculate source estimates.
+  source payloads and source-payload manifests. It validates file content and
+  adapts into renderer payloads; it must not discover project outputs or
+  calculate source estimates.
 - `source_payloads.py`, `transforms.py`, and `scalar_fields.py`: bridge helpers
   that adapt prepared source payloads to the renderer.
 

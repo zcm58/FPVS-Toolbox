@@ -7,6 +7,7 @@ source-localization values or choose an inverse method.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +22,21 @@ from Tools.LORETA_Visualizer.source_payloads import (
 from Tools.LORETA_Visualizer.transforms import COORDINATE_SPACE_DISPLAY, MeshDisplayTransform
 
 PREPARED_SOURCE_PAYLOAD_FORMAT = "fpvs-loreta-source-payload-v1"
+PREPARED_SOURCE_MANIFEST_FORMAT = "fpvs-loreta-source-manifest-v1"
 
 
 class PreparedSourcePayloadImportError(ValueError):
     """Raised when a prepared source payload file cannot be imported."""
+
+
+@dataclass(frozen=True)
+class PreparedSourceManifestEntry:
+    """One condition entry from a prepared source payload manifest."""
+
+    condition_id: str
+    label: str
+    payload_path: Path
+    metadata: dict[str, Any]
 
 
 def load_prepared_source_payload_json(
@@ -48,6 +60,65 @@ def load_prepared_source_payload_json(
         display_transform=display_transform,
         source_path=payload_path,
     )
+
+
+def load_prepared_source_manifest_json(path: str | Path) -> tuple[PreparedSourceManifestEntry, ...]:
+    """Load a prepared source manifest and resolve payload paths."""
+    manifest_path = Path(path)
+    if manifest_path.suffix.lower() != ".json":
+        raise PreparedSourcePayloadImportError("Prepared source manifests must use the .json extension.")
+    try:
+        with manifest_path.open("r", encoding="utf-8") as handle:
+            raw_manifest = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise PreparedSourcePayloadImportError(f"Prepared source manifest is not valid JSON: {exc}") from exc
+    except OSError as exc:
+        raise PreparedSourcePayloadImportError(f"Unable to read prepared source manifest: {exc}") from exc
+    return prepared_source_manifest_from_mapping(raw_manifest, manifest_path=manifest_path)
+
+
+def prepared_source_manifest_from_mapping(
+    raw_manifest: Any,
+    *,
+    manifest_path: Path,
+) -> tuple[PreparedSourceManifestEntry, ...]:
+    """Validate a prepared source manifest mapping."""
+    if not isinstance(raw_manifest, dict):
+        raise PreparedSourcePayloadImportError("Prepared source manifest must be a JSON object.")
+    manifest_format = str(raw_manifest.get("format", "")).strip()
+    if manifest_format != PREPARED_SOURCE_MANIFEST_FORMAT:
+        raise PreparedSourcePayloadImportError(
+            f"Unsupported prepared source manifest format: {manifest_format or '<missing>'}."
+        )
+    raw_conditions = raw_manifest.get("conditions")
+    if not isinstance(raw_conditions, list) or not raw_conditions:
+        raise PreparedSourcePayloadImportError("Prepared source manifest requires a non-empty 'conditions' list.")
+
+    manifest_dir = manifest_path.parent.resolve()
+    entries: list[PreparedSourceManifestEntry] = []
+    seen_ids: set[str] = set()
+    for index, raw_entry in enumerate(raw_conditions, start=1):
+        if not isinstance(raw_entry, dict):
+            raise PreparedSourcePayloadImportError("Prepared source manifest condition entries must be objects.")
+        label = _required_string(raw_entry, "label")
+        raw_id = _optional_string(raw_entry, "id", _slug(label))
+        if raw_id in seen_ids:
+            raise PreparedSourcePayloadImportError(f"Duplicate prepared source manifest condition id: {raw_id!r}.")
+        seen_ids.add(raw_id)
+        condition_id = f"manifest:{index}:{raw_id}"
+        payload_path = _resolve_manifest_payload_path(
+            raw_entry,
+            manifest_dir=manifest_dir,
+        )
+        entries.append(
+            PreparedSourceManifestEntry(
+                condition_id=condition_id,
+                label=label,
+                payload_path=payload_path,
+                metadata=_metadata(raw_entry.get("metadata")),
+            )
+        )
+    return tuple(entries)
 
 
 def prepared_source_payload_from_mapping(
@@ -164,6 +235,34 @@ def _metadata(raw_metadata: Any) -> dict[str, Any]:
     return dict(raw_metadata)
 
 
+def _resolve_manifest_payload_path(raw_entry: dict[str, Any], *, manifest_dir: Path) -> Path:
+    file_value = raw_entry.get("file")
+    if not isinstance(file_value, str) or not file_value.strip():
+        raise PreparedSourcePayloadImportError("Prepared source manifest entries require a non-empty 'file' string.")
+    payload_path = Path(file_value.strip())
+    if payload_path.is_absolute():
+        raise PreparedSourcePayloadImportError("Prepared source manifest file paths must be relative paths.")
+    resolved = (manifest_dir / payload_path).resolve()
+    try:
+        resolved.relative_to(manifest_dir)
+    except ValueError as exc:
+        raise PreparedSourcePayloadImportError(
+            "Prepared source manifest file paths must stay inside the manifest folder."
+        ) from exc
+    if resolved.suffix.lower() != ".json":
+        raise PreparedSourcePayloadImportError("Prepared source manifest entries must point to .json payload files.")
+    if not resolved.is_file():
+        raise PreparedSourcePayloadImportError(f"Prepared source manifest payload file is missing: {payload_path}.")
+    return resolved
+
+
+def _slug(label: str) -> str:
+    lowered = label.strip().lower()
+    chars = [char if char.isalnum() else "_" for char in lowered]
+    slug = "_".join(part for part in "".join(chars).split("_") if part)
+    return slug or "condition"
+
+
 def prepared_source_payload_example() -> dict[str, Any]:
     """Return a minimal JSON-serializable prepared source payload example."""
     return {
@@ -177,4 +276,26 @@ def prepared_source_payload_example() -> dict[str, Any]:
         "values": [0.2, 0.8, 1.0],
         "faces": [[0, 1, 2]],
         "metadata": {"synthetic": True},
+    }
+
+
+def prepared_source_manifest_example() -> dict[str, Any]:
+    """Return a minimal JSON-serializable prepared source manifest example."""
+    return {
+        "format": PREPARED_SOURCE_MANIFEST_FORMAT,
+        "label": "Example prepared source manifest",
+        "conditions": [
+            {
+                "id": "condition_a",
+                "label": "Condition A",
+                "file": "condition_a_source.json",
+                "metadata": {"group": "demo"},
+            },
+            {
+                "id": "condition_b",
+                "label": "Condition B",
+                "file": "condition_b_source.json",
+                "metadata": {"group": "demo"},
+            },
+        ],
     }

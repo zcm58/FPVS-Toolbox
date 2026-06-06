@@ -35,6 +35,8 @@ drawn inside the transparent anatomical shell.
   bounds.
 - Load a prepared source payload JSON file from disk and render it through the
   same display adapter used by the synthetic fixture.
+- Load a prepared source manifest JSON file so several prepared source payloads
+  appear in the condition dropdown.
 
 Higher synthetic values are mapped toward red. Lower values appear lighter or
 less intense depending on the current color range.
@@ -65,6 +67,11 @@ The **Load source JSON** button accepts controlled prepared-payload files with
 points, values, optional triangle faces, a source-model label, metadata, and a
 coordinate-space label. The tool validates the file and converts coordinates
 into the current display mesh space before rendering.
+
+The **Load manifest** button accepts a controlled manifest file that lists
+condition labels and relative prepared-payload JSON files. After loading a
+manifest, those imported conditions appear in the same condition dropdown as the
+synthetic demos. Selecting one loads and renders its prepared payload.
 
 ## Future real-data direction
 

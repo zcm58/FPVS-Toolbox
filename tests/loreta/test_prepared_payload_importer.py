@@ -6,10 +6,14 @@ import numpy as np
 import pytest
 
 from Tools.LORETA_Visualizer.prepared_payload_importer import (
+    PREPARED_SOURCE_MANIFEST_FORMAT,
     PREPARED_SOURCE_PAYLOAD_FORMAT,
     PreparedSourcePayloadImportError,
+    load_prepared_source_manifest_json,
     load_prepared_source_payload_json,
+    prepared_source_manifest_example,
     prepared_source_payload_example,
+    prepared_source_manifest_from_mapping,
     prepared_source_payload_from_mapping,
 )
 from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_VOLUME_MESH
@@ -104,3 +108,64 @@ def test_prepared_source_payload_import_requires_json_extension(tmp_path) -> Non
 
     with pytest.raises(PreparedSourcePayloadImportError, match=".json extension"):
         load_prepared_source_payload_json(payload_path, display_transform=MeshDisplayTransform.identity())
+
+
+def test_prepared_source_manifest_loads_relative_condition_payloads(tmp_path) -> None:
+    payload_a = prepared_source_payload_example()
+    payload_a["label"] = "Faces source"
+    payload_b = prepared_source_payload_example()
+    payload_b["label"] = "Objects source"
+    payload_b["points"] = [[-0.1, 0.25, 0.1], [0.0, 0.3, 0.15], [0.1, 0.25, 0.1]]
+    (tmp_path / "condition_a_source.json").write_text(json.dumps(payload_a), encoding="utf-8")
+    (tmp_path / "condition_b_source.json").write_text(json.dumps(payload_b), encoding="utf-8")
+    manifest = prepared_source_manifest_example()
+    manifest_path = tmp_path / "source_manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    entries = load_prepared_source_manifest_json(manifest_path)
+
+    assert len(entries) == 2
+    assert entries[0].label == "Condition A"
+    assert entries[0].condition_id == "manifest:1:condition_a"
+    assert entries[0].payload_path == tmp_path / "condition_a_source.json"
+    assert entries[1].payload_path == tmp_path / "condition_b_source.json"
+    assert entries[0].metadata == {"group": "demo"}
+
+    payloads = [
+        load_prepared_source_payload_json(entry.payload_path, display_transform=MeshDisplayTransform.identity())
+        for entry in entries
+    ]
+    assert [payload.label for payload in payloads] == ["Faces source", "Objects source"]
+
+
+def test_prepared_source_manifest_rejects_path_escape(tmp_path) -> None:
+    outside = tmp_path.parent / "outside_source.json"
+    outside.write_text(json.dumps(prepared_source_payload_example()), encoding="utf-8")
+    raw_manifest = {
+        "format": PREPARED_SOURCE_MANIFEST_FORMAT,
+        "conditions": [
+            {
+                "id": "escape",
+                "label": "Escape",
+                "file": "../outside_source.json",
+            }
+        ],
+    }
+
+    with pytest.raises(PreparedSourcePayloadImportError, match="inside the manifest folder"):
+        prepared_source_manifest_from_mapping(raw_manifest, manifest_path=tmp_path / "manifest.json")
+
+
+def test_prepared_source_manifest_rejects_duplicate_condition_ids(tmp_path) -> None:
+    (tmp_path / "source_a.json").write_text(json.dumps(prepared_source_payload_example()), encoding="utf-8")
+    (tmp_path / "source_b.json").write_text(json.dumps(prepared_source_payload_example()), encoding="utf-8")
+    raw_manifest = {
+        "format": PREPARED_SOURCE_MANIFEST_FORMAT,
+        "conditions": [
+            {"id": "same", "label": "First", "file": "source_a.json"},
+            {"id": "same", "label": "Second", "file": "source_b.json"},
+        ],
+    }
+
+    with pytest.raises(PreparedSourcePayloadImportError, match="Duplicate"):
+        prepared_source_manifest_from_mapping(raw_manifest, manifest_path=tmp_path / "manifest.json")
