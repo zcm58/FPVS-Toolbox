@@ -2,12 +2,12 @@
 
 ## Status
 
-Phase 1, Phase 2, and Phase 3 implemented on `codex/loreta-3d-visualizer`. Future slices below should stay on that branch until merge-back into `codex/publication-report-workflow`.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, and Phase 5B are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic and now supports scalar-gradient source maps before any real LORETA calculations are introduced.
 
 ## Date
 
 Created: 2026-06-05
-Updated: 2026-06-05
+Updated: 2026-06-06
 
 ## Goal
 
@@ -67,8 +67,10 @@ New tool implementation:
   - `renderer.py`: PyVista/VTK rendering adapter, lazy imports, actor/camera helpers.
   - `synthetic_brain.py`: deterministic synthetic mesh/activation placeholders used for viewer validation.
   - `fsaverage_mesh.py`: lazy fsaverage fetch/load/decimation helpers for Slice 2.
-  - `dummy_activation.py`: deterministic synthetic LORETA-like condition data for Slice 3 and Slice 4.
+  - `dummy_activation.py`: deterministic synthetic LORETA-like condition data for Slice 3, Slice 4, and source-model-agnostic 5A demos.
   - `conditions.py`: condition list/model helpers for Slice 4.
+  - `source_payloads.py`: renderer-facing payload contract for cortical surface points, cortical/deep meshes, volume/deep source representations, and future ROI meshes.
+  - `scalar_fields.py`: scalar-gradient color stops and scalp-map-style auto/manual color-limit helpers.
   - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
 
 Main App shell integration:
@@ -92,6 +94,8 @@ Avoid:
 - Adding LORETA-specific computation to preprocessing, Stats, diagnostics, or project I/O modules.
 
 ## Phase 1: Embedded Real-Time Brain Viewer
+
+Status: Implemented. The embedded sidebar tool, PyVista renderer, synthetic fallback, camera controls, zoom controls, reset, and brain transparency controls are present on the LORETA branch.
 
 Objective:
 
@@ -193,6 +197,8 @@ Done means:
 
 ## Phase 4: Condition Selection And Demo Data Switching
 
+Status: Implemented with two local synthetic conditions: occipital and frontal. Switching the combo updates the dummy activation payload immediately without reading real LORETA files or changing project state.
+
 Objective:
 
 - Add condition-selection GUI similar in spirit to the SNR Plot Generator's condition workflow, but scoped to the LORETA visualizer.
@@ -217,6 +223,8 @@ Done means:
 
 ## Phase 5: Optional Real Data Adapter
 
+Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Real LORETA calculation, real file discovery, and project-output integration remain out of scope.
+
 Objective:
 
 - Add a deterministic adapter interface for future real LORETA/source-volume inputs.
@@ -230,6 +238,58 @@ Done means:
 - The adapter receives condition-specific values and coordinates/scalars from an upstream computation path and only normalizes them into the visualizer payload contract.
 - The adapter does not import `Tools.SourceLocalization`, retired Main App paths, or quarantine code.
 - Any project-file integration is explicitly scoped in a new plan update before implementation.
+
+### Phase 5A: General Source Payload Adapter And Deep Demo
+
+Objective:
+
+- Make the renderer-facing activation contract source-model agnostic before real calculations exist.
+- Add a LORETA-local payload model that can represent cortical surface points, cortical/deep mesh overlays, volume/deep source representations, and future ROI/subcortical meshes.
+- Keep the renderer as a display-only consumer of already-prepared coordinates and scalar values.
+- Add a synthetic deep medial-temporal/hippocampal-style demo condition so the user can visually confirm that internal sources can be rendered inside the transparent anatomical shell.
+- Preserve existing occipital/frontal dummy condition switching and all view controls.
+
+Implementation notes:
+
+- Add `src/Tools/LORETA_Visualizer/source_payloads.py` for payload dataclasses, validation, finite-value filtering, and value normalization.
+- Refactor dummy activation generation to emit the general payload instead of a cortical-only activation object.
+- Add `Deep medial temporal demo` as a deterministic local condition with `volume_grid` source model metadata.
+- Render the deep demo as smooth internal mesh blobs rather than point glyphs; do not add real anatomical hippocampus meshes yet.
+- Do not compute source localization, discover LORETA files, write project settings, or import retired/quarantine source-localization code.
+
+Done means:
+
+- The condition selector offers occipital, frontal, and deep medial-temporal synthetic demos.
+- Switching to the deep demo updates the heatmap layer immediately and places smooth internal mesh blobs inside the transparent brain volume.
+- The renderer accepts a general source payload without knowing how values were calculated.
+- Existing opacity, visibility, smoothing, zoom, rotate, and reset behavior still works.
+- Focused non-GUI tests cover the payload contract and the synthetic deep-source payload shape.
+
+### Phase 5B: Scalar Gradient Source Maps
+
+Status: Implemented with local dummy scalar fields and renderer color-limit controls.
+
+Objective:
+
+- Treat dummy LORETA activity as continuous scalar fields rather than binary active/inactive regions.
+- Use a sequential colormap with high values on the red end, following the scalp-map tool pattern of explicit color limits and auto-scaling.
+- Add controls for automatic intensity scaling and manual min/max intensity bounds.
+- Keep color scaling in renderer/view configuration only; do not introduce LORETA numerical computation.
+- Preserve cortical surface patch rendering and smooth deep internal mesh rendering.
+
+Implementation notes:
+
+- `scalar_fields.py` owns LORETA-local color stops and `resolve_scalar_limits(...)`.
+- Auto scaling uses scalp-map style nonnegative bounds: lower bound is 0 for nonnegative maps, with upper bound from finite payload values.
+- Manual bounds are accepted through GUI spin boxes and corrected if max is not greater than min.
+- Dummy occipital, frontal, and deep medial-temporal payloads carry continuous scalar values in the renderer payload.
+
+Done means:
+
+- Switching dummy conditions shows graded color variation across source surfaces/blobs.
+- The intensity auto-scale toggle changes whether payload-derived or manual min/max color bounds are used.
+- High dummy values render at the red end of the colormap.
+- Focused tests cover scalar-limit resolution and dummy scalar ranges.
 
 ## Integration Safety
 

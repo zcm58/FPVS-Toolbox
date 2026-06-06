@@ -7,6 +7,8 @@ import logging
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -23,9 +25,12 @@ from Main_App.gui.components import (
     configure_window_surface,
     make_action_button,
 )
-from Tools.LORETA_Visualizer.dummy_activation import make_occipital_demo_activation
+from Tools.LORETA_Visualizer.conditions import DEMO_LORETA_CONDITIONS, condition_by_id, default_condition
+from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult, load_fsaverage_brain_mesh
 from Tools.LORETA_Visualizer.renderer import BrainRendererWidget, RenderBackendError
+from Tools.LORETA_Visualizer.scalar_fields import DEFAULT_SCALAR_MAX, DEFAULT_SCALAR_MIN, resolve_scalar_limits
+from Tools.LORETA_Visualizer.source_payloads import SourcePayload
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +83,8 @@ class LoretaVisualizerWindow(QWidget):
         self.status_banner: StatusBanner | None = None
         self._mesh_thread: QThread | None = None
         self._mesh_worker: FsaverageLoadWorker | None = None
+        self._selected_condition_id = default_condition().condition_id
+        self._current_activation_payload: SourcePayload | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -144,7 +151,56 @@ class LoretaVisualizerWindow(QWidget):
         controls.content_layout.addWidget(self.activation_opacity_slider)
         controls.content_layout.addWidget(self.activation_opacity_value_label)
 
-        self.activation_visible_check = QCheckBox("Show dummy occipital heatmap", controls)
+        self.activation_auto_scale_check = QCheckBox("Auto scale intensity", controls)
+        self.activation_auto_scale_check.setObjectName("loreta_activation_auto_scale_check")
+        self.activation_auto_scale_check.setChecked(True)
+        self.activation_auto_scale_check.toggled.connect(self._on_activation_auto_scale_changed)
+        controls.content_layout.addWidget(self.activation_auto_scale_check)
+
+        range_label = QLabel("Intensity range", controls)
+        range_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(range_label)
+
+        range_row = QHBoxLayout()
+        range_row.setContentsMargins(0, 0, 0, 0)
+        range_row.setSpacing(6)
+        self.activation_min_spin = QDoubleSpinBox(controls)
+        self.activation_min_spin.setObjectName("loreta_activation_min_spin")
+        self.activation_min_spin.setDecimals(2)
+        self.activation_min_spin.setRange(-1_000_000.0, 1_000_000.0)
+        self.activation_min_spin.setSingleStep(0.05)
+        self.activation_min_spin.setValue(DEFAULT_SCALAR_MIN)
+        self.activation_min_spin.valueChanged.connect(self._on_activation_range_changed)
+        self.activation_max_spin = QDoubleSpinBox(controls)
+        self.activation_max_spin.setObjectName("loreta_activation_max_spin")
+        self.activation_max_spin.setDecimals(2)
+        self.activation_max_spin.setRange(-1_000_000.0, 1_000_000.0)
+        self.activation_max_spin.setSingleStep(0.05)
+        self.activation_max_spin.setValue(DEFAULT_SCALAR_MAX)
+        self.activation_max_spin.valueChanged.connect(self._on_activation_range_changed)
+        range_row.addWidget(self.activation_min_spin)
+        range_row.addWidget(QLabel("to", controls), 0)
+        range_row.addWidget(self.activation_max_spin)
+        controls.content_layout.addLayout(range_row)
+
+        condition_label = QLabel("Dummy condition", controls)
+        condition_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(condition_label)
+
+        self.condition_combo = QComboBox(controls)
+        self.condition_combo.setObjectName("loreta_condition_combo")
+        for condition in DEMO_LORETA_CONDITIONS:
+            self.condition_combo.addItem(condition.label, condition.condition_id)
+        self.condition_combo.currentIndexChanged.connect(self._on_condition_changed)
+        controls.content_layout.addWidget(self.condition_combo)
+
+        self.condition_status_label = QLabel("", controls)
+        self.condition_status_label.setObjectName("loreta_condition_status_label")
+        self.condition_status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.condition_status_label.setWordWrap(True)
+        controls.content_layout.addWidget(self.condition_status_label)
+
+        self.activation_visible_check = QCheckBox("Show dummy LORETA heatmap", controls)
         self.activation_visible_check.setObjectName("loreta_activation_visible_check")
         self.activation_visible_check.setChecked(True)
         self.activation_visible_check.toggled.connect(self._on_activation_visibility_changed)
@@ -187,6 +243,8 @@ class LoretaVisualizerWindow(QWidget):
 
         self._update_transparency_label(DEFAULT_OPACITY_PERCENT)
         self._update_activation_opacity_label(DEFAULT_ACTIVATION_OPACITY_PERCENT)
+        self._sync_activation_range_enabled()
+        self._update_condition_status()
         return controls
 
     def _initialize_renderer(self) -> None:
@@ -213,6 +271,9 @@ class LoretaVisualizerWindow(QWidget):
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.transparency_slider.setEnabled(enabled)
         self.activation_opacity_slider.setEnabled(enabled)
+        self.activation_auto_scale_check.setEnabled(enabled)
+        self._sync_activation_range_enabled()
+        self.condition_combo.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
         self.smooth_surface_check.setEnabled(enabled)
         self.zoom_out_btn.setEnabled(enabled)
@@ -238,10 +299,35 @@ class LoretaVisualizerWindow(QWidget):
     def _update_activation_opacity_label(self, value: int) -> None:
         self.activation_opacity_value_label.setText(f"{value}%")
 
+    def _on_activation_auto_scale_changed(self, _checked: bool) -> None:
+        self._sync_activation_range_enabled()
+        self._apply_activation_scalar_range()
+
+    def _on_activation_range_changed(self, _value: float) -> None:
+        self._apply_activation_scalar_range()
+
+    def _sync_activation_range_enabled(self) -> None:
+        renderer_available = self.renderer is not None
+        manual_enabled = renderer_available and not self.activation_auto_scale_check.isChecked()
+        self.activation_min_spin.setEnabled(manual_enabled)
+        self.activation_max_spin.setEnabled(manual_enabled)
+
     def _on_activation_visibility_changed(self, checked: bool) -> None:
         renderer = self.renderer
         if renderer is not None:
             renderer.set_activation_visible(checked)
+
+    def _on_condition_changed(self, _index: int) -> None:
+        condition_id = self.condition_combo.currentData()
+        if isinstance(condition_id, str):
+            self._selected_condition_id = condition_id
+        self._update_condition_status()
+        self._refresh_dummy_activation()
+
+    def _update_condition_status(self) -> None:
+        condition = condition_by_id(self._selected_condition_id)
+        region_label = condition.activation_region.replace("_", " ")
+        self.condition_status_label.setText(f"Showing synthetic {region_label} activation.")
 
     def _on_smooth_surface_toggled(self, checked: bool) -> None:
         renderer = self.renderer
@@ -320,10 +406,27 @@ class LoretaVisualizerWindow(QWidget):
         mesh_points = renderer.mesh_points()
         if mesh_points is None:
             return
-        payload = make_occipital_demo_activation(mesh_points)
+        mesh_faces = renderer.mesh_faces()
+        condition = condition_by_id(self._selected_condition_id)
+        payload = make_demo_condition_activation(mesh_points, mesh_faces=mesh_faces, condition=condition)
+        self._current_activation_payload = payload
         renderer.set_activation_payload(payload)
+        self._apply_activation_scalar_range()
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
         renderer.set_activation_visible(self.activation_visible_check.isChecked())
+
+    def _apply_activation_scalar_range(self) -> None:
+        renderer = self.renderer
+        payload = self._current_activation_payload
+        if renderer is None or payload is None:
+            return
+        vmin, vmax = resolve_scalar_limits(
+            payload.values,
+            auto_scale=self.activation_auto_scale_check.isChecked(),
+            manual_min=self.activation_min_spin.value(),
+            manual_max=self.activation_max_spin.value(),
+        )
+        renderer.set_activation_scalar_range(vmin, vmax)
 
     def closeEvent(self, event) -> None:  # noqa: N802, ANN001
         renderer = self.renderer

@@ -7,7 +7,15 @@ from typing import Any
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from Tools.LORETA_Visualizer.dummy_activation import ActivationPayload
+from Tools.LORETA_Visualizer.scalar_fields import DEFAULT_SCALAR_MAX, DEFAULT_SCALAR_MIN, LORETA_SCALAR_COLORS
+from Tools.LORETA_Visualizer.source_payloads import (
+    SOURCE_KIND_ROI_MESH,
+    SOURCE_KIND_SURFACE_MESH,
+    SOURCE_KIND_SURFACE_POINTS,
+    SOURCE_KIND_VOLUME_MESH,
+    SOURCE_KIND_VOLUME_POINTS,
+    SourcePayload,
+)
 from Tools.LORETA_Visualizer.synthetic_brain import BrainMesh, make_synthetic_brain_mesh
 
 logger = logging.getLogger(__name__)
@@ -39,6 +47,7 @@ class BrainRendererWidget(QWidget):
         self._smooth_visual_enabled = False
         self._activation_opacity = 0.72
         self._activation_visible = True
+        self._activation_scalar_range = (DEFAULT_SCALAR_MIN, DEFAULT_SCALAR_MAX)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -169,6 +178,12 @@ class BrainRendererWidget(QWidget):
             return None
         return mesh.points
 
+    def mesh_faces(self) -> Any | None:
+        mesh = self._current_mesh
+        if mesh is None:
+            return None
+        return mesh.faces
+
     def replace_brain_mesh(self, mesh: BrainMesh, *, reset_camera: bool = True) -> None:
         plotter = self._plotter
         if plotter is None:
@@ -223,7 +238,7 @@ class BrainRendererWidget(QWidget):
             return
         self._smooth_brain_actor = self._add_brain_actor(self._smooth_surface, visible=self._smooth_visual_enabled)
 
-    def set_activation_payload(self, payload: ActivationPayload) -> None:
+    def set_activation_payload(self, payload: SourcePayload) -> None:
         plotter = self._plotter
         if plotter is None:
             return
@@ -233,19 +248,58 @@ class BrainRendererWidget(QWidget):
         if len(payload.points) == 0:
             plotter.render()
             return
-        cloud = pv.PolyData(payload.points)
+        mesh_kinds = {SOURCE_KIND_ROI_MESH, SOURCE_KIND_SURFACE_MESH, SOURCE_KIND_VOLUME_MESH}
+        if payload.kind in mesh_kinds and payload.faces is not None:
+            cloud = pv.PolyData(payload.points, payload.faces)
+            render_points_as_spheres = False
+            point_size = 12
+            style = "surface"
+        else:
+            cloud = pv.PolyData(payload.points)
+            is_volume_points = payload.kind == SOURCE_KIND_VOLUME_POINTS
+            is_surface_points = payload.kind == SOURCE_KIND_SURFACE_POINTS
+            render_points_as_spheres = is_volume_points
+            point_size = 14 if is_volume_points else 22
+            style = "points_gaussian" if is_surface_points else "points"
         cloud["activation"] = payload.values
         self._activation_actor = plotter.add_mesh(
             cloud,
             scalars="activation",
-            cmap="Reds",
-            clim=(0.0, 1.0),
+            cmap=list(LORETA_SCALAR_COLORS),
+            clim=self._activation_scalar_range,
             opacity=self._activation_opacity,
-            render_points_as_spheres=True,
-            point_size=18,
+            render_points_as_spheres=render_points_as_spheres,
+            point_size=point_size,
+            style=style,
+            lighting=False,
+            ambient=1.0,
+            diffuse=0.0,
+            specular=0.0,
+            smooth_shading=payload.kind in mesh_kinds,
             show_scalar_bar=False,
         )
         self._activation_actor.SetVisibility(self._activation_visible)
+        plotter.render()
+
+    def set_activation_scalar_range(self, vmin: float, vmax: float) -> None:
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+        self._activation_scalar_range = (float(vmin), float(vmax))
+        actor = self._activation_actor
+        plotter = self._plotter
+        if actor is None or plotter is None:
+            return
+        mapper = getattr(actor, "mapper", None)
+        if mapper is None:
+            try:
+                mapper = actor.GetMapper()
+            except (AttributeError, RuntimeError, TypeError):
+                mapper = None
+        if mapper is not None:
+            try:
+                mapper.SetScalarRange(*self._activation_scalar_range)
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                logger.debug("loreta_activation_scalar_range_failed", exc_info=True)
         plotter.render()
 
     def set_activation_opacity(self, opacity: float) -> None:
