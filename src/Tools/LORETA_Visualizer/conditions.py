@@ -20,13 +20,13 @@ DEMO_LORETA_CONDITIONS: tuple[DemoLoretaCondition, ...] = (
         condition_id="occipital",
         label="Occipital demo condition",
         activation_region="occipital",
-        source_model="cortical_surface",
+        source_model="volume_grid",
     ),
     DemoLoretaCondition(
         condition_id="frontal",
         label="Frontal demo condition",
         activation_region="frontal",
-        source_model="cortical_surface",
+        source_model="volume_grid",
     ),
     DemoLoretaCondition(
         condition_id="deep_medial_temporal",

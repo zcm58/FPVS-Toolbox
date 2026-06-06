@@ -163,7 +163,7 @@ Done means:
 
 ## Phase 3: Dummy LORETA Heatmap Layer
 
-Status: Implemented. The visualizer renders a synthetic posterior/occipital activation point-cloud layer in the current mesh coordinate space, with independent visibility and opacity controls. Higher dummy values use the red end of the `Reds` colormap.
+Status: Implemented and superseded by later scalar-gradient volume-mesh demos. The visualizer renders an independent synthetic LORETA layer in the current mesh coordinate space, with independent visibility and opacity controls.
 
 Objective:
 
@@ -197,7 +197,7 @@ Done means:
 
 ## Phase 4: Condition Selection And Demo Data Switching
 
-Status: Implemented with two local synthetic conditions: occipital and frontal. Switching the combo updates the dummy activation payload immediately without reading real LORETA files or changing project state.
+Status: Implemented with local synthetic occipital, frontal, and deep medial-temporal conditions. Switching the combo updates the dummy activation payload immediately without reading real LORETA files or changing project state.
 
 Objective:
 
@@ -275,7 +275,7 @@ Objective:
 - Use a sequential colormap with high values on the red end, following the scalp-map tool pattern of explicit color limits and auto-scaling.
 - Add controls for automatic intensity scaling and manual min/max intensity bounds.
 - Keep color scaling in renderer/view configuration only; do not introduce LORETA numerical computation.
-- Preserve cortical surface patch rendering and smooth deep internal mesh rendering.
+- Preserve smooth internal volume-mesh rendering for occipital, frontal, and deep medial-temporal demos.
 
 Implementation notes:
 
@@ -286,7 +286,7 @@ Implementation notes:
 
 Done means:
 
-- Switching dummy conditions shows graded color variation across source surfaces/blobs.
+- Switching dummy conditions shows graded color variation across smooth 3D source blobs.
 - The intensity auto-scale toggle changes whether payload-derived or manual min/max color bounds are used.
 - High dummy values render at the red end of the colormap.
 - Focused tests cover scalar-limit resolution and dummy scalar ranges.

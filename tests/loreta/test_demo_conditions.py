@@ -5,20 +5,25 @@ import numpy as np
 from Tools.LORETA_Visualizer.conditions import condition_by_id
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.scalar_fields import LORETA_SCALAR_COLORS, resolve_scalar_limits
-from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_SURFACE_MESH, SOURCE_KIND_VOLUME_MESH, make_source_payload
+from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_VOLUME_MESH, make_source_payload
 from Tools.LORETA_Visualizer.synthetic_brain import make_synthetic_brain_mesh
 
 
-def test_demo_conditions_place_activation_in_distinct_regions() -> None:
+def test_demo_conditions_place_volume_activation_in_distinct_regions() -> None:
     mesh = make_synthetic_brain_mesh()
     occipital = make_demo_condition_activation(mesh.points, mesh_faces=mesh.faces, condition=condition_by_id("occipital"))
     frontal = make_demo_condition_activation(mesh.points, mesh_faces=mesh.faces, condition=condition_by_id("frontal"))
 
     assert len(occipital.points) > 0
     assert len(frontal.points) > 0
-    assert occipital.kind == SOURCE_KIND_SURFACE_MESH
+    assert occipital.kind == SOURCE_KIND_VOLUME_MESH
+    assert frontal.kind == SOURCE_KIND_VOLUME_MESH
+    assert occipital.source_model == "volume_grid"
+    assert frontal.source_model == "volume_grid"
     assert occipital.faces is not None
+    assert frontal.faces is not None
     assert len(occipital.faces) > 0
+    assert len(frontal.faces) > 0
     assert float(np.min(occipital.values)) > 0.0
     assert float(np.max(occipital.values)) <= 1.0
     assert float(np.mean(occipital.points[:, 1])) < 0.0
