@@ -6,6 +6,12 @@ This directory owns the embedded LORETA 3D visualizer only. Keep LORETA visualiz
 
 This is a completely new source-localization development branch. Retired Source Localization/eLORETA code, quarantine code, legacy launchers, historical settings, and old GUI workflows are not design inputs for this tool. Future design choices should be made from the current visualizer payload contract, current Main App embedding patterns, current scientific requirements, and current library capabilities only.
 
+The goal of this tool is to render anatomical context and source-activation
+payloads in real time. It is not the source-localization calculation engine.
+Future real LORETA, sLORETA, eLORETA, beamformer, MNE, or other inverse-method
+implementations should prepare coordinates and scalar values elsewhere, then
+hand them to this directory through the helper/payload bridge.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -23,7 +29,31 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Future LORETA-value calculation should produce a prepared mesh/point/volume payload in the same coordinate space as the anatomical mesh, then pass that payload into this visualizer through a narrow adapter.
 - The renderer should only know how to display base meshes and activation payloads; it should not compute source-localization values.
 - The fsaverage loader should only locate/fetch/read anatomical surfaces; it should not compute source-localization values or condition statistics.
+- Helper modules are the bridge between future calculation outputs and
+  rendering:
+  - `source_payloads.py` validates prepared coordinates/scalars, stores source
+    metadata, and converts payloads into display space.
+  - `transforms.py` owns native/source coordinate to display-coordinate
+    transforms.
+  - `scalar_fields.py` owns visual color limits and color stops.
+  - `fsaverage_mesh.py` owns anatomical mesh loading and display transforms.
+- Helper modules may adapt, validate, normalize for display, and transform
+  already-computed values. They must not compute inverse solutions, frequency
+  statistics, source estimates, or condition effects.
 - Demo heatmap data must stay clearly synthetic and local to this tool.
+
+## File Responsibilities
+
+- `gui.py`: embedded PySide6 page, controls, worker wiring, and status text.
+- `renderer.py`: PyVista/VTK scene adapter, actors, camera, opacity, scalar map,
+  and mesh display. No LORETA math.
+- `fsaverage_mesh.py`: external MNE fsaverage discovery/fetch/read/decimation and
+  anatomical display transform construction. No source estimates.
+- `synthetic_brain.py`: fallback/demo mesh model.
+- `conditions.py` and `dummy_activation.py`: deterministic synthetic conditions
+  and demo-only source maps.
+- `source_payloads.py`, `transforms.py`, and `scalar_fields.py`: bridge helpers
+  that adapt prepared source payloads to the renderer.
 
 ## Boundary Rules
 
@@ -33,6 +63,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not bundle fsaverage MRI/template data in `src/`, `src/quarantine/`, or package data. Fetch or locate fsaverage outside the repo through MNE/user cache paths only.
 - Do not change preprocessing order, Stats methods, BDF loading, project manifests, exports, diagnostics, or app-wide project I/O for visualizer-only work.
 - Do not write LORETA visualizer settings into `project.json` unless a future plan explicitly scopes project-level real-data integration.
+- Do not add real-data file discovery, project-output integration, source
+  calculation, or method selection without updating the active exec plan and
+  this local architecture guidance.
 
 ## GUI And Worker Rules
 

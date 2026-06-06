@@ -7,13 +7,13 @@ from typing import Any
 
 import numpy as np
 
+from Tools.LORETA_Visualizer.transforms import COORDINATE_SPACE_DISPLAY, MeshDisplayTransform
+
 SOURCE_KIND_SURFACE_POINTS = "surface_points"
 SOURCE_KIND_SURFACE_MESH = "surface_mesh"
 SOURCE_KIND_VOLUME_POINTS = "volume_points"
 SOURCE_KIND_VOLUME_MESH = "volume_mesh"
 SOURCE_KIND_ROI_MESH = "roi_mesh"
-
-COORDINATE_SPACE_DISPLAY = "normalized_display"
 
 
 @dataclass(frozen=True)
@@ -85,6 +85,31 @@ def empty_source_payload(label: str) -> SourcePayload:
         points=np.empty((0, 3), dtype=float),
         values=np.empty((0,), dtype=float),
         label=label,
+    )
+
+
+def source_payload_to_display(
+    payload: SourcePayload,
+    display_transform: MeshDisplayTransform,
+) -> SourcePayload:
+    """Return a payload whose coordinates are in renderer display space."""
+    if payload.coordinate_space == display_transform.display_coordinate_space:
+        return payload
+    display_points = display_transform.to_display_points(
+        payload.points,
+        coordinate_space=payload.coordinate_space,
+    )
+    return make_source_payload(
+        points=display_points,
+        values=payload.values,
+        label=payload.label,
+        kind=payload.kind,
+        coordinate_space=display_transform.display_coordinate_space,
+        source_model=payload.source_model,
+        value_label=payload.value_label,
+        faces=payload.faces,
+        metadata=payload.metadata,
+        normalize_values=False,
     )
 
 

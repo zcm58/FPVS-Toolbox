@@ -16,6 +16,7 @@ from urllib.error import URLError
 import numpy as np
 
 from Tools.LORETA_Visualizer.synthetic_brain import BrainMesh
+from Tools.LORETA_Visualizer.transforms import COORDINATE_SPACE_FSAVERAGE, MeshDisplayTransform
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,10 @@ def load_fsaverage_brain_mesh(
     except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
         raise FsaverageMeshError(f"Unable to read fsaverage {surface} surface: {exc}") from exc
 
-    points, faces = _combine_hemispheres(left_vertices, left_faces, right_vertices, right_faces)
-    points = _normalize_points(points)
-    mesh = _decimate_surface(points, faces, max_triangles=max_triangles)
+    native_points, faces = _combine_hemispheres(left_vertices, left_faces, right_vertices, right_faces)
+    display_transform = _display_transform(native_points)
+    points = display_transform.to_display_points(native_points)
+    mesh = _decimate_surface(points, faces, max_triangles=max_triangles, display_transform=display_transform)
     return FsaverageMeshResult(
         mesh=mesh,
         fsaverage_dir=fsaverage_dir,
@@ -154,9 +156,10 @@ def _decimate_surface(
     faces: np.ndarray,
     *,
     max_triangles: int,
+    display_transform: MeshDisplayTransform,
 ) -> BrainMesh:
     if max_triangles <= 0 or len(faces) <= max_triangles:
-        return BrainMesh(points=points, faces=_faces_to_vtk(faces))
+        return BrainMesh(points=points, faces=_faces_to_vtk(faces), display_transform=display_transform)
     try:
         import pyvista as pv
 
@@ -177,21 +180,24 @@ def _decimate_surface(
         return BrainMesh(
             points=np.asarray(decimated.points, dtype=float),
             faces=_faces_to_vtk(decimated_faces),
+            display_transform=display_transform,
         )
     except (AttributeError, RuntimeError, TypeError, ValueError, ImportError, ModuleNotFoundError) as exc:
         logger.warning(
             "fsaverage_mesh_decimation_failed",
             extra={"error": str(exc), "original_triangles": len(faces)},
         )
-        return BrainMesh(points=points, faces=_faces_to_vtk(faces))
+        return BrainMesh(points=points, faces=_faces_to_vtk(faces), display_transform=display_transform)
 
 
-def _normalize_points(points: np.ndarray) -> np.ndarray:
-    centered = np.asarray(points, dtype=float) - np.mean(points, axis=0)
-    radius = float(np.max(np.linalg.norm(centered, axis=1)))
-    if radius <= 0.0:
-        raise FsaverageMeshError("fsaverage mesh has invalid zero radius.")
-    return centered / radius
+def _display_transform(points: np.ndarray) -> MeshDisplayTransform:
+    try:
+        return MeshDisplayTransform.from_native_points(
+            points,
+            native_coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+        )
+    except ValueError as exc:
+        raise FsaverageMeshError(f"fsaverage mesh has invalid display transform: {exc}") from exc
 
 
 def _faces_to_vtk(faces: np.ndarray) -> np.ndarray:

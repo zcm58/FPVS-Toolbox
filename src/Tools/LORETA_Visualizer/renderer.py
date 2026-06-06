@@ -17,6 +17,7 @@ from Tools.LORETA_Visualizer.source_payloads import (
     SourcePayload,
 )
 from Tools.LORETA_Visualizer.synthetic_brain import BrainMesh, make_synthetic_brain_mesh
+from Tools.LORETA_Visualizer.transforms import MeshDisplayTransform
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,18 @@ class BrainRendererWidget(QWidget):
         if mesh is None:
             return None
         return mesh.faces
+
+    def mesh_display_transform(self) -> MeshDisplayTransform | None:
+        mesh = self._current_mesh
+        if mesh is None:
+            return None
+        return mesh.display_transform
+
+    def to_display_points(self, points: Any, *, coordinate_space: str | None = None) -> Any | None:
+        transform = self.mesh_display_transform()
+        if transform is None:
+            return None
+        return transform.to_display_points(points, coordinate_space=coordinate_space)
 
     def replace_brain_mesh(self, mesh: BrainMesh, *, reset_camera: bool = True) -> None:
         plotter = self._plotter

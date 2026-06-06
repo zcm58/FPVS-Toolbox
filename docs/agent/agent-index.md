@@ -33,6 +33,7 @@ Activate the repo environment before Python commands:
 | Post-processing, FFT crop, or Excel export behavior | `legacy-boundary-review` | `docs/agent/architecture/post-processing-export-contract.md`; `docs/agent/architecture/fft-crop-method.md` |
 | Project manifests, project roots, file dialogs, exports, imports | `project-path-audit` | `docs/agent/architecture/project-io.md` |
 | Stats analysis, GUI/pipeline structure, reporting, exports | `pyside6-gui-cleanup` plus focused Stats tests | `docs/agent/architecture/statistics-tools.md` |
+| LORETA Visualizer, source visualization, or source-localization-adjacent rendering | `legacy-boundary-review` plus focused tool tests | `docs/agent/exec-plans/active/loreta-3d-visualizer.md`; `src/Tools/LORETA_Visualizer/AGENTS.md`; `src/Tools/LORETA_Visualizer/ARCHITECTURE.md` |
 | GUI smoke coverage definitions | `pytest-qt-smoke` | `docs/agent/quality/test-selection.md`; do not run pytest-qt/offscreen locally |
 | Generated files, temp folders, local caches | `cleanup-generated-files` | `docs/agent/quality/garbage-collection.md`; `docs/agent/exec-plans/tech-debt-tracker.md` |
 

@@ -53,6 +53,13 @@ Current `Legacy_App` runtime couplings:
   page, `worker.py` wraps the runner for QThread use, and the other modules own
   discovery, typed request/result contracts, narrative/DOCX writing, and source
   workbook/audit exports.
+- `src/Tools/LORETA_Visualizer/`: embedded 3D LORETA/source-visualization
+  viewer. This is a new source-localization visualization branch, not a
+  continuation of the removed `Tools.SourceLocalization` implementation.
+  `renderer.py` displays base meshes and prepared source payloads only;
+  `source_payloads.py`, `transforms.py`, and `scalar_fields.py` are the bridge
+  helpers between future calculation outputs and the renderer; future numerical
+  source-localization calculation belongs outside renderer/fsaverage/GUI code.
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`: UI-agnostic average-preprocessing behavior used by the PySide6 tool.
 - `src/Tools/Image_Resizer/`: image resizing utility.
@@ -61,5 +68,5 @@ Current `Legacy_App` runtime couplings:
 
 ## Dead Or Quarantined
 
-- Source Localization/eLORETA: removed from active runtime; `src/Tools/SourceLocalization/**` must remain empty of source files unless restoration is explicitly scoped.
+- Source Localization/eLORETA: removed from active runtime; `src/Tools/SourceLocalization/**` must remain empty of source files unless restoration is explicitly scoped. The separate `src/Tools/LORETA_Visualizer/**` tool is allowed only as the new visualization branch described in its local `AGENTS.md` and `ARCHITECTURE.md`.
 - `src/quarantine/**`: ignored quarantine tree retained outside active runtime.

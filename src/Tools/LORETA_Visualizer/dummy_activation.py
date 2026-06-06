@@ -11,7 +11,9 @@ from Tools.LORETA_Visualizer.source_payloads import (
     SourcePayload,
     empty_source_payload,
     make_source_payload,
+    source_payload_to_display,
 )
+from Tools.LORETA_Visualizer.transforms import MeshDisplayTransform
 
 ActivationPayload = SourcePayload
 
@@ -31,19 +33,50 @@ def make_demo_condition_activation(
     mesh_faces: np.ndarray | None = None,
     condition: DemoLoretaCondition,
     max_points: int = 900,
+    display_transform: MeshDisplayTransform | None = None,
 ) -> ActivationPayload:
     """Return deterministic condition-specific synthetic activation points.
 
     The payload is synthetic. It uses the current mesh coordinate space so it
-    aligns with fsaverage-derived meshes when available.
+    aligns with fsaverage-derived meshes when available. When a non-identity
+    display transform is available, the synthetic payload is converted into the
+    mesh native coordinate space and then back through the same helper path that
+    future real source payloads will use.
     """
     points = np.asarray(mesh_points, dtype=float)
     if points.ndim != 2 or points.shape[1] != 3 or len(points) == 0:
         return empty_source_payload(label=f"Synthetic {condition.activation_region} demo activation")
-    if condition.activation_region == "deep_medial_temporal":
-        return _make_volume_region_activation(points, condition=condition)
+    payload = _make_volume_region_activation(points, condition=condition)
+    return _maybe_round_trip_through_native_space(payload, display_transform)
 
-    return _make_volume_region_activation(points, condition=condition)
+
+def _maybe_round_trip_through_native_space(
+    payload: ActivationPayload,
+    display_transform: MeshDisplayTransform | None,
+) -> ActivationPayload:
+    if display_transform is None:
+        return payload
+    if display_transform.native_coordinate_space == display_transform.display_coordinate_space:
+        return payload
+
+    native_payload = make_source_payload(
+        points=display_transform.from_display_points(payload.points),
+        values=payload.values,
+        label=payload.label,
+        kind=payload.kind,
+        coordinate_space=display_transform.native_coordinate_space,
+        source_model=payload.source_model,
+        value_label=payload.value_label,
+        faces=payload.faces,
+        metadata={
+            **payload.metadata,
+            "transform_simulation": True,
+            "native_coordinate_space": display_transform.native_coordinate_space,
+            "display_coordinate_space": display_transform.display_coordinate_space,
+        },
+        normalize_values=False,
+    )
+    return source_payload_to_display(native_payload, display_transform)
 
 
 def _make_volume_region_activation(

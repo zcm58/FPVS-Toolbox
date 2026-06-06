@@ -54,6 +54,12 @@ ruff check .
 - Project path or file I/O changes: add or run tests with `tmp_path`; do not depend on a developer machine path.
 - Legacy-boundary changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check protected` and confirm retired `Legacy_App` paths were not recreated; any historical behavior cleanup must preserve the processing pipeline.
 - Source Localization/eLORETA changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.
+- LORETA Visualizer changes: activate `.\.venv1`, then run focused checks for
+  `src/Tools/LORETA_Visualizer/` plus
+  `python .agents/skills/legacy-boundary-review/scripts/audit_protected_edits.py`
+  and `python .agents/scripts/audit/agent_audit.py --check source-localization-refs`.
+  Confirm rendering changes do not add source-localization calculation to
+  `renderer.py`, `fsaverage_mesh.py`, or GUI code.
 - Processing pipeline changes: verify processing order, output filenames, sheets, and formats remain compatible.
 - Garbage collection: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check garbage-collection` to catch visible cache/temp artifacts, new inline debt markers, and broad production exception handlers.
 

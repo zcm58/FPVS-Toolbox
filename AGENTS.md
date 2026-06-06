@@ -28,6 +28,7 @@ FPVS Toolbox is a Windows-oriented PySide6 desktop application for preprocessing
 - Active project model, project manager, project metadata, projects-root, and preprocessing-settings imports should use `src/Main_App/projects/`.
 - Active runtime diagnostics imports should use `src/Main_App/diagnostics/`; repo-evaluation checks belong in `scripts/` or `.agents/skills/`, and manual project probes belong in `scripts/manual_diagnostics/`.
 - Source Localization/eLORETA has been removed from active runtime. Do not add GUI, settings, tests, imports, quarantine-tree dependencies, or bundled `fsaverage` MRI template data unless the user explicitly scopes a restoration feature.
+- The new LORETA Visualizer work is a separate source-localization visualization branch under `src/Tools/LORETA_Visualizer/`, not a revival of `src/Tools/SourceLocalization/**`. Keep visualizer rendering, mesh helpers, payload adapters, demo data, and tool-local docs in that directory; preserve the boundary where future source-localization calculations produce prepared values and visualizer helpers bridge them into renderer payloads.
 - The active preprocessing order is locked to match the Volfart et al. (2021) FPVS implementation decision: initial reference, drop reference channels, optional channel limit preserving stim, FIR filter, downsample, kurtosis/interpolation, final average reference. Do not reorder filtering and downsampling, change FIR duration scaling, or remove the order/version fingerprint guards unless the user explicitly requests a statistical-method change and updates `docs/agent/architecture/preprocessing-contract.md`, `docs/user/reference/methods-reporting-checklist.md`, and the focused processing-order tests.
 - The Stats default group-level significant-harmonics method (Volfart/Retter/Rossion style) is locked behavior. It selects one common non-base oddball harmonic list from grand-averaged `FullFFT Amplitude (uV)` spectra across all scalp electrodes, using z > 1.64 against neighboring-bin noise. Neighboring noise is +/-10 FFT bins around the target after excluding target-1, target, target+1, then dropping the single minimum and single maximum finite amplitude values before computing mean and population SD. Do not change this selection, threshold, electrode scope, noise-window, min/max exclusion, exact-column requirement, or uniform application across participants, conditions, and ROIs unless the user explicitly requests a statistical-method change.
 - Prefer thin adapters outside protected folders when legacy behavior must be reused.
@@ -94,6 +95,7 @@ the focused verification gates below.
 - Preprocessing contract: [docs/agent/architecture/preprocessing-contract.md](docs/agent/architecture/preprocessing-contract.md); canonical active import surface lives in `src/Main_App/processing/preprocess.py`.
 - Pre-ship checklist: [docs/agent/reviews/pre_ship_checklist.md](docs/agent/reviews/pre_ship_checklist.md)
 - Legacy quarantine audit: [docs/agent/architecture/legacy-quarantine-audit.md](docs/agent/architecture/legacy-quarantine-audit.md)
+- LORETA Visualizer tool docs: [src/Tools/LORETA_Visualizer/AGENTS.md](src/Tools/LORETA_Visualizer/AGENTS.md) and [src/Tools/LORETA_Visualizer/ARCHITECTURE.md](src/Tools/LORETA_Visualizer/ARCHITECTURE.md)
 
 ## Standard Verification
 
@@ -114,6 +116,7 @@ the command, failure reason, and residual risk.
 
 - Retired `Legacy_App` and `PySide6_App` paths are not recreated.
 - Source Localization/eLORETA remains removed from active runtime unless explicitly restored as a new feature.
+- New LORETA Visualizer work preserves rendering/calculation separation and does not use retired Source Localization code as precedent.
 - PySide6-only GUI imports are preserved.
 - UI work remains non-blocking.
 - Project-path discipline is preserved.

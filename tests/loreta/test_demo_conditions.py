@@ -7,6 +7,11 @@ from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activat
 from Tools.LORETA_Visualizer.scalar_fields import LORETA_SCALAR_COLORS, resolve_scalar_limits
 from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_VOLUME_MESH, make_source_payload
 from Tools.LORETA_Visualizer.synthetic_brain import make_synthetic_brain_mesh
+from Tools.LORETA_Visualizer.transforms import (
+    COORDINATE_SPACE_DISPLAY,
+    COORDINATE_SPACE_FSAVERAGE,
+    MeshDisplayTransform,
+)
 
 
 def test_demo_conditions_place_volume_activation_in_distinct_regions() -> None:
@@ -71,3 +76,39 @@ def test_scalar_gradient_limits_follow_scalp_map_style_bounds() -> None:
     assert resolve_scalar_limits(np.asarray([0.2, 0.8]), auto_scale=True) == (0.0, 0.8)
     assert resolve_scalar_limits(np.asarray([-0.4, 0.8]), auto_scale=True) == (-0.4, 0.8)
     assert resolve_scalar_limits(np.asarray([0.2]), auto_scale=False, manual_min=1.0, manual_max=1.0) == (1.0, 2.0)
+
+
+def test_demo_condition_can_exercise_native_to_display_bridge() -> None:
+    native_mesh_points = np.asarray(
+        [
+            [-35.0, -70.0, -20.0],
+            [-35.0, 40.0, 40.0],
+            [35.0, -70.0, -18.0],
+            [35.0, 42.0, 38.0],
+            [0.0, -20.0, 72.0],
+            [0.0, -15.0, -45.0],
+        ],
+        dtype=float,
+    )
+    transform = MeshDisplayTransform.from_native_points(
+        native_mesh_points,
+        native_coordinate_space=COORDINATE_SPACE_FSAVERAGE,
+    )
+    display_mesh_points = transform.to_display_points(native_mesh_points)
+
+    direct_payload = make_demo_condition_activation(
+        display_mesh_points,
+        condition=condition_by_id("occipital"),
+    )
+    bridged_payload = make_demo_condition_activation(
+        display_mesh_points,
+        condition=condition_by_id("occipital"),
+        display_transform=transform,
+    )
+
+    assert bridged_payload.coordinate_space == COORDINATE_SPACE_DISPLAY
+    assert bridged_payload.metadata["transform_simulation"] is True
+    assert bridged_payload.metadata["native_coordinate_space"] == COORDINATE_SPACE_FSAVERAGE
+    assert np.allclose(bridged_payload.points, direct_payload.points)
+    assert np.allclose(bridged_payload.values, direct_payload.values)
+    assert np.array_equal(bridged_payload.faces, direct_payload.faces)

@@ -407,8 +407,14 @@ class LoretaVisualizerWindow(QWidget):
         if mesh_points is None:
             return
         mesh_faces = renderer.mesh_faces()
+        display_transform = renderer.mesh_display_transform()
         condition = condition_by_id(self._selected_condition_id)
-        payload = make_demo_condition_activation(mesh_points, mesh_faces=mesh_faces, condition=condition)
+        payload = make_demo_condition_activation(
+            mesh_points,
+            mesh_faces=mesh_faces,
+            condition=condition,
+            display_transform=display_transform,
+        )
         self._current_activation_payload = payload
         renderer.set_activation_payload(payload)
         self._apply_activation_scalar_range()

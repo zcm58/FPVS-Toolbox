@@ -77,6 +77,7 @@ nav:
       - Feature Tour: tools/feature-tour.md
       - SNR Plot Generator: tools/snr-plot-generator.md
       - Scalp Maps: tools/scalp-maps.md
+      - LORETA Visualizer: tools/loreta-visualizer.md
       - Ratio Calculator: tools/ratio-calculator.md
       - Image Resizer: tools/image-resizer.md
       - Epoch Averaging: tools/epoch-averaging.md

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
+
+from Tools.LORETA_Visualizer.transforms import MeshDisplayTransform
 
 
 @dataclass(frozen=True)
@@ -13,6 +15,7 @@ class BrainMesh:
 
     points: np.ndarray
     faces: np.ndarray
+    display_transform: MeshDisplayTransform = field(default_factory=MeshDisplayTransform.identity)
 
 
 def make_synthetic_brain_mesh(

@@ -14,6 +14,13 @@ Source Localization/eLORETA is removed from active runtime, not a protected blac
 
 - `src/Tools/SourceLocalization/**` must stay empty of source files.
 - The app must not add GUI actions, settings, tests, imports, or quarantine-tree dependencies for this removed feature.
+- The new `src/Tools/LORETA_Visualizer/**` tool is a separately scoped
+  source-visualization branch. It must not consult, copy, import, or inherit
+  design decisions from the removed Source Localization/eLORETA code.
+- In that new tool, renderer code displays prepared payloads only. Tool-local
+  helpers may validate, transform, normalize, and adapt future calculation
+  outputs into renderer payloads, but they must not compute inverse solutions,
+  source statistics, or LORETA values.
 
 Rules:
 
@@ -21,6 +28,9 @@ Rules:
 - Prefer thin adapters or caller-side normalization in purpose-based Main App packages.
 - When old behavior already has a current-app replacement, use that replacement rather than adding compatibility paths.
 - Do not revive Source Localization/eLORETA imports, tests, settings, or UI behavior unless the user explicitly asks to restore that feature.
+- Do not treat the new LORETA Visualizer as permission to change preprocessing,
+  Stats methods, project manifests, BDF loading, diagnostics, or active
+  project I/O.
 - Keep compatibility exports in `src/Main_App/__init__.py` stable unless the task is specifically about imports.
 
 Useful checks:

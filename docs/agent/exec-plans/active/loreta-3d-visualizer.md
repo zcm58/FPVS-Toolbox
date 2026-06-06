@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, and Phase 5B are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic and now supports scalar-gradient source maps before any real LORETA calculations are introduced.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, and Phase 5C are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, and preserves native-to-display coordinate transforms before any real LORETA calculations are introduced.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -65,6 +65,7 @@ New tool implementation:
 
 - `src/Tools/LORETA_Visualizer/`
   - `AGENTS.md`: scoped rules for keeping LORETA visualizer code self-contained and separating rendering from future LORETA computation.
+  - `ARCHITECTURE.md`: tool-local architecture contract covering goals, non-goals, bridge helpers, renderer/calculation separation, and payload flow.
   - `__init__.py`: public tool surface.
   - `gui.py`: embedded PySide6 page/window class.
   - `renderer.py`: PyVista/VTK rendering adapter, lazy imports, actor/camera helpers.
@@ -74,6 +75,7 @@ New tool implementation:
   - `conditions.py`: condition list/model helpers for Slice 4.
   - `source_payloads.py`: renderer-facing payload contract for cortical surface points, cortical/deep meshes, volume/deep source representations, and future ROI meshes.
   - `scalar_fields.py`: scalar-gradient color stops and scalp-map-style auto/manual color-limit helpers.
+  - `transforms.py`: native/source coordinate to renderer display coordinate transform contract.
   - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
 
 Main App shell integration:
@@ -227,7 +229,7 @@ Done means:
 
 ## Phase 5: Optional Real Data Adapter
 
-Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Real LORETA calculation, real file discovery, and project-output integration remain out of scope.
+Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Real LORETA calculation, real file discovery, and project-output integration remain out of scope.
 
 Objective:
 
@@ -294,6 +296,33 @@ Done means:
 - The intensity auto-scale toggle changes whether payload-derived or manual min/max color bounds are used.
 - High dummy values render at the red end of the colormap.
 - Focused tests cover scalar-limit resolution and dummy scalar ranges.
+
+### Phase 5C: Coordinate Transform Contract
+
+Status: Implemented. Meshes carry the display transform used to normalize native coordinates, and source payloads can be converted into renderer display space through a narrow helper.
+
+Objective:
+
+- Preserve the native/anatomical-to-renderer display coordinate transform instead of discarding it during mesh loading.
+- Let future source-localization methods provide coordinates in their declared source space and convert them into display space through a visualizer-local adapter boundary.
+- Keep this independent from LORETA numerical computation, source-estimation method choice, and project I/O.
+- Support future changes in source-localization method by keeping the rendering contract tied to explicit coordinate spaces rather than one hard-coded calculation pipeline.
+
+Implementation notes:
+
+- `transforms.py` owns `MeshDisplayTransform` and coordinate-space constants.
+- fsaverage mesh loading builds a transform from the native fsaverage surface points, uses it to normalize the display mesh, and stores it on `BrainMesh`.
+- Synthetic meshes use an identity display transform because their points are already in renderer display coordinates.
+- `source_payloads.py` exposes `source_payload_to_display(...)` so future adapters can convert prepared payloads without changing renderer internals.
+- `renderer.py` exposes the current mesh display transform for future adapter wiring.
+- Synthetic GUI payloads round-trip through native coordinates and `source_payload_to_display(...)` when the loaded mesh has a non-identity native/display transform, so the dummy path exercises the future real-data bridge without computing source estimates.
+- This does not add MNI registration, subject MRI transforms, source file import, or real source-localization computation.
+
+Done means:
+
+- Native fsaverage-like point arrays round-trip through display and native space.
+- Payload conversion preserves scalar values, faces, labels, and source model metadata while updating coordinates into display space.
+- Mismatched coordinate-space labels are rejected instead of silently rendering misaligned sources.
 
 ## Integration Safety
 
