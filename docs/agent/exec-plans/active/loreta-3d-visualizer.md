@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, and Phase 5D are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, and includes a prepared source-map fixture before any real LORETA calculations are introduced.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, and Phase 5E are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, and imports controlled prepared JSON payloads before any real LORETA calculations are introduced.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -77,6 +77,7 @@ New tool implementation:
   - `scalar_fields.py`: scalar-gradient color stops and scalp-map-style auto/manual color-limit helpers.
   - `transforms.py`: native/source coordinate to renderer display coordinate transform contract.
   - `prepared_source_fixture.py`: in-memory prepared source-map fixture that validates the future adapter handoff shape without computing source estimates.
+  - `prepared_payload_importer.py`: controlled JSON importer for already-prepared source payloads.
   - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
 
 Main App shell integration:
@@ -230,7 +231,7 @@ Done means:
 
 ## Phase 5: Optional Real Data Adapter
 
-Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Phase 5D adds a selectable prepared source-map fixture that looks like a future real-data handoff. Real LORETA calculation, real file discovery, and project-output integration remain out of scope.
+Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Phase 5D adds a selectable prepared source-map fixture that looks like a future real-data handoff. Phase 5E adds controlled prepared JSON payload import. Real LORETA calculation, project-output discovery, and project-output integration remain out of scope.
 
 Objective:
 
@@ -348,6 +349,31 @@ Done means:
 - Selecting `Prepared source-map fixture` immediately updates the heatmap layer.
 - The payload is a volume mesh with finite scalar gradients and VTK faces.
 - Focused tests prove the fixture condition exists, uses prepared fixture metadata, and preserves display alignment through a fsaverage-like native transform.
+
+### Phase 5E: External Prepared Payload Import
+
+Status: Implemented. The visualizer can load a user-selected prepared source payload JSON file, validate it, convert it to renderer display space, and render it through the existing activation layer.
+
+Objective:
+
+- Add a controlled external file format for already-prepared source payloads.
+- Keep import separate from source-localization calculation and project-output discovery.
+- Support source payload JSON fields for format version, label, kind, coordinate space, source model, value label, points, scalar values, optional triangle faces, and metadata.
+- Convert imported coordinates through `source_payload_to_display(...)` using the current mesh display transform.
+- Let users manually inspect an imported prepared payload without changing project manifests or running real LORETA math.
+
+Implementation notes:
+
+- `prepared_payload_importer.py` owns JSON parsing, schema validation, face conversion, metadata preservation, and display conversion.
+- The GUI exposes `Load source JSON`; cancel leaves the current activation unchanged.
+- Import errors are surfaced in the condition status label and logged without crashing the viewer.
+- No project root is required for this importer because files are explicit user selections and no output is written.
+
+Done means:
+
+- Focused tests load display-space and fsaverage-like native JSON payloads and confirm display-space output.
+- Invalid JSON/schema cases fail with `PreparedSourcePayloadImportError`.
+- The GUI can render the imported payload through the same activation actor, opacity controls, and scalar range controls used by synthetic payloads.
 
 ## Integration Safety
 

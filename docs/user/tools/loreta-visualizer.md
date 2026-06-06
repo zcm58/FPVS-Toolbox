@@ -33,6 +33,8 @@ drawn inside the transparent anatomical shell.
   source-map fixture conditions.
 - Auto-scale the source intensity map or set manual minimum/maximum intensity
   bounds.
+- Load a prepared source payload JSON file from disk and render it through the
+  same display adapter used by the synthetic fixture.
 
 Higher synthetic values are mapped toward red. Lower values appear lighter or
 less intense depending on the current color range.
@@ -58,6 +60,11 @@ source-localization result.
 The prepared source-map fixture is shaped like a future real-data handoff with
 coordinates, scalar values, faces, source-model metadata, and coordinate-space
 conversion. It is still synthetic and should be used only to inspect rendering.
+
+The **Load source JSON** button accepts controlled prepared-payload files with
+points, values, optional triangle faces, a source-model label, metadata, and a
+coordinate-space label. The tool validates the file and converts coordinates
+into the current display mesh space before rendering.
 
 ## Future real-data direction
 

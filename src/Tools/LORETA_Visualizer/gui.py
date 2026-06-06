@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -28,6 +30,10 @@ from Main_App.gui.components import (
 from Tools.LORETA_Visualizer.conditions import DEMO_LORETA_CONDITIONS, condition_by_id, default_condition
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult, load_fsaverage_brain_mesh
+from Tools.LORETA_Visualizer.prepared_payload_importer import (
+    PreparedSourcePayloadImportError,
+    load_prepared_source_payload_json,
+)
 from Tools.LORETA_Visualizer.renderer import BrainRendererWidget, RenderBackendError
 from Tools.LORETA_Visualizer.scalar_fields import DEFAULT_SCALAR_MAX, DEFAULT_SCALAR_MIN, resolve_scalar_limits
 from Tools.LORETA_Visualizer.source_payloads import SourcePayload
@@ -85,6 +91,7 @@ class LoretaVisualizerWindow(QWidget):
         self._mesh_worker: FsaverageLoadWorker | None = None
         self._selected_condition_id = default_condition().condition_id
         self._current_activation_payload: SourcePayload | None = None
+        self._last_import_dir: Path | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -234,6 +241,12 @@ class LoretaVisualizerWindow(QWidget):
         self.reset_camera_btn.clicked.connect(self._reset_camera)
         controls.content_layout.addWidget(self.reset_camera_btn)
 
+        self.load_source_payload_btn = make_action_button("Load source JSON", compact=True, parent=controls)
+        self.load_source_payload_btn.setObjectName("loreta_load_source_payload_btn")
+        self.load_source_payload_btn.setToolTip("Load a prepared source payload JSON file.")
+        self.load_source_payload_btn.clicked.connect(self._load_prepared_source_payload)
+        controls.content_layout.addWidget(self.load_source_payload_btn)
+
         self.load_fsaverage_btn = make_action_button("Fetch/load fsaverage", compact=True, parent=controls)
         self.load_fsaverage_btn.setObjectName("loreta_load_fsaverage_btn")
         self.load_fsaverage_btn.setToolTip("Load an external MNE fsaverage mesh.")
@@ -279,6 +292,7 @@ class LoretaVisualizerWindow(QWidget):
         self.zoom_out_btn.setEnabled(enabled)
         self.zoom_in_btn.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
+        self.load_source_payload_btn.setEnabled(enabled)
         self.load_fsaverage_btn.setEnabled(enabled)
 
     def _on_transparency_changed(self, value: int) -> None:
@@ -349,6 +363,39 @@ class LoretaVisualizerWindow(QWidget):
     def _load_fsaverage_with_fetch(self) -> None:
         self._start_fsaverage_load(allow_fetch=True)
 
+    def _load_prepared_source_payload(self) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        initial_dir = "" if self._last_import_dir is None else str(self._last_import_dir)
+        file_name, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Load prepared source payload",
+            initial_dir,
+            "Prepared source payload (*.json);;JSON files (*.json)",
+        )
+        if not file_name:
+            return
+        self._import_prepared_source_payload(Path(file_name))
+
+    def _import_prepared_source_payload(self, path: Path) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None:
+            self.condition_status_label.setText("Prepared source import failed: no mesh transform is available.")
+            return
+        try:
+            payload = load_prepared_source_payload_json(path, display_transform=display_transform)
+        except PreparedSourcePayloadImportError as exc:
+            logger.warning("loreta_prepared_source_payload_import_failed", extra={"path": str(path), "error": str(exc)})
+            self.condition_status_label.setText(f"Prepared source import failed: {exc}")
+            return
+        self._last_import_dir = path.parent
+        self._set_activation_payload(payload)
+        self.condition_status_label.setText(f"Showing imported prepared source payload: {path.name}")
+
     def _start_fsaverage_load(self, *, allow_fetch: bool) -> None:
         if self._mesh_thread is not None:
             return
@@ -415,6 +462,12 @@ class LoretaVisualizerWindow(QWidget):
             condition=condition,
             display_transform=display_transform,
         )
+        self._set_activation_payload(payload)
+
+    def _set_activation_payload(self, payload: SourcePayload) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
         self._current_activation_payload = payload
         renderer.set_activation_payload(payload)
         self._apply_activation_scalar_range()
