@@ -4,6 +4,8 @@
 
 This directory owns the embedded LORETA 3D visualizer only. Keep LORETA visualizer code, demo data, rendering adapters, fsaverage mesh loading helpers, and future visualizer-local adapters inside `src/Tools/LORETA_Visualizer/` unless a plan explicitly scopes shell integration.
 
+This is a completely new source-localization development branch. Retired Source Localization/eLORETA code, quarantine code, legacy launchers, historical settings, and old GUI workflows are not design inputs for this tool. Future design choices should be made from the current visualizer payload contract, current Main App embedding patterns, current scientific requirements, and current library capabilities only.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -26,6 +28,7 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 ## Boundary Rules
 
 - Do not import from `Tools.SourceLocalization` or `src/quarantine/**`.
+- Do not consult or copy old Source Localization/eLORETA implementation code for architecture, naming, data flow, GUI design, settings, tests, or rendering choices.
 - Do not recreate `src/Tools/SourceLocalization/**`, `src/Main_App/Legacy_App/**`, or `src/Main_App/PySide6_App/**`.
 - Do not bundle fsaverage MRI/template data in `src/`, `src/quarantine/`, or package data. Fetch or locate fsaverage outside the repo through MNE/user cache paths only.
 - Do not change preprocessing order, Stats methods, BDF loading, project manifests, exports, diagnostics, or app-wide project I/O for visualizer-only work.

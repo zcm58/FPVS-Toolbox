@@ -4,6 +4,8 @@
 
 Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, and Phase 5B are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic and now supports scalar-gradient source maps before any real LORETA calculations are introduced.
 
+This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
+
 ## Date
 
 Created: 2026-06-05
@@ -39,6 +41,7 @@ Core design rule: rendering, fsaverage/anatomical mesh construction, and LORETA 
 - `requirements.txt` already includes `pyvista`, `pyvistaqt`, `vtk`, and `nibabel`; PyVista/VTK should be the first 3D backend unless implementation testing shows it cannot embed reliably.
 - The local MNE dependency exposes `mne.datasets.fetch_fsaverage(subjects_dir=None)` and `mne.read_surface(...)`, which can support an fsaverage mesh loader without bundling MRI/template data into source.
 - Source Localization/eLORETA is removed from active runtime. `src/Tools/SourceLocalization/**` must remain empty of source files, and this visualizer must not import from `Tools.SourceLocalization` or `src/quarantine/**`.
+- This LORETA visualizer is new work. Do not use retired Source Localization/eLORETA code or quarantine code as a reference implementation for architecture, names, GUI behavior, settings, tests, rendering, or future real-data adapters.
 - Future-agent local rules for this tool live in `src/Tools/LORETA_Visualizer/AGENTS.md`.
 
 ## Branch And Promotion Policy
@@ -88,6 +91,7 @@ Avoid:
 - `src/Tools/SourceLocalization/**`.
 - Imports from `src/quarantine/**`.
 - Restoring old legacy eLORETA launchers, settings, tests, or GUI paths.
+- Adopting old Source Localization/eLORETA architecture, data contracts, GUI patterns, settings, tests, rendering decisions, or file layouts as precedent.
 - Writing LORETA settings into `project.json` in Phase 1.
 - Bundling `fsaverage` MRI/template data in `src/`, `src/quarantine/`, or package data. Fetch or locate fsaverage outside the repo only.
 - Computing LORETA/source-localization values inside `renderer.py`, `fsaverage_mesh.py`, or GUI widget code.
