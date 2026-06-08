@@ -41,11 +41,7 @@ def build_markdown(
     if not participant_inclusion.empty and "included" in participant_inclusion.columns:
         included_count = int(participant_inclusion["included"].fillna(False).sum())
     condition_text = ", ".join(selected_conditions) if selected_conditions else "no selected conditions"
-    roi_text = ", ".join(
-        f"{roi.name} ({roi.role})"
-        for roi in request.rois
-        if roi.selected
-    )
+    roi_text = ", ".join(_format_roi_text(roi) for roi in request.rois if roi.selected)
     if not roi_text:
         roi_text = "no selected ROIs"
     base_rate_roi_text = (
@@ -88,6 +84,13 @@ def build_markdown(
         lines.append("- None")
     lines.append("")
     return "\n".join(lines)
+
+
+def _format_roi_text(roi) -> str:
+    electrodes = ", ".join(str(electrode) for electrode in roi.electrodes)
+    if electrodes:
+        return f"{roi.name} ({roi.role}; electrodes: {electrodes})"
+    return f"{roi.name} ({roi.role}; electrodes: not configured)"
 
 
 def _analysis_sections(frames: Mapping[str, pd.DataFrame]) -> list[str]:

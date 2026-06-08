@@ -120,6 +120,9 @@ def test_generate_publication_report_writes_initial_bundle(tmp_path: Path) -> No
     assert "# Semantic categories Publication Report" in markdown_text
     assert "CondA, CondB" in markdown_text
     assert "1 included participant(s)" in markdown_text
+    assert "LOT (primary; electrodes: P7, P9, PO7, PO3, O1)" in markdown_text
+    assert "ROT (primary; electrodes: P8, P10, PO8, PO4, O2)" in markdown_text
+    assert "Central (supporting/exploratory; electrodes: FCz, Cz, CPz, CP1, C1, FC1)" in markdown_text
 
     with ZipFile(result.docx_path) as docx:
         assert "word/document.xml" in docx.namelist()
