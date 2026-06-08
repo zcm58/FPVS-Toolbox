@@ -20,9 +20,15 @@ The first durable goal is rendering:
 - a payload contract that future real source-localization producers can feed
   without changing renderer internals.
 
+The first implemented source-ready method is a beta L2-MNE cortical surface
+producer for FPVS oddball-response maps. It is one method that emits the same
+prepared payload/manifest format expected from any later LORETA/eLORETA volume
+or mixed source-space producer.
+
 ## Non-Goals
 
-This directory must not own:
+Outside the dedicated `source_producers/` subpackage, this directory must not
+own:
 
 - LORETA, sLORETA, eLORETA, beamformer, MNE inverse, or other source-estimation
   calculations;
@@ -45,12 +51,17 @@ cleanup, focused tests, and documentation.
 ## Data Flow
 
 The renderer consumes display-ready objects. Calculation outputs must be
-prepared before they reach `renderer.py`.
+prepared and validated before they reach `renderer.py`.
 
 ```text
-External future source calculation
+Swappable source calculation producer
+L2-MNE cortical surface beta, future LORETA volume, etc.
         |
-        | coordinates, scalar values, source metadata
+        | prepared payload JSON / manifest JSON
+        v
+prepared_payload_validator.py
+        |
+        | validated coordinates, scalar values, source metadata
         v
 Tool-local bridge helpers
 source_payloads.py + transforms.py + scalar_fields.py
@@ -87,6 +98,34 @@ conditions.py + dummy_activation.py
 renderer.py
 ```
 
+## Source Producer Boundary
+
+Real source-localization methods should be implemented as calculation
+producers, separate from display code. A producer owns method assumptions,
+forward/inverse model construction, montage assumptions, FPVS harmonic handling,
+condition aggregation, and scalar source metrics. Its output is a prepared
+payload JSON file or a prepared manifest plus payload files.
+
+Producer code may use scientific libraries such as MNE, but it must not import
+or call `gui.py`, `renderer.py`, `fsaverage_mesh.py`,
+`prepared_payload_importer.py`, `source_payloads.py`, `transforms.py`, or
+`scalar_fields.py`. The importer and bridge helpers remain the display-side
+translation layer.
+
+Phase 6A added the first method as a beta L2-MNE cortical-surface producer:
+
+- target BioSemi ActiveTwo 64-channel / 10-10 montage assumptions first;
+- target group-level condition maps first, with individual maps later;
+- use the Stats-locked group significant oddball harmonic list exactly;
+- emit fsaverage-aligned cortical surface payloads with method metadata such as
+  `l2_mne_cortical_surface_beta`;
+- document that this method is cortical-surface source estimation and does not
+  claim hippocampal or other deep localization.
+
+Later LORETA/eLORETA volume methods should become sibling producers that emit
+`volume_points`, `volume_mesh`, or ROI mesh payloads. They should not require
+renderer, importer, or bridge-helper rewrites.
+
 ## File Responsibilities
 
 - `gui.py`: embedded page, controls, status text, fsaverage worker wiring, and
@@ -113,6 +152,12 @@ renderer.py
   payload and manifest JSON. It owns format constants, schema descriptors, and
   cross-field checks. It does not render, calculate source estimates, or inspect
   project outputs.
+- `source_producers/`: swappable source-localization calculation methods that
+  read explicit source-ready inputs and write validated prepared
+  payload/manifest JSON. Phase 6A includes method-neutral producer result
+  contracts and `l2_mne_cortical.py`, a beta fixed-orientation L2-MNE cortical
+  surface producer with a deterministic BioSemi64/10-10 source-ready fixture.
+  Later producers may use LORETA/eLORETA volume or mixed source-space models.
 - `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
   the expected output shape for future source-localization producers. They are
   format examples only and are not source estimates. This directory also holds
@@ -172,6 +217,18 @@ If a future method changes from LORETA to another inverse model, the renderer
 should stay unchanged. The adapter/bridge should map the method output into this
 payload contract.
 
+For the beta L2-MNE cortical-surface method, expected payloads should identify
+the method in `source_model`/metadata, use a cortical surface payload kind, and
+describe the source metric clearly. A later volume LORETA method should use the
+same outer payload shape but a volume or ROI payload kind and method-specific
+metadata.
+
+The current beta L2-MNE producer accepts source-ready arrays: channel names,
+selected harmonic topographies, cortical source coordinates/faces, and a
+channel-by-source leadfield. It writes payloads and manifests after validation.
+It does not discover project workbooks, compute Stats harmonic selections,
+export preprocessing data, or build subject-specific MRI forward models.
+
 Checked-in examples live in `examples/`. The fsaverage-native example is the
 preferred reference shape for future calculations that produce coordinates in
 the same source space as the anatomical mesh. The display-space examples and
@@ -191,7 +248,7 @@ Use `.venv1` when available; in local checkouts without it, use the equivalent
 Focused checks for this tool:
 
 ```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Tools\LORETA_Visualizer\*.py
+.\.venv1\Scripts\python.exe -m compileall -q src\Tools\LORETA_Visualizer
 .\.venv1\Scripts\python.exe -m ruff check src\Tools\LORETA_Visualizer tests\loreta
 .\.venv1\Scripts\python.exe -m pytest tests\loreta -q
 .\.venv1\Scripts\python.exe .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py

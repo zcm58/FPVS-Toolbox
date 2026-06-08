@@ -2,28 +2,35 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, and Phase 5H are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, and includes producer-facing schema/validation before any real LORETA calculations are introduced.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, and Phase 6A are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, and now has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
 ## Current Development Stage
 
-The branch is currently in the prepared source-payload contract stage. The
+The branch is currently in the beta source-producer contract stage. The
 interactive renderer, anatomical mesh loading, source-layer rendering, scalar
 color controls, coordinate transform bridge, single-payload importer,
 multi-condition manifest importer, checked-in JSON format examples, JSON Schema
-shape files, and producer-facing validator are in place.
+shape files, producer-facing validator, method-neutral source-producer result
+contracts, and beta L2-MNE cortical-surface fixture producer are in place.
 
-The branch is not yet in the real source-localization calculation stage. Future
-LORETA, eLORETA, sLORETA, MNE inverse, beamformer, or other source-estimation
-code should target the prepared JSON/payload bridge and stay separate from the
-renderer, GUI, fsaverage loader, and project I/O until a new plan explicitly
-scopes calculation or project integration.
+The branch is not yet in the project-integrated real EEG source-localization
+stage. The beta L2-MNE implementation accepts explicit source-ready arrays and
+writes validated prepared JSON; it does not discover project outputs, read
+participant workbooks, build subject MRI forward models, or alter preprocessing,
+Stats, or project manifests. Future LORETA, eLORETA, sLORETA, beamformer, or
+other source-estimation methods should become sibling producers that target the
+prepared JSON/payload bridge and stay separate from the renderer, GUI, display
+fsaverage loader, and project I/O unless a new plan explicitly scopes
+integration.
 
-The prepared payload contract stage is complete enough for the next work to move
-outside the renderer. The next recommended development slice is Phase 6A: a
-separate source-localization producer spike that investigates real calculation
-inputs and emits prepared payload JSON through the Phase 5H validator.
+The prepared payload contract stage is complete and Phase 6A has established
+the first swappable source method. The next recommended development slice is a
+Phase 6B planning/implementation slice for source-ready project input assembly:
+decide whether the producer reads existing `FullFFT Amplitude (uV)` workbooks,
+requires complex Fourier coefficients, or consumes a new sensor-topography
+export before attempting real participant/condition runs.
 
 ## Date
 
@@ -46,7 +53,15 @@ The first implementation phase proves the real-time 3D viewer experience:
 
 Later phases add a real anatomical mesh, dummy LORETA-like activation layers, and condition selection before real data adapters. Early slices must not depend on source-localization computation, preprocessing changes, or project-output changes.
 
-Core design rule: rendering, fsaverage/anatomical mesh construction, and LORETA numerical calculation are separate concerns. This tool may render a prepared LORETA mesh/point/volume payload in the same 3D coordinate space as the fsaverage brain mesh, but computing the LORETA values belongs to a separate future implementation and should not be mixed into rendering or fsaverage mesh loading code.
+Core design rule: rendering, fsaverage/anatomical mesh construction, display
+translation, and source-localization numerical calculation are separate
+concerns. This tool may render a prepared source mesh/point/volume payload in
+the same 3D coordinate space as the fsaverage brain mesh, but computing the
+source values belongs to a separate method producer and must not be mixed into
+rendering, fsaverage mesh loading, importer, or display-translation code. The
+first real producer method is planned as beta L2-MNE cortical-surface source
+maps; later LORETA/eLORETA/sLORETA/volume methods should swap in by producing
+the same validated prepared payload/manifest contract.
 
 ## Current Repo State
 
@@ -100,6 +115,7 @@ New tool implementation:
   - `prepared_payload_validator.py`: producer-facing validator and schema descriptors for prepared source payloads and manifests.
   - `examples/`: checked-in synthetic prepared payload and manifest JSON examples for future calculation producer output shape and importer validation.
   - `examples/*.schema.json`: shape-level JSON Schema files for external producer tooling.
+  - `source_producers/`: source-localization calculation producers that read explicit source-ready inputs and write prepared payload/manifest JSON. These modules must not import the GUI, renderer, display importer, display bridge helpers, or display mesh loader.
   - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
 
 Main App shell integration:
@@ -109,7 +125,7 @@ Main App shell integration:
 - `src/Main_App/gui/icons.py`: add a dedicated sidebar icon/logo key for the visualizer.
 - `src/Main_App/gui/project_workflows.py`: retire any cached `_loreta_visualizer_page` if the tool becomes project-aware.
 
-No other production module should receive LORETA-specific implementation code unless this plan is explicitly revised. Keep visualizer logic, demo payloads, mesh adapters, rendering adapters, and future narrow real-data adapters inside `src/Tools/LORETA_Visualizer/`.
+No other production module should receive LORETA-specific implementation code unless this plan is explicitly revised. Keep visualizer logic, demo payloads, mesh adapters, rendering adapters, payload validators, and source-producer adapters inside `src/Tools/LORETA_Visualizer/`. Keep method producers in `source_producers/` so L2-MNE, LORETA volume, eLORETA, or other methods can be swapped without changing renderer or translation code.
 
 Avoid:
 
@@ -120,7 +136,7 @@ Avoid:
 - Adopting old Source Localization/eLORETA architecture, data contracts, GUI patterns, settings, tests, rendering decisions, or file layouts as precedent.
 - Writing LORETA settings into `project.json` in Phase 1.
 - Bundling `fsaverage` MRI/template data in `src/`, `src/quarantine/`, or package data. Fetch or locate fsaverage outside the repo only.
-- Computing LORETA/source-localization values inside `renderer.py`, `fsaverage_mesh.py`, or GUI widget code.
+- Computing LORETA/source-localization values inside `renderer.py`, `fsaverage_mesh.py`, `prepared_payload_importer.py`, `source_payloads.py`, `transforms.py`, `scalar_fields.py`, or GUI widget code.
 - Adding LORETA-specific computation to preprocessing, Stats, diagnostics, or project I/O modules.
 
 ## Phase 1: Embedded Real-Time Brain Viewer
@@ -484,42 +500,106 @@ Done means:
 - The checked-in examples are validated against that target in tests.
 - No real LORETA calculation, project-output discovery, or project I/O is added.
 
-## Phase 6: Real Source-Localization Producer
+## Phase 6: Real Source-Localization Producers
 
-Status: Proposed future stage. Not implemented.
+Status: Started. Phase 6A is implemented; project-integrated real EEG source-localization remains future work.
 
 Objective:
 
-- Start real source-localization work in a separate producer path that outputs
-  `fpvs-loreta-source-payload-v1` JSON.
+- Start real source-localization work in separate producer paths that output
+  `fpvs-loreta-source-payload-v1` payload JSON and, when multiple conditions
+  are produced, `fpvs-loreta-source-manifest-v1` manifest JSON.
 - Preserve the renderer/importer boundary: the visualizer should continue to
   consume prepared payloads only.
 - Keep method choice, forward model assumptions, montage handling, FPVS
   frequency-domain inputs, and condition/contrast calculations outside
   renderer, fsaverage mesh loading, and GUI rendering code.
+- Treat each source-localization method as a swappable producer. A method may be
+  L2-MNE cortical surface, a later LORETA/eLORETA volume model, a mixed
+  cortical-volume model, or another explicitly scoped approach, but each method
+  must hand off through the same prepared payload validator and importer path.
 
-### Phase 6A: Calculation Producer Spike
+### Phase 6A: Beta L2-MNE Cortical-Surface Producer
 
-Status: Proposed next slice. Not implemented.
+Status: Implemented. The tool now includes a separate source-ready beta L2-MNE cortical-surface producer under `src/Tools/LORETA_Visualizer/source_producers/`.
 
 Objective:
 
-- Inventory the real inputs needed for a first source-localization calculation
-  producer, including EEG montage/electrode coordinates, reference assumptions,
-  condition labels, frequency-domain FPVS values, and source-model choice.
-- Decide the first method spike, such as an MNE inverse-style path, sLORETA,
-  eLORETA, or another explicitly scoped method.
-- Produce a small validated prepared payload JSON from a controlled fixture or
-  minimal real-like input without changing renderer internals.
-- Keep all output validation routed through Phase 5H before GUI import.
+- Implement the first real calculation method as a beta L2 minimum-norm
+  estimate (L2-MNE) cortical-surface producer, following the published FPVS
+  EEG/MEG source-estimation pattern as closely as practical for the toolbox's
+  current data model.
+- Scope the method to BioSemi ActiveTwo 64-channel / 10-10 montage assumptions
+  first, group-level condition maps first, and oddball-response source maps
+  per condition.
+- Use the Stats-locked group significant oddball harmonic list exactly. The
+  method should respect the FPVS convention that the oddball response is
+  distributed across selected harmonics and should produce condition-level source
+  maps from the same harmonic set used for scalp-map quantification.
+- Keep the producer separate from display code. The L2-MNE producer may use MNE
+  source-estimation APIs and explicit source-ready inputs, but it must not import
+  or call `renderer.py`, `gui.py`, `fsaverage_mesh.py`,
+  `prepared_payload_importer.py`, `source_payloads.py`, `transforms.py`, or
+  `scalar_fields.py`.
+- Emit fsaverage-aligned cortical surface payloads, likely `surface_mesh` or
+  `surface_points` with `source_model` metadata such as
+  `l2_mne_cortical_surface_beta`, `coordinate_space` set to the declared
+  fsaverage/source coordinate label, and scalar values representing the chosen
+  source metric.
+- Validate every emitted payload/manifest through `prepared_payload_validator.py`
+  before any GUI import or manual rendering inspection.
+- Document all beta assumptions, especially montage template use, reference
+  assumptions, no subject MRI, group averaging strategy, harmonic summation or
+  source-space baseline correction, and that cortical-surface L2-MNE does not
+  claim deep/hippocampal localization.
+
+Implementation notes:
+
+- `source_producers/contracts.py` owns method-neutral emitted-payload and
+  producer-run result dataclasses. These describe output files and validation
+  status, not renderer objects.
+- `source_producers/l2_mne_cortical.py` owns the Phase 6A beta implementation:
+  explicit source-ready forward model arrays, FPVS condition harmonic
+  topographies, fixed-orientation L2 minimum-norm inverse calculation, prepared
+  payload/manifest writing, and a deterministic BioSemi64/10-10 fixture writer.
+- The beta producer applies an average-reference projection by default, uses
+  `lambda2 = 1 / 9` by default, records the harmonic strategy in payload
+  metadata, and defaults to summing selected sensor harmonic topographies before
+  inversion.
+- The deterministic fixture exposes occipital and frontal oddball conditions
+  over the same selected harmonic list and writes two cortical `surface_mesh`
+  payloads plus a manifest. It is source-ready validation data, not a
+  participant or project result.
+- The fixture can be written with:
+
+```powershell
+$env:PYTHONPATH='src'
+.\.venv\Scripts\python.exe -m Tools.LORETA_Visualizer.source_producers.l2_mne_cortical --output .codex-tmp\l2_mne_phase6a_fixture
+```
+
+- A future volume LORETA/eLORETA method should be able to implement the same
+  producer contract and emit `volume_points`, `volume_mesh`, or ROI mesh
+  payloads without changing the renderer, importer, or bridge helpers.
+- The calculation producer should use MNE/fsaverage/source-space resources for
+  computation independently from `fsaverage_mesh.py`, which remains a display
+  mesh loader only.
+- If existing project workbooks do not contain enough source-ready information,
+  Phase 6B should document the missing input and either use a controlled source
+  fixture or add a separately scoped export plan. Do not change preprocessing,
+  Stats, workbook formats, or project manifests without revising this plan.
 
 Done means:
 
-- The producer path is clearly separate from `renderer.py`, `gui.py`,
-  `fsaverage_mesh.py`, and existing project outputs.
-- The spike emits a payload or documents the exact missing scientific inputs
-  needed to emit one.
-- The output validates with `prepared_payload_validator.py`.
+- The L2-MNE cortical-surface producer path is clearly separate from
+  `renderer.py`, `gui.py`, `fsaverage_mesh.py`, importer/display bridge helpers,
+  and existing project outputs.
+- The producer emits validated cortical-surface payloads and a manifest from a
+  deterministic source-ready fixture.
+- The output validates with `prepared_payload_validator.py` and can be loaded
+  through the existing importer without renderer changes.
+- The method boundary is explicit enough that a later LORETA/eLORETA volume
+  producer can be added as a second method rather than refactoring the L2-MNE
+  path into the renderer.
 - No retired Source Localization/eLORETA code, quarantine code, preprocessing
   behavior changes, Stats method changes, or project-manifest integration is
   introduced without a new scoped plan.
@@ -539,7 +619,7 @@ Done means:
 Run narrow checks focused on changed files. Use `.venv1` when available; if the local checkout only has `.venv`, use the equivalent `.venv\Scripts\python.exe` path and report that substitution.
 
 ```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Tools\LORETA_Visualizer\*.py
+.\.venv1\Scripts\python.exe -m compileall -q src\Tools\LORETA_Visualizer
 .\.venv1\Scripts\python.exe -m py_compile src\Main_App\gui\main_window.py src\Main_App\gui\sidebar.py src\Main_App\gui\icons.py src\Main_App\gui\project_workflows.py
 .\.venv1\Scripts\python.exe .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
 .\.venv1\Scripts\python.exe .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py
@@ -580,5 +660,12 @@ Additional visible smoke path for future slices:
 - Preferred fsaverage surface for the base layer: pial, inflated, white, or another surface.
 - First real-data shape after demo/importer conditions: point cloud, volume
   grid, cortical sheet mesh, or another source-space representation.
-- First source-localization producer method and required scientific inputs for
-  a valid 64-channel FPVS EEG source-estimation spike.
+- Phase 6B source-ready project input contract for L2-MNE: whether it reads
+  existing `FullFFT Amplitude (uV)` workbooks first, requires complex Fourier
+  coefficients, or receives a new source-ready sensor-topography export.
+- Whether project-integrated L2-MNE should keep Phase 6A's default strategy of
+  summing selected sensor harmonic topographies before inversion, add
+  source-space harmonic estimates summed after inversion, or add source-space
+  z/BCA-style baseline correction.
+- Future second method target after L2-MNE: LORETA/eLORETA volume, mixed
+  cortical-volume source space, or another explicitly scoped model.

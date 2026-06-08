@@ -12,6 +12,13 @@ Future real LORETA, sLORETA, eLORETA, beamformer, MNE, or other inverse-method
 implementations should prepare coordinates and scalar values elsewhere, then
 hand them to this directory through the helper/payload bridge.
 
+The first implemented source-ready method is a beta L2-MNE cortical-surface
+source-map producer for FPVS oddball responses. Treat it as one swappable
+calculation method, not as the renderer's native model. Later LORETA/eLORETA
+volume or mixed source-space methods should be able to emit the same prepared
+payload/manifest contract without changing renderer or display-translation
+logic.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -40,6 +47,16 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Helper modules may adapt, validate, normalize for display, and transform
   already-computed values. They must not compute inverse solutions, frequency
   statistics, source estimates, or condition effects.
+- Calculation producers live in the separate `source_producers/` subpackage and
+  should write prepared payload JSON/manifest JSON that validates before import.
+  Producers may use MNE or other scientific libraries, but they must not import
+  `gui.py`, `renderer.py`, `fsaverage_mesh.py`,
+  `prepared_payload_importer.py`, `source_payloads.py`, `transforms.py`, or
+  `scalar_fields.py`.
+- The L2-MNE producer should stay labeled beta, cortical-surface only, and
+  method-specific in metadata, for example `l2_mne_cortical_surface_beta`.
+  Future LORETA/eLORETA volume methods should become sibling producers rather
+  than edits to renderer or bridge helpers.
 - Demo heatmap data must stay clearly synthetic and local to this tool.
 
 ## File Responsibilities
@@ -68,6 +85,13 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   Python validator and checked-in examples.
 - `source_payloads.py`, `transforms.py`, and `scalar_fields.py`: bridge helpers
   that adapt prepared source payloads to the renderer.
+- `source_producers/`: source-localization calculation methods that convert
+  explicit source-ready inputs into validated prepared JSON payloads/manifests.
+  They are calculation code, not display code, and should not depend on renderer
+  classes or display mesh helpers. Phase 6A includes
+  `source_producers/l2_mne_cortical.py` for source-ready beta L2-MNE cortical
+  surface payloads and `source_producers/contracts.py` for method-neutral
+  producer result types.
 
 ## Boundary Rules
 
@@ -80,6 +104,12 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not add real-data file discovery, project-output integration, source
   calculation, or method selection without updating the active exec plan and
   this local architecture guidance.
+- Do not treat the beta L2-MNE cortical-surface method as a required design
+  choice for future LORETA/eLORETA volume methods. The shared design choice is
+  the prepared payload/manifest contract, not the inverse method.
+- Do not extend Phase 6A into project workbook discovery, participant looping,
+  preprocessing exports, Stats harmonic-selection changes, or project manifests
+  without updating the active exec plan first.
 - Do not change the checked-in prepared JSON examples in a way that implies
   renderer ownership of LORETA math. They are output-format examples for future
   calculation producers and importer tests only.

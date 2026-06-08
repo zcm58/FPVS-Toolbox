@@ -10,9 +10,15 @@ source-localization calculations are added.
 
 ## Current status
 
-The tool does not currently calculate real LORETA, eLORETA, sLORETA, MNE inverse
-solutions, or deep-source estimates from EEG data. The visible occipital,
-frontal, and deep medial temporal activations are synthetic demo maps.
+The embedded visualizer does not currently calculate real LORETA, eLORETA,
+sLORETA, MNE inverse solutions, or deep-source estimates from project EEG data.
+The visible occipital, frontal, and deep medial temporal activations are
+synthetic demo maps.
+
+A separate beta L2-MNE cortical-surface producer now exists for source-ready
+test inputs. It can write prepared JSON payloads for occipital and frontal
+fixture conditions, but it is not yet connected to project workbooks or
+participant data.
 
 Use the current version to verify rendering behavior, transparency, camera
 controls, source-layer opacity, color scaling, and whether source maps can be
@@ -45,7 +51,7 @@ less intense depending on the current color range.
 
 ## Inputs
 
-No real EEG source-localization files are read yet.
+No real EEG source-localization files are read by the embedded visualizer yet.
 
 The fsaverage brain mesh is loaded through MNE from an external user/cache
 location. The toolbox does not store fsaverage MRI template data in the source
@@ -54,6 +60,10 @@ tree or project folders.
 Checked-in JSON examples live in
 `src/Tools/LORETA_Visualizer/examples/`. These are synthetic examples for
 format validation and manual importer checks; they are not real source maps.
+
+The beta L2-MNE producer can also generate a source-ready fixture manifest into
+a local output folder. Those fixture files are useful for checking that the
+producer writes the same prepared JSON format the visualizer already imports.
 
 ## Interpreting the demo maps
 
@@ -128,3 +138,14 @@ helper layer will then adapt that prepared payload into the 3D renderer.
 
 This separation lets the visualization support different future source methods
 without hard-coding one calculation pipeline into the display layer.
+
+The first calculation direction is a beta L2-MNE cortical-surface method for
+FPVS oddball-response maps. That method is intended for fsaverage cortical
+surface source maps, not deep volume localization. It produces the same
+prepared JSON payload shape as the current examples, so a later LORETA,
+eLORETA, or mixed volume method can be added as a different calculation method
+without changing how the 3D renderer works.
+
+The next missing piece is project input assembly: deciding exactly how to turn
+the toolbox's condition-level FPVS frequency-domain outputs into the
+source-ready channel topographies the beta L2-MNE producer expects.
