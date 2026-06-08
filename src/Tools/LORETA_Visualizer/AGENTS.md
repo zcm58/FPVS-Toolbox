@@ -49,7 +49,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Helper modules are the bridge between future calculation outputs and
   rendering:
   - `source_payloads.py` validates prepared coordinates/scalars, stores source
-    metadata, and converts payloads into display space.
+    metadata, filters renderer-facing display values when explicitly scoped
+    such as positive-only z-score display, and converts payloads into display
+    space.
   - `transforms.py` owns native/source coordinate to display-coordinate
     transforms.
   - `scalar_fields.py` owns visual color limits and color stops.
@@ -101,7 +103,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   marked as not computed from EEG. Keep JSON Schema files here aligned with the
   Python validator and checked-in examples.
 - `source_payloads.py`, `transforms.py`, and `scalar_fields.py`: bridge helpers
-  that adapt prepared source payloads to the renderer.
+  that adapt prepared source payloads to the renderer. Z-score payloads should
+  keep signed values in JSON while the default activation view renders only
+  `z > 0` through display-side filtering.
 - `source_producers/`: source-localization calculation methods that convert
   explicit source-ready inputs into validated prepared JSON payloads/manifests.
   They are calculation code, not display code, and should not depend on renderer

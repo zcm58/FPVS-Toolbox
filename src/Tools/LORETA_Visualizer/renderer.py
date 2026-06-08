@@ -262,7 +262,8 @@ class BrainRendererWidget(QWidget):
             plotter.render()
             return
         mesh_kinds = {SOURCE_KIND_ROI_MESH, SOURCE_KIND_SURFACE_MESH, SOURCE_KIND_VOLUME_MESH}
-        if payload.kind in mesh_kinds and payload.faces is not None:
+        has_faces = payload.faces is not None and len(payload.faces) > 0
+        if payload.kind in mesh_kinds and has_faces:
             cloud = pv.PolyData(payload.points, payload.faces)
             render_points_as_spheres = False
             point_size = 12
@@ -288,7 +289,7 @@ class BrainRendererWidget(QWidget):
             ambient=1.0,
             diffuse=0.0,
             specular=0.0,
-            smooth_shading=payload.kind in mesh_kinds,
+            smooth_shading=payload.kind in mesh_kinds and has_faces,
             show_scalar_bar=False,
         )
         self._activation_actor.SetVisibility(self._activation_visible)

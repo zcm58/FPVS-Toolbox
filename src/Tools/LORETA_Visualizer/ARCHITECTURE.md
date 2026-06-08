@@ -192,8 +192,8 @@ from already summed BCA values or compact selected-harmonic summaries.
   format examples only and are not source estimates. This directory also holds
   the shape-level JSON Schema files for external tooling.
 - `source_payloads.py`: renderer-facing `SourcePayload` validation,
-  finite-value filtering, metadata preservation, and payload conversion to
-  display space.
+  finite-value filtering, metadata preservation, positive-z display filtering,
+  and payload conversion to display space.
 - `transforms.py`: `MeshDisplayTransform` and coordinate-space constants.
 - `scalar_fields.py`: visual scalar color stops and auto/manual color-limit
   resolution.
@@ -275,7 +275,10 @@ model construction and source-value calculation remain in `source_producers/`.
 The project Hauk-style z-score exporter writes generated files under
 `6 - Source Localization/L2-MNE Hauk Z-Score Beta/` by default. It uses the
 same prepared-manifest importer as every other source payload. Its displayed
-values are source-space z-scores, not arbitrary L2-MNE amplitude. The
+values are source-space z-scores, not arbitrary L2-MNE amplitude. The generated
+payloads preserve the signed z-score field for QC, but the default activation
+view renders only `z > 0` values so below-baseline troughs are not drawn as the
+primary heatmap. The
 neighboring-bin policy mirrors the Stats-style FPVS neighboring-bin window by
 using offsets `-10..-2` and `+2..+10`, dropping the minimum and maximum
 neighboring source amplitude per source point before computing the source-space

@@ -892,6 +892,10 @@ Implementation notes completed:
   manifest, or auto-builds it once in a worker when the manifest is missing.
   Manual z-score rebuilds, arbitrary-amplitude exports, and prepared JSON
   imports live in the collapsed Advanced controls.
+- The default z-score activation view renders only positive source-space
+  z-scores (`z > 0`). The generated payloads still preserve the full signed
+  z-score field for QC, but negative/below-baseline source points are filtered
+  from the renderer-facing activation payload.
 - The z-score path reads `FullFFT Amplitude (uV)` only. It refuses BCA-only or
   compact-summary-only workbooks with a clear Phase 6D input error.
 - Semantic Categories exported successfully to:

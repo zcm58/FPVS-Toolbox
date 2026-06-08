@@ -45,7 +45,7 @@ from Tools.LORETA_Visualizer.scalar_fields import (
     format_scalar_value,
     resolve_scalar_limits,
 )
-from Tools.LORETA_Visualizer.source_payloads import SourcePayload
+from Tools.LORETA_Visualizer.source_payloads import SourcePayload, filter_source_payload_values_above
 
 logger = logging.getLogger(__name__)
 
@@ -176,13 +176,40 @@ def _activation_value_readout(payload: SourcePayload | None) -> str:
     label = payload.value_label.strip() or "source activation"
     source_unit = str(payload.metadata.get("source_value_unit", "")).strip()
     sensor_unit = str(payload.metadata.get("sensor_value_unit", "")).strip()
+    filter_text = _activation_display_filter_readout(payload)
     if source_unit and sensor_unit:
-        return f"Value: {label}; unit: {source_unit}; input: {sensor_unit}"
+        return f"Value: {label}; unit: {source_unit}; input: {sensor_unit}{filter_text}"
     if source_unit:
-        return f"Value: {label}; unit: {source_unit}"
+        return f"Value: {label}; unit: {source_unit}{filter_text}"
     if sensor_unit:
-        return f"Value: {label}; input: {sensor_unit}"
-    return f"Value: {label}"
+        return f"Value: {label}; input: {sensor_unit}{filter_text}"
+    return f"Value: {label}{filter_text}"
+
+
+def _activation_display_filter_readout(payload: SourcePayload) -> str:
+    if payload.metadata.get("display_value_filter") != "values_above_threshold":
+        return ""
+    threshold = payload.metadata.get("display_value_filter_threshold")
+    try:
+        threshold_text = format_scalar_value(float(threshold))
+    except (TypeError, ValueError):
+        threshold_text = "threshold"
+    return f"; display: > {threshold_text}"
+
+
+def _source_payload_uses_zscores(payload: SourcePayload) -> bool:
+    source_unit = str(payload.metadata.get("source_value_unit", "")).strip().lower()
+    if source_unit in {"z-score", "z score", "zscore"}:
+        return True
+    label = payload.value_label.strip().lower()
+    model = payload.source_model.strip().lower()
+    return "z-score" in label or "zscore" in model
+
+
+def _activation_display_payload(payload: SourcePayload) -> SourcePayload:
+    if _source_payload_uses_zscores(payload):
+        return filter_source_payload_values_above(payload, threshold=0.0)
+    return payload
 
 
 class LoretaVisualizerWindow(QWidget):
@@ -832,8 +859,9 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None:
             return
-        self._current_activation_payload = payload
-        renderer.set_activation_payload(payload)
+        display_payload = _activation_display_payload(payload)
+        self._current_activation_payload = display_payload
+        renderer.set_activation_payload(display_payload)
         self._apply_activation_scalar_range()
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
         renderer.set_activation_visible(self.activation_visible_check.isChecked())

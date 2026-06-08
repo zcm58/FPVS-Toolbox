@@ -178,6 +178,11 @@ project view. This mode reads raw `FullFFT Amplitude (uV)` target and
 neighboring frequency bins, sends target and noise topographies through the
 same inverse model, and displays source-space z-scores.
 
+By default, z-score maps display only positive source-space z-scores (`z > 0`).
+The signed z-score payload is still preserved in the generated JSON for QC, but
+negative/below-baseline values are not rendered in the normal activation view.
+This keeps the visible heatmap focused on above-baseline FPVS source responses.
+
 The older arbitrary-amplitude L2-MNE cortical-surface export remains available
 as an advanced diagnostic action. Those values are arbitrary/template-scaled
 source amplitudes proportional to the sensor topographies used as input

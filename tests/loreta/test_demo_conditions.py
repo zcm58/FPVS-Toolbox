@@ -4,9 +4,14 @@ import numpy as np
 
 from Tools.LORETA_Visualizer.conditions import condition_by_id
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
-from Tools.LORETA_Visualizer.gui import _activation_value_readout
+from Tools.LORETA_Visualizer.gui import _activation_display_payload, _activation_value_readout
 from Tools.LORETA_Visualizer.scalar_fields import LORETA_SCALAR_COLORS, format_scalar_value, resolve_scalar_limits
-from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_VOLUME_MESH, make_source_payload
+from Tools.LORETA_Visualizer.source_payloads import (
+    SOURCE_KIND_SURFACE_MESH,
+    SOURCE_KIND_VOLUME_MESH,
+    filter_source_payload_values_above,
+    make_source_payload,
+)
 from Tools.LORETA_Visualizer.synthetic_brain import make_synthetic_brain_mesh
 from Tools.LORETA_Visualizer.transforms import (
     COORDINATE_SPACE_DISPLAY,
@@ -95,6 +100,86 @@ def test_scalar_scale_readout_formats_tiny_source_values_and_units() -> None:
 
     assert _activation_value_readout(payload) == (
         "Value: beta L2-MNE cortical source amplitude; unit: arbitrary units; input: summed BCA uV"
+    )
+
+
+def test_filter_source_payload_values_above_remaps_mesh_faces() -> None:
+    payload = make_source_payload(
+        points=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.5, 1.5, 0.0],
+            ],
+            dtype=float,
+        ),
+        values=np.asarray([-1.0, 0.0, 0.5, 2.0, 3.0], dtype=float),
+        label="signed z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 2, 3], [2, 3, 4], [1, 2, 4]], dtype=np.int64),
+        metadata={"source_value_unit": "z-score"},
+        normalize_values=False,
+    )
+
+    filtered = filter_source_payload_values_above(payload, threshold=0.0)
+
+    assert filtered.values.tolist() == [0.5, 2.0, 3.0]
+    assert np.array_equal(filtered.faces, np.asarray([[0, 1, 2]], dtype=np.int64))
+    assert filtered.metadata["display_value_filter_original_point_count"] == 5
+    assert filtered.metadata["display_value_filter_rendered_point_count"] == 3
+
+
+def test_filter_source_payload_values_above_remaps_flat_vtk_mesh_faces() -> None:
+    payload = make_source_payload(
+        points=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        values=np.asarray([-1.0, 0.5, 1.5, 2.5], dtype=float),
+        label="signed z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        value_label="source-space z-score",
+        faces=np.asarray([3, 0, 1, 2, 3, 1, 2, 3], dtype=np.int64),
+        metadata={"source_value_unit": "z-score"},
+        normalize_values=False,
+    )
+
+    filtered = filter_source_payload_values_above(payload, threshold=0.0)
+
+    assert filtered.values.tolist() == [0.5, 1.5, 2.5]
+    assert np.array_equal(filtered.faces, np.asarray([3, 0, 1, 2], dtype=np.int64))
+
+
+def test_zscore_activation_display_defaults_to_positive_values_only() -> None:
+    payload = make_source_payload(
+        points=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        values=np.asarray([-6.0, 0.0, 4.2], dtype=float),
+        label="Semantic Response",
+        value_label="source-space z-score",
+        metadata={"source_value_unit": "z-score", "sensor_value_unit": "raw FFT amplitude uV"},
+        normalize_values=False,
+    )
+
+    display_payload = _activation_display_payload(payload)
+
+    assert display_payload.values.tolist() == [4.2]
+    assert _activation_value_readout(display_payload) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; display: > 0"
     )
 
 
