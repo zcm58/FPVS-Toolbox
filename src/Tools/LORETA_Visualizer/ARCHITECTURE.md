@@ -151,8 +151,8 @@ from already summed BCA values or compact selected-harmonic summaries.
 
 - `gui.py`: embedded page, controls, status text, fsaverage worker wiring, and
   user-triggered renderer updates.
-- `renderer.py`: PyVista/VTK scene adapter. It displays base meshes, smooth
-  visual mesh duplicates, prepared source payloads, opacity, scalar ranges, and
+- `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
+  prepared source payloads, opacity, scalar ranges, and
   camera controls. It must not calculate source estimates.
 - `fsaverage_mesh.py`: external fsaverage discovery/fetch/read/decimation and
   construction of the anatomical display transform. It must not calculate

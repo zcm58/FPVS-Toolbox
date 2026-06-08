@@ -412,12 +412,11 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_visible_check.toggled.connect(self._on_activation_visibility_changed)
         controls.content_layout.addWidget(self.activation_visible_check)
 
-        self.smooth_surface_check = QCheckBox("Smooth visual brain surface", controls)
-        self.smooth_surface_check.setObjectName("loreta_smooth_surface_check")
-        self.smooth_surface_check.setChecked(False)
-        self.smooth_surface_check.setToolTip("Display a smoothed visual duplicate; activation coordinates stay unchanged.")
-        self.smooth_surface_check.toggled.connect(self._on_smooth_surface_toggled)
-        controls.content_layout.addWidget(self.smooth_surface_check)
+        self.reset_camera_btn = make_action_button("Reset", compact=True, parent=controls)
+        self.reset_camera_btn.setObjectName("loreta_reset_camera_btn")
+        self.reset_camera_btn.setToolTip("Reset view")
+        self.reset_camera_btn.clicked.connect(self._reset_camera)
+        controls.content_layout.addWidget(self.reset_camera_btn)
 
         self.advanced_controls_check = QCheckBox("Advanced", controls)
         self.advanced_controls_check.setObjectName("loreta_advanced_controls_check")
@@ -430,12 +429,6 @@ class LoretaVisualizerWindow(QWidget):
         advanced_layout.setSpacing(6)
         self.advanced_controls.setVisible(False)
         self.advanced_controls_check.toggled.connect(self.advanced_controls.setVisible)
-
-        self.reset_camera_btn = make_action_button("Reset", compact=True, parent=controls)
-        self.reset_camera_btn.setObjectName("loreta_reset_camera_btn")
-        self.reset_camera_btn.setToolTip("Reset view")
-        self.reset_camera_btn.clicked.connect(self._reset_camera)
-        advanced_layout.addWidget(self.reset_camera_btn)
 
         self.load_source_payload_btn = make_action_button("Load source JSON", compact=True, parent=controls)
         self.load_source_payload_btn.setObjectName("loreta_load_source_payload_btn")
@@ -501,7 +494,6 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_activation_range_enabled()
         self.condition_combo.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
-        self.smooth_surface_check.setEnabled(enabled)
         self.advanced_controls_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
         self.load_source_payload_btn.setEnabled(enabled)
@@ -567,16 +559,11 @@ class LoretaVisualizerWindow(QWidget):
     def _update_condition_status(self) -> None:
         manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
         if manifest_entry is not None:
-            self.condition_status_label.setText(f"Showing imported source condition: {manifest_entry.label}")
+            self.condition_status_label.setText("")
             return
         condition = condition_by_id(self._selected_condition_id)
         region_label = condition.activation_region.replace("_", " ")
         self.condition_status_label.setText(f"Showing synthetic {region_label} activation.")
-
-    def _on_smooth_surface_toggled(self, checked: bool) -> None:
-        renderer = self.renderer
-        if renderer is not None:
-            renderer.set_smooth_visual_enabled(checked)
 
     def _zoom_in(self) -> None:
         if self.renderer is not None:
@@ -720,7 +707,7 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._last_import_dir = path.parent
         self._set_activation_payload(payload)
-        self.condition_status_label.setText(f"Showing imported prepared source payload: {path.name}")
+        self.condition_status_label.setText("")
 
     def _import_prepared_source_manifest(self, path: Path) -> None:
         try:
@@ -785,7 +772,6 @@ class LoretaVisualizerWindow(QWidget):
         if renderer is None or not isinstance(result, FsaverageMeshResult):
             return
         renderer.replace_brain_mesh(result.mesh, reset_camera=True)
-        renderer.set_smooth_visual_enabled(self.smooth_surface_check.isChecked())
         self._refresh_dummy_activation()
         self.mesh_status.set_variant("success")
         self.mesh_status.set_text(
@@ -853,7 +839,7 @@ class LoretaVisualizerWindow(QWidget):
             }
         )
         self._set_activation_payload(payload)
-        self.condition_status_label.setText(f"Showing imported source condition: {entry.label}")
+        self.condition_status_label.setText("")
 
     def _set_activation_payload(self, payload: SourcePayload) -> None:
         renderer = self.renderer

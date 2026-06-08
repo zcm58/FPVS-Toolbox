@@ -39,13 +39,10 @@ class BrainRendererWidget(QWidget):
         self.setObjectName("loreta_brain_renderer")
         self._plotter: Any | None = None
         self._brain_actor: Any | None = None
-        self._smooth_brain_actor: Any | None = None
         self._activation_actor: Any | None = None
         self._surface: Any | None = None
-        self._smooth_surface: Any | None = None
         self._current_mesh: BrainMesh | None = None
         self._brain_opacity = initial_opacity
-        self._smooth_visual_enabled = False
         self._activation_opacity = 0.72
         self._activation_visible = True
         self._activation_scalar_range = (DEFAULT_SCALAR_MIN, DEFAULT_SCALAR_MAX)
@@ -78,7 +75,7 @@ class BrainRendererWidget(QWidget):
         mesh = make_synthetic_brain_mesh()
         self._current_mesh = mesh
         self._surface = self._to_polydata(pv, mesh)
-        self._brain_actor = self._add_brain_actor(self._surface, visible=True)
+        self._brain_actor = self._add_brain_actor(self._surface)
         plotter.add_axes(interactive=False)
         plotter.camera_position = "xy"
         plotter.reset_camera()
@@ -114,7 +111,7 @@ class BrainRendererWidget(QWidget):
         except (AttributeError, RuntimeError, TypeError):
             logger.debug("loreta_brain_material_failed", exc_info=True)
 
-    def _add_brain_actor(self, surface: Any, *, visible: bool) -> Any:
+    def _add_brain_actor(self, surface: Any) -> Any:
         plotter = self._plotter
         if plotter is None:
             return None
@@ -131,46 +128,16 @@ class BrainRendererWidget(QWidget):
             diffuse=0.72,
         )
         self._apply_brain_material(actor)
-        actor.SetVisibility(bool(visible))
         return actor
-
-    def _make_smooth_surface(self) -> Any | None:
-        surface = self._surface
-        if surface is None:
-            return None
-        try:
-            smoothed = surface.smooth(
-                n_iter=70,
-                relaxation_factor=0.018,
-                convergence=0.0,
-                boundary_smoothing=True,
-                feature_smoothing=False,
-                inplace=False,
-            )
-            return smoothed.compute_normals(
-                point_normals=True,
-                cell_normals=False,
-                split_vertices=False,
-                consistent_normals=True,
-                auto_orient_normals=True,
-                feature_angle=100.0,
-                inplace=False,
-            )
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            logger.debug("loreta_smooth_surface_failed", exc_info=True)
-            return surface
 
     def set_brain_opacity(self, opacity: float) -> None:
         opacity = max(0.05, min(1.0, float(opacity)))
         self._brain_opacity = opacity
         actor = self._brain_actor
-        smooth_actor = self._smooth_brain_actor
         plotter = self._plotter
         if actor is None or plotter is None:
             return
         actor.GetProperty().SetOpacity(opacity)
-        if smooth_actor is not None:
-            smooth_actor.GetProperty().SetOpacity(opacity)
         plotter.render()
 
     def mesh_points(self) -> Any | None:
@@ -209,47 +176,12 @@ class BrainRendererWidget(QWidget):
                 plotter.remove_actor(previous_actor, render=False)
             except (AttributeError, RuntimeError, TypeError, ValueError):
                 logger.debug("loreta_remove_previous_actor_failed", exc_info=True)
-        previous_smooth_actor = self._smooth_brain_actor
-        if previous_smooth_actor is not None:
-            try:
-                plotter.remove_actor(previous_smooth_actor, render=False)
-            except (AttributeError, RuntimeError, TypeError, ValueError):
-                logger.debug("loreta_remove_previous_smooth_actor_failed", exc_info=True)
         self._current_mesh = mesh
         self._surface = self._to_polydata(pv, mesh)
-        self._smooth_surface = None
-        self._smooth_brain_actor = None
-        self._brain_actor = self._add_brain_actor(self._surface, visible=not self._smooth_visual_enabled)
-        if self._smooth_visual_enabled:
-            self._ensure_smooth_actor()
+        self._brain_actor = self._add_brain_actor(self._surface)
         if reset_camera:
             plotter.reset_camera()
         plotter.render()
-
-    def set_smooth_visual_enabled(self, enabled: bool) -> None:
-        self._smooth_visual_enabled = bool(enabled)
-        if self._smooth_visual_enabled:
-            self._ensure_smooth_actor()
-        brain_actor = self._brain_actor
-        smooth_actor = self._smooth_brain_actor
-        plotter = self._plotter
-        if brain_actor is not None:
-            brain_actor.SetVisibility(not self._smooth_visual_enabled)
-        if smooth_actor is not None:
-            smooth_actor.SetVisibility(self._smooth_visual_enabled)
-        if plotter is not None:
-            plotter.render()
-
-    def _ensure_smooth_actor(self) -> None:
-        if self._smooth_brain_actor is not None:
-            return
-        plotter = self._plotter
-        if plotter is None:
-            return
-        self._smooth_surface = self._make_smooth_surface()
-        if self._smooth_surface is None:
-            return
-        self._smooth_brain_actor = self._add_brain_actor(self._smooth_surface, visible=self._smooth_visual_enabled)
 
     def set_activation_payload(self, payload: SourcePayload) -> None:
         plotter = self._plotter
@@ -371,10 +303,8 @@ class BrainRendererWidget(QWidget):
         plotter = self._plotter
         self._plotter = None
         self._brain_actor = None
-        self._smooth_brain_actor = None
         self._activation_actor = None
         self._surface = None
-        self._smooth_surface = None
         self._current_mesh = None
         if plotter is None:
             return

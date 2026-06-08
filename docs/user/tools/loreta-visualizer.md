@@ -34,7 +34,6 @@ drawn inside the transparent anatomical shell.
 - Adjust brain transparency.
 - Use an external fsaverage mesh loaded through MNE, with synthetic fallback
   when the external mesh is unavailable.
-- Toggle a smoothed visual duplicate of the brain surface.
 - Show or hide the source map independently from the brain mesh.
 - Adjust source-map opacity.
 - Switch among project source-map conditions when available, or synthetic

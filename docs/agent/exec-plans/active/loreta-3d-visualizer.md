@@ -161,7 +161,7 @@ Objective:
 - Add interaction controls:
   - orbit/drag rotation;
   - mouse-wheel or trackpad zoom;
-  - reset camera/default view action in Advanced controls;
+  - reset camera/default view action in the always-visible controls;
   - transparency slider for the base brain mesh.
 - Add a sidebar button and dedicated sidebar icon/logo.
 - Keep the viewer responsive during interaction and app navigation.
@@ -321,7 +321,7 @@ Done means:
 - The condition selector offers occipital, frontal, and deep medial-temporal synthetic demos.
 - Switching to the deep demo updates the heatmap layer immediately and places smooth internal mesh blobs inside the transparent brain volume.
 - The renderer accepts a general source payload without knowing how values were calculated.
-- Existing opacity, visibility, smoothing, zoom, rotate, and reset behavior still works.
+- Existing opacity, visibility, zoom, rotate, and reset behavior still works.
 - Focused non-GUI tests cover the payload contract and the synthetic deep-source payload shape.
 
 ### Phase 5B: Scalar Gradient Source Maps
@@ -890,8 +890,9 @@ Implementation notes completed:
 - Hauk-style z-score maps are now the default project behavior: after
   fsaverage loads, the GUI auto-loads the existing project-local z-score
   manifest, or auto-builds it once in a worker when the manifest is missing.
-  Manual z-score rebuilds, arbitrary-amplitude exports, and prepared JSON
-  imports live in the collapsed Advanced controls.
+  Reset view remains always visible. Manual z-score rebuilds,
+  arbitrary-amplitude exports, and prepared JSON imports live in the collapsed
+  Advanced controls.
 - The default z-score activation view renders only positive source-space
   z-scores (`z > 0`). The generated payloads still preserve the full signed
   z-score field for QC, but negative/below-baseline source points are filtered
