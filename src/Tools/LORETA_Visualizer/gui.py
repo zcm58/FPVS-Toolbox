@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QDialogButtonBox,
     QSizePolicy,
     QSlider,
     QVBoxLayout,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from Main_App.gui.components import (
+    AppDialog,
     SectionCard,
     StatusBanner,
     SubsectionHeaderLabel,
@@ -53,6 +55,10 @@ DEFAULT_OPACITY_PERCENT = 48
 DEFAULT_ACTIVATION_OPACITY_PERCENT = 72
 PROJECT_SOURCE_EXPORT_AMPLITUDE = "amplitude"
 PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
+SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
+SOURCE_OPTIONS_ACTION_LOAD_MANIFEST = "load_manifest"
+SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE = "rebuild_zscore"
+SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE = "rebuild_amplitude"
 
 
 class FsaverageLoadWorker(QObject):
@@ -87,10 +93,17 @@ class ProjectSourceMapExportWorker(QObject):
     failed = Signal(str)
     finished = Signal()
 
-    def __init__(self, *, project_root: Path, export_mode: str) -> None:
+    def __init__(
+        self,
+        *,
+        project_root: Path,
+        export_mode: str,
+        include_flagged_subjects: bool,
+    ) -> None:
         super().__init__()
         self._project_root = project_root
         self._export_mode = export_mode
+        self._include_flagged_subjects = include_flagged_subjects
 
     @Slot()
     def run(self) -> None:
@@ -100,13 +113,19 @@ class ProjectSourceMapExportWorker(QObject):
                     write_project_l2_mne_hauk_zscore_payloads,
                 )
 
-                result = write_project_l2_mne_hauk_zscore_payloads(project_root=self._project_root)
+                result = write_project_l2_mne_hauk_zscore_payloads(
+                    project_root=self._project_root,
+                    include_flagged_subjects=self._include_flagged_subjects,
+                )
             else:
                 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
                     write_project_l2_mne_cortical_surface_payloads,
                 )
 
-                result = write_project_l2_mne_cortical_surface_payloads(project_root=self._project_root)
+                result = write_project_l2_mne_cortical_surface_payloads(
+                    project_root=self._project_root,
+                    include_flagged_subjects=self._include_flagged_subjects,
+                )
         except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
             self.failed.emit(str(exc))
         else:
@@ -212,6 +231,97 @@ def _activation_display_payload(payload: SourcePayload) -> SourcePayload:
     return payload
 
 
+def _source_export_status_text(
+    export_mode: str,
+    *,
+    automatic: bool,
+    include_flagged_subjects: bool,
+) -> str:
+    flag_text = "including flagged participants" if include_flagged_subjects else "excluding flagged participants"
+    if automatic:
+        return f"Preparing project source-space z-score maps ({flag_text})..."
+    if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
+        return f"Building Hauk-style source-space z-score JSON from the active project ({flag_text})..."
+    return f"Building beta L2-MNE source JSON from the active project ({flag_text})..."
+
+
+class SourceMapOptionsDialog(AppDialog):
+    """Small modal for source-map rebuild and import options."""
+
+    def __init__(
+        self,
+        parent: QWidget,
+        *,
+        include_flagged_subjects: bool,
+        project_available: bool,
+        export_busy: bool,
+    ) -> None:
+        super().__init__("Source Map Options", parent, size=SurfaceSize(width=430, height=360, min_width=390))
+        self.selected_action: str | None = None
+
+        method_label = QLabel(
+            "Default project maps use beta Hauk-style L2-MNE source-space z-scores. "
+            "The method uses project FullFFT target/noise bins, the Stats-selected "
+            "oddball harmonics, and a BioSemi64/fsaverage cortical template.",
+            self,
+        )
+        method_label.setObjectName("loreta_source_options_method_label")
+        method_label.setWordWrap(True)
+        self.root_layout.addWidget(method_label)
+
+        self.include_flagged_check = QCheckBox("Include Stats QC flagged participants in source-map calculations", self)
+        self.include_flagged_check.setObjectName("loreta_include_flagged_subjects_check")
+        self.include_flagged_check.setChecked(bool(include_flagged_subjects))
+        self.include_flagged_check.setToolTip(
+            "Leave unchecked to exclude participants listed in Flagged Participants.xlsx."
+        )
+        self.root_layout.addWidget(self.include_flagged_check)
+
+        availability_label = QLabel(
+            "Open a project to rebuild source maps." if not project_available else "Rebuilds write project-local JSON and load the resulting manifest.",
+            self,
+        )
+        availability_label.setObjectName("loreta_source_options_availability_label")
+        availability_label.setWordWrap(True)
+        self.root_layout.addWidget(availability_label)
+
+        self.rebuild_zscore_btn = make_action_button("Rebuild z-score maps", compact=True, parent=self)
+        self.rebuild_zscore_btn.setObjectName("loreta_options_rebuild_zscore_btn")
+        self.rebuild_zscore_btn.setToolTip("Write Hauk-style source-space z-score JSON and load it.")
+        self.rebuild_zscore_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE))
+        self.root_layout.addWidget(self.rebuild_zscore_btn)
+
+        self.rebuild_amplitude_btn = make_action_button("Build diagnostic amplitude maps", compact=True, parent=self)
+        self.rebuild_amplitude_btn.setObjectName("loreta_options_rebuild_amplitude_btn")
+        self.rebuild_amplitude_btn.setToolTip("Write diagnostic beta L2-MNE amplitude JSON and load it.")
+        self.rebuild_amplitude_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE))
+        self.root_layout.addWidget(self.rebuild_amplitude_btn)
+
+        self.load_source_payload_btn = make_action_button("Load source JSON", compact=True, parent=self)
+        self.load_source_payload_btn.setObjectName("loreta_options_load_source_payload_btn")
+        self.load_source_payload_btn.setToolTip("Load a prepared source payload JSON file.")
+        self.load_source_payload_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD))
+        self.root_layout.addWidget(self.load_source_payload_btn)
+
+        self.load_source_manifest_btn = make_action_button("Load manifest", compact=True, parent=self)
+        self.load_source_manifest_btn.setObjectName("loreta_options_load_source_manifest_btn")
+        self.load_source_manifest_btn.setToolTip("Load a prepared source condition manifest.")
+        self.load_source_manifest_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_LOAD_MANIFEST))
+        self.root_layout.addWidget(self.load_source_manifest_btn)
+
+        rebuild_enabled = project_available and not export_busy
+        self.rebuild_zscore_btn.setEnabled(rebuild_enabled)
+        self.rebuild_amplitude_btn.setEnabled(rebuild_enabled)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
+        buttons.rejected.connect(self.reject)
+        self.root_layout.addWidget(buttons)
+
+    def _select_action(self, action: str) -> None:
+        self.selected_action = action
+        self.accept()
+
+
 class LoretaVisualizerWindow(QWidget):
     """Embedded workspace page for Phase 1 real-time brain rendering."""
 
@@ -241,6 +351,7 @@ class LoretaVisualizerWindow(QWidget):
         self._last_import_dir: Path | None = None
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
         self._auto_project_zscore_attempted = False
+        self._include_flagged_subjects = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -418,45 +529,11 @@ class LoretaVisualizerWindow(QWidget):
         self.reset_camera_btn.clicked.connect(self._reset_camera)
         controls.content_layout.addWidget(self.reset_camera_btn)
 
-        self.advanced_controls_check = QCheckBox("Advanced", controls)
-        self.advanced_controls_check.setObjectName("loreta_advanced_controls_check")
-        controls.content_layout.addWidget(self.advanced_controls_check)
-
-        self.advanced_controls = QWidget(controls)
-        self.advanced_controls.setObjectName("loreta_advanced_controls")
-        advanced_layout = QVBoxLayout(self.advanced_controls)
-        advanced_layout.setContentsMargins(0, 0, 0, 0)
-        advanced_layout.setSpacing(6)
-        self.advanced_controls.setVisible(False)
-        self.advanced_controls_check.toggled.connect(self.advanced_controls.setVisible)
-
-        self.load_source_payload_btn = make_action_button("Load source JSON", compact=True, parent=controls)
-        self.load_source_payload_btn.setObjectName("loreta_load_source_payload_btn")
-        self.load_source_payload_btn.setToolTip("Load a prepared source payload JSON file.")
-        self.load_source_payload_btn.clicked.connect(self._load_prepared_source_payload)
-        advanced_layout.addWidget(self.load_source_payload_btn)
-
-        self.build_project_zscore_btn = make_action_button("Rebuild z-score maps", compact=True, parent=controls)
-        self.build_project_zscore_btn.setObjectName("loreta_build_project_zscore_btn")
-        self.build_project_zscore_btn.setToolTip(
-            "Write Hauk-style L2-MNE source-space z-score JSON from the active project and load it."
-        )
-        self.build_project_zscore_btn.clicked.connect(self._build_project_zscore_source_maps)
-        advanced_layout.addWidget(self.build_project_zscore_btn)
-
-        self.build_project_source_btn = make_action_button("Build diagnostic amplitude maps", compact=True, parent=controls)
-        self.build_project_source_btn.setObjectName("loreta_build_project_source_btn")
-        self.build_project_source_btn.setToolTip("Write beta L2-MNE source JSON from the active project and load it.")
-        self.build_project_source_btn.clicked.connect(self._build_project_source_maps)
-        advanced_layout.addWidget(self.build_project_source_btn)
-
-        self.load_source_manifest_btn = make_action_button("Load manifest", compact=True, parent=controls)
-        self.load_source_manifest_btn.setObjectName("loreta_load_source_manifest_btn")
-        self.load_source_manifest_btn.setToolTip("Load a prepared source condition manifest.")
-        self.load_source_manifest_btn.clicked.connect(self._load_prepared_source_manifest)
-        advanced_layout.addWidget(self.load_source_manifest_btn)
-
-        controls.content_layout.addWidget(self.advanced_controls)
+        self.source_options_btn = make_action_button("Source Map Options...", compact=True, parent=controls)
+        self.source_options_btn.setObjectName("loreta_source_options_btn")
+        self.source_options_btn.setToolTip("Open source-map rebuild, import, and participant QC options.")
+        self.source_options_btn.clicked.connect(self._open_source_map_options)
+        controls.content_layout.addWidget(self.source_options_btn)
         controls.content_layout.addStretch(1)
 
         self._update_transparency_label(DEFAULT_OPACITY_PERCENT)
@@ -494,20 +571,13 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_activation_range_enabled()
         self.condition_combo.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
-        self.advanced_controls_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
-        self.load_source_payload_btn.setEnabled(enabled)
+        self.source_options_btn.setEnabled(enabled)
         self._sync_project_source_button()
-        self.load_source_manifest_btn.setEnabled(enabled)
 
     def _sync_project_source_button(self) -> None:
-        enabled = (
-            self.renderer is not None
-            and self._project_root is not None
-            and self._source_export_thread is None
-        )
-        self.build_project_source_btn.setEnabled(enabled)
-        self.build_project_zscore_btn.setEnabled(enabled)
+        if hasattr(self, "source_options_btn"):
+            self.source_options_btn.setEnabled(self.renderer is not None)
 
     def _on_transparency_changed(self, value: int) -> None:
         self._update_transparency_label(value)
@@ -577,6 +647,26 @@ class LoretaVisualizerWindow(QWidget):
         if self.renderer is not None:
             self.renderer.reset_camera()
 
+    def _open_source_map_options(self) -> None:
+        if self.renderer is None:
+            return
+        dialog = SourceMapOptionsDialog(
+            self,
+            include_flagged_subjects=self._include_flagged_subjects,
+            project_available=self._project_root is not None,
+            export_busy=self._source_export_thread is not None,
+        )
+        dialog.exec()
+        self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
+        if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
+            self._build_project_zscore_source_maps()
+        elif dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE:
+            self._build_project_source_maps()
+        elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD:
+            self._load_prepared_source_payload()
+        elif dialog.selected_action == SOURCE_OPTIONS_ACTION_LOAD_MANIFEST:
+            self._load_prepared_source_manifest()
+
     def _load_prepared_source_payload(self) -> None:
         renderer = self.renderer
         if renderer is None:
@@ -637,20 +727,29 @@ class LoretaVisualizerWindow(QWidget):
             return
         if self._source_export_thread is not None:
             return
-        if automatic:
-            status_text = "Preparing project source-space z-score maps..."
-        else:
-            status_text = (
-                "Building Hauk-style source-space z-score JSON from the active project..."
-                if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE
-                else "Building beta L2-MNE source JSON from the active project..."
-            )
+        include_flagged_subjects = self._include_flagged_subjects
+        status_text = _source_export_status_text(
+            export_mode,
+            automatic=automatic,
+            include_flagged_subjects=include_flagged_subjects,
+        )
         self.condition_status_label.setText(status_text)
-        self.build_project_source_btn.setEnabled(False)
-        self.build_project_zscore_btn.setEnabled(False)
+        self.source_options_btn.setEnabled(False)
+        logger.info(
+            "loreta_project_source_maps_export_started",
+            extra={
+                "project_root": str(self._project_root),
+                "export_mode": export_mode,
+                "include_flagged_subjects": include_flagged_subjects,
+            },
+        )
 
         thread = QThread(self)
-        worker = ProjectSourceMapExportWorker(project_root=self._project_root, export_mode=export_mode)
+        worker = ProjectSourceMapExportWorker(
+            project_root=self._project_root,
+            export_mode=export_mode,
+            include_flagged_subjects=include_flagged_subjects,
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.exported.connect(self._on_project_source_maps_exported)
@@ -675,6 +774,20 @@ class LoretaVisualizerWindow(QWidget):
         self._last_import_dir = output_dir
         method_id = str(getattr(producer_result, "method_id", ""))
         source_label = "source-space z-score maps" if "hauk_zscore" in method_id else "source maps"
+        project_inputs = getattr(result, "project_inputs", None)
+        flagged_subjects = tuple(getattr(project_inputs, "flagged_subjects", ()) or ())
+        excluded_subjects = tuple(getattr(project_inputs, "excluded_subjects", ()) or ())
+        logger.info(
+            "loreta_project_source_maps_export_complete",
+            extra={
+                "manifest_path": str(manifest_path),
+                "method_id": method_id,
+                "condition_count": len(payloads),
+                "include_flagged_subjects": self._include_flagged_subjects,
+                "flagged_subject_count": len(flagged_subjects),
+                "excluded_subject_count": len(excluded_subjects),
+            },
+        )
         self.condition_status_label.setText(
             f"Prepared project {source_label} for {len(payloads)} conditions."
         )
@@ -682,7 +795,10 @@ class LoretaVisualizerWindow(QWidget):
 
     @Slot(str)
     def _on_project_source_maps_failed(self, message: str) -> None:
-        logger.warning("loreta_project_source_maps_export_failed", extra={"error": message})
+        logger.warning(
+            "loreta_project_source_maps_export_failed",
+            extra={"error": message, "include_flagged_subjects": self._include_flagged_subjects},
+        )
         self.condition_status_label.setText(f"Project source export failed: {message}")
 
     @Slot()

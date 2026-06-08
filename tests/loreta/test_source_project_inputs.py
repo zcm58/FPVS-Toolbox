@@ -27,24 +27,27 @@ def test_project_input_assembler_builds_bca_condition_topographies(tmp_path) -> 
     assert result.diagnostics == ()
 
     condition_a = result.conditions[0]
-    expected_2_4 = np.asarray([10.0 + index for index in range(64)], dtype=float) + 0.5
-    expected_4_8 = np.asarray([20.0 + index for index in range(64)], dtype=float) + 0.5
+    expected_2_4 = np.asarray([10.0 + index for index in range(64)], dtype=float)
+    expected_4_8 = np.asarray([20.0 + index for index in range(64)], dtype=float)
     assert np.allclose(condition_a.harmonic_topographies[2.4], expected_2_4)
     assert np.allclose(condition_a.harmonic_topographies[4.8], expected_4_8)
     assert condition_a.metadata["source_sheet"] == "BCA (uV)"
-    assert condition_a.metadata["flagged_subjects_included"] == ["P2"]
-
-
-def test_project_input_assembler_can_exclude_flagged_subjects(tmp_path) -> None:
-    project_root = _build_project_fixture(tmp_path)
-
-    result = build_l2_mne_conditions_from_project(project_root, include_flagged_subjects=False)
-
-    condition_a = result.conditions[0]
-    expected_2_4 = np.asarray([10.0 + index for index in range(64)], dtype=float)
-    assert np.allclose(condition_a.harmonic_topographies[2.4], expected_2_4)
     assert condition_a.metadata["included_subject_count"] == 1
     assert condition_a.metadata["include_flagged_subjects"] is False
+    assert condition_a.metadata["flagged_subjects_included"] == []
+
+
+def test_project_input_assembler_can_include_flagged_subjects(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path)
+
+    result = build_l2_mne_conditions_from_project(project_root, include_flagged_subjects=True)
+
+    condition_a = result.conditions[0]
+    expected_2_4 = np.asarray([10.0 + index for index in range(64)], dtype=float) + 0.5
+    assert np.allclose(condition_a.harmonic_topographies[2.4], expected_2_4)
+    assert condition_a.metadata["included_subject_count"] == 2
+    assert condition_a.metadata["include_flagged_subjects"] is True
+    assert condition_a.metadata["flagged_subjects_included"] == ["P2"]
 
 
 def test_project_input_assembler_can_use_fft_amplitude_metric(tmp_path) -> None:
@@ -59,7 +62,7 @@ def test_project_input_assembler_can_use_fft_amplitude_metric(tmp_path) -> None:
     assert result.sheet_name == "FFT Amplitude (uV)"
     assert [condition.label for condition in result.conditions] == ["Condition B"]
     condition_b = result.conditions[0]
-    expected = np.asarray([300.0 + index for index in range(64)], dtype=float) + 0.5
+    expected = np.asarray([300.0 + index for index in range(64)], dtype=float)
     assert np.allclose(condition_b.harmonic_topographies[2.4], expected)
     assert condition_b.sensor_value_unit == "summed FFT amplitude uV"
 

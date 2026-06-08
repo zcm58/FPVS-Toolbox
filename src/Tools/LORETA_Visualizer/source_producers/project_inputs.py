@@ -61,7 +61,7 @@ def build_l2_mne_conditions_from_project(
     *,
     metric: str = SOURCE_TOPOGRAPHY_METRIC_BCA,
     conditions: Sequence[str] | None = None,
-    include_flagged_subjects: bool = True,
+    include_flagged_subjects: bool = False,
 ) -> ProjectSourceTopographyInputSet:
     """Build group-level condition topographies from existing project workbooks.
 

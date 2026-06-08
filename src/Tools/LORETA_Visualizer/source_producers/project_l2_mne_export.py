@@ -86,7 +86,7 @@ def write_project_l2_mne_cortical_surface_payloads(
     output_dir: str | Path | None = None,
     metric: str = SOURCE_TOPOGRAPHY_METRIC_BCA,
     conditions: Sequence[str] | None = None,
-    include_flagged_subjects: bool = True,
+    include_flagged_subjects: bool = False,
     spacing: str = DEFAULT_MNE_FSAVERAGE_SPACING,
     allow_fetch_fsaverage: bool = False,
     harmonic_strategy: str = HARMONIC_STRATEGY_SUM_SENSOR_TOPOGRAPHIES_THEN_INVERT,
@@ -401,9 +401,9 @@ def _parse_args() -> argparse.Namespace:
         help="Condition label to include. Repeat to export a subset.",
     )
     parser.add_argument(
-        "--exclude-flagged",
+        "--include-flagged",
         action="store_true",
-        help="Exclude participants listed in Flagged Participants.xlsx.",
+        help="Include participants listed in Flagged Participants.xlsx. Default is to exclude them.",
     )
     parser.add_argument(
         "--spacing",
@@ -433,7 +433,7 @@ def main() -> int:
         output_dir=args.output,
         metric=args.metric,
         conditions=args.conditions,
-        include_flagged_subjects=not args.exclude_flagged,
+        include_flagged_subjects=args.include_flagged,
         spacing=args.spacing,
         allow_fetch_fsaverage=args.fetch_fsaverage,
         harmonic_strategy=args.harmonic_strategy,

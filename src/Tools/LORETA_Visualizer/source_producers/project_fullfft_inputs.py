@@ -116,7 +116,7 @@ def build_l2_mne_hauk_zscore_conditions_from_project(
     project_root: str | Path,
     *,
     conditions: Sequence[str] | None = None,
-    include_flagged_subjects: bool = True,
+    include_flagged_subjects: bool = False,
     noise_window_bins: int = DEFAULT_HAUK_ZSCORE_NOISE_WINDOW_BINS,
     excluded_offsets: Sequence[int] = DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS,
     min_noise_bins: int = DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS,

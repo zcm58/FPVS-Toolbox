@@ -73,7 +73,7 @@ def write_project_l2_mne_hauk_zscore_payloads(
     project_root: str | Path,
     output_dir: str | Path | None = None,
     conditions: Sequence[str] | None = None,
-    include_flagged_subjects: bool = True,
+    include_flagged_subjects: bool = False,
     spacing: str = DEFAULT_MNE_FSAVERAGE_SPACING,
     allow_fetch_fsaverage: bool = False,
     forward_model: L2MNECorticalForwardModel | None = None,
@@ -178,9 +178,9 @@ def _parse_args() -> argparse.Namespace:
         help="Condition label to include. Repeat to export a subset.",
     )
     parser.add_argument(
-        "--exclude-flagged",
+        "--include-flagged",
         action="store_true",
-        help="Exclude participants listed in Flagged Participants.xlsx.",
+        help="Include participants listed in Flagged Participants.xlsx. Default is to exclude them.",
     )
     parser.add_argument(
         "--spacing",
@@ -201,7 +201,7 @@ def main() -> int:
         project_root=args.project_root,
         output_dir=args.output,
         conditions=args.conditions,
-        include_flagged_subjects=not args.exclude_flagged,
+        include_flagged_subjects=args.include_flagged,
         spacing=args.spacing,
         allow_fetch_fsaverage=args.fetch_fsaverage,
     )

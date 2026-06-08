@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, and Phase 6D are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, can write beta project source-map JSON from real project data, and can now write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, and Phase 6E are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, and now exposes method/QC controls plus user-facing method documentation for the beta source-map workflow.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -22,7 +22,9 @@ validated prepared JSON/manifest files for the visualizer. Phase 6D adds the
 publication-aligned method/QC path: raw project `FullFFT Amplitude (uV)`
 target and neighboring bins are sent through the same L2-MNE inverse model,
 then source-space baseline correction and z-scoring are applied before writing
-the renderer payload.
+the renderer payload. Phase 6E adds method documentation, a Source Map Options
+modal, flagged-participant include/exclude rebuild control, and compact IDE-log
+reporting for source-map rebuilds.
 
 This is still a beta, template-based method-validation stage, not a final
 scientifically validated source-localization workflow. The 6C and 6D paths use
@@ -36,11 +38,12 @@ unless a new plan explicitly scopes integration.
 The prepared payload contract stage is complete, Phase 6A established the first
 swappable source method, Phase 6B established a read-only project-input
 assembler, Phase 6C established the first real-project beta export and GUI
-entry point, and Phase 6D established the Hauk-style source-space z-score mode.
-The next recommended development slice is Phase 6E: source-localization method
-QC/reporting and user controls around z-score export assumptions, including
-flagged-participant inclusion, method metadata review, and manual/visible smoke
-documentation before broader scientific validation.
+entry point, Phase 6D established the Hauk-style source-space z-score mode, and
+Phase 6E established source-map method/QC controls and documentation. The next
+recommended development slice is Phase 6F: manual/scientific validation and
+comparison of the beta L2-MNE z-score maps against scalp-map patterns,
+participant-QC variants, and expected condition effects before adding another
+source-localization method.
 
 ## Date
 
@@ -645,9 +648,10 @@ Implementation notes:
   group means across included participants, preserving a separate topography for
   each selected harmonic so the L2-MNE producer can apply its harmonic strategy.
 - It reads `Excluded Participants.xlsx` and `Flagged Participants.xlsx`.
-  Excluded participants are skipped. Flagged participants are included by
-  default to preserve current Stats behavior, but callers can set
-  `include_flagged_subjects=False` for diagnostic/source-map comparisons.
+  Excluded participants are skipped. Participants listed in
+  `Flagged Participants.xlsx` are excluded by default for source-map generation,
+  but callers can set `include_flagged_subjects=True` for diagnostic/source-map
+  comparisons.
 - It performs no writes to the project and does not import renderer, GUI,
   importer, display transform, preprocessing, or Stats implementation modules.
 
@@ -675,11 +679,11 @@ Semantic Categories 6B findings:
   but is ROI-level, not electrode-level; the source topography assembler should
   use it for the selected harmonics and use per-participant workbooks for
   electrode-level values.
-- Existing QC output flags `study-participant`, `study-participant`, and `study-participant`; none are excluded. Including
-  flagged participants preserves current Stats behavior but can strongly
+- Existing QC output flags `study-participant`, `study-participant`, and `study-participant`; none are excluded by Stats.
+  Including flagged participants in source-map generation can strongly
   dominate Mixed Response maps, especially `study-participant` and `study-participant` at electrode `study-participant`.
-  The source workflow should expose a flagged-participant include/exclude choice
-  before users interpret maps.
+  The source workflow defaults to excluding flagged participants and exposes an
+  explicit include choice before users interpret maps.
 
 Recommendation:
 
@@ -703,8 +707,8 @@ Done means:
   source-ready 64-channel condition topographies for all selected conditions.
 - The selected harmonic list matches the all-condition Stats-ready harmonic
   list exactly.
-- Excluded and flagged participant files are read, and flagged participants can
-  be included or excluded deliberately.
+- Excluded and flagged participant files are read, and flagged participants are
+  excluded by default while remaining deliberately includable for comparison.
 - Focused tests cover the assembler without depending on local `D:\` project
   paths.
 - No project files, preprocessing outputs, Stats behavior, renderer code, GUI
@@ -743,11 +747,10 @@ Implementation notes:
 - The default source-space spacing is MNE `ico3`, yielding 1,284 cortical
   source points and 2,560 triangular faces. Points are emitted in FreeSurfer
   fsaverage millimeter coordinates with `coordinate_space: fsaverage_surface`.
-- The diagnostic arbitrary-amplitude exporter remains available from the
-  collapsed Advanced controls. It runs in a `QThread`, writes the project-local
-  files, then loads the emitted manifest through the existing importer. The
-  worker orchestrates the calculation but does not put source math into the
-  renderer or importer.
+- The diagnostic arbitrary-amplitude exporter remains available from Source Map
+  Options. It runs in a `QThread`, writes the project-local files, then loads
+  the emitted manifest through the existing importer. The worker orchestrates
+  the calculation but does not put source math into the renderer or importer.
 - The `Load source JSON` and `Load manifest` dialogs now prefer the last import
   folder, then the active project's 6D z-score output folder, then the 6C
   diagnostic amplitude output folder, then the active project root.
@@ -891,8 +894,8 @@ Implementation notes completed:
   fsaverage loads, the GUI auto-loads the existing project-local z-score
   manifest, or auto-builds it once in a worker when the manifest is missing.
   Reset view remains always visible. Manual z-score rebuilds,
-  arbitrary-amplitude exports, and prepared JSON imports live in the collapsed
-  Advanced controls.
+  arbitrary-amplitude exports, and prepared JSON imports live in Source Map
+  Options.
 - The default z-score activation view renders only positive source-space
   z-scores (`z > 0`). The generated payloads still preserve the full signed
   z-score field for QC, but negative/below-baseline source points are filtered
@@ -907,6 +910,84 @@ Implementation notes completed:
   l2_mne_cortical_surface_hauk_zscore_beta`, `value_label:
   source-space z-score`, `source_value_unit: z-score`, and selected harmonics
   `[2.4, 4.8, 7.2, 9.6, 13.2, 20.4]`.
+- After Phase 6E default-QC behavior was updated, Semantic Categories was
+  regenerated with `include_flagged_subjects: false`, excluding `study-participant`, `study-participant`,
+  and `study-participant` from source-map generation. The first regenerated payload reports
+  24 included participants.
+
+### Phase 6E: Source-Map Method QC And User Controls
+
+Status: Implemented. Phase 6E adds user-facing method documentation and replaces
+the inline Advanced control group with a small Source Map Options modal.
+
+Objective:
+
+- Keep detailed method explanation out of the compact tool panel and place it
+  in a dedicated MkDocs page.
+- Cite the FPVS EEG/MEG L2-MNE source-estimation publications that motivate the
+  beta Hauk-style path:
+  - Hauk et al. (2021), DOI `10.1016/j.neuroimage.2021.118460`;
+  - Hauk et al. (2025), DOI `10.1162/imag_a_00414`.
+- Expose the existing producer-side flagged-participant include/exclude option
+  in the GUI so maps can be rebuilt with or without participants listed in
+  `Flagged Participants.xlsx`.
+- Keep source-map rebuild reporting compact in structured IDE logs instead of
+  adding a sidecar report file.
+- Do not change renderer behavior or move source-estimation logic into GUI,
+  renderer, importer, bridge helpers, preprocessing, Stats, or project
+  manifests.
+
+Implementation notes completed:
+
+- Added `docs/user/tools/source-localization-method.md` and wired it into
+  `mkdocs.yml`.
+- Updated `docs/user/tools/loreta-visualizer.md` to link to the method page and
+  describe Source Map Options.
+- Replaced the collapsed Advanced checkbox/inline controls with a
+  `Source Map Options...` modal. The modal contains:
+  - a short method summary;
+  - `Include Stats QC flagged participants in source-map calculations`;
+  - `Rebuild z-score maps`;
+  - `Build diagnostic amplitude maps`;
+  - `Load source JSON`;
+  - `Load manifest`.
+- `ProjectSourceMapExportWorker` now carries `include_flagged_subjects` to both
+  the Hauk-style z-score producer and the diagnostic amplitude producer.
+- The GUI logs one compact start line and one compact completion/failure line
+  for project source-map rebuilds, including method/export mode, manifest path
+  when available, condition count, and flagged/excluded participant counts.
+- The renderer and display bridge were intentionally unchanged.
+- Source-map rebuild defaults were updated after initial Phase 6E completion:
+  participants listed in `Flagged Participants.xlsx` are excluded by default;
+  the modal checkbox is an opt-in to include them.
+
+Done means:
+
+- The MkDocs user nav includes a dedicated source-localization method page.
+- The method page explains current beta status, inputs, z-score calculation,
+  positive-z display behavior, participant QC behavior, output files, and
+  limitations.
+- The visualizer offers a modal source-map options workflow instead of an
+  inline Advanced section.
+- Rebuilds exclude flagged participants by default and can include them on
+  request without changing Stats behavior, preprocessing, or project manifests.
+- Focused non-GUI checks cover changed helper behavior and the LORETA test suite
+  still passes. GUI behavior is covered by a visible/manual smoke path because
+  offscreen Qt is not run locally.
+
+### Phase 6F: Manual Scientific Validation And Comparison
+
+Status: Planned.
+
+Objective:
+
+- Compare Semantic Categories source maps against condition scalp maps and
+  expected posterior/anterior response patterns.
+- Rebuild and compare maps with flagged participants included vs excluded.
+- Record validation observations and unresolved scientific assumptions before
+  adding another source-localization method.
+- Decide whether the next method should be eLORETA/sLORETA volume, a mixed
+  cortical-volume source space, or a more subject-specific forward model.
 
 ## Integration Safety
 
@@ -969,8 +1050,5 @@ Additional visible smoke path for future slices:
   topographies are summed across selected harmonics, matching-offset
   neighboring-bin topographies are summed across selected harmonics, and the
   source-space z-score is computed from those target/noise source estimates.
-- Whether the beta GUI/project workflow should add an explicit flagged
-  participant include/exclude control. Phase 6C/6D currently include flagged
-  participants by default to match current Stats behavior.
 - Future second method target after L2-MNE: LORETA/eLORETA volume, mixed
   cortical-volume source space, or another explicitly scoped model.

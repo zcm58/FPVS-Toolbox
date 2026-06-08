@@ -8,7 +8,12 @@ import pandas as pd
 import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
-from Tools.LORETA_Visualizer.gui import default_project_zscore_manifest_path, resolve_loreta_import_start_dir
+from Tools.LORETA_Visualizer.gui import (
+    PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+    _source_export_status_text,
+    default_project_zscore_manifest_path,
+    resolve_loreta_import_start_dir,
+)
 from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
@@ -97,6 +102,20 @@ def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_pat
 
     manifest_path.write_text("{}", encoding="utf-8")
     assert default_project_zscore_manifest_path(project_root) == manifest_path
+
+
+def test_source_export_status_text_reports_flagged_participant_choice() -> None:
+    assert _source_export_status_text(
+        PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+        automatic=False,
+        include_flagged_subjects=True,
+    ) == "Building Hauk-style source-space z-score JSON from the active project (including flagged participants)..."
+
+    assert _source_export_status_text(
+        PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+        automatic=True,
+        include_flagged_subjects=False,
+    ) == "Preparing project source-space z-score maps (excluding flagged participants)..."
 
 
 def test_source_points_use_native_coordinate_source_space_not_forward_head_space() -> None:

@@ -147,10 +147,18 @@ space, estimates target/noise source amplitudes through the same inverse model,
 and writes `source_value_unit: z-score` payloads. It must not derive z-scores
 from already summed BCA values or compact selected-harmonic summaries.
 
+Phase 6E adds documentation and GUI source-map options around those producer
+paths. Project source-map generation excludes participants listed in
+`Flagged Participants.xlsx` by default. The GUI may pass an
+`include_flagged_subjects` opt-in choice into project rebuild workers and log
+compact rebuild summaries, but source-estimation math still belongs only to
+`source_producers/`.
+
 ## File Responsibilities
 
 - `gui.py`: embedded page, controls, status text, fsaverage worker wiring, and
-  user-triggered renderer updates.
+  user-triggered renderer updates. Source-map rebuild/import controls live in
+  the Source Map Options modal.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity, scalar ranges, and
   camera controls. It must not calculate source estimates.

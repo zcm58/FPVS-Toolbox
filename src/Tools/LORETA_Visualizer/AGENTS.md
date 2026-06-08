@@ -29,6 +29,13 @@ must remain in `source_producers/` and must not move source-estimation logic
 into the GUI, renderer, importer, fsaverage display mesh loader, or bridge
 helpers.
 
+Phase 6E adds user-facing source-method documentation and GUI source-map
+options only. Source-map generation excludes participants listed in
+`Flagged Participants.xlsx` by default; the Source Map Options modal may
+explicitly include them for comparison, then pass that choice to the project
+source producer. It must not calculate source values or change renderer
+behavior.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -168,6 +175,8 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Workers must not touch widgets directly; use signals.
 - Keep startup resilient: missing PyVista/VTK/MNE/fsaverage should show inline status and synthetic fallback rather than crashing the Main App.
 - Do not run offscreen Qt workflows in this repo; use non-GUI checks plus visible/manual smoke paths.
+- Keep source-map rebuild/import controls in the Source Map Options modal unless
+  a future plan explicitly scopes a different interaction model.
 
 ## Verification
 

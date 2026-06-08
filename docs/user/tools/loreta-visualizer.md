@@ -15,6 +15,10 @@ Hauk-style L2-MNE cortical-surface source-space z-score maps. This is an early
 method-validation path, not a final validated LORETA, eLORETA, sLORETA,
 deep-source, or subject-MRI workflow.
 
+For details about the current source-localization method, assumptions,
+citations, z-score calculation, and participant QC behavior, see
+[Source Localization Method](source-localization-method.md).
+
 The visible occipital, frontal, and deep medial temporal demo activations are
 still synthetic. The real-project path is separate: it reads existing project
 workbooks, uses the Stats-selected oddball harmonic list, builds a template
@@ -42,12 +46,9 @@ drawn inside the transparent anatomical shell.
   bounds.
 - Read the source color scale from the control-panel color ramp and min/max
   labels.
-- Load a prepared source payload JSON file from disk and render it through the
-  same display adapter used by the synthetic fixture.
-- Load a prepared source manifest JSON file so several prepared source payloads
-  appear in the condition dropdown.
-- Build beta project source JSON from the active project and load the resulting
-  manifest.
+- Open **Source Map Options** to rebuild project maps with Stats/QC-flagged
+  participants excluded by default or explicitly included for comparison, load a
+  prepared source payload JSON file, or load a prepared source manifest.
 - Use checked-in example payload and manifest JSON files as references for the
   expected future calculation output shape.
 
@@ -83,9 +84,10 @@ The main file to load manually is:
 
 `project_l2_mne_cortical_surface_beta_manifest.json`
 
-The **Load source JSON** and **Load manifest** dialogs start in the last import
-folder when possible. Otherwise, they open to the active project's source-map
-output folder when it exists, then the active project root.
+The source JSON and manifest load actions live in **Source Map Options**. Their
+dialogs start in the last import folder when possible. Otherwise, they open to
+the active project's source-map output folder when it exists, then the active
+project root.
 
 ## Interpreting the demo maps
 
@@ -108,11 +110,11 @@ manifest is missing and the required `FullFFT Amplitude (uV)` target/noise-bin
 data are present, the tool builds the z-score source maps in the background and
 loads the generated manifest.
 
-Advanced controls can still load a controlled prepared-payload JSON file or a
-prepared source manifest manually. Manual payloads need points, values, optional
-triangle faces, a source-model label, metadata, and a coordinate-space label.
-The tool validates the file and converts coordinates into the current display
-mesh space before rendering.
+Source Map Options can still load a controlled prepared-payload JSON file or a
+prepared source manifest manually. Manual payloads need points, values,
+optional triangle faces, a source-model label, metadata, and a coordinate-space
+label. The tool validates the file and converts coordinates into the current
+display mesh space before rendering.
 
 ## Prepared source JSON format
 
@@ -183,8 +185,9 @@ negative/below-baseline values are not rendered in the normal activation view.
 This keeps the visible heatmap focused on above-baseline FPVS source responses.
 
 The older arbitrary-amplitude L2-MNE cortical-surface export remains available
-as an advanced diagnostic action. Those values are arbitrary/template-scaled
-source amplitudes proportional to the sensor topographies used as input
+in Source Map Options as a diagnostic action. Those values are
+arbitrary/template-scaled source amplitudes proportional to the sensor
+topographies used as input
 (`summed BCA uV` by default). They are not calibrated current density, dipole
 moment, or microvolts at the source.
 
