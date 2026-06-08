@@ -7,8 +7,9 @@ This page is the tool-local architecture contract for agents working in
 
 The LORETA Visualizer is an embedded PySide6 tool for interactive 3D display of
 an anatomical brain mesh plus prepared source-activation payloads. It supports
-both transparent overlay views for volume/deep payloads and an opaque cortical
-paint view for the current L2-MNE cortical-surface method.
+both transparent overlay views for volume/deep payloads and opaque cortical
+paint views for the current L2-MNE cortical-surface method, including the
+default publication-style split-hemisphere layout.
 It is a new source-localization visualization branch. It is not a revival,
 refactor, or design continuation of the removed `Tools.SourceLocalization`
 implementation.
@@ -16,6 +17,8 @@ implementation.
 The first durable goal is rendering:
 
 - real-time orbit, zoom, reset, and opacity controls where opacity is relevant;
+- independent left/right hemisphere rotation in publication-style cortical
+  display mode;
 - an external fsaverage-derived anatomical mesh when available;
 - a synthetic fallback mesh when fsaverage is unavailable;
 - synthetic scalar source maps for surface/deep rendering validation;
@@ -163,10 +166,16 @@ compact rebuild summaries, but source-estimation math still belongs only to
   the Source Map Options modal.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
-  paint actors, and camera controls. It must not calculate source estimates.
+  paint actors, split-hemisphere publication actors, and camera controls. It
+  must not calculate source estimates.
 - `fsaverage_mesh.py`: external fsaverage discovery/fetch/read/decimation and
-  construction of the anatomical display transform. It must not calculate
-  source estimates.
+  construction of the anatomical display transform. It also preserves
+  display-only left/right hemisphere meshes for publication layout. The
+  combined mesh remains pial for the single-surface and transparent views;
+  fsaverage inflated hemispheres are used only as the split-view display canvas
+  when their topology matches the pial/source surface. FreeSurfer `curv` or
+  `sulc` morph values may be read as split-view gray-white underlay shading.
+  It must not calculate source estimates.
 - `synthetic_brain.py`: deterministic fallback brain mesh and `BrainMesh`
   dataclass.
 - `conditions.py`: synthetic demo condition metadata.
@@ -291,10 +300,14 @@ The project Hauk-style z-score exporter writes generated files under
 same prepared-manifest importer as every other source payload. Its displayed
 values are source-space z-scores, not arbitrary L2-MNE amplitude. The generated
 payloads preserve the signed z-score field for QC. The default L2-MNE cortical
-surface view paints those values onto an opaque pial display mesh; z-scores
-below the selected display cutoff are clamped to the neutral gray cortex color,
-and displayed z-scores use the same heatmap ramp as the transparent overlay
-view. The default display cutoff is `z >= 1.64`. The
+surface view paints those values onto an opaque split-hemisphere display using
+fsaverage inflated hemispheres when available and pial split hemispheres as a
+fallback. The split display uses FreeSurfer `curv` gray-white underlay shading
+when available, `sulc` as a fallback, and geometry-derived shading as a final
+fallback. The alternate single-surface view paints the same values onto the
+combined pial mesh. Z-scores below the selected display cutoff are shown as the
+shaded cortex, and displayed z-scores use the same heatmap ramp as the
+transparent overlay view. The default display cutoff is `z >= 1.64`. The
 neighboring-bin policy mirrors the Stats-style FPVS neighboring-bin window by
 using offsets `-10..-2` and `+2..+10`, dropping the minimum and maximum
 neighboring source amplitude per source point before computing the source-space

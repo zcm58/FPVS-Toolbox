@@ -46,7 +46,14 @@ from Tools.LORETA_Visualizer.prepared_payload_importer import (
     load_prepared_source_manifest_json,
     load_prepared_source_payload_json,
 )
-from Tools.LORETA_Visualizer.renderer import BrainRendererWidget, RenderBackendError
+from Tools.LORETA_Visualizer.renderer import (
+    DISPLAY_MODE_CORTICAL_SURFACE,
+    DISPLAY_MODE_SPLIT_HEMISPHERE,
+    DISPLAY_MODE_TRANSPARENT_MESH,
+    SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES,
+    BrainRendererWidget,
+    RenderBackendError,
+)
 from Tools.LORETA_Visualizer.scalar_fields import (
     DEFAULT_SCALAR_MAX,
     DEFAULT_SCALAR_MIN,
@@ -60,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_OPACITY_PERCENT = 48
 DEFAULT_ACTIVATION_OPACITY_PERCENT = 72
+DEFAULT_DISPLAY_MODE = DISPLAY_MODE_SPLIT_HEMISPHERE
 PROJECT_SOURCE_EXPORT_AMPLITUDE = "amplitude"
 PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
 SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
@@ -73,6 +81,11 @@ ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
     ("z >= 2.58 (~two-tailed p < .01)", 2.58),
     ("z >= 3.29 (~two-tailed p < .001)", 3.29),
     ("z >= 3.89 (~two-tailed p < .0001)", 3.89),
+)
+DISPLAY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("Publication split hemispheres", DISPLAY_MODE_SPLIT_HEMISPHERE),
+    ("Fsaverage cortical surface", DISPLAY_MODE_CORTICAL_SURFACE),
+    ("Transparent brain mesh", DISPLAY_MODE_TRANSPARENT_MESH),
 )
 
 
@@ -208,13 +221,18 @@ def _activation_value_readout(
     payload: SourcePayload | None,
     *,
     zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    cortical_threshold_display: bool = True,
 ) -> str:
     if payload is None:
         return "Value: source activation"
     label = payload.value_label.strip() or "source activation"
     source_unit = str(payload.metadata.get("source_value_unit", "")).strip()
     sensor_unit = str(payload.metadata.get("sensor_value_unit", "")).strip()
-    filter_text = _activation_display_filter_readout(payload, zscore_display_threshold=zscore_display_threshold)
+    filter_text = _activation_display_filter_readout(
+        payload,
+        zscore_display_threshold=zscore_display_threshold,
+        cortical_threshold_display=cortical_threshold_display,
+    )
     if source_unit and sensor_unit:
         return f"Value: {label}; unit: {source_unit}; input: {sensor_unit}{filter_text}"
     if source_unit:
@@ -228,8 +246,9 @@ def _activation_display_filter_readout(
     payload: SourcePayload,
     *,
     zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    cortical_threshold_display: bool = True,
 ) -> str:
-    if uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+    if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
         return f"; display: z >= {format_scalar_value(zscore_display_threshold)}"
     if payload.metadata.get("display_value_filter") != "values_above_threshold":
         return ""
@@ -255,9 +274,10 @@ def _activation_scale_values(
     payload: SourcePayload,
     *,
     zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    cortical_threshold_display: bool = True,
 ) -> np.ndarray:
     values = np.asarray(payload.values, dtype=float)
-    if uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+    if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
         return values[values >= float(zscore_display_threshold)]
     return values
 
@@ -482,6 +502,7 @@ class LoretaVisualizerWindow(QWidget):
         self._auto_project_zscore_attempted = False
         self._include_flagged_subjects = False
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
+        self._display_mode = DEFAULT_DISPLAY_MODE
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -554,6 +575,18 @@ class LoretaVisualizerWindow(QWidget):
         self.condition_status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.condition_status_label.setWordWrap(True)
         controls.content_layout.addWidget(self.condition_status_label)
+
+        display_mode_label = QLabel("Display", controls)
+        display_mode_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(display_mode_label)
+
+        self.display_mode_combo = QComboBox(controls)
+        self.display_mode_combo.setObjectName("loreta_display_mode_combo")
+        for label, mode in DISPLAY_MODE_OPTIONS:
+            self.display_mode_combo.addItem(label, mode)
+        self.display_mode_combo.currentIndexChanged.connect(self._on_display_mode_changed)
+        controls.content_layout.addWidget(self.display_mode_combo)
+        self._set_display_mode_combo_data(self._display_mode)
 
         self.activation_auto_scale_check = QCheckBox("Auto scale intensity", controls)
         self.activation_auto_scale_check.setObjectName("loreta_activation_auto_scale_check")
@@ -653,6 +686,52 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_visible_check.toggled.connect(self._on_activation_visibility_changed)
         controls.content_layout.addWidget(self.activation_visible_check)
 
+        self.split_rotation_label = QLabel("Hemisphere rotation", controls)
+        self.split_rotation_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(self.split_rotation_label)
+
+        self.left_split_rotation_row = QWidget(controls)
+        left_split_rotation_layout = QHBoxLayout(self.left_split_rotation_row)
+        left_split_rotation_layout.setContentsMargins(0, 0, 0, 0)
+        left_split_rotation_layout.setSpacing(6)
+        left_split_rotation_layout.addWidget(QLabel("Left", self.left_split_rotation_row), 1)
+        self.left_split_rotate_minus_btn = make_action_button("-", compact=True, parent=self.left_split_rotation_row)
+        self.left_split_rotate_minus_btn.setObjectName("loreta_left_split_rotate_minus_btn")
+        self.left_split_rotate_minus_btn.setToolTip("Rotate left hemisphere counterclockwise")
+        self.left_split_rotate_minus_btn.clicked.connect(
+            lambda: self._rotate_split_hemisphere("left", -SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES)
+        )
+        self.left_split_rotate_plus_btn = make_action_button("+", compact=True, parent=self.left_split_rotation_row)
+        self.left_split_rotate_plus_btn.setObjectName("loreta_left_split_rotate_plus_btn")
+        self.left_split_rotate_plus_btn.setToolTip("Rotate left hemisphere clockwise")
+        self.left_split_rotate_plus_btn.clicked.connect(
+            lambda: self._rotate_split_hemisphere("left", SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES)
+        )
+        left_split_rotation_layout.addWidget(self.left_split_rotate_minus_btn, 0)
+        left_split_rotation_layout.addWidget(self.left_split_rotate_plus_btn, 0)
+        controls.content_layout.addWidget(self.left_split_rotation_row)
+
+        self.right_split_rotation_row = QWidget(controls)
+        right_split_rotation_layout = QHBoxLayout(self.right_split_rotation_row)
+        right_split_rotation_layout.setContentsMargins(0, 0, 0, 0)
+        right_split_rotation_layout.setSpacing(6)
+        right_split_rotation_layout.addWidget(QLabel("Right", self.right_split_rotation_row), 1)
+        self.right_split_rotate_minus_btn = make_action_button("-", compact=True, parent=self.right_split_rotation_row)
+        self.right_split_rotate_minus_btn.setObjectName("loreta_right_split_rotate_minus_btn")
+        self.right_split_rotate_minus_btn.setToolTip("Rotate right hemisphere counterclockwise")
+        self.right_split_rotate_minus_btn.clicked.connect(
+            lambda: self._rotate_split_hemisphere("right", -SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES)
+        )
+        self.right_split_rotate_plus_btn = make_action_button("+", compact=True, parent=self.right_split_rotation_row)
+        self.right_split_rotate_plus_btn.setObjectName("loreta_right_split_rotate_plus_btn")
+        self.right_split_rotate_plus_btn.setToolTip("Rotate right hemisphere clockwise")
+        self.right_split_rotate_plus_btn.clicked.connect(
+            lambda: self._rotate_split_hemisphere("right", SPLIT_HEMISPHERE_ROTATION_STEP_DEGREES)
+        )
+        right_split_rotation_layout.addWidget(self.right_split_rotate_minus_btn, 0)
+        right_split_rotation_layout.addWidget(self.right_split_rotate_plus_btn, 0)
+        controls.content_layout.addWidget(self.right_split_rotation_row)
+
         self.reset_camera_btn = make_action_button("Reset", compact=True, parent=controls)
         self.reset_camera_btn.setObjectName("loreta_reset_camera_btn")
         self.reset_camera_btn.setToolTip("Reset view")
@@ -692,16 +771,18 @@ class LoretaVisualizerWindow(QWidget):
             return
 
         self.viewport_layout.addWidget(self.renderer, 1)
+        self.renderer.set_display_mode(self._display_mode)
         self._set_controls_enabled(True)
         self._refresh_dummy_activation()
 
     def _set_controls_enabled(self, enabled: bool) -> None:
-        opacity_enabled = enabled and not self._activation_uses_cortical_paint()
+        opacity_enabled = enabled and not self._activation_uses_opaque_cortical_mode()
         self.transparency_slider.setEnabled(opacity_enabled)
         self.activation_opacity_slider.setEnabled(opacity_enabled)
         self.activation_auto_scale_check.setEnabled(enabled)
         self._sync_activation_range_enabled()
         self.condition_combo.setEnabled(enabled)
+        self.display_mode_combo.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
         self.source_options_btn.setEnabled(enabled)
@@ -751,11 +832,15 @@ class LoretaVisualizerWindow(QWidget):
         payload = self._current_activation_payload
         return payload is not None and uses_cortical_surface_paint(payload)
 
+    def _activation_uses_opaque_cortical_mode(self) -> bool:
+        return self._activation_uses_cortical_paint() and self._display_mode != DISPLAY_MODE_TRANSPARENT_MESH
+
     def _sync_activation_render_mode_controls(self) -> None:
         if not hasattr(self, "activation_opacity_slider"):
             return
-        cortical_paint = self._activation_uses_cortical_paint()
-        opacity_enabled = self.renderer is not None and not cortical_paint
+        opaque_cortical_mode = self._activation_uses_opaque_cortical_mode()
+        split_mode_active = opaque_cortical_mode and self._display_mode == DISPLAY_MODE_SPLIT_HEMISPHERE
+        opacity_enabled = self.renderer is not None and not opaque_cortical_mode
         self.transparency_slider.setEnabled(opacity_enabled)
         self.activation_opacity_slider.setEnabled(opacity_enabled)
         for widget in (
@@ -766,8 +851,45 @@ class LoretaVisualizerWindow(QWidget):
             self.activation_opacity_slider,
             self.activation_opacity_value_label,
         ):
-            widget.setVisible(not cortical_paint)
+            widget.setVisible(not opaque_cortical_mode)
+        for widget in (
+            self.split_rotation_label,
+            self.left_split_rotation_row,
+            self.right_split_rotation_row,
+        ):
+            widget.setVisible(split_mode_active)
+            widget.setEnabled(self.renderer is not None and split_mode_active)
         self.activation_color_ramp.setStyleSheet(_activation_color_ramp_stylesheet())
+
+    def _set_display_mode_combo_data(self, display_mode: str) -> None:
+        if not hasattr(self, "display_mode_combo"):
+            return
+        previous_block_state = self.display_mode_combo.blockSignals(True)
+        try:
+            for index in range(self.display_mode_combo.count()):
+                if self.display_mode_combo.itemData(index) == display_mode:
+                    self.display_mode_combo.setCurrentIndex(index)
+                    return
+        finally:
+            self.display_mode_combo.blockSignals(previous_block_state)
+
+    def _on_display_mode_changed(self, _index: int) -> None:
+        mode = self.display_mode_combo.currentData()
+        if not isinstance(mode, str):
+            return
+        self._display_mode = mode
+        renderer = self.renderer
+        if renderer is not None:
+            renderer.set_display_mode(mode)
+            renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
+            renderer.set_activation_visible(self.activation_visible_check.isChecked())
+        self._sync_activation_render_mode_controls()
+        self._apply_activation_scalar_range()
+
+    def _rotate_split_hemisphere(self, side: str, degrees: float) -> None:
+        renderer = self.renderer
+        if renderer is not None:
+            renderer.rotate_split_hemisphere(side, degrees)
 
     def _on_activation_visibility_changed(self, checked: bool) -> None:
         renderer = self.renderer
@@ -1054,8 +1176,19 @@ class LoretaVisualizerWindow(QWidget):
         renderer.replace_brain_mesh(result.mesh, reset_camera=True)
         self._refresh_dummy_activation()
         self.mesh_status.set_variant("success")
+        split_note = (
+            f" Split view uses fsaverage {result.split_surface} hemispheres."
+            if result.split_surface != result.surface
+            else ""
+        )
+        shading_note = (
+            f" Publication shading uses {result.split_shading_source}."
+            if result.split_shading_source
+            else ""
+        )
         self.mesh_status.set_text(
             f"Using {result.source_label} mesh from external cache ({result.triangle_count:,} triangles)."
+            f"{split_note}{shading_note}"
         )
         self._ensure_default_project_zscore_maps()
 
@@ -1128,6 +1261,7 @@ class LoretaVisualizerWindow(QWidget):
         display_payload = _activation_display_payload(payload)
         self._current_activation_payload = display_payload
         self._sync_activation_render_mode_controls()
+        renderer.set_display_mode(self._display_mode)
         renderer.set_activation_payload(display_payload)
         self._apply_activation_scalar_range()
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
@@ -1141,9 +1275,10 @@ class LoretaVisualizerWindow(QWidget):
         scale_values = _activation_scale_values(
             payload,
             zscore_display_threshold=self._zscore_display_threshold,
+            cortical_threshold_display=self._activation_uses_opaque_cortical_mode(),
         )
         manual_min = self.activation_min_spin.value()
-        if uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+        if self._activation_uses_opaque_cortical_mode() and _source_payload_uses_zscores(payload):
             threshold = self._zscore_display_threshold
             if self.activation_auto_scale_check.isChecked():
                 finite = scale_values[np.isfinite(scale_values)]
@@ -1178,6 +1313,7 @@ class LoretaVisualizerWindow(QWidget):
             _activation_value_readout(
                 self._current_activation_payload,
                 zscore_display_threshold=self._zscore_display_threshold,
+                cortical_threshold_display=self._activation_uses_opaque_cortical_mode(),
             )
         )
 

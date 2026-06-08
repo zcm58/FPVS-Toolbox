@@ -5,6 +5,12 @@ import numpy as np
 from Tools.LORETA_Visualizer.conditions import condition_by_id
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.gui import _activation_display_payload, _activation_value_readout
+from Tools.LORETA_Visualizer.renderer import (
+    BrainRendererWidget,
+    DISPLAY_MODE_SPLIT_HEMISPHERE,
+    _publication_hemisphere_points,
+    _publication_surface_rgb,
+)
 from Tools.LORETA_Visualizer.scalar_fields import LORETA_SCALAR_COLORS, format_scalar_value, resolve_scalar_limits
 from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_SURFACE_MESH,
@@ -12,6 +18,7 @@ from Tools.LORETA_Visualizer.source_payloads import (
     filter_source_payload_values_above,
     make_source_payload,
 )
+from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh
 from Tools.LORETA_Visualizer.synthetic_brain import make_synthetic_brain_mesh
 from Tools.LORETA_Visualizer.transforms import (
     COORDINATE_SPACE_DISPLAY,
@@ -40,6 +47,21 @@ def test_demo_conditions_place_volume_activation_in_distinct_regions() -> None:
     assert float(np.mean(occipital.points[:, 1])) < 0.0
     assert float(np.mean(frontal.points[:, 1])) > 0.0
     assert float(np.mean(frontal.points[:, 1])) > float(np.mean(occipital.points[:, 1]))
+
+
+def test_synthetic_brain_exposes_split_hemisphere_meshes() -> None:
+    mesh = make_synthetic_brain_mesh()
+
+    assert mesh.left_hemisphere is not None
+    assert mesh.right_hemisphere is not None
+    assert mesh.left_hemisphere.points.shape[1] == 3
+    assert mesh.right_hemisphere.points.shape[1] == 3
+    assert len(mesh.left_hemisphere.faces) > 0
+    assert len(mesh.right_hemisphere.faces) > 0
+    assert mesh.left_hemisphere.shade_values is not None
+    assert mesh.right_hemisphere.shade_values is not None
+    assert len(mesh.left_hemisphere.shade_values) == len(mesh.left_hemisphere.points)
+    assert len(mesh.right_hemisphere.shade_values) == len(mesh.right_hemisphere.points)
 
 
 def test_deep_demo_condition_uses_internal_volume_mesh() -> None:
@@ -210,6 +232,126 @@ def test_l2_mne_surface_zscore_display_uses_cortical_paint_without_filtering_poi
         "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
         "display: z >= 1.64"
     )
+
+    assert _activation_value_readout(display_payload, cortical_threshold_display=False) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV"
+    )
+
+
+def test_split_hemisphere_projection_uses_projection_points_for_values() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([2.0, 5.0], dtype=float),
+        label="surface z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_cortical_surface_hauk_zscore_beta",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={"source_value_unit": "z-score"},
+        normalize_values=False,
+    )
+    draw_points = np.asarray([[20.0, 0.0, 0.0], [22.0, 0.0, 0.0]], dtype=float)
+    projection_points = np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float)
+    hemisphere = BrainHemisphereMesh(
+        points=draw_points,
+        faces=np.asarray([3, 0, 1, 1], dtype=np.int64),
+        projection_points=projection_points,
+        surface="inflated",
+    )
+    renderer = BrainRendererWidget.__new__(BrainRendererWidget)
+    renderer._cortical_paint_z_threshold = 1.64
+
+    state = BrainRendererWidget._project_split_hemisphere(renderer, hemisphere, payload)
+
+    assert np.array_equal(state.points, draw_points)
+    assert state.values.tolist() == [2.0, 5.0]
+
+
+def test_publication_surface_rgb_preserves_shaded_cortex_underlay() -> None:
+    values = np.asarray([np.nan, 2.0, 5.0], dtype=float)
+    shade_values = np.asarray([0.0, 0.5, 1.0], dtype=float)
+
+    visible_colors = _publication_surface_rgb(
+        values,
+        shade_values,
+        scalar_range=(2.0, 5.0),
+        activation_visible=True,
+    )
+    hidden_colors = _publication_surface_rgb(
+        values,
+        shade_values,
+        scalar_range=(2.0, 5.0),
+        activation_visible=False,
+    )
+
+    assert visible_colors.dtype == np.uint8
+    assert visible_colors.shape == (3, 3)
+    assert hidden_colors[0, 0] < hidden_colors[2, 0]
+    assert np.array_equal(visible_colors[0], hidden_colors[0])
+    assert not np.array_equal(visible_colors[1], hidden_colors[1])
+    assert not np.array_equal(visible_colors[2], hidden_colors[2])
+
+
+def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeypatch) -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+        values=np.asarray([2.0, 3.0, 4.0], dtype=float),
+        label="surface z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_cortical_surface_hauk_zscore_beta",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 2]], dtype=np.int64),
+        metadata={"source_value_unit": "z-score"},
+        normalize_values=False,
+    )
+    renderer = BrainRendererWidget.__new__(BrainRendererWidget)
+    renderer._plotter = _FakePlotter()
+    renderer._display_mode = DISPLAY_MODE_SPLIT_HEMISPHERE
+    renderer._split_hemisphere_active = True
+    renderer._activation_actor = None
+    renderer._split_left_actor = None
+    renderer._split_right_actor = None
+    reset_camera_values: list[bool] = []
+
+    def fake_set_split_payload(
+        _self: BrainRendererWidget,
+        _payload,
+        *,
+        reset_camera: bool = True,
+    ) -> bool:
+        reset_camera_values.append(reset_camera)
+        return True
+
+    monkeypatch.setattr(BrainRendererWidget, "_set_split_hemisphere_payload", fake_set_split_payload)
+
+    renderer.set_activation_payload(payload)
+
+    assert reset_camera_values == [False]
+
+
+class _FakePlotter:
+    def render(self) -> None:
+        return None
+
+
+def test_publication_hemisphere_points_separate_left_and_right_layouts() -> None:
+    source_points = np.asarray(
+        [
+            [-1.0, -0.5, 0.0],
+            [-1.0, 0.5, 0.0],
+            [-0.5, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    left = _publication_hemisphere_points(source_points, side="left")
+    right = _publication_hemisphere_points(-source_points, side="right")
+    rotated_left = _publication_hemisphere_points(source_points, side="left", extra_yaw_degrees=12.0)
+
+    assert float(np.mean(left[:, 0])) < 0.0
+    assert float(np.mean(right[:, 0])) > 0.0
+    assert not np.allclose(left, rotated_left)
+    assert float(np.max(np.linalg.norm(left - np.mean(left, axis=0), axis=1))) <= 0.83
 
 
 def test_demo_condition_can_exercise_native_to_display_bridge() -> None:

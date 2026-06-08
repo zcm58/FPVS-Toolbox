@@ -78,13 +78,19 @@ space.
 ## What the viewer displays
 
 The generated JSON stores the full signed source-space z-score field. The
-default cortical-surface view uses an opaque fsaverage pial brain and paints
-source-space z-scores on that surface. Values below the selected display
-threshold are shown as the neutral gray cortex color rather than as activation
-colors. The default cutoff is `z >= 1.64`; Source Map Options > Display also
-offers `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89` presets.
-Displayed values use the same heatmap color scale as the transparent source-map
-view.
+default cortical-surface display uses an opaque publication-style split view of
+the left and right fsaverage hemispheres and paints source-space z-scores on
+those surfaces. The split view uses inflated fsaverage hemispheres when they
+are available and topology-compatible with the pial/source surface, which makes
+the cortex flatter and easier to inspect. The split view also uses FreeSurfer
+`curv` gray-white shading when available, `sulc` as a fallback, and a simple
+geometry-derived underlay if neither morph file is available. The same payload
+can also be shown on a single pial surface or in the transparent mesh view.
+Values below the selected display threshold are shown as the shaded cortex
+rather than as activation colors. The default cutoff is `z >= 1.64`; Source Map
+Options > Display also offers `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and
+`z >= 3.89` presets. Displayed values use the same heatmap color scale as the
+transparent source-map view.
 
 The color legend is in z-score units for these payloads. With auto-scaling on,
 the upper color limit is the largest displayed positive z-score in the current
@@ -92,7 +98,10 @@ condition. Manual color limits change only the display scale; they do not
 change the generated source values.
 
 The paint projection is display-only interpolation from the prepared source
-mesh to the denser pial display mesh. It should be interpreted as a clearer
+mesh to pial/source-space projection coordinates. In split-hemisphere view, the
+same display-only projection is applied separately to the left and right
+hemispheres, then drawn on the inflated display canvas with curvature/sulcal
+underlay shading when available. It should be interpreted as a clearer
 visualization of the same beta source map, not as extra spatial precision in
 the source calculation.
 

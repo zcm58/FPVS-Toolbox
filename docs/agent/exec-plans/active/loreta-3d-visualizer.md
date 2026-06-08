@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, and Phase 6F are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, and renders L2-MNE cortical-surface maps as opaque pial cortical paint.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, and Phase 6G are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, and defaults cortical viewing to a publication-style split-hemisphere layout.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -27,7 +27,8 @@ modal, flagged-participant include/exclude rebuild control, and compact IDE-log
 reporting for source-map rebuilds. Phase 6F adds opaque pial cortical paint
 rendering and a user-facing z-score display cutoff selector for L2-MNE cortical
 surface payloads while preserving transparent overlay rendering for volume/deep
-payloads.
+payloads. Phase 6G adds a display-mode selector and makes a publication-style
+split-hemisphere cortical view the default selected cortical display.
 
 This is still a beta, template-based method-validation stage, not a final
 scientifically validated source-localization workflow. The 6C and 6D paths use
@@ -44,10 +45,11 @@ assembler, Phase 6C established the first real-project beta export and GUI
 entry point, Phase 6D established the Hauk-style source-space z-score mode, and
 Phase 6E established source-map method/QC controls and documentation, and
 Phase 6F established the opaque cortical paint visualization and display
-threshold selector for surface maps. The next recommended development slice is
-Phase 6G: a source-view mode selector with a split-hemisphere,
-publication-style cortical viewer alongside the current pial surface view and
-transparent mesh view.
+threshold selector for surface maps. Phase 6G established a source-view mode
+selector with a split-hemisphere, publication-style cortical viewer alongside
+the single pial surface view and transparent mesh view. The next recommended
+development slice is Phase 6H: visible/manual scientific validation and
+comparison against expected publication-style cortical maps.
 
 ## Date
 
@@ -1012,8 +1014,9 @@ Implementation notes completed:
   `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89`.
 - User docs and tool-local agent/architecture docs describe cortical paint as
   visualization interpolation only, not extra source-estimation precision.
-- Publication-ready inflated-surface views are intentionally left as future
-  work; Phase 6F targets the current pial display surface only.
+- Publication-ready split-hemisphere layout, inflated display surfaces, and
+  curvature/sulcal shading belong to Phase 6G and later view-mode slices;
+  Phase 6F targets the current single pial display surface only.
 
 Done means:
 
@@ -1029,13 +1032,13 @@ Done means:
 
 ### Phase 6G: View Mode Selector And Split-Hemisphere Publication Viewer
 
-Status: Planned.
+Status: Implemented.
 
 Objective:
 
 - Add a right-panel display mode selector so users can switch between:
-  - current fsaverage pial cortical surface map;
   - publication-style split-hemisphere cortical view;
+  - fsaverage pial cortical surface map;
   - transparent brain mesh view for volume/deep and future LORETA/eLORETA
     payloads.
 - Keep all modes reading the same prepared payload and scalar-range controls
@@ -1044,30 +1047,40 @@ Objective:
   project already-computed display values, but must not compute source
   localization, z-scores, or statistical masks.
 
-Initial implementation direction:
+Implemented scope:
 
-- The pial cortical surface map remains the default for L2-MNE cortical
-  surface payloads.
-- The split-hemisphere mode should be a display-only publication-style layout
-  for cortical surface payloads. It should not claim Hauk-style cluster
-  permutation masking until that method is implemented.
-- The transparent mesh mode should keep the current opacity controls and remain
-  the default-compatible path for volume/deep payloads.
-- Mode switching should be immediate for the active condition without requiring
-  source JSON rebuilds.
-- If a selected mode is incompatible with the active payload kind, the GUI
-  should fall back gracefully or disable that option with clear status text.
-
-Open decisions before implementation:
-
-- Whether the split-hemisphere view uses pial or inflated surfaces for the first
-  slice.
-- Whether the split-hemisphere view is a second PyVista viewport layout or a
-  camera/layout mode inside the existing renderer.
-- Whether surface labels should include left/right text in the viewport or stay
-  implicit through layout.
-- Whether transparent mesh mode should be selectable for cortical payloads as a
-  comparison/debug view or reserved for volume/deep payloads.
+- The publication split-hemisphere mode is the default selected display mode.
+- The split view uses fsaverage inflated hemisphere meshes when available,
+  with pial hemisphere fallback if the inflated topology is unavailable or does
+  not match the pial/source surface.
+- The renderer preserves left/right fsaverage hemisphere surfaces at anatomical
+  mesh load time, projects already-computed cortical values through pial/source
+  coordinates, draws them on the split-view display surface, and places them
+  side-by-side in a publication-oriented camera layout.
+- The split view reads FreeSurfer `curv` morph data from the external
+  fsaverage cache for gray-white curvature underlay shading, falls back to
+  `sulc` if needed, and finally falls back to geometry-derived shading if no
+  morph underlay is available.
+- Split-view RGB colors combine the underlay and the existing heatmap ramp:
+  sub-threshold/hidden source values show shaded cortex, while thresholded
+  positive z-scores paint over that cortex.
+- Left and right hemispheres can be rotated independently from the right panel.
+  The existing Reset button restores the desired publication layout and camera.
+- Switching conditions in publication split mode preserves the current camera,
+  zoom, and hemisphere rotations; Reset is the explicit control for returning
+  to the standard publication layout.
+- The single cortical surface mode keeps the Phase 6F opaque cortical paint
+  behavior.
+- The transparent mesh mode remains available and keeps opacity controls. It is
+  still the fallback-compatible path for volume/deep payloads and future
+  LORETA/eLORETA volume methods.
+- This is display-only shading. It is not a cluster-permutation mask and does
+  not modify source values.
+- Mode switching is immediate for the active condition and does not rebuild
+  source JSON.
+- All modes consume the same prepared payload. View-mode geometry transforms
+  are display-only and do not compute source localization, z-scores, or
+  statistical masks.
 
 ### Phase 6H: Manual Scientific Validation And Comparison
 

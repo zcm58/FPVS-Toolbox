@@ -42,6 +42,17 @@ already-computed source values onto the higher-resolution pial display mesh,
 and apply a user-selected z-score display cutoff, but it must not compute or
 alter source-localization values.
 
+Phase 6G adds a display-mode selector and makes the publication-style
+split-hemisphere cortical view the default selected cortical display. This mode
+uses inflated left/right display meshes when fsaverage provides topology-matched
+inflated surfaces, falls back to pial split surfaces otherwise, projects the
+same prepared cortical payload values through pial/source coordinates, and lets
+the user rotate each hemisphere for inspection. Reset must restore the intended
+publication layout. The split view may use FreeSurfer `curv` or `sulc` morph
+data as a gray-white curvature underlay beneath the heatmap. It is still a
+display-only renderer mode, not a new source-localization method or
+statistical mask.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -97,10 +108,14 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 
 - `gui.py`: embedded PySide6 page, controls, worker wiring, and status text.
 - `renderer.py`: PyVista/VTK scene adapter, actors, camera, opacity where
-  relevant, scalar map, cortical paint display, and mesh display. No LORETA
-  math.
+  relevant, scalar map, cortical paint display, split-hemisphere publication
+  display, and mesh display. No LORETA math.
 - `fsaverage_mesh.py`: external MNE fsaverage discovery/fetch/read/decimation and
-  anatomical display transform construction. No source estimates.
+  anatomical display transform construction, including display-only
+  topology-matched hemisphere meshes for publication layout. The combined mesh
+  remains pial for existing single-surface and transparent views; inflated
+  surfaces and optional `curv`/`sulc` underlay values are only a split-view
+  display canvas. No source estimates.
 - `synthetic_brain.py`: fallback/demo mesh model.
 - `conditions.py` and `dummy_activation.py`: deterministic synthetic conditions
   and demo-only source maps.

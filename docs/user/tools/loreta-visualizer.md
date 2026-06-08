@@ -28,14 +28,24 @@ importer used by the demo fixtures.
 
 Use the current version to verify rendering behavior, camera controls, color
 scaling, and whether source maps can be drawn in the intended mode. Current
-L2-MNE cortical-surface project maps use an opaque cortical paint view. Volume,
-ROI, and deep-style maps keep the transparent anatomical shell behavior.
+L2-MNE cortical-surface project maps default to an opaque publication-style
+split-hemisphere cortical paint view. The split view uses fsaverage inflated
+hemispheres when available so the cortical map is flatter and easier to read.
+It also uses FreeSurfer curvature/sulcal gray-white shading when available to
+make folds and surface depth easier to interpret.
+Volume, ROI, and deep-style maps keep the transparent anatomical shell
+behavior.
 
 ## What you can do now
 
 - Rotate the 3D scene by dragging in the viewport.
 - Zoom with mouse or trackpad interaction.
-- Reset the camera to the default view.
+- Switch between publication split hemispheres, a single fsaverage cortical
+  surface, and the transparent brain mesh view.
+- Rotate the left and right hemispheres independently in the publication split
+  view.
+- Reset the camera, and in publication split view reset both hemispheres to the
+  intended publication layout.
 - Adjust brain transparency for transparent-shell volume/deep views.
 - Use an external fsaverage mesh loaded through MNE, with synthetic fallback
   when the external mesh is unavailable.
@@ -182,22 +192,31 @@ project view. This mode reads raw `FullFFT Amplitude (uV)` target and
 neighboring frequency bins, sends target and noise topographies through the
 same inverse model, and displays source-space z-scores.
 
-By default, z-score maps use an opaque cortical paint view on the fsaverage
-pial surface. The signed z-score payload is still preserved in the generated
-JSON for QC, but values below the selected display threshold are clamped to the
-neutral gray cortex color for display. The default threshold is `z >= 1.64`.
-Source Map Options > Display provides preset cutoffs for `z >= 1.64`,
-`z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89`. Values above the
-selected cutoff are painted on top with the same heatmap color ramp used by the
-transparent visualizer. This keeps the visible heatmap focused on stronger FPVS
-source responses without hiding the cortical surface.
+By default, z-score maps use an opaque cortical paint view in the
+publication-style split-hemisphere layout. That split layout uses inflated
+fsaverage hemispheres when they are available and topology-compatible with the
+pial/source surface; otherwise it falls back to pial split hemispheres. It uses
+FreeSurfer `curv` shading when available, `sulc` as a fallback, and a simple
+geometry-derived underlay if neither file is available. The same payload can
+also be shown on a single fsaverage pial surface or in the transparent mesh
+view. The signed z-score payload is still preserved in the generated JSON for
+QC, but in opaque split cortical paint mode values below the selected display
+threshold show the gray-white shaded cortex rather than activation colors. The
+default threshold is `z >= 1.64`. Source Map Options > Display provides preset
+cutoffs for `z >= 1.64`, `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and
+`z >= 3.89`. Values above the selected cutoff are painted on top with the same
+heatmap color ramp used by the transparent visualizer. This keeps the visible
+heatmap focused on stronger FPVS source responses without hiding the cortical
+surface.
 
 The threshold is a display mask only. It is not the same as the
 cluster-permutation significance mask used in Hauk-style publication figures.
 
 The cortical paint projection is display-only interpolation from the prepared
-source mesh onto the higher-resolution pial display mesh. It does not improve
-or change the underlying source-estimation precision.
+source mesh onto pial/source-space projection coordinates. In the split
+publication view, the resulting display values are drawn on the inflated
+hemisphere canvas when available. This does not improve or change the
+underlying source-estimation precision.
 
 The older arbitrary-amplitude L2-MNE cortical-surface export remains available
 in Source Map Options as a diagnostic action. Those values are
