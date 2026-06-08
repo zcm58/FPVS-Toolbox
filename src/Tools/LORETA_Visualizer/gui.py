@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QSizePolicy,
     QSlider,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +33,11 @@ from Main_App.gui.components import (
     make_action_button,
 )
 from Tools.LORETA_Visualizer.conditions import DEMO_LORETA_CONDITIONS, condition_by_id, default_condition
+from Tools.LORETA_Visualizer.cortical_paint import (
+    DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    source_payload_uses_zscores,
+    uses_cortical_surface_paint,
+)
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
 from Tools.LORETA_Visualizer.fsaverage_mesh import FsaverageMeshError, FsaverageMeshResult, load_fsaverage_brain_mesh
 from Tools.LORETA_Visualizer.prepared_payload_importer import (
@@ -59,6 +66,14 @@ SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
 SOURCE_OPTIONS_ACTION_LOAD_MANIFEST = "load_manifest"
 SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE = "rebuild_zscore"
 SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE = "rebuild_amplitude"
+ZSCORE_DISPLAY_THRESHOLD_CUSTOM_ID = "custom"
+ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
+    ("z >= 1.64 (~one-tailed p < .05)", 1.64),
+    ("z >= 1.96 (~two-tailed p < .05)", 1.96),
+    ("z >= 2.58 (~two-tailed p < .01)", 2.58),
+    ("z >= 3.29 (~two-tailed p < .001)", 3.29),
+    ("z >= 3.89 (~two-tailed p < .0001)", 3.89),
+)
 
 
 class FsaverageLoadWorker(QObject):
@@ -176,10 +191,10 @@ def default_project_zscore_manifest_path(project_root: Path | None) -> Path | No
     return manifest_path if manifest_path.is_file() else None
 
 
-def _activation_color_ramp_stylesheet() -> str:
+def _activation_color_ramp_stylesheet(colors: tuple[str, ...] = LORETA_SCALAR_COLORS) -> str:
     stops = []
-    max_index = max(len(LORETA_SCALAR_COLORS) - 1, 1)
-    for index, color in enumerate(LORETA_SCALAR_COLORS):
+    max_index = max(len(colors) - 1, 1)
+    for index, color in enumerate(colors):
         stops.append(f"stop:{index / max_index:.3f} {color}")
     return (
         "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
@@ -189,13 +204,17 @@ def _activation_color_ramp_stylesheet() -> str:
     )
 
 
-def _activation_value_readout(payload: SourcePayload | None) -> str:
+def _activation_value_readout(
+    payload: SourcePayload | None,
+    *,
+    zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+) -> str:
     if payload is None:
         return "Value: source activation"
     label = payload.value_label.strip() or "source activation"
     source_unit = str(payload.metadata.get("source_value_unit", "")).strip()
     sensor_unit = str(payload.metadata.get("sensor_value_unit", "")).strip()
-    filter_text = _activation_display_filter_readout(payload)
+    filter_text = _activation_display_filter_readout(payload, zscore_display_threshold=zscore_display_threshold)
     if source_unit and sensor_unit:
         return f"Value: {label}; unit: {source_unit}; input: {sensor_unit}{filter_text}"
     if source_unit:
@@ -205,7 +224,13 @@ def _activation_value_readout(payload: SourcePayload | None) -> str:
     return f"Value: {label}{filter_text}"
 
 
-def _activation_display_filter_readout(payload: SourcePayload) -> str:
+def _activation_display_filter_readout(
+    payload: SourcePayload,
+    *,
+    zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+) -> str:
+    if uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+        return f"; display: z >= {format_scalar_value(zscore_display_threshold)}"
     if payload.metadata.get("display_value_filter") != "values_above_threshold":
         return ""
     threshold = payload.metadata.get("display_value_filter_threshold")
@@ -217,18 +242,24 @@ def _activation_display_filter_readout(payload: SourcePayload) -> str:
 
 
 def _source_payload_uses_zscores(payload: SourcePayload) -> bool:
-    source_unit = str(payload.metadata.get("source_value_unit", "")).strip().lower()
-    if source_unit in {"z-score", "z score", "zscore"}:
-        return True
-    label = payload.value_label.strip().lower()
-    model = payload.source_model.strip().lower()
-    return "z-score" in label or "zscore" in model
+    return source_payload_uses_zscores(payload)
 
 
 def _activation_display_payload(payload: SourcePayload) -> SourcePayload:
-    if _source_payload_uses_zscores(payload):
+    if _source_payload_uses_zscores(payload) and not uses_cortical_surface_paint(payload):
         return filter_source_payload_values_above(payload, threshold=0.0)
     return payload
+
+
+def _activation_scale_values(
+    payload: SourcePayload,
+    *,
+    zscore_display_threshold: float = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+) -> np.ndarray:
+    values = np.asarray(payload.values, dtype=float)
+    if uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+        return values[values >= float(zscore_display_threshold)]
+    return values
 
 
 def _source_export_status_text(
@@ -253,11 +284,13 @@ class SourceMapOptionsDialog(AppDialog):
         parent: QWidget,
         *,
         include_flagged_subjects: bool,
+        zscore_display_threshold: float,
         project_available: bool,
         export_busy: bool,
     ) -> None:
-        super().__init__("Source Map Options", parent, size=SurfaceSize(width=430, height=360, min_width=390))
+        super().__init__("Source Map Options", parent, size=SurfaceSize(width=460, height=430, min_width=410))
         self.selected_action: str | None = None
+        self._syncing_threshold_controls = False
 
         method_label = QLabel(
             "Default project maps use beta Hauk-style L2-MNE source-space z-scores. "
@@ -269,13 +302,66 @@ class SourceMapOptionsDialog(AppDialog):
         method_label.setWordWrap(True)
         self.root_layout.addWidget(method_label)
 
+        tabs = QTabWidget(self)
+        tabs.setObjectName("loreta_source_options_tabs")
+        self.root_layout.addWidget(tabs)
+
+        display_tab = QWidget(tabs)
+        display_layout = QVBoxLayout(display_tab)
+        display_layout.setContentsMargins(8, 8, 8, 8)
+        display_layout.setSpacing(8)
+
+        threshold_label = QLabel("Cortical z-score display threshold", display_tab)
+        threshold_label.setObjectName("loreta_zscore_threshold_label")
+        display_layout.addWidget(threshold_label)
+
+        self.zscore_threshold_combo = QComboBox(display_tab)
+        self.zscore_threshold_combo.setObjectName("loreta_zscore_threshold_combo")
+        for label, threshold in ZSCORE_DISPLAY_THRESHOLD_PRESETS:
+            self.zscore_threshold_combo.addItem(label, threshold)
+        self.zscore_threshold_combo.addItem("Custom", ZSCORE_DISPLAY_THRESHOLD_CUSTOM_ID)
+        self.zscore_threshold_combo.currentIndexChanged.connect(self._on_zscore_threshold_preset_changed)
+        display_layout.addWidget(self.zscore_threshold_combo)
+
+        threshold_row = QHBoxLayout()
+        threshold_row.setContentsMargins(0, 0, 0, 0)
+        threshold_row.setSpacing(8)
+        threshold_spin_label = QLabel("z cutoff", display_tab)
+        threshold_spin_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.zscore_threshold_spin = QDoubleSpinBox(display_tab)
+        self.zscore_threshold_spin.setObjectName("loreta_zscore_threshold_spin")
+        self.zscore_threshold_spin.setRange(0.0, 10.0)
+        self.zscore_threshold_spin.setDecimals(2)
+        self.zscore_threshold_spin.setSingleStep(0.01)
+        self.zscore_threshold_spin.valueChanged.connect(self._on_zscore_threshold_spin_changed)
+        threshold_row.addWidget(threshold_spin_label, 0)
+        threshold_row.addWidget(self.zscore_threshold_spin, 1)
+        display_layout.addLayout(threshold_row)
+
+        threshold_note = QLabel(
+            "Values below this display cutoff render as gray cortex. "
+            "This is not a cluster-permutation significance mask.",
+            display_tab,
+        )
+        threshold_note.setObjectName("loreta_zscore_threshold_note")
+        threshold_note.setWordWrap(True)
+        display_layout.addWidget(threshold_note)
+        display_layout.addStretch(1)
+        tabs.addTab(display_tab, "Display")
+
+        data_tab = QWidget(tabs)
+        data_layout = QVBoxLayout(data_tab)
+        data_layout.setContentsMargins(8, 8, 8, 8)
+        data_layout.setSpacing(8)
+        tabs.addTab(data_tab, "Data")
+
         self.include_flagged_check = QCheckBox("Include Stats QC flagged participants in source-map calculations", self)
         self.include_flagged_check.setObjectName("loreta_include_flagged_subjects_check")
         self.include_flagged_check.setChecked(bool(include_flagged_subjects))
         self.include_flagged_check.setToolTip(
             "Leave unchecked to exclude participants listed in Flagged Participants.xlsx."
         )
-        self.root_layout.addWidget(self.include_flagged_check)
+        data_layout.addWidget(self.include_flagged_check)
 
         availability_label = QLabel(
             "Open a project to rebuild source maps." if not project_available else "Rebuilds write project-local JSON and load the resulting manifest.",
@@ -283,35 +369,37 @@ class SourceMapOptionsDialog(AppDialog):
         )
         availability_label.setObjectName("loreta_source_options_availability_label")
         availability_label.setWordWrap(True)
-        self.root_layout.addWidget(availability_label)
+        data_layout.addWidget(availability_label)
 
         self.rebuild_zscore_btn = make_action_button("Rebuild z-score maps", compact=True, parent=self)
         self.rebuild_zscore_btn.setObjectName("loreta_options_rebuild_zscore_btn")
         self.rebuild_zscore_btn.setToolTip("Write Hauk-style source-space z-score JSON and load it.")
         self.rebuild_zscore_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE))
-        self.root_layout.addWidget(self.rebuild_zscore_btn)
+        data_layout.addWidget(self.rebuild_zscore_btn)
 
         self.rebuild_amplitude_btn = make_action_button("Build diagnostic amplitude maps", compact=True, parent=self)
         self.rebuild_amplitude_btn.setObjectName("loreta_options_rebuild_amplitude_btn")
         self.rebuild_amplitude_btn.setToolTip("Write diagnostic beta L2-MNE amplitude JSON and load it.")
         self.rebuild_amplitude_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE))
-        self.root_layout.addWidget(self.rebuild_amplitude_btn)
+        data_layout.addWidget(self.rebuild_amplitude_btn)
 
         self.load_source_payload_btn = make_action_button("Load source JSON", compact=True, parent=self)
         self.load_source_payload_btn.setObjectName("loreta_options_load_source_payload_btn")
         self.load_source_payload_btn.setToolTip("Load a prepared source payload JSON file.")
         self.load_source_payload_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD))
-        self.root_layout.addWidget(self.load_source_payload_btn)
+        data_layout.addWidget(self.load_source_payload_btn)
 
         self.load_source_manifest_btn = make_action_button("Load manifest", compact=True, parent=self)
         self.load_source_manifest_btn.setObjectName("loreta_options_load_source_manifest_btn")
         self.load_source_manifest_btn.setToolTip("Load a prepared source condition manifest.")
         self.load_source_manifest_btn.clicked.connect(lambda: self._select_action(SOURCE_OPTIONS_ACTION_LOAD_MANIFEST))
-        self.root_layout.addWidget(self.load_source_manifest_btn)
+        data_layout.addWidget(self.load_source_manifest_btn)
+        data_layout.addStretch(1)
 
         rebuild_enabled = project_available and not export_busy
         self.rebuild_zscore_btn.setEnabled(rebuild_enabled)
         self.rebuild_amplitude_btn.setEnabled(rebuild_enabled)
+        self._set_threshold_controls_value(zscore_display_threshold)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
         buttons.rejected.connect(self.reject)
@@ -320,6 +408,47 @@ class SourceMapOptionsDialog(AppDialog):
     def _select_action(self, action: str) -> None:
         self.selected_action = action
         self.accept()
+
+    def _set_threshold_controls_value(self, threshold: float) -> None:
+        self._syncing_threshold_controls = True
+        try:
+            value = max(0.0, float(threshold))
+            self.zscore_threshold_spin.setValue(value)
+            preset_index = self.zscore_threshold_combo.count() - 1
+            for index in range(self.zscore_threshold_combo.count()):
+                item_data = self.zscore_threshold_combo.itemData(index)
+                if isinstance(item_data, float) and abs(item_data - value) < 0.005:
+                    preset_index = index
+                    break
+            self.zscore_threshold_combo.setCurrentIndex(preset_index)
+        finally:
+            self._syncing_threshold_controls = False
+
+    def _on_zscore_threshold_preset_changed(self, _index: int) -> None:
+        if self._syncing_threshold_controls:
+            return
+        item_data = self.zscore_threshold_combo.currentData()
+        if isinstance(item_data, float):
+            self._syncing_threshold_controls = True
+            try:
+                self.zscore_threshold_spin.setValue(item_data)
+            finally:
+                self._syncing_threshold_controls = False
+
+    def _on_zscore_threshold_spin_changed(self, value: float) -> None:
+        if self._syncing_threshold_controls:
+            return
+        self._syncing_threshold_controls = True
+        try:
+            preset_index = self.zscore_threshold_combo.count() - 1
+            for index in range(self.zscore_threshold_combo.count()):
+                item_data = self.zscore_threshold_combo.itemData(index)
+                if isinstance(item_data, float) and abs(item_data - float(value)) < 0.005:
+                    preset_index = index
+                    break
+            self.zscore_threshold_combo.setCurrentIndex(preset_index)
+        finally:
+            self._syncing_threshold_controls = False
 
 
 class LoretaVisualizerWindow(QWidget):
@@ -352,6 +481,7 @@ class LoretaVisualizerWindow(QWidget):
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
         self._auto_project_zscore_attempted = False
         self._include_flagged_subjects = False
+        self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -487,9 +617,9 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_value_label.setWordWrap(True)
         controls.content_layout.addWidget(self.activation_value_label)
 
-        opacity_label = QLabel("Brain opacity", controls)
-        opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(opacity_label)
+        self.opacity_label = QLabel("Brain opacity", controls)
+        self.opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(self.opacity_label)
 
         self.transparency_value_label = QLabel("", controls)
         self.transparency_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -502,9 +632,9 @@ class LoretaVisualizerWindow(QWidget):
         controls.content_layout.addWidget(self.transparency_slider)
         controls.content_layout.addWidget(self.transparency_value_label)
 
-        activation_label = QLabel("Source opacity", controls)
-        activation_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(activation_label)
+        self.activation_opacity_label = QLabel("Source opacity", controls)
+        self.activation_opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(self.activation_opacity_label)
 
         self.activation_opacity_value_label = QLabel("", controls)
         self.activation_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -539,6 +669,7 @@ class LoretaVisualizerWindow(QWidget):
         self._update_transparency_label(DEFAULT_OPACITY_PERCENT)
         self._update_activation_opacity_label(DEFAULT_ACTIVATION_OPACITY_PERCENT)
         self._sync_activation_range_enabled()
+        self._sync_activation_render_mode_controls()
         self._update_activation_scale_readout(DEFAULT_SCALAR_MIN, DEFAULT_SCALAR_MAX)
         self._update_condition_status()
         return controls
@@ -565,14 +696,16 @@ class LoretaVisualizerWindow(QWidget):
         self._refresh_dummy_activation()
 
     def _set_controls_enabled(self, enabled: bool) -> None:
-        self.transparency_slider.setEnabled(enabled)
-        self.activation_opacity_slider.setEnabled(enabled)
+        opacity_enabled = enabled and not self._activation_uses_cortical_paint()
+        self.transparency_slider.setEnabled(opacity_enabled)
+        self.activation_opacity_slider.setEnabled(opacity_enabled)
         self.activation_auto_scale_check.setEnabled(enabled)
         self._sync_activation_range_enabled()
         self.condition_combo.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
         self.source_options_btn.setEnabled(enabled)
+        self._sync_activation_render_mode_controls()
         self._sync_project_source_button()
 
     def _sync_project_source_button(self) -> None:
@@ -614,6 +747,28 @@ class LoretaVisualizerWindow(QWidget):
                 "Auto color scale" if self.activation_auto_scale_check.isChecked() else "Manual color scale"
             )
 
+    def _activation_uses_cortical_paint(self) -> bool:
+        payload = self._current_activation_payload
+        return payload is not None and uses_cortical_surface_paint(payload)
+
+    def _sync_activation_render_mode_controls(self) -> None:
+        if not hasattr(self, "activation_opacity_slider"):
+            return
+        cortical_paint = self._activation_uses_cortical_paint()
+        opacity_enabled = self.renderer is not None and not cortical_paint
+        self.transparency_slider.setEnabled(opacity_enabled)
+        self.activation_opacity_slider.setEnabled(opacity_enabled)
+        for widget in (
+            self.opacity_label,
+            self.transparency_slider,
+            self.transparency_value_label,
+            self.activation_opacity_label,
+            self.activation_opacity_slider,
+            self.activation_opacity_value_label,
+        ):
+            widget.setVisible(not cortical_paint)
+        self.activation_color_ramp.setStyleSheet(_activation_color_ramp_stylesheet())
+
     def _on_activation_visibility_changed(self, checked: bool) -> None:
         renderer = self.renderer
         if renderer is not None:
@@ -653,11 +808,13 @@ class LoretaVisualizerWindow(QWidget):
         dialog = SourceMapOptionsDialog(
             self,
             include_flagged_subjects=self._include_flagged_subjects,
+            zscore_display_threshold=self._zscore_display_threshold,
             project_available=self._project_root is not None,
             export_busy=self._source_export_thread is not None,
         )
         dialog.exec()
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
+        self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
         if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
             self._build_project_zscore_source_maps()
         elif dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE:
@@ -684,6 +841,13 @@ class LoretaVisualizerWindow(QWidget):
         if not file_name:
             return
         self._import_prepared_source_payload(Path(file_name))
+
+    def _set_zscore_display_threshold(self, threshold: float) -> None:
+        self._zscore_display_threshold = max(0.0, float(threshold))
+        renderer = self.renderer
+        if renderer is not None:
+            renderer.set_cortical_paint_z_threshold(self._zscore_display_threshold)
+        self._apply_activation_scalar_range()
 
     def _load_prepared_source_manifest(self) -> None:
         renderer = self.renderer
@@ -963,6 +1127,7 @@ class LoretaVisualizerWindow(QWidget):
             return
         display_payload = _activation_display_payload(payload)
         self._current_activation_payload = display_payload
+        self._sync_activation_render_mode_controls()
         renderer.set_activation_payload(display_payload)
         self._apply_activation_scalar_range()
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
@@ -973,19 +1138,48 @@ class LoretaVisualizerWindow(QWidget):
         payload = self._current_activation_payload
         if renderer is None or payload is None:
             return
-        vmin, vmax = resolve_scalar_limits(
-            payload.values,
-            auto_scale=self.activation_auto_scale_check.isChecked(),
-            manual_min=self.activation_min_spin.value(),
-            manual_max=self.activation_max_spin.value(),
+        scale_values = _activation_scale_values(
+            payload,
+            zscore_display_threshold=self._zscore_display_threshold,
         )
+        manual_min = self.activation_min_spin.value()
+        if uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+            threshold = self._zscore_display_threshold
+            if self.activation_auto_scale_check.isChecked():
+                finite = scale_values[np.isfinite(scale_values)]
+                vmax = float(np.nanmax(finite)) if len(finite) else threshold + 1.0
+                vmin, vmax = resolve_scalar_limits(
+                    np.asarray([threshold, vmax], dtype=float),
+                    auto_scale=False,
+                    manual_min=threshold,
+                    manual_max=vmax,
+                )
+            else:
+                vmin, vmax = resolve_scalar_limits(
+                    scale_values,
+                    auto_scale=False,
+                    manual_min=max(threshold, manual_min),
+                    manual_max=self.activation_max_spin.value(),
+                )
+        else:
+            vmin, vmax = resolve_scalar_limits(
+                scale_values,
+                auto_scale=self.activation_auto_scale_check.isChecked(),
+                manual_min=manual_min,
+                manual_max=self.activation_max_spin.value(),
+            )
         renderer.set_activation_scalar_range(vmin, vmax)
         self._update_activation_scale_readout(vmin, vmax)
 
     def _update_activation_scale_readout(self, vmin: float, vmax: float) -> None:
         self.activation_scale_min_label.setText(format_scalar_value(vmin))
         self.activation_scale_max_label.setText(format_scalar_value(vmax))
-        self.activation_value_label.setText(_activation_value_readout(self._current_activation_payload))
+        self.activation_value_label.setText(
+            _activation_value_readout(
+                self._current_activation_payload,
+                zscore_display_threshold=self._zscore_display_threshold,
+            )
+        )
 
     def closeEvent(self, event) -> None:  # noqa: N802, ANN001
         renderer = self.renderer

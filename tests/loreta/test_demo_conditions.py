@@ -183,6 +183,35 @@ def test_zscore_activation_display_defaults_to_positive_values_only() -> None:
     )
 
 
+def test_l2_mne_surface_zscore_display_uses_cortical_paint_without_filtering_points() -> None:
+    payload = make_source_payload(
+        points=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        values=np.asarray([-6.0, 0.0, 4.2], dtype=float),
+        label="Semantic Response",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_cortical_surface_hauk_zscore_beta",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 2]], dtype=np.int64),
+        metadata={"source_value_unit": "z-score", "sensor_value_unit": "raw FFT amplitude uV"},
+        normalize_values=False,
+    )
+
+    display_payload = _activation_display_payload(payload)
+
+    assert display_payload.values.tolist() == [-6.0, 0.0, 4.2]
+    assert _activation_value_readout(display_payload) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
+        "display: z >= 1.64"
+    )
+
+
 def test_demo_condition_can_exercise_native_to_display_bridge() -> None:
     native_mesh_points = np.asarray(
         [

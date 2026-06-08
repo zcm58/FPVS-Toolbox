@@ -78,13 +78,28 @@ space.
 ## What the viewer displays
 
 The generated JSON stores the full signed source-space z-score field. The
-default activation view displays only positive z-scores (`z > 0`) so the map
-focuses on above-baseline source estimates.
+default cortical-surface view uses an opaque fsaverage pial brain and paints
+source-space z-scores on that surface. Values below the selected display
+threshold are shown as the neutral gray cortex color rather than as activation
+colors. The default cutoff is `z >= 1.64`; Source Map Options > Display also
+offers `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89` presets.
+Displayed values use the same heatmap color scale as the transparent source-map
+view.
 
 The color legend is in z-score units for these payloads. With auto-scaling on,
 the upper color limit is the largest displayed positive z-score in the current
 condition. Manual color limits change only the display scale; they do not
 change the generated source values.
+
+The paint projection is display-only interpolation from the prepared source
+mesh to the denser pial display mesh. It should be interpreted as a clearer
+visualization of the same beta source map, not as extra spatial precision in
+the source calculation.
+
+The display threshold is not a source-space cluster-permutation test. The
+published Hauk-style figures mask source z-score maps by significant clusters
+from a cluster-based permutation test against zero; that inferential mask is a
+future method step, not part of the current renderer-only threshold.
 
 ## What this method is not
 

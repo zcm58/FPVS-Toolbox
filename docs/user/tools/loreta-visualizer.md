@@ -26,20 +26,21 @@ BioSemi64/fsaverage cortical forward model through MNE, writes prepared z-score
 source JSON files when needed, and loads them through the same manifest
 importer used by the demo fixtures.
 
-Use the current version to verify rendering behavior, transparency, camera
-controls, source-layer opacity, color scaling, and whether source maps can be
-drawn inside the transparent anatomical shell.
+Use the current version to verify rendering behavior, camera controls, color
+scaling, and whether source maps can be drawn in the intended mode. Current
+L2-MNE cortical-surface project maps use an opaque cortical paint view. Volume,
+ROI, and deep-style maps keep the transparent anatomical shell behavior.
 
 ## What you can do now
 
 - Rotate the 3D scene by dragging in the viewport.
 - Zoom with mouse or trackpad interaction.
 - Reset the camera to the default view.
-- Adjust brain transparency.
+- Adjust brain transparency for transparent-shell volume/deep views.
 - Use an external fsaverage mesh loaded through MNE, with synthetic fallback
   when the external mesh is unavailable.
 - Show or hide the source map independently from the brain mesh.
-- Adjust source-map opacity.
+- Adjust source-map opacity for transparent overlay views.
 - Switch among project source-map conditions when available, or synthetic
   demonstration conditions otherwise.
 - Auto-scale the source intensity map or set manual minimum/maximum intensity
@@ -57,7 +58,9 @@ less intense depending on the current color range.
 
 For beta L2-MNE project maps, the color scale shows the actual scalar range
 used for the current source map. When auto-scale is on, the min/max labels
-update from the loaded payload values.
+update from the loaded payload values after display-only cortical paint
+thresholding. Z-scores below the selected display cutoff are shown as the
+neutral gray cortex color.
 
 ## Inputs
 
@@ -179,10 +182,22 @@ project view. This mode reads raw `FullFFT Amplitude (uV)` target and
 neighboring frequency bins, sends target and noise topographies through the
 same inverse model, and displays source-space z-scores.
 
-By default, z-score maps display only positive source-space z-scores (`z > 0`).
-The signed z-score payload is still preserved in the generated JSON for QC, but
-negative/below-baseline values are not rendered in the normal activation view.
-This keeps the visible heatmap focused on above-baseline FPVS source responses.
+By default, z-score maps use an opaque cortical paint view on the fsaverage
+pial surface. The signed z-score payload is still preserved in the generated
+JSON for QC, but values below the selected display threshold are clamped to the
+neutral gray cortex color for display. The default threshold is `z >= 1.64`.
+Source Map Options > Display provides preset cutoffs for `z >= 1.64`,
+`z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89`. Values above the
+selected cutoff are painted on top with the same heatmap color ramp used by the
+transparent visualizer. This keeps the visible heatmap focused on stronger FPVS
+source responses without hiding the cortical surface.
+
+The threshold is a display mask only. It is not the same as the
+cluster-permutation significance mask used in Hauk-style publication figures.
+
+The cortical paint projection is display-only interpolation from the prepared
+source mesh onto the higher-resolution pial display mesh. It does not improve
+or change the underlying source-estimation precision.
 
 The older arbitrary-amplitude L2-MNE cortical-surface export remains available
 in Source Map Options as a diagnostic action. Those values are

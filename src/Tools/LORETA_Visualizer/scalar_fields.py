@@ -12,6 +12,7 @@ LORETA_SCALAR_COLORS: tuple[str, ...] = (
     "#fdae61",
     "#b2182b",
 )
+CORTICAL_PAINT_BASE_COLOR = "#c9cdd2"
 DEFAULT_SCALAR_MIN = 0.0
 DEFAULT_SCALAR_MAX = 1.0
 

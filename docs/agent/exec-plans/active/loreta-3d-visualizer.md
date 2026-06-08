@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, and Phase 6E are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, and now exposes method/QC controls plus user-facing method documentation for the beta source-map workflow.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, and Phase 6F are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, and renders L2-MNE cortical-surface maps as opaque pial cortical paint.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -24,12 +24,15 @@ target and neighboring bins are sent through the same L2-MNE inverse model,
 then source-space baseline correction and z-scoring are applied before writing
 the renderer payload. Phase 6E adds method documentation, a Source Map Options
 modal, flagged-participant include/exclude rebuild control, and compact IDE-log
-reporting for source-map rebuilds.
+reporting for source-map rebuilds. Phase 6F adds opaque pial cortical paint
+rendering and a user-facing z-score display cutoff selector for L2-MNE cortical
+surface payloads while preserving transparent overlay rendering for volume/deep
+payloads.
 
 This is still a beta, template-based method-validation stage, not a final
 scientifically validated source-localization workflow. The 6C and 6D paths use
 real project FPVS condition data, but they do not change preprocessing, Stats,
-existing project manifests, workbook formats, the renderer, or the importer.
+existing project manifests, workbook formats, source producers, or the importer.
 Future LORETA, eLORETA, sLORETA, beamformer, or other source-estimation methods
 should become sibling producers that target the prepared JSON/payload bridge
 and stay separate from the renderer, display fsaverage loader, and project I/O
@@ -39,11 +42,12 @@ The prepared payload contract stage is complete, Phase 6A established the first
 swappable source method, Phase 6B established a read-only project-input
 assembler, Phase 6C established the first real-project beta export and GUI
 entry point, Phase 6D established the Hauk-style source-space z-score mode, and
-Phase 6E established source-map method/QC controls and documentation. The next
-recommended development slice is Phase 6F: manual/scientific validation and
-comparison of the beta L2-MNE z-score maps against scalp-map patterns,
-participant-QC variants, and expected condition effects before adding another
-source-localization method.
+Phase 6E established source-map method/QC controls and documentation, and
+Phase 6F established the opaque cortical paint visualization and display
+threshold selector for surface maps. The next recommended development slice is
+Phase 6G: a source-view mode selector with a split-hemisphere,
+publication-style cortical viewer alongside the current pial surface view and
+transparent mesh view.
 
 ## Date
 
@@ -848,8 +852,9 @@ Implementation notes:
   `6 - Source Localization/L2-MNE Hauk Z-Score Beta/`.
 - The visualizer should auto-scale or manually scale z-scores, and the legend
   should make it obvious when the displayed unit is z-score. A useful manual
-  scale preset may include 0 to 1.96 or 0 to a user-selected positive z-score
-  range, but do not hard-code interpretation thresholds into the renderer.
+  scale preset may include 1.64 to 1.96 or a user-selected positive z-score
+  range. Display thresholds should remain user-facing renderer masks, not
+  source-estimation calculations.
 
 Definitions of done:
 
@@ -896,10 +901,11 @@ Implementation notes completed:
   Reset view remains always visible. Manual z-score rebuilds,
   arbitrary-amplitude exports, and prepared JSON imports live in Source Map
   Options.
-- The default z-score activation view renders only positive source-space
-  z-scores (`z > 0`). The generated payloads still preserve the full signed
-  z-score field for QC, but negative/below-baseline source points are filtered
-  from the renderer-facing activation payload.
+- The generated payloads preserve the full signed source-space z-score field
+  for QC. Phase 6F changed the default L2-MNE cortical surface display from
+  positive-only point filtering to opaque cortical paint where z-scores below
+  the selected display cutoff are shown as the neutral gray cortex color. The
+  default display cutoff is `z >= 1.64`.
 - The z-score path reads `FullFFT Amplitude (uV)` only. It refuses BCA-only or
   compact-summary-only workbooks with a clear Phase 6D input error.
 - Semantic Categories exported successfully to:
@@ -965,7 +971,7 @@ Done means:
 
 - The MkDocs user nav includes a dedicated source-localization method page.
 - The method page explains current beta status, inputs, z-score calculation,
-  positive-z display behavior, participant QC behavior, output files, and
+  thresholded z-score display behavior, participant QC behavior, output files, and
   limitations.
 - The visualizer offers a modal source-map options workflow instead of an
   inline Advanced section.
@@ -975,7 +981,95 @@ Done means:
   still passes. GUI behavior is covered by a visible/manual smoke path because
   offscreen Qt is not run locally.
 
-### Phase 6F: Manual Scientific Validation And Comparison
+### Phase 6F: Opaque Cortical Surface Paint Mode
+
+Status: Implemented. Phase 6F renders L2-MNE cortical-surface payloads as an
+opaque pial brain with source values painted onto the cortex.
+
+Objective:
+
+- Make the current Hauk-style L2-MNE cortical surface maps easier to interpret
+  by removing transparent brain/source opacity from this method's default view.
+- Keep opacity controls and transparent-shell rendering available for
+  volume/deep payloads and future LORETA/eLORETA methods.
+- Preserve the signed source-space z-score payloads while displaying
+  sub-threshold z-scores as a neutral gray cortex color and retained z-scores
+  with the same heatmap ramp used by the transparent visualizer.
+- Keep source estimation, z-score calculation, and project export logic
+  unchanged.
+
+Implementation notes completed:
+
+- Added a display-only cortical paint helper that projects prepared L2-MNE
+  cortical source values onto the higher-resolution pial display mesh using
+  inverse-distance interpolation through `scipy.spatial.cKDTree`.
+- The renderer automatically uses cortical paint for L2-MNE `surface_mesh`
+  payloads and keeps the existing separate activation actor for volume, ROI,
+  point, and deep-style payloads.
+- The GUI hides brain/source opacity controls while cortical paint is active,
+  keeps condition/scale/legend/show/reset/options controls, and exposes a
+  Source Map Options > Display cutoff selector. Presets include `z >= 1.64`,
+  `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89`.
+- User docs and tool-local agent/architecture docs describe cortical paint as
+  visualization interpolation only, not extra source-estimation precision.
+- Publication-ready inflated-surface views are intentionally left as future
+  work; Phase 6F targets the current pial display surface only.
+
+Done means:
+
+- L2-MNE cortical surface z-score maps render as an opaque pial cortical map.
+- Z-scores below the selected display cutoff are visually indistinguishable
+  from the gray base cortex; retained z-scores use the shared transparent-view
+  heatmap colors.
+- Existing volume/deep dummy payloads still use transparency and source opacity.
+- Focused tests cover projection, non-mutation of payload values, and the
+  cortical-vs-non-surface z-score display split.
+- The display cutoff is documented as a renderer mask only. Hauk-style
+  cluster-permutation significance masking remains future method work.
+
+### Phase 6G: View Mode Selector And Split-Hemisphere Publication Viewer
+
+Status: Planned.
+
+Objective:
+
+- Add a right-panel display mode selector so users can switch between:
+  - current fsaverage pial cortical surface map;
+  - publication-style split-hemisphere cortical view;
+  - transparent brain mesh view for volume/deep and future LORETA/eLORETA
+    payloads.
+- Keep all modes reading the same prepared payload and scalar-range controls
+  wherever scientifically appropriate.
+- Preserve renderer/source-producer separation: view modes may transform or
+  project already-computed display values, but must not compute source
+  localization, z-scores, or statistical masks.
+
+Initial implementation direction:
+
+- The pial cortical surface map remains the default for L2-MNE cortical
+  surface payloads.
+- The split-hemisphere mode should be a display-only publication-style layout
+  for cortical surface payloads. It should not claim Hauk-style cluster
+  permutation masking until that method is implemented.
+- The transparent mesh mode should keep the current opacity controls and remain
+  the default-compatible path for volume/deep payloads.
+- Mode switching should be immediate for the active condition without requiring
+  source JSON rebuilds.
+- If a selected mode is incompatible with the active payload kind, the GUI
+  should fall back gracefully or disable that option with clear status text.
+
+Open decisions before implementation:
+
+- Whether the split-hemisphere view uses pial or inflated surfaces for the first
+  slice.
+- Whether the split-hemisphere view is a second PyVista viewport layout or a
+  camera/layout mode inside the existing renderer.
+- Whether surface labels should include left/right text in the viewport or stay
+  implicit through layout.
+- Whether transparent mesh mode should be selectable for cortical payloads as a
+  comparison/debug view or reserved for volume/deep payloads.
+
+### Phase 6H: Manual Scientific Validation And Comparison
 
 Status: Planned.
 

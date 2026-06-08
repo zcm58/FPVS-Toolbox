@@ -7,7 +7,17 @@ from typing import Any
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from Tools.LORETA_Visualizer.scalar_fields import DEFAULT_SCALAR_MAX, DEFAULT_SCALAR_MIN, LORETA_SCALAR_COLORS
+from Tools.LORETA_Visualizer.cortical_paint import (
+    DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    project_cortical_surface_payload,
+    uses_cortical_surface_paint,
+)
+from Tools.LORETA_Visualizer.scalar_fields import (
+    CORTICAL_PAINT_BASE_COLOR,
+    DEFAULT_SCALAR_MAX,
+    DEFAULT_SCALAR_MIN,
+    LORETA_SCALAR_COLORS,
+)
 from Tools.LORETA_Visualizer.source_payloads import (
     SOURCE_KIND_ROI_MESH,
     SOURCE_KIND_SURFACE_MESH,
@@ -46,6 +56,9 @@ class BrainRendererWidget(QWidget):
         self._activation_opacity = 0.72
         self._activation_visible = True
         self._activation_scalar_range = (DEFAULT_SCALAR_MIN, DEFAULT_SCALAR_MAX)
+        self._cortical_paint_active = False
+        self._cortical_paint_z_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
+        self._last_activation_payload: SourcePayload | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -117,7 +130,7 @@ class BrainRendererWidget(QWidget):
             return None
         actor = plotter.add_mesh(
             surface,
-            color="#efc7b7",
+            color=CORTICAL_PAINT_BASE_COLOR,
             opacity=self._brain_opacity,
             smooth_shading=True,
             show_edges=False,
@@ -130,12 +143,41 @@ class BrainRendererWidget(QWidget):
         self._apply_brain_material(actor)
         return actor
 
+    def _add_cortical_paint_actor(self, surface: Any) -> Any:
+        plotter = self._plotter
+        if plotter is None:
+            return None
+        actor = plotter.add_mesh(
+            surface,
+            scalars="activation",
+            cmap=list(LORETA_SCALAR_COLORS),
+            clim=self._activation_scalar_range,
+            color=CORTICAL_PAINT_BASE_COLOR,
+            nan_color=CORTICAL_PAINT_BASE_COLOR,
+            nan_opacity=1.0,
+            opacity=1.0,
+            smooth_shading=True,
+            show_edges=False,
+            lighting=True,
+            specular=0.18,
+            specular_power=12,
+            ambient=0.48,
+            diffuse=0.70,
+            show_scalar_bar=False,
+        )
+        self._apply_brain_material(actor)
+        return actor
+
     def set_brain_opacity(self, opacity: float) -> None:
         opacity = max(0.05, min(1.0, float(opacity)))
         self._brain_opacity = opacity
         actor = self._brain_actor
         plotter = self._plotter
         if actor is None or plotter is None:
+            return
+        if self._cortical_paint_active:
+            actor.GetProperty().SetOpacity(1.0)
+            plotter.render()
             return
         actor.GetProperty().SetOpacity(opacity)
         plotter.render()
@@ -170,12 +212,10 @@ class BrainRendererWidget(QWidget):
             return
         import pyvista as pv
 
-        previous_actor = self._brain_actor
-        if previous_actor is not None:
-            try:
-                plotter.remove_actor(previous_actor, render=False)
-            except (AttributeError, RuntimeError, TypeError, ValueError):
-                logger.debug("loreta_remove_previous_actor_failed", exc_info=True)
+        self._remove_brain_actor(render=False)
+        self._remove_activation_actor(render=False)
+        self._cortical_paint_active = False
+        self._last_activation_payload = None
         self._current_mesh = mesh
         self._surface = self._to_polydata(pv, mesh)
         self._brain_actor = self._add_brain_actor(self._surface)
@@ -189,9 +229,22 @@ class BrainRendererWidget(QWidget):
             return
         import pyvista as pv
 
+        self._last_activation_payload = payload
         self._remove_activation_actor(render=False)
         if len(payload.points) == 0:
+            self._restore_base_brain_actor(render=False)
             plotter.render()
+            return
+        if uses_cortical_surface_paint(payload) and self._set_cortical_paint_payload(payload):
+            plotter.render()
+            return
+        self._restore_base_brain_actor(render=False)
+        self._add_activation_overlay(pv, payload)
+        plotter.render()
+
+    def _add_activation_overlay(self, pv: Any, payload: SourcePayload) -> None:
+        plotter = self._plotter
+        if plotter is None:
             return
         mesh_kinds = {SOURCE_KIND_ROI_MESH, SOURCE_KIND_SURFACE_MESH, SOURCE_KIND_VOLUME_MESH}
         has_faces = payload.faces is not None and len(payload.faces) > 0
@@ -225,22 +278,59 @@ class BrainRendererWidget(QWidget):
             show_scalar_bar=False,
         )
         self._activation_actor.SetVisibility(self._activation_visible)
-        plotter.render()
+
+    def _set_cortical_paint_payload(self, payload: SourcePayload) -> bool:
+        mesh = self._current_mesh
+        surface = self._surface
+        if mesh is None or surface is None:
+            return False
+        try:
+            projection = project_cortical_surface_payload(
+                mesh.points,
+                payload,
+                z_threshold=self._cortical_paint_z_threshold,
+            )
+            paint_surface = surface.copy(deep=True)
+            paint_surface["activation"] = projection.values
+        except (ImportError, ModuleNotFoundError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("loreta_cortical_paint_projection_failed", extra={"error": str(exc)})
+            return False
+
+        self._remove_brain_actor(render=False)
+        self._brain_actor = self._add_cortical_paint_actor(paint_surface)
+        self._cortical_paint_active = True
+        self._set_cortical_paint_scalar_visibility(self._activation_visible)
+        return True
+
+    def set_cortical_paint_z_threshold(self, threshold: float) -> None:
+        numeric_threshold = max(0.0, float(threshold))
+        self._cortical_paint_z_threshold = numeric_threshold
+        payload = self._last_activation_payload
+        if self._cortical_paint_active and payload is not None:
+            self.set_activation_payload(payload)
+
+    def _restore_base_brain_actor(self, *, render: bool) -> None:
+        if not self._cortical_paint_active:
+            return
+        plotter = self._plotter
+        surface = self._surface
+        if plotter is None or surface is None:
+            return
+        self._remove_brain_actor(render=False)
+        self._brain_actor = self._add_brain_actor(surface)
+        self._cortical_paint_active = False
+        if render:
+            plotter.render()
 
     def set_activation_scalar_range(self, vmin: float, vmax: float) -> None:
         if vmax <= vmin:
             vmax = vmin + 1.0
         self._activation_scalar_range = (float(vmin), float(vmax))
-        actor = self._activation_actor
+        actor = self._brain_actor if self._cortical_paint_active else self._activation_actor
         plotter = self._plotter
         if actor is None or plotter is None:
             return
-        mapper = getattr(actor, "mapper", None)
-        if mapper is None:
-            try:
-                mapper = actor.GetMapper()
-            except (AttributeError, RuntimeError, TypeError):
-                mapper = None
+        mapper = self._actor_mapper(actor)
         if mapper is not None:
             try:
                 mapper.SetScalarRange(*self._activation_scalar_range)
@@ -260,12 +350,56 @@ class BrainRendererWidget(QWidget):
 
     def set_activation_visible(self, visible: bool) -> None:
         self._activation_visible = bool(visible)
-        actor = self._activation_actor
         plotter = self._plotter
-        if actor is None or plotter is None:
+        if plotter is None:
+            return
+        if self._cortical_paint_active:
+            self._set_cortical_paint_scalar_visibility(self._activation_visible)
+            plotter.render()
+            return
+        actor = self._activation_actor
+        if actor is None:
             return
         actor.SetVisibility(self._activation_visible)
         plotter.render()
+
+    @staticmethod
+    def _actor_mapper(actor: Any) -> Any | None:
+        mapper = getattr(actor, "mapper", None)
+        if mapper is not None:
+            return mapper
+        try:
+            return actor.GetMapper()
+        except (AttributeError, RuntimeError, TypeError):
+            return None
+
+    def _set_cortical_paint_scalar_visibility(self, visible: bool) -> None:
+        actor = self._brain_actor
+        if actor is None:
+            return
+        mapper = self._actor_mapper(actor)
+        if mapper is not None:
+            try:
+                mapper.SetScalarVisibility(bool(visible))
+            except (AttributeError, RuntimeError, TypeError):
+                logger.debug("loreta_cortical_paint_visibility_failed", exc_info=True)
+        try:
+            prop = actor.GetProperty()
+            prop.SetColor(*_hex_to_rgb(CORTICAL_PAINT_BASE_COLOR))
+            prop.SetOpacity(1.0)
+        except (AttributeError, RuntimeError, TypeError):
+            logger.debug("loreta_cortical_paint_base_material_failed", exc_info=True)
+
+    def _remove_brain_actor(self, *, render: bool) -> None:
+        plotter = self._plotter
+        actor = self._brain_actor
+        self._brain_actor = None
+        if plotter is None or actor is None:
+            return
+        try:
+            plotter.remove_actor(actor, render=render)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            logger.debug("loreta_remove_previous_actor_failed", exc_info=True)
 
     def _remove_activation_actor(self, *, render: bool) -> None:
         plotter = self._plotter
@@ -306,9 +440,18 @@ class BrainRendererWidget(QWidget):
         self._activation_actor = None
         self._surface = None
         self._current_mesh = None
+        self._cortical_paint_active = False
+        self._last_activation_payload = None
         if plotter is None:
             return
         try:
             plotter.close()
         except (AttributeError, RuntimeError, TypeError):
             logger.debug("loreta_renderer_close_failed", exc_info=True)
+
+
+def _hex_to_rgb(color: str) -> tuple[float, float, float]:
+    value = color.lstrip("#")
+    if len(value) != 6:
+        return (0.79, 0.80, 0.82)
+    return tuple(int(value[index : index + 2], 16) / 255 for index in (0, 2, 4))

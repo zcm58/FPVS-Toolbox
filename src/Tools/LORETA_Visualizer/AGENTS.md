@@ -36,6 +36,12 @@ explicitly include them for comparison, then pass that choice to the project
 source producer. It must not calculate source values or change renderer
 behavior.
 
+Phase 6F adds opaque cortical surface paint rendering for L2-MNE cortical
+surface payloads. This is a display-only renderer mode: it may interpolate
+already-computed source values onto the higher-resolution pial display mesh,
+and apply a user-selected z-score display cutoff, but it must not compute or
+alter source-localization values.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -57,11 +63,13 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   rendering:
   - `source_payloads.py` validates prepared coordinates/scalars, stores source
     metadata, filters renderer-facing display values when explicitly scoped
-    such as positive-only z-score display, and converts payloads into display
-    space.
+    such as positive-only non-surface z-score display, and converts payloads
+    into display space.
   - `transforms.py` owns native/source coordinate to display-coordinate
     transforms.
   - `scalar_fields.py` owns visual color limits and color stops.
+  - `cortical_paint.py` owns display-only projection from prepared L2-MNE
+    cortical source meshes onto the pial display mesh.
   - `fsaverage_mesh.py` owns anatomical mesh loading and display transforms.
 - Helper modules may adapt, validate, normalize for display, and transform
   already-computed values. They must not compute inverse solutions, frequency
@@ -88,8 +96,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 ## File Responsibilities
 
 - `gui.py`: embedded PySide6 page, controls, worker wiring, and status text.
-- `renderer.py`: PyVista/VTK scene adapter, actors, camera, opacity, scalar map,
-  and mesh display. No LORETA math.
+- `renderer.py`: PyVista/VTK scene adapter, actors, camera, opacity where
+  relevant, scalar map, cortical paint display, and mesh display. No LORETA
+  math.
 - `fsaverage_mesh.py`: external MNE fsaverage discovery/fetch/read/decimation and
   anatomical display transform construction. No source estimates.
 - `synthetic_brain.py`: fallback/demo mesh model.
@@ -109,10 +118,12 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   prepared source-map contract. Keep examples small, deterministic, and clearly
   marked as not computed from EEG. Keep JSON Schema files here aligned with the
   Python validator and checked-in examples.
-- `source_payloads.py`, `transforms.py`, and `scalar_fields.py`: bridge helpers
-  that adapt prepared source payloads to the renderer. Z-score payloads should
-  keep signed values in JSON while the default activation view renders only
-  `z > 0` through display-side filtering.
+- `source_payloads.py`, `transforms.py`, `scalar_fields.py`, and
+  `cortical_paint.py`: bridge helpers that adapt prepared source payloads to
+  the renderer. Z-score payloads should keep signed values in JSON. L2-MNE
+  cortical-surface z-score payloads render as opaque cortical paint with
+  sub-threshold z-scores shown as gray cortex; non-surface z-score payloads may
+  still use positive-only display filtering.
 - `source_producers/`: source-localization calculation methods that convert
   explicit source-ready inputs into validated prepared JSON payloads/manifests.
   They are calculation code, not display code, and should not depend on renderer

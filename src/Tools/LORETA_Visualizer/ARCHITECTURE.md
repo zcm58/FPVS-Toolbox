@@ -6,14 +6,16 @@ This page is the tool-local architecture contract for agents working in
 ## Purpose
 
 The LORETA Visualizer is an embedded PySide6 tool for interactive 3D display of
-a transparent anatomical brain mesh plus prepared source-activation payloads.
+an anatomical brain mesh plus prepared source-activation payloads. It supports
+both transparent overlay views for volume/deep payloads and an opaque cortical
+paint view for the current L2-MNE cortical-surface method.
 It is a new source-localization visualization branch. It is not a revival,
 refactor, or design continuation of the removed `Tools.SourceLocalization`
 implementation.
 
 The first durable goal is rendering:
 
-- real-time orbit, zoom, reset, and opacity controls;
+- real-time orbit, zoom, reset, and opacity controls where opacity is relevant;
 - an external fsaverage-derived anatomical mesh when available;
 - a synthetic fallback mesh when fsaverage is unavailable;
 - synthetic scalar source maps for surface/deep rendering validation;
@@ -160,8 +162,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
   user-triggered renderer updates. Source-map rebuild/import controls live in
   the Source Map Options modal.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
-  prepared source payloads, opacity, scalar ranges, and
-  camera controls. It must not calculate source estimates.
+  prepared source payloads, opacity where relevant, scalar ranges, cortical
+  paint actors, and camera controls. It must not calculate source estimates.
 - `fsaverage_mesh.py`: external fsaverage discovery/fetch/read/decimation and
   construction of the anatomical display transform. It must not calculate
   source estimates.
@@ -181,6 +183,10 @@ compact rebuild summaries, but source-estimation math still belongs only to
   payload and manifest JSON. It owns format constants, schema descriptors, and
   cross-field checks. It does not render, calculate source estimates, or inspect
   project outputs.
+- `cortical_paint.py`: display-only projection from a prepared L2-MNE cortical
+  surface payload onto the higher-resolution pial display mesh. It may
+  interpolate already-computed values for visualization, but it must not compute
+  source estimates or change payload values.
 - `source_producers/`: swappable source-localization calculation methods that
   read explicit source-ready inputs and write validated prepared
   payload/manifest JSON. Phase 6A includes method-neutral producer result
@@ -200,8 +206,8 @@ compact rebuild summaries, but source-estimation math still belongs only to
   format examples only and are not source estimates. This directory also holds
   the shape-level JSON Schema files for external tooling.
 - `source_payloads.py`: renderer-facing `SourcePayload` validation,
-  finite-value filtering, metadata preservation, positive-z display filtering,
-  and payload conversion to display space.
+  finite-value filtering, metadata preservation, non-surface positive-z display
+  filtering, and payload conversion to display space.
 - `transforms.py`: `MeshDisplayTransform` and coordinate-space constants.
 - `scalar_fields.py`: visual scalar color stops and auto/manual color-limit
   resolution.
@@ -284,9 +290,11 @@ The project Hauk-style z-score exporter writes generated files under
 `6 - Source Localization/L2-MNE Hauk Z-Score Beta/` by default. It uses the
 same prepared-manifest importer as every other source payload. Its displayed
 values are source-space z-scores, not arbitrary L2-MNE amplitude. The generated
-payloads preserve the signed z-score field for QC, but the default activation
-view renders only `z > 0` values so below-baseline troughs are not drawn as the
-primary heatmap. The
+payloads preserve the signed z-score field for QC. The default L2-MNE cortical
+surface view paints those values onto an opaque pial display mesh; z-scores
+below the selected display cutoff are clamped to the neutral gray cortex color,
+and displayed z-scores use the same heatmap ramp as the transparent overlay
+view. The default display cutoff is `z >= 1.64`. The
 neighboring-bin policy mirrors the Stats-style FPVS neighboring-bin window by
 using offsets `-10..-2` and `+2..+10`, dropping the minimum and maximum
 neighboring source amplitude per source point before computing the source-space

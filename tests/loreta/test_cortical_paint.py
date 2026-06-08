@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+import numpy as np
+
+from Tools.LORETA_Visualizer.cortical_paint import (
+    project_cortical_surface_payload,
+    source_payload_uses_zscores,
+    uses_cortical_surface_paint,
+)
+from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_SURFACE_MESH, SOURCE_KIND_VOLUME_MESH, make_source_payload
+
+
+def test_cortical_paint_projects_source_values_to_dense_display_mesh() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([-2.0, 4.0], dtype=float),
+        label="surface z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_cortical_surface_hauk_zscore_beta",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={"source_value_unit": "z-score"},
+        normalize_values=False,
+    )
+    original_values = payload.values.copy()
+    display_points = np.asarray(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+        dtype=float,
+    )
+
+    projection = project_cortical_surface_payload(display_points, payload, neighbors=2)
+
+    assert uses_cortical_surface_paint(payload) is True
+    assert source_payload_uses_zscores(payload) is True
+    assert projection.source_value_min == -2.0
+    assert projection.source_value_max == 4.0
+    assert np.isnan(projection.values[0])
+    assert projection.values[1:].tolist() == [2.0, 4.0]
+    assert np.array_equal(payload.values, original_values)
+
+
+def test_cortical_paint_threshold_masks_subthreshold_zscores() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([1.2, 2.0], dtype=float),
+        label="surface z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_cortical_surface_hauk_zscore_beta",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={"source_value_unit": "z-score"},
+        normalize_values=False,
+    )
+
+    projection = project_cortical_surface_payload(payload.points, payload, neighbors=1, z_threshold=1.64)
+
+    assert np.isnan(projection.values[0])
+    assert projection.values[1] == 2.0
+
+
+def test_cortical_paint_rejects_non_l2_mne_volume_payloads() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([1.0], dtype=float),
+        label="volume",
+        kind=SOURCE_KIND_VOLUME_MESH,
+        source_model="volume_grid",
+        faces=np.asarray([[0, 0, 0]], dtype=np.int64),
+        normalize_values=False,
+    )
+
+    assert uses_cortical_surface_paint(payload) is False
