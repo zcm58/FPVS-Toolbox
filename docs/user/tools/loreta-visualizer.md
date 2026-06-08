@@ -107,6 +107,18 @@ Manifest files use `fpvs-loreta-source-manifest-v1` and list condition entries
 with `id`, `label`, relative `file`, and optional `metadata`. See
 `src/Tools/LORETA_Visualizer/examples/source_manifest_v1_display_conditions_example.json`.
 
+The examples directory also includes shape-level JSON Schema files:
+
+- `source_payload_v1.schema.json`
+- `source_manifest_v1.schema.json`
+
+For future calculation code, the stricter in-repo validator is
+`Tools.LORETA_Visualizer.prepared_payload_validator`. It can check payload and
+manifest JSON before the files are loaded into the GUI. The validator catches
+cross-field issues such as mismatched point/value counts, invalid face indices,
+duplicate manifest condition ids, and manifest paths that escape the manifest
+folder.
+
 ## Future real-data direction
 
 Future source-localization calculations should be implemented separately from

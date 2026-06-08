@@ -59,9 +59,13 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   source payloads and source-payload manifests. It validates file content and
   adapts into renderer payloads; it must not discover project outputs or
   calculate source estimates.
+- `prepared_payload_validator.py`: producer-facing payload/manifest validation,
+  format constants, schema descriptors, and cross-field rules. It must not
+  render, inspect projects, or calculate source estimates.
 - `examples/`: checked-in synthetic JSON payload and manifest examples for the
   prepared source-map contract. Keep examples small, deterministic, and clearly
-  marked as not computed from EEG.
+  marked as not computed from EEG. Keep JSON Schema files here aligned with the
+  Python validator and checked-in examples.
 - `source_payloads.py`, `transforms.py`, and `scalar_fields.py`: bridge helpers
   that adapt prepared source payloads to the renderer.
 
@@ -79,6 +83,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not change the checked-in prepared JSON examples in a way that implies
   renderer ownership of LORETA math. They are output-format examples for future
   calculation producers and importer tests only.
+- Keep producer validation separate from display conversion. If a future source
+  method needs new coordinate metadata, extend the prepared payload contract
+  deliberately; do not let renderer internals leak into validation.
 
 ## GUI And Worker Rules
 

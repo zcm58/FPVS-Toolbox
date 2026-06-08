@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fpvs-toolbox.local/schemas/loreta/source_payload_v1.schema.json",
+  "title": "FPVS LORETA Visualizer Prepared Source Payload v1",
+  "description": "Shape-only schema for already-computed source payloads. The Python validator enforces cross-field rules such as one value per point and face-index bounds.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["format", "coordinate_space", "points", "values"],
+  "properties": {
+    "format": {
+      "const": "fpvs-loreta-source-payload-v1"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["roi_mesh", "surface_mesh", "surface_points", "volume_mesh", "volume_points"]
+    },
+    "coordinate_space": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "value_label": {
+      "type": "string",
+      "minLength": 1
+    },
+    "points": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 3,
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "values": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "number"
+      }
+    },
+    "faces": {
+      "oneOf": [
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

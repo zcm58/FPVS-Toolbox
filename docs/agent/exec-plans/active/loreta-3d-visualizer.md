@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, and Phase 5G are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, and provides checked-in JSON examples before any real LORETA calculations are introduced.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, and Phase 5H are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, and includes producer-facing schema/validation before any real LORETA calculations are introduced.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -11,8 +11,8 @@ This plan is the source of truth for a completely new source-localization develo
 The branch is currently in the prepared source-payload contract stage. The
 interactive renderer, anatomical mesh loading, source-layer rendering, scalar
 color controls, coordinate transform bridge, single-payload importer,
-multi-condition manifest importer, and checked-in JSON format examples are in
-place.
+multi-condition manifest importer, checked-in JSON format examples, JSON Schema
+shape files, and producer-facing validator are in place.
 
 The branch is not yet in the real source-localization calculation stage. Future
 LORETA, eLORETA, sLORETA, MNE inverse, beamformer, or other source-estimation
@@ -20,9 +20,10 @@ code should target the prepared JSON/payload bridge and stay separate from the
 renderer, GUI, fsaverage loader, and project I/O until a new plan explicitly
 scopes calculation or project integration.
 
-The next recommended development slice is Phase 5H: formalize the prepared JSON
-contract into a machine-checkable schema/validator so future calculation code can
-test its output before the visualizer imports it.
+The prepared payload contract stage is complete enough for the next work to move
+outside the renderer. The next recommended development slice is Phase 6A: a
+separate source-localization producer spike that investigates real calculation
+inputs and emits prepared payload JSON through the Phase 5H validator.
 
 ## Date
 
@@ -96,7 +97,9 @@ New tool implementation:
   - `transforms.py`: native/source coordinate to renderer display coordinate transform contract.
   - `prepared_source_fixture.py`: in-memory prepared source-map fixture that validates the future adapter handoff shape without computing source estimates.
   - `prepared_payload_importer.py`: controlled JSON importer for already-prepared source payloads and source-payload manifests.
+  - `prepared_payload_validator.py`: producer-facing validator and schema descriptors for prepared source payloads and manifests.
   - `examples/`: checked-in synthetic prepared payload and manifest JSON examples for future calculation producer output shape and importer validation.
+  - `examples/*.schema.json`: shape-level JSON Schema files for external producer tooling.
   - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
 
 Main App shell integration:
@@ -250,7 +253,7 @@ Done means:
 
 ## Phase 5: Optional Real Data Adapter
 
-Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Phase 5D adds a selectable prepared source-map fixture that looks like a future real-data handoff. Phase 5E adds controlled prepared JSON payload import. Phase 5F adds multi-condition prepared payload manifests. Phase 5G adds checked-in JSON examples for future calculation producer output. Real LORETA calculation, project-output discovery, and project-output integration remain out of scope.
+Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Phase 5D adds a selectable prepared source-map fixture that looks like a future real-data handoff. Phase 5E adds controlled prepared JSON payload import. Phase 5F adds multi-condition prepared payload manifests. Phase 5G adds checked-in JSON examples for future calculation producer output. Phase 5H adds producer-facing schema and validation. Real LORETA calculation, project-output discovery, and project-output integration remain out of scope.
 
 Objective:
 
@@ -446,7 +449,7 @@ Done means:
 
 ### Phase 5H: Prepared Payload Schema And Producer Validation
 
-Status: Proposed next slice. Not implemented.
+Status: Implemented. The tool includes JSON Schema files plus a Python validator for prepared payload and manifest producer preflight checks.
 
 Objective:
 
@@ -460,13 +463,19 @@ Objective:
 
 Implementation notes:
 
-- Prefer a lightweight tool-local schema representation or a JSON Schema file in
-  `src/Tools/LORETA_Visualizer/examples/` unless dependency review supports a
-  dedicated schema library.
-- Tests should validate the checked-in examples and a small set of invalid
-  producer outputs.
-- The GUI importer can continue using the existing importer error messages; the
-  schema is primarily for producer-side confidence and agent/developer clarity.
+- `prepared_payload_validator.py` owns the v1 format constants, lightweight
+  schema descriptors, file/mapping validators, and cross-field validation rules.
+- `examples/source_payload_v1.schema.json` and
+  `examples/source_manifest_v1.schema.json` provide shape-level JSON Schema
+  files for external producer tooling.
+- The importer delegates raw-shape validation to the producer validator before
+  converting payloads into renderer display space.
+- Tests validate checked-in examples plus invalid producer outputs such as
+  mismatched point/value counts, bad source kinds, invalid face indices,
+  duplicate condition ids, absolute paths, path escapes, and missing manifest
+  payload files.
+- The schema/validator is for producer-side confidence and does not introduce a
+  real calculation path.
 
 Done means:
 
@@ -474,6 +483,46 @@ Done means:
   manifest JSON.
 - The checked-in examples are validated against that target in tests.
 - No real LORETA calculation, project-output discovery, or project I/O is added.
+
+## Phase 6: Real Source-Localization Producer
+
+Status: Proposed future stage. Not implemented.
+
+Objective:
+
+- Start real source-localization work in a separate producer path that outputs
+  `fpvs-loreta-source-payload-v1` JSON.
+- Preserve the renderer/importer boundary: the visualizer should continue to
+  consume prepared payloads only.
+- Keep method choice, forward model assumptions, montage handling, FPVS
+  frequency-domain inputs, and condition/contrast calculations outside
+  renderer, fsaverage mesh loading, and GUI rendering code.
+
+### Phase 6A: Calculation Producer Spike
+
+Status: Proposed next slice. Not implemented.
+
+Objective:
+
+- Inventory the real inputs needed for a first source-localization calculation
+  producer, including EEG montage/electrode coordinates, reference assumptions,
+  condition labels, frequency-domain FPVS values, and source-model choice.
+- Decide the first method spike, such as an MNE inverse-style path, sLORETA,
+  eLORETA, or another explicitly scoped method.
+- Produce a small validated prepared payload JSON from a controlled fixture or
+  minimal real-like input without changing renderer internals.
+- Keep all output validation routed through Phase 5H before GUI import.
+
+Done means:
+
+- The producer path is clearly separate from `renderer.py`, `gui.py`,
+  `fsaverage_mesh.py`, and existing project outputs.
+- The spike emits a payload or documents the exact missing scientific inputs
+  needed to emit one.
+- The output validates with `prepared_payload_validator.py`.
+- No retired Source Localization/eLORETA code, quarantine code, preprocessing
+  behavior changes, Stats method changes, or project-manifest integration is
+  introduced without a new scoped plan.
 
 ## Integration Safety
 
@@ -529,7 +578,7 @@ Additional visible smoke path for future slices:
 - Final icon direction: dedicated brain/source icon in `Main_App.gui.icons.sidebar_icon`, not an image asset unless the current icon system changes.
 - Whether the branch-visible sidebar entry should remain default-visible after promotion or be hidden behind a release feature flag.
 - Preferred fsaverage surface for the base layer: pial, inflated, white, or another surface.
-- Whether Phase 5H should use plain tool-local validation functions only or add
-  JSON Schema documents plus a validation dependency.
 - First real-data shape after demo/importer conditions: point cloud, volume
   grid, cortical sheet mesh, or another source-space representation.
+- First source-localization producer method and required scientific inputs for
+  a valid 64-channel FPVS EEG source-estimation spike.

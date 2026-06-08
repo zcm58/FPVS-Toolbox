@@ -109,9 +109,14 @@ renderer.py
   scalar values, faces, coordinate-space labels, and metadata; manifest files map
   condition labels to relative payload JSON files. This is user-selected file
   input only, not project-output discovery.
+- `prepared_payload_validator.py`: producer-facing validation for prepared
+  payload and manifest JSON. It owns format constants, schema descriptors, and
+  cross-field checks. It does not render, calculate source estimates, or inspect
+  project outputs.
 - `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
   the expected output shape for future source-localization producers. They are
-  format examples only and are not source estimates.
+  format examples only and are not source estimates. This directory also holds
+  the shape-level JSON Schema files for external tooling.
 - `source_payloads.py`: renderer-facing `SourcePayload` validation,
   finite-value filtering, metadata preservation, and payload conversion to
   display space.
@@ -172,6 +177,11 @@ preferred reference shape for future calculations that produce coordinates in
 the same source space as the anatomical mesh. The display-space examples and
 manifest are intended for importer and GUI validation without requiring an
 fsaverage cache.
+
+Future calculation producers should use `prepared_payload_validator.py` for
+preflight validation before handing JSON to the GUI importer. The JSON Schema
+files provide an external-tooling shape contract, while the Python validator
+adds cross-field checks that the schema intentionally does not own.
 
 ## Verification
 

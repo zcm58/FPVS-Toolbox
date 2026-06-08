@@ -8,6 +8,16 @@ other source-localization values.
 Future source-localization calculation code can use these examples as the output
 shape to target before handing data to the visualizer importer.
 
+The companion schema files are:
+
+- `source_payload_v1.schema.json`
+- `source_manifest_v1.schema.json`
+
+The schema files describe the JSON shape for external tools. The Python
+validator in `prepared_payload_validator.py` enforces additional cross-field
+rules, including one scalar value per point, valid triangle-face indices, unique
+manifest condition ids, and safe relative manifest paths.
+
 ## Payload Files
 
 Payload JSON files use:
@@ -42,3 +52,17 @@ Manifest JSON files use:
   `metadata`
 
 Manifest `file` paths must be relative and stay inside the manifest folder.
+
+## Producer Preflight
+
+Future calculation code can validate output before import:
+
+```python
+from Tools.LORETA_Visualizer.prepared_payload_validator import (
+    validate_prepared_source_manifest_json,
+    validate_prepared_source_payload_json,
+)
+
+validate_prepared_source_payload_json("source_payload.json")
+validate_prepared_source_manifest_json("source_manifest.json", require_payload_files=True)
+```
