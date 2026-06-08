@@ -375,6 +375,11 @@ def _payload_metadata(
         "regularization": "lambda2 scaled by leadfield sensor-space trace",
         "average_reference_applied": bool(config.apply_average_reference),
         "sensor_value_unit": condition.sensor_value_unit,
+        "source_value_unit": "arbitrary units",
+        "source_value_unit_note": (
+            "Template-scaled L2-MNE source amplitude proportional to the input sensor topography; "
+            "not calibrated current density or dipole moment."
+        ),
         "channel_count": len(forward_model.channel_names),
         "source_count": int(len(forward_model.source_points)),
         "channel_names": list(forward_model.channel_names),

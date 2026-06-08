@@ -2,35 +2,40 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, and Phase 6A are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, and now has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, and Phase 6C are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, and can now write beta project source-map JSON from real project data.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
 ## Current Development Stage
 
-The branch is currently in the beta source-producer contract stage. The
+The branch is currently in the beta project source-map export stage. The
 interactive renderer, anatomical mesh loading, source-layer rendering, scalar
 color controls, coordinate transform bridge, single-payload importer,
 multi-condition manifest importer, checked-in JSON format examples, JSON Schema
 shape files, producer-facing validator, method-neutral source-producer result
-contracts, and beta L2-MNE cortical-surface fixture producer are in place.
+contracts, beta L2-MNE cortical-surface fixture producer, and read-only project
+topography input assembler are in place. Phase 6C adds the first project-level
+export path: real project topographies are combined with an external
+MNE/fsaverage BioSemi64 template EEG forward model and written as validated
+prepared JSON/manifest files for the visualizer.
 
-The branch is not yet in the project-integrated real EEG source-localization
-stage. The beta L2-MNE implementation accepts explicit source-ready arrays and
-writes validated prepared JSON; it does not discover project outputs, read
-participant workbooks, build subject MRI forward models, or alter preprocessing,
-Stats, or project manifests. Future LORETA, eLORETA, sLORETA, beamformer, or
-other source-estimation methods should become sibling producers that target the
-prepared JSON/payload bridge and stay separate from the renderer, GUI, display
-fsaverage loader, and project I/O unless a new plan explicitly scopes
-integration.
+This is still a beta, template-based method-validation stage, not a final
+scientifically validated source-localization workflow. The 6C path uses real
+project FPVS condition data, but it does not change preprocessing, Stats,
+existing project manifests, workbook formats, the renderer, or the importer.
+Future LORETA, eLORETA, sLORETA, beamformer, or other source-estimation methods
+should become sibling producers that target the prepared JSON/payload bridge
+and stay separate from the renderer, display fsaverage loader, and project I/O
+unless a new plan explicitly scopes integration.
 
-The prepared payload contract stage is complete and Phase 6A has established
-the first swappable source method. The next recommended development slice is a
-Phase 6B planning/implementation slice for source-ready project input assembly:
-decide whether the producer reads existing `FullFFT Amplitude (uV)` workbooks,
-requires complex Fourier coefficients, or consumes a new sensor-topography
-export before attempting real participant/condition runs.
+The prepared payload contract stage is complete, Phase 6A established the first
+swappable source method, and Phase 6B established a read-only project-input
+assembler. Phase 6C established the first real-project beta export and GUI
+entry point. The next recommended development slice is Phase 6D: method/QC
+source-space z-score mode for the project source-map workflow, modeled on the
+Hauk et al. 2021 FPVS L2-MNE frequency-domain source-estimation procedure:
+summed harmonic topographies, source-space baseline/noise correction, and
+source-space z-score payloads.
 
 ## Date
 
@@ -116,6 +121,7 @@ New tool implementation:
   - `examples/`: checked-in synthetic prepared payload and manifest JSON examples for future calculation producer output shape and importer validation.
   - `examples/*.schema.json`: shape-level JSON Schema files for external producer tooling.
   - `source_producers/`: source-localization calculation producers that read explicit source-ready inputs and write prepared payload/manifest JSON. These modules must not import the GUI, renderer, display importer, display bridge helpers, or display mesh loader.
+    - `project_inputs.py`: read-only Phase 6B project workbook adapter that assembles source-ready 64-channel FPVS condition topographies for calculation producers.
   - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
 
 Main App shell integration:
@@ -502,7 +508,7 @@ Done means:
 
 ## Phase 6: Real Source-Localization Producers
 
-Status: Started. Phase 6A is implemented; project-integrated real EEG source-localization remains future work.
+Status: Started. Phase 6A, Phase 6B, and Phase 6C are implemented; Phase 6D is planned next for Hauk-style source-space z-scored L2-MNE maps. Additional source methods remain future work.
 
 Objective:
 
@@ -583,10 +589,10 @@ $env:PYTHONPATH='src'
 - The calculation producer should use MNE/fsaverage/source-space resources for
   computation independently from `fsaverage_mesh.py`, which remains a display
   mesh loader only.
-- If existing project workbooks do not contain enough source-ready information,
-  Phase 6B should document the missing input and either use a controlled source
-  fixture or add a separately scoped export plan. Do not change preprocessing,
-  Stats, workbook formats, or project manifests without revising this plan.
+- Phase 6B confirmed that existing compact project workbooks can provide
+  source-ready BCA or FFT-amplitude topographies for the beta path. Do not
+  change preprocessing, Stats, workbook formats, or project manifests without
+  revising this plan.
 
 Done means:
 
@@ -603,6 +609,265 @@ Done means:
 - No retired Source Localization/eLORETA code, quarantine code, preprocessing
   behavior changes, Stats method changes, or project-manifest integration is
   introduced without a new scoped plan.
+
+### Phase 6B: Read-Only Project Topography Inputs
+
+Status: Implemented. The tool now includes a read-only project input assembler
+under `src/Tools/LORETA_Visualizer/source_producers/project_inputs.py`.
+
+Objective:
+
+- Inspect a real FPVS project output layout and determine how to build
+  source-ready condition topographies without changing preprocessing or Stats.
+- Use the same Stats-selected significant harmonic list that drives the
+  condition-level FPVS DV and scalp-map quantification.
+- Assemble one 64-channel topography per selected harmonic per condition, ready
+  for the Phase 6A L2-MNE producer.
+- Preserve the renderer/importer boundary and avoid project writes.
+- Surface participant QC flags rather than silently dropping flagged data.
+
+Implementation notes:
+
+- `project_inputs.py` reads `3 - Statistical Analysis Results/Stats_Ready_Summed_BCA.xlsx`
+  for the selected harmonic list and the real selected condition names.
+- It reads compact per-participant workbook sheets under
+  `1 - Excel Data Files/<Condition>/` and supports both:
+  - `BCA (uV)` via `metric="bca"`; and
+  - `FFT Amplitude (uV)` via `metric="fft_amplitude"`.
+- It returns `L2MNEFPVSCondition` objects whose harmonic topographies are
+  group means across included participants, preserving a separate topography for
+  each selected harmonic so the L2-MNE producer can apply its harmonic strategy.
+- It reads `Excluded Participants.xlsx` and `Flagged Participants.xlsx`.
+  Excluded participants are skipped. Flagged participants are included by
+  default to preserve current Stats behavior, but callers can set
+  `include_flagged_subjects=False` for diagnostic/source-map comparisons.
+- It performs no writes to the project and does not import renderer, GUI,
+  importer, display transform, preprocessing, or Stats implementation modules.
+
+Semantic Categories 6B findings:
+
+- Project root inspected read-only:
+  `D:\FPVS Toolbox Root\Semantic Categories`.
+- Raw source folder from app settings/project metadata:
+  `D:\NERD Lab Data Archive\2026\Semantic Categories (2026)`.
+- Project layout is single-group with 27 participants and five selected
+  analysis conditions: `Color Response`, `Color Response 2`,
+  `Mixed Response 1`, `Mixed Response 2`, and `Semantic Response`.
+- A stale/empty `Color Response 1` output folder exists but is not present in
+  the current `project.json` event map or Stats-ready long-format condition set.
+- The all-condition Stats-ready selected harmonics are:
+  `2.4`, `4.8`, `7.2`, `9.6`, `13.2`, and `20.4` Hz.
+- All 135 selected condition/participant workbooks read cleanly from the compact
+  `BCA (uV)` and `FFT Amplitude (uV)` sheets, contain the exact selected
+  harmonic columns, and match the expected 64-channel BioSemi ordering.
+- `Publication_Scalp_Maps_Source_Data.xlsx` is useful for paired scalp-map
+  auditing, but it currently covers only `Color Response` and
+  `Semantic Response` with a different pair-specific harmonic list. It should
+  not be the primary input for all-condition source maps.
+- `Stats_Ready_Summed_BCA.xlsx` carries the correct all-condition harmonic list
+  but is ROI-level, not electrode-level; the source topography assembler should
+  use it for the selected harmonics and use per-participant workbooks for
+  electrode-level values.
+- Existing QC output flags `study-participant`, `study-participant`, and `study-participant`; none are excluded. Including
+  flagged participants preserves current Stats behavior but can strongly
+  dominate Mixed Response maps, especially `study-participant` and `study-participant` at electrode `study-participant`.
+  The source workflow should expose a flagged-participant include/exclude choice
+  before users interpret maps.
+
+Recommendation:
+
+- For the first project-connected beta source maps, use `BCA (uV)` topographies
+  by default because they match the current FPVS quantification pipeline and
+  produce interpretable occipital response patterns from Semantic Categories.
+- Keep `FFT Amplitude (uV)` supported for method exploration. Raw FFT amplitude
+  is closer to the published L2-MNE wording of summed frequency-domain
+  topographies, but in Semantic Categories it carries more broad/frontal
+  amplitude structure and lacks source-space baseline correction by itself.
+- Do not require complex Fourier coefficients for the immediate beta. If later
+  validation shows phase/polarity is needed, add a separate source-ready complex
+  coefficient export rather than changing preprocessing silently.
+- Phase 6D is the explicit Hauk-style implementation target: source-space
+  baseline correction and z-scoring from target and neighboring-bin
+  topographies. That remains a source-producer change, not a renderer change.
+
+Done means:
+
+- Semantic Categories can be inspected read-only and converted into
+  source-ready 64-channel condition topographies for all selected conditions.
+- The selected harmonic list matches the all-condition Stats-ready harmonic
+  list exactly.
+- Excluded and flagged participant files are read, and flagged participants can
+  be included or excluded deliberately.
+- Focused tests cover the assembler without depending on local `D:\` project
+  paths.
+- No project files, preprocessing outputs, Stats behavior, renderer code, GUI
+  code, importer code, or project manifests are changed.
+
+### Phase 6C: Project Beta L2-MNE Source-Map Export
+
+Status: Implemented. The tool can now write beta L2-MNE cortical-surface source
+maps from an existing project and load those maps through the existing prepared
+manifest importer.
+
+Objective:
+
+- Make real project data viewable in the LORETA Visualizer without changing the
+  renderer or importer contract.
+- Combine Phase 6B project condition topographies with a BioSemi64/fsaverage
+  template EEG forward model.
+- Write one prepared source payload JSON per project condition plus one
+  manifest JSON under the active project root.
+- Keep source-map generation in `source_producers/`, separate from rendering,
+  display mesh loading, payload import, and display transforms.
+- Make the GUI import dialog project-root-aware so loading prepared JSON starts
+  from the selected project's source-map output folder when available.
+
+Implementation notes:
+
+- `source_producers/project_l2_mne_export.py` owns the 6C export orchestration.
+  It reads project topographies through `project_inputs.py`, builds a
+  fixed-orientation MNE/fsaverage BioSemi64 EEG forward model, calls the 6A
+  L2-MNE producer, and writes validated payload/manifest JSON.
+- The default output folder is project-local:
+  `6 - Source Localization/L2-MNE Cortical Surface Beta/`.
+- The default source metric is `BCA (uV)` to match the current FPVS
+  quantification path. `FFT Amplitude (uV)` remains supported by the assembler
+  and producer path for method exploration.
+- The default source-space spacing is MNE `ico3`, yielding 1,284 cortical
+  source points and 2,560 triangular faces. Points are emitted in FreeSurfer
+  fsaverage millimeter coordinates with `coordinate_space: fsaverage_surface`.
+- The GUI exposes `Build project source JSON`, which runs the exporter in a
+  `QThread`, writes the project-local files, then loads the emitted manifest
+  through the existing importer. The worker orchestrates the calculation but
+  does not put source math into the renderer or importer.
+- The `Load source JSON` and `Load manifest` dialogs now prefer the last import
+  folder, then the active project's 6C output folder, then the active project
+  root.
+- Semantic Categories was exported successfully to:
+  `D:\FPVS Toolbox Root\Semantic Categories\6 - Source Localization\L2-MNE Cortical Surface Beta\project_l2_mne_cortical_surface_beta_manifest.json`.
+  The manifest contains `Color Response`, `Color Response 2`,
+  `Mixed Response 1`, `Mixed Response 2`, and `Semantic Response`.
+
+Done means:
+
+- A real single-group project with compact per-participant workbooks can produce
+  a validated prepared manifest plus condition payloads without changing
+  project manifests, preprocessing outputs, Stats behavior, or workbook formats.
+- The generated manifest can be loaded through the existing visualizer importer
+  and condition dropdown.
+- Generated output stays under the project root by default and rejects output
+  directories outside the project root.
+- The GUI remains responsive while source JSON generation runs.
+  No offscreen Qt workflow is required for local verification.
+
+### Phase 6D: Hauk-Style Source-Space Z-Score Mode
+
+Status: Planned next. This is the next active source-localization slice.
+
+Objective:
+
+- Replace the current arbitrary-unit beta display path, or add a selectable
+  mode beside it, with source-space z-scored L2-MNE maps modeled on the
+  frequency-domain FPVS source-estimation procedure used by Hauk, Rice, Volfart
+  et al. (NeuroImage, 2021).
+- Make the renderer-visible scale meaningful and publication-aligned:
+  `value_label` should be `source-space z-score`, `source_value_unit` should be
+  `z-score`, and the visualizer legend should display z-score min/max values.
+- Keep all calculation work inside `source_producers/`. The renderer, importer,
+  payload bridge, fsaverage display mesh loader, and GUI must not compute FFT
+  bins, baseline correction, inverse estimates, or z-scores.
+
+Hauk 2021 methodological target:
+
+- Work in the FPVS frequency domain, not the time-domain evoked path.
+- For each condition/frequency family, use topographies around the target
+  oddball/base frequency harmonics and sum across the selected harmonics.
+- Use L2 minimum-norm source estimation for those harmonic topographies.
+- Apply the same baseline/noise correction and z-scoring logic in source space
+  that Hauk 2021 describes for frequency-domain results: target-bin source
+  amplitude should be baseline corrected against neighboring frequency bins,
+  then divided by neighboring-bin source-space noise SD.
+- Render the resulting source-space z-score map on the cortical surface.
+
+Important equivalence boundary:
+
+- The target is exact alignment with the Hauk-style **source-space z-score
+  transformation** and payload semantics, not an unsupported claim that the
+  current toolbox has the same acquisition model as Hauk 2021.
+- Hauk 2021 used combined EEG/MEG, individual MRIs, individual head/source
+  models, whitening across sensor types, loose orientation constraints, no
+  depth weighting or noise normalization, and SNR=3 regularization. The current
+  beta project path is BioSemi64 EEG-only with an fsaverage/template head model.
+  Those differences must remain explicit in payload metadata and user-facing
+  documentation until the toolbox actually supports them.
+- The finished Phase 6D mode must therefore be named clearly, for example
+  `l2_mne_cortical_surface_hauk_zscore_beta`, and metadata must state
+  `hauk_2021_frequency_domain_zscore_aligned: true` plus the remaining
+  limitations such as `sensor_modalities: EEG only`,
+  `head_model: fsaverage template`, and `subject_mri: none`.
+
+Implementation notes:
+
+- Add a dedicated source producer module or focused extension under
+  `src/Tools/LORETA_Visualizer/source_producers/`, such as
+  `l2_mne_hauk_zscore.py` or a clearly named sibling orchestration function.
+- Extend the project input layer so it can assemble both target harmonic
+  topographies and neighboring-bin topographies for each selected harmonic.
+  Do not change preprocessing or Stats harmonic-selection behavior silently.
+- Prefer reading existing per-participant frequency-domain workbook sheets if
+  they contain the required neighboring frequency bins. If current compact
+  outputs do not contain enough neighboring-bin detail, Phase 6D must stop and
+  document the missing upstream export rather than fabricating z-scores from
+  BCA-only summaries.
+- Use the same selected harmonic list as the Stats group-significant harmonic
+  policy unless the user explicitly scopes a different Hauk-style harmonic
+  policy for this source mode.
+- Compute source estimates for target and neighboring-bin topographies using
+  the same forward model, inverse settings, harmonic strategy, and reference
+  assumptions within a run.
+- Compute source-space baseline and z-score per source point from the
+  neighboring-bin source estimates. The z-score map is the renderer payload;
+  arbitrary L2-MNE amplitude remains diagnostic metadata, not the displayed
+  primary scalar.
+- Preserve the current project-local output discipline. Suggested output folder:
+  `6 - Source Localization/L2-MNE Hauk Z-Score Beta/`.
+- The visualizer should auto-scale or manually scale z-scores, and the legend
+  should make it obvious when the displayed unit is z-score. A useful manual
+  scale preset may include 0 to 1.96 or 0 to a user-selected positive z-score
+  range, but do not hard-code interpretation thresholds into the renderer.
+
+Definitions of done:
+
+- A source-space z-score producer emits validated prepared payloads with:
+  - `source_model: l2_mne_cortical_surface_hauk_zscore_beta`;
+  - `value_label: source-space z-score`;
+  - `metadata.source_value_unit: z-score`;
+  - metadata listing selected harmonics, neighboring-bin policy, baseline
+    correction rule, z-score denominator rule, forward model, inverse settings,
+    sensor modality, and Hauk-alignment limitations.
+- The source-space z-score mode uses target and neighboring-bin source estimates
+  from the same inverse model. It does not derive z-scores from already summed
+  BCA values alone.
+- If the current project workbooks lack the neighboring-bin data needed for a
+  legitimate Hauk-style source-space z-score, the producer raises a clear,
+  tested error explaining the missing input and the required upstream export.
+- The generated manifest contains all selected project conditions and can be
+  loaded through the existing prepared-manifest importer without renderer
+  changes.
+- The control-panel legend displays z-score min/max values and the unit readout
+  says `source-space z-score; unit: z-score` for these payloads.
+- Focused tests cover:
+  - neighboring-bin project input assembly;
+  - z-score calculation on deterministic source-ready fixtures;
+  - rejection when only BCA summaries are available;
+  - payload metadata/format validation;
+  - manifest import compatibility.
+- Semantic Categories can be run through the mode only if the required
+  neighboring-bin frequency-domain inputs are present. Otherwise the documented
+  result is a precise upstream-data requirement, not a fake z-score map.
+- No source-space z-score calculation is added to `renderer.py`, `gui.py`,
+  `prepared_payload_importer.py`, `source_payloads.py`, `transforms.py`,
+  `scalar_fields.py`, preprocessing, Stats, or project manifests.
 
 ## Integration Safety
 
@@ -660,12 +925,12 @@ Additional visible smoke path for future slices:
 - Preferred fsaverage surface for the base layer: pial, inflated, white, or another surface.
 - First real-data shape after demo/importer conditions: point cloud, volume
   grid, cortical sheet mesh, or another source-space representation.
-- Phase 6B source-ready project input contract for L2-MNE: whether it reads
-  existing `FullFFT Amplitude (uV)` workbooks first, requires complex Fourier
-  coefficients, or receives a new source-ready sensor-topography export.
-- Whether project-integrated L2-MNE should keep Phase 6A's default strategy of
-  summing selected sensor harmonic topographies before inversion, add
-  source-space harmonic estimates summed after inversion, or add source-space
-  z/BCA-style baseline correction.
+- Whether the Hauk-style source-space z-score mode should sum selected sensor
+  harmonic topographies before inversion or invert each harmonic/noise-bin
+  topography before summing source-space z-scores. Phase 6D must choose and
+  document this explicitly.
+- Whether the beta GUI/project workflow should include flagged participants by
+  default to match current Stats behavior or default to excluding flagged
+  participants for exploratory source-map viewing.
 - Future second method target after L2-MNE: LORETA/eLORETA volume, mixed
   cortical-volume source space, or another explicitly scoped model.

@@ -16,6 +16,19 @@ DEFAULT_SCALAR_MIN = 0.0
 DEFAULT_SCALAR_MAX = 1.0
 
 
+def format_scalar_value(value: float) -> str:
+    """Format source-map scalar values for compact UI scale labels."""
+    numeric = float(value)
+    magnitude = abs(numeric)
+    if numeric == 0.0:
+        return "0"
+    if magnitude >= 10_000.0 or magnitude < 0.001:
+        return f"{numeric:.3e}"
+    if magnitude < 1.0:
+        return f"{numeric:.4f}".rstrip("0").rstrip(".")
+    return f"{numeric:.3f}".rstrip("0").rstrip(".")
+
+
 def resolve_scalar_limits(
     values: np.ndarray,
     *,

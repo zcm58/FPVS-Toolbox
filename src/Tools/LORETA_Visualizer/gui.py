@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
@@ -37,7 +38,13 @@ from Tools.LORETA_Visualizer.prepared_payload_importer import (
     load_prepared_source_payload_json,
 )
 from Tools.LORETA_Visualizer.renderer import BrainRendererWidget, RenderBackendError
-from Tools.LORETA_Visualizer.scalar_fields import DEFAULT_SCALAR_MAX, DEFAULT_SCALAR_MIN, resolve_scalar_limits
+from Tools.LORETA_Visualizer.scalar_fields import (
+    DEFAULT_SCALAR_MAX,
+    DEFAULT_SCALAR_MIN,
+    LORETA_SCALAR_COLORS,
+    format_scalar_value,
+    resolve_scalar_limits,
+)
 from Tools.LORETA_Visualizer.source_payloads import SourcePayload
 
 logger = logging.getLogger(__name__)
@@ -71,12 +78,88 @@ class FsaverageLoadWorker(QObject):
             self.finished.emit()
 
 
+class ProjectSourceMapExportWorker(QObject):
+    """Write project beta source maps without touching widgets."""
+
+    exported = Signal(object)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, *, project_root: Path) -> None:
+        super().__init__()
+        self._project_root = project_root
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
+                write_project_l2_mne_cortical_surface_payloads,
+            )
+
+            result = write_project_l2_mne_cortical_surface_payloads(project_root=self._project_root)
+        except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
+            self.failed.emit(str(exc))
+        else:
+            self.exported.emit(result)
+        finally:
+            self.finished.emit()
+
+
+def resolve_loreta_import_start_dir(
+    *,
+    project_root: Path | None,
+    last_import_dir: Path | None,
+) -> str:
+    """Return the preferred starting folder for LORETA JSON file dialogs."""
+    if last_import_dir is not None and last_import_dir.is_dir():
+        return str(last_import_dir)
+    if project_root is not None and project_root.is_dir():
+        from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
+            default_project_l2_mne_output_dir,
+        )
+
+        source_dir = default_project_l2_mne_output_dir(project_root)
+        if source_dir.is_dir():
+            return str(source_dir)
+        return str(project_root)
+    return ""
+
+
+def _activation_color_ramp_stylesheet() -> str:
+    stops = []
+    max_index = max(len(LORETA_SCALAR_COLORS) - 1, 1)
+    for index, color in enumerate(LORETA_SCALAR_COLORS):
+        stops.append(f"stop:{index / max_index:.3f} {color}")
+    return (
+        "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+        f"{', '.join(stops)});"
+        "border: 1px solid #d6dee8;"
+        "border-radius: 2px;"
+    )
+
+
+def _activation_value_readout(payload: SourcePayload | None) -> str:
+    if payload is None:
+        return "Value: source activation"
+    label = payload.value_label.strip() or "source activation"
+    source_unit = str(payload.metadata.get("source_value_unit", "")).strip()
+    sensor_unit = str(payload.metadata.get("sensor_value_unit", "")).strip()
+    if source_unit and sensor_unit:
+        return f"Value: {label}; unit: {source_unit}; input: {sensor_unit}"
+    if source_unit:
+        return f"Value: {label}; unit: {source_unit}"
+    if sensor_unit:
+        return f"Value: {label}; input: {sensor_unit}"
+    return f"Value: {label}"
+
+
 class LoretaVisualizerWindow(QWidget):
     """Embedded workspace page for Phase 1 real-time brain rendering."""
 
     def __init__(
         self,
         parent: QWidget | None = None,
+        project_root: str | None = None,
         *,
         embedded: bool = True,
     ) -> None:
@@ -87,10 +170,13 @@ class LoretaVisualizerWindow(QWidget):
         configure_window_surface(self, title="LORETA Visualizer", size=surface_size)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
+        self._project_root = self._resolve_project_root(project_root)
         self.renderer: BrainRendererWidget | None = None
         self.status_banner: StatusBanner | None = None
         self._mesh_thread: QThread | None = None
         self._mesh_worker: FsaverageLoadWorker | None = None
+        self._source_export_thread: QThread | None = None
+        self._source_export_worker: ProjectSourceMapExportWorker | None = None
         self._selected_condition_id = default_condition().condition_id
         self._current_activation_payload: SourcePayload | None = None
         self._last_import_dir: Path | None = None
@@ -127,6 +213,26 @@ class LoretaVisualizerWindow(QWidget):
         if self.renderer is not None:
             self._start_fsaverage_load(allow_fetch=False)
 
+    def _resolve_project_root(self, provided_root: str | None) -> Path | None:
+        if provided_root:
+            root = Path(provided_root)
+            if root.exists():
+                return root.resolve()
+        env_root = os.environ.get("FPVS_PROJECT_ROOT")
+        if env_root:
+            root = Path(env_root)
+            if root.exists():
+                return root.resolve()
+        parent: QObject | None = self.parent()
+        while parent is not None:
+            project = getattr(parent, "currentProject", None)
+            if project is not None and hasattr(project, "project_root"):
+                root = Path(project.project_root)
+                if root.exists():
+                    return root.resolve()
+            parent = parent.parent()
+        return None
+
     def _build_controls(self) -> SectionCard:
         controls = SectionCard("View Controls", self, object_name="loreta_view_controls")
         controls.setFixedWidth(240)
@@ -146,7 +252,7 @@ class LoretaVisualizerWindow(QWidget):
         controls.content_layout.addWidget(self.transparency_slider)
         controls.content_layout.addWidget(self.transparency_value_label)
 
-        activation_label = QLabel("Dummy LORETA opacity", controls)
+        activation_label = QLabel("Source map opacity", controls)
         activation_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         controls.content_layout.addWidget(activation_label)
 
@@ -193,7 +299,37 @@ class LoretaVisualizerWindow(QWidget):
         range_row.addWidget(self.activation_max_spin)
         controls.content_layout.addLayout(range_row)
 
-        condition_label = QLabel("Dummy condition", controls)
+        self.activation_scale_mode_label = QLabel("Auto color scale", controls)
+        self.activation_scale_mode_label.setObjectName("loreta_activation_scale_mode_label")
+        self.activation_scale_mode_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(self.activation_scale_mode_label)
+
+        scale_row = QHBoxLayout()
+        scale_row.setContentsMargins(0, 0, 0, 0)
+        scale_row.setSpacing(6)
+        self.activation_scale_min_label = QLabel("", controls)
+        self.activation_scale_min_label.setObjectName("loreta_activation_scale_min_label")
+        self.activation_scale_min_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.activation_color_ramp = QLabel("", controls)
+        self.activation_color_ramp.setObjectName("loreta_activation_color_ramp")
+        self.activation_color_ramp.setFixedHeight(12)
+        self.activation_color_ramp.setMinimumWidth(72)
+        self.activation_color_ramp.setStyleSheet(_activation_color_ramp_stylesheet())
+        self.activation_scale_max_label = QLabel("", controls)
+        self.activation_scale_max_label.setObjectName("loreta_activation_scale_max_label")
+        self.activation_scale_max_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        scale_row.addWidget(self.activation_scale_min_label, 0)
+        scale_row.addWidget(self.activation_color_ramp, 1)
+        scale_row.addWidget(self.activation_scale_max_label, 0)
+        controls.content_layout.addLayout(scale_row)
+
+        self.activation_value_label = QLabel("", controls)
+        self.activation_value_label.setObjectName("loreta_activation_value_label")
+        self.activation_value_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.activation_value_label.setWordWrap(True)
+        controls.content_layout.addWidget(self.activation_value_label)
+
+        condition_label = QLabel("Source condition", controls)
         condition_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         controls.content_layout.addWidget(condition_label)
 
@@ -210,7 +346,7 @@ class LoretaVisualizerWindow(QWidget):
         self.condition_status_label.setWordWrap(True)
         controls.content_layout.addWidget(self.condition_status_label)
 
-        self.activation_visible_check = QCheckBox("Show dummy LORETA heatmap", controls)
+        self.activation_visible_check = QCheckBox("Show source map", controls)
         self.activation_visible_check.setObjectName("loreta_activation_visible_check")
         self.activation_visible_check.setChecked(True)
         self.activation_visible_check.toggled.connect(self._on_activation_visibility_changed)
@@ -250,6 +386,12 @@ class LoretaVisualizerWindow(QWidget):
         self.load_source_payload_btn.clicked.connect(self._load_prepared_source_payload)
         controls.content_layout.addWidget(self.load_source_payload_btn)
 
+        self.build_project_source_btn = make_action_button("Build project source JSON", compact=True, parent=controls)
+        self.build_project_source_btn.setObjectName("loreta_build_project_source_btn")
+        self.build_project_source_btn.setToolTip("Write beta L2-MNE source JSON from the active project and load it.")
+        self.build_project_source_btn.clicked.connect(self._build_project_source_maps)
+        controls.content_layout.addWidget(self.build_project_source_btn)
+
         self.load_source_manifest_btn = make_action_button("Load manifest", compact=True, parent=controls)
         self.load_source_manifest_btn.setObjectName("loreta_load_source_manifest_btn")
         self.load_source_manifest_btn.setToolTip("Load a prepared source condition manifest.")
@@ -266,6 +408,7 @@ class LoretaVisualizerWindow(QWidget):
         self._update_transparency_label(DEFAULT_OPACITY_PERCENT)
         self._update_activation_opacity_label(DEFAULT_ACTIVATION_OPACITY_PERCENT)
         self._sync_activation_range_enabled()
+        self._update_activation_scale_readout(DEFAULT_SCALAR_MIN, DEFAULT_SCALAR_MAX)
         self._update_condition_status()
         return controls
 
@@ -302,8 +445,17 @@ class LoretaVisualizerWindow(QWidget):
         self.zoom_in_btn.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
         self.load_source_payload_btn.setEnabled(enabled)
+        self._sync_project_source_button()
         self.load_source_manifest_btn.setEnabled(enabled)
         self.load_fsaverage_btn.setEnabled(enabled)
+
+    def _sync_project_source_button(self) -> None:
+        enabled = (
+            self.renderer is not None
+            and self._project_root is not None
+            and self._source_export_thread is None
+        )
+        self.build_project_source_btn.setEnabled(enabled)
 
     def _on_transparency_changed(self, value: int) -> None:
         self._update_transparency_label(value)
@@ -335,6 +487,10 @@ class LoretaVisualizerWindow(QWidget):
         manual_enabled = renderer_available and not self.activation_auto_scale_check.isChecked()
         self.activation_min_spin.setEnabled(manual_enabled)
         self.activation_max_spin.setEnabled(manual_enabled)
+        if hasattr(self, "activation_scale_mode_label"):
+            self.activation_scale_mode_label.setText(
+                "Auto color scale" if self.activation_auto_scale_check.isChecked() else "Manual color scale"
+            )
 
     def _on_activation_visibility_changed(self, checked: bool) -> None:
         renderer = self.renderer
@@ -381,7 +537,10 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None:
             return
-        initial_dir = "" if self._last_import_dir is None else str(self._last_import_dir)
+        initial_dir = resolve_loreta_import_start_dir(
+            project_root=self._project_root,
+            last_import_dir=self._last_import_dir,
+        )
         file_name, _selected_filter = QFileDialog.getOpenFileName(
             self,
             "Load prepared source payload",
@@ -396,7 +555,10 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None:
             return
-        initial_dir = "" if self._last_import_dir is None else str(self._last_import_dir)
+        initial_dir = resolve_loreta_import_start_dir(
+            project_root=self._project_root,
+            last_import_dir=self._last_import_dir,
+        )
         file_name, _selected_filter = QFileDialog.getOpenFileName(
             self,
             "Load prepared source manifest",
@@ -406,6 +568,55 @@ class LoretaVisualizerWindow(QWidget):
         if not file_name:
             return
         self._import_prepared_source_manifest(Path(file_name))
+
+    def _build_project_source_maps(self) -> None:
+        if self._project_root is None:
+            self.condition_status_label.setText("Open a project before building beta source JSON.")
+            return
+        if self._source_export_thread is not None:
+            return
+        self.condition_status_label.setText("Building beta L2-MNE source JSON from the active project...")
+        self.build_project_source_btn.setEnabled(False)
+
+        thread = QThread(self)
+        worker = ProjectSourceMapExportWorker(project_root=self._project_root)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.exported.connect(self._on_project_source_maps_exported)
+        worker.failed.connect(self._on_project_source_maps_failed)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._project_source_export_finished)
+        self._source_export_thread = thread
+        self._source_export_worker = worker
+        thread.start()
+
+    @Slot(object)
+    def _on_project_source_maps_exported(self, result: object) -> None:
+        output_dir = getattr(result, "output_dir", None)
+        manifest_path = getattr(result, "manifest_path", None)
+        producer_result = getattr(result, "producer_result", None)
+        payloads = getattr(producer_result, "payloads", ())
+        if not isinstance(output_dir, Path) or not isinstance(manifest_path, Path):
+            self.condition_status_label.setText("Project source export failed: unexpected export result.")
+            return
+        self._last_import_dir = output_dir
+        self.condition_status_label.setText(
+            f"Built beta source JSON for {len(payloads)} conditions."
+        )
+        self._import_prepared_source_manifest(manifest_path)
+
+    @Slot(str)
+    def _on_project_source_maps_failed(self, message: str) -> None:
+        logger.warning("loreta_project_source_maps_export_failed", extra={"error": message})
+        self.condition_status_label.setText(f"Project source export failed: {message}")
+
+    @Slot()
+    def _project_source_export_finished(self) -> None:
+        self._source_export_thread = None
+        self._source_export_worker = None
+        self._sync_project_source_button()
 
     def _import_prepared_source_payload(self, path: Path) -> None:
         renderer = self.renderer
@@ -507,6 +718,7 @@ class LoretaVisualizerWindow(QWidget):
         self._mesh_worker = None
         if self.renderer is not None:
             self.load_fsaverage_btn.setEnabled(True)
+        self._sync_project_source_button()
 
     def _refresh_dummy_activation(self) -> None:
         renderer = self.renderer
@@ -581,6 +793,12 @@ class LoretaVisualizerWindow(QWidget):
             manual_max=self.activation_max_spin.value(),
         )
         renderer.set_activation_scalar_range(vmin, vmax)
+        self._update_activation_scale_readout(vmin, vmax)
+
+    def _update_activation_scale_readout(self, vmin: float, vmax: float) -> None:
+        self.activation_scale_min_label.setText(format_scalar_value(vmin))
+        self.activation_scale_max_label.setText(format_scalar_value(vmax))
+        self.activation_value_label.setText(_activation_value_readout(self._current_activation_payload))
 
     def closeEvent(self, event) -> None:  # noqa: N802, ANN001
         renderer = self.renderer
@@ -590,4 +808,7 @@ class LoretaVisualizerWindow(QWidget):
         if self._mesh_thread is not None:
             self._mesh_thread.quit()
             self._mesh_thread.wait(1000)
+        if self._source_export_thread is not None:
+            self._source_export_thread.quit()
+            self._source_export_thread.wait(1000)
         super().closeEvent(event)

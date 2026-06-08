@@ -4,7 +4,8 @@ import numpy as np
 
 from Tools.LORETA_Visualizer.conditions import condition_by_id
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
-from Tools.LORETA_Visualizer.scalar_fields import LORETA_SCALAR_COLORS, resolve_scalar_limits
+from Tools.LORETA_Visualizer.gui import _activation_value_readout
+from Tools.LORETA_Visualizer.scalar_fields import LORETA_SCALAR_COLORS, format_scalar_value, resolve_scalar_limits
 from Tools.LORETA_Visualizer.source_payloads import SOURCE_KIND_VOLUME_MESH, make_source_payload
 from Tools.LORETA_Visualizer.synthetic_brain import make_synthetic_brain_mesh
 from Tools.LORETA_Visualizer.transforms import (
@@ -76,6 +77,25 @@ def test_scalar_gradient_limits_follow_scalp_map_style_bounds() -> None:
     assert resolve_scalar_limits(np.asarray([0.2, 0.8]), auto_scale=True) == (0.0, 0.8)
     assert resolve_scalar_limits(np.asarray([-0.4, 0.8]), auto_scale=True) == (-0.4, 0.8)
     assert resolve_scalar_limits(np.asarray([0.2]), auto_scale=False, manual_min=1.0, manual_max=1.0) == (1.0, 2.0)
+
+
+def test_scalar_scale_readout_formats_tiny_source_values_and_units() -> None:
+    assert format_scalar_value(0.0) == "0"
+    assert format_scalar_value(0.000087632) == "8.763e-05"
+    assert format_scalar_value(0.125) == "0.125"
+
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.000087632], dtype=float),
+        label="Beta source",
+        value_label="beta L2-MNE cortical source amplitude",
+        metadata={"source_value_unit": "arbitrary units", "sensor_value_unit": "summed BCA uV"},
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload) == (
+        "Value: beta L2-MNE cortical source amplitude; unit: arbitrary units; input: summed BCA uV"
+    )
 
 
 def test_demo_condition_can_exercise_native_to_display_bridge() -> None:

@@ -4,21 +4,23 @@ Use this page when you want to inspect the experimental 3D LORETA/source
 visualization tool.
 
 The LORETA Visualizer opens from the main app sidebar as **LORETA Visualizer**.
-Its current implementation is a visualization prototype: it renders a brain
-mesh and synthetic source maps so the 3D display layer can be tested before real
-source-localization calculations are added.
+Its current implementation is an experimental visualization and beta
+source-map viewer: it renders a brain mesh, synthetic source maps, prepared
+JSON payloads, and early real-project cortical L2-MNE maps.
 
 ## Current status
 
-The embedded visualizer does not currently calculate real LORETA, eLORETA,
-sLORETA, MNE inverse solutions, or deep-source estimates from project EEG data.
-The visible occipital, frontal, and deep medial temporal activations are
-synthetic demo maps.
+The embedded visualizer can now display real project data through a beta
+L2-MNE cortical-surface source-map export. This is an early method-validation
+path, not a final validated LORETA, eLORETA, sLORETA, deep-source, or
+subject-MRI workflow.
 
-A separate beta L2-MNE cortical-surface producer now exists for source-ready
-test inputs. It can write prepared JSON payloads for occipital and frontal
-fixture conditions, but it is not yet connected to project workbooks or
-participant data.
+The visible occipital, frontal, and deep medial temporal demo activations are
+still synthetic. The real-project path is separate: it reads existing project
+workbooks, uses the Stats-selected oddball harmonic list, builds a template
+BioSemi64/fsaverage cortical forward model through MNE, writes prepared source
+JSON files, and loads them through the same manifest importer used by the demo
+fixtures.
 
 Use the current version to verify rendering behavior, transparency, camera
 controls, source-layer opacity, color scaling, and whether source maps can be
@@ -39,19 +41,25 @@ drawn inside the transparent anatomical shell.
   source-map fixture conditions.
 - Auto-scale the source intensity map or set manual minimum/maximum intensity
   bounds.
+- Read the source color scale from the control-panel color ramp and min/max
+  labels.
 - Load a prepared source payload JSON file from disk and render it through the
   same display adapter used by the synthetic fixture.
 - Load a prepared source manifest JSON file so several prepared source payloads
   appear in the condition dropdown.
+- Build beta project source JSON from the active project and load the resulting
+  manifest.
 - Use checked-in example payload and manifest JSON files as references for the
   expected future calculation output shape.
 
 Higher synthetic values are mapped toward red. Lower values appear lighter or
 less intense depending on the current color range.
 
-## Inputs
+For beta L2-MNE project maps, the color scale shows the actual scalar range
+used for the current source map. When auto-scale is on, the min/max labels
+update from the loaded payload values.
 
-No real EEG source-localization files are read by the embedded visualizer yet.
+## Inputs
 
 The fsaverage brain mesh is loaded through MNE from an external user/cache
 location. The toolbox does not store fsaverage MRI template data in the source
@@ -61,15 +69,31 @@ Checked-in JSON examples live in
 `src/Tools/LORETA_Visualizer/examples/`. These are synthetic examples for
 format validation and manual importer checks; they are not real source maps.
 
-The beta L2-MNE producer can also generate a source-ready fixture manifest into
-a local output folder. Those fixture files are useful for checking that the
+The beta L2-MNE producer can generate a source-ready fixture manifest into a
+local output folder. Those fixture files are useful for checking that the
 producer writes the same prepared JSON format the visualizer already imports.
+
+For real project inputs, the source-ready assembler reads existing
+per-participant Excel outputs under `1 - Excel Data Files` plus the selected
+harmonics from `Stats_Ready_Summed_BCA.xlsx`. The 6C beta exporter writes
+project-local output under:
+
+`6 - Source Localization/L2-MNE Cortical Surface Beta/`
+
+The main file to load manually is:
+
+`project_l2_mne_cortical_surface_beta_manifest.json`
+
+The **Load source JSON** and **Load manifest** dialogs start in the last import
+folder when possible. Otherwise, they open to the active project's source-map
+output folder when it exists, then the active project root.
 
 ## Interpreting the demo maps
 
-Treat every current source activation as a rendering test only. The maps are not
-estimated from EEG data, are not tied to FPVS statistics, and should not be used
-for reporting neural source results.
+Treat synthetic demo activations as rendering tests only. Beta project source
+maps are estimated from project EEG-derived topographies, but they are still
+exploratory and should not be used as final reportable source-localization
+results until the method is validated for your study.
 
 The deep medial temporal demo shows that the renderer can display a smooth
 internal 3D source blob inside the transparent brain. It is not a hippocampal
@@ -88,6 +112,11 @@ The **Load manifest** button accepts a controlled manifest file that lists
 condition labels and relative prepared-payload JSON files. After loading a
 manifest, those imported conditions appear in the same condition dropdown as the
 synthetic demos. Selecting one loads and renders its prepared payload.
+
+The **Build project source JSON** button uses the active project, writes the
+beta L2-MNE source-map files into the project-local source folder, and then
+loads the generated manifest. The current default uses BCA topographies and
+includes flagged participants to match the existing Stats behavior.
 
 ## Prepared source JSON format
 
@@ -146,6 +175,13 @@ prepared JSON payload shape as the current examples, so a later LORETA,
 eLORETA, or mixed volume method can be added as a different calculation method
 without changing how the 3D renderer works.
 
-The next missing piece is project input assembly: deciding exactly how to turn
-the toolbox's condition-level FPVS frequency-domain outputs into the
-source-ready channel topographies the beta L2-MNE producer expects.
+The current real-data path is cortical-surface only and uses a template
+fsaverage model. The next important improvements are method/QC controls:
+choosing BCA versus FFT amplitude, including or excluding flagged participants,
+and testing source-space baseline or z-score approaches before treating the
+maps as analysis-ready.
+
+The current beta L2-MNE source values are plotted in arbitrary/template-scaled
+source units. They are proportional to the sensor topographies used as input
+(`summed BCA uV` by default), but they are not calibrated current density,
+dipole moment, or microvolts at the source.

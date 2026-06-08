@@ -25,6 +25,11 @@ producer for FPVS oddball-response maps. It is one method that emits the same
 prepared payload/manifest format expected from any later LORETA/eLORETA volume
 or mixed source-space producer.
 
+Phase 6C adds the first project-connected beta export path. It uses real
+project condition topographies, an external MNE/fsaverage BioSemi64 template
+EEG forward model, and the existing prepared payload/manifest bridge so real
+project data can be viewed without changing renderer internals.
+
 ## Non-Goals
 
 Outside the dedicated `source_producers/` subpackage, this directory must not
@@ -126,6 +131,13 @@ Later LORETA/eLORETA volume methods should become sibling producers that emit
 `volume_points`, `volume_mesh`, or ROI mesh payloads. They should not require
 renderer, importer, or bridge-helper rewrites.
 
+Phase 6C adds `project_l2_mne_export.py` as calculation-side orchestration. It
+is allowed to read existing project workbooks through `project_inputs.py`, use
+MNE to build an fsaverage/BioSemi64 template forward model, and write generated
+payload/manifest JSON under the active project root. It must not update
+`project.json`, change Stats outputs, modify preprocessing data, or teach the
+renderer how L2-MNE works.
+
 ## File Responsibilities
 
 - `gui.py`: embedded page, controls, status text, fsaverage worker wiring, and
@@ -157,7 +169,12 @@ renderer, importer, or bridge-helper rewrites.
   payload/manifest JSON. Phase 6A includes method-neutral producer result
   contracts and `l2_mne_cortical.py`, a beta fixed-orientation L2-MNE cortical
   surface producer with a deterministic BioSemi64/10-10 source-ready fixture.
-  Later producers may use LORETA/eLORETA volume or mixed source-space models.
+  Phase 6B includes `project_inputs.py`, a read-only adapter that assembles
+  source-ready condition topographies from existing project workbooks. Phase 6C
+  includes `project_l2_mne_export.py`, a project-local beta export that combines
+  those topographies with an external MNE/fsaverage BioSemi64 template forward
+  model and writes prepared source-map JSON. Later producers may use
+  LORETA/eLORETA volume or mixed source-space models.
 - `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
   the expected output shape for future source-localization producers. They are
   format examples only and are not source estimates. This directory also holds
@@ -226,8 +243,22 @@ metadata.
 The current beta L2-MNE producer accepts source-ready arrays: channel names,
 selected harmonic topographies, cortical source coordinates/faces, and a
 channel-by-source leadfield. It writes payloads and manifests after validation.
-It does not discover project workbooks, compute Stats harmonic selections,
-export preprocessing data, or build subject-specific MRI forward models.
+`project_inputs.py` can assemble the selected harmonic topographies from
+existing project workbooks, but it still does not compute Stats harmonic
+selections, export preprocessing data, write project files, or build
+subject-specific MRI forward models.
+
+The project-input adapter reads the all-condition selected harmonics from the
+Stats-ready workbook, reads compact per-participant electrode-level sheets
+(`BCA (uV)` or `FFT Amplitude (uV)`), applies existing exclusion files, records
+flagged participant status, and returns `L2MNEFPVSCondition` objects for
+calculation producers.
+
+The project L2-MNE exporter writes generated files under
+`6 - Source Localization/L2-MNE Cortical Surface Beta/` by default. The manifest
+can be loaded by the GUI's prepared-manifest importer. The GUI may trigger this
+export in a worker thread and then load the resulting manifest, but all inverse
+model construction and source-value calculation remain in `source_producers/`.
 
 Checked-in examples live in `examples/`. The fsaverage-native example is the
 preferred reference shape for future calculations that produce coordinates in

@@ -624,8 +624,13 @@ class MainWindow(QMainWindow, ProcessingMixin):
         if page is None:
             from Tools.LORETA_Visualizer import LoretaVisualizerWindow
 
+            project_root = None
+            project = getattr(self, "currentProject", None)
+            if project is not None and hasattr(project, "project_root"):
+                project_root = str(project.project_root)
             page = LoretaVisualizerWindow(
                 parent=self.workspace_stack,
+                project_root=project_root,
                 embedded=True,
             )
             page.setObjectName("embedded_loreta_visualizer_page")

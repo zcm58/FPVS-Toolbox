@@ -19,6 +19,12 @@ volume or mixed source-space methods should be able to emit the same prepared
 payload/manifest contract without changing renderer or display-translation
 logic.
 
+The first project-connected export path is Phase 6C. It writes beta L2-MNE
+cortical-surface prepared JSON from real project topographies under the active
+project root. This is still calculation-side orchestration; it must remain in
+`source_producers/` and must not move source-estimation logic into the GUI,
+renderer, importer, fsaverage display mesh loader, or bridge helpers.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -91,7 +97,12 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   classes or display mesh helpers. Phase 6A includes
   `source_producers/l2_mne_cortical.py` for source-ready beta L2-MNE cortical
   surface payloads and `source_producers/contracts.py` for method-neutral
-  producer result types.
+  producer result types. Phase 6B includes
+  `source_producers/project_inputs.py`, a read-only project workbook adapter
+  that assembles 64-channel condition topographies for source producers. Phase
+  6C includes `source_producers/project_l2_mne_export.py`, which combines those
+  project topographies with an external MNE/fsaverage BioSemi64 template
+  forward model and writes project-local prepared source JSON.
 
 ## Boundary Rules
 
@@ -110,6 +121,14 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not extend Phase 6A into project workbook discovery, participant looping,
   preprocessing exports, Stats harmonic-selection changes, or project manifests
   without updating the active exec plan first.
+- Project input assembly may read existing project workbooks and QC summaries
+  through `source_producers/project_inputs.py`, but it must not write project
+  files, update Stats metadata, alter workbooks, change participant exclusions,
+  or use local real-project paths in tests.
+- Project source-map export may write generated payload/manifest JSON under
+  the active project root through `source_producers/project_l2_mne_export.py`.
+  Keep the default output project-local, reject silent output escapes, and do
+  not write to `project.json` unless a future plan explicitly scopes that.
 - Do not change the checked-in prepared JSON examples in a way that implies
   renderer ownership of LORETA math. They are output-format examples for future
   calculation producers and importer tests only.
