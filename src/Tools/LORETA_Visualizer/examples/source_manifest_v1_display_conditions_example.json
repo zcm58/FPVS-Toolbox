@@ -1,0 +1,24 @@
+{
+  "format": "fpvs-loreta-source-manifest-v1",
+  "label": "Example prepared source-map condition set",
+  "conditions": [
+    {
+      "id": "example_occipital",
+      "label": "Example occipital condition",
+      "file": "source_payload_v1_occipital_display_example.json",
+      "metadata": {
+        "synthetic": true,
+        "region_hint": "bilateral occipital"
+      }
+    },
+    {
+      "id": "example_frontal",
+      "label": "Example frontal condition",
+      "file": "source_payload_v1_frontal_display_example.json",
+      "metadata": {
+        "synthetic": true,
+        "region_hint": "bilateral frontal"
+      }
+    }
+  ]
+}

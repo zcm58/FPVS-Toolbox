@@ -2,14 +2,32 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, and Phase 5F are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, and supports prepared payload manifests before any real LORETA calculations are introduced.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, and Phase 5G are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, and provides checked-in JSON examples before any real LORETA calculations are introduced.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
+
+## Current Development Stage
+
+The branch is currently in the prepared source-payload contract stage. The
+interactive renderer, anatomical mesh loading, source-layer rendering, scalar
+color controls, coordinate transform bridge, single-payload importer,
+multi-condition manifest importer, and checked-in JSON format examples are in
+place.
+
+The branch is not yet in the real source-localization calculation stage. Future
+LORETA, eLORETA, sLORETA, MNE inverse, beamformer, or other source-estimation
+code should target the prepared JSON/payload bridge and stay separate from the
+renderer, GUI, fsaverage loader, and project I/O until a new plan explicitly
+scopes calculation or project integration.
+
+The next recommended development slice is Phase 5H: formalize the prepared JSON
+contract into a machine-checkable schema/validator so future calculation code can
+test its output before the visualizer imports it.
 
 ## Date
 
 Created: 2026-06-05
-Updated: 2026-06-06
+Updated: 2026-06-08
 
 ## Goal
 
@@ -78,6 +96,7 @@ New tool implementation:
   - `transforms.py`: native/source coordinate to renderer display coordinate transform contract.
   - `prepared_source_fixture.py`: in-memory prepared source-map fixture that validates the future adapter handoff shape without computing source estimates.
   - `prepared_payload_importer.py`: controlled JSON importer for already-prepared source payloads and source-payload manifests.
+  - `examples/`: checked-in synthetic prepared payload and manifest JSON examples for future calculation producer output shape and importer validation.
   - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
 
 Main App shell integration:
@@ -231,7 +250,7 @@ Done means:
 
 ## Phase 5: Optional Real Data Adapter
 
-Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Phase 5D adds a selectable prepared source-map fixture that looks like a future real-data handoff. Phase 5E adds controlled prepared JSON payload import. Phase 5F adds multi-condition prepared payload manifests. Real LORETA calculation, project-output discovery, and project-output integration remain out of scope.
+Status: Split into smaller slices. Phase 5A covers a general source payload contract plus synthetic deep-source rendering. Phase 5B adds scalar-gradient color mapping and intensity bounds for source values. Phase 5C preserves the native-to-display coordinate transform for future source-localization adapters. Phase 5D adds a selectable prepared source-map fixture that looks like a future real-data handoff. Phase 5E adds controlled prepared JSON payload import. Phase 5F adds multi-condition prepared payload manifests. Phase 5G adds checked-in JSON examples for future calculation producer output. Real LORETA calculation, project-output discovery, and project-output integration remain out of scope.
 
 Objective:
 
@@ -400,6 +419,62 @@ Done means:
 - Imported manifest entries appear in the condition dropdown with `Imported:` labels.
 - Selecting an imported condition loads its payload, converts it to display space, and renders it through the existing activation actor.
 
+### Phase 5G: Checked-In Prepared JSON Examples
+
+Status: Implemented. The visualizer directory includes synthetic prepared payload and manifest JSON examples that future source-localization calculation code can use as the expected v1 output shape.
+
+Objective:
+
+- Provide concrete JSON examples for future LORETA/source-localization producers.
+- Keep examples in the visualizer directory with the importer and payload bridge.
+- Include both display-space examples that load without fsaverage and an fsaverage-native example that represents the more realistic future calculation handoff.
+- Include a manifest example that maps multiple conditions to relative payload files.
+- Keep all examples synthetic, small, deterministic, and clearly labeled as not computed from EEG.
+
+Implementation notes:
+
+- `src/Tools/LORETA_Visualizer/examples/source_payload_v1_fsaverage_native_example.json` is the reference shape for future source-localization outputs in fsaverage coordinates.
+- `src/Tools/LORETA_Visualizer/examples/source_payload_v1_occipital_display_example.json` and `source_payload_v1_frontal_display_example.json` are normalized display-space examples for importer/GUI validation.
+- `src/Tools/LORETA_Visualizer/examples/source_manifest_v1_display_conditions_example.json` demonstrates a multi-condition manifest with relative payload paths.
+- Focused tests load the checked-in examples through `prepared_payload_importer.py` so the examples stay aligned with the importer contract.
+
+Done means:
+
+- Checked-in examples use `fpvs-loreta-source-payload-v1` and `fpvs-loreta-source-manifest-v1`.
+- The examples can be loaded by the importer and converted into renderer display space.
+- The examples remain format fixtures only and do not introduce LORETA calculation, project-output discovery, or project I/O.
+
+### Phase 5H: Prepared Payload Schema And Producer Validation
+
+Status: Proposed next slice. Not implemented.
+
+Objective:
+
+- Add a machine-checkable contract for `fpvs-loreta-source-payload-v1` and
+  `fpvs-loreta-source-manifest-v1`.
+- Let future source-localization calculation code validate its JSON outputs
+  before handing them to the visualizer.
+- Keep validation independent from renderer internals, project-output discovery,
+  and LORETA numerical computation.
+- Keep the checked-in Phase 5G examples as schema fixtures.
+
+Implementation notes:
+
+- Prefer a lightweight tool-local schema representation or a JSON Schema file in
+  `src/Tools/LORETA_Visualizer/examples/` unless dependency review supports a
+  dedicated schema library.
+- Tests should validate the checked-in examples and a small set of invalid
+  producer outputs.
+- The GUI importer can continue using the existing importer error messages; the
+  schema is primarily for producer-side confidence and agent/developer clarity.
+
+Done means:
+
+- Future calculation producers have a concrete validation target for payload and
+  manifest JSON.
+- The checked-in examples are validated against that target in tests.
+- No real LORETA calculation, project-output discovery, or project I/O is added.
+
 ## Integration Safety
 
 - Preserve preprocessing order, project I/O formats, diagnostics, loading, analytics, Stats behavior, and export formats.
@@ -454,4 +529,7 @@ Additional visible smoke path for future slices:
 - Final icon direction: dedicated brain/source icon in `Main_App.gui.icons.sidebar_icon`, not an image asset unless the current icon system changes.
 - Whether the branch-visible sidebar entry should remain default-visible after promotion or be hidden behind a release feature flag.
 - Preferred fsaverage surface for the base layer: pial, inflated, white, or another surface.
-- First real-data shape after demo conditions: point cloud, volume grid, cortical sheet mesh, or another source-space representation.
+- Whether Phase 5H should use plain tool-local validation functions only or add
+  JSON Schema documents plus a validation dependency.
+- First real-data shape after demo/importer conditions: point cloud, volume
+  grid, cortical sheet mesh, or another source-space representation.

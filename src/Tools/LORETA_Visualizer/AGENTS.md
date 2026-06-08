@@ -59,6 +59,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   source payloads and source-payload manifests. It validates file content and
   adapts into renderer payloads; it must not discover project outputs or
   calculate source estimates.
+- `examples/`: checked-in synthetic JSON payload and manifest examples for the
+  prepared source-map contract. Keep examples small, deterministic, and clearly
+  marked as not computed from EEG.
 - `source_payloads.py`, `transforms.py`, and `scalar_fields.py`: bridge helpers
   that adapt prepared source payloads to the renderer.
 
@@ -73,6 +76,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not add real-data file discovery, project-output integration, source
   calculation, or method selection without updating the active exec plan and
   this local architecture guidance.
+- Do not change the checked-in prepared JSON examples in a way that implies
+  renderer ownership of LORETA math. They are output-format examples for future
+  calculation producers and importer tests only.
 
 ## GUI And Worker Rules
 

@@ -37,6 +37,8 @@ drawn inside the transparent anatomical shell.
   same display adapter used by the synthetic fixture.
 - Load a prepared source manifest JSON file so several prepared source payloads
   appear in the condition dropdown.
+- Use checked-in example payload and manifest JSON files as references for the
+  expected future calculation output shape.
 
 Higher synthetic values are mapped toward red. Lower values appear lighter or
 less intense depending on the current color range.
@@ -48,6 +50,10 @@ No real EEG source-localization files are read yet.
 The fsaverage brain mesh is loaded through MNE from an external user/cache
 location. The toolbox does not store fsaverage MRI template data in the source
 tree or project folders.
+
+Checked-in JSON examples live in
+`src/Tools/LORETA_Visualizer/examples/`. These are synthetic examples for
+format validation and manual importer checks; they are not real source maps.
 
 ## Interpreting the demo maps
 
@@ -72,6 +78,34 @@ The **Load manifest** button accepts a controlled manifest file that lists
 condition labels and relative prepared-payload JSON files. After loading a
 manifest, those imported conditions appear in the same condition dropdown as the
 synthetic demos. Selecting one loads and renders its prepared payload.
+
+## Prepared source JSON format
+
+Future LORETA/source-localization calculation code should output a prepared
+source payload JSON object rather than talking directly to the renderer.
+
+Payload files use this v1 shape:
+
+- `format`: `fpvs-loreta-source-payload-v1`
+- `label`: display label for the source map
+- `kind`: source display type, such as `volume_mesh`
+- `coordinate_space`: coordinate-space label, such as `fsaverage_surface` or
+  `normalized_display`
+- `source_model`: upstream method or model label
+- `value_label`: scalar value label
+- `points`: finite `N x 3` coordinates
+- `values`: finite scalar values with one value per point
+- `faces`: optional triangle rows for mesh payloads
+- `metadata`: optional provenance and notes
+
+The most useful template for future fsaverage-aligned calculations is
+`src/Tools/LORETA_Visualizer/examples/source_payload_v1_fsaverage_native_example.json`.
+The importer converts that coordinate space into renderer display space through
+the visualizer helper layer.
+
+Manifest files use `fpvs-loreta-source-manifest-v1` and list condition entries
+with `id`, `label`, relative `file`, and optional `metadata`. See
+`src/Tools/LORETA_Visualizer/examples/source_manifest_v1_display_conditions_example.json`.
 
 ## Future real-data direction
 

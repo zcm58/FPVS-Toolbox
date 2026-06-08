@@ -109,6 +109,9 @@ renderer.py
   scalar values, faces, coordinate-space labels, and metadata; manifest files map
   condition labels to relative payload JSON files. This is user-selected file
   input only, not project-output discovery.
+- `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
+  the expected output shape for future source-localization producers. They are
+  format examples only and are not source estimates.
 - `source_payloads.py`: renderer-facing `SourcePayload` validation,
   finite-value filtering, metadata preservation, and payload conversion to
   display space.
@@ -149,6 +152,8 @@ Disallowed bridge behavior:
 Future real source-localization producers should hand this tool a prepared
 payload with:
 
+- `format`: `fpvs-loreta-source-payload-v1`;
+- `label`: human-readable source-map label;
 - `points`: finite `N x 3` coordinates;
 - `values`: finite scalar values aligned one-to-one with `points`;
 - `coordinate_space`: explicit native/display/source coordinate-space label;
@@ -161,6 +166,12 @@ payload with:
 If a future method changes from LORETA to another inverse model, the renderer
 should stay unchanged. The adapter/bridge should map the method output into this
 payload contract.
+
+Checked-in examples live in `examples/`. The fsaverage-native example is the
+preferred reference shape for future calculations that produce coordinates in
+the same source space as the anatomical mesh. The display-space examples and
+manifest are intended for importer and GUI validation without requiring an
+fsaverage cache.
 
 ## Verification
 
