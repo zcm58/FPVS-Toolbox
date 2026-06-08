@@ -176,12 +176,19 @@ eLORETA, or mixed volume method can be added as a different calculation method
 without changing how the 3D renderer works.
 
 The current real-data path is cortical-surface only and uses a template
-fsaverage model. The next important improvements are method/QC controls:
-choosing BCA versus FFT amplitude, including or excluding flagged participants,
-and testing source-space baseline or z-score approaches before treating the
-maps as analysis-ready.
+fsaverage model. It has two beta project export modes:
 
-The current beta L2-MNE source values are plotted in arbitrary/template-scaled
-source units. They are proportional to the sensor topographies used as input
-(`summed BCA uV` by default), but they are not calibrated current density,
-dipole moment, or microvolts at the source.
+- **Build project source JSON** writes the original L2-MNE cortical-surface
+  diagnostic maps. These values are arbitrary/template-scaled source amplitudes
+  proportional to the sensor topographies used as input (`summed BCA uV` by
+  default). They are not calibrated current density, dipole moment, or
+  microvolts at the source.
+- **Build z-score source JSON** writes Hauk-style L2-MNE source-space z-score
+  maps. This mode reads raw `FullFFT Amplitude (uV)` target and neighboring
+  frequency bins, sends target and noise topographies through the same inverse
+  model, and displays source-space z-scores.
+
+The z-score mode is better aligned with FPVS source-localization publications,
+but it is still a beta template-based workflow. It is EEG-only, uses fsaverage
+instead of individual MRIs, and is intended for method review before treating
+the maps as analysis-ready.

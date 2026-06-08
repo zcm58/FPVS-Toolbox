@@ -2,26 +2,31 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, and Phase 6C are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, and can now write beta project source-map JSON from real project data.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, and Phase 6D are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, can write beta project source-map JSON from real project data, and can now write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
 ## Current Development Stage
 
-The branch is currently in the beta project source-map export stage. The
+The branch is currently in the beta project source-map export and method-QC
+z-score stage. The
 interactive renderer, anatomical mesh loading, source-layer rendering, scalar
 color controls, coordinate transform bridge, single-payload importer,
 multi-condition manifest importer, checked-in JSON format examples, JSON Schema
 shape files, producer-facing validator, method-neutral source-producer result
 contracts, beta L2-MNE cortical-surface fixture producer, and read-only project
-topography input assembler are in place. Phase 6C adds the first project-level
-export path: real project topographies are combined with an external
-MNE/fsaverage BioSemi64 template EEG forward model and written as validated
-prepared JSON/manifest files for the visualizer.
+topography input assemblers are in place. Phase 6C adds the first project-level
+arbitrary-amplitude export path: real project topographies are combined with an
+external MNE/fsaverage BioSemi64 template EEG forward model and written as
+validated prepared JSON/manifest files for the visualizer. Phase 6D adds the
+publication-aligned method/QC path: raw project `FullFFT Amplitude (uV)`
+target and neighboring bins are sent through the same L2-MNE inverse model,
+then source-space baseline correction and z-scoring are applied before writing
+the renderer payload.
 
 This is still a beta, template-based method-validation stage, not a final
-scientifically validated source-localization workflow. The 6C path uses real
-project FPVS condition data, but it does not change preprocessing, Stats,
+scientifically validated source-localization workflow. The 6C and 6D paths use
+real project FPVS condition data, but they do not change preprocessing, Stats,
 existing project manifests, workbook formats, the renderer, or the importer.
 Future LORETA, eLORETA, sLORETA, beamformer, or other source-estimation methods
 should become sibling producers that target the prepared JSON/payload bridge
@@ -29,13 +34,13 @@ and stay separate from the renderer, display fsaverage loader, and project I/O
 unless a new plan explicitly scopes integration.
 
 The prepared payload contract stage is complete, Phase 6A established the first
-swappable source method, and Phase 6B established a read-only project-input
-assembler. Phase 6C established the first real-project beta export and GUI
-entry point. The next recommended development slice is Phase 6D: method/QC
-source-space z-score mode for the project source-map workflow, modeled on the
-Hauk et al. 2021 FPVS L2-MNE frequency-domain source-estimation procedure:
-summed harmonic topographies, source-space baseline/noise correction, and
-source-space z-score payloads.
+swappable source method, Phase 6B established a read-only project-input
+assembler, Phase 6C established the first real-project beta export and GUI
+entry point, and Phase 6D established the Hauk-style source-space z-score mode.
+The next recommended development slice is Phase 6E: source-localization method
+QC/reporting and user controls around z-score export assumptions, including
+flagged-participant inclusion, method metadata review, and manual/visible smoke
+documentation before broader scientific validation.
 
 ## Date
 
@@ -508,7 +513,7 @@ Done means:
 
 ## Phase 6: Real Source-Localization Producers
 
-Status: Started. Phase 6A, Phase 6B, and Phase 6C are implemented; Phase 6D is planned next for Hauk-style source-space z-scored L2-MNE maps. Additional source methods remain future work.
+Status: Started. Phase 6A, Phase 6B, Phase 6C, and Phase 6D are implemented. Additional source methods and scientific-validation controls remain future work.
 
 Objective:
 
@@ -762,7 +767,11 @@ Done means:
 
 ### Phase 6D: Hauk-Style Source-Space Z-Score Mode
 
-Status: Planned next. This is the next active source-localization slice.
+Status: Implemented. Phase 6D adds a dedicated Hauk-style L2-MNE
+source-space z-score producer, a read-only FullFFT target/noise-bin project
+input adapter, a project-local z-score export orchestrator, and a GUI worker
+button that builds and loads the generated z-score manifest without putting
+source math in the renderer or importer.
 
 Objective:
 
@@ -869,6 +878,26 @@ Definitions of done:
   `prepared_payload_importer.py`, `source_payloads.py`, `transforms.py`,
   `scalar_fields.py`, preprocessing, Stats, or project manifests.
 
+Implementation notes completed:
+
+- New calculation modules:
+  - `source_producers/l2_mne_hauk_zscore.py`;
+  - `source_producers/project_fullfft_inputs.py`;
+  - `source_producers/project_l2_mne_hauk_zscore_export.py`.
+- The GUI now exposes `Build z-score source JSON` beside the older arbitrary
+  amplitude `Build project source JSON` action. Both run through the worker
+  thread and existing prepared-manifest importer.
+- The z-score path reads `FullFFT Amplitude (uV)` only. It refuses BCA-only or
+  compact-summary-only workbooks with a clear Phase 6D input error.
+- Semantic Categories exported successfully to:
+  `D:\FPVS Toolbox Root\Semantic Categories\6 - Source Localization\L2-MNE Hauk Z-Score Beta\project_l2_mne_hauk_zscore_beta_manifest.json`.
+  The manifest contains `Color Response`, `Color Response 2`,
+  `Mixed Response 1`, `Mixed Response 2`, and `Semantic Response`.
+  The first payload reports `source_model:
+  l2_mne_cortical_surface_hauk_zscore_beta`, `value_label:
+  source-space z-score`, `source_value_unit: z-score`, and selected harmonics
+  `[2.4, 4.8, 7.2, 9.6, 13.2, 20.4]`.
+
 ## Integration Safety
 
 - Preserve preprocessing order, project I/O formats, diagnostics, loading, analytics, Stats behavior, and export formats.
@@ -925,12 +954,13 @@ Additional visible smoke path for future slices:
 - Preferred fsaverage surface for the base layer: pial, inflated, white, or another surface.
 - First real-data shape after demo/importer conditions: point cloud, volume
   grid, cortical sheet mesh, or another source-space representation.
-- Whether the Hauk-style source-space z-score mode should sum selected sensor
-  harmonic topographies before inversion or invert each harmonic/noise-bin
-  topography before summing source-space z-scores. Phase 6D must choose and
-  document this explicitly.
-- Whether the beta GUI/project workflow should include flagged participants by
-  default to match current Stats behavior or default to excluding flagged
-  participants for exploratory source-map viewing.
+- Whether future source methods need an alternate harmonic strategy. Phase 6D
+  chose Hauk-style summed sensor topographies before inversion: target
+  topographies are summed across selected harmonics, matching-offset
+  neighboring-bin topographies are summed across selected harmonics, and the
+  source-space z-score is computed from those target/noise source estimates.
+- Whether the beta GUI/project workflow should add an explicit flagged
+  participant include/exclude control. Phase 6C/6D currently include flagged
+  participants by default to match current Stats behavior.
 - Future second method target after L2-MNE: LORETA/eLORETA volume, mixed
   cortical-volume source space, or another explicitly scoped model.

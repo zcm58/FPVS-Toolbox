@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from config import DEFAULT_ELECTRODE_NAMES_64
+from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
+from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
+from Tools.LORETA_Visualizer.source_producers.project_fullfft_inputs import (
+    ProjectFullFftInputError,
+    build_l2_mne_hauk_zscore_conditions_from_project,
+)
+from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+    default_project_l2_mne_hauk_zscore_output_dir,
+    write_project_l2_mne_hauk_zscore_payloads,
+)
+
+
+def test_project_fullfft_assembler_reads_neighboring_bins(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path)
+
+    result = build_l2_mne_hauk_zscore_conditions_from_project(
+        project_root,
+        conditions=["Condition A"],
+        noise_window_bins=3,
+        min_noise_bins=4,
+    )
+
+    assert result.sheet_name == "FullFFT Amplitude (uV)"
+    assert result.selected_harmonics_hz == (2.4, 4.8)
+    assert result.bin_plan.noise_window_bins == 3
+    assert [condition.label for condition in result.conditions] == ["Condition A"]
+    condition = result.conditions[0]
+    harmonic = condition.harmonic_bins[2.4]
+    assert harmonic.target_column == "2.4000_Hz"
+    assert tuple(harmonic.noise_topographies_by_offset) == (-3, -2, 2, 3)
+    expected_target = _expected_fullfft_values(condition_base=10.0, frequency_hz=2.4, subject_mean=0.5)
+    assert np.allclose(harmonic.target_topography, expected_target)
+    expected_noise = _expected_fullfft_values(condition_base=10.0, frequency_hz=2.2, subject_mean=0.5)
+    assert np.allclose(harmonic.noise_topographies_by_offset[-2], expected_noise)
+
+
+def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path)
+
+    result = write_project_l2_mne_hauk_zscore_payloads(
+        project_root=project_root,
+        forward_model=_tiny_forward_model(),
+        noise_window_bins=3,
+        min_noise_bins=4,
+    )
+
+    assert result.output_dir == default_project_l2_mne_hauk_zscore_output_dir(project_root)
+    assert result.manifest_path.is_file()
+    assert result.producer_result.manifest_validation.label == validate_prepared_source_manifest_json(
+        result.manifest_path,
+        require_payload_files=True,
+    ).label
+    assert len(result.producer_result.payloads) == 2
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["label"] == "L2-MNE Hauk-style source-space z-score beta maps"
+    payload = json.loads(result.producer_result.payloads[0].payload_path.read_text(encoding="utf-8"))
+    metadata = payload["metadata"]
+    assert payload["source_model"] == "l2_mne_cortical_surface_hauk_zscore_beta"
+    assert metadata["source_value_unit"] == "z-score"
+    assert metadata["config_project_integration"] == "phase_6d_project_l2_mne_hauk_zscore_beta"
+    assert metadata["condition_project_input_assembly"] == "phase_6d_fullfft_neighbor_bins_read_only"
+
+
+def test_project_hauk_zscore_rejects_outputs_outside_project_root(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="inside the project root"):
+        write_project_l2_mne_hauk_zscore_payloads(
+            project_root=project_root,
+            output_dir=tmp_path / "outside",
+            forward_model=_tiny_forward_model(),
+            noise_window_bins=3,
+            min_noise_bins=4,
+        )
+
+
+def test_project_hauk_zscore_rejects_bca_only_workbooks(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path, include_fullfft=False)
+
+    with pytest.raises(ProjectFullFftInputError, match="requires the 'FullFFT Amplitude"):
+        build_l2_mne_hauk_zscore_conditions_from_project(
+            project_root,
+            noise_window_bins=3,
+            min_noise_bins=4,
+        )
+
+
+def _tiny_forward_model() -> L2MNECorticalForwardModel:
+    leadfield = np.vstack(
+        [
+            np.asarray([0.1 + channel * 0.01, 0.3 + channel * 0.02, 0.5 + channel * 0.03], dtype=float)
+            for channel in range(len(DEFAULT_ELECTRODE_NAMES_64))
+        ]
+    )
+    return L2MNECorticalForwardModel(
+        channel_names=tuple(DEFAULT_ELECTRODE_NAMES_64),
+        source_points=np.asarray(
+            [
+                [-40.0, -80.0, 20.0],
+                [0.0, -90.0, 32.0],
+                [40.0, -80.0, 20.0],
+            ],
+            dtype=float,
+        ),
+        leadfield=leadfield,
+        faces=np.asarray([[0, 1, 2]], dtype=np.int64),
+        metadata={"fixture": True, "forward_model_status": "tiny test model"},
+    )
+
+
+def _build_project_fixture(tmp_path: Path, *, include_fullfft: bool = True) -> Path:
+    project_root = tmp_path / "Project"
+    stats_dir = project_root / "3 - Statistical Analysis Results"
+    excel_root = project_root / "1 - Excel Data Files"
+    stats_dir.mkdir(parents=True)
+    excel_root.mkdir(parents=True)
+    _write_stats_ready(stats_dir / "Stats_Ready_Summed_BCA.xlsx")
+    pd.DataFrame({"participant_id": [], "exclusion_reason": []}).to_excel(
+        stats_dir / "Excluded Participants.xlsx",
+        sheet_name="Excluded Participants",
+        index=False,
+    )
+    pd.DataFrame({"participant_id": [], "flag_types": []}).to_excel(
+        stats_dir / "Flagged Participants.xlsx",
+        sheet_name="Flag Summary",
+        index=False,
+    )
+    for condition, base in (("Condition A", 10.0), ("Condition B", 100.0)):
+        condition_dir = excel_root / condition
+        condition_dir.mkdir()
+        for subject_offset, subject in enumerate(("SCP1", "SCP2")):
+            _write_participant_workbook(
+                condition_dir / f"{subject}_{condition}_Results.xlsx",
+                base=base,
+                subject_offset=subject_offset,
+                include_fullfft=include_fullfft,
+            )
+    return project_root
+
+
+def _write_stats_ready(path: Path) -> None:
+    with pd.ExcelWriter(path) as writer:
+        pd.DataFrame(
+            {
+                "condition": ["Condition A", "Condition A", "Condition B", "Condition B"],
+                "subject_id": ["P1", "P2", "P1", "P2"],
+                "roi": ["ROI"] * 4,
+                "summed_bca_uv": [1.0, 2.0, 3.0, 4.0],
+            }
+        ).to_excel(writer, sheet_name="Long_Format", index=False)
+        pd.DataFrame(
+            {
+                "harmonic_hz": [1.2, 2.4, 4.8],
+                "selected": [False, True, True],
+            }
+        ).to_excel(writer, sheet_name="Harmonic_Selection", index=False)
+
+
+def _write_participant_workbook(
+    path: Path,
+    *,
+    base: float,
+    subject_offset: int,
+    include_fullfft: bool,
+) -> None:
+    bca = pd.DataFrame(
+        {
+            "Electrode": DEFAULT_ELECTRODE_NAMES_64,
+            "2.4000_Hz": [base + index for index in range(64)],
+            "4.8000_Hz": [base + 10.0 + index for index in range(64)],
+        }
+    )
+    with pd.ExcelWriter(path) as writer:
+        bca.to_excel(writer, sheet_name="BCA (uV)", index=False)
+        if include_fullfft:
+            fullfft = pd.DataFrame({"Electrode": DEFAULT_ELECTRODE_NAMES_64})
+            for frequency in (2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 4.5, 4.6, 4.7, 4.8, 4.9, 5.0, 5.1):
+                fullfft[f"{frequency:.4f}_Hz"] = _expected_fullfft_values(
+                    condition_base=base,
+                    frequency_hz=frequency,
+                    subject_mean=float(subject_offset),
+                )
+            fullfft.to_excel(writer, sheet_name="FullFFT Amplitude (uV)", index=False)
+
+
+def _expected_fullfft_values(
+    *,
+    condition_base: float,
+    frequency_hz: float,
+    subject_mean: float,
+) -> np.ndarray:
+    electrode_index = np.arange(64, dtype=float)
+    return condition_base + subject_mean + electrode_index * (1.0 + frequency_hz / 10.0)

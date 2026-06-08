@@ -138,6 +138,15 @@ payload/manifest JSON under the active project root. It must not update
 `project.json`, change Stats outputs, modify preprocessing data, or teach the
 renderer how L2-MNE works.
 
+Phase 6D adds `l2_mne_hauk_zscore.py`,
+`project_fullfft_inputs.py`, and
+`project_l2_mne_hauk_zscore_export.py` as a separate Hauk-style
+source-space z-score path. It reads raw project `FullFFT Amplitude (uV)` target
+and neighboring frequency-bin topographies, sums selected harmonics in sensor
+space, estimates target/noise source amplitudes through the same inverse model,
+and writes `source_value_unit: z-score` payloads. It must not derive z-scores
+from already summed BCA values or compact selected-harmonic summaries.
+
 ## File Responsibilities
 
 - `gui.py`: embedded page, controls, status text, fsaverage worker wiring, and
@@ -173,8 +182,11 @@ renderer how L2-MNE works.
   source-ready condition topographies from existing project workbooks. Phase 6C
   includes `project_l2_mne_export.py`, a project-local beta export that combines
   those topographies with an external MNE/fsaverage BioSemi64 template forward
-  model and writes prepared source-map JSON. Later producers may use
-  LORETA/eLORETA volume or mixed source-space models.
+  model and writes prepared source-map JSON. Phase 6D includes
+  `l2_mne_hauk_zscore.py`, `project_fullfft_inputs.py`, and
+  `project_l2_mne_hauk_zscore_export.py`, which produce project-local
+  source-space z-score payloads from FullFFT target/noise-bin data. Later
+  producers may use LORETA/eLORETA volume or mixed source-space models.
 - `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
   the expected output shape for future source-localization producers. They are
   format examples only and are not source estimates. This directory also holds
@@ -259,6 +271,15 @@ The project L2-MNE exporter writes generated files under
 can be loaded by the GUI's prepared-manifest importer. The GUI may trigger this
 export in a worker thread and then load the resulting manifest, but all inverse
 model construction and source-value calculation remain in `source_producers/`.
+
+The project Hauk-style z-score exporter writes generated files under
+`6 - Source Localization/L2-MNE Hauk Z-Score Beta/` by default. It uses the
+same prepared-manifest importer as every other source payload. Its displayed
+values are source-space z-scores, not arbitrary L2-MNE amplitude. The
+neighboring-bin policy mirrors the Stats-style FPVS neighboring-bin window by
+using offsets `-10..-2` and `+2..+10`, dropping the minimum and maximum
+neighboring source amplitude per source point before computing the source-space
+noise mean and population SD.
 
 Checked-in examples live in `examples/`. The fsaverage-native example is the
 preferred reference shape for future calculations that produce coordinates in

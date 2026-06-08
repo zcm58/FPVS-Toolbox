@@ -51,6 +51,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_OPACITY_PERCENT = 48
 DEFAULT_ACTIVATION_OPACITY_PERCENT = 72
+PROJECT_SOURCE_EXPORT_AMPLITUDE = "amplitude"
+PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
 
 
 class FsaverageLoadWorker(QObject):
@@ -85,18 +87,26 @@ class ProjectSourceMapExportWorker(QObject):
     failed = Signal(str)
     finished = Signal()
 
-    def __init__(self, *, project_root: Path) -> None:
+    def __init__(self, *, project_root: Path, export_mode: str) -> None:
         super().__init__()
         self._project_root = project_root
+        self._export_mode = export_mode
 
     @Slot()
     def run(self) -> None:
         try:
-            from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
-                write_project_l2_mne_cortical_surface_payloads,
-            )
+            if self._export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
+                from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+                    write_project_l2_mne_hauk_zscore_payloads,
+                )
 
-            result = write_project_l2_mne_cortical_surface_payloads(project_root=self._project_root)
+                result = write_project_l2_mne_hauk_zscore_payloads(project_root=self._project_root)
+            else:
+                from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
+                    write_project_l2_mne_cortical_surface_payloads,
+                )
+
+                result = write_project_l2_mne_cortical_surface_payloads(project_root=self._project_root)
         except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError) as exc:
             self.failed.emit(str(exc))
         else:
@@ -392,6 +402,14 @@ class LoretaVisualizerWindow(QWidget):
         self.build_project_source_btn.clicked.connect(self._build_project_source_maps)
         controls.content_layout.addWidget(self.build_project_source_btn)
 
+        self.build_project_zscore_btn = make_action_button("Build z-score source JSON", compact=True, parent=controls)
+        self.build_project_zscore_btn.setObjectName("loreta_build_project_zscore_btn")
+        self.build_project_zscore_btn.setToolTip(
+            "Write Hauk-style L2-MNE source-space z-score JSON from the active project and load it."
+        )
+        self.build_project_zscore_btn.clicked.connect(self._build_project_zscore_source_maps)
+        controls.content_layout.addWidget(self.build_project_zscore_btn)
+
         self.load_source_manifest_btn = make_action_button("Load manifest", compact=True, parent=controls)
         self.load_source_manifest_btn.setObjectName("loreta_load_source_manifest_btn")
         self.load_source_manifest_btn.setToolTip("Load a prepared source condition manifest.")
@@ -456,6 +474,7 @@ class LoretaVisualizerWindow(QWidget):
             and self._source_export_thread is None
         )
         self.build_project_source_btn.setEnabled(enabled)
+        self.build_project_zscore_btn.setEnabled(enabled)
 
     def _on_transparency_changed(self, value: int) -> None:
         self._update_transparency_label(value)
@@ -570,16 +589,28 @@ class LoretaVisualizerWindow(QWidget):
         self._import_prepared_source_manifest(Path(file_name))
 
     def _build_project_source_maps(self) -> None:
+        self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_AMPLITUDE)
+
+    def _build_project_zscore_source_maps(self) -> None:
+        self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_HAUK_ZSCORE)
+
+    def _build_project_source_maps_for_mode(self, export_mode: str) -> None:
         if self._project_root is None:
             self.condition_status_label.setText("Open a project before building beta source JSON.")
             return
         if self._source_export_thread is not None:
             return
-        self.condition_status_label.setText("Building beta L2-MNE source JSON from the active project...")
+        status_text = (
+            "Building Hauk-style source-space z-score JSON from the active project..."
+            if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE
+            else "Building beta L2-MNE source JSON from the active project..."
+        )
+        self.condition_status_label.setText(status_text)
         self.build_project_source_btn.setEnabled(False)
+        self.build_project_zscore_btn.setEnabled(False)
 
         thread = QThread(self)
-        worker = ProjectSourceMapExportWorker(project_root=self._project_root)
+        worker = ProjectSourceMapExportWorker(project_root=self._project_root, export_mode=export_mode)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.exported.connect(self._on_project_source_maps_exported)

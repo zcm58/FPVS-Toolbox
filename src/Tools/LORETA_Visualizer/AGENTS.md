@@ -21,9 +21,13 @@ logic.
 
 The first project-connected export path is Phase 6C. It writes beta L2-MNE
 cortical-surface prepared JSON from real project topographies under the active
-project root. This is still calculation-side orchestration; it must remain in
-`source_producers/` and must not move source-estimation logic into the GUI,
-renderer, importer, fsaverage display mesh loader, or bridge helpers.
+project root. Phase 6D adds a separate Hauk-style L2-MNE source-space z-score
+export path that reads raw `FullFFT Amplitude (uV)` target and neighboring-bin
+topographies, applies the same inverse model to target and noise bins, then
+writes z-score payloads. Both paths are calculation-side orchestration; they
+must remain in `source_producers/` and must not move source-estimation logic
+into the GUI, renderer, importer, fsaverage display mesh loader, or bridge
+helpers.
 
 Allowed outside this directory:
 
@@ -61,8 +65,15 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   `scalar_fields.py`.
 - The L2-MNE producer should stay labeled beta, cortical-surface only, and
   method-specific in metadata, for example `l2_mne_cortical_surface_beta`.
+  The Hauk-style z-score producer should stay labeled beta and method-specific,
+  for example `l2_mne_cortical_surface_hauk_zscore_beta`, with
+  `source_value_unit: z-score`.
   Future LORETA/eLORETA volume methods should become sibling producers rather
   than edits to renderer or bridge helpers.
+- Never derive source-space z-scores from already summed BCA values or compact
+  selected-harmonic summaries. The z-score path needs raw target and
+  neighboring frequency-bin source estimates from the same inverse model. If
+  the required FullFFT bins are unavailable, raise a clear producer/input error.
 - Demo heatmap data must stay clearly synthetic and local to this tool.
 
 ## File Responsibilities
@@ -102,7 +113,12 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   that assembles 64-channel condition topographies for source producers. Phase
   6C includes `source_producers/project_l2_mne_export.py`, which combines those
   project topographies with an external MNE/fsaverage BioSemi64 template
-  forward model and writes project-local prepared source JSON.
+  forward model and writes project-local prepared source JSON. Phase 6D includes
+  `source_producers/l2_mne_hauk_zscore.py`,
+  `source_producers/project_fullfft_inputs.py`, and
+  `source_producers/project_l2_mne_hauk_zscore_export.py`; together they read
+  project FullFFT target/noise bins, compute Hauk-style source-space z-scores,
+  and write project-local z-score prepared source JSON.
 
 ## Boundary Rules
 
@@ -129,6 +145,11 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   the active project root through `source_producers/project_l2_mne_export.py`.
   Keep the default output project-local, reject silent output escapes, and do
   not write to `project.json` unless a future plan explicitly scopes that.
+- Project Hauk-style z-score export may write generated payload/manifest JSON
+  under the active project root through
+  `source_producers/project_l2_mne_hauk_zscore_export.py`. Keep the default
+  output project-local, reject silent output escapes, and do not write to
+  `project.json` unless a future plan explicitly scopes that.
 - Do not change the checked-in prepared JSON examples in a way that implies
   renderer ownership of LORETA math. They are output-format examples for future
   calculation producers and importer tests only.
