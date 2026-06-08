@@ -55,6 +55,7 @@ from Tools.Publication_Report.models import (
     ReportRoi,
     report_rois_from_settings_pairs,
 )
+from Tools.Publication_Report.narrative import build_markdown
 from Tools.Publication_Report.runner import generate_publication_report
 from Tools.Publication_Report.discovery import WorkbookEntry
 
@@ -176,6 +177,36 @@ def test_generate_publication_report_writes_initial_bundle(tmp_path: Path) -> No
     assert audit["manual_excluded_subjects"] == ["P02"]
     assert audit["qc_excluded_subjects"] == ["P03"]
     assert [roi["roi"] for roi in audit["rois"]] == ["LOT", "ROT", "Central"]
+
+
+def test_publication_report_describes_actual_harmonic_selection_method(tmp_path: Path) -> None:
+    text = build_markdown(
+        request=PublicationReportRequest(project_root=tmp_path),
+        selected_conditions=("Semantic Response", "Color Response"),
+        participant_inclusion=pd.DataFrame({"subject_id": ["P01"], "included": [True]}),
+        analysis_frames={
+            HARMONIC_SELECTION_SHEET: pd.DataFrame(
+                [
+                    {
+                        "target_frequency_hz": 1.2,
+                        "selected": True,
+                    },
+                    {
+                        "target_frequency_hz": 2.4,
+                        "selected": False,
+                    },
+                ]
+            )
+        },
+        warnings=(),
+    )
+
+    assert "grand-averaged `FullFFT Amplitude (uV)` spectra" in text
+    assert "all scalp electrodes" in text
+    assert "Harmonics were retained only when z > 1.64." in text
+    assert "applied to every participant, selected condition, and ROI" in text
+    assert "SNR was not used as the dependent variable" in text
+    assert "two consecutive" not in text.casefold()
 
 
 def _write_fullfft_detectability_workbook(

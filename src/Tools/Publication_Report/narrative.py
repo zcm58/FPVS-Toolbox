@@ -121,17 +121,41 @@ def _analysis_sections(frames: Mapping[str, pd.DataFrame]) -> list[str]:
 def _harmonic_selection_lines(frame: pd.DataFrame | None) -> list[str]:
     if frame is None or frame.empty or "selected" not in frame.columns:
         return []
+    lines = ["### Harmonic Selection Method", ""]
+    lines.append(
+        "Oddball harmonics for Summed BCA were selected using the FPVS Toolbox "
+        "default group-level significant-harmonics policy. Candidate non-base "
+        "oddball harmonics were generated at 1.2 Hz increments up to the BCA "
+        "upper limit, with base-rate overlaps excluded. Selection was performed "
+        "once from grand-averaged `FullFFT Amplitude (uV)` spectra across "
+        "included participants and selected conditions after averaging each "
+        "workbook across all scalp electrodes."
+    )
+    lines.append(
+        "For each candidate target bin, z was computed as (target amplitude - "
+        "local-noise mean) / local-noise population SD. The local-noise window "
+        "used the 10 FFT bins below and 10 bins above the target, excluded the "
+        "target bin and its immediately adjacent bins, required at least four "
+        "finite noise bins, and dropped the single minimum and single maximum "
+        "finite amplitude values before computing the noise statistics. "
+        "Harmonics were retained only when z > 1.64. The same retained harmonic "
+        "list was then applied to every participant, selected condition, and ROI "
+        "when summing BCA from the `BCA (uV)` sheets; SNR was not used as the "
+        "dependent variable."
+    )
     selected = frame.loc[frame["selected"].fillna(False).astype(bool)]
     if selected.empty:
-        return [
+        lines.append(
             "No oddball harmonics crossed the Stats group-level selection threshold "
-            "for the selected conditions and included participants.",
-        ]
+            "for the selected conditions and included participants."
+        )
+        return lines
     freqs = ", ".join(_format_hz(value) for value in selected["target_frequency_hz"])
-    return [
+    lines.append(
         f"The Stats group-level harmonic selection retained {len(selected)} "
-        f"oddball harmonic(s): {freqs}.",
-    ]
+        f"oddball harmonic(s): {freqs}."
+    )
+    return lines
 
 
 def _test_decision_lines(frame: pd.DataFrame | None) -> list[str]:
