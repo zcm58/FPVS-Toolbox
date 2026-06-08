@@ -8,9 +8,13 @@ import pandas as pd
 import pytest
 
 from config import DEFAULT_ELECTRODE_NAMES_64
-from Tools.LORETA_Visualizer.gui import resolve_loreta_import_start_dir
+from Tools.LORETA_Visualizer.gui import default_project_zscore_manifest_path, resolve_loreta_import_start_dir
 from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
+from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+    DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME,
+    PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER,
+)
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
     PROJECT_L2_MNE_BETA_OUTPUT_FOLDER,
     PROJECT_SOURCE_LOCALIZATION_FOLDER,
@@ -64,18 +68,35 @@ def test_project_l2_mne_export_rejects_outputs_outside_project_root(tmp_path) ->
 def test_loreta_import_dialog_prefers_last_dir_then_project_source_dir(tmp_path) -> None:
     project_root = tmp_path / "Project"
     project_root.mkdir()
-    source_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_BETA_OUTPUT_FOLDER
-    source_dir.mkdir(parents=True)
+    zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
+    zscore_dir.mkdir(parents=True)
+    amplitude_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_BETA_OUTPUT_FOLDER
+    amplitude_dir.mkdir(parents=True)
     last_dir = tmp_path / "last"
     last_dir.mkdir()
 
     assert resolve_loreta_import_start_dir(project_root=project_root, last_import_dir=last_dir) == str(last_dir)
-    assert resolve_loreta_import_start_dir(project_root=project_root, last_import_dir=None) == str(source_dir)
+    assert resolve_loreta_import_start_dir(project_root=project_root, last_import_dir=None) == str(zscore_dir)
 
-    source_dir.rmdir()
-    source_dir.parent.rmdir()
+    zscore_dir.rmdir()
+    assert resolve_loreta_import_start_dir(project_root=project_root, last_import_dir=None) == str(amplitude_dir)
+
+    amplitude_dir.rmdir()
+    amplitude_dir.parent.rmdir()
     assert resolve_loreta_import_start_dir(project_root=project_root, last_import_dir=None) == str(project_root)
     assert resolve_loreta_import_start_dir(project_root=None, last_import_dir=None) == ""
+
+
+def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_path) -> None:
+    project_root = tmp_path / "Project"
+    zscore_dir = project_root / PROJECT_SOURCE_LOCALIZATION_FOLDER / PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER
+    zscore_dir.mkdir(parents=True)
+    manifest_path = zscore_dir / DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME
+
+    assert default_project_zscore_manifest_path(project_root) is None
+
+    manifest_path.write_text("{}", encoding="utf-8")
+    assert default_project_zscore_manifest_path(project_root) == manifest_path
 
 
 def test_source_points_use_native_coordinate_source_space_not_forward_head_space() -> None:

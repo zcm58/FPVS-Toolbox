@@ -10,17 +10,17 @@ JSON payloads, and early real-project cortical L2-MNE maps.
 
 ## Current status
 
-The embedded visualizer can now display real project data through a beta
-L2-MNE cortical-surface source-map export. This is an early method-validation
-path, not a final validated LORETA, eLORETA, sLORETA, deep-source, or
-subject-MRI workflow.
+The embedded visualizer can now display real project data through beta
+Hauk-style L2-MNE cortical-surface source-space z-score maps. This is an early
+method-validation path, not a final validated LORETA, eLORETA, sLORETA,
+deep-source, or subject-MRI workflow.
 
 The visible occipital, frontal, and deep medial temporal demo activations are
 still synthetic. The real-project path is separate: it reads existing project
 workbooks, uses the Stats-selected oddball harmonic list, builds a template
-BioSemi64/fsaverage cortical forward model through MNE, writes prepared source
-JSON files, and loads them through the same manifest importer used by the demo
-fixtures.
+BioSemi64/fsaverage cortical forward model through MNE, writes prepared z-score
+source JSON files when needed, and loads them through the same manifest
+importer used by the demo fixtures.
 
 Use the current version to verify rendering behavior, transparency, camera
 controls, source-layer opacity, color scaling, and whether source maps can be
@@ -29,16 +29,16 @@ drawn inside the transparent anatomical shell.
 ## What you can do now
 
 - Rotate the 3D scene by dragging in the viewport.
-- Zoom with mouse or trackpad interaction, or with the explicit zoom buttons.
+- Zoom with mouse or trackpad interaction.
 - Reset the camera to the default view.
 - Adjust brain transparency.
-- Load an external fsaverage mesh through MNE when an fsaverage cache is
-  available, or use the synthetic fallback mesh.
+- Use an external fsaverage mesh loaded through MNE, with synthetic fallback
+  when the external mesh is unavailable.
 - Toggle a smoothed visual duplicate of the brain surface.
-- Show or hide the dummy source heatmap independently from the brain mesh.
-- Adjust dummy source-map opacity.
-- Switch among synthetic occipital, frontal, deep medial temporal, and prepared
-  source-map fixture conditions.
+- Show or hide the source map independently from the brain mesh.
+- Adjust source-map opacity.
+- Switch among project source-map conditions when available, or synthetic
+  demonstration conditions otherwise.
 - Auto-scale the source intensity map or set manual minimum/maximum intensity
   bounds.
 - Read the source color scale from the control-panel color ramp and min/max
@@ -103,20 +103,17 @@ The prepared source-map fixture is shaped like a future real-data handoff with
 coordinates, scalar values, faces, source-model metadata, and coordinate-space
 conversion. It is still synthetic and should be used only to inspect rendering.
 
-The **Load source JSON** button accepts controlled prepared-payload files with
-points, values, optional triangle faces, a source-model label, metadata, and a
-coordinate-space label. The tool validates the file and converts coordinates
-into the current display mesh space before rendering.
+When the tool opens inside a project, it automatically prepares fsaverage and
+then prefers the project-local Hauk-style source-space z-score manifest. If the
+manifest is missing and the required `FullFFT Amplitude (uV)` target/noise-bin
+data are present, the tool builds the z-score source maps in the background and
+loads the generated manifest.
 
-The **Load manifest** button accepts a controlled manifest file that lists
-condition labels and relative prepared-payload JSON files. After loading a
-manifest, those imported conditions appear in the same condition dropdown as the
-synthetic demos. Selecting one loads and renders its prepared payload.
-
-The **Build project source JSON** button uses the active project, writes the
-beta L2-MNE source-map files into the project-local source folder, and then
-loads the generated manifest. The current default uses BCA topographies and
-includes flagged participants to match the existing Stats behavior.
+Advanced controls can still load a controlled prepared-payload JSON file or a
+prepared source manifest manually. Manual payloads need points, values, optional
+triangle faces, a source-model label, metadata, and a coordinate-space label.
+The tool validates the file and converts coordinates into the current display
+mesh space before rendering.
 
 ## Prepared source JSON format
 
@@ -176,17 +173,16 @@ eLORETA, or mixed volume method can be added as a different calculation method
 without changing how the 3D renderer works.
 
 The current real-data path is cortical-surface only and uses a template
-fsaverage model. It has two beta project export modes:
+fsaverage model. Hauk-style L2-MNE source-space z-score maps are the default
+project view. This mode reads raw `FullFFT Amplitude (uV)` target and
+neighboring frequency bins, sends target and noise topographies through the
+same inverse model, and displays source-space z-scores.
 
-- **Build project source JSON** writes the original L2-MNE cortical-surface
-  diagnostic maps. These values are arbitrary/template-scaled source amplitudes
-  proportional to the sensor topographies used as input (`summed BCA uV` by
-  default). They are not calibrated current density, dipole moment, or
-  microvolts at the source.
-- **Build z-score source JSON** writes Hauk-style L2-MNE source-space z-score
-  maps. This mode reads raw `FullFFT Amplitude (uV)` target and neighboring
-  frequency bins, sends target and noise topographies through the same inverse
-  model, and displays source-space z-scores.
+The older arbitrary-amplitude L2-MNE cortical-surface export remains available
+as an advanced diagnostic action. Those values are arbitrary/template-scaled
+source amplitudes proportional to the sensor topographies used as input
+(`summed BCA uV` by default). They are not calibrated current density, dipole
+moment, or microvolts at the source.
 
 The z-score mode is better aligned with FPVS source-localization publications,
 but it is still a beta template-based workflow. It is EEG-only, uses fsaverage

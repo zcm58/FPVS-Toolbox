@@ -161,8 +161,7 @@ Objective:
 - Add interaction controls:
   - orbit/drag rotation;
   - mouse-wheel or trackpad zoom;
-  - explicit zoom in and zoom out buttons;
-  - reset camera/default view button;
+  - reset camera/default view action in Advanced controls;
   - transparency slider for the base brain mesh.
 - Add a sidebar button and dedicated sidebar icon/logo.
 - Keep the viewer responsive during interaction and app navigation.
@@ -187,7 +186,10 @@ Done means:
 
 ## Phase 2: Real Anatomical Brain Mesh
 
-Status: Implemented. The visualizer starts with the synthetic fallback, checks for an existing external fsaverage cache without fetching, and provides a `Fetch/load fsaverage` control that loads fsaverage through MNE outside the repo.
+Status: Implemented. The visualizer starts with the synthetic fallback and
+loads/fetches fsaverage through MNE outside the repo in a worker when the tool
+opens. A visible `Fetch/load fsaverage` button is no longer part of the primary
+UI.
 
 Objective:
 
@@ -741,13 +743,14 @@ Implementation notes:
 - The default source-space spacing is MNE `ico3`, yielding 1,284 cortical
   source points and 2,560 triangular faces. Points are emitted in FreeSurfer
   fsaverage millimeter coordinates with `coordinate_space: fsaverage_surface`.
-- The GUI exposes `Build project source JSON`, which runs the exporter in a
-  `QThread`, writes the project-local files, then loads the emitted manifest
-  through the existing importer. The worker orchestrates the calculation but
-  does not put source math into the renderer or importer.
+- The diagnostic arbitrary-amplitude exporter remains available from the
+  collapsed Advanced controls. It runs in a `QThread`, writes the project-local
+  files, then loads the emitted manifest through the existing importer. The
+  worker orchestrates the calculation but does not put source math into the
+  renderer or importer.
 - The `Load source JSON` and `Load manifest` dialogs now prefer the last import
-  folder, then the active project's 6C output folder, then the active project
-  root.
+  folder, then the active project's 6D z-score output folder, then the 6C
+  diagnostic amplitude output folder, then the active project root.
 - Semantic Categories was exported successfully to:
   `D:\FPVS Toolbox Root\Semantic Categories\6 - Source Localization\L2-MNE Cortical Surface Beta\project_l2_mne_cortical_surface_beta_manifest.json`.
   The manifest contains `Color Response`, `Color Response 2`,
@@ -769,9 +772,9 @@ Done means:
 
 Status: Implemented. Phase 6D adds a dedicated Hauk-style L2-MNE
 source-space z-score producer, a read-only FullFFT target/noise-bin project
-input adapter, a project-local z-score export orchestrator, and a GUI worker
-button that builds and loads the generated z-score manifest without putting
-source math in the renderer or importer.
+input adapter, a project-local z-score export orchestrator, and automatic GUI
+loading/building of the generated z-score manifest without putting source math
+in the renderer or importer.
 
 Objective:
 
@@ -884,9 +887,11 @@ Implementation notes completed:
   - `source_producers/l2_mne_hauk_zscore.py`;
   - `source_producers/project_fullfft_inputs.py`;
   - `source_producers/project_l2_mne_hauk_zscore_export.py`.
-- The GUI now exposes `Build z-score source JSON` beside the older arbitrary
-  amplitude `Build project source JSON` action. Both run through the worker
-  thread and existing prepared-manifest importer.
+- Hauk-style z-score maps are now the default project behavior: after
+  fsaverage loads, the GUI auto-loads the existing project-local z-score
+  manifest, or auto-builds it once in a worker when the manifest is missing.
+  Manual z-score rebuilds, arbitrary-amplitude exports, and prepared JSON
+  imports live in the collapsed Advanced controls.
 - The z-score path reads `FullFFT Amplitude (uV)` only. It refuses BCA-only or
   compact-summary-only workbooks with a clear Phase 6D input error.
 - Semantic Categories exported successfully to:
@@ -932,7 +937,7 @@ Manual visible smoke path for Phase 1:
 2. Confirm the LORETA Visualizer sidebar icon/logo appears under Workspace Tools.
 3. Open the visualizer from the sidebar.
 4. Confirm the embedded viewport renders a nonblank 3D brain-like mesh.
-5. Drag to rotate; use mouse-wheel/trackpad and explicit zoom in/out buttons.
+5. Drag to rotate; use mouse-wheel/trackpad to zoom.
 6. Move the transparency slider and confirm mesh alpha changes immediately.
 7. Use reset camera/default view.
 8. Switch Home -> LORETA Visualizer -> another embedded tool -> LORETA Visualizer and confirm no crash, stale state, or duplicate widget behavior.

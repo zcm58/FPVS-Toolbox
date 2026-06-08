@@ -124,15 +124,37 @@ def resolve_loreta_import_start_dir(
     if last_import_dir is not None and last_import_dir.is_dir():
         return str(last_import_dir)
     if project_root is not None and project_root.is_dir():
+        from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+            default_project_l2_mne_hauk_zscore_output_dir,
+        )
         from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
             default_project_l2_mne_output_dir,
         )
 
-        source_dir = default_project_l2_mne_output_dir(project_root)
-        if source_dir.is_dir():
-            return str(source_dir)
+        for source_dir in (
+            default_project_l2_mne_hauk_zscore_output_dir(project_root),
+            default_project_l2_mne_output_dir(project_root),
+        ):
+            if source_dir.is_dir():
+                return str(source_dir)
         return str(project_root)
     return ""
+
+
+def default_project_zscore_manifest_path(project_root: Path | None) -> Path | None:
+    """Return the default project z-score manifest path when it already exists."""
+    if project_root is None or not project_root.is_dir():
+        return None
+    from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+        DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME,
+        default_project_l2_mne_hauk_zscore_output_dir,
+    )
+
+    manifest_path = (
+        default_project_l2_mne_hauk_zscore_output_dir(project_root)
+        / DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME
+    )
+    return manifest_path if manifest_path.is_file() else None
 
 
 def _activation_color_ramp_stylesheet() -> str:
@@ -191,6 +213,7 @@ class LoretaVisualizerWindow(QWidget):
         self._current_activation_payload: SourcePayload | None = None
         self._last_import_dir: Path | None = None
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
+        self._auto_project_zscore_attempted = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -199,7 +222,7 @@ class LoretaVisualizerWindow(QWidget):
         header = SubsectionHeaderLabel("LORETA Visualizer", self)
         root.addWidget(header, 0)
         self.mesh_status = StatusBanner(
-            "Synthetic placeholder mesh shown. Looking for an external fsaverage cache...",
+            "Preparing fsaverage brain mesh...",
             self,
             variant="info",
         )
@@ -221,7 +244,7 @@ class LoretaVisualizerWindow(QWidget):
         body.addWidget(self._build_controls(), 0)
         self._initialize_renderer()
         if self.renderer is not None:
-            self._start_fsaverage_load(allow_fetch=False)
+            self._start_fsaverage_load(allow_fetch=True)
 
     def _resolve_project_root(self, provided_root: str | None) -> Path | None:
         if provided_root:
@@ -244,70 +267,31 @@ class LoretaVisualizerWindow(QWidget):
         return None
 
     def _build_controls(self) -> SectionCard:
-        controls = SectionCard("View Controls", self, object_name="loreta_view_controls")
+        controls = SectionCard("Source Map", self, object_name="loreta_view_controls")
         controls.setFixedWidth(240)
 
-        opacity_label = QLabel("Brain transparency", controls)
-        opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(opacity_label)
+        condition_label = QLabel("Condition", controls)
+        condition_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(condition_label)
 
-        self.transparency_value_label = QLabel("", controls)
-        self.transparency_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.condition_combo = QComboBox(controls)
+        self.condition_combo.setObjectName("loreta_condition_combo")
+        for condition in DEMO_LORETA_CONDITIONS:
+            self.condition_combo.addItem(condition.label, condition.condition_id)
+        self.condition_combo.currentIndexChanged.connect(self._on_condition_changed)
+        controls.content_layout.addWidget(self.condition_combo)
 
-        self.transparency_slider = QSlider(Qt.Horizontal, controls)
-        self.transparency_slider.setObjectName("loreta_transparency_slider")
-        self.transparency_slider.setRange(5, 100)
-        self.transparency_slider.setValue(DEFAULT_OPACITY_PERCENT)
-        self.transparency_slider.valueChanged.connect(self._on_transparency_changed)
-        controls.content_layout.addWidget(self.transparency_slider)
-        controls.content_layout.addWidget(self.transparency_value_label)
-
-        activation_label = QLabel("Source map opacity", controls)
-        activation_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(activation_label)
-
-        self.activation_opacity_value_label = QLabel("", controls)
-        self.activation_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-
-        self.activation_opacity_slider = QSlider(Qt.Horizontal, controls)
-        self.activation_opacity_slider.setObjectName("loreta_activation_opacity_slider")
-        self.activation_opacity_slider.setRange(0, 100)
-        self.activation_opacity_slider.setValue(DEFAULT_ACTIVATION_OPACITY_PERCENT)
-        self.activation_opacity_slider.valueChanged.connect(self._on_activation_opacity_changed)
-        controls.content_layout.addWidget(self.activation_opacity_slider)
-        controls.content_layout.addWidget(self.activation_opacity_value_label)
+        self.condition_status_label = QLabel("", controls)
+        self.condition_status_label.setObjectName("loreta_condition_status_label")
+        self.condition_status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.condition_status_label.setWordWrap(True)
+        controls.content_layout.addWidget(self.condition_status_label)
 
         self.activation_auto_scale_check = QCheckBox("Auto scale intensity", controls)
         self.activation_auto_scale_check.setObjectName("loreta_activation_auto_scale_check")
         self.activation_auto_scale_check.setChecked(True)
         self.activation_auto_scale_check.toggled.connect(self._on_activation_auto_scale_changed)
         controls.content_layout.addWidget(self.activation_auto_scale_check)
-
-        range_label = QLabel("Intensity range", controls)
-        range_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(range_label)
-
-        range_row = QHBoxLayout()
-        range_row.setContentsMargins(0, 0, 0, 0)
-        range_row.setSpacing(6)
-        self.activation_min_spin = QDoubleSpinBox(controls)
-        self.activation_min_spin.setObjectName("loreta_activation_min_spin")
-        self.activation_min_spin.setDecimals(2)
-        self.activation_min_spin.setRange(-1_000_000.0, 1_000_000.0)
-        self.activation_min_spin.setSingleStep(0.05)
-        self.activation_min_spin.setValue(DEFAULT_SCALAR_MIN)
-        self.activation_min_spin.valueChanged.connect(self._on_activation_range_changed)
-        self.activation_max_spin = QDoubleSpinBox(controls)
-        self.activation_max_spin.setObjectName("loreta_activation_max_spin")
-        self.activation_max_spin.setDecimals(2)
-        self.activation_max_spin.setRange(-1_000_000.0, 1_000_000.0)
-        self.activation_max_spin.setSingleStep(0.05)
-        self.activation_max_spin.setValue(DEFAULT_SCALAR_MAX)
-        self.activation_max_spin.valueChanged.connect(self._on_activation_range_changed)
-        range_row.addWidget(self.activation_min_spin)
-        range_row.addWidget(QLabel("to", controls), 0)
-        range_row.addWidget(self.activation_max_spin)
-        controls.content_layout.addLayout(range_row)
 
         self.activation_scale_mode_label = QLabel("Auto color scale", controls)
         self.activation_scale_mode_label.setObjectName("loreta_activation_scale_mode_label")
@@ -333,28 +317,67 @@ class LoretaVisualizerWindow(QWidget):
         scale_row.addWidget(self.activation_scale_max_label, 0)
         controls.content_layout.addLayout(scale_row)
 
+        range_label = QLabel("Manual range", controls)
+        range_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(range_label)
+
+        range_row = QHBoxLayout()
+        range_row.setContentsMargins(0, 0, 0, 0)
+        range_row.setSpacing(6)
+        self.activation_min_spin = QDoubleSpinBox(controls)
+        self.activation_min_spin.setObjectName("loreta_activation_min_spin")
+        self.activation_min_spin.setDecimals(2)
+        self.activation_min_spin.setRange(-1_000_000.0, 1_000_000.0)
+        self.activation_min_spin.setSingleStep(0.05)
+        self.activation_min_spin.setValue(DEFAULT_SCALAR_MIN)
+        self.activation_min_spin.valueChanged.connect(self._on_activation_range_changed)
+        self.activation_max_spin = QDoubleSpinBox(controls)
+        self.activation_max_spin.setObjectName("loreta_activation_max_spin")
+        self.activation_max_spin.setDecimals(2)
+        self.activation_max_spin.setRange(-1_000_000.0, 1_000_000.0)
+        self.activation_max_spin.setSingleStep(0.05)
+        self.activation_max_spin.setValue(DEFAULT_SCALAR_MAX)
+        self.activation_max_spin.valueChanged.connect(self._on_activation_range_changed)
+        range_row.addWidget(self.activation_min_spin)
+        range_row.addWidget(QLabel("to", controls), 0)
+        range_row.addWidget(self.activation_max_spin)
+        controls.content_layout.addLayout(range_row)
+
         self.activation_value_label = QLabel("", controls)
         self.activation_value_label.setObjectName("loreta_activation_value_label")
         self.activation_value_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.activation_value_label.setWordWrap(True)
         controls.content_layout.addWidget(self.activation_value_label)
 
-        condition_label = QLabel("Source condition", controls)
-        condition_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        controls.content_layout.addWidget(condition_label)
+        opacity_label = QLabel("Brain opacity", controls)
+        opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(opacity_label)
 
-        self.condition_combo = QComboBox(controls)
-        self.condition_combo.setObjectName("loreta_condition_combo")
-        for condition in DEMO_LORETA_CONDITIONS:
-            self.condition_combo.addItem(condition.label, condition.condition_id)
-        self.condition_combo.currentIndexChanged.connect(self._on_condition_changed)
-        controls.content_layout.addWidget(self.condition_combo)
+        self.transparency_value_label = QLabel("", controls)
+        self.transparency_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        self.condition_status_label = QLabel("", controls)
-        self.condition_status_label.setObjectName("loreta_condition_status_label")
-        self.condition_status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.condition_status_label.setWordWrap(True)
-        controls.content_layout.addWidget(self.condition_status_label)
+        self.transparency_slider = QSlider(Qt.Horizontal, controls)
+        self.transparency_slider.setObjectName("loreta_transparency_slider")
+        self.transparency_slider.setRange(5, 100)
+        self.transparency_slider.setValue(DEFAULT_OPACITY_PERCENT)
+        self.transparency_slider.valueChanged.connect(self._on_transparency_changed)
+        controls.content_layout.addWidget(self.transparency_slider)
+        controls.content_layout.addWidget(self.transparency_value_label)
+
+        activation_label = QLabel("Source opacity", controls)
+        activation_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        controls.content_layout.addWidget(activation_label)
+
+        self.activation_opacity_value_label = QLabel("", controls)
+        self.activation_opacity_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.activation_opacity_slider = QSlider(Qt.Horizontal, controls)
+        self.activation_opacity_slider.setObjectName("loreta_activation_opacity_slider")
+        self.activation_opacity_slider.setRange(0, 100)
+        self.activation_opacity_slider.setValue(DEFAULT_ACTIVATION_OPACITY_PERCENT)
+        self.activation_opacity_slider.valueChanged.connect(self._on_activation_opacity_changed)
+        controls.content_layout.addWidget(self.activation_opacity_slider)
+        controls.content_layout.addWidget(self.activation_opacity_value_label)
 
         self.activation_visible_check = QCheckBox("Show source map", controls)
         self.activation_visible_check.setObjectName("loreta_activation_visible_check")
@@ -369,58 +392,51 @@ class LoretaVisualizerWindow(QWidget):
         self.smooth_surface_check.toggled.connect(self._on_smooth_surface_toggled)
         controls.content_layout.addWidget(self.smooth_surface_check)
 
-        zoom_row = QHBoxLayout()
-        zoom_row.setContentsMargins(0, 0, 0, 0)
-        zoom_row.setSpacing(6)
-        self.zoom_out_btn = make_action_button("-", compact=True, parent=controls)
-        self.zoom_out_btn.setObjectName("loreta_zoom_out_btn")
-        self.zoom_out_btn.setToolTip("Zoom out")
-        self.zoom_out_btn.clicked.connect(self._zoom_out)
-        self.zoom_in_btn = make_action_button("+", compact=True, parent=controls)
-        self.zoom_in_btn.setObjectName("loreta_zoom_in_btn")
-        self.zoom_in_btn.setToolTip("Zoom in")
-        self.zoom_in_btn.clicked.connect(self._zoom_in)
-        zoom_row.addWidget(self.zoom_out_btn)
-        zoom_row.addWidget(self.zoom_in_btn)
-        controls.content_layout.addLayout(zoom_row)
+        self.advanced_controls_check = QCheckBox("Advanced", controls)
+        self.advanced_controls_check.setObjectName("loreta_advanced_controls_check")
+        controls.content_layout.addWidget(self.advanced_controls_check)
+
+        self.advanced_controls = QWidget(controls)
+        self.advanced_controls.setObjectName("loreta_advanced_controls")
+        advanced_layout = QVBoxLayout(self.advanced_controls)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_layout.setSpacing(6)
+        self.advanced_controls.setVisible(False)
+        self.advanced_controls_check.toggled.connect(self.advanced_controls.setVisible)
 
         self.reset_camera_btn = make_action_button("Reset", compact=True, parent=controls)
         self.reset_camera_btn.setObjectName("loreta_reset_camera_btn")
         self.reset_camera_btn.setToolTip("Reset view")
         self.reset_camera_btn.clicked.connect(self._reset_camera)
-        controls.content_layout.addWidget(self.reset_camera_btn)
+        advanced_layout.addWidget(self.reset_camera_btn)
 
         self.load_source_payload_btn = make_action_button("Load source JSON", compact=True, parent=controls)
         self.load_source_payload_btn.setObjectName("loreta_load_source_payload_btn")
         self.load_source_payload_btn.setToolTip("Load a prepared source payload JSON file.")
         self.load_source_payload_btn.clicked.connect(self._load_prepared_source_payload)
-        controls.content_layout.addWidget(self.load_source_payload_btn)
+        advanced_layout.addWidget(self.load_source_payload_btn)
 
-        self.build_project_source_btn = make_action_button("Build project source JSON", compact=True, parent=controls)
-        self.build_project_source_btn.setObjectName("loreta_build_project_source_btn")
-        self.build_project_source_btn.setToolTip("Write beta L2-MNE source JSON from the active project and load it.")
-        self.build_project_source_btn.clicked.connect(self._build_project_source_maps)
-        controls.content_layout.addWidget(self.build_project_source_btn)
-
-        self.build_project_zscore_btn = make_action_button("Build z-score source JSON", compact=True, parent=controls)
+        self.build_project_zscore_btn = make_action_button("Rebuild z-score maps", compact=True, parent=controls)
         self.build_project_zscore_btn.setObjectName("loreta_build_project_zscore_btn")
         self.build_project_zscore_btn.setToolTip(
             "Write Hauk-style L2-MNE source-space z-score JSON from the active project and load it."
         )
         self.build_project_zscore_btn.clicked.connect(self._build_project_zscore_source_maps)
-        controls.content_layout.addWidget(self.build_project_zscore_btn)
+        advanced_layout.addWidget(self.build_project_zscore_btn)
+
+        self.build_project_source_btn = make_action_button("Build diagnostic amplitude maps", compact=True, parent=controls)
+        self.build_project_source_btn.setObjectName("loreta_build_project_source_btn")
+        self.build_project_source_btn.setToolTip("Write beta L2-MNE source JSON from the active project and load it.")
+        self.build_project_source_btn.clicked.connect(self._build_project_source_maps)
+        advanced_layout.addWidget(self.build_project_source_btn)
 
         self.load_source_manifest_btn = make_action_button("Load manifest", compact=True, parent=controls)
         self.load_source_manifest_btn.setObjectName("loreta_load_source_manifest_btn")
         self.load_source_manifest_btn.setToolTip("Load a prepared source condition manifest.")
         self.load_source_manifest_btn.clicked.connect(self._load_prepared_source_manifest)
-        controls.content_layout.addWidget(self.load_source_manifest_btn)
+        advanced_layout.addWidget(self.load_source_manifest_btn)
 
-        self.load_fsaverage_btn = make_action_button("Fetch/load fsaverage", compact=True, parent=controls)
-        self.load_fsaverage_btn.setObjectName("loreta_load_fsaverage_btn")
-        self.load_fsaverage_btn.setToolTip("Load an external MNE fsaverage mesh.")
-        self.load_fsaverage_btn.clicked.connect(self._load_fsaverage_with_fetch)
-        controls.content_layout.addWidget(self.load_fsaverage_btn)
+        controls.content_layout.addWidget(self.advanced_controls)
         controls.content_layout.addStretch(1)
 
         self._update_transparency_label(DEFAULT_OPACITY_PERCENT)
@@ -459,13 +475,11 @@ class LoretaVisualizerWindow(QWidget):
         self.condition_combo.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
         self.smooth_surface_check.setEnabled(enabled)
-        self.zoom_out_btn.setEnabled(enabled)
-        self.zoom_in_btn.setEnabled(enabled)
+        self.advanced_controls_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
         self.load_source_payload_btn.setEnabled(enabled)
         self._sync_project_source_button()
         self.load_source_manifest_btn.setEnabled(enabled)
-        self.load_fsaverage_btn.setEnabled(enabled)
 
     def _sync_project_source_button(self) -> None:
         enabled = (
@@ -549,9 +563,6 @@ class LoretaVisualizerWindow(QWidget):
         if self.renderer is not None:
             self.renderer.reset_camera()
 
-    def _load_fsaverage_with_fetch(self) -> None:
-        self._start_fsaverage_load(allow_fetch=True)
-
     def _load_prepared_source_payload(self) -> None:
         renderer = self.renderer
         if renderer is None:
@@ -594,17 +605,32 @@ class LoretaVisualizerWindow(QWidget):
     def _build_project_zscore_source_maps(self) -> None:
         self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_HAUK_ZSCORE)
 
-    def _build_project_source_maps_for_mode(self, export_mode: str) -> None:
+    def _ensure_default_project_zscore_maps(self) -> None:
+        if self._auto_project_zscore_attempted or self._project_root is None or self.renderer is None:
+            return
+        self._auto_project_zscore_attempted = True
+        manifest_path = default_project_zscore_manifest_path(self._project_root)
+        if manifest_path is not None:
+            self.condition_status_label.setText("Loading project source-space z-score maps...")
+            self._last_import_dir = manifest_path.parent
+            self._import_prepared_source_manifest(manifest_path)
+            return
+        self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_HAUK_ZSCORE, automatic=True)
+
+    def _build_project_source_maps_for_mode(self, export_mode: str, *, automatic: bool = False) -> None:
         if self._project_root is None:
             self.condition_status_label.setText("Open a project before building beta source JSON.")
             return
         if self._source_export_thread is not None:
             return
-        status_text = (
-            "Building Hauk-style source-space z-score JSON from the active project..."
-            if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE
-            else "Building beta L2-MNE source JSON from the active project..."
-        )
+        if automatic:
+            status_text = "Preparing project source-space z-score maps..."
+        else:
+            status_text = (
+                "Building Hauk-style source-space z-score JSON from the active project..."
+                if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE
+                else "Building beta L2-MNE source JSON from the active project..."
+            )
         self.condition_status_label.setText(status_text)
         self.build_project_source_btn.setEnabled(False)
         self.build_project_zscore_btn.setEnabled(False)
@@ -633,8 +659,10 @@ class LoretaVisualizerWindow(QWidget):
             self.condition_status_label.setText("Project source export failed: unexpected export result.")
             return
         self._last_import_dir = output_dir
+        method_id = str(getattr(producer_result, "method_id", ""))
+        source_label = "source-space z-score maps" if "hauk_zscore" in method_id else "source maps"
         self.condition_status_label.setText(
-            f"Built beta source JSON for {len(payloads)} conditions."
+            f"Prepared project {source_label} for {len(payloads)} conditions."
         )
         self._import_prepared_source_manifest(manifest_path)
 
@@ -709,7 +737,6 @@ class LoretaVisualizerWindow(QWidget):
             if allow_fetch
             else "Checking external fsaverage cache..."
         )
-        self.load_fsaverage_btn.setEnabled(False)
 
         thread = QThread(self)
         worker = FsaverageLoadWorker(allow_fetch=allow_fetch)
@@ -737,6 +764,7 @@ class LoretaVisualizerWindow(QWidget):
         self.mesh_status.set_text(
             f"Using {result.source_label} mesh from external cache ({result.triangle_count:,} triangles)."
         )
+        self._ensure_default_project_zscore_maps()
 
     @Slot(str)
     def _on_fsaverage_failed(self, message: str) -> None:
@@ -747,8 +775,6 @@ class LoretaVisualizerWindow(QWidget):
     def _mesh_load_finished(self) -> None:
         self._mesh_thread = None
         self._mesh_worker = None
-        if self.renderer is not None:
-            self.load_fsaverage_btn.setEnabled(True)
         self._sync_project_source_button()
 
     def _refresh_dummy_activation(self) -> None:
