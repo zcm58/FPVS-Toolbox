@@ -21,6 +21,9 @@ Source Localization/eLORETA is removed from active runtime, not a protected blac
   helpers may validate, transform, normalize, and adapt future calculation
   outputs into renderer payloads, but they must not compute inverse solutions,
   source statistics, or LORETA values.
+- The new visualizer may fetch external fsaverage data through MNE, but durable
+  automatic installs belong in the ignored repository-root `.fpvs_cache`
+  directory, never in active source, docs, package data, or quarantine paths.
 
 Rules:
 

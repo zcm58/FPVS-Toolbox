@@ -115,6 +115,15 @@ Installer downloads are cached under
 system temp directory otherwise. The cache must stay outside the install
 folder, project root, and repository source tree.
 
+The experimental LORETA Visualizer uses MNE to fetch fsaverage when needed.
+Automatic fetches target the ignored repository-root cache
+`.fpvs_cache/mne/MNE-fsaverage-data/`. Do not add fsaverage MRI/template data
+to `src/`, `docs/`, package data, or quarantine paths. If a stale generic MNE
+subjects-dir setting points into `src` or `docs`, the visualizer ignores that
+candidate and continues to the root-local cache; an explicit
+`FPVS_FSAVERAGE_SUBJECTS_DIR` override must point to an untracked subjects
+directory outside those forbidden paths.
+
 ## Debug Logging
 
 The toolbox routes messages through Python's `logging` module. At startup the

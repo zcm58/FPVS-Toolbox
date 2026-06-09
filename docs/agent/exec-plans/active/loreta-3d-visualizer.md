@@ -2,14 +2,14 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, and Phase 6G are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from existing project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, and defaults cortical viewing to a publication-style split-hemisphere layout.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, and Phase 6G are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, and keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
 ## Current Development Stage
 
-The branch is currently in the beta project source-map export and method-QC
-z-score stage. The
+The branch is currently past the beta project source-map export and method-QC
+z-score implementation stage and is in post-6G hardening/validation. The
 interactive renderer, anatomical mesh loading, source-layer rendering, scalar
 color controls, coordinate transform bridge, single-payload importer,
 multi-condition manifest importer, checked-in JSON format examples, JSON Schema
@@ -29,6 +29,11 @@ rendering and a user-facing z-score display cutoff selector for L2-MNE cortical
 surface payloads while preserving transparent overlay rendering for volume/deep
 payloads. Phase 6G adds a display-mode selector and makes a publication-style
 split-hemisphere cortical view the default selected cortical display.
+Post-6G hardening adds durable root-local fsaverage cache behavior, skips stale
+unsafe generic MNE fsaverage config paths, reads project workbooks from both
+flat condition folders and condition/group subfolders, surfaces clear
+preprocessing/Stats-export prerequisite messages, and disables VTK depth peeling
+for transparent mesh modes.
 
 This is still a beta, template-based method-validation stage, not a final
 scientifically validated source-localization workflow. The 6C and 6D paths use
@@ -54,7 +59,7 @@ comparison against expected publication-style cortical maps.
 ## Date
 
 Created: 2026-06-05
-Updated: 2026-06-08
+Updated: 2026-06-09
 
 ## Goal
 
@@ -78,9 +83,9 @@ concerns. This tool may render a prepared source mesh/point/volume payload in
 the same 3D coordinate space as the fsaverage brain mesh, but computing the
 source values belongs to a separate method producer and must not be mixed into
 rendering, fsaverage mesh loading, importer, or display-translation code. The
-first real producer method is planned as beta L2-MNE cortical-surface source
-maps; later LORETA/eLORETA/sLORETA/volume methods should swap in by producing
-the same validated prepared payload/manifest contract.
+first real producer method is implemented as beta L2-MNE cortical-surface
+source maps; later LORETA/eLORETA/sLORETA/volume methods should swap in by
+producing the same validated prepared payload/manifest contract.
 
 ## Current Repo State
 
@@ -93,6 +98,13 @@ the same validated prepared payload/manifest contract.
   - `src/Main_App/gui/project_workflows.py` for retiring project-bound embedded page instances after project changes.
 - `requirements.txt` already includes `pyvista`, `pyvistaqt`, `vtk`, and `nibabel`; PyVista/VTK should be the first 3D backend unless implementation testing shows it cannot embed reliably.
 - The local MNE dependency exposes `mne.datasets.fetch_fsaverage(subjects_dir=None)` and `mne.read_surface(...)`, which can support an fsaverage mesh loader without bundling MRI/template data into source.
+- Automatic fsaverage fetches target `.fpvs_cache/mne/MNE-fsaverage-data/`
+  under the FPVS Toolbox repository root. Generic stale MNE subjects-dir config
+  under `src/` or `docs/` is ignored; explicit
+  `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides under those paths fail fast.
+- Transparent mesh rendering uses plain alpha blending because VTK depth
+  peeling made translucent brain actors disappear on at least one supported
+  Windows graphics stack.
 - Source Localization/eLORETA is removed from active runtime. `src/Tools/SourceLocalization/**` must remain empty of source files, and this visualizer must not import from `Tools.SourceLocalization` or `src/quarantine/**`.
 - This LORETA visualizer is new work. Do not use retired Source Localization/eLORETA code or quarantine code as a reference implementation for architecture, names, GUI behavior, settings, tests, rendering, or future real-data adapters.
 - Future-agent local rules for this tool live in `src/Tools/LORETA_Visualizer/AGENTS.md`.
@@ -121,8 +133,9 @@ New tool implementation:
   - `ARCHITECTURE.md`: tool-local architecture contract covering goals, non-goals, bridge helpers, renderer/calculation separation, and payload flow.
   - `__init__.py`: public tool surface.
   - `gui.py`: embedded PySide6 page/window class.
-  - `renderer.py`: PyVista/VTK rendering adapter, lazy imports, actor/camera helpers.
+  - `renderer.py`: PyVista/VTK rendering adapter, lazy imports, actor/camera helpers, cortical paint, split-hemisphere display, and transparent mesh alpha blending.
   - `synthetic_brain.py`: deterministic synthetic mesh/activation placeholders used for viewer validation.
+  - `fsaverage_cache.py`: root-local/configured fsaverage cache policy.
   - `fsaverage_mesh.py`: lazy fsaverage fetch/load/decimation helpers for Slice 2.
   - `dummy_activation.py`: deterministic synthetic LORETA-like condition data for Slice 3, Slice 4, and source-model-agnostic 5A demos.
   - `conditions.py`: condition list/model helpers for Slice 4.
@@ -135,8 +148,10 @@ New tool implementation:
   - `examples/`: checked-in synthetic prepared payload and manifest JSON examples for future calculation producer output shape and importer validation.
   - `examples/*.schema.json`: shape-level JSON Schema files for external producer tooling.
   - `source_producers/`: source-localization calculation producers that read explicit source-ready inputs and write prepared payload/manifest JSON. These modules must not import the GUI, renderer, display importer, display bridge helpers, or display mesh loader.
-    - `project_inputs.py`: read-only Phase 6B project workbook adapter that assembles source-ready 64-channel FPVS condition topographies for calculation producers.
-  - `settings.py` or `state.py`: tool-local viewer settings/session defaults if needed.
+    - `project_inputs.py`: read-only Phase 6B project workbook adapter that assembles source-ready 64-channel FPVS condition topographies from flat condition folders or condition/group subfolders.
+    - `project_fullfft_inputs.py`: read-only Phase 6D FullFFT target/noise-bin adapter for Hauk-style source-space z-scores.
+    - `project_l2_mne_export.py`: Phase 6C diagnostic arbitrary-amplitude project exporter.
+    - `project_l2_mne_hauk_zscore_export.py`: Phase 6D default project z-score exporter.
 
 Main App shell integration:
 
@@ -158,8 +173,13 @@ Avoid:
 - Bundling `fsaverage` MRI/template data in `src/`, `docs/`,
   `src/quarantine/`, or package data. Automatic fetches should install into the
   untracked FPVS Toolbox root cache at
-  `.fpvs_cache/mne/MNE-fsaverage-data/`; explicit user/MNE subjects-dir
-  overrides may point elsewhere if they do not target source or docs paths.
+  `.fpvs_cache/mne/MNE-fsaverage-data/`. Explicit
+  `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides may point elsewhere only if they do
+  not target source or docs paths; stale generic MNE config candidates that do
+  target those forbidden paths are ignored.
+- Re-enabling VTK depth peeling for transparent mesh modes without visible
+  Windows/VTK driver testing. The current renderer deliberately uses plain
+  alpha blending so opacity values below 100% still show the brain mesh.
 - Computing LORETA/source-localization values inside `renderer.py`, `fsaverage_mesh.py`, `prepared_payload_importer.py`, `source_payloads.py`, `transforms.py`, `scalar_fields.py`, or GUI widget code.
 - Adding LORETA-specific computation to preprocessing, Stats, diagnostics, or project I/O modules.
 
@@ -225,6 +245,10 @@ Implementation notes:
 - Store automatically fetched template data in the untracked FPVS Toolbox root
   cache, not in temp directories, `src/`, docs, quarantine, package data, or
   project folders.
+- Ignore stale generic MNE fsaverage config candidates that point under `src/`
+  or `docs/` so a bad developer-machine config does not block the root-local
+  cache. Explicit `FPVS_FSAVERAGE_SUBJECTS_DIR` remains fail-fast when it points
+  to a forbidden path.
 - Keep mesh loading lazy. If fetching/loading is slow, move it to `QThread` or `QRunnable` and update the viewport through signals.
 - Add clear inline status for "Using fsaverage", "Fetching fsaverage", and "Using synthetic fallback".
 - Consider loading a pial/inflated surface pair later, but Slice 2 only needs one usable anatomical mesh.
@@ -237,6 +261,8 @@ Done means:
 - No fsaverage data is added to tracked source/docs/package data or the
   quarantine tree; the durable local cache remains under ignored `.fpvs_cache`.
 - Existing synthetic placeholder remains available as a fallback/debug path.
+- Stale MNE config pointing at `src/` or `docs/` does not force fsaverage into
+  tracked paths or prevent the root-local cache from being used.
 
 ## Phase 3: Dummy LORETA Heatmap Layer
 
@@ -656,7 +682,8 @@ Implementation notes:
 - `project_inputs.py` reads `3 - Statistical Analysis Results/Stats_Ready_Summed_BCA.xlsx`
   for the selected harmonic list and the real selected condition names.
 - It reads compact per-participant workbook sheets under
-  `1 - Excel Data Files/<Condition>/` and supports both:
+  `1 - Excel Data Files/<Condition>/` and
+  `1 - Excel Data Files/<Condition>/<Group>/` and supports both:
   - `BCA (uV)` via `metric="bca"`; and
   - `FFT Amplitude (uV)` via `metric="fft_amplitude"`.
 - It returns `L2MNEFPVSCondition` objects whose harmonic topographies are
@@ -670,35 +697,31 @@ Implementation notes:
 - It performs no writes to the project and does not import renderer, GUI,
   importer, display transform, preprocessing, or Stats implementation modules.
 
-Semantic Categories 6B findings:
+Semantic Categories 6B validation findings:
 
-- Project root inspected read-only:
-  `D:\FPVS Toolbox Root\Semantic Categories`.
-- Raw source folder from app settings/project metadata:
-  `D:\NERD Lab Data Archive\2026\Semantic Categories (2026)`.
-- Project layout is single-group with 27 participants and five selected
-  analysis conditions: `Color Response`, `Color Response 2`,
-  `Mixed Response 1`, `Mixed Response 2`, and `Semantic Response`.
-- A stale/empty `Color Response 1` output folder exists but is not present in
-  the current `project.json` event map or Stats-ready long-format condition set.
+- A real project was inspected read-only without writing project files.
+- The observed layout is single-group with 27 participants and five selected
+  analysis conditions: `Fruit vs Veg`, `Green Fruit vs Green Veg`,
+  `Green Veg vs Red Veg`, `Red Fruit vs Green Fruit`, and `Veg vs Fruit`.
 - The all-condition Stats-ready selected harmonics are:
   `2.4`, `4.8`, `7.2`, `9.6`, `13.2`, and `20.4` Hz.
 - All 135 selected condition/participant workbooks read cleanly from the compact
-  `BCA (uV)` and `FFT Amplitude (uV)` sheets, contain the exact selected
-  harmonic columns, and match the expected 64-channel BioSemi ordering.
+  `BCA (uV)` and `FFT Amplitude (uV)` sheets in the condition/group workbook
+  layout, contain the exact selected harmonic columns, and match the expected
+  64-channel BioSemi ordering.
 - `Publication_Scalp_Maps_Source_Data.xlsx` is useful for paired scalp-map
-  auditing, but it currently covers only `Color Response` and
-  `Semantic Response` with a different pair-specific harmonic list. It should
-  not be the primary input for all-condition source maps.
+  auditing when present, but it may cover only a subset of conditions or use a
+  pair-specific harmonic list. It should not be the primary input for
+  all-condition source maps.
 - `Stats_Ready_Summed_BCA.xlsx` carries the correct all-condition harmonic list
   but is ROI-level, not electrode-level; the source topography assembler should
   use it for the selected harmonics and use per-participant workbooks for
   electrode-level values.
 - Existing QC output flags `study-participant`, `study-participant`, and `study-participant`; none are excluded by Stats.
   Including flagged participants in source-map generation can strongly
-  dominate Mixed Response maps, especially `study-participant` and `study-participant` at electrode `study-participant`.
-  The source workflow defaults to excluding flagged participants and exposes an
-  explicit include choice before users interpret maps.
+  dominate specific condition maps. The source workflow defaults to excluding
+  flagged participants and exposes an explicit include choice before users
+  interpret maps.
 
 Recommendation:
 
@@ -769,10 +792,12 @@ Implementation notes:
 - The `Load source JSON` and `Load manifest` dialogs now prefer the last import
   folder, then the active project's 6D z-score output folder, then the 6C
   diagnostic amplitude output folder, then the active project root.
-- Semantic Categories was exported successfully to:
-  `D:\FPVS Toolbox Root\Semantic Categories\6 - Source Localization\L2-MNE Cortical Surface Beta\project_l2_mne_cortical_surface_beta_manifest.json`.
-  The manifest contains `Color Response`, `Color Response 2`,
-  `Mixed Response 1`, `Mixed Response 2`, and `Semantic Response`.
+- The diagnostic amplitude exporter remains available from Source Map Options.
+  When run, its project-local manifest path is
+  `6 - Source Localization/L2-MNE Cortical Surface Beta/project_l2_mne_cortical_surface_beta_manifest.json`.
+  The current default project path is the Phase 6D Hauk-style z-score export;
+  a diagnostic amplitude manifest is not required for the viewer to display the
+  default maps.
 
 Done means:
 
@@ -906,6 +931,9 @@ Implementation notes completed:
   - `source_producers/l2_mne_hauk_zscore.py`;
   - `source_producers/project_fullfft_inputs.py`;
   - `source_producers/project_l2_mne_hauk_zscore_export.py`.
+- `project_fullfft_inputs.py` reuses the condition workbook discovery helper
+  from `project_inputs.py`, so Hauk-style z-score generation reads both flat
+  `Condition/*.xlsx` and grouped `Condition/Group/*.xlsx` workbook layouts.
 - Hauk-style z-score maps are now the default project behavior: after
   fsaverage loads, the GUI auto-loads the existing project-local z-score
   manifest, or auto-builds it once in a worker when the manifest is missing.
@@ -919,10 +947,15 @@ Implementation notes completed:
   default display cutoff is `z >= 1.64`.
 - The z-score path reads `FullFFT Amplitude (uV)` only. It refuses BCA-only or
   compact-summary-only workbooks with a clear Phase 6D input error.
-- Semantic Categories exported successfully to:
-  `D:\FPVS Toolbox Root\Semantic Categories\6 - Source Localization\L2-MNE Hauk Z-Score Beta\project_l2_mne_hauk_zscore_beta_manifest.json`.
-  The manifest contains `Color Response`, `Color Response 2`,
-  `Mixed Response 1`, `Mixed Response 2`, and `Semantic Response`.
+- GUI failure text now maps missing Stats-ready workbooks, missing selected
+  harmonics, missing FullFFT sheets, and missing included FullFFT workbooks to
+  a user-facing prerequisite message: re-run preprocessing, then open Stats and
+  run `Export Stats-Ready Workbook` before returning to LORETA Visualizer.
+- A real Semantic Categories validation run exported successfully under the
+  active project root at
+  `6 - Source Localization/L2-MNE Hauk Z-Score Beta/project_l2_mne_hauk_zscore_beta_manifest.json`.
+  The manifest contains `Fruit vs Veg`, `Green Fruit vs Green Veg`,
+  `Green Veg vs Red Veg`, `Red Fruit vs Green Fruit`, and `Veg vs Fruit`.
   The first payload reports `source_model:
   l2_mne_cortical_surface_hauk_zscore_beta`, `value_label:
   source-space z-score`, `source_value_unit: z-score`, and selected harmonics
@@ -1083,6 +1116,10 @@ Implemented scope:
 - The transparent mesh mode remains available and keeps opacity controls. It is
   still the fallback-compatible path for volume/deep payloads and future
   LORETA/eLORETA volume methods.
+- Transparent mesh mode uses normal alpha blending with depth peeling disabled
+  because depth peeling caused the brain actor to disappear at opacity values
+  below 100% on at least one Windows/VTK machine. Revisit only with visible
+  cross-machine rendering checks.
 - This is display-only shading. It is not a cluster-permutation mask and does
   not modify source values.
 - Mode switching is immediate for the active condition and does not rebuild
@@ -1128,7 +1165,8 @@ Run narrow checks focused on changed files. Use `.venv1` when available; if the 
 .\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check gui
 .\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check source-localization
 .\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check source-localization-refs
-ruff check src\Tools\LORETA_Visualizer src\Main_App\gui\main_window.py src\Main_App\gui\sidebar.py src\Main_App\gui\icons.py src\Main_App\gui\project_workflows.py
+.\.venv1\Scripts\python.exe -m pytest tests\loreta -q
+.\.venv1\Scripts\ruff.exe check src\Tools\LORETA_Visualizer tests\loreta src\Main_App\gui\main_window.py src\Main_App\gui\sidebar.py src\Main_App\gui\icons.py src\Main_App\gui\project_workflows.py
 ```
 
 Do not run pytest-qt/offscreen GUI tests locally. Add or update focused GUI smoke coverage definitions when useful, but document that local execution was skipped unless the user approves a safe visible GUI test environment.
@@ -1140,31 +1178,38 @@ Manual visible smoke path for Phase 1:
 3. Open the visualizer from the sidebar.
 4. Confirm the embedded viewport renders a nonblank 3D brain-like mesh.
 5. Drag to rotate; use mouse-wheel/trackpad to zoom.
-6. Move the transparency slider and confirm mesh alpha changes immediately.
+6. Switch to transparent mesh mode, move the transparency slider below 100%,
+   and confirm the brain mesh remains visible while alpha changes immediately.
 7. Use reset camera/default view.
 8. Switch Home -> LORETA Visualizer -> another embedded tool -> LORETA Visualizer and confirm no crash, stale state, or duplicate widget behavior.
 9. Confirm existing tools still open.
 
-Additional visible smoke path for future slices:
+Additional visible smoke path for current and future slices:
 
 1. Slice 2: confirm the status indicates fsaverage/anatomical mesh when available, and synthetic fallback when unavailable.
 2. Slice 2: confirm no `src/fsaverage`, `src/quarantine/Tools/LORETA/fsaverage`, or other tracked fsaverage data appears in `git status`.
 3. Slice 3: toggle activation visibility, base visibility, activation opacity, and base opacity independently.
 4. Slice 3: adjust threshold/range controls and confirm the activation layer changes while the base mesh remains stable.
 5. Slice 4: select multiple demo/project condition labels and confirm the activation pattern changes for each.
+6. Phase 6D/6G: with a processed project, confirm the viewer auto-loads
+   `6 - Source Localization/L2-MNE Hauk Z-Score Beta/project_l2_mne_hauk_zscore_beta_manifest.json`
+   when present; if it is missing, confirm the visible status explains that the
+   project must be reprocessed and the Stats-ready workbook exported when
+   required inputs are absent.
+7. Phase 6G: confirm publication split view, single cortical surface view, and
+   transparent mesh view all render the same selected condition without
+   rebuilding source JSON.
 
 ## Open Decisions
 
-- Final sidebar label: likely `LORETA Visualizer` unless the user prefers `Brain Visualizer`.
-- Final icon direction: dedicated brain/source icon in `Main_App.gui.icons.sidebar_icon`, not an image asset unless the current icon system changes.
 - Whether the branch-visible sidebar entry should remain default-visible after promotion or be hidden behind a release feature flag.
-- Preferred fsaverage surface for the base layer: pial, inflated, white, or another surface.
-- First real-data shape after demo/importer conditions: point cloud, volume
-  grid, cortical sheet mesh, or another source-space representation.
 - Whether future source methods need an alternate harmonic strategy. Phase 6D
   chose Hauk-style summed sensor topographies before inversion: target
   topographies are summed across selected harmonics, matching-offset
   neighboring-bin topographies are summed across selected harmonics, and the
   source-space z-score is computed from those target/noise source estimates.
-- Future second method target after L2-MNE: LORETA/eLORETA volume, mixed
-  cortical-volume source space, or another explicitly scoped model.
+- Future method target after beta L2-MNE: LORETA/eLORETA volume, mixed
+  cortical-volume source space, subject-specific forward models, or another
+  explicitly scoped model.
+- Whether Phase 6H validation should remain manual notes only or produce a
+  project-local, non-source-data validation report artifact.

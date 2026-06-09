@@ -38,13 +38,20 @@ preprocessing or change Stats behavior.
 
 Required inputs:
 
-- `Stats_Ready_Summed_BCA.xlsx`, for the project-wide selected oddball
-  harmonic list.
-- Per-participant condition workbooks under `1 - Excel Data Files/<Condition>/`.
+- `Stats_Ready_Summed_BCA.xlsx`, exported from the Stats tool, for the
+  project-wide selected oddball harmonic list.
+- Per-participant condition workbooks under `1 - Excel Data Files/<Condition>/`
+  or `1 - Excel Data Files/<Condition>/<Group>/`.
 - The `FullFFT Amplitude (uV)` sheet in those workbooks, including target
   harmonic bins and neighboring frequency bins.
 - The existing participant QC files:
   `Excluded Participants.xlsx` and `Flagged Participants.xlsx`.
+
+If these files are missing, re-run preprocessing for the project, then open
+Stats and run **Export Stats-Ready Workbook** before building source maps. The
+z-score workflow requires the raw FullFFT target and neighboring bins; it stops
+with an input error rather than deriving source z-scores from BCA-only summary
+workbooks.
 
 Excluded participants are always skipped. Participants listed in
 `Flagged Participants.xlsx` are excluded by default for source-map generation.
@@ -152,3 +159,10 @@ The main manifest is:
 The visualizer automatically loads this manifest when it is present. If it is
 missing and the required FullFFT data are available, the visualizer can build it
 in the background.
+
+The diagnostic arbitrary-amplitude exporter writes to:
+
+`6 - Source Localization/L2-MNE Cortical Surface Beta/`
+
+It is available from Source Map Options for method review, but the default
+project display is the Hauk-style z-score manifest above.

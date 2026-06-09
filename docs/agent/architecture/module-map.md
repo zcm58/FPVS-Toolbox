@@ -56,10 +56,16 @@ Current `Legacy_App` runtime couplings:
 - `src/Tools/LORETA_Visualizer/`: embedded 3D LORETA/source-visualization
   viewer. This is a new source-localization visualization branch, not a
   continuation of the removed `Tools.SourceLocalization` implementation.
-  `renderer.py` displays base meshes and prepared source payloads only;
+  `renderer.py` displays base meshes and prepared source payloads only and uses
+  plain alpha blending instead of VTK depth peeling for transparent mesh
+  compatibility. `fsaverage_cache.py` keeps automatic fsaverage downloads in
+  the ignored repository-root `.fpvs_cache/mne/MNE-fsaverage-data/` cache.
   `source_payloads.py`, `transforms.py`, and `scalar_fields.py` are the bridge
-  helpers between future calculation outputs and the renderer; future numerical
-  source-localization calculation belongs outside renderer/fsaverage/GUI code.
+  helpers between future calculation outputs and the renderer. Project source
+  calculation lives in `source_producers/`, which reads existing flat or
+  condition/group project workbooks and writes prepared JSON/manifest files
+  under the active project root. Future numerical source-localization
+  calculation belongs outside renderer/fsaverage/GUI code.
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`: UI-agnostic average-preprocessing behavior used by the PySide6 tool.
 - `src/Tools/Image_Resizer/`: image resizing utility.

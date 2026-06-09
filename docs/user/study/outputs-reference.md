@@ -10,6 +10,7 @@ This page maps the main result files to the workflow steps that create them.
 - `2 - SNR Plots`: generated plot outputs from the SNR Plot Generator.
 - `3 - Statistical Analysis Results`: inferential tables, QC flags, and exclusion reports.
 - `4 - Scalp Maps`: BCA scalp-map figures and source data from the Scalp Maps tool.
+- `6 - Source Localization`: experimental LORETA Visualizer prepared source-map JSON and manifests.
 
 Your exact folder names may vary by project setup, but the file types below are expected.
 
@@ -48,10 +49,26 @@ Common figure exports include:
 The source workbook records the selected significant harmonics, plotted BCA
 values, grand-average values, diagnostics, and export parameters.
 
+## Source-map outputs
+
+The experimental LORETA Visualizer can write prepared source-map payloads under
+`6 - Source Localization` when the project has been processed and the Stats
+tool has exported `Stats_Ready_Summed_BCA.xlsx`.
+
+Current project source-map folders include:
+
+- `L2-MNE Hauk Z-Score Beta`: beta Hauk-style source-space z-score maps.
+- `L2-MNE Cortical Surface Beta`: diagnostic arbitrary-amplitude maps.
+
+Each folder contains one manifest JSON plus one payload JSON per condition.
+These files are loaded by the visualizer; they are not final validated
+source-localization results.
+
 ## Quick checks when reviewing outputs
 
 1. Confirm each expected condition has a folder and participant files.
 2. Confirm sheet names exist in each Excel file.
 3. Confirm statistical tables include effect, df, test statistic, p-value, and corrected p-value where relevant.
 4. For scalp maps, confirm the source workbook lists the expected selected harmonics and conditions.
-5. Archive the project settings and logs with exported files for reproducibility.
+5. For LORETA source maps, confirm the manifest exists and every expected condition has a payload file.
+6. Archive the project settings and logs with exported files for reproducibility.

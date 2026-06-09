@@ -53,6 +53,13 @@ data as a gray-white curvature underlay beneath the heatmap. It is still a
 display-only renderer mode, not a new source-localization method or
 statistical mask.
 
+Post-6G hardening keeps automatic fsaverage installs in the repository-root
+`.fpvs_cache/mne/MNE-fsaverage-data/` cache, supports flat and
+condition/group workbook layouts for project source-map inputs, gives users a
+clear preprocessing/Stats-export prerequisite message when source-map inputs
+are missing, and uses driver-tolerant alpha blending instead of VTK depth
+peeling for transparent mesh modes.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -109,8 +116,14 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - `gui.py`: embedded PySide6 page, controls, worker wiring, and status text.
 - `renderer.py`: PyVista/VTK scene adapter, actors, camera, opacity where
   relevant, scalar map, cortical paint display, split-hemisphere publication
-  display, and mesh display. No LORETA math.
-- `fsaverage_cache.py`: shared root-local/configured fsaverage cache path helpers.
+  display, and mesh display. It explicitly disables depth peeling so
+  transparent meshes remain visible across supported Windows/VTK driver stacks.
+  No LORETA math.
+- `fsaverage_cache.py`: shared root-local/configured fsaverage cache path
+  helpers. Automatic fetches use `.fpvs_cache/mne/MNE-fsaverage-data/`;
+  explicit `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides are rejected if they point
+  under `src/` or `docs/`, while stale generic MNE config candidates there are
+  ignored so the root-local cache can still be used.
 - `fsaverage_mesh.py`: MNE fsaverage discovery/fetch/read/decimation and
   anatomical display transform construction, including display-only
   topology-matched hemisphere meshes for publication layout. The combined mesh
@@ -148,15 +161,17 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   surface payloads and `source_producers/contracts.py` for method-neutral
   producer result types. Phase 6B includes
   `source_producers/project_inputs.py`, a read-only project workbook adapter
-  that assembles 64-channel condition topographies for source producers. Phase
-  6C includes `source_producers/project_l2_mne_export.py`, which combines those
+  that assembles 64-channel condition topographies from flat condition folders
+  or condition/group folders for source producers. Phase 6C includes
+  `source_producers/project_l2_mne_export.py`, which combines those
   project topographies with an external MNE/fsaverage BioSemi64 template
   forward model and writes project-local prepared source JSON. Phase 6D includes
   `source_producers/l2_mne_hauk_zscore.py`,
   `source_producers/project_fullfft_inputs.py`, and
   `source_producers/project_l2_mne_hauk_zscore_export.py`; together they read
-  project FullFFT target/noise bins, compute Hauk-style source-space z-scores,
-  and write project-local z-score prepared source JSON.
+  project FullFFT target/noise bins from the same flat or grouped workbook
+  layouts, compute Hauk-style source-space z-scores, and write project-local
+  z-score prepared source JSON.
 
 ## Boundary Rules
 
@@ -166,8 +181,14 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not bundle fsaverage MRI/template data in `src/`, `docs/`,
   `src/quarantine/`, or package data. Automatic fetches should install into the
   untracked FPVS Toolbox root cache at
-  `.fpvs_cache/mne/MNE-fsaverage-data/`; explicit user/MNE subjects-dir
-  overrides may point elsewhere if they do not target source or docs paths.
+  `.fpvs_cache/mne/MNE-fsaverage-data/`. Explicit
+  `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides may point elsewhere only if they do
+  not target source or docs paths; stale generic MNE config candidates that do
+  target those forbidden paths are ignored.
+- Do not re-enable VTK depth peeling for transparent mesh modes unless the
+  target Windows/VTK driver behavior has been visibly retested. The current
+  renderer deliberately uses plain alpha blending because depth peeling made
+  translucent brain meshes disappear on at least one supported machine.
 - Do not change preprocessing order, Stats methods, BDF loading, project manifests, exports, diagnostics, or app-wide project I/O for visualizer-only work.
 - Do not write LORETA visualizer settings into `project.json` unless a future plan explicitly scopes project-level real-data integration.
 - Do not add real-data file discovery, project-output integration, source
@@ -214,7 +235,7 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 Use the narrowest checks first:
 
 ```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Tools\LORETA_Visualizer\*.py
+.\.venv1\Scripts\python.exe -m compileall -q src\Tools\LORETA_Visualizer
 .\.venv1\Scripts\python.exe .agents\skills\pyside6-gui-cleanup\scripts\audit_gui_imports.py
 .\.venv1\Scripts\python.exe .agents\skills\legacy-boundary-review\scripts\audit_protected_edits.py
 .\.venv1\Scripts\python.exe .agents\scripts\audit\agent_audit.py --check source-localization-refs

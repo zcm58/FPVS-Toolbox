@@ -21,10 +21,10 @@ citations, z-score calculation, and participant QC behavior, see
 
 The visible occipital, frontal, and deep medial temporal demo activations are
 still synthetic. The real-project path is separate: it reads existing project
-workbooks, uses the Stats-selected oddball harmonic list, builds a template
-BioSemi64/fsaverage cortical forward model through MNE, writes prepared z-score
-source JSON files when needed, and loads them through the same manifest
-importer used by the demo fixtures.
+workbooks, uses the oddball harmonic list exported by the Stats tool, builds a
+template BioSemi64/fsaverage cortical forward model through MNE, writes
+prepared z-score source JSON files when needed, and loads them through the same
+manifest importer used by the demo fixtures.
 
 Use the current version to verify rendering behavior, camera controls, color
 scaling, and whether source maps can be drawn in the intended mode. Current
@@ -84,6 +84,10 @@ MNE may still stage downloaded zip files in the Windows temporary directory
 while extracting them, but the durable fsaverage install is under
 `.fpvs_cache`. The toolbox does not store fsaverage MRI template data in the
 source tree, docs tree, quarantine tree, package data, or project folders.
+If an old generic MNE subjects-dir setting points into `src` or `docs`, the
+visualizer ignores that unsafe candidate and uses the toolbox cache instead.
+An explicit `FPVS_FSAVERAGE_SUBJECTS_DIR` override must point to another
+untracked subjects directory.
 
 Checked-in JSON examples live in
 `src/Tools/LORETA_Visualizer/examples/`. These are synthetic examples for
@@ -93,10 +97,25 @@ The beta L2-MNE producer can generate a source-ready fixture manifest into a
 local output folder. Those fixture files are useful for checking that the
 producer writes the same prepared JSON format the visualizer already imports.
 
-For real project inputs, the source-ready assembler reads existing
-per-participant Excel outputs under `1 - Excel Data Files` plus the selected
-harmonics from `Stats_Ready_Summed_BCA.xlsx`. The 6C beta exporter writes
-project-local output under:
+For real project inputs, first process the project, then open the Stats tool and
+run **Export Stats-Ready Workbook**. The source-ready assemblers read the
+selected harmonics from
+`3 - Statistical Analysis Results/Stats_Ready_Summed_BCA.xlsx` and
+per-participant Excel outputs under `1 - Excel Data Files`. Workbooks may be
+directly inside each condition folder or inside condition/group subfolders.
+
+The default Hauk-style z-score exporter requires each included participant
+workbook to contain a `FullFFT Amplitude (uV)` sheet with the exact selected
+harmonic columns and neighboring frequency bins. Its project-local output is:
+
+`6 - Source Localization/L2-MNE Hauk Z-Score Beta/`
+
+The main file loaded by default is:
+
+`project_l2_mne_hauk_zscore_beta_manifest.json`
+
+The older 6C diagnostic amplitude exporter remains available in Source Map
+Options and writes project-local output under:
 
 `6 - Source Localization/L2-MNE Cortical Surface Beta/`
 
@@ -129,6 +148,13 @@ then prefers the project-local Hauk-style source-space z-score manifest. If the
 manifest is missing and the required `FullFFT Amplitude (uV)` target/noise-bin
 data are present, the tool builds the z-score source maps in the background and
 loads the generated manifest.
+
+If the project has not been reprocessed or the Stats-ready workbook has not
+been exported, the visualizer cannot build project source maps. Re-run
+preprocessing for the project, then open Stats and run **Export Stats-Ready
+Workbook** before returning to the LORETA Visualizer. If FullFFT sheets or exact
+selected-frequency columns are missing, the z-score path stops instead of
+fabricating source z-scores from BCA-only summaries.
 
 Source Map Options can still load a controlled prepared-payload JSON file or a
 prepared source manifest manually. Manual payloads need points, values,

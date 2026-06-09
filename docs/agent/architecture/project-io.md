@@ -52,6 +52,11 @@ FPVS Toolbox uses a strict hybrid settings model:
 - Multi-group Excel output layout is condition-first/group-second:
   `1 - Excel Data Files/<Condition>/<Group>/<Participant>_<Condition>_Results.xlsx`.
   Single-group output remains flat under each condition folder.
+- Experimental LORETA Visualizer source-map exports are generated under the
+  active project root at `6 - Source Localization/`, with method-specific
+  subfolders such as `L2-MNE Hauk Z-Score Beta/` and
+  `L2-MNE Cortical Surface Beta/`. These are generated payload/manifest files,
+  not `project.json` settings.
 
 Rules:
 

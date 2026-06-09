@@ -8,11 +8,12 @@ FPVS Toolbox is a Windows desktop application for preprocessing, cleaning, and a
 - Extraction of epochs and post-processing metrics (FFT, SNR, BCA, Z-score)
 - Built-in statistical analysis with repeated-measures ANOVA, linear mixed-effects models, and post-hoc pairwise tests
 - Support for single-group FPVS statistical workflows
+- Experimental LORETA Visualizer branch for beta 3D cortical source-map viewing
 
 
 ## Removed Features
 
-- LORETA/eLORETA source localization and 3D visualization were removed from the active app. Restoring them would require a new explicitly scoped feature with fresh architecture, tests, and verification.
+- The retired LORETA/eLORETA source-localization implementation was removed from the active app. The current `src/Tools/LORETA_Visualizer/` work is a separate experimental visualization branch with fresh architecture, tests, and documentation; it is not a restoration of the removed implementation.
 
 
 ## Installation

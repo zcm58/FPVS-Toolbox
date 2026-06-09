@@ -17,6 +17,8 @@ implementation.
 The first durable goal is rendering:
 
 - real-time orbit, zoom, reset, and opacity controls where opacity is relevant;
+- driver-tolerant transparent mesh rendering using plain alpha blending rather
+  than VTK depth peeling;
 - independent left/right hemisphere rotation in publication-style cortical
   display mode;
 - an external fsaverage-derived anatomical mesh when available;
@@ -34,6 +36,12 @@ Phase 6C adds the first project-connected beta export path. It uses real
 project condition topographies, an external MNE/fsaverage BioSemi64 template
 EEG forward model, and the existing prepared payload/manifest bridge so real
 project data can be viewed without changing renderer internals.
+
+Current project source-map readers support both flat condition workbook folders
+and condition/group workbook subfolders. They require the Stats-ready workbook
+export for selected harmonics; the Hauk-style z-score path also requires
+`FullFFT Amplitude (uV)` target and neighboring-bin columns in included
+participant workbooks.
 
 ## Non-Goals
 
@@ -89,7 +97,7 @@ Embedded 3D viewport
 The anatomical side follows a parallel path:
 
 ```text
-FPVS Toolbox root-local fsaverage cache, configured MNE/user cache, or synthetic fallback
+FPVS Toolbox root-local fsaverage cache, allowed configured subjects-dir, or synthetic fallback
         |
         v
 fsaverage_mesh.py / synthetic_brain.py
@@ -168,11 +176,15 @@ compact rebuild summaries, but source-estimation math still belongs only to
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, and camera controls. It
-  must not calculate source estimates.
+  disables VTK depth peeling and relies on normal alpha blending so
+  transparent brain meshes remain visible across supported Windows graphics
+  stacks. It must not calculate source estimates.
 - `fsaverage_cache.py`: shared fsaverage cache path policy. The default durable
   install location is `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS
   Toolbox root; `src/`, `docs/`, quarantine, and package-data paths are
-  rejected.
+  rejected. Stale generic MNE config candidates under `src/` or `docs/` are
+  ignored; explicit `FPVS_FSAVERAGE_SUBJECTS_DIR` overrides under those paths
+  fail fast.
 - `fsaverage_mesh.py`: fsaverage discovery/fetch/read/decimation and
   construction of the anatomical display transform. It also preserves
   display-only left/right hemisphere meshes for publication layout. The
@@ -207,8 +219,9 @@ compact rebuild summaries, but source-estimation math still belongs only to
   contracts and `l2_mne_cortical.py`, a beta fixed-orientation L2-MNE cortical
   surface producer with a deterministic BioSemi64/10-10 source-ready fixture.
   Phase 6B includes `project_inputs.py`, a read-only adapter that assembles
-  source-ready condition topographies from existing project workbooks. Phase 6C
-  includes `project_l2_mne_export.py`, a project-local beta export that combines
+  source-ready condition topographies from existing flat or condition/group
+  project workbooks. Phase 6C includes `project_l2_mne_export.py`, a
+  project-local beta export that combines
   those topographies with an external MNE/fsaverage BioSemi64 template forward
   model and writes prepared source-map JSON. Phase 6D includes
   `l2_mne_hauk_zscore.py`, `project_fullfft_inputs.py`, and
@@ -284,15 +297,17 @@ The current beta L2-MNE producer accepts source-ready arrays: channel names,
 selected harmonic topographies, cortical source coordinates/faces, and a
 channel-by-source leadfield. It writes payloads and manifests after validation.
 `project_inputs.py` can assemble the selected harmonic topographies from
-existing project workbooks, but it still does not compute Stats harmonic
-selections, export preprocessing data, write project files, or build
+existing flat condition workbooks or condition/group workbooks, but it still
+does not compute Stats harmonic selections, export preprocessing data, write
+project files, or build
 subject-specific MRI forward models.
 
 The project-input adapter reads the all-condition selected harmonics from the
 Stats-ready workbook, reads compact per-participant electrode-level sheets
-(`BCA (uV)` or `FFT Amplitude (uV)`), applies existing exclusion files, records
-flagged participant status, and returns `L2MNEFPVSCondition` objects for
-calculation producers.
+(`BCA (uV)` or `FFT Amplitude (uV)`) from either flat condition folders or
+condition/group subfolders, applies existing exclusion files, records flagged
+participant status, and returns `L2MNEFPVSCondition` objects for calculation
+producers.
 
 The project L2-MNE exporter writes generated files under
 `6 - Source Localization/L2-MNE Cortical Surface Beta/` by default. The manifest
@@ -303,8 +318,11 @@ model construction and source-value calculation remain in `source_producers/`.
 The project Hauk-style z-score exporter writes generated files under
 `6 - Source Localization/L2-MNE Hauk Z-Score Beta/` by default. It uses the
 same prepared-manifest importer as every other source payload. Its displayed
-values are source-space z-scores, not arbitrary L2-MNE amplitude. The generated
-payloads preserve the signed z-score field for QC. The default L2-MNE cortical
+values are source-space z-scores, not arbitrary L2-MNE amplitude. It reads
+`FullFFT Amplitude (uV)` only and refuses BCA-only or compact-summary-only
+workbooks with a user-facing prerequisite message instead of fabricating
+source-space z-scores. The generated payloads preserve the signed z-score field
+for QC. The default L2-MNE cortical
 surface view paints those values onto an opaque split-hemisphere display using
 fsaverage inflated hemispheres when available and pial split hemispheres as a
 fallback. The split display uses FreeSurfer `curv` gray-white underlay shading
