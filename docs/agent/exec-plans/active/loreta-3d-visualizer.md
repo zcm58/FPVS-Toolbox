@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, Phase 6G, Phase 6H-A(1), and Phase 6H-A(2) are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling, builds real-project Hauk z-score maps through MNE-native L2-MNE with loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`, and now defaults Hauk-style real-project z-score generation to participant-first source maps with raw mean, median, and 20% trimmed-mean group summaries.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, Phase 6G, Phase 6H-A(1), Phase 6H-A(2), and Phase 6H-A(3) are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling, builds real-project Hauk z-score maps through MNE-native L2-MNE with loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`, defaults Hauk-style real-project z-score generation to participant-first source maps with raw mean, median, and 20% trimmed-mean group summaries, and now writes source-space cluster-permutation masks for participant-first L2-MNE publication maps.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -35,7 +35,11 @@ MNE-native L2-MNE inverse settings aligned with Hauk et al.: `method="MNE"`,
 normalization, and `lambda2 = 1 / 9`. Phase 6H-A(2) changes the default
 Hauk-style project z-score export to participant-first source-space z-scores,
 then group raw mean, median, and 20% trimmed-mean summaries, while keeping the
-older group-first model as a deprecated advanced fallback.
+older group-first model as a deprecated advanced fallback. Phase 6H-A(3)
+computes a one-sample positive-tail sign-flip source-space
+cluster-permutation mask from participant z-score maps and stores the
+significant source vertices in prepared payload metadata for publication-style
+L2-MNE display.
 Post-6G hardening adds durable root-local fsaverage cache behavior, skips stale
 unsafe generic MNE fsaverage config paths, reads project workbooks from both
 flat condition folders and condition/group subfolders, surfaces clear
@@ -60,12 +64,13 @@ Phase 6F established the opaque cortical paint visualization and display
 threshold selector for surface maps. Phase 6G established a source-view mode
 selector with a split-hemisphere, publication-style cortical viewer alongside
 the single pial surface view and transparent mesh view. Phase 6H-A(1)
-established Hauk-style MNE-native inverse settings, and Phase 6H-A(2)
-established participant-first source-map generation and group summaries before
-inferential masking. The next recommended development slice is manual
-scientific validation of participant-first maps against scalp maps and the
-deprecated group-first output, then planning Hauk-style cluster-permutation
-masking if the participant-first outputs are scientifically plausible.
+established Hauk-style MNE-native inverse settings, Phase 6H-A(2) established
+participant-first source-map generation and group summaries, and Phase
+6H-A(3) established producer-side source-space cluster-permutation masks for
+publication-style cortical display. The next recommended development slice is
+manual scientific validation of masked maps against scalp maps, unmasked maps,
+and the deprecated group-first output before expanding cluster controls or
+adding another source method.
 
 ## Date
 
@@ -1155,8 +1160,8 @@ Implemented scope:
 
 ### Phase 6H: Manual Scientific Validation And Comparison
 
-Status: Started. Phase 6H-A(1) is implemented; Phase 6H-A(2) is planned
-with implementation decisions locked.
+Status: Started. Phase 6H-A(1), Phase 6H-A(2), and Phase 6H-A(3) are
+implemented.
 
 Objective:
 
@@ -1242,7 +1247,7 @@ Implemented scope:
   the GUI.
 - User and agent docs describe the participant-first calculation order,
   summary outputs, deprecated fallback, Stats-QC inclusion rule, and
-  `cluster_mask=none` limitation.
+  pre-cluster-mask limitation addressed by Phase 6H-A(3).
 
 Locked decisions:
 
@@ -1273,9 +1278,9 @@ Locked decisions:
   `l2_mne_fsaverage_participant_zscore_mean`,
   `l2_mne_fsaverage_participant_zscore_median`, and
   `l2_mne_fsaverage_participant_zscore_trimmed_mean`.
-- Do not implement cluster-permutation masking in this slice. Generated
-  metadata should state that `cluster_mask` is absent or `none`; the viewer's
-  threshold display remains a visualization threshold, not an inferential mask.
+- Cluster-permutation masking is intentionally deferred to Phase 6H-A(3). The
+  Phase 6H-A(2) participant sidecar is the required input for that later
+  inferential mask.
 - Keep the fsaverage-template source space for all participants in this phase.
   Subject-specific MRIs, subject-specific forward models, and mixed
   surface/volume source spaces remain future method work.
@@ -1304,13 +1309,77 @@ Done means:
 - Advanced settings can still opt into the deprecated group-first model, with
   clear labeling and low-noise status/log messages.
 - JSON metadata distinguishes participant-first summaries from deprecated
-  group-first exports, records the aggregation method, participant inclusion
-  rule, harmonic list, neighboring-bin policy, inverse settings, and
-  `cluster_mask=none`.
+  group-first exports and records the aggregation method, participant inclusion
+  rule, harmonic list, neighboring-bin policy, and inverse settings.
 - Focused tests prove that participant source z-score maps are computed before
   group aggregation, that all three aggregation summaries are deterministic,
   that deprecated group-first generation remains explicitly opt-in, and that
   the renderer-facing payload contract is unchanged.
+- Compile, ruff, focused `tests/loreta`, GUI import audit, project-path audit,
+  protected-edit/source-localization audits, and a documented visible manual
+  smoke path pass. Do not run offscreen Qt tests locally.
+
+#### Phase 6H-A(3): Source-Space Cluster-Permutation Masking
+
+Status: Implemented.
+
+Objective:
+
+- Make publication-style L2-MNE cortical maps use an inferential source-space
+  cluster mask as their primary display mask, matching the Hauk-style figure
+  interpretation more closely than a crude display-only z cutoff.
+- Preserve full signed source-space z-score values in the JSON payload for QC.
+- Keep cluster statistics in `source_producers/`; the renderer must only obey
+  a prepared mask and must not compute statistics.
+
+Implemented scope:
+
+- `l2_mne_hauk_zscore.py` computes one-sample, positive-tail sign-flip
+  source-space cluster-permutation masks from participant z-score maps.
+- Candidate clusters are formed from source vertices whose one-sample t
+  statistic against zero passes the cluster-forming threshold. Mesh adjacency
+  comes from the fsaverage/source-space surface faces.
+- Cluster-level correction uses the maximum cluster mass from sign-flipped
+  participant maps. Defaults are cluster-forming `p = .05`, corrected cluster
+  `alpha = .05`, deterministic seed `20260609`, and up to `2048`
+  permutations, with exact sign flips when the participant count is small
+  enough.
+- Participant-first group-summary payloads now store
+  `cluster_mask=source_space_cluster_permutation`,
+  `cluster_mask_vertex_indices`, cluster settings, and significant-cluster
+  summaries in metadata. Payload `values` remain unchanged.
+- The participant sidecar records condition-level cluster-mask summaries for
+  future individual/QC tooling.
+- `cortical_paint.py` treats a producer-provided cluster mask as primary for
+  L2-MNE cortical paint. Older unmasked payloads fall back to the manual
+  z-score display cutoff.
+- `gui.py` labels masked maps as source-space cluster masked and uses a
+  zero-based color legend for cluster-masked cortical z-score displays.
+
+Locked decisions:
+
+- Cluster masking is enabled by default only for participant-first Hauk-style
+  L2-MNE source-space z-score exports. The deprecated group-first model cannot
+  produce this inferential mask.
+- The cluster test is one-sided positive against zero because the current
+  publication-style display targets positive FPVS source responses.
+- The manual z-score display cutoff remains available in Source Map Options
+  for exploratory/unmasked payloads and future display modes, but it is not
+  the primary publication mask when a cluster mask is present.
+- Cluster masks are source-space statistical results, not renderer filters.
+  Future LORETA/eLORETA volume methods must add their own method-appropriate
+  statistical masks rather than reusing cortical surface assumptions blindly.
+
+Done means:
+
+- Regenerated participant-first project payloads include cluster-mask metadata
+  and retain full signed source values.
+- Publication split-hemisphere and single cortical-surface paint views use the
+  cluster mask automatically when it is present.
+- Older unmasked source JSON remains loadable and falls back to the visual
+  z-score threshold behavior.
+- Focused tests prove cluster formation/correction, payload metadata, and
+  cluster-mask display precedence over the old threshold fallback.
 - Compile, ruff, focused `tests/loreta`, GUI import audit, project-path audit,
   protected-edit/source-localization audits, and a documented visible manual
   smoke path pass. Do not run offscreen Qt tests locally.

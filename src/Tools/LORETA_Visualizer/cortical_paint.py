@@ -48,6 +48,36 @@ def uses_cortical_surface_paint(payload: SourcePayload) -> bool:
     return "l2_mne" in model_text
 
 
+def payload_cluster_mask(payload: SourcePayload) -> np.ndarray | None:
+    """Return a source-space cluster mask from payload metadata when present."""
+    metadata = payload.metadata
+    mask_label = str(metadata.get("cluster_mask", "")).strip().lower()
+    if mask_label in {"", "none", "disabled"}:
+        return None
+    source_count = len(payload.values)
+    raw_mask = metadata.get("cluster_mask_values")
+    if raw_mask is not None:
+        mask = np.asarray(raw_mask, dtype=bool).reshape(-1)
+        if len(mask) == source_count:
+            return mask
+    raw_indices = metadata.get("cluster_mask_vertex_indices")
+    if raw_indices is None:
+        return None
+    indices = np.asarray(raw_indices, dtype=np.int64).reshape(-1)
+    if len(indices) == 0:
+        return np.zeros(source_count, dtype=bool)
+    if not np.all((indices >= 0) & (indices < source_count)):
+        raise ValueError("Payload cluster mask vertex indices must refer to existing source values.")
+    mask = np.zeros(source_count, dtype=bool)
+    mask[indices] = True
+    return mask
+
+
+def payload_has_cluster_mask(payload: SourcePayload) -> bool:
+    """Return whether a payload carries a usable source-space cluster mask."""
+    return payload_cluster_mask(payload) is not None
+
+
 def project_cortical_surface_payload(
     display_points: np.ndarray,
     payload: SourcePayload,
@@ -73,9 +103,13 @@ def project_cortical_surface_payload(
     original_max = float(np.max(source_values))
     projection_values = source_values.copy()
     is_zscore_payload = source_payload_uses_zscores(payload)
+    source_cluster_mask = payload_cluster_mask(payload) if is_zscore_payload else None
     if is_zscore_payload:
-        threshold = _valid_z_threshold(z_threshold)
-        projection_values = np.where(projection_values >= threshold, projection_values, 0.0)
+        if source_cluster_mask is not None:
+            projection_values = np.where(source_cluster_mask, projection_values, 0.0)
+        else:
+            threshold = _valid_z_threshold(z_threshold)
+            projection_values = np.where(projection_values >= threshold, projection_values, 0.0)
 
     interpolated = _inverse_distance_values(
         target_points,
@@ -84,7 +118,10 @@ def project_cortical_surface_payload(
         neighbors=neighbors,
         power=power,
     )
-    if is_zscore_payload:
+    if is_zscore_payload and source_cluster_mask is not None:
+        display_cluster_mask = _nearest_mask_values(target_points, source_points, source_cluster_mask)
+        interpolated = np.where(display_cluster_mask & (interpolated > 0.0), interpolated, np.nan)
+    elif is_zscore_payload:
         interpolated = np.where(interpolated >= threshold, interpolated, np.nan)
     return CorticalPaintProjection(
         values=np.asarray(interpolated, dtype=float),
@@ -164,3 +201,18 @@ def _inverse_distance_values(
         )
         output[weighted_rows] = row_values
     return output
+
+
+def _nearest_mask_values(
+    target_points: np.ndarray,
+    source_points: np.ndarray,
+    source_mask: np.ndarray,
+) -> np.ndarray:
+    from scipy.spatial import cKDTree
+
+    mask = np.asarray(source_mask, dtype=bool).reshape(-1)
+    if len(mask) != len(source_points):
+        raise ValueError("Cluster mask must align one-to-one with source points.")
+    tree = cKDTree(source_points)
+    _distances, indices = tree.query(target_points, k=1)
+    return mask[np.asarray(indices, dtype=np.int64)]

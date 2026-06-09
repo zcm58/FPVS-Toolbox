@@ -83,7 +83,9 @@ For each condition:
 7. For each participant, compute a source-space z-score:
    `(target source amplitude - neighboring-bin mean) / neighboring-bin SD`.
 8. Combine participant source-space z-score maps into group summaries.
-9. Write prepared group-summary source JSON payloads plus a manifest and a
+9. Compute a source-space cluster-permutation mask from participant z-score
+   maps.
+10. Write prepared group-summary source JSON payloads plus a manifest and a
    participant-level sidecar for future individual viewing.
 
 The default neighboring-bin policy uses offsets `-10..-2` and `+2..+10`,
@@ -93,9 +95,11 @@ space.
 
 The default viewer condition entries are group summaries of participant-level
 source-space z-scores. The export writes raw mean, median, and 20% trimmed mean
-summaries for each condition. The visualizer loads the raw mean entries by
-default when the manifest order is unchanged, and the other summaries are
-available from the condition selector.
+summaries for each condition. The same participant-level maps are also used to
+compute a one-sided positive source-space cluster-permutation mask against
+zero. The visualizer loads the raw mean entries by default when the manifest
+order is unchanged, and the other summaries are available from the condition
+selector.
 
 Source Map Options can still build the older group-first beta model for
 comparison. That deprecated model averages target and neighboring-bin
@@ -114,16 +118,19 @@ the cortex flatter and easier to inspect. The split view also uses FreeSurfer
 `curv` gray-white shading when available, `sulc` as a fallback, and a simple
 geometry-derived underlay if neither morph file is available. The same payload
 can also be shown on a single pial surface or in the transparent mesh view.
-Values below the selected display threshold are shown as the shaded cortex
-rather than as activation colors. The default cutoff is `z >= 1.64`; Source Map
-Options > Display also offers `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and
-`z >= 3.89` presets. Displayed values use the same heatmap color scale as the
-transparent source-map view.
+When the generated payload contains a source-space cluster mask, that mask is
+the primary publication-style display: vertices outside significant clusters
+are shown as shaded cortex rather than activation colors. Older unmasked
+payloads fall back to the selected display threshold. The default cutoff is
+`z >= 1.64`; Source Map Options > Display also offers `z >= 1.96`,
+`z >= 2.58`, `z >= 3.29`, and `z >= 3.89` presets. Displayed values use the
+same heatmap color scale as the transparent source-map view.
 
 The color legend is in z-score units for these payloads. With auto-scaling on,
-the upper color limit is the largest displayed positive z-score in the current
-condition. Manual color limits change only the display scale; they do not
-change the generated source values.
+cluster-masked maps use `0` as the lower color bound and the largest retained
+positive z-score in the current condition as the upper bound. Manual color
+limits change only the display scale; they do not change the generated source
+values or statistical mask.
 
 The paint projection is display-only interpolation from the prepared source
 mesh to pial/source-space projection coordinates. In split-hemisphere view, the
@@ -133,10 +140,32 @@ underlay shading when available. It should be interpreted as a clearer
 visualization of the same beta source map, not as extra spatial precision in
 the source calculation.
 
-The display threshold is not a source-space cluster-permutation test. The
-published Hauk-style figures mask source z-score maps by significant clusters
-from a cluster-based permutation test against zero; that inferential mask is a
-future method step, not part of the current renderer-only threshold.
+The display threshold is not the source-space cluster-permutation test. It is
+kept for exploratory/unmasked payloads. For current regenerated
+participant-first maps, the cluster mask is computed before rendering and saved
+in the source JSON metadata. The renderer only obeys that prepared mask.
+
+## Cluster-permutation mask
+
+The cluster mask asks whether a connected region of the fsaverage cortical
+source surface is reliably above zero across participants.
+
+The toolbox currently uses a one-sample, positive-tail sign-flip permutation
+test:
+
+- compute a one-sample t statistic against zero at each source vertex from the
+  participant z-score maps;
+- form candidate clusters from neighboring source vertices that pass the
+  cluster-forming threshold;
+- randomly flip participant signs to build a null distribution of the largest
+  cluster mass expected by chance;
+- keep clusters whose mass survives cluster-level correction.
+
+Default settings are cluster-forming `p = .05`, corrected cluster
+`alpha = .05`, deterministic seed `20260609`, and up to `2048` sign-flip
+permutations. For small participant counts, the exact available sign flips are
+used. The resulting cluster p-value applies to the cluster as a whole, not to
+each individual vertex inside the cluster.
 
 ## What this method is not
 

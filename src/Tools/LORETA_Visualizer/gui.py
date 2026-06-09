@@ -36,6 +36,8 @@ from Main_App.gui.components import (
 from Tools.LORETA_Visualizer.conditions import DEMO_LORETA_CONDITIONS, condition_by_id, default_condition
 from Tools.LORETA_Visualizer.cortical_paint import (
     DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    payload_cluster_mask,
+    payload_has_cluster_mask,
     source_payload_uses_zscores,
     uses_cortical_surface_paint,
 )
@@ -343,6 +345,8 @@ def _activation_display_filter_readout(
     cortical_threshold_display: bool = True,
 ) -> str:
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+        if payload_has_cluster_mask(payload):
+            return "; display: source-space cluster mask"
         return f"; display: z >= {format_scalar_value(zscore_display_threshold)}"
     if payload.metadata.get("display_value_filter") != "values_above_threshold":
         return ""
@@ -372,6 +376,9 @@ def _activation_scale_values(
 ) -> np.ndarray:
     values = np.asarray(payload.values, dtype=float)
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+        cluster_mask = payload_cluster_mask(payload)
+        if cluster_mask is not None:
+            return values[cluster_mask & (values > 0.0)]
         return values[values >= float(zscore_display_threshold)]
     return values
 
@@ -477,7 +484,7 @@ class SourceMapOptionsDialog(AppDialog):
 
         threshold_note = QLabel(
             "Values below this display cutoff render as gray cortex. "
-            "This is not a cluster-permutation significance mask.",
+            "Cluster-masked payloads use their producer-computed mask first.",
             display_tab,
         )
         threshold_note.setObjectName("loreta_zscore_threshold_note")
@@ -1349,20 +1356,21 @@ class LoretaVisualizerWindow(QWidget):
             for payload in payloads
         )
         if all_cortical_zscore:
-            threshold = self._zscore_display_threshold
+            has_cluster_mask = any(payload_has_cluster_mask(payload) for payload in payloads)
+            lower_bound = 0.0 if has_cluster_mask else self._zscore_display_threshold
             if self.activation_auto_scale_check.isChecked():
                 finite = scale_values[np.isfinite(scale_values)]
-                vmax = float(np.nanmax(finite)) if len(finite) else threshold + 1.0
+                vmax = float(np.nanmax(finite)) if len(finite) else lower_bound + 1.0
                 return resolve_scalar_limits(
-                    np.asarray([threshold, vmax], dtype=float),
+                    np.asarray([lower_bound, vmax], dtype=float),
                     auto_scale=False,
-                    manual_min=threshold,
+                    manual_min=lower_bound,
                     manual_max=vmax,
                 )
             return resolve_scalar_limits(
                 scale_values,
                 auto_scale=False,
-                manual_min=max(threshold, self.activation_min_spin.value()),
+                manual_min=max(lower_bound, self.activation_min_spin.value()),
                 manual_max=self.activation_max_spin.value(),
             )
         return resolve_scalar_limits(
@@ -1736,7 +1744,14 @@ class LoretaVisualizerWindow(QWidget):
             }
         )
         self._set_activation_payload(payload)
-        self.condition_status_label.setText("")
+        if (
+            uses_cortical_surface_paint(payload)
+            and _source_payload_uses_zscores(payload)
+            and not payload_has_cluster_mask(payload)
+        ):
+            self.condition_status_label.setText("Loaded unmasked source map. Rebuild z-score maps to add cluster masks.")
+        else:
+            self.condition_status_label.setText("")
 
     def _set_activation_payload(self, payload: SourcePayload) -> None:
         renderer = self.renderer
@@ -1763,21 +1778,21 @@ class LoretaVisualizerWindow(QWidget):
         )
         manual_min = self.activation_min_spin.value()
         if self._activation_uses_opaque_cortical_mode() and _source_payload_uses_zscores(payload):
-            threshold = self._zscore_display_threshold
+            lower_bound = 0.0 if payload_has_cluster_mask(payload) else self._zscore_display_threshold
             if self.activation_auto_scale_check.isChecked():
                 finite = scale_values[np.isfinite(scale_values)]
-                vmax = float(np.nanmax(finite)) if len(finite) else threshold + 1.0
+                vmax = float(np.nanmax(finite)) if len(finite) else lower_bound + 1.0
                 vmin, vmax = resolve_scalar_limits(
-                    np.asarray([threshold, vmax], dtype=float),
+                    np.asarray([lower_bound, vmax], dtype=float),
                     auto_scale=False,
-                    manual_min=threshold,
+                    manual_min=lower_bound,
                     manual_max=vmax,
                 )
             else:
                 vmin, vmax = resolve_scalar_limits(
                     scale_values,
                     auto_scale=False,
-                    manual_min=max(threshold, manual_min),
+                    manual_min=max(lower_bound, manual_min),
                     manual_max=self.activation_max_spin.value(),
                 )
         else:

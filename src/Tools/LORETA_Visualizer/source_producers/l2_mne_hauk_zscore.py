@@ -67,6 +67,16 @@ PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT = "fpvs_loreta_participant_source_maps_v1"
 DEFAULT_HAUK_ZSCORE_NOISE_WINDOW_BINS = 10
 DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS = 4
 DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS = (-1, 0, 1)
+DEFAULT_CLUSTER_MASK_ENABLED = True
+DEFAULT_CLUSTER_FORMING_P_VALUE = 0.05
+DEFAULT_CLUSTER_ALPHA = 0.05
+DEFAULT_CLUSTER_PERMUTATION_COUNT = 2048
+DEFAULT_CLUSTER_PERMUTATION_SEED = 20260609
+CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP = "one_sample_sign_flip_max_cluster_mass"
+CLUSTER_MASK_STATUS_COMPUTED = "computed"
+CLUSTER_MASK_STATUS_NO_CANDIDATES = "no_candidate_clusters"
+CLUSTER_MASK_STATUS_DISABLED = "disabled"
+CLUSTER_TAIL_POSITIVE = "positive"
 
 
 @dataclass(frozen=True)
@@ -82,6 +92,12 @@ class L2MNEHaukZScoreConfig:
     min_noise_bins: int = DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS
     excluded_noise_offsets: tuple[int, ...] = DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS
     drop_min_max_noise_per_source: bool = True
+    cluster_mask_enabled: bool = DEFAULT_CLUSTER_MASK_ENABLED
+    cluster_forming_p_value: float = DEFAULT_CLUSTER_FORMING_P_VALUE
+    cluster_alpha: float = DEFAULT_CLUSTER_ALPHA
+    cluster_permutation_count: int = DEFAULT_CLUSTER_PERMUTATION_COUNT
+    cluster_permutation_seed: int = DEFAULT_CLUSTER_PERMUTATION_SEED
+    cluster_tail: str = CLUSTER_TAIL_POSITIVE
     montage_name: str = "BioSemi ActiveTwo 64-channel 10-10"
     harmonic_policy_id: str = "stats_group_significant_oddball_harmonics"
     template_subject: str = "fsaverage"
@@ -107,11 +123,25 @@ class L2MNEHaukZScoreConfig:
         excluded = tuple(sorted({int(offset) for offset in self.excluded_noise_offsets}))
         if 0 not in excluded:
             raise ValueError("Hauk z-score excluded noise offsets must include the target offset 0.")
+        cluster_forming_p = _validate_probability(self.cluster_forming_p_value, "cluster_forming_p_value")
+        cluster_alpha = _validate_probability(self.cluster_alpha, "cluster_alpha")
+        cluster_permutation_count = int(self.cluster_permutation_count)
+        if cluster_permutation_count < 1:
+            raise ValueError("Cluster permutation count must be at least 1.")
+        cluster_tail = str(self.cluster_tail).strip().lower()
+        if cluster_tail != CLUSTER_TAIL_POSITIVE:
+            raise ValueError("Only positive one-sided source-space cluster masks are currently supported.")
         object.__setattr__(self, "selected_harmonics_hz", selected)
         object.__setattr__(self, "lambda2", lambda2)
         object.__setattr__(self, "noise_window_bins", noise_window_bins)
         object.__setattr__(self, "min_noise_bins", min_noise_bins)
         object.__setattr__(self, "excluded_noise_offsets", excluded)
+        object.__setattr__(self, "cluster_mask_enabled", bool(self.cluster_mask_enabled))
+        object.__setattr__(self, "cluster_forming_p_value", cluster_forming_p)
+        object.__setattr__(self, "cluster_alpha", cluster_alpha)
+        object.__setattr__(self, "cluster_permutation_count", cluster_permutation_count)
+        object.__setattr__(self, "cluster_permutation_seed", int(self.cluster_permutation_seed))
+        object.__setattr__(self, "cluster_tail", cluster_tail)
         object.__setattr__(self, "metadata", dict(self.metadata))
 
 
@@ -288,6 +318,38 @@ class L2MNEHaukParticipantZScoreSummary:
 
 
 @dataclass(frozen=True)
+class L2MNEHaukSourceCluster:
+    """One source-space cluster from the participant-level permutation test."""
+
+    cluster_id: int
+    vertex_indices: tuple[int, ...]
+    cluster_mass: float
+    p_value: float
+    significant: bool
+
+
+@dataclass(frozen=True)
+class L2MNEHaukClusterPermutationResult:
+    """Source-space cluster mask computed from participant z-score maps."""
+
+    status: str
+    mask: np.ndarray
+    t_values: np.ndarray
+    cluster_forming_threshold: float
+    cluster_forming_p_value: float
+    cluster_alpha: float
+    permutation_count: int
+    permutation_seed: int
+    tail: str
+    clusters: tuple[L2MNEHaukSourceCluster, ...]
+
+    @property
+    def significant_clusters(self) -> tuple[L2MNEHaukSourceCluster, ...]:
+        """Return only clusters that survive cluster-level correction."""
+        return tuple(cluster for cluster in self.clusters if cluster.significant)
+
+
+@dataclass(frozen=True)
 class L2MNEHaukParticipantZScoreWriteResult:
     """Participant-first output files plus the renderer-ready producer result."""
 
@@ -430,6 +492,83 @@ def summarize_l2_mne_hauk_participant_zscores(
     )
 
 
+def compute_l2_mne_hauk_source_cluster_mask(
+    participant_values: Sequence[L2MNEHaukParticipantZScoreValues],
+    *,
+    faces: np.ndarray,
+    config: L2MNEHaukZScoreConfig,
+) -> L2MNEHaukClusterPermutationResult:
+    """Compute a Hauk-style source-space cluster mask across participants.
+
+    This is a one-sample, positive-tail sign-flip permutation test against zero
+    over participant source-space z-score maps. It produces an inferential mask
+    for display payloads; it does not alter source values or run the inverse
+    solution.
+    """
+    matrix = _participant_zscore_matrix(participant_values)
+    source_count = matrix.shape[1]
+    adjacency = _mesh_adjacency(faces, source_count=source_count)
+    observed_t = _one_sample_t_values(matrix)
+    threshold = _cluster_forming_t_threshold(
+        participant_count=matrix.shape[0],
+        p_value=config.cluster_forming_p_value,
+    )
+    observed_clusters = _cluster_components(observed_t >= threshold, adjacency)
+    empty_mask = np.zeros(source_count, dtype=bool)
+    if not observed_clusters:
+        return L2MNEHaukClusterPermutationResult(
+            status=CLUSTER_MASK_STATUS_NO_CANDIDATES,
+            mask=empty_mask,
+            t_values=observed_t,
+            cluster_forming_threshold=threshold,
+            cluster_forming_p_value=config.cluster_forming_p_value,
+            cluster_alpha=config.cluster_alpha,
+            permutation_count=0,
+            permutation_seed=int(config.cluster_permutation_seed),
+            tail=config.cluster_tail,
+            clusters=(),
+        )
+
+    null_max_masses = _permutation_max_cluster_masses(
+        matrix,
+        adjacency=adjacency,
+        threshold=threshold,
+        permutation_count=config.cluster_permutation_count,
+        seed=config.cluster_permutation_seed,
+    )
+    clusters: list[L2MNEHaukSourceCluster] = []
+    mask = empty_mask.copy()
+    denominator = float(len(null_max_masses) + 1)
+    for cluster_index, cluster_vertices in enumerate(observed_clusters, start=1):
+        cluster_mass = float(np.sum(observed_t[np.asarray(cluster_vertices, dtype=np.int64)]))
+        p_value = float((1 + np.count_nonzero(null_max_masses >= cluster_mass - 1e-12)) / denominator)
+        significant = p_value <= config.cluster_alpha
+        if significant:
+            mask[np.asarray(cluster_vertices, dtype=np.int64)] = True
+        clusters.append(
+            L2MNEHaukSourceCluster(
+                cluster_id=cluster_index,
+                vertex_indices=tuple(int(index) for index in cluster_vertices),
+                cluster_mass=cluster_mass,
+                p_value=p_value,
+                significant=significant,
+            )
+        )
+
+    return L2MNEHaukClusterPermutationResult(
+        status=CLUSTER_MASK_STATUS_COMPUTED,
+        mask=mask,
+        t_values=observed_t,
+        cluster_forming_threshold=threshold,
+        cluster_forming_p_value=config.cluster_forming_p_value,
+        cluster_alpha=config.cluster_alpha,
+        permutation_count=int(len(null_max_masses)),
+        permutation_seed=int(config.cluster_permutation_seed),
+        tail=config.cluster_tail,
+        clusters=tuple(clusters),
+    )
+
+
 def build_l2_mne_hauk_zscore_surface_payload(
     *,
     forward_model: L2MNECorticalForwardModel,
@@ -470,6 +609,7 @@ def build_l2_mne_hauk_participant_zscore_summary_payload(
     config: L2MNEHaukZScoreConfig,
     participant_values: Sequence[L2MNEHaukParticipantZScoreValues],
     summary: L2MNEHaukParticipantZScoreSummary,
+    cluster_result: L2MNEHaukClusterPermutationResult | None = None,
 ) -> dict[str, Any]:
     """Build one renderer-ready group summary from participant source maps."""
     values = np.asarray(summary.values, dtype=float).reshape(-1)
@@ -494,6 +634,7 @@ def build_l2_mne_hauk_participant_zscore_summary_payload(
             config=config,
             participant_values=participant_values,
             summary=summary,
+            cluster_result=cluster_result,
         ),
     }
     validate_prepared_source_payload_mapping(payload)
@@ -609,6 +750,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
     manifest_conditions: list[dict[str, Any]] = []
     used_file_names: set[str] = set()
     participant_rows_by_condition: dict[str, tuple[L2MNEHaukParticipantZScoreValues, ...]] = {}
+    cluster_results_by_condition: dict[str, L2MNEHaukClusterPermutationResult | None] = {}
     for condition_index, condition in enumerate(condition_list, start=1):
         _emit_progress(
             progress_callback,
@@ -623,6 +765,25 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
             config=config,
         )
         participant_rows_by_condition[condition.condition_id] = participant_rows
+        cluster_result = None
+        if config.cluster_mask_enabled:
+            _emit_progress(
+                progress_callback,
+                f"Computing source-space cluster mask for {condition.label}...",
+            )
+            cluster_result = compute_l2_mne_hauk_source_cluster_mask(
+                participant_rows,
+                faces=forward_model.faces,
+                config=config,
+            )
+            _emit_progress(
+                progress_callback,
+                (
+                    f"Cluster mask for {condition.label}: "
+                    f"{int(np.count_nonzero(cluster_result.mask))} source point(s) retained."
+                ),
+            )
+        cluster_results_by_condition[condition.condition_id] = cluster_result
         for aggregation in aggregation_list:
             summary = summarize_l2_mne_hauk_participant_zscores(
                 participant_rows,
@@ -639,6 +800,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
                 config=config,
                 participant_values=participant_rows,
                 summary=summary,
+                cluster_result=cluster_result,
             )
             condition_payload_id = f"{condition.condition_id}_{summary.aggregation}"
             file_name = _unique_participant_payload_file_name(condition.condition_id, summary.aggregation, used_file_names)
@@ -665,6 +827,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
                         "selected_harmonics_hz": list(config.selected_harmonics_hz),
                         "value_label": config.value_label,
                         "source_value_unit": "z-score",
+                        **_cluster_manifest_entry_metadata(cluster_result),
                     },
                 }
             )
@@ -678,6 +841,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
             conditions=condition_list,
             config=config,
             participant_rows_by_condition=participant_rows_by_condition,
+            cluster_results_by_condition=cluster_results_by_condition,
         ),
     )
 
@@ -689,7 +853,12 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
             "producer_method": METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE,
             "aggregation_methods": list(aggregation_list),
             "participant_sidecar_file": sidecar_path.name,
-            "cluster_mask": "none",
+            "cluster_mask": (
+                "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
+            ),
+            "cluster_mask_method": (
+                CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP if config.cluster_mask_enabled else "none"
+            ),
         },
     }
     manifest_path = output_path / manifest_name
@@ -823,6 +992,148 @@ def _trimmed_mean(values: np.ndarray, *, trim_fraction: float) -> np.ndarray:
     return np.mean(sorted_values[trim_count : matrix.shape[0] - trim_count, :], axis=0)
 
 
+def _participant_zscore_matrix(
+    participant_values: Sequence[L2MNEHaukParticipantZScoreValues],
+) -> np.ndarray:
+    rows = tuple(participant_values)
+    if len(rows) < 2:
+        raise ValueError("Source-space cluster permutation requires at least two participant maps.")
+    matrix = np.vstack([np.asarray(row.values, dtype=float).reshape(1, -1) for row in rows])
+    if matrix.ndim != 2 or matrix.shape[1] == 0:
+        raise ValueError("Participant source z-score matrix must be participants x source_points.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("Participant source z-score matrix contains non-finite values.")
+    return matrix.astype(float)
+
+
+def _one_sample_t_values(matrix: np.ndarray) -> np.ndarray:
+    values = np.asarray(matrix, dtype=float)
+    participant_count = values.shape[0]
+    means = np.mean(values, axis=0)
+    sd = np.std(values, axis=0, ddof=1)
+    t_values = np.zeros(values.shape[1], dtype=float)
+    valid = np.isfinite(sd) & (sd > 1e-12)
+    t_values[valid] = means[valid] / (sd[valid] / np.sqrt(float(participant_count)))
+    return np.where(np.isfinite(t_values), t_values, 0.0)
+
+
+def _cluster_forming_t_threshold(*, participant_count: int, p_value: float) -> float:
+    if participant_count < 2:
+        raise ValueError("Cluster-forming threshold requires at least two participants.")
+    try:
+        from scipy import stats
+
+        threshold = float(stats.t.ppf(1.0 - float(p_value), df=participant_count - 1))
+    except (ImportError, AttributeError, TypeError, ValueError):
+        threshold = 1.6448536269514722
+    if not np.isfinite(threshold):
+        raise ValueError("Cluster-forming threshold was not finite.")
+    return threshold
+
+
+def _permutation_max_cluster_masses(
+    matrix: np.ndarray,
+    *,
+    adjacency: Sequence[set[int]],
+    threshold: float,
+    permutation_count: int,
+    seed: int,
+) -> np.ndarray:
+    values = np.asarray(matrix, dtype=float)
+    masses: list[float] = []
+    for signs in _sign_flip_vectors(values.shape[0], permutation_count=permutation_count, seed=seed):
+        signed = values * signs[:, np.newaxis]
+        t_values = _one_sample_t_values(signed)
+        clusters = _cluster_components(t_values >= threshold, adjacency)
+        if clusters:
+            masses.append(max(float(np.sum(t_values[np.asarray(cluster, dtype=np.int64)])) for cluster in clusters))
+        else:
+            masses.append(0.0)
+    return np.asarray(masses, dtype=float)
+
+
+def _sign_flip_vectors(
+    participant_count: int,
+    *,
+    permutation_count: int,
+    seed: int,
+) -> Sequence[np.ndarray]:
+    exact_count = 2**participant_count
+    if participant_count <= 12 and exact_count <= int(permutation_count):
+        return tuple(_exact_sign_vector(index, participant_count) for index in range(exact_count))
+    rng = np.random.default_rng(int(seed))
+    draws = rng.choice(np.asarray([-1.0, 1.0], dtype=float), size=(int(permutation_count), participant_count))
+    return tuple(np.asarray(row, dtype=float) for row in draws)
+
+
+def _exact_sign_vector(index: int, participant_count: int) -> np.ndarray:
+    signs = np.empty(participant_count, dtype=float)
+    for participant_index in range(participant_count):
+        signs[participant_index] = 1.0 if (index >> participant_index) & 1 else -1.0
+    return signs
+
+
+def _mesh_adjacency(faces: np.ndarray, *, source_count: int) -> tuple[set[int], ...]:
+    adjacency = [set() for _ in range(int(source_count))]
+    for triangle in _triangle_faces_from_any_faces(faces):
+        if not np.all((triangle >= 0) & (triangle < source_count)):
+            raise ValueError("Cluster-mask source faces must refer to existing source points.")
+        a, b, c = (int(index) for index in triangle)
+        adjacency[a].update((b, c))
+        adjacency[b].update((a, c))
+        adjacency[c].update((a, b))
+    return tuple(adjacency)
+
+
+def _triangle_faces_from_any_faces(faces: np.ndarray) -> np.ndarray:
+    face_array = np.asarray(faces, dtype=np.int64)
+    if face_array.ndim == 1:
+        if len(face_array) % 4 != 0:
+            raise ValueError("Flat source faces must use VTK-style triangular records.")
+        vtk_faces = face_array.reshape(-1, 4)
+        if not np.all(vtk_faces[:, 0] == 3):
+            raise ValueError("Flat source faces must use VTK-style triangular records.")
+        return vtk_faces[:, 1:4].astype(np.int64)
+    if face_array.ndim == 2 and face_array.shape[1] == 4:
+        if not np.all(face_array[:, 0] == 3):
+            raise ValueError("Source face rows must use VTK-style triangular records.")
+        return face_array[:, 1:4].astype(np.int64)
+    if face_array.ndim == 2 and face_array.shape[1] == 3:
+        return face_array.astype(np.int64)
+    raise ValueError("Source faces must be triangle rows or VTK-style triangular records.")
+
+
+def _cluster_components(
+    candidate_mask: np.ndarray,
+    adjacency: Sequence[set[int]],
+) -> tuple[tuple[int, ...], ...]:
+    candidate = np.asarray(candidate_mask, dtype=bool).reshape(-1)
+    if len(candidate) != len(adjacency):
+        raise ValueError("Cluster candidate mask must align with source adjacency.")
+    unvisited = set(int(index) for index in np.flatnonzero(candidate))
+    clusters: list[tuple[int, ...]] = []
+    while unvisited:
+        seed = unvisited.pop()
+        stack = [seed]
+        cluster = [seed]
+        while stack:
+            current = stack.pop()
+            for neighbor in adjacency[current]:
+                if neighbor in unvisited:
+                    unvisited.remove(neighbor)
+                    stack.append(neighbor)
+                    cluster.append(neighbor)
+        clusters.append(tuple(sorted(cluster)))
+    return tuple(clusters)
+
+
+def _validate_probability(value: float, label: str) -> float:
+    probability = float(value)
+    if not np.isfinite(probability) or probability <= 0.0 or probability >= 1.0:
+        raise ValueError(f"{label} must be > 0 and < 1.")
+    return probability
+
+
 def _validate_topography(values: Sequence[float], *, label: str) -> np.ndarray:
     vector = np.asarray(values, dtype=float).reshape(-1)
     if len(vector) == 0 or not np.all(np.isfinite(vector)):
@@ -939,6 +1250,79 @@ def _payload_metadata(
     return metadata
 
 
+def _cluster_payload_metadata(
+    cluster_result: L2MNEHaukClusterPermutationResult | None,
+    *,
+    config: L2MNEHaukZScoreConfig,
+) -> dict[str, Any]:
+    if not config.cluster_mask_enabled:
+        return {
+            "cluster_mask": CLUSTER_MASK_STATUS_DISABLED,
+            "cluster_mask_primary_display": False,
+            "cluster_mask_method": "none",
+        }
+    if cluster_result is None:
+        return {
+            "cluster_mask": "none",
+            "cluster_mask_primary_display": False,
+            "cluster_mask_method": "none",
+        }
+    retained = np.flatnonzero(cluster_result.mask).astype(int)
+    significant_clusters = cluster_result.significant_clusters
+    return {
+        "cluster_mask": "source_space_cluster_permutation",
+        "cluster_mask_status": cluster_result.status,
+        "cluster_mask_primary_display": True,
+        "cluster_mask_method": CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP,
+        "cluster_mask_note": (
+            "Renderer uses this producer-computed source-space mask as the primary "
+            "publication-style L2-MNE display mask; source values remain unchanged."
+        ),
+        "cluster_mask_vertex_indices": [int(index) for index in retained],
+        "cluster_mask_vertex_count": int(len(retained)),
+        "cluster_mask_source_count": int(len(cluster_result.mask)),
+        "cluster_forming_statistic": "one_sample_t_against_zero",
+        "cluster_forming_tail": cluster_result.tail,
+        "cluster_forming_p_value": float(cluster_result.cluster_forming_p_value),
+        "cluster_forming_threshold": float(cluster_result.cluster_forming_threshold),
+        "cluster_alpha": float(cluster_result.cluster_alpha),
+        "cluster_permutation_count": int(cluster_result.permutation_count),
+        "cluster_permutation_seed": int(cluster_result.permutation_seed),
+        "cluster_candidate_count": int(len(cluster_result.clusters)),
+        "cluster_significant_cluster_count": int(len(significant_clusters)),
+        "cluster_significant_clusters": [
+            {
+                "cluster_id": int(cluster.cluster_id),
+                "vertex_count": int(len(cluster.vertex_indices)),
+                "cluster_mass": float(cluster.cluster_mass),
+                "p_value": float(cluster.p_value),
+            }
+            for cluster in significant_clusters
+        ],
+    }
+
+
+def _cluster_manifest_entry_metadata(
+    cluster_result: L2MNEHaukClusterPermutationResult | None,
+) -> dict[str, Any]:
+    if cluster_result is None:
+        return {
+            "cluster_mask": "none",
+            "cluster_mask_vertex_count": 0,
+            "cluster_significant_cluster_count": 0,
+        }
+    return {
+        "cluster_mask": "source_space_cluster_permutation",
+        "cluster_mask_status": cluster_result.status,
+        "cluster_mask_vertex_count": int(np.count_nonzero(cluster_result.mask)),
+        "cluster_mask_source_count": int(len(cluster_result.mask)),
+        "cluster_significant_cluster_count": int(len(cluster_result.significant_clusters)),
+        "cluster_forming_p_value": float(cluster_result.cluster_forming_p_value),
+        "cluster_alpha": float(cluster_result.cluster_alpha),
+        "cluster_permutation_count": int(cluster_result.permutation_count),
+    }
+
+
 def _participant_summary_payload_metadata(
     *,
     forward_model: L2MNECorticalForwardModel,
@@ -946,6 +1330,7 @@ def _participant_summary_payload_metadata(
     config: L2MNEHaukZScoreConfig,
     participant_values: Sequence[L2MNEHaukParticipantZScoreValues],
     summary: L2MNEHaukParticipantZScoreSummary,
+    cluster_result: L2MNEHaukClusterPermutationResult | None = None,
 ) -> dict[str, Any]:
     rows = tuple(participant_values)
     participant_ids = [row.participant_id for row in rows]
@@ -1014,10 +1399,8 @@ def _participant_summary_payload_metadata(
         "hauk_alignment_limitations": [
             "EEG only; Hauk 2021 used combined EEG and MEG.",
             "Template fsaverage head/source model; Hauk 2021 and 2025 used individual MRIs.",
-            "No source-space cluster-permutation mask is applied in this phase.",
             "Ad hoc diagonal EEG covariance is used for whitening in this EEG-only template path.",
         ],
-        "cluster_mask": "none",
         "sensor_modalities": ["EEG"],
         "head_model": "fsaverage template",
         "subject_mri": "none",
@@ -1025,6 +1408,7 @@ def _participant_summary_payload_metadata(
         "project_integration": "none",
         "renderer_dependency": "none",
     }
+    metadata.update(_cluster_payload_metadata(cluster_result, config=config))
     metadata.update(_json_safe_metadata(forward_model.metadata, prefix="forward_model"))
     metadata.update(_json_safe_metadata(config.metadata, prefix="config"))
     metadata.update(_json_safe_metadata(condition.metadata, prefix="condition"))
@@ -1037,10 +1421,13 @@ def _participant_zscore_sidecar_payload(
     conditions: Sequence[L2MNEHaukParticipantGroupCondition],
     config: L2MNEHaukZScoreConfig,
     participant_rows_by_condition: Mapping[str, Sequence[L2MNEHaukParticipantZScoreValues]],
+    cluster_results_by_condition: Mapping[str, L2MNEHaukClusterPermutationResult | None] | None = None,
 ) -> dict[str, Any]:
     condition_rows: list[dict[str, Any]] = []
+    cluster_lookup = dict(cluster_results_by_condition or {})
     for condition in conditions:
         participant_rows = tuple(participant_rows_by_condition.get(condition.condition_id, ()))
+        cluster_result = cluster_lookup.get(condition.condition_id)
         condition_rows.append(
             {
                 "condition_id": condition.condition_id,
@@ -1055,6 +1442,7 @@ def _participant_zscore_sidecar_payload(
                     }
                     for row in participant_rows
                 ],
+                "cluster_mask": _cluster_manifest_entry_metadata(cluster_result),
             }
         )
     return {
@@ -1069,7 +1457,12 @@ def _participant_zscore_sidecar_payload(
         "metadata": {
             "selected_harmonics_hz": list(config.selected_harmonics_hz),
             "participant_level_values": True,
-            "cluster_mask": "none",
+            "cluster_mask": (
+                "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
+            ),
+            "cluster_mask_method": (
+                CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP if config.cluster_mask_enabled else "none"
+            ),
             "renderer_dependency": "none",
         },
     }

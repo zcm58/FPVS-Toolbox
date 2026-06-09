@@ -448,7 +448,10 @@ class BrainRendererWidget(QWidget):
                 z_threshold=self._cortical_paint_z_threshold,
             )
             paint_surface = surface.copy(deep=True)
-            paint_surface["activation"] = projection.values
+            paint_surface["activation"] = _cortical_paint_display_values(
+                projection.values,
+                scalar_range=self._activation_scalar_range,
+            )
         except (ImportError, ModuleNotFoundError, RuntimeError, TypeError, ValueError) as exc:
             logger.warning("loreta_cortical_paint_projection_failed", extra={"error": str(exc)})
             return False
@@ -619,6 +622,11 @@ class BrainRendererWidget(QWidget):
         self._activation_scalar_range = (float(vmin), float(vmax))
         if self._split_hemisphere_active:
             self._render_split_hemispheres(render=True)
+            return
+        if self._cortical_paint_active:
+            payload = self._last_activation_payload
+            if payload is not None:
+                self.set_activation_payload(payload)
             return
         actors = self._active_scalar_actors()
         plotter = self._plotter
@@ -1289,11 +1297,18 @@ def _publication_surface_rgb(
     colors = _publication_base_rgb(len(scalar_values), shade_values)
     if not activation_visible:
         return colors
-    finite = np.isfinite(scalar_values)
+    vmin = float(scalar_range[0])
+    finite = np.isfinite(scalar_values) & (scalar_values >= vmin)
     if not np.any(finite):
         return colors
     colors[finite] = _scalar_values_to_rgb(scalar_values[finite], scalar_range=scalar_range)
     return colors
+
+
+def _cortical_paint_display_values(values: np.ndarray, *, scalar_range: tuple[float, float]) -> np.ndarray:
+    scalar_values = np.asarray(values, dtype=float).reshape(-1)
+    vmin = float(scalar_range[0])
+    return np.where(np.isfinite(scalar_values) & (scalar_values >= vmin), scalar_values, np.nan)
 
 
 def _publication_base_rgb(count: int, shade_values: np.ndarray | None) -> np.ndarray:

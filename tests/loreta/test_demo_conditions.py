@@ -11,6 +11,7 @@ from Tools.LORETA_Visualizer.renderer import (
     PublicationSplitSvgPanel,
     _SplitHemisphereState,
     _configure_transparency_backend,
+    _cortical_paint_display_values,
     _publication_hemisphere_points,
     _publication_surface_rgb,
     write_publication_split_hemisphere_stack_svg,
@@ -295,6 +296,38 @@ def test_publication_surface_rgb_preserves_shaded_cortex_underlay() -> None:
     assert np.array_equal(visible_colors[0], hidden_colors[0])
     assert not np.array_equal(visible_colors[1], hidden_colors[1])
     assert not np.array_equal(visible_colors[2], hidden_colors[2])
+
+
+def test_publication_surface_rgb_uses_shaded_cortex_below_color_minimum() -> None:
+    values = np.asarray([1.0, 2.0, 5.0], dtype=float)
+    shade_values = np.asarray([0.0, 0.5, 1.0], dtype=float)
+
+    visible_colors = _publication_surface_rgb(
+        values,
+        shade_values,
+        scalar_range=(2.0, 5.0),
+        activation_visible=True,
+    )
+    hidden_colors = _publication_surface_rgb(
+        values,
+        shade_values,
+        scalar_range=(2.0, 5.0),
+        activation_visible=False,
+    )
+
+    assert np.array_equal(visible_colors[0], hidden_colors[0])
+    assert not np.array_equal(visible_colors[1], hidden_colors[1])
+    assert not np.array_equal(visible_colors[2], hidden_colors[2])
+
+
+def test_cortical_paint_display_values_hide_values_below_color_minimum() -> None:
+    values = np.asarray([np.nan, 1.0, 2.0, 5.0], dtype=float)
+
+    display_values = _cortical_paint_display_values(values, scalar_range=(2.0, 5.0))
+
+    assert np.isnan(display_values[0])
+    assert np.isnan(display_values[1])
+    assert display_values[2:].tolist() == [2.0, 5.0]
 
 
 def test_publication_split_svg_export_writes_transparent_labeled_view(tmp_path) -> None:

@@ -75,8 +75,16 @@ and only then aggregate those z-score maps into group raw mean, median, and 20%
 trimmed-mean payloads. The participant sidecar is for future individual viewing;
 the renderer still loads the group prepared payloads. The older group-first
 model is a deprecated advanced fallback only and must not be treated as the
-default design precedent. Cluster-permutation masking remains future work and
-must not be implied by display thresholds.
+default design precedent.
+
+Phase 6H-A(3) adds source-space cluster-permutation masks for participant-first
+Hauk-style L2-MNE z-score maps. The mask is computed only in
+`source_producers/` from participant source maps, saved as prepared payload
+metadata, and used as the primary publication-style display mask when present.
+The renderer and cortical paint helpers may obey `cluster_mask_vertex_indices`,
+but they must not compute t statistics, sign flips, clusters, or p-values. The
+manual z-score display cutoff is a fallback/exploratory display setting for
+unmasked payloads and must not be described as inferential.
 
 Allowed outside this directory:
 
@@ -169,8 +177,10 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   `cortical_paint.py`: bridge helpers that adapt prepared source payloads to
   the renderer. Z-score payloads should keep signed values in JSON. L2-MNE
   cortical-surface z-score payloads render as opaque cortical paint with
-  sub-threshold z-scores shown as gray cortex; non-surface z-score payloads may
-  still use positive-only display filtering.
+  producer-provided cluster masks shown as activation and unmasked vertices
+  shown as gray cortex. If no producer mask is present, the manual z-score
+  display cutoff remains the fallback behavior. Non-surface z-score payloads
+  may still use positive-only display filtering.
 - `source_producers/`: source-localization calculation methods that convert
   explicit source-ready inputs into validated prepared JSON payloads/manifests.
   They are calculation code, not display code, and should not depend on renderer
@@ -188,8 +198,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   `source_producers/project_fullfft_inputs.py`, and
   `source_producers/project_l2_mne_hauk_zscore_export.py`; together they read
   project FullFFT target/noise bins from the same flat or grouped workbook
-  layouts, compute Hauk-style source-space z-scores, and write project-local
-  z-score prepared source JSON.
+  layouts, compute Hauk-style source-space z-scores, compute participant-first
+  source-space cluster-permutation masks, and write project-local z-score
+  prepared source JSON.
 
 ## Boundary Rules
 

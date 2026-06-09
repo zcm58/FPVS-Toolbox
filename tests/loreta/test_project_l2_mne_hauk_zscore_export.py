@@ -110,7 +110,8 @@ def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path)
     assert metadata["participant_zscore_aggregation"] == "mean"
     assert metadata["config_project_integration"] == "phase_6h_a2_project_l2_mne_participant_first_hauk_zscore"
     assert metadata["condition_project_input_assembly"] == "phase_6h_a2_fullfft_participant_neighbor_bins_read_only"
-    assert metadata["cluster_mask"] == "none"
+    assert metadata["cluster_mask"] == "source_space_cluster_permutation"
+    assert metadata["cluster_mask_method"] == "one_sample_sign_flip_max_cluster_mass"
     sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
     assert sidecar["conditions"][0]["participant_count"] == 2
 
@@ -152,6 +153,7 @@ def test_project_hauk_zscore_export_reports_progress(tmp_path) -> None:
     assert any("Using supplied L2-MNE inverse model" in message for message in messages)
     assert any("L2-MNE inverse model is ready" in message for message in messages)
     assert any("Computing participant source z-scores for condition 1/2" in message for message in messages)
+    assert any("Computing source-space cluster mask" in message for message in messages)
     assert any("Writing participant source-map sidecar" in message for message in messages)
     assert any("Writing source-map manifest" in message for message in messages)
     assert any("Source-map JSON export complete" in message for message in messages)

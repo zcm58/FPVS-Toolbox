@@ -19,6 +19,7 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
     L2MNEHaukZScoreConfig,
     build_l2_mne_hauk_zscore_surface_payload,
     compute_l2_mne_hauk_participant_zscore_source_values,
+    compute_l2_mne_hauk_source_cluster_mask,
     compute_l2_mne_hauk_zscore_source_values,
     summarize_l2_mne_hauk_participant_zscores,
     write_l2_mne_hauk_participant_zscore_surface_payloads,
@@ -170,6 +171,29 @@ def test_participant_zscore_trimmed_mean_drops_each_tail_per_source() -> None:
     assert np.allclose(summary.values, np.asarray([2.0, 4.0]))
 
 
+def test_cluster_permutation_mask_keeps_significant_connected_positive_cluster() -> None:
+    participant_values = _cluster_participant_values()
+    config = L2MNEHaukZScoreConfig(
+        selected_harmonics_hz=(1.0,),
+        apply_average_reference=False,
+        min_noise_bins=4,
+        cluster_permutation_count=128,
+    )
+
+    result = compute_l2_mne_hauk_source_cluster_mask(
+        participant_values,
+        faces=np.asarray([[0, 1, 2], [2, 3, 4]], dtype=np.int64),
+        config=config,
+    )
+
+    assert result.cluster_forming_p_value == pytest.approx(0.05)
+    assert result.cluster_alpha == pytest.approx(0.05)
+    assert result.permutation_count == 64
+    assert result.mask.tolist() == [True, True, True, False, False]
+    assert len(result.significant_clusters) == 1
+    assert result.significant_clusters[0].p_value <= 0.05
+
+
 def test_participant_first_writer_emits_group_summaries_and_sidecar(tmp_path) -> None:
     result = write_l2_mne_hauk_participant_zscore_surface_payloads(
         forward_model=_identity_forward_model(),
@@ -196,7 +220,9 @@ def test_participant_first_writer_emits_group_summaries_and_sidecar(tmp_path) ->
     assert payload["source_model"] == "l2_mne_fsaverage_participant_zscore_mean"
     assert payload["metadata"]["source_map_model"] == "participant_first"
     assert payload["metadata"]["participant_count"] == 2
-    assert payload["metadata"]["cluster_mask"] == "none"
+    assert payload["metadata"]["cluster_mask"] == "source_space_cluster_permutation"
+    assert payload["metadata"]["cluster_mask_method"] == "one_sample_sign_flip_max_cluster_mass"
+    assert payload["metadata"]["cluster_mask_vertex_count"] == 0
     sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
     assert sidecar["format"] == PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT
     assert sidecar["conditions"][0]["participant_count"] == 2
@@ -257,6 +283,25 @@ def _participant_group_condition() -> L2MNEHaukParticipantGroupCondition:
             ),
         ),
     )
+
+
+def _cluster_participant_values() -> tuple[L2MNEHaukParticipantZScoreValues, ...]:
+    rows = []
+    for index, scale in enumerate((0.92, 0.96, 1.0, 1.04, 1.08, 1.12), start=1):
+        noise_value = 0.35 if index % 2 else -0.35
+        values = np.asarray([4.2 * scale, 4.0 * scale, 3.8 * scale, noise_value, -0.04], dtype=float)
+        rows.append(
+            L2MNEHaukParticipantZScoreValues(
+                participant_id=f"P{index}",
+                values=values,
+                target_source_values=np.zeros(5, dtype=float),
+                noise_mean_values=np.zeros(5, dtype=float),
+                noise_std_values=np.ones(5, dtype=float),
+                noise_offsets_used=(-2, 2),
+                zero_noise_sd_source_count=0,
+            )
+        )
+    return tuple(rows)
 
 
 def _hauk_condition(

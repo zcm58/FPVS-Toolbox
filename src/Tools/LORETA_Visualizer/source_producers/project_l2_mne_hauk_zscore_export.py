@@ -93,6 +93,11 @@ def write_project_l2_mne_hauk_zscore_payloads(
     zscore_model: str = PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST,
     aggregations: Sequence[str] = DEFAULT_PARTICIPANT_ZSCORE_AGGREGATIONS,
     trim_fraction: float = DEFAULT_PARTICIPANT_ZSCORE_TRIM_FRACTION,
+    cluster_mask_enabled: bool = True,
+    cluster_forming_p_value: float = 0.05,
+    cluster_alpha: float = 0.05,
+    cluster_permutation_count: int = 2048,
+    cluster_permutation_seed: int = 20260609,
     progress_callback: ProgressCallback | None = None,
 ) -> ProjectL2MNEHaukZScoreExportResult:
     """Write Hauk-style source-space z-score JSON for an existing project.
@@ -159,6 +164,11 @@ def write_project_l2_mne_hauk_zscore_payloads(
         noise_window_bins=project_inputs.bin_plan.noise_window_bins,
         excluded_noise_offsets=project_inputs.bin_plan.excluded_offsets,
         min_noise_bins=project_inputs.bin_plan.min_noise_bins,
+        cluster_mask_enabled=cluster_mask_enabled and participant_first,
+        cluster_forming_p_value=cluster_forming_p_value,
+        cluster_alpha=cluster_alpha,
+        cluster_permutation_count=cluster_permutation_count,
+        cluster_permutation_seed=cluster_permutation_seed,
         metadata={
             "project_integration": (
                 "phase_6h_a2_project_l2_mne_participant_first_hauk_zscore"
@@ -175,7 +185,11 @@ def write_project_l2_mne_hauk_zscore_payloads(
             "project_input_diagnostics": list(project_inputs.diagnostics),
             "frequency_resolution_hz": project_inputs.bin_plan.frequency_resolution_hz,
             "output_scope": "project-local",
-            "cluster_mask": "none",
+            "cluster_mask": (
+                "source_space_cluster_permutation"
+                if cluster_mask_enabled and participant_first
+                else "none"
+            ),
         },
     )
 

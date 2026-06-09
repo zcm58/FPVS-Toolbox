@@ -234,8 +234,11 @@ compact rebuild summaries, but source-estimation math still belongs only to
   computes participant source-space z-score maps, and the export writes group
   raw mean, median, and 20% trimmed-mean prepared payloads plus a participant
   sidecar for future individual viewing. The deprecated group-first z-score
-  model is retained only as an advanced comparison fallback. Later producers
-  may use LORETA/eLORETA volume or mixed source-space models.
+  model is retained only as an advanced comparison fallback. Phase 6H-A(3)
+  computes participant-first source-space cluster-permutation masks and stores
+  the significant source vertices in payload metadata for publication-style
+  display. Later producers may use LORETA/eLORETA volume or mixed source-space
+  models.
 - `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
   the expected output shape for future source-localization producers. They are
   format examples only and are not source estimates. This directory also holds
@@ -290,6 +293,10 @@ payload with:
   `cortical_surface`, or a future method-specific label;
 - optional VTK-style `faces` for mesh payloads;
 - optional metadata that describes provenance without changing renderer logic.
+  For participant-first L2-MNE z-score payloads, metadata may include
+  `cluster_mask=source_space_cluster_permutation` and
+  `cluster_mask_vertex_indices` so the renderer can display only
+  producer-computed significant source vertices.
 
 If a future method changes from LORETA to another inverse model, the renderer
 should stay unchanged. The adapter/bridge should map the method output into this
@@ -336,9 +343,11 @@ fsaverage inflated hemispheres when available and pial split hemispheres as a
 fallback. The split display uses FreeSurfer `curv` gray-white underlay shading
 when available, `sulc` as a fallback, and geometry-derived shading as a final
 fallback. The alternate single-surface view paints the same values onto the
-combined pial mesh. Z-scores below the selected display cutoff are shown as the
-shaded cortex, and displayed z-scores use the same heatmap ramp as the
-transparent overlay view. The default display cutoff is `z >= 1.64`. The
+combined pial mesh. For participant-first maps with producer-computed
+cluster-permutation metadata, source vertices outside the significant cluster
+mask are shown as shaded cortex and retained positive z-scores use the same
+heatmap ramp as the transparent overlay view. Older unmasked payloads fall
+back to the manual display cutoff, whose default is `z >= 1.64`. The
 neighboring-bin policy mirrors the Stats-style FPVS neighboring-bin window by
 using offsets `-10..-2` and `+2..+10`, dropping the minimum and maximum
 neighboring source amplitude per source point before computing the source-space

@@ -70,9 +70,11 @@ less intense depending on the current color range.
 
 For beta L2-MNE project maps, the color scale shows the actual scalar range
 used for the current source map. When auto-scale is on, the min/max labels
-update from the loaded payload values after display-only cortical paint
-thresholding. Z-scores below the selected display cutoff are shown as the
-neutral gray cortex color.
+update from the loaded payload values after cortical paint masking. For
+regenerated participant-first maps, the primary mask is the producer-computed
+source-space cluster-permutation mask. Older unmasked maps fall back to the
+selected display cutoff. Hidden vertices are shown as the neutral gray cortex
+color.
 
 ## Inputs
 
@@ -241,17 +243,19 @@ FreeSurfer `curv` shading when available, `sulc` as a fallback, and a simple
 geometry-derived underlay if neither file is available. The same payload can
 also be shown on a single fsaverage pial surface or in the transparent mesh
 view. The signed z-score payload is still preserved in the generated JSON for
-QC, but in opaque split cortical paint mode values below the selected display
-threshold show the gray-white shaded cortex rather than activation colors. The
-default threshold is `z >= 1.64`. Source Map Options > Display provides preset
-cutoffs for `z >= 1.64`, `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and
-`z >= 3.89`. Values above the selected cutoff are painted on top with the same
-heatmap color ramp used by the transparent visualizer. This keeps the visible
-heatmap focused on stronger FPVS source responses without hiding the cortical
-surface.
+QC. Regenerated participant-first payloads include a source-space
+cluster-permutation mask, and opaque cortical paint mode uses that mask as the
+primary publication-style display. Source vertices outside significant clusters
+show the gray-white shaded cortex rather than activation colors. Older
+unmasked payloads fall back to the selected display threshold. The default
+threshold is `z >= 1.64`. Source Map Options > Display provides preset cutoffs
+for `z >= 1.64`, `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89`.
+Values retained by either the cluster mask or fallback cutoff are painted on
+top with the same heatmap color ramp used by the transparent visualizer.
 
-The threshold is a display mask only. It is not the same as the
-cluster-permutation significance mask used in Hauk-style publication figures.
+The threshold is a display mask only. The cluster-permutation mask is the
+statistical mask for current participant-first Hauk-style L2-MNE maps, and it
+is computed by the source producer before rendering.
 
 The cortical paint projection is display-only interpolation from the prepared
 source mesh onto pial/source-space projection coordinates. In the split
