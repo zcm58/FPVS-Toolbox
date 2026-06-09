@@ -10,6 +10,7 @@ import pytest
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.gui import (
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+    _project_source_export_failure_text,
     _source_export_status_text,
     default_project_zscore_manifest_path,
     resolve_loreta_import_start_dir,
@@ -208,6 +209,41 @@ def test_source_export_status_text_reports_flagged_participant_choice() -> None:
         automatic=True,
         include_flagged_subjects=False,
     ) == "Preparing project source-space z-score maps (excluding flagged participants)..."
+
+
+def test_project_source_export_failure_text_guides_stats_ready_prerequisites() -> None:
+    message = (
+        "Stats-ready workbook is required for selected harmonics: "
+        "D:\\FPVS Toolbox Project Root\\Project\\3 - Statistical Analysis Results\\Stats_Ready_Summed_BCA.xlsx"
+    )
+
+    text = _project_source_export_failure_text(message)
+
+    assert text.startswith("Project source maps are not ready yet.")
+    assert "Re-run preprocessing for this project" in text
+    assert "Export Stats-Ready Workbook" in text
+    assert "Details: Stats-ready workbook is required" in text
+
+
+def test_project_source_export_failure_text_guides_fullfft_prerequisites() -> None:
+    message = (
+        "Phase 6D source-space z-score mode requires the 'FullFFT Amplitude (uV)' sheet "
+        "in every included participant workbook. Missing in: SCP1_Condition_Results.xlsx."
+    )
+
+    text = _project_source_export_failure_text(message)
+
+    assert text.startswith("Project source maps are not ready yet.")
+    assert "Re-run preprocessing for this project" in text
+    assert "Export Stats-Ready Workbook" in text
+    assert "FullFFT Amplitude (uV)" in text
+
+
+def test_project_source_export_failure_text_preserves_unrecognized_error() -> None:
+    assert (
+        _project_source_export_failure_text("Unable to build MNE/fsaverage forward model")
+        == "Project source export failed: Unable to build MNE/fsaverage forward model"
+    )
 
 
 def test_source_points_use_native_coordinate_source_space_not_forward_head_space() -> None:

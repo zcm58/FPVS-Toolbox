@@ -296,6 +296,24 @@ def _source_export_status_text(
     return f"Building beta L2-MNE source JSON from the active project ({flag_text})..."
 
 
+def _project_source_export_failure_text(message: str) -> str:
+    detail = str(message).strip()
+    lowered = detail.lower()
+    if (
+        "stats-ready workbook" in lowered
+        or "harmonic_selection" in lowered
+        or "selected harmonics" in lowered
+        or "fullfft amplitude" in lowered
+        or "fullfft source z-score" in lowered
+    ):
+        return (
+            "Project source maps are not ready yet. Re-run preprocessing for this project, then open Stats and run "
+            "Export Stats-Ready Workbook before returning to LORETA Visualizer."
+            f" Details: {detail}"
+        )
+    return f"Project source export failed: {detail}"
+
+
 class SourceMapOptionsDialog(AppDialog):
     """Small modal for source-map rebuild and import options."""
 
@@ -1085,7 +1103,7 @@ class LoretaVisualizerWindow(QWidget):
             "loreta_project_source_maps_export_failed",
             extra={"error": message, "include_flagged_subjects": self._include_flagged_subjects},
         )
-        self.condition_status_label.setText(f"Project source export failed: {message}")
+        self.condition_status_label.setText(_project_source_export_failure_text(message))
 
     @Slot()
     def _project_source_export_finished(self) -> None:
