@@ -95,6 +95,17 @@ both whole-hemisphere and coordinate-defined LOT/ROT occipito-temporal ROI
 rows. It is a companion validation metric and must not replace the existing
 sensor-space BCA lateralization statistics.
 
+Phase 6H-A(5) makes the Hauk-style source laterality target
+Desikan-Killiany temporal label based instead of coordinate-box based. Project
+exports preserve fsaverage source vertex IDs and hemisphere labels, read
+fsaverage `aparc` labels, and emit a primary
+`desikan_killiany_temporal_hauk` ROI row from the combined inferior, middle,
+and superior temporal labels in each hemisphere. The coordinate LOT/ROT row
+remains only as a transparent QC/fallback row. Keep label reading and ROI
+masking in `source_producers/`; renderer, GUI, importer, and display helpers
+must not infer anatomical ROIs from actors, colors, screenshots, or display
+coordinates.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -209,10 +220,13 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   project FullFFT target/noise bins from the same flat or grouped workbook
   layouts, compute Hauk-style source-space z-scores, compute participant-first
   source-space cluster-permutation masks, write source-space lateralization
-  summary sidecars, and write project-local z-score prepared source JSON.
-  `source_lateralization.py` computes descriptive right/left source summaries
-  from already-computed source values; it must not estimate sources, perform
-  lateralization statistics, or inspect renderer state.
+  summary sidecars, preserve fsaverage source vertex identity for anatomical
+  ROI summaries, and write project-local z-score prepared source JSON.
+  `source_rois.py` maps named fsaverage anatomical label definitions, including
+  the Hauk-style Desikan-Killiany temporal ROI, onto already-computed source
+  spaces. `source_lateralization.py` computes descriptive right/left source
+  summaries from already-computed source values; it must not estimate sources,
+  perform lateralization statistics, or inspect renderer state.
 
 ## Boundary Rules
 

@@ -367,7 +367,7 @@ def test_source_points_use_native_coordinate_source_space_not_forward_head_space
         ),
     }
 
-    points, faces, counts = _surface_source_points_and_faces(
+    points, faces, counts, vertex_ids, hemispheres = _surface_source_points_and_faces(
         [forward_space],
         coordinate_source_spaces=[native_space],
     )
@@ -384,6 +384,8 @@ def test_source_points_use_native_coordinate_source_space_not_forward_head_space
     )
     assert np.array_equal(faces, np.asarray([[0, 1, 2]], dtype=np.int64))
     assert counts == (3,)
+    assert vertex_ids == (0, 1, 2)
+    assert hemispheres == ("lh", "lh", "lh")
 
 
 def _tiny_forward_model() -> L2MNECorticalForwardModel:

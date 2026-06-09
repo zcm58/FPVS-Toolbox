@@ -228,7 +228,7 @@ def build_mne_fsaverage_l2_mne_forward_model(
         raise ProjectL2MNEExportError(
             "MNE forward model channel order did not match the expected BioSemi64 order."
         )
-    source_points, faces, hemi_counts = _surface_source_points_and_faces(
+    source_points, faces, hemi_counts, source_vertex_ids, source_hemispheres = _surface_source_points_and_faces(
         loose_forward["src"],
         coordinate_source_spaces=src,
     )
@@ -272,9 +272,16 @@ def build_mne_fsaverage_l2_mne_forward_model(
             "source_points_unit": "FreeSurfer surface millimeters",
             "leadfield_shape": [int(leadfield.shape[0]), int(leadfield.shape[1])],
             "hemi_source_counts": list(hemi_counts),
+            "source_vertex_ids_by_hemi": _source_vertex_ids_by_hemi(
+                source_vertex_ids=source_vertex_ids,
+                source_hemispheres=source_hemispheres,
+            ),
+            "source_vertex_id_source": "MNE source-space vertno values",
             "subject_mri": "template fsaverage only",
         },
         source_estimator=source_estimator,
+        source_vertex_ids=source_vertex_ids,
+        source_hemispheres=source_hemispheres,
     )
 
 
@@ -444,15 +451,20 @@ def _surface_source_points_and_faces(  # noqa: ANN001
     source_spaces,
     *,
     coordinate_source_spaces=None,
-) -> tuple[np.ndarray, np.ndarray, tuple[int, ...]]:
+) -> tuple[np.ndarray, np.ndarray, tuple[int, ...], tuple[int, ...], tuple[str, ...]]:
     points_by_hemi: list[np.ndarray] = []
     faces_by_hemi: list[np.ndarray] = []
     source_counts: list[int] = []
+    source_vertex_ids: list[int] = []
+    source_hemispheres: list[str] = []
     offset = 0
     coordinate_spaces = source_spaces if coordinate_source_spaces is None else coordinate_source_spaces
     if len(coordinate_spaces) != len(source_spaces):
         raise ProjectL2MNEExportError("MNE source-space coordinate and forward spaces do not match by hemisphere.")
-    for source_space, coordinate_space in zip(source_spaces, coordinate_spaces, strict=True):
+    for hemi_index, (source_space, coordinate_space) in enumerate(
+        zip(source_spaces, coordinate_spaces, strict=True)
+    ):
+        hemi = "lh" if hemi_index == 0 else "rh"
         vertno = np.asarray(source_space["vertno"], dtype=np.int64)
         rr = np.asarray(coordinate_space["rr"], dtype=float)
         points = rr[vertno] * 1000.0
@@ -461,6 +473,8 @@ def _surface_source_points_and_faces(  # noqa: ANN001
             faces_by_hemi.append(faces + offset)
         points_by_hemi.append(points.astype(float))
         source_counts.append(int(len(points)))
+        source_vertex_ids.extend(int(vertex) for vertex in vertno)
+        source_hemispheres.extend([hemi] * len(vertno))
         offset += len(points)
 
     if not points_by_hemi:
@@ -469,7 +483,18 @@ def _surface_source_points_and_faces(  # noqa: ANN001
     if not faces_by_hemi:
         raise ProjectL2MNEExportError("MNE source space did not contain triangular cortical faces.")
     faces = np.vstack(faces_by_hemi).astype(np.int64)
-    return source_points, faces, tuple(source_counts)
+    return source_points, faces, tuple(source_counts), tuple(source_vertex_ids), tuple(source_hemispheres)
+
+
+def _source_vertex_ids_by_hemi(
+    *,
+    source_vertex_ids: Sequence[int],
+    source_hemispheres: Sequence[str],
+) -> dict[str, list[int]]:
+    result = {"lh": [], "rh": []}
+    for vertex_id, hemi in zip(source_vertex_ids, source_hemispheres, strict=True):
+        result[str(hemi)].append(int(vertex_id))
+    return result
 
 
 def _local_source_faces(source_space, *, vertno: np.ndarray) -> np.ndarray:  # noqa: ANN001

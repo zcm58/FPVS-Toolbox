@@ -81,6 +81,8 @@ class L2MNECorticalForwardModel:
     label: str = "fsaverage cortical surface"
     metadata: Mapping[str, Any] = field(default_factory=dict)
     source_estimator: Callable[..., Sequence[float] | np.ndarray] | None = None
+    source_vertex_ids: Sequence[int] | None = None
+    source_hemispheres: Sequence[str] | None = None
 
     def __post_init__(self) -> None:
         channels = tuple(_validate_channel_name(name) for name in self.channel_names)
@@ -104,6 +106,14 @@ class L2MNECorticalForwardModel:
                 f"({len(channels)} expected, got {leadfield.shape[0]})."
             )
         faces = _validate_triangle_faces(self.faces, point_count=len(points))
+        source_vertex_ids = _validate_optional_source_vertex_ids(
+            self.source_vertex_ids,
+            source_count=len(points),
+        )
+        source_hemispheres = _validate_optional_source_hemispheres(
+            self.source_hemispheres,
+            source_count=len(points),
+        )
         object.__setattr__(self, "channel_names", channels)
         object.__setattr__(self, "source_points", points)
         object.__setattr__(self, "leadfield", leadfield)
@@ -111,6 +121,8 @@ class L2MNECorticalForwardModel:
         object.__setattr__(self, "coordinate_space", _validate_label(self.coordinate_space, "coordinate_space"))
         object.__setattr__(self, "label", _validate_label(self.label, "label"))
         object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "source_vertex_ids", source_vertex_ids)
+        object.__setattr__(self, "source_hemispheres", source_hemispheres)
 
 
 @dataclass(frozen=True)
@@ -449,10 +461,36 @@ def _payload_metadata(
         "project_integration": "none",
         "renderer_dependency": "none",
     }
+    metadata.update(_source_identity_metadata(forward_model))
     metadata.update(_json_safe_metadata(forward_model.metadata, prefix="forward_model"))
     metadata.update(_json_safe_metadata(config.metadata, prefix="config"))
     metadata.update(_json_safe_metadata(condition.metadata, prefix="condition"))
     return metadata
+
+
+def _source_identity_metadata(forward_model: L2MNECorticalForwardModel) -> dict[str, Any]:
+    if forward_model.source_vertex_ids is None or forward_model.source_hemispheres is None:
+        return {
+            "source_vertex_identity": "unavailable",
+            "source_vertex_identity_note": (
+                "This payload does not preserve original fsaverage source vertex IDs; "
+                "label-based cortical ROI summaries cannot be computed from it."
+            ),
+        }
+    vertex_ids = [int(value) for value in forward_model.source_vertex_ids]
+    hemispheres = [str(value) for value in forward_model.source_hemispheres]
+    ids_by_hemi = {"lh": [], "rh": []}
+    indices_by_hemi = {"lh": [], "rh": []}
+    for index, (vertex_id, hemi) in enumerate(zip(vertex_ids, hemispheres, strict=True)):
+        ids_by_hemi[hemi].append(vertex_id)
+        indices_by_hemi[hemi].append(int(index))
+    return {
+        "source_vertex_identity": "fsaverage_vertno",
+        "source_vertex_ids": vertex_ids,
+        "source_hemispheres": hemispheres,
+        "source_vertex_ids_by_hemi": ids_by_hemi,
+        "source_indices_by_hemi": indices_by_hemi,
+    }
 
 
 def _fixture_condition(
@@ -638,6 +676,45 @@ def _validate_triangle_faces(values: np.ndarray, *, point_count: int) -> np.ndar
     if not np.all(faces >= 0) or int(np.max(faces)) >= point_count:
         raise ValueError("L2-MNE cortical surface faces must refer to existing source points.")
     return faces
+
+
+def _validate_optional_source_vertex_ids(
+    values: Sequence[int] | None,
+    *,
+    source_count: int,
+) -> tuple[int, ...] | None:
+    if values is None:
+        return None
+    ids = tuple(int(value) for value in values)
+    if len(ids) != source_count:
+        raise ValueError(
+            f"L2-MNE source vertex IDs must contain {source_count} entries; got {len(ids)}."
+        )
+    if any(value < 0 for value in ids):
+        raise ValueError("L2-MNE source vertex IDs must be non-negative.")
+    return ids
+
+
+def _validate_optional_source_hemispheres(
+    values: Sequence[str] | None,
+    *,
+    source_count: int,
+) -> tuple[str, ...] | None:
+    if values is None:
+        return None
+    hemispheres = tuple(_validate_hemisphere_label(value) for value in values)
+    if len(hemispheres) != source_count:
+        raise ValueError(
+            f"L2-MNE source hemisphere labels must contain {source_count} entries; got {len(hemispheres)}."
+        )
+    return hemispheres
+
+
+def _validate_hemisphere_label(value: str) -> str:
+    label = str(value).strip().lower()
+    if label not in {"lh", "rh"}:
+        raise ValueError("L2-MNE source hemisphere labels must be 'lh' or 'rh'.")
+    return label
 
 
 def _array_to_json_rows(values: np.ndarray) -> list[list[float]] | list[list[int]]:

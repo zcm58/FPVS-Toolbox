@@ -35,6 +35,7 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
     _referenced_leadfield,
     _round_harmonic,
     _slug,
+    _source_identity_metadata,
     _validate_harmonics,
     _validate_label,
 )
@@ -43,6 +44,10 @@ from Tools.LORETA_Visualizer.source_producers.source_lateralization import (
     DEFAULT_SOURCE_LATERALIZATION_JSON_NAME,
     build_source_lateralization_rows,
     write_source_lateralization_summary_files,
+)
+from Tools.LORETA_Visualizer.source_producers.source_rois import (
+    SourceRoiMaskPair,
+    desikan_killiany_temporal_hauk_roi,
 )
 
 logger = logging.getLogger(__name__)
@@ -760,6 +765,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
     participant_rows_by_condition: dict[str, tuple[L2MNEHaukParticipantZScoreValues, ...]] = {}
     cluster_results_by_condition: dict[str, L2MNEHaukClusterPermutationResult | None] = {}
     lateralization_rows: list[dict[str, Any]] = []
+    precomputed_lateralization_rois = _precomputed_lateralization_rois(forward_model)
     for condition_index, condition in enumerate(condition_list, start=1):
         _emit_progress(
             progress_callback,
@@ -850,6 +856,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
                 participant_values=participant_rows,
                 group_summaries=condition_summaries,
                 cluster_mask=None if cluster_result is None else cluster_result.mask,
+                precomputed_rois=precomputed_lateralization_rois,
             )
         )
 
@@ -884,6 +891,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
             "cluster_mask_method": (
                 CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP if config.cluster_mask_enabled else "none"
             ),
+            "desikan_killiany_temporal_roi": bool(precomputed_lateralization_rois),
             "summary_note": (
                 "Descriptive source-space lateralization companion metric. It does not replace "
                 "sensor-space BCA lateralization statistics."
@@ -934,6 +942,27 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
         lateralization_summary_path=lateralization_json_path,
         lateralization_summary_csv_path=lateralization_csv_path,
     )
+
+
+def _precomputed_lateralization_rois(
+    forward_model: L2MNECorticalForwardModel,
+) -> tuple[SourceRoiMaskPair, ...]:
+    if forward_model.source_vertex_ids is None or forward_model.source_hemispheres is None:
+        return ()
+    subjects_dir = forward_model.metadata.get("fsaverage_subjects_dir")
+    subject = str(forward_model.metadata.get("fsaverage_subject", "fsaverage"))
+    if not subjects_dir:
+        return ()
+    try:
+        roi = desikan_killiany_temporal_hauk_roi(
+            source_vertex_ids=forward_model.source_vertex_ids,
+            source_hemispheres=forward_model.source_hemispheres,
+            subjects_dir=str(subjects_dir),
+            subject=subject,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise ValueError(f"Unable to build Desikan-Killiany temporal source ROI: {exc}") from exc
+    return (roi,)
 
 
 def _source_amplitudes_from_topographies(
@@ -1293,6 +1322,7 @@ def _payload_metadata(
         "project_integration": "none",
         "renderer_dependency": "none",
     }
+    metadata.update(_source_identity_metadata(forward_model))
     metadata.update(_json_safe_metadata(forward_model.metadata, prefix="forward_model"))
     metadata.update(_json_safe_metadata(config.metadata, prefix="config"))
     metadata.update(_json_safe_metadata(condition.metadata, prefix="condition"))
@@ -1458,6 +1488,7 @@ def _participant_summary_payload_metadata(
         "renderer_dependency": "none",
     }
     metadata.update(_cluster_payload_metadata(cluster_result, config=config))
+    metadata.update(_source_identity_metadata(forward_model))
     metadata.update(_json_safe_metadata(forward_model.metadata, prefix="forward_model"))
     metadata.update(_json_safe_metadata(config.metadata, prefix="config"))
     metadata.update(_json_safe_metadata(condition.metadata, prefix="condition"))
@@ -1506,6 +1537,7 @@ def _participant_zscore_sidecar_payload(
         "metadata": {
             "selected_harmonics_hz": list(config.selected_harmonics_hz),
             "participant_level_values": True,
+            **_source_identity_metadata(forward_model),
             "cluster_mask": (
                 "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
             ),

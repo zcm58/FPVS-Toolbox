@@ -14,6 +14,11 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from Tools.LORETA_Visualizer.source_producers.source_rois import (
+    DESIKAN_KILLIANY_TEMPORAL_HAUK_ROI_ID,
+    SourceRoiMaskPair,
+)
+
 SOURCE_LATERALIZATION_SUMMARY_FORMAT = "fpvs_loreta_source_lateralization_summary_v1"
 DEFAULT_SOURCE_LATERALIZATION_JSON_NAME = "source_lateralization_summary.json"
 DEFAULT_SOURCE_LATERALIZATION_CSV_NAME = "source_lateralization_summary.csv"
@@ -21,6 +26,7 @@ SOURCE_LATERALIZATION_MASK_CLUSTER = "source_space_cluster_permutation"
 SOURCE_LATERALIZATION_MASK_POSITIVE_FALLBACK = "positive_z_fallback"
 SOURCE_LATERALIZATION_VALUE_POLICY = "positive_z_magnitude"
 SOURCE_LATERALIZATION_INDEX_FORMULA = "(right_sum_positive_z - left_sum_positive_z) / (right_sum_positive_z + left_sum_positive_z)"
+SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK = DESIKAN_KILLIANY_TEMPORAL_HAUK_ROI_ID
 SOURCE_LATERALIZATION_ROI_WHOLE_HEMISPHERE = "whole_hemisphere"
 SOURCE_LATERALIZATION_ROI_OCCIPITOTEMPORAL_LOT_ROT = "occipitotemporal_lot_rot"
 DEFAULT_SOURCE_LATERALIZATION_ROIS = (
@@ -42,6 +48,13 @@ SOURCE_LATERALIZATION_ROI_DEFINITIONS = {
         "y_max_mm": -35.0,
         "z_max_mm": 35.0,
     },
+    SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK: {
+        "label": "Desikan-Killiany inferior/middle/superior temporal",
+        "definition": (
+            "FreeSurfer fsaverage aparc labels inferiortemporal, middletemporal, "
+            "and superiortemporal in each hemisphere"
+        ),
+    },
 }
 
 _CSV_FIELDS = (
@@ -50,6 +63,7 @@ _CSV_FIELDS = (
     "roi_id",
     "roi_label",
     "roi_definition",
+    "roi_source",
     "map_type",
     "participant_id",
     "aggregation",
@@ -77,6 +91,7 @@ def build_source_lateralization_rows(
     participant_values: Sequence[Any],
     group_summaries: Sequence[Any],
     cluster_mask: Sequence[bool] | np.ndarray | None,
+    precomputed_rois: Sequence[SourceRoiMaskPair] = (),
     roi_ids: Sequence[str] = DEFAULT_SOURCE_LATERALIZATION_ROIS,
     midline_tolerance: float = 0.0,
 ) -> list[dict[str, Any]]:
@@ -91,46 +106,101 @@ def build_source_lateralization_rows(
     rows: list[dict[str, Any]] = []
     mask = _validate_cluster_mask(cluster_mask, source_count=len(points))
 
+    for roi in precomputed_rois:
+        rows.extend(
+            _rows_for_roi(
+                source_count=len(points),
+                condition_id=condition_id,
+                condition_label=condition_label,
+                participant_values=participant_values,
+                group_summaries=group_summaries,
+                cluster_mask=mask,
+                roi_id=roi.roi_id,
+                roi_label=roi.label,
+                roi_definition=roi.definition,
+                roi_source=str(roi.metadata.get("roi_source", "precomputed")),
+                left_mask=roi.left_mask,
+                right_mask=roi.right_mask,
+            )
+        )
+
     for roi_id in roi_ids:
         roi = _roi_masks(points, roi_id=roi_id, midline_tolerance=midline_tolerance)
-        for participant in participant_values:
-            rows.append(
-                _source_lateralization_row(
-                    source_values=getattr(participant, "values"),
-                    source_count=len(points),
-                    condition_id=condition_id,
-                    condition_label=condition_label,
-                    roi_id=roi["id"],
-                    roi_label=roi["label"],
-                    roi_definition=roi["definition"],
-                    map_type="participant",
-                    participant_id=str(getattr(participant, "participant_id")),
-                    aggregation="participant",
-                    left_mask=roi["left_mask"],
-                    right_mask=roi["right_mask"],
-                    cluster_mask=mask,
-                )
+        rows.extend(
+            _rows_for_roi(
+                source_count=len(points),
+                condition_id=condition_id,
+                condition_label=condition_label,
+                participant_values=participant_values,
+                group_summaries=group_summaries,
+                cluster_mask=mask,
+                roi_id=roi["id"],
+                roi_label=roi["label"],
+                roi_definition=roi["definition"],
+                roi_source=roi["source"],
+                left_mask=roi["left_mask"],
+                right_mask=roi["right_mask"],
             )
+        )
 
-        for summary in group_summaries:
-            rows.append(
-                _source_lateralization_row(
-                    source_values=getattr(summary, "values"),
-                    source_count=len(points),
-                    condition_id=condition_id,
-                    condition_label=condition_label,
-                    roi_id=roi["id"],
-                    roi_label=roi["label"],
-                    roi_definition=roi["definition"],
-                    map_type="group_summary",
-                    participant_id="",
-                    aggregation=str(getattr(summary, "aggregation")),
-                    left_mask=roi["left_mask"],
-                    right_mask=roi["right_mask"],
-                    cluster_mask=mask,
-                )
+    return rows
+
+
+def _rows_for_roi(
+    *,
+    source_count: int,
+    condition_id: str,
+    condition_label: str,
+    participant_values: Sequence[Any],
+    group_summaries: Sequence[Any],
+    cluster_mask: np.ndarray | None,
+    roi_id: str,
+    roi_label: str,
+    roi_definition: str,
+    roi_source: str,
+    left_mask: np.ndarray,
+    right_mask: np.ndarray,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for participant in participant_values:
+        rows.append(
+            _source_lateralization_row(
+                source_values=getattr(participant, "values"),
+                source_count=source_count,
+                condition_id=condition_id,
+                condition_label=condition_label,
+                roi_id=roi_id,
+                roi_label=roi_label,
+                roi_definition=roi_definition,
+                roi_source=roi_source,
+                map_type="participant",
+                participant_id=str(getattr(participant, "participant_id")),
+                aggregation="participant",
+                left_mask=left_mask,
+                right_mask=right_mask,
+                cluster_mask=cluster_mask,
             )
+        )
 
+    for summary in group_summaries:
+        rows.append(
+            _source_lateralization_row(
+                source_values=getattr(summary, "values"),
+                source_count=source_count,
+                condition_id=condition_id,
+                condition_label=condition_label,
+                roi_id=roi_id,
+                roi_label=roi_label,
+                roi_definition=roi_definition,
+                roi_source=roi_source,
+                map_type="group_summary",
+                participant_id="",
+                aggregation=str(getattr(summary, "aggregation")),
+                left_mask=left_mask,
+                right_mask=right_mask,
+                cluster_mask=cluster_mask,
+            )
+        )
     return rows
 
 
@@ -180,6 +250,7 @@ def _source_lateralization_row(
     roi_id: str,
     roi_label: str,
     roi_definition: str,
+    roi_source: str,
     map_type: str,
     participant_id: str,
     aggregation: str,
@@ -211,6 +282,7 @@ def _source_lateralization_row(
         "roi_id": roi_id,
         "roi_label": roi_label,
         "roi_definition": roi_definition,
+        "roi_source": roi_source,
         "map_type": map_type,
         "participant_id": participant_id,
         "aggregation": aggregation,
@@ -257,6 +329,7 @@ def _roi_masks(
         "id": roi_key,
         "label": str(definition["label"]),
         "definition": str(definition["definition"]),
+        "source": "coordinate_rule",
         "left_mask": roi_mask & (points[:, 0] < -midline),
         "right_mask": roi_mask & (points[:, 0] > midline),
     }

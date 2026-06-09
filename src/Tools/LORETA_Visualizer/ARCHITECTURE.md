@@ -239,12 +239,20 @@ compact rebuild summaries, but source-estimation math still belongs only to
   the significant source vertices in payload metadata for publication-style
   display. Phase 6H-A(4) writes a descriptive source-space lateralization
   summary from already-computed participant/group maps and producer masks.
+  Phase 6H-A(5) preserves fsaverage source vertex IDs and hemisphere labels,
+  reads fsaverage Desikan-Killiany `aparc` temporal labels, and writes the
+  primary Hauk-style inferior/middle/superior temporal ROI lateralization rows.
   Later producers may use LORETA/eLORETA volume or mixed source-space models.
+- `source_rois.py`: producer-side anatomical ROI helpers that map named
+  fsaverage label definitions onto already-computed source spaces using stable
+  source vertex IDs and hemisphere labels. It must not estimate sources, render
+  payloads, or perform statistics.
 - `source_lateralization.py`: producer-side descriptive summaries of
   right/left source activation from already-computed source values. It may use
-  producer-provided masks and may emit coordinate-defined whole-hemisphere and
-  LOT/ROT occipito-temporal ROI rows, but it must not run inverse estimation,
-  perform inferential lateralization tests, or inspect renderer state.
+  producer-provided masks, precomputed anatomical ROIs from `source_rois.py`,
+  and coordinate-defined whole-hemisphere/LOT-ROT QC rows, but it must not run
+  inverse estimation, perform inferential lateralization tests, or inspect
+  renderer state.
 - `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
   the expected output shape for future source-localization producers. They are
   format examples only and are not source estimates. This directory also holds

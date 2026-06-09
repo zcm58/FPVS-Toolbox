@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from Tools.LORETA_Visualizer.source_producers.source_lateralization import (
+    SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK,
     SOURCE_LATERALIZATION_ROI_OCCIPITOTEMPORAL_LOT_ROT,
     SOURCE_LATERALIZATION_ROI_WHOLE_HEMISPHERE,
     SOURCE_LATERALIZATION_MASK_CLUSTER,
@@ -15,6 +16,7 @@ from Tools.LORETA_Visualizer.source_producers.source_lateralization import (
     build_source_lateralization_rows,
     write_source_lateralization_summary_files,
 )
+from Tools.LORETA_Visualizer.source_producers.source_rois import SourceRoiMaskPair
 
 
 @dataclass(frozen=True)
@@ -106,3 +108,37 @@ def test_source_lateralization_writer_emits_json_and_csv(tmp_path) -> None:
         csv_rows = list(csv.DictReader(handle))
     assert csv_rows[0]["condition_label"] == "Color Response"
     assert csv_rows[0]["lateralization_index_sum"] == "0.5"
+
+
+def test_source_lateralization_emits_precomputed_desikan_killiany_roi_first() -> None:
+    rows = build_source_lateralization_rows(
+        source_points=np.asarray(
+            [
+                [-1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        condition_id="semantic_response",
+        condition_label="Semantic Response",
+        participant_values=(
+            _ParticipantMap("P1", np.asarray([2.0, 6.0], dtype=float)),
+        ),
+        group_summaries=(),
+        cluster_mask=np.asarray([True, True], dtype=bool),
+        precomputed_rois=(
+            SourceRoiMaskPair(
+                roi_id=SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK,
+                label="DK temporal",
+                definition="test",
+                left_mask=np.asarray([True, False], dtype=bool),
+                right_mask=np.asarray([False, True], dtype=bool),
+                metadata={"roi_source": "fsaverage_aparc_desikan_killiany"},
+            ),
+        ),
+    )
+
+    assert rows[0]["roi_id"] == SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK
+    assert rows[0]["roi_source"] == "fsaverage_aparc_desikan_killiany"
+    assert rows[0]["lateralization_index_sum"] == pytest.approx(0.5)
+    assert rows[1]["roi_id"] == SOURCE_LATERALIZATION_ROI_WHOLE_HEMISPHERE

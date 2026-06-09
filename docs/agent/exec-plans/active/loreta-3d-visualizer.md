@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, Phase 6G, Phase 6H-A(1), Phase 6H-A(2), Phase 6H-A(3), and Phase 6H-A(4) are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling, builds real-project Hauk z-score maps through MNE-native L2-MNE with loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`, defaults Hauk-style real-project z-score generation to participant-first source maps with raw mean, median, and 20% trimmed-mean group summaries, writes source-space cluster-permutation masks for participant-first L2-MNE publication maps, and now writes descriptive source-space lateralization summary sidecars.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, Phase 6G, Phase 6H-A(1), Phase 6H-A(2), Phase 6H-A(3), Phase 6H-A(4), and Phase 6H-A(5) are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling, builds real-project Hauk z-score maps through MNE-native L2-MNE with loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`, defaults Hauk-style real-project z-score generation to participant-first source maps with raw mean, median, and 20% trimmed-mean group summaries, writes source-space cluster-permutation masks for participant-first L2-MNE publication maps, writes descriptive source-space lateralization summary sidecars, and now emits Hauk-style Desikan-Killiany inferior/middle/superior temporal ROI lateralization rows from fsaverage `aparc` labels.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -39,7 +39,12 @@ older group-first model as a deprecated advanced fallback. Phase 6H-A(3)
 computes a one-sample positive-tail sign-flip source-space
 cluster-permutation mask from participant z-score maps and stores the
 significant source vertices in prepared payload metadata for publication-style
-L2-MNE display.
+L2-MNE display. Phase 6H-A(4) writes producer-side descriptive source-space
+lateralization CSV/JSON sidecars for participant and group-summary maps.
+Phase 6H-A(5) preserves fsaverage source-space vertex IDs and hemisphere
+labels, maps the Desikan-Killiany inferior, middle, and superior temporal
+labels onto the source mesh, and emits the Hauk-style temporal-lobe
+lateralization rows as the primary source-space laterality summary.
 Post-6G hardening adds durable root-local fsaverage cache behavior, skips stale
 unsafe generic MNE fsaverage config paths, reads project workbooks from both
 flat condition folders and condition/group subfolders, surfaces clear
@@ -70,11 +75,14 @@ participant-first source-map generation and group summaries, and Phase
 publication-style cortical display. Phase 6H-A(4) adds descriptive
 whole-hemisphere and coordinate-defined LOT/ROT source-space lateralization
 summaries so source maps can be compared against known sensor-space BCA
-lateralization results without changing the renderer. The next recommended
-development slice is manual scientific validation of masked maps against scalp
-maps, unmasked maps, source-space lateralization summaries, and the deprecated
-group-first output before expanding cluster controls or adding another source
-method.
+lateralization results without changing the renderer. Phase 6H-A(5) replaces
+the coordinate-defined LOT/ROT approximation as the Hauk-style target by
+adding Desikan-Killiany temporal label masks from fsaverage `aparc`; the older
+coordinate LOT/ROT row remains as a transparent QC/fallback row. The next
+recommended development slice is manual scientific validation of masked maps
+against scalp maps, unmasked maps, source-space lateralization summaries, and
+the deprecated group-first output before expanding cluster controls or adding
+another source method.
 
 ## Date
 
@@ -1164,8 +1172,8 @@ Implemented scope:
 
 ### Phase 6H: Manual Scientific Validation And Comparison
 
-Status: Started. Phase 6H-A(1), Phase 6H-A(2), Phase 6H-A(3), and Phase 6H-A(4) are
-implemented.
+Status: Started. Phase 6H-A(1), Phase 6H-A(2), Phase 6H-A(3), Phase 6H-A(4),
+and Phase 6H-A(5) are implemented.
 
 Objective:
 
@@ -1443,6 +1451,65 @@ Done means:
   propagation.
 - Compile, ruff, focused `tests/loreta`, GUI import audit, project-path audit,
   protected-edit/source-localization audits, and a documented visible manual
+  smoke path pass. Do not run offscreen Qt tests locally.
+
+#### Phase 6H-A(5): Hauk-Style Desikan-Killiany Temporal Laterality
+
+Status: Implemented.
+
+Objective:
+
+- Replace the coordinate-defined LOT/ROT approximation as the Hauk-style
+  source laterality target with a Desikan-Killiany temporal-lobe ROI matching
+  the published description: inferior, middle, and superior temporal labels in
+  the left and right hemispheres.
+- Preserve the calculation/rendering boundary. Anatomical ROI masking belongs
+  in `source_producers/`, and the renderer must not infer laterality from
+  display actors, colors, camera orientation, screenshots, or interpolated
+  display meshes.
+
+Implemented scope:
+
+- `project_l2_mne_export.py` preserves the MNE/fsaverage source-space vertex
+  IDs and hemisphere labels when building the template cortical source space.
+- `l2_mne_cortical.py` stores optional source vertex identity metadata in
+  prepared source payload metadata without changing source values.
+- `source_rois.py` reads fsaverage `aparc` labels through MNE/FreeSurfer and
+  maps the `inferiortemporal`, `middletemporal`, and `superiortemporal` labels
+  onto the current source-space vertices for each hemisphere.
+- `source_lateralization.py` can prepend precomputed anatomical ROI rows before
+  the existing coordinate-defined QC rows.
+- `l2_mne_hauk_zscore.py` builds the Desikan-Killiany temporal ROI once per
+  source model and includes `desikan_killiany_temporal_hauk` rows in the JSON
+  and CSV source lateralization sidecars.
+- Semantic Categories source maps were regenerated so the project-local
+  sidecars include the new Hauk-style temporal ROI rows.
+
+Locked decisions:
+
+- The Hauk-style source laterality row is
+  `desikan_killiany_temporal_hauk`.
+- The coordinate-defined `occipitotemporal_lot_rot` row remains available only
+  as a transparent QC/fallback comparison and should not be described as the
+  Hauk-style manuscript method.
+- Values remain positive z-score magnitudes within the producer's source-space
+  cluster mask, matching the current publication-style positive-response map
+  interpretation.
+- The ROI is fsaverage-template based. Subject-specific anatomical ROIs remain
+  future work because this workflow does not yet use individual MRIs.
+
+Done means:
+
+- Regenerated project source outputs include `desikan_killiany_temporal_hauk`
+  rows in `source_lateralization_summary.csv` and
+  `source_lateralization_summary.json`.
+- Focused tests verify source vertex identity propagation, label-to-source
+  mask construction, and Hauk-style ROI row emission.
+- User and agent docs explain the ROI labels, source of the anatomical
+  parcellation, formula/sign convention, value policy, and relationship to the
+  older coordinate LOT/ROT QC row.
+- Compile, ruff, focused `tests/loreta`, GUI import audit, project-path audit,
+  protected-edit/source-localization audits, and a documented visible/manual
   smoke path pass. Do not run offscreen Qt tests locally.
 
 ## Integration Safety

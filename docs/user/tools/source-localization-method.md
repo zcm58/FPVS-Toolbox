@@ -34,6 +34,8 @@ normalization, and `lambda2 = 1 / 9` for SNR = 3.
   obtained with fast periodic visual stimulation (FPVS)*, Imaging Neuroscience,
   3, imag_a_00414.
   DOI: [10.1162/imag_a_00414](https://doi.org/10.1162/imag_a_00414)
+- FreeSurfer Desikan-Killiany cortical parcellation reference:
+  [CorticalParcellation](https://surfer.nmr.mgh.harvard.edu/fswiki/CorticalParcellation)
 
 ## Inputs
 
@@ -86,7 +88,8 @@ For each condition:
 9. Compute a source-space cluster-permutation mask from participant z-score
    maps.
 10. Compute descriptive source-space lateralization summaries for each
-    participant and group summary map.
+    participant and group summary map, including the Hauk-style
+    Desikan-Killiany temporal ROI.
 11. Write prepared group-summary source JSON payloads plus a manifest and a
    participant-level sidecar for future individual viewing.
 
@@ -195,21 +198,56 @@ magnitudes within left and right source vertices. Vertices outside the
 significant source cluster are not counted. If an older unmasked payload is
 summarized, the fallback is positive z-score source values.
 
-The summary currently writes two ROI scopes:
+The primary Hauk-style source-lateralization ROI is:
+
+- `desikan_killiany_temporal_hauk`: the FreeSurfer/fsaverage
+  Desikan-Killiany `aparc` temporal labels used for the Hauk-style check:
+  `inferiortemporal`, `middletemporal`, and `superiortemporal`, combined
+  separately in the left and right hemispheres.
+
+The project exporter preserves the MNE/fsaverage source-space vertex IDs and
+hemisphere labels, reads the fsaverage `aparc` annotation, maps those label
+vertices onto the current source mesh, and then collapses positive
+cluster-masked source z-score magnitudes within the left and right temporal
+ROIs. This follows the Hauk-style idea of collapsing z-scores across most of
+the temporal lobe, while still using this toolbox's EEG-only fsaverage-template
+model.
+
+The summary also writes two QC/fallback ROI scopes:
 
 - `whole_hemisphere`: all source vertices split by source-space x coordinate.
-- `occipitotemporal_lot_rot`: an approximate LOT/ROT source ROI using
+- `occipitotemporal_lot_rot`: the earlier approximate LOT/ROT source ROI using
   posterior lateral occipito-temporal source coordinates:
   `abs(x) >= 20 mm`, `y <= -35 mm`, and `z <= 35 mm`.
 
-For both scopes, x < 0 is left, x > 0 is right, and midline source points are
-ignored. The LOT/ROT ROI is coordinate-defined because the current prepared
-payload stores source coordinates but not original FreeSurfer vertex IDs. A
-future label-based ROI could use fsaverage anatomical labels if the source
-payload contract adds stable source-vertex identifiers.
+For the coordinate-defined fallback scopes, x < 0 is left, x > 0 is right, and
+midline source points are ignored. Prefer the Desikan-Killiany temporal ROI for
+Hauk-style source-space laterality reporting; use coordinate LOT/ROT rows only
+as a transparent QC comparison.
 
 This is a descriptive source-estimate check, not a formal source-space
 lateralization statistical test.
+
+## Methods summary for reporting
+
+For the current beta source-localization workflow, FPVS source maps are
+estimated from condition-specific frequency-domain EEG topographies using an
+fsaverage-template cortical surface and MNE-native L2 minimum-norm estimation
+(`method="MNE"`, loose orientation `0.2`, no depth weighting, no
+dSPM/sLORETA/eLORETA noise normalization, `lambda2 = 1 / 9`). For each
+included participant, target oddball harmonic topographies and neighboring-bin
+topographies are projected through the same inverse model. Source estimates
+are summed across the Stats-selected significant oddball harmonics, then each
+source vertex is converted to a z-score relative to neighboring-bin source
+activity after excluding the minimum and maximum neighboring values.
+Participant z-score maps are combined into group raw mean, median, and 20%
+trimmed-mean maps. Publication-style displays use a one-sample positive-tail
+source-space sign-flip cluster-permutation mask against zero. Source-space
+laterality is summarized descriptively by collapsing positive cluster-masked
+z-score magnitudes within the fsaverage Desikan-Killiany inferior, middle, and
+superior temporal labels in the left and right hemispheres and computing
+`(Right - Left) / (Right + Left)`, where positive values indicate greater
+right-hemisphere source activation.
 
 ## What this method is not
 

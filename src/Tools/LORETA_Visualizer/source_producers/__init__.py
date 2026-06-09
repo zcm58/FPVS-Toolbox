@@ -71,8 +71,15 @@ if TYPE_CHECKING:
     )
     from Tools.LORETA_Visualizer.source_producers.source_lateralization import (
         SOURCE_LATERALIZATION_SUMMARY_FORMAT,
+        SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK,
         build_source_lateralization_rows,
         write_source_lateralization_summary_files,
+    )
+    from Tools.LORETA_Visualizer.source_producers.source_rois import (
+        DESIKAN_KILLIANY_TEMPORAL_HAUK_ROI_ID,
+        SourceRoiMaskPair,
+        desikan_killiany_temporal_hauk_roi,
+        desikan_killiany_temporal_hauk_roi_from_label_vertices,
     )
 
 _L2_MNE_EXPORTS = {
@@ -130,8 +137,15 @@ _PROJECT_HAUK_ZSCORE_EXPORTS = {
 }
 _SOURCE_LATERALIZATION_EXPORTS = {
     "SOURCE_LATERALIZATION_SUMMARY_FORMAT",
+    "SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK",
     "build_source_lateralization_rows",
     "write_source_lateralization_summary_files",
+}
+_SOURCE_ROI_EXPORTS = {
+    "DESIKAN_KILLIANY_TEMPORAL_HAUK_ROI_ID",
+    "SourceRoiMaskPair",
+    "desikan_killiany_temporal_hauk_roi",
+    "desikan_killiany_temporal_hauk_roi_from_label_vertices",
 }
 
 __all__ = [
@@ -155,7 +169,10 @@ __all__ = [
     "ProjectParticipantSourceFrequencyBinInputSet",
     "ProjectSourceFrequencyBinInputSet",
     "ProjectSourceTopographyInputSet",
+    "DESIKAN_KILLIANY_TEMPORAL_HAUK_ROI_ID",
     "SOURCE_LATERALIZATION_SUMMARY_FORMAT",
+    "SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK",
+    "SourceRoiMaskPair",
     "SourceProducerRunResult",
     "build_l2_mne_hauk_participant_zscore_conditions_from_project",
     "build_l2_mne_hauk_participant_zscore_summary_payload",
@@ -181,6 +198,8 @@ __all__ = [
     "write_l2_mne_cortical_surface_fixture",
     "write_l2_mne_cortical_surface_payloads",
     "write_source_lateralization_summary_files",
+    "desikan_killiany_temporal_hauk_roi",
+    "desikan_killiany_temporal_hauk_roi_from_label_vertices",
 ]
 
 
@@ -221,4 +240,9 @@ def __getattr__(name: str) -> Any:
             "Tools.LORETA_Visualizer.source_producers.source_lateralization"
         )
         return getattr(source_lateralization, name)
+    if name in _SOURCE_ROI_EXPORTS:
+        source_rois = importlib.import_module(
+            "Tools.LORETA_Visualizer.source_producers.source_rois"
+        )
+        return getattr(source_rois, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
