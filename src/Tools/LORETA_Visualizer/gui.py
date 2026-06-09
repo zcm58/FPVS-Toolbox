@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -206,6 +207,63 @@ def default_project_zscore_manifest_path(project_root: Path | None) -> Path | No
         / DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME
     )
     return manifest_path if manifest_path.is_file() else None
+
+
+def default_split_svg_export_path(
+    *,
+    project_root: Path | None,
+    last_import_dir: Path | None,
+    condition_label: str,
+) -> str:
+    """Return a helpful default path for publication split SVG exports."""
+    start_dir_text = resolve_loreta_import_start_dir(
+        project_root=project_root,
+        last_import_dir=last_import_dir,
+    )
+    stem = _safe_export_stem(f"loreta_split_hemispheres_{condition_label}")
+    if start_dir_text:
+        return str(Path(start_dir_text) / f"{stem}.svg")
+    return f"{stem}.svg"
+
+
+def default_stacked_split_svg_export_path(
+    *,
+    project_root: Path | None,
+    last_import_dir: Path | None,
+    top_condition_label: str,
+    bottom_condition_label: str,
+) -> str:
+    """Return a helpful default path for stacked publication split SVG exports."""
+    top_code = split_svg_condition_code(top_condition_label)
+    bottom_code = split_svg_condition_code(bottom_condition_label)
+    start_dir_text = resolve_loreta_import_start_dir(
+        project_root=project_root,
+        last_import_dir=last_import_dir,
+    )
+    stem = _safe_export_stem(f"loreta_split_hemispheres_{top_code}_{bottom_code}")
+    if start_dir_text:
+        return str(Path(start_dir_text) / f"{stem}.svg")
+    return f"{stem}.svg"
+
+
+def split_svg_condition_code(condition_label: str) -> str:
+    """Return the compact condition code used in stacked split-hemisphere figures."""
+    label = str(condition_label).strip()
+    lowered = label.lower()
+    if "color response" in lowered:
+        return "CR"
+    if "semantic response" in lowered:
+        return "SR"
+    words = re.findall(r"[A-Za-z0-9]+", label)
+    if not words:
+        return "MAP"
+    return "".join(word[0] for word in words[:3]).upper()
+
+
+def _safe_export_stem(text: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text).strip())
+    stem = re.sub(r"_+", "_", stem).strip("._-")
+    return stem or "loreta_split_hemispheres"
 
 
 def _coerce_existing_project_root(value: object) -> Path | None:
@@ -521,6 +579,76 @@ class SourceMapOptionsDialog(AppDialog):
             self._syncing_threshold_controls = False
 
 
+class StackedSplitSvgExportDialog(AppDialog):
+    """Modal for choosing the two conditions in a stacked split-hemisphere SVG."""
+
+    def __init__(
+        self,
+        parent: QWidget,
+        *,
+        condition_options: tuple[tuple[str, str], ...],
+        current_condition_id: str,
+    ) -> None:
+        super().__init__("Export Stacked Split SVG", parent, size=SurfaceSize(width=420, height=220, min_width=380))
+        self._condition_options = condition_options
+
+        top_label = QLabel("Top panel", self)
+        top_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.root_layout.addWidget(top_label)
+        self.top_condition_combo = QComboBox(self)
+        self.top_condition_combo.setObjectName("loreta_stack_export_top_condition_combo")
+        self.root_layout.addWidget(self.top_condition_combo)
+
+        bottom_label = QLabel("Bottom panel", self)
+        bottom_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.root_layout.addWidget(bottom_label)
+        self.bottom_condition_combo = QComboBox(self)
+        self.bottom_condition_combo.setObjectName("loreta_stack_export_bottom_condition_combo")
+        self.root_layout.addWidget(self.bottom_condition_combo)
+
+        for condition_id, label in condition_options:
+            self.top_condition_combo.addItem(label, condition_id)
+            self.bottom_condition_combo.addItem(label, condition_id)
+        self._set_default_indices(current_condition_id)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        self.root_layout.addWidget(buttons)
+
+    def selected_conditions(self) -> tuple[tuple[str, str], tuple[str, str]]:
+        top_index = self.top_condition_combo.currentIndex()
+        bottom_index = self.bottom_condition_combo.currentIndex()
+        return self._condition_options[top_index], self._condition_options[bottom_index]
+
+    def _set_default_indices(self, current_condition_id: str) -> None:
+        top_index = self._find_condition_index("color response")
+        bottom_index = self._find_condition_index("semantic response")
+        current_index = self._find_condition_id_index(current_condition_id)
+        if top_index < 0:
+            top_index = current_index if current_index >= 0 else 0
+        if bottom_index < 0 or bottom_index == top_index:
+            bottom_index = 1 if len(self._condition_options) > 1 and top_index != 1 else 0
+        self.top_condition_combo.setCurrentIndex(max(0, top_index))
+        self.bottom_condition_combo.setCurrentIndex(max(0, bottom_index))
+
+    def _find_condition_index(self, phrase: str) -> int:
+        needle = phrase.lower()
+        for index, (_condition_id, label) in enumerate(self._condition_options):
+            if needle in label.lower():
+                return index
+        return -1
+
+    def _find_condition_id_index(self, condition_id: str) -> int:
+        for index, (candidate_id, _label) in enumerate(self._condition_options):
+            if candidate_id == condition_id:
+                return index
+        return -1
+
+
 class LoretaVisualizerWindow(QWidget):
     """Embedded workspace page for Phase 1 real-time brain rendering."""
 
@@ -797,6 +925,22 @@ class LoretaVisualizerWindow(QWidget):
         self.reset_camera_btn.clicked.connect(self._reset_camera)
         controls.content_layout.addWidget(self.reset_camera_btn)
 
+        self.export_split_svg_btn = make_action_button("Export Split SVG...", compact=True, parent=controls)
+        self.export_split_svg_btn.setObjectName("loreta_export_split_svg_btn")
+        self.export_split_svg_btn.setToolTip(
+            "Export the current publication split-hemisphere view as a transparent SVG."
+        )
+        self.export_split_svg_btn.clicked.connect(self._export_split_hemisphere_svg)
+        controls.content_layout.addWidget(self.export_split_svg_btn)
+
+        self.export_stacked_split_svg_btn = make_action_button("Export Stack SVG...", compact=True, parent=controls)
+        self.export_stacked_split_svg_btn.setObjectName("loreta_export_stacked_split_svg_btn")
+        self.export_stacked_split_svg_btn.setToolTip(
+            "Export two split-hemisphere conditions as one transparent SVG."
+        )
+        self.export_stacked_split_svg_btn.clicked.connect(self._export_stacked_split_hemisphere_svg)
+        controls.content_layout.addWidget(self.export_stacked_split_svg_btn)
+
         self.source_options_btn = make_action_button("Source Map Options...", compact=True, parent=controls)
         self.source_options_btn.setObjectName("loreta_source_options_btn")
         self.source_options_btn.setToolTip("Open source-map rebuild, import, and participant QC options.")
@@ -844,6 +988,8 @@ class LoretaVisualizerWindow(QWidget):
         self.display_mode_combo.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
+        self.export_split_svg_btn.setEnabled(enabled)
+        self.export_stacked_split_svg_btn.setEnabled(enabled)
         self.source_options_btn.setEnabled(enabled)
         self._sync_activation_render_mode_controls()
         self._sync_project_source_button()
@@ -988,6 +1134,202 @@ class LoretaVisualizerWindow(QWidget):
     def _reset_camera(self) -> None:
         if self.renderer is not None:
             self.renderer.reset_camera()
+
+    def _export_split_hemisphere_svg(self) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        if renderer.display_mode() != DISPLAY_MODE_SPLIT_HEMISPHERE or not renderer.can_export_split_hemisphere_svg():
+            self._set_source_export_status(
+                "Switch to Publication split hemispheres with a loaded source map before exporting SVG.",
+                variant="warning",
+            )
+            return
+        project_root = self._refresh_project_root()
+        default_path = default_split_svg_export_path(
+            project_root=project_root,
+            last_import_dir=self._last_import_dir,
+            condition_label=self._selected_condition_label(),
+        )
+        file_name, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export publication split hemisphere SVG",
+            default_path,
+            "SVG files (*.svg)",
+        )
+        if not file_name:
+            return
+        output_path = Path(file_name)
+        if output_path.suffix.lower() != ".svg":
+            output_path = output_path.with_suffix(".svg")
+        try:
+            written_path = renderer.write_split_hemisphere_svg(output_path)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("loreta_split_svg_export_failed", extra={"path": str(output_path), "error": str(exc)})
+            self._set_source_export_status(f"Split hemisphere SVG export failed: {exc}", variant="warning")
+            return
+        self._last_import_dir = written_path.parent
+        self._set_source_export_status(f"Exported split hemisphere SVG: {written_path}", variant="success")
+
+    def _export_stacked_split_hemisphere_svg(self) -> None:
+        renderer = self.renderer
+        if renderer is None:
+            return
+        condition_options = self._condition_options()
+        if len(condition_options) < 2:
+            self._set_source_export_status(
+                "Load at least two source-map conditions before exporting a stacked SVG.",
+                variant="warning",
+            )
+            return
+        dialog = StackedSplitSvgExportDialog(
+            self,
+            condition_options=condition_options,
+            current_condition_id=self._selected_condition_id,
+        )
+        if not dialog.exec():
+            return
+        (top_id, top_label), (bottom_id, bottom_label) = dialog.selected_conditions()
+        if top_id == bottom_id:
+            self._set_source_export_status("Choose two different conditions for the stacked SVG.", variant="warning")
+            return
+        try:
+            top_payload = self._condition_payload_for_export(top_id)
+            bottom_payload = self._condition_payload_for_export(bottom_id)
+            scalar_range = self._stacked_split_scalar_range((top_payload, bottom_payload))
+            panels = (
+                renderer.split_hemisphere_svg_panel_for_payload(
+                    top_payload,
+                    label=split_svg_condition_code(top_label),
+                    scalar_range=scalar_range,
+                ),
+                renderer.split_hemisphere_svg_panel_for_payload(
+                    bottom_payload,
+                    label=split_svg_condition_code(bottom_label),
+                    scalar_range=scalar_range,
+                ),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError, PreparedSourcePayloadImportError) as exc:
+            logger.warning("loreta_stacked_split_svg_prepare_failed", extra={"error": str(exc)})
+            self._set_source_export_status(f"Stacked split SVG export failed: {exc}", variant="warning")
+            return
+
+        project_root = self._refresh_project_root()
+        default_path = default_stacked_split_svg_export_path(
+            project_root=project_root,
+            last_import_dir=self._last_import_dir,
+            top_condition_label=top_label,
+            bottom_condition_label=bottom_label,
+        )
+        file_name, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export stacked split hemisphere SVG",
+            default_path,
+            "SVG files (*.svg)",
+        )
+        if not file_name:
+            return
+        output_path = Path(file_name)
+        if output_path.suffix.lower() != ".svg":
+            output_path = output_path.with_suffix(".svg")
+        try:
+            written_path = renderer.write_split_hemisphere_stack_svg(output_path, panels=panels)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("loreta_stacked_split_svg_export_failed", extra={"path": str(output_path), "error": str(exc)})
+            self._set_source_export_status(f"Stacked split SVG export failed: {exc}", variant="warning")
+            return
+        self._last_import_dir = written_path.parent
+        self._set_source_export_status(f"Exported stacked split SVG: {written_path}", variant="success")
+
+    def _selected_condition_label(self) -> str:
+        manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
+        if manifest_entry is not None:
+            return manifest_entry.label
+        return condition_by_id(self._selected_condition_id).label
+
+    def _condition_options(self) -> tuple[tuple[str, str], ...]:
+        options: list[tuple[str, str]] = []
+        for index in range(self.condition_combo.count()):
+            condition_id = self.condition_combo.itemData(index)
+            if not isinstance(condition_id, str):
+                continue
+            manifest_entry = self._manifest_conditions.get(condition_id)
+            if manifest_entry is not None:
+                options.append((condition_id, manifest_entry.label))
+            else:
+                options.append((condition_id, condition_by_id(condition_id).label))
+        return tuple(options)
+
+    def _condition_payload_for_export(self, condition_id: str) -> SourcePayload:
+        renderer = self.renderer
+        if renderer is None:
+            raise RuntimeError("3D renderer is not available.")
+        display_transform = renderer.mesh_display_transform()
+        if display_transform is None:
+            raise RuntimeError("No mesh transform is available.")
+        manifest_entry = self._manifest_conditions.get(condition_id)
+        if manifest_entry is not None:
+            payload = load_prepared_source_payload_json(
+                manifest_entry.payload_path,
+                display_transform=display_transform,
+            )
+            payload.metadata.update(
+                {
+                    "manifest_condition_id": manifest_entry.condition_id,
+                    "manifest_condition_label": manifest_entry.label,
+                    "manifest_metadata": manifest_entry.metadata,
+                }
+            )
+            return _activation_display_payload(payload)
+        mesh_points = renderer.mesh_points()
+        if mesh_points is None:
+            raise RuntimeError("No display mesh is available.")
+        payload = make_demo_condition_activation(
+            mesh_points,
+            mesh_faces=renderer.mesh_faces(),
+            condition=condition_by_id(condition_id),
+            display_transform=display_transform,
+        )
+        return _activation_display_payload(payload)
+
+    def _stacked_split_scalar_range(self, payloads: tuple[SourcePayload, SourcePayload]) -> tuple[float, float]:
+        scale_chunks = [
+            _activation_scale_values(
+                payload,
+                zscore_display_threshold=self._zscore_display_threshold,
+                cortical_threshold_display=uses_cortical_surface_paint(payload),
+            )
+            for payload in payloads
+        ]
+        scale_arrays = [chunk.reshape(-1) for chunk in scale_chunks if len(chunk)]
+        scale_values = np.concatenate(scale_arrays) if scale_arrays else np.empty(0, dtype=float)
+        all_cortical_zscore = all(
+            uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload)
+            for payload in payloads
+        )
+        if all_cortical_zscore:
+            threshold = self._zscore_display_threshold
+            if self.activation_auto_scale_check.isChecked():
+                finite = scale_values[np.isfinite(scale_values)]
+                vmax = float(np.nanmax(finite)) if len(finite) else threshold + 1.0
+                return resolve_scalar_limits(
+                    np.asarray([threshold, vmax], dtype=float),
+                    auto_scale=False,
+                    manual_min=threshold,
+                    manual_max=vmax,
+                )
+            return resolve_scalar_limits(
+                scale_values,
+                auto_scale=False,
+                manual_min=max(threshold, self.activation_min_spin.value()),
+                manual_max=self.activation_max_spin.value(),
+            )
+        return resolve_scalar_limits(
+            scale_values,
+            auto_scale=self.activation_auto_scale_check.isChecked(),
+            manual_min=self.activation_min_spin.value(),
+            manual_max=self.activation_max_spin.value(),
+        )
 
     def _open_source_map_options(self) -> None:
         if self.renderer is None:

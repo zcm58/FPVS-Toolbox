@@ -8,9 +8,13 @@ from Tools.LORETA_Visualizer.gui import _activation_display_payload, _activation
 from Tools.LORETA_Visualizer.renderer import (
     BrainRendererWidget,
     DISPLAY_MODE_SPLIT_HEMISPHERE,
+    PublicationSplitSvgPanel,
+    _SplitHemisphereState,
     _configure_transparency_backend,
     _publication_hemisphere_points,
     _publication_surface_rgb,
+    write_publication_split_hemisphere_stack_svg,
+    write_publication_split_hemisphere_svg,
 )
 from Tools.LORETA_Visualizer.scalar_fields import LORETA_SCALAR_COLORS, format_scalar_value, resolve_scalar_limits
 from Tools.LORETA_Visualizer.source_payloads import (
@@ -291,6 +295,149 @@ def test_publication_surface_rgb_preserves_shaded_cortex_underlay() -> None:
     assert np.array_equal(visible_colors[0], hidden_colors[0])
     assert not np.array_equal(visible_colors[1], hidden_colors[1])
     assert not np.array_equal(visible_colors[2], hidden_colors[2])
+
+
+def test_publication_split_svg_export_writes_transparent_labeled_view(tmp_path) -> None:
+    state = _SplitHemisphereState(
+        points=np.asarray(
+            [
+                [-1.0, -0.5, 0.0],
+                [-1.0, 0.5, 0.0],
+                [-0.5, 0.0, 1.0],
+            ],
+            dtype=float,
+        ),
+        faces=np.asarray([3, 0, 1, 2], dtype=np.int64),
+        values=np.asarray([np.nan, 2.0, 5.0], dtype=float),
+        shade_values=np.asarray([0.0, 0.5, 1.0], dtype=float),
+    )
+
+    output_path = write_publication_split_hemisphere_svg(
+        tmp_path / "split.svg",
+        left_state=state,
+        right_state=state,
+        scalar_range=(1.64, 5.0),
+        activation_visible=True,
+    )
+
+    text = output_path.read_text(encoding="utf-8")
+    assert "<svg" in text
+    assert 'width="6.5in"' in text
+    assert 'height="3in"' in text
+    assert "Segoe UI" in text
+    assert "background" not in text.lower()
+    assert "Left" in text
+    assert "Right" in text
+    assert text.count(">Left<") == 1
+    assert text.count(">Right<") == 1
+    assert "loretaActivationGradient" in text
+    assert 'href="data:image/png;base64,' in text
+
+
+def test_publication_split_svg_export_embeds_full_surface_raster(tmp_path) -> None:
+    points = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [0.0, 3.0, 0.0],
+            [1.0, 3.0, 0.0],
+        ],
+        dtype=float,
+    )
+    faces = np.asarray(
+        [
+            3,
+            0,
+            1,
+            2,
+            3,
+            1,
+            3,
+            2,
+            3,
+            2,
+            3,
+            4,
+            3,
+            3,
+            5,
+            4,
+            3,
+            4,
+            5,
+            6,
+            3,
+            5,
+            7,
+            6,
+        ],
+        dtype=np.int64,
+    )
+    state = _SplitHemisphereState(
+        points=points,
+        faces=faces,
+        values=np.asarray([np.nan, 2.0, np.nan, 3.0, np.nan, 4.0, np.nan, 5.0], dtype=float),
+    )
+
+    output_path = write_publication_split_hemisphere_svg(
+        tmp_path / "small.svg",
+        left_state=state,
+        right_state=state,
+        scalar_range=(1.64, 5.0),
+        activation_visible=True,
+    )
+
+    text = output_path.read_text(encoding="utf-8")
+    assert text.count("<image") == 1
+    assert "<path" not in text
+
+
+def test_publication_split_stack_svg_export_labels_conditions(tmp_path) -> None:
+    state = _SplitHemisphereState(
+        points=np.asarray(
+            [
+                [-1.0, -0.5, 0.0],
+                [-1.0, 0.5, 0.0],
+                [-0.5, 0.0, 1.0],
+            ],
+            dtype=float,
+        ),
+        faces=np.asarray([3, 0, 1, 2], dtype=np.int64),
+        values=np.asarray([np.nan, 2.0, 5.0], dtype=float),
+        shade_values=np.asarray([0.0, 0.5, 1.0], dtype=float),
+    )
+    panels = (
+        PublicationSplitSvgPanel(
+            label="CR",
+            left_state=state,
+            right_state=state,
+            scalar_range=(1.64, 5.0),
+            activation_visible=True,
+        ),
+        PublicationSplitSvgPanel(
+            label="SR",
+            left_state=state,
+            right_state=state,
+            scalar_range=(1.64, 5.0),
+            activation_visible=True,
+        ),
+    )
+
+    output_path = write_publication_split_hemisphere_stack_svg(tmp_path / "stack.svg", panels=panels)
+
+    text = output_path.read_text(encoding="utf-8")
+    assert 'width="6.5in"' in text
+    assert 'height="6.75in"' in text
+    assert ">CR<" in text
+    assert ">SR<" in text
+    assert text.count(">Left<") == 1
+    assert text.count(">Right<") == 1
+    assert text.count("loretaActivationGradient") == 2
+    assert text.count("<image") == 2
 
 
 def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeypatch) -> None:
