@@ -47,8 +47,9 @@ behavior.
 - Reset the camera, and in publication split view reset both hemispheres to the
   intended publication layout.
 - Adjust brain transparency for transparent-shell volume/deep views.
-- Use an external fsaverage mesh loaded through MNE, with synthetic fallback
-  when the external mesh is unavailable.
+- Use an fsaverage mesh loaded through MNE from the toolbox cache or a
+  configured subjects directory, with synthetic fallback when the mesh is
+  unavailable.
 - Show or hide the source map independently from the brain mesh.
 - Adjust source-map opacity for transparent overlay views.
 - Switch among project source-map conditions when available, or synthetic
@@ -74,9 +75,15 @@ neutral gray cortex color.
 
 ## Inputs
 
-The fsaverage brain mesh is loaded through MNE from an external user/cache
-location. The toolbox does not store fsaverage MRI template data in the source
-tree or project folders.
+The fsaverage brain mesh is loaded through MNE from the FPVS Toolbox root-local
+cache by default:
+
+`C:\...\FPVS-Toolbox-Repo\.fpvs_cache\mne\MNE-fsaverage-data\fsaverage`
+
+MNE may still stage downloaded zip files in the Windows temporary directory
+while extracting them, but the durable fsaverage install is under
+`.fpvs_cache`. The toolbox does not store fsaverage MRI template data in the
+source tree, docs tree, quarantine tree, package data, or project folders.
 
 Checked-in JSON examples live in
 `src/Tools/LORETA_Visualizer/examples/`. These are synthetic examples for

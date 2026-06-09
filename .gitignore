@@ -93,6 +93,8 @@ src/quarantine/Tools/LORETA/fsaverage/
 src/quarantine/**
 !src/quarantine/
 /src/fpvs_cache/
+
+# Root-local FPVS cache, including MNE/fsaverage downloads.
 .fpvs_cache/
 
 # Agent harness manifests intentionally tracked despite the general *.txt rule.

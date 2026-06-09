@@ -1,6 +1,6 @@
 """Project-level beta L2-MNE source-map export.
 
-This module combines read-only project workbook topographies with an external
+This module combines read-only project workbook topographies with a shared
 MNE/fsaverage EEG forward model, then writes prepared JSON payloads for the
 visualizer importer. It owns calculation orchestration only; it does not import
 GUI, renderer, display mesh, or display-transform modules.
@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import ssl
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +19,13 @@ from urllib.error import URLError
 import numpy as np
 
 from config import DEFAULT_ELECTRODE_NAMES_64
+from Tools.LORETA_Visualizer.fsaverage_cache import (
+    FSAVERAGE_SUBJECT,
+    candidate_fsaverage_subjects_dirs,
+    ensure_allowed_fsaverage_subjects_dir,
+    fetch_fsaverage_subjects_dir,
+    preferred_fsaverage_subjects_dirs,
+)
 from Tools.LORETA_Visualizer.source_producers.contracts import SourceProducerRunResult
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
     COORDINATE_SPACE_FSAVERAGE,
@@ -42,7 +48,6 @@ PROJECT_SOURCE_LOCALIZATION_FOLDER = "6 - Source Localization"
 PROJECT_L2_MNE_BETA_OUTPUT_FOLDER = "L2-MNE Cortical Surface Beta"
 DEFAULT_MNE_FSAVERAGE_SPACING = "ico3"
 DEFAULT_MNE_MINDIST_MM = 5.0
-FSAVERAGE_SUBJECT = "fsaverage"
 FSAVERAGE_BEM_SOLUTION = "fsaverage-5120-5120-5120-bem-sol.fif"
 FSAVERAGE_TRANS = "fsaverage-trans.fif"
 SUPPORTED_PROJECT_SOURCE_METRICS = (
@@ -258,56 +263,45 @@ def _project_output_dir(project_root: Path, output_dir: str | Path | None) -> Pa
 
 
 def _resolve_fsaverage_subjects_dir(mne_module, *, allow_fetch: bool) -> Path:  # noqa: ANN001
-    for candidate in _candidate_subjects_dirs(mne_module):
+    try:
+        candidates = preferred_fsaverage_subjects_dirs() if allow_fetch else _candidate_subjects_dirs(mne_module)
+    except ValueError as exc:
+        raise ProjectL2MNEExportError(str(exc)) from exc
+    for candidate in candidates:
         fsaverage_dir = candidate / FSAVERAGE_SUBJECT
-        if fsaverage_dir.is_dir():
-            return _ensure_outside_repo(candidate)
+        if fsaverage_dir.is_dir() and (not allow_fetch or _has_required_forward_model_files(candidate)):
+            try:
+                return ensure_allowed_fsaverage_subjects_dir(candidate)
+            except ValueError as exc:
+                raise ProjectL2MNEExportError(str(exc)) from exc
 
     if not allow_fetch:
         raise ProjectL2MNEExportError("fsaverage is not available and fetching is disabled.")
     try:
+        subjects_dir = fetch_fsaverage_subjects_dir()
+    except ValueError as exc:
+        raise ProjectL2MNEExportError(str(exc)) from exc
+    try:
         from mne.datasets import fetch_fsaverage
 
-        fsaverage_dir = Path(fetch_fsaverage(subjects_dir=None, verbose=False))
+        fsaverage_dir = Path(fetch_fsaverage(subjects_dir=subjects_dir, verbose=False))
     except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError, URLError, ssl.SSLError, TimeoutError) as exc:
         raise ProjectL2MNEExportError(f"Unable to fetch fsaverage through MNE: {exc}") from exc
-    return _ensure_outside_repo(fsaverage_dir.parent)
+    try:
+        return ensure_allowed_fsaverage_subjects_dir(fsaverage_dir.parent)
+    except ValueError as exc:
+        raise ProjectL2MNEExportError(str(exc)) from exc
 
 
 def _candidate_subjects_dirs(mne_module) -> list[Path]:  # noqa: ANN001
-    candidates: list[Path] = []
-    env_subjects_dir = os.environ.get("FPVS_FSAVERAGE_SUBJECTS_DIR") or os.environ.get("SUBJECTS_DIR")
-    if env_subjects_dir:
-        path = Path(env_subjects_dir).expanduser()
-        candidates.append(path.parent if path.name == FSAVERAGE_SUBJECT else path)
-
-    for key in ("SUBJECTS_DIR", "MNE_DATASETS_FSAVERAGE_PATH", "MNE_DATA"):
-        value = mne_module.get_config(key)
-        if not value:
-            continue
-        path = Path(value).expanduser()
-        candidates.append(path.parent if path.name == FSAVERAGE_SUBJECT else path)
-
-    candidates.append(Path.home() / "mne_data" / "MNE-fsaverage-data")
-    unique: list[Path] = []
-    seen: set[Path] = set()
-    for candidate in candidates:
-        resolved = candidate.resolve()
-        if resolved not in seen:
-            unique.append(resolved)
-            seen.add(resolved)
-    return unique
+    return candidate_fsaverage_subjects_dirs(mne_module)
 
 
-def _ensure_outside_repo(path: Path) -> Path:
-    resolved = path.expanduser().resolve()
-    try:
-        repo_root = Path.cwd().resolve()
-        resolved.relative_to(repo_root)
-    except ValueError:
-        return resolved
-    raise ProjectL2MNEExportError(
-        "fsaverage resolved inside this repository; choose an external MNE/user cache location."
+def _has_required_forward_model_files(subjects_dir: Path) -> bool:
+    subject_dir = subjects_dir / FSAVERAGE_SUBJECT
+    return (
+        (subject_dir / "bem" / FSAVERAGE_BEM_SOLUTION).is_file()
+        and (subject_dir / "bem" / FSAVERAGE_TRANS).is_file()
     )
 
 

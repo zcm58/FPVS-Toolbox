@@ -155,7 +155,11 @@ Avoid:
 - Restoring old legacy eLORETA launchers, settings, tests, or GUI paths.
 - Adopting old Source Localization/eLORETA architecture, data contracts, GUI patterns, settings, tests, rendering decisions, or file layouts as precedent.
 - Writing LORETA settings into `project.json` in Phase 1.
-- Bundling `fsaverage` MRI/template data in `src/`, `src/quarantine/`, or package data. Fetch or locate fsaverage outside the repo only.
+- Bundling `fsaverage` MRI/template data in `src/`, `docs/`,
+  `src/quarantine/`, or package data. Automatic fetches should install into the
+  untracked FPVS Toolbox root cache at
+  `.fpvs_cache/mne/MNE-fsaverage-data/`; explicit user/MNE subjects-dir
+  overrides may point elsewhere if they do not target source or docs paths.
 - Computing LORETA/source-localization values inside `renderer.py`, `fsaverage_mesh.py`, `prepared_payload_importer.py`, `source_payloads.py`, `transforms.py`, `scalar_fields.py`, or GUI widget code.
 - Adding LORETA-specific computation to preprocessing, Stats, diagnostics, or project I/O modules.
 
@@ -196,9 +200,9 @@ Done means:
 ## Phase 2: Real Anatomical Brain Mesh
 
 Status: Implemented. The visualizer starts with the synthetic fallback and
-loads/fetches fsaverage through MNE outside the repo in a worker when the tool
-opens. A visible `Fetch/load fsaverage` button is no longer part of the primary
-UI.
+loads/fetches fsaverage through MNE into the untracked FPVS Toolbox root cache
+in a worker when the tool opens. A visible `Fetch/load fsaverage` button is no
+longer part of the primary UI.
 
 Objective:
 
@@ -206,7 +210,9 @@ Objective:
 - Prefer fsaverage as the first target, loaded through MNE rather than bundled into the repo.
 - Use a lazy mesh loader that can:
   - locate an existing fsaverage subject directory if configured;
-  - fetch fsaverage through `mne.datasets.fetch_fsaverage(...)` into an external user/cache location when missing;
+  - fetch fsaverage through `mne.datasets.fetch_fsaverage(...)` into
+    `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS Toolbox root when
+    missing;
   - read an appropriate surface with `mne.read_surface(...)`;
   - convert vertices/faces into PyVista `PolyData`;
   - optionally decimate or use a lower-density surface for responsive interaction.
@@ -216,7 +222,9 @@ Objective:
 Implementation notes:
 
 - Do not place fsaverage files under `src/`, `src/quarantine/`, tracked docs, or package data.
-- Store any fetched template data in the standard MNE/user cache or another user-writable cache path outside the repo.
+- Store automatically fetched template data in the untracked FPVS Toolbox root
+  cache, not in temp directories, `src/`, docs, quarantine, package data, or
+  project folders.
 - Keep mesh loading lazy. If fetching/loading is slow, move it to `QThread` or `QRunnable` and update the viewport through signals.
 - Add clear inline status for "Using fsaverage", "Fetching fsaverage", and "Using synthetic fallback".
 - Consider loading a pial/inflated surface pair later, but Slice 2 only needs one usable anatomical mesh.
@@ -226,7 +234,8 @@ Done means:
 - The visualizer can render a real fsaverage-derived brain mesh.
 - Transparency, rotate/orbit, zoom in/out, and reset view continue to work.
 - Missing fsaverage does not crash app startup or the embedded page.
-- No fsaverage data is added to the repo or quarantine tree.
+- No fsaverage data is added to tracked source/docs/package data or the
+  quarantine tree; the durable local cache remains under ignored `.fpvs_cache`.
 - Existing synthetic placeholder remains available as a fallback/debug path.
 
 ## Phase 3: Dummy LORETA Heatmap Layer

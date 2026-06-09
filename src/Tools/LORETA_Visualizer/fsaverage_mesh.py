@@ -1,13 +1,13 @@
 """fsaverage mesh loading for the LORETA visualizer.
 
-The fsaverage template is fetched or located through MNE outside the repository.
-Do not bundle fsaverage data into active source or quarantine paths.
+The fsaverage template is fetched or located through MNE in the FPVS Toolbox
+root-local cache by default. Do not bundle fsaverage data into active source,
+docs, quarantine paths, or package data.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import ssl
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +15,12 @@ from urllib.error import URLError
 
 import numpy as np
 
+from Tools.LORETA_Visualizer.fsaverage_cache import (
+    candidate_fsaverage_dirs,
+    ensure_allowed_fsaverage_dir,
+    fetch_fsaverage_subjects_dir,
+    preferred_fsaverage_dirs,
+)
 from Tools.LORETA_Visualizer.synthetic_brain import BrainHemisphereMesh, BrainMesh
 from Tools.LORETA_Visualizer.transforms import COORDINATE_SPACE_FSAVERAGE, MeshDisplayTransform
 
@@ -244,55 +250,39 @@ def _surfaces_share_topology(
 
 
 def _resolve_fsaverage_dir(*, allow_fetch: bool) -> Path:
-    for candidate in _candidate_fsaverage_dirs():
-        if candidate.is_dir():
-            return _ensure_outside_repo(candidate)
+    try:
+        candidates = preferred_fsaverage_dirs() if allow_fetch else candidate_fsaverage_dirs()
+    except ValueError as exc:
+        raise FsaverageMeshError(str(exc)) from exc
+    for candidate in candidates:
+        if candidate.is_dir() and (not allow_fetch or _has_default_surface_pair(candidate)):
+            try:
+                return ensure_allowed_fsaverage_dir(candidate)
+            except ValueError as exc:
+                raise FsaverageMeshError(str(exc)) from exc
 
     if not allow_fetch:
         raise FsaverageMeshError("fsaverage is not available and fetching is disabled.")
 
     try:
+        subjects_dir = fetch_fsaverage_subjects_dir()
+    except ValueError as exc:
+        raise FsaverageMeshError(str(exc)) from exc
+    try:
         from mne.datasets import fetch_fsaverage
 
-        fs_dir = Path(fetch_fsaverage(subjects_dir=None, verbose=False))
+        fs_dir = Path(fetch_fsaverage(subjects_dir=subjects_dir, verbose=False))
     except (OSError, RuntimeError, ValueError, ImportError, ModuleNotFoundError, URLError, ssl.SSLError, TimeoutError) as exc:
         raise FsaverageMeshError(f"Unable to fetch fsaverage through MNE: {exc}") from exc
-    return _ensure_outside_repo(fs_dir)
-
-
-def _candidate_fsaverage_dirs() -> list[Path]:
-    candidates: list[Path] = []
-    env_subjects_dir = os.environ.get("FPVS_FSAVERAGE_SUBJECTS_DIR") or os.environ.get("SUBJECTS_DIR")
-    if env_subjects_dir:
-        candidate = Path(env_subjects_dir).expanduser()
-        candidates.append(candidate if candidate.name == "fsaverage" else candidate / "fsaverage")
-
     try:
-        import mne
-
-        for key in ("MNE_DATASETS_FSAVERAGE_PATH", "MNE_DATA"):
-            value = mne.get_config(key)
-            if not value:
-                continue
-            base = Path(value).expanduser()
-            candidates.append(base if base.name == "fsaverage" else base / "fsaverage")
-    except (ImportError, ModuleNotFoundError, RuntimeError, ValueError):
-        logger.debug("fsaverage_mne_config_lookup_failed", exc_info=True)
-
-    candidates.append(Path.home() / "mne_data" / "MNE-fsaverage-data" / "fsaverage")
-    return candidates
+        return ensure_allowed_fsaverage_dir(fs_dir)
+    except ValueError as exc:
+        raise FsaverageMeshError(str(exc)) from exc
 
 
-def _ensure_outside_repo(path: Path) -> Path:
-    resolved = path.expanduser().resolve()
-    try:
-        repo_root = Path.cwd().resolve()
-        resolved.relative_to(repo_root)
-    except ValueError:
-        return resolved
-    raise FsaverageMeshError(
-        "fsaverage resolved inside this repository; choose an external MNE/user cache location."
-    )
+def _has_default_surface_pair(fsaverage_dir: Path) -> bool:
+    surf_dir = fsaverage_dir / "surf"
+    return (surf_dir / f"lh.{DEFAULT_SURFACE}").is_file() and (surf_dir / f"rh.{DEFAULT_SURFACE}").is_file()
 
 
 def _combine_hemispheres(

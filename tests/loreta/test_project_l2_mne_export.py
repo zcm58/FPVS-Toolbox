@@ -14,6 +14,14 @@ from Tools.LORETA_Visualizer.gui import (
     default_project_zscore_manifest_path,
     resolve_loreta_import_start_dir,
 )
+from Tools.LORETA_Visualizer.fsaverage_cache import (
+    DEFAULT_FSAVERAGE_SUBJECTS_DIR,
+    candidate_fsaverage_subjects_dirs,
+    default_fsaverage_subjects_dir,
+    ensure_allowed_fsaverage_subjects_dir,
+    fpvs_toolbox_root,
+)
+from Tools.LORETA_Visualizer import fsaverage_mesh
 from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared_source_manifest_json
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
@@ -23,6 +31,7 @@ from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export 
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
     PROJECT_L2_MNE_BETA_OUTPUT_FOLDER,
     PROJECT_SOURCE_LOCALIZATION_FOLDER,
+    _resolve_fsaverage_subjects_dir,
     _surface_source_points_and_faces,
     default_project_l2_mne_output_dir,
     write_project_l2_mne_cortical_surface_payloads,
@@ -68,6 +77,89 @@ def test_project_l2_mne_export_rejects_outputs_outside_project_root(tmp_path) ->
             output_dir=tmp_path / "outside",
             forward_model=_tiny_forward_model(),
         )
+
+
+def test_default_fsaverage_cache_is_root_local(monkeypatch) -> None:
+    monkeypatch.delenv("FPVS_FSAVERAGE_SUBJECTS_DIR", raising=False)
+    monkeypatch.delenv("SUBJECTS_DIR", raising=False)
+
+    class FakeMneConfig:
+        @staticmethod
+        def get_config(key: str) -> None:
+            return None
+
+    expected = fpvs_toolbox_root() / DEFAULT_FSAVERAGE_SUBJECTS_DIR
+
+    assert default_fsaverage_subjects_dir() == expected
+    assert candidate_fsaverage_subjects_dirs(FakeMneConfig())[0] == expected
+
+
+def test_fsaverage_cache_rejects_source_and_docs_paths() -> None:
+    root = fpvs_toolbox_root()
+
+    with pytest.raises(ValueError, match="src/ or docs"):
+        ensure_allowed_fsaverage_subjects_dir(root / "src" / "fsaverage-cache")
+    with pytest.raises(ValueError, match="src/ or docs"):
+        ensure_allowed_fsaverage_subjects_dir(root / "docs" / "fsaverage-cache")
+
+
+def test_project_forward_model_fetches_fsaverage_to_root_local_cache(monkeypatch, tmp_path) -> None:
+    import mne.datasets
+
+    target_subjects_dir = tmp_path / "repo-cache" / "mne" / "MNE-fsaverage-data"
+    (target_subjects_dir / "fsaverage").mkdir(parents=True)
+    calls: list[Path] = []
+
+    def fake_fetch_fsaverage(*, subjects_dir: Path | None = None, verbose: bool | None = None) -> Path:
+        del verbose
+        assert subjects_dir is not None
+        subjects_path = Path(subjects_dir)
+        calls.append(subjects_path)
+        fsaverage_dir = subjects_path / "fsaverage"
+        fsaverage_dir.mkdir(parents=True, exist_ok=True)
+        return fsaverage_dir
+
+    class FakeMneConfig:
+        @staticmethod
+        def get_config(key: str) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "Tools.LORETA_Visualizer.source_producers.project_l2_mne_export.preferred_fsaverage_subjects_dirs",
+        lambda: [target_subjects_dir],
+    )
+    monkeypatch.setattr(
+        "Tools.LORETA_Visualizer.source_producers.project_l2_mne_export.fetch_fsaverage_subjects_dir",
+        lambda: target_subjects_dir,
+    )
+    monkeypatch.setattr(mne.datasets, "fetch_fsaverage", fake_fetch_fsaverage)
+
+    assert _resolve_fsaverage_subjects_dir(FakeMneConfig(), allow_fetch=True) == target_subjects_dir
+    assert calls == [target_subjects_dir]
+
+
+def test_mesh_loader_fetches_fsaverage_to_root_local_cache(monkeypatch, tmp_path) -> None:
+    import mne.datasets
+
+    target_subjects_dir = tmp_path / "repo-cache" / "mne" / "MNE-fsaverage-data"
+    (target_subjects_dir / "fsaverage").mkdir(parents=True)
+    calls: list[Path] = []
+
+    def fake_fetch_fsaverage(*, subjects_dir: Path | None = None, verbose: bool | None = None) -> Path:
+        del verbose
+        assert subjects_dir is not None
+        subjects_path = Path(subjects_dir)
+        calls.append(subjects_path)
+        fsaverage_dir = subjects_path / "fsaverage"
+        fsaverage_dir.mkdir(parents=True, exist_ok=True)
+        return fsaverage_dir
+
+    monkeypatch.setattr(fsaverage_mesh, "preferred_fsaverage_dirs", lambda: [target_subjects_dir / "fsaverage"])
+    monkeypatch.setattr(fsaverage_mesh, "fetch_fsaverage_subjects_dir", lambda: target_subjects_dir)
+    monkeypatch.setattr(mne.datasets, "fetch_fsaverage", fake_fetch_fsaverage)
+
+    assert fsaverage_mesh._resolve_fsaverage_dir(allow_fetch=True) == target_subjects_dir / "fsaverage"
+    assert calls == [target_subjects_dir]
 
 
 def test_loreta_import_dialog_prefers_last_dir_then_project_source_dir(tmp_path) -> None:

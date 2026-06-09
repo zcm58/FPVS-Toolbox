@@ -79,7 +79,7 @@ Recent migration slices:
 
 - Source Localization/eLORETA has been removed from active runtime, GUI menus, settings, tracked tests, and active migration shims.
 - `src/Tools/SourceLocalization/**` must remain empty of source files.
-- The bundled `fsaverage` MRI template data is intentionally not retained in active source or quarantine; fetch/regenerate it outside the repo only if a future restoration explicitly requires it.
+- The bundled `fsaverage` MRI template data is intentionally not retained in active source or quarantine. Automatic fetches may use the ignored FPVS Toolbox root cache at `.fpvs_cache/mne/MNE-fsaverage-data/`, but the template must not be added to tracked source, docs, package data, or quarantine paths.
 - Do not revive imports from `Tools.SourceLocalization` or quarantine-tree Source Localization code unless restoration is explicitly scoped as a new feature.
 
 Removed from active runtime after the Main App refactor slice:

@@ -110,7 +110,8 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - `renderer.py`: PyVista/VTK scene adapter, actors, camera, opacity where
   relevant, scalar map, cortical paint display, split-hemisphere publication
   display, and mesh display. No LORETA math.
-- `fsaverage_mesh.py`: external MNE fsaverage discovery/fetch/read/decimation and
+- `fsaverage_cache.py`: shared root-local/configured fsaverage cache path helpers.
+- `fsaverage_mesh.py`: MNE fsaverage discovery/fetch/read/decimation and
   anatomical display transform construction, including display-only
   topology-matched hemisphere meshes for publication layout. The combined mesh
   remains pial for existing single-surface and transparent views; inflated
@@ -162,7 +163,11 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not import from `Tools.SourceLocalization` or `src/quarantine/**`.
 - Do not consult or copy old Source Localization/eLORETA implementation code for architecture, naming, data flow, GUI design, settings, tests, or rendering choices.
 - Do not recreate `src/Tools/SourceLocalization/**`, `src/Main_App/Legacy_App/**`, or `src/Main_App/PySide6_App/**`.
-- Do not bundle fsaverage MRI/template data in `src/`, `src/quarantine/`, or package data. Fetch or locate fsaverage outside the repo through MNE/user cache paths only.
+- Do not bundle fsaverage MRI/template data in `src/`, `docs/`,
+  `src/quarantine/`, or package data. Automatic fetches should install into the
+  untracked FPVS Toolbox root cache at
+  `.fpvs_cache/mne/MNE-fsaverage-data/`; explicit user/MNE subjects-dir
+  overrides may point elsewhere if they do not target source or docs paths.
 - Do not change preprocessing order, Stats methods, BDF loading, project manifests, exports, diagnostics, or app-wide project I/O for visualizer-only work.
 - Do not write LORETA visualizer settings into `project.json` unless a future plan explicitly scopes project-level real-data integration.
 - Do not add real-data file discovery, project-output integration, source

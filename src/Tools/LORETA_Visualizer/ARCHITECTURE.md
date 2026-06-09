@@ -47,8 +47,9 @@ own:
   project-output discovery;
 - retired `Tools.SourceLocalization`, `src/quarantine/**`,
   `src/Main_App/Legacy_App/**`, or `src/Main_App/PySide6_App/**` behavior;
-- bundled fsaverage or MRI template data in source, quarantine, docs, or package
-  data.
+- bundled fsaverage or MRI template data in source, docs, quarantine, or
+  package data. Automatic fsaverage fetches use the untracked FPVS Toolbox
+  root cache instead.
 
 ## Ownership
 
@@ -88,7 +89,7 @@ Embedded 3D viewport
 The anatomical side follows a parallel path:
 
 ```text
-External MNE/user fsaverage cache or synthetic fallback
+FPVS Toolbox root-local fsaverage cache, configured MNE/user cache, or synthetic fallback
         |
         v
 fsaverage_mesh.py / synthetic_brain.py
@@ -168,7 +169,11 @@ compact rebuild summaries, but source-estimation math still belongs only to
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, and camera controls. It
   must not calculate source estimates.
-- `fsaverage_mesh.py`: external fsaverage discovery/fetch/read/decimation and
+- `fsaverage_cache.py`: shared fsaverage cache path policy. The default durable
+  install location is `.fpvs_cache/mne/MNE-fsaverage-data/` under the FPVS
+  Toolbox root; `src/`, `docs/`, quarantine, and package-data paths are
+  rejected.
+- `fsaverage_mesh.py`: fsaverage discovery/fetch/read/decimation and
   construction of the anatomical display transform. It also preserves
   display-only left/right hemisphere meshes for publication layout. The
   combined mesh remains pial for the single-surface and transparent views;

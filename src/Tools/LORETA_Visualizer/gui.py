@@ -1149,9 +1149,9 @@ class LoretaVisualizerWindow(QWidget):
             return
         self.mesh_status.set_variant("info")
         self.mesh_status.set_text(
-            "Fetching/loading fsaverage through MNE outside the repo..."
+            "Fetching/loading fsaverage through the FPVS Toolbox cache..."
             if allow_fetch
-            else "Checking external fsaverage cache..."
+            else "Checking configured/root-local fsaverage cache..."
         )
 
         thread = QThread(self)
@@ -1187,7 +1187,7 @@ class LoretaVisualizerWindow(QWidget):
             else ""
         )
         self.mesh_status.set_text(
-            f"Using {result.source_label} mesh from external cache ({result.triangle_count:,} triangles)."
+            f"Using {result.source_label} mesh from cache ({result.triangle_count:,} triangles)."
             f"{split_note}{shading_note}"
         )
         self._ensure_default_project_zscore_maps()
