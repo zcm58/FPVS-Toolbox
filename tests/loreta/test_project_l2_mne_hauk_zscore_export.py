@@ -72,6 +72,21 @@ def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path)
     assert metadata["condition_project_input_assembly"] == "phase_6d_fullfft_neighbor_bins_read_only"
 
 
+def test_project_hauk_zscore_export_reads_group_subfolder_workbooks(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path, group_subfolders=True)
+
+    result = write_project_l2_mne_hauk_zscore_payloads(
+        project_root=project_root,
+        forward_model=_tiny_forward_model(),
+        noise_window_bins=3,
+        min_noise_bins=4,
+    )
+
+    assert result.manifest_path.is_file()
+    assert len(result.producer_result.payloads) == 2
+    assert result.project_inputs.summaries[0].workbook_count == 2
+
+
 def test_project_hauk_zscore_rejects_outputs_outside_project_root(tmp_path) -> None:
     project_root = _build_project_fixture(tmp_path)
 
@@ -119,7 +134,12 @@ def _tiny_forward_model() -> L2MNECorticalForwardModel:
     )
 
 
-def _build_project_fixture(tmp_path: Path, *, include_fullfft: bool = True) -> Path:
+def _build_project_fixture(
+    tmp_path: Path,
+    *,
+    include_fullfft: bool = True,
+    group_subfolders: bool = False,
+) -> Path:
     project_root = tmp_path / "Project"
     stats_dir = project_root / "3 - Statistical Analysis Results"
     excel_root = project_root / "1 - Excel Data Files"
@@ -139,9 +159,11 @@ def _build_project_fixture(tmp_path: Path, *, include_fullfft: bool = True) -> P
     for condition, base in (("Condition A", 10.0), ("Condition B", 100.0)):
         condition_dir = excel_root / condition
         condition_dir.mkdir()
+        workbook_dir = condition_dir / "Default" if group_subfolders else condition_dir
+        workbook_dir.mkdir(exist_ok=True)
         for subject_offset, subject in enumerate(("SCP1", "SCP2")):
             _write_participant_workbook(
-                condition_dir / f"{subject}_{condition}_Results.xlsx",
+                workbook_dir / f"{subject}_{condition}_Results.xlsx",
                 base=base,
                 subject_offset=subject_offset,
                 include_fullfft=include_fullfft,

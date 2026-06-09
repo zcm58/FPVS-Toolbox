@@ -26,6 +26,7 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
 )
 from Tools.LORETA_Visualizer.source_producers.project_inputs import (
     ProjectConditionTopographySummary,
+    _condition_workbook_paths,
     _read_selected_harmonics,
     _read_subject_list,
     _resolve_conditions,
@@ -146,7 +147,7 @@ def build_l2_mne_hauk_zscore_conditions_from_project(
         if not condition_dir.is_dir():
             diagnostics.append(f"Missing condition workbook folder: {condition}")
             continue
-        workbooks = sorted(condition_dir.glob("*.xlsx"))
+        workbooks = _condition_workbook_paths(condition_dir)
         target_vectors: dict[float, list[np.ndarray]] = {harmonic: [] for harmonic in selected_harmonics}
         noise_vectors: dict[float, dict[int, list[np.ndarray]]] = {harmonic: {} for harmonic in selected_harmonics}
         included_subjects: list[str] = []

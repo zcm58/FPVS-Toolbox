@@ -91,7 +91,7 @@ def build_l2_mne_conditions_from_project(
         if not condition_dir.is_dir():
             diagnostics.append(f"Missing condition workbook folder: {condition}")
             continue
-        workbooks = sorted(condition_dir.glob("*.xlsx"))
+        workbooks = _condition_workbook_paths(condition_dir)
         harmonic_vectors: dict[float, list[np.ndarray]] = {harmonic: [] for harmonic in selected_harmonics}
         included_subjects: list[str] = []
         for workbook_path in workbooks:
@@ -174,6 +174,17 @@ def _sensor_value_unit(metric: str) -> str:
     if metric == SOURCE_TOPOGRAPHY_METRIC_BCA:
         return "summed BCA uV"
     return "summed FFT amplitude uV"
+
+
+def _condition_workbook_paths(condition_dir: Path) -> tuple[Path, ...]:
+    """Return flat and condition/group participant workbook paths."""
+    paths = [
+        path
+        for pattern in ("*.xlsx", "*/*.xlsx")
+        for path in condition_dir.glob(pattern)
+        if path.is_file() and not path.name.startswith("~$")
+    ]
+    return tuple(sorted(paths))
 
 
 def _read_selected_harmonics(stats_ready_path: Path) -> tuple[float, ...]:

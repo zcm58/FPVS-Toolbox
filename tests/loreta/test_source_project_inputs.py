@@ -67,6 +67,16 @@ def test_project_input_assembler_can_use_fft_amplitude_metric(tmp_path) -> None:
     assert condition_b.sensor_value_unit == "summed FFT amplitude uV"
 
 
+def test_project_input_assembler_reads_group_subfolder_workbooks(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path, group_subfolders=True)
+
+    result = build_l2_mne_conditions_from_project(project_root)
+
+    assert [condition.label for condition in result.conditions] == ["Condition A", "Condition B"]
+    assert result.summaries[0].workbook_count == 2
+    assert result.conditions[0].metadata["included_subject_count"] == 1
+
+
 def test_project_input_assembler_rejects_missing_selected_column(tmp_path) -> None:
     project_root = _build_project_fixture(tmp_path, omit_condition_b_4_8=True)
 
@@ -74,7 +84,12 @@ def test_project_input_assembler_rejects_missing_selected_column(tmp_path) -> No
         build_l2_mne_conditions_from_project(project_root)
 
 
-def _build_project_fixture(tmp_path: Path, *, omit_condition_b_4_8: bool = False) -> Path:
+def _build_project_fixture(
+    tmp_path: Path,
+    *,
+    omit_condition_b_4_8: bool = False,
+    group_subfolders: bool = False,
+) -> Path:
     project_root = tmp_path / "Project"
     stats_dir = project_root / "3 - Statistical Analysis Results"
     excel_root = project_root / "1 - Excel Data Files"
@@ -86,9 +101,11 @@ def _build_project_fixture(tmp_path: Path, *, omit_condition_b_4_8: bool = False
     for condition in ("Condition A", "Condition B"):
         condition_dir = excel_root / condition
         condition_dir.mkdir()
+        workbook_dir = condition_dir / "Default" if group_subfolders else condition_dir
+        workbook_dir.mkdir(exist_ok=True)
         for subject_offset, subject in enumerate(("SCP1", "SCP2")):
             _write_participant_workbook(
-                condition_dir / f"{subject}_{condition}_Results.xlsx",
+                workbook_dir / f"{subject}_{condition}_Results.xlsx",
                 condition=condition,
                 subject_offset=subject_offset,
                 omit_4_8=omit_condition_b_4_8 and condition == "Condition B",
