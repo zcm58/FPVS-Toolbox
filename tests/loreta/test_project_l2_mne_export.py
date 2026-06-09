@@ -10,6 +10,7 @@ import pytest
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.gui import (
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+    PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
     _coerce_existing_project_root,
     _project_root_from_object,
     _project_source_export_failure_text,
@@ -279,13 +280,20 @@ def test_source_export_status_text_reports_flagged_participant_choice() -> None:
         PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
         automatic=False,
         include_flagged_subjects=True,
-    ) == "Building Hauk-style source-space z-score JSON from the active project (including flagged participants)..."
+    ) == "Building participant-first source-space z-score JSON from the active project (including flagged participants)..."
 
     assert _source_export_status_text(
         PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
         automatic=True,
         include_flagged_subjects=False,
-    ) == "Preparing project source-space z-score maps (excluding flagged participants)..."
+    ) == "Preparing participant-first project source-space z-score maps (excluding flagged participants)..."
+
+    assert _source_export_status_text(
+        PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+        automatic=False,
+        include_flagged_subjects=False,
+        zscore_model=PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
+    ) == "Building deprecated group-first source-space z-score JSON from the active project (excluding flagged participants)..."
 
 
 def test_project_source_export_failure_text_guides_stats_ready_prerequisites() -> None:

@@ -58,6 +58,26 @@ def test_cortical_paint_threshold_masks_subthreshold_zscores() -> None:
     assert projection.values[1] == 2.0
 
 
+def test_cortical_paint_detects_participant_first_surface_metadata() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([1.2, 2.0], dtype=float),
+        label="participant mean z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "source_space": "fsaverage_surface",
+            "base_producer_method": "l2_mne_fsaverage_participant_zscore",
+        },
+        normalize_values=False,
+    )
+
+    assert uses_cortical_surface_paint(payload) is True
+
+
 def test_cortical_paint_rejects_non_l2_mne_volume_payloads() -> None:
     payload = make_source_payload(
         points=np.asarray([[0.0, 0.0, 0.0]], dtype=float),

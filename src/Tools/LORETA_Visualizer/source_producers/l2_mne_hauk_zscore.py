@@ -43,6 +43,27 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], None]
 
 METHOD_ID_L2_MNE_CORTICAL_SURFACE_HAUK_ZSCORE_BETA = "l2_mne_cortical_surface_hauk_zscore_beta"
+METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE = "l2_mne_fsaverage_participant_zscore"
+METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE_MEAN = "l2_mne_fsaverage_participant_zscore_mean"
+METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE_MEDIAN = "l2_mne_fsaverage_participant_zscore_median"
+METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE_TRIMMED_MEAN = (
+    "l2_mne_fsaverage_participant_zscore_trimmed_mean"
+)
+PARTICIPANT_ZSCORE_AGGREGATION_MEAN = "mean"
+PARTICIPANT_ZSCORE_AGGREGATION_MEDIAN = "median"
+PARTICIPANT_ZSCORE_AGGREGATION_TRIMMED_MEAN = "trimmed_mean"
+PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS = {
+    PARTICIPANT_ZSCORE_AGGREGATION_MEAN: METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE_MEAN,
+    PARTICIPANT_ZSCORE_AGGREGATION_MEDIAN: METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE_MEDIAN,
+    PARTICIPANT_ZSCORE_AGGREGATION_TRIMMED_MEAN: METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE_TRIMMED_MEAN,
+}
+DEFAULT_PARTICIPANT_ZSCORE_AGGREGATIONS = (
+    PARTICIPANT_ZSCORE_AGGREGATION_MEAN,
+    PARTICIPANT_ZSCORE_AGGREGATION_MEDIAN,
+    PARTICIPANT_ZSCORE_AGGREGATION_TRIMMED_MEAN,
+)
+DEFAULT_PARTICIPANT_ZSCORE_TRIM_FRACTION = 0.2
+PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT = "fpvs_loreta_participant_source_maps_v1"
 DEFAULT_HAUK_ZSCORE_NOISE_WINDOW_BINS = 10
 DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS = 4
 DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS = (-1, 0, 1)
@@ -196,6 +217,84 @@ class L2MNEHaukZScoreValues:
     zero_noise_sd_source_count: int
 
 
+@dataclass(frozen=True)
+class L2MNEHaukParticipantSourceInput:
+    """One participant's source-ready target/noise-bin topographies."""
+
+    participant_id: str
+    condition: L2MNEHaukZScoreCondition
+
+    def __post_init__(self) -> None:
+        participant_id = _validate_label(self.participant_id, "participant_id")
+        if not isinstance(self.condition, L2MNEHaukZScoreCondition):
+            raise TypeError("Participant source input condition must be L2MNEHaukZScoreCondition.")
+        object.__setattr__(self, "participant_id", participant_id)
+
+
+@dataclass(frozen=True)
+class L2MNEHaukParticipantGroupCondition:
+    """One condition containing participant-level source-ready inputs."""
+
+    condition_id: str
+    label: str
+    participants: Sequence[L2MNEHaukParticipantSourceInput]
+    sensor_value_unit: str = "raw FFT amplitude uV"
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        condition_id = _slug(_validate_label(self.condition_id, "condition_id"))
+        label = _validate_label(self.label, "label")
+        participant_list = tuple(self.participants)
+        if not participant_list:
+            raise ValueError("Participant-first Hauk z-score condition requires at least one participant.")
+        ids = [participant.participant_id for participant in participant_list]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"Duplicate participant source inputs for {label}.")
+        for participant in participant_list:
+            if not isinstance(participant, L2MNEHaukParticipantSourceInput):
+                raise TypeError("participants must contain L2MNEHaukParticipantSourceInput values.")
+            if participant.condition.condition_id != condition_id:
+                raise ValueError("Participant source input condition_id must match the group condition_id.")
+        object.__setattr__(self, "condition_id", condition_id)
+        object.__setattr__(self, "label", label)
+        object.__setattr__(self, "participants", participant_list)
+        object.__setattr__(self, "sensor_value_unit", _validate_label(self.sensor_value_unit, "sensor_value_unit"))
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+
+@dataclass(frozen=True)
+class L2MNEHaukParticipantZScoreValues:
+    """One participant's computed source-space z-score map."""
+
+    participant_id: str
+    values: np.ndarray
+    target_source_values: np.ndarray
+    noise_mean_values: np.ndarray
+    noise_std_values: np.ndarray
+    noise_offsets_used: tuple[int, ...]
+    zero_noise_sd_source_count: int
+
+
+@dataclass(frozen=True)
+class L2MNEHaukParticipantZScoreSummary:
+    """Group summary over participant-level source z-score maps."""
+
+    aggregation: str
+    label_suffix: str
+    method_id: str
+    values: np.ndarray
+    participant_count: int
+    trim_fraction: float | None = None
+
+
+@dataclass(frozen=True)
+class L2MNEHaukParticipantZScoreWriteResult:
+    """Participant-first output files plus the renderer-ready producer result."""
+
+    producer_result: SourceProducerRunResult
+    participant_sidecar_path: Path
+
+
 def compute_l2_mne_hauk_zscore_source_values(
     *,
     forward_model: L2MNECorticalForwardModel,
@@ -266,6 +365,71 @@ def compute_l2_mne_hauk_zscore_source_values(
     )
 
 
+def compute_l2_mne_hauk_participant_zscore_source_values(
+    *,
+    forward_model: L2MNECorticalForwardModel,
+    condition: L2MNEHaukParticipantGroupCondition,
+    config: L2MNEHaukZScoreConfig,
+) -> tuple[L2MNEHaukParticipantZScoreValues, ...]:
+    """Compute source-space z-score maps independently for each participant."""
+    rows: list[L2MNEHaukParticipantZScoreValues] = []
+    for participant in condition.participants:
+        result = compute_l2_mne_hauk_zscore_source_values(
+            forward_model=forward_model,
+            condition=participant.condition,
+            config=config,
+        )
+        rows.append(
+            L2MNEHaukParticipantZScoreValues(
+                participant_id=participant.participant_id,
+                values=result.values,
+                target_source_values=result.target_source_values,
+                noise_mean_values=result.noise_mean_values,
+                noise_std_values=result.noise_std_values,
+                noise_offsets_used=result.noise_offsets_used,
+                zero_noise_sd_source_count=result.zero_noise_sd_source_count,
+            )
+        )
+    return tuple(rows)
+
+
+def summarize_l2_mne_hauk_participant_zscores(
+    participant_values: Sequence[L2MNEHaukParticipantZScoreValues],
+    *,
+    aggregation: str,
+    trim_fraction: float = DEFAULT_PARTICIPANT_ZSCORE_TRIM_FRACTION,
+) -> L2MNEHaukParticipantZScoreSummary:
+    """Summarize participant-level z-score maps with a deterministic aggregator."""
+    aggregation_id = _validate_participant_zscore_aggregation(aggregation)
+    rows = tuple(participant_values)
+    if not rows:
+        raise ValueError("Participant z-score aggregation requires at least one participant map.")
+    matrix = np.vstack([np.asarray(row.values, dtype=float).reshape(1, -1) for row in rows])
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("Participant source z-score maps contain non-finite values.")
+    if aggregation_id == PARTICIPANT_ZSCORE_AGGREGATION_MEAN:
+        values = np.mean(matrix, axis=0)
+        label_suffix = "Raw mean z-score"
+        summary_trim_fraction: float | None = None
+    elif aggregation_id == PARTICIPANT_ZSCORE_AGGREGATION_MEDIAN:
+        values = np.median(matrix, axis=0)
+        label_suffix = "Median z-score"
+        summary_trim_fraction = None
+    else:
+        trim_fraction = _validate_trim_fraction(trim_fraction)
+        values = _trimmed_mean(matrix, trim_fraction=trim_fraction)
+        label_suffix = f"{trim_fraction:.0%} trimmed mean z-score"
+        summary_trim_fraction = trim_fraction
+    return L2MNEHaukParticipantZScoreSummary(
+        aggregation=aggregation_id,
+        label_suffix=label_suffix,
+        method_id=PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS[aggregation_id],
+        values=np.asarray(values, dtype=float),
+        participant_count=len(rows),
+        trim_fraction=summary_trim_fraction,
+    )
+
+
 def build_l2_mne_hauk_zscore_surface_payload(
     *,
     forward_model: L2MNECorticalForwardModel,
@@ -293,6 +457,43 @@ def build_l2_mne_hauk_zscore_surface_payload(
             condition=condition,
             config=config,
             result=result,
+        ),
+    }
+    validate_prepared_source_payload_mapping(payload)
+    return payload
+
+
+def build_l2_mne_hauk_participant_zscore_summary_payload(
+    *,
+    forward_model: L2MNECorticalForwardModel,
+    condition: L2MNEHaukParticipantGroupCondition,
+    config: L2MNEHaukZScoreConfig,
+    participant_values: Sequence[L2MNEHaukParticipantZScoreValues],
+    summary: L2MNEHaukParticipantZScoreSummary,
+) -> dict[str, Any]:
+    """Build one renderer-ready group summary from participant source maps."""
+    values = np.asarray(summary.values, dtype=float).reshape(-1)
+    if len(values) != len(forward_model.source_points):
+        raise ValueError(
+            f"Participant source summary has {len(values)} source values; "
+            f"{len(forward_model.source_points)} expected."
+        )
+    payload = {
+        "format": PREPARED_SOURCE_PAYLOAD_FORMAT,
+        "label": f"{condition.label} {summary.label_suffix}",
+        "kind": SOURCE_KIND_SURFACE_MESH,
+        "coordinate_space": forward_model.coordinate_space,
+        "source_model": summary.method_id,
+        "value_label": config.value_label,
+        "points": _array_to_json_rows(forward_model.source_points),
+        "values": _array_to_json_values(values),
+        "faces": _array_to_json_rows(forward_model.faces),
+        "metadata": _participant_summary_payload_metadata(
+            forward_model=forward_model,
+            condition=condition,
+            config=config,
+            participant_values=participant_values,
+            summary=summary,
         ),
     }
     validate_prepared_source_payload_mapping(payload)
@@ -381,6 +582,142 @@ def write_l2_mne_hauk_zscore_surface_payloads(
     )
 
 
+def write_l2_mne_hauk_participant_zscore_surface_payloads(
+    *,
+    forward_model: L2MNECorticalForwardModel,
+    conditions: Sequence[L2MNEHaukParticipantGroupCondition],
+    config: L2MNEHaukZScoreConfig,
+    output_dir: str | Path,
+    manifest_name: str = "l2_mne_participant_zscore_manifest.json",
+    aggregations: Sequence[str] = DEFAULT_PARTICIPANT_ZSCORE_AGGREGATIONS,
+    trim_fraction: float = DEFAULT_PARTICIPANT_ZSCORE_TRIM_FRACTION,
+    participant_sidecar_name: str = "participant_l2_mne_hauk_zscore_maps.json",
+    progress_callback: ProgressCallback | None = None,
+) -> L2MNEHaukParticipantZScoreWriteResult:
+    """Write participant-first z-score summaries and participant sidecar JSON."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    condition_list = tuple(conditions)
+    if not condition_list:
+        raise ValueError("Participant-first Hauk z-score producer requires at least one condition.")
+    aggregation_list = tuple(_validate_participant_zscore_aggregation(value) for value in aggregations)
+    if not aggregation_list:
+        raise ValueError("Participant-first Hauk z-score producer requires at least one aggregation.")
+    trim_fraction = _validate_trim_fraction(trim_fraction)
+
+    emitted: list[ProducedPayload] = []
+    manifest_conditions: list[dict[str, Any]] = []
+    used_file_names: set[str] = set()
+    participant_rows_by_condition: dict[str, tuple[L2MNEHaukParticipantZScoreValues, ...]] = {}
+    for condition_index, condition in enumerate(condition_list, start=1):
+        _emit_progress(
+            progress_callback,
+            (
+                f"Computing participant source z-scores for condition "
+                f"{condition_index}/{len(condition_list)}: {condition.label}..."
+            ),
+        )
+        participant_rows = compute_l2_mne_hauk_participant_zscore_source_values(
+            forward_model=forward_model,
+            condition=condition,
+            config=config,
+        )
+        participant_rows_by_condition[condition.condition_id] = participant_rows
+        for aggregation in aggregation_list:
+            summary = summarize_l2_mne_hauk_participant_zscores(
+                participant_rows,
+                aggregation=aggregation,
+                trim_fraction=trim_fraction,
+            )
+            _emit_progress(
+                progress_callback,
+                f"Writing {condition.label} {summary.label_suffix} source JSON...",
+            )
+            payload = build_l2_mne_hauk_participant_zscore_summary_payload(
+                forward_model=forward_model,
+                condition=condition,
+                config=config,
+                participant_values=participant_rows,
+                summary=summary,
+            )
+            condition_payload_id = f"{condition.condition_id}_{summary.aggregation}"
+            file_name = _unique_participant_payload_file_name(condition.condition_id, summary.aggregation, used_file_names)
+            payload_path = output_path / file_name
+            _write_json(payload_path, payload)
+            validation = validate_prepared_source_payload_json(payload_path)
+            emitted.append(
+                ProducedPayload(
+                    condition_id=condition_payload_id,
+                    label=payload["label"],
+                    payload_path=payload_path,
+                    validation=validation,
+                )
+            )
+            manifest_conditions.append(
+                {
+                    "id": condition_payload_id,
+                    "label": payload["label"],
+                    "file": file_name,
+                    "metadata": {
+                        "producer_method": summary.method_id,
+                        "base_producer_method": METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE,
+                        "participant_zscore_aggregation": summary.aggregation,
+                        "selected_harmonics_hz": list(config.selected_harmonics_hz),
+                        "value_label": config.value_label,
+                        "source_value_unit": "z-score",
+                    },
+                }
+            )
+
+    sidecar_path = output_path / participant_sidecar_name
+    _emit_progress(progress_callback, "Writing participant source-map sidecar...")
+    _write_json(
+        sidecar_path,
+        _participant_zscore_sidecar_payload(
+            forward_model=forward_model,
+            conditions=condition_list,
+            config=config,
+            participant_rows_by_condition=participant_rows_by_condition,
+        ),
+    )
+
+    manifest = {
+        "format": PREPARED_SOURCE_MANIFEST_FORMAT,
+        "label": "L2-MNE participant-first source-space z-score maps",
+        "conditions": manifest_conditions,
+        "metadata": {
+            "producer_method": METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE,
+            "aggregation_methods": list(aggregation_list),
+            "participant_sidecar_file": sidecar_path.name,
+            "cluster_mask": "none",
+        },
+    }
+    manifest_path = output_path / manifest_name
+    _emit_progress(progress_callback, "Writing source-map manifest...")
+    _write_json(manifest_path, manifest)
+    _emit_progress(progress_callback, "Validating source-map manifest...")
+    manifest_validation = validate_prepared_source_manifest_json(manifest_path, require_payload_files=True)
+    logger.info(
+        "l2_mne_participant_zscore_payloads_written",
+        extra={
+            "output_dir": str(output_path),
+            "condition_count": len(condition_list),
+            "payload_count": len(emitted),
+            "participant_sidecar_path": str(sidecar_path),
+        },
+    )
+    return L2MNEHaukParticipantZScoreWriteResult(
+        producer_result=SourceProducerRunResult(
+            method_id=METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE,
+            output_dir=output_path,
+            manifest_path=manifest_path,
+            payloads=tuple(emitted),
+            manifest_validation=manifest_validation,
+        ),
+        participant_sidecar_path=sidecar_path,
+    )
+
+
 def _source_amplitudes_from_topographies(
     forward_model: L2MNECorticalForwardModel,
     topographies: np.ndarray,
@@ -460,6 +797,30 @@ def _drop_extreme_noise_rows(noise_source_values: np.ndarray) -> np.ndarray:
     if noise_source_values.shape[0] <= 2:
         return noise_source_values
     return np.sort(noise_source_values, axis=0)[1:-1, :]
+
+
+def _validate_participant_zscore_aggregation(value: str) -> str:
+    aggregation = str(value).strip().lower()
+    if aggregation not in PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS:
+        valid = ", ".join(PARTICIPANT_ZSCORE_AGGREGATION_METHOD_IDS)
+        raise ValueError(f"Unsupported participant z-score aggregation {value!r}; expected one of: {valid}.")
+    return aggregation
+
+
+def _validate_trim_fraction(value: float) -> float:
+    fraction = float(value)
+    if not np.isfinite(fraction) or fraction < 0.0 or fraction >= 0.5:
+        raise ValueError("Participant z-score trim_fraction must be >= 0 and < 0.5.")
+    return fraction
+
+
+def _trimmed_mean(values: np.ndarray, *, trim_fraction: float) -> np.ndarray:
+    matrix = np.asarray(values, dtype=float)
+    trim_count = int(np.floor(matrix.shape[0] * float(trim_fraction)))
+    if trim_count <= 0 or (2 * trim_count) >= matrix.shape[0]:
+        return np.mean(matrix, axis=0)
+    sorted_values = np.sort(matrix, axis=0)
+    return np.mean(sorted_values[trim_count : matrix.shape[0] - trim_count, :], axis=0)
 
 
 def _validate_topography(values: Sequence[float], *, label: str) -> np.ndarray:
@@ -555,9 +916,16 @@ def _payload_metadata(
         "hauk_alignment_limitations": [
             "EEG only; Hauk 2021 used combined EEG and MEG.",
             "Template fsaverage head/source model; Hauk 2021 and 2025 used individual MRIs.",
-            "Group-level topographies are source-estimated once; Hauk-style group inference likely used participant-level source maps.",
+            "Deprecated group-first mode source-estimates group-level topographies once; Phase 6H-A(2) participant-first maps are the preferred path.",
             "Ad hoc diagonal EEG covariance is used for whitening in this EEG-only template path.",
         ],
+        "source_map_model": "deprecated_group_first",
+        "deprecated_model": True,
+        "deprecation_note": (
+            "Retained as an advanced fallback while participant-first source maps are validated; "
+            "planned for removal."
+        ),
+        "cluster_mask": "none",
         "sensor_modalities": ["EEG"],
         "head_model": "fsaverage template",
         "subject_mri": "none",
@@ -571,12 +939,160 @@ def _payload_metadata(
     return metadata
 
 
+def _participant_summary_payload_metadata(
+    *,
+    forward_model: L2MNECorticalForwardModel,
+    condition: L2MNEHaukParticipantGroupCondition,
+    config: L2MNEHaukZScoreConfig,
+    participant_values: Sequence[L2MNEHaukParticipantZScoreValues],
+    summary: L2MNEHaukParticipantZScoreSummary,
+) -> dict[str, Any]:
+    rows = tuple(participant_values)
+    participant_ids = [row.participant_id for row in rows]
+    common_offsets = sorted({offset for row in rows for offset in row.noise_offsets_used})
+    metadata = {
+        "beta": True,
+        "producer_method": summary.method_id,
+        "base_producer_method": METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE,
+        "inverse_method": "L2 minimum-norm estimate",
+        "source_space": "cortical_surface",
+        "source_map_model": "participant_first",
+        "template_subject": config.template_subject,
+        "montage_name": config.montage_name,
+        "coordinate_space": forward_model.coordinate_space,
+        "forward_model_label": forward_model.label,
+        "harmonic_policy_id": config.harmonic_policy_id,
+        "selected_harmonics_hz": list(config.selected_harmonics_hz),
+        "harmonic_strategy": config.harmonic_strategy,
+        "participant_zscore_order": [
+            "read participant sensor FFT amplitude target/noise-bin topographies",
+            "estimate source values for each participant target and noise topography",
+            "sum source estimates across selected significant harmonics",
+            "compute participant source-space z-score maps",
+            "aggregate participant z-score maps for group display",
+        ],
+        "participant_zscore_aggregation": summary.aggregation,
+        "participant_zscore_aggregation_label": summary.label_suffix,
+        "participant_zscore_trim_fraction": summary.trim_fraction,
+        "participant_count": summary.participant_count,
+        "participant_ids": participant_ids,
+        "lambda2": float(config.lambda2),
+        "inverse_backend": str(forward_model.metadata.get("inverse_backend", "manual_ridge")),
+        "orientation_constraint": str(forward_model.metadata.get("orientation_constraint", "fixed")),
+        "loose_orientation": forward_model.metadata.get("loose_orientation"),
+        "fixed_orientation": forward_model.metadata.get("fixed_orientation", True),
+        "depth_weighting": str(forward_model.metadata.get("depth_weighting", "not_applicable")),
+        "noise_normalization": str(forward_model.metadata.get("noise_normalization", "none")),
+        "regularization": str(
+            forward_model.metadata.get("regularization", "lambda2 scaled by leadfield sensor-space trace")
+        ),
+        "average_reference_applied": bool(config.apply_average_reference),
+        "sensor_value_unit": condition.sensor_value_unit,
+        "source_value_unit": "z-score",
+        "source_value_unit_note": (
+            "Group summary of participant-level source-space z-score maps. Each participant map is "
+            "computed from target-bin L2-MNE source amplitude relative to neighboring-bin source-space noise."
+        ),
+        "value_label": config.value_label,
+        "neighboring_bin_policy": {
+            "noise_window_bins_each_side": int(config.noise_window_bins),
+            "excluded_offsets": list(config.excluded_noise_offsets),
+            "common_offsets_used": common_offsets,
+            "drop_min_max_noise_per_source": bool(config.drop_min_max_noise_per_source),
+            "min_noise_bins": int(config.min_noise_bins),
+        },
+        "baseline_correction_rule": "target source amplitude minus neighboring-bin source-space mean",
+        "z_score_denominator_rule": "population SD of neighboring-bin source-space amplitudes after optional min/max removal",
+        "zero_noise_sd_source_count_by_participant": {
+            row.participant_id: int(row.zero_noise_sd_source_count) for row in rows
+        },
+        "channel_count": len(forward_model.channel_names),
+        "source_count": int(len(forward_model.source_points)),
+        "channel_names": list(forward_model.channel_names),
+        "hauk_2021_frequency_domain_zscore_aligned": True,
+        "hauk_alignment_target": "participant-first frequency-domain L2-MNE source-space baseline correction and z-scoring",
+        "hauk_alignment_limitations": [
+            "EEG only; Hauk 2021 used combined EEG and MEG.",
+            "Template fsaverage head/source model; Hauk 2021 and 2025 used individual MRIs.",
+            "No source-space cluster-permutation mask is applied in this phase.",
+            "Ad hoc diagonal EEG covariance is used for whitening in this EEG-only template path.",
+        ],
+        "cluster_mask": "none",
+        "sensor_modalities": ["EEG"],
+        "head_model": "fsaverage template",
+        "subject_mri": "none",
+        "deep_source_claim": "none; Hauk-style beta L2-MNE payload is cortical surface only",
+        "project_integration": "none",
+        "renderer_dependency": "none",
+    }
+    metadata.update(_json_safe_metadata(forward_model.metadata, prefix="forward_model"))
+    metadata.update(_json_safe_metadata(config.metadata, prefix="config"))
+    metadata.update(_json_safe_metadata(condition.metadata, prefix="condition"))
+    return metadata
+
+
+def _participant_zscore_sidecar_payload(
+    *,
+    forward_model: L2MNECorticalForwardModel,
+    conditions: Sequence[L2MNEHaukParticipantGroupCondition],
+    config: L2MNEHaukZScoreConfig,
+    participant_rows_by_condition: Mapping[str, Sequence[L2MNEHaukParticipantZScoreValues]],
+) -> dict[str, Any]:
+    condition_rows: list[dict[str, Any]] = []
+    for condition in conditions:
+        participant_rows = tuple(participant_rows_by_condition.get(condition.condition_id, ()))
+        condition_rows.append(
+            {
+                "condition_id": condition.condition_id,
+                "label": condition.label,
+                "participant_count": len(participant_rows),
+                "participants": [
+                    {
+                        "participant_id": row.participant_id,
+                        "values": _array_to_json_values(row.values),
+                        "noise_offsets_used": list(row.noise_offsets_used),
+                        "zero_noise_sd_source_count": int(row.zero_noise_sd_source_count),
+                    }
+                    for row in participant_rows
+                ],
+            }
+        )
+    return {
+        "format": PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT,
+        "source_model": METHOD_ID_L2_MNE_FSAVERAGE_PARTICIPANT_ZSCORE,
+        "value_label": config.value_label,
+        "source_value_unit": "z-score",
+        "coordinate_space": forward_model.coordinate_space,
+        "points": _array_to_json_rows(forward_model.source_points),
+        "faces": _array_to_json_rows(forward_model.faces),
+        "conditions": condition_rows,
+        "metadata": {
+            "selected_harmonics_hz": list(config.selected_harmonics_hz),
+            "participant_level_values": True,
+            "cluster_mask": "none",
+            "renderer_dependency": "none",
+        },
+    }
+
+
 def _unique_payload_file_name(condition_id: str, used: set[str]) -> str:
     base = _slug(condition_id)
     candidate = f"{base}_l2_mne_hauk_zscore_beta.json"
     suffix = 2
     while candidate in used:
         candidate = f"{base}_{suffix}_l2_mne_hauk_zscore_beta.json"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def _unique_participant_payload_file_name(condition_id: str, aggregation: str, used: set[str]) -> str:
+    base = _slug(condition_id)
+    suffix_label = _slug(aggregation)
+    candidate = f"{base}_l2_mne_participant_zscore_{suffix_label}.json"
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}_{suffix}_l2_mne_participant_zscore_{suffix_label}.json"
         suffix += 1
     used.add(candidate)
     return candidate

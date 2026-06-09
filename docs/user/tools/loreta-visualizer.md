@@ -60,7 +60,8 @@ behavior.
   labels.
 - Open **Source Map Options** to rebuild project maps with Stats/QC-flagged
   participants excluded by default or explicitly included for comparison, load a
-  prepared source payload JSON file, or load a prepared source manifest.
+  prepared source payload JSON file, load a prepared source manifest, or choose
+  the deprecated group-first z-score model for comparison.
 - Use checked-in example payload and manifest JSON files as references for the
   expected future calculation output shape.
 
@@ -113,6 +114,11 @@ harmonic columns and neighboring frequency bins. Its project-local output is:
 The main file loaded by default is:
 
 `project_l2_mne_hauk_zscore_beta_manifest.json`
+
+That manifest contains participant-first source-space z-score group summaries:
+raw mean, median, and 20% trimmed mean entries for each condition. The same
+folder also stores `participant_l2_mne_hauk_zscore_maps.json`, a participant
+sidecar reserved for future individual-viewer support.
 
 The older 6C diagnostic amplitude exporter remains available in Source Map
 Options and writes project-local output under:
@@ -222,8 +228,10 @@ without changing how the 3D renderer works.
 The current real-data path is cortical-surface only and uses a template
 fsaverage model. Hauk-style L2-MNE source-space z-score maps are the default
 project view. This mode reads raw `FullFFT Amplitude (uV)` target and
-neighboring frequency bins, sends target and noise topographies through the
-same inverse model, and displays source-space z-scores.
+neighboring frequency bins for each included participant, sends each
+participant's target and noise topographies through the same inverse model,
+computes participant source-space z-score maps, and then displays group raw
+mean, median, or 20% trimmed mean z-score summaries.
 
 By default, z-score maps use an opaque cortical paint view in the
 publication-style split-hemisphere layout. That split layout uses inflated

@@ -12,9 +12,12 @@ from Tools.LORETA_Visualizer.prepared_payload_validator import validate_prepared
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
 from Tools.LORETA_Visualizer.source_producers.project_fullfft_inputs import (
     ProjectFullFftInputError,
+    build_l2_mne_hauk_participant_zscore_conditions_from_project,
     build_l2_mne_hauk_zscore_conditions_from_project,
 )
 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+    PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
+    PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST,
     default_project_l2_mne_hauk_zscore_output_dir,
     write_project_l2_mne_hauk_zscore_payloads,
 )
@@ -44,6 +47,32 @@ def test_project_fullfft_assembler_reads_neighboring_bins(tmp_path) -> None:
     assert np.allclose(harmonic.noise_topographies_by_offset[-2], expected_noise)
 
 
+def test_project_fullfft_participant_assembler_preserves_subject_maps(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path)
+
+    result = build_l2_mne_hauk_participant_zscore_conditions_from_project(
+        project_root,
+        conditions=["Condition A"],
+        noise_window_bins=3,
+        min_noise_bins=4,
+    )
+
+    assert [condition.label for condition in result.conditions] == ["Condition A"]
+    condition = result.conditions[0]
+    assert [participant.participant_id for participant in condition.participants] == ["P1", "P2"]
+    first_harmonic = condition.participants[0].condition.harmonic_bins[2.4]
+    second_harmonic = condition.participants[1].condition.harmonic_bins[2.4]
+    assert np.allclose(
+        first_harmonic.target_topography,
+        _expected_fullfft_values(condition_base=10.0, frequency_hz=2.4, subject_mean=0.0),
+    )
+    assert np.allclose(
+        second_harmonic.target_topography,
+        _expected_fullfft_values(condition_base=10.0, frequency_hz=2.4, subject_mean=1.0),
+    )
+    assert condition.metadata["project_input_assembly"] == "phase_6h_a2_fullfft_participant_neighbor_bins_read_only"
+
+
 def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path) -> None:
     project_root = _build_project_fixture(tmp_path)
 
@@ -56,20 +85,54 @@ def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path)
 
     assert result.output_dir == default_project_l2_mne_hauk_zscore_output_dir(project_root)
     assert result.manifest_path.is_file()
+    assert result.export_model == PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST
+    assert result.participant_sidecar_path is not None
+    assert result.participant_sidecar_path.is_file()
     assert result.producer_result.manifest_validation.label == validate_prepared_source_manifest_json(
         result.manifest_path,
         require_payload_files=True,
     ).label
-    assert len(result.producer_result.payloads) == 2
+    assert len(result.producer_result.payloads) == 6
 
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["label"] == "L2-MNE Hauk-style source-space z-score beta maps"
+    assert manifest["label"] == "L2-MNE participant-first source-space z-score maps"
+    assert manifest["metadata"]["participant_sidecar_file"] == result.participant_sidecar_path.name
+    assert [entry["metadata"]["participant_zscore_aggregation"] for entry in manifest["conditions"][:3]] == [
+        "mean",
+        "median",
+        "trimmed_mean",
+    ]
     payload = json.loads(result.producer_result.payloads[0].payload_path.read_text(encoding="utf-8"))
     metadata = payload["metadata"]
-    assert payload["source_model"] == "l2_mne_cortical_surface_hauk_zscore_beta"
+    assert payload["source_model"] == "l2_mne_fsaverage_participant_zscore_mean"
     assert metadata["source_value_unit"] == "z-score"
-    assert metadata["config_project_integration"] == "phase_6d_project_l2_mne_hauk_zscore_beta"
-    assert metadata["condition_project_input_assembly"] == "phase_6d_fullfft_neighbor_bins_read_only"
+    assert metadata["source_map_model"] == "participant_first"
+    assert metadata["participant_zscore_aggregation"] == "mean"
+    assert metadata["config_project_integration"] == "phase_6h_a2_project_l2_mne_participant_first_hauk_zscore"
+    assert metadata["condition_project_input_assembly"] == "phase_6h_a2_fullfft_participant_neighbor_bins_read_only"
+    assert metadata["cluster_mask"] == "none"
+    sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
+    assert sidecar["conditions"][0]["participant_count"] == 2
+
+
+def test_project_hauk_zscore_export_keeps_deprecated_group_first_opt_in(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path)
+
+    result = write_project_l2_mne_hauk_zscore_payloads(
+        project_root=project_root,
+        forward_model=_tiny_forward_model(),
+        noise_window_bins=3,
+        min_noise_bins=4,
+        zscore_model=PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
+    )
+
+    assert result.export_model == PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST
+    assert result.participant_sidecar_path is None
+    assert len(result.producer_result.payloads) == 2
+    payload = json.loads(result.producer_result.payloads[0].payload_path.read_text(encoding="utf-8"))
+    assert payload["source_model"] == "l2_mne_cortical_surface_hauk_zscore_beta"
+    assert payload["metadata"]["source_map_model"] == "deprecated_group_first"
+    assert payload["metadata"]["deprecated_model"] is True
 
 
 def test_project_hauk_zscore_export_reports_progress(tmp_path) -> None:
@@ -84,11 +147,12 @@ def test_project_hauk_zscore_export_reports_progress(tmp_path) -> None:
         progress_callback=messages.append,
     )
 
-    assert any("Reading project FullFFT workbooks" in message for message in messages)
-    assert any("Prepared source inputs for 2 condition" in message for message in messages)
+    assert any("Reading participant FullFFT workbooks" in message for message in messages)
+    assert any("Prepared participant-level source inputs for 2 condition" in message for message in messages)
     assert any("Using supplied L2-MNE inverse model" in message for message in messages)
     assert any("L2-MNE inverse model is ready" in message for message in messages)
-    assert any("Computing source-space z-score map 1/2" in message for message in messages)
+    assert any("Computing participant source z-scores for condition 1/2" in message for message in messages)
+    assert any("Writing participant source-map sidecar" in message for message in messages)
     assert any("Writing source-map manifest" in message for message in messages)
     assert any("Source-map JSON export complete" in message for message in messages)
 
@@ -104,7 +168,7 @@ def test_project_hauk_zscore_export_reads_group_subfolder_workbooks(tmp_path) ->
     )
 
     assert result.manifest_path.is_file()
-    assert len(result.producer_result.payloads) == 2
+    assert len(result.producer_result.payloads) == 6
     assert result.project_inputs.summaries[0].workbook_count == 2
 
 

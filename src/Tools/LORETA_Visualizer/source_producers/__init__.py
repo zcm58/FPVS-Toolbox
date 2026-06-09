@@ -28,15 +28,24 @@ if TYPE_CHECKING:
     )
     from Tools.LORETA_Visualizer.source_producers.l2_mne_hauk_zscore import (
         L2MNEHaukHarmonicBins,
+        L2MNEHaukParticipantGroupCondition,
+        L2MNEHaukParticipantSourceInput,
+        L2MNEHaukParticipantZScoreValues,
         L2MNEHaukZScoreCondition,
         L2MNEHaukZScoreConfig,
+        build_l2_mne_hauk_participant_zscore_summary_payload,
         build_l2_mne_hauk_zscore_surface_payload,
+        compute_l2_mne_hauk_participant_zscore_source_values,
         compute_l2_mne_hauk_zscore_source_values,
+        summarize_l2_mne_hauk_participant_zscores,
+        write_l2_mne_hauk_participant_zscore_surface_payloads,
         write_l2_mne_hauk_zscore_surface_payloads,
     )
     from Tools.LORETA_Visualizer.source_producers.project_fullfft_inputs import (
         ProjectFullFftBinPlan,
+        ProjectParticipantSourceFrequencyBinInputSet,
         ProjectSourceFrequencyBinInputSet,
+        build_l2_mne_hauk_participant_zscore_conditions_from_project,
         build_l2_mne_hauk_zscore_conditions_from_project,
     )
     from Tools.LORETA_Visualizer.source_producers.project_inputs import (
@@ -45,8 +54,11 @@ if TYPE_CHECKING:
         build_l2_mne_conditions_from_project,
     )
     from Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export import (
+        PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
+        PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST,
         ProjectL2MNEHaukZScoreExportResult,
         default_project_l2_mne_hauk_zscore_output_dir,
+        write_project_l2_mne_hauk_zscore_group_first_payloads,
         write_project_l2_mne_hauk_zscore_payloads,
     )
     from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
@@ -68,15 +80,24 @@ _L2_MNE_EXPORTS = {
 }
 _L2_MNE_HAUK_ZSCORE_EXPORTS = {
     "L2MNEHaukHarmonicBins",
+    "L2MNEHaukParticipantGroupCondition",
+    "L2MNEHaukParticipantSourceInput",
+    "L2MNEHaukParticipantZScoreValues",
     "L2MNEHaukZScoreCondition",
     "L2MNEHaukZScoreConfig",
+    "build_l2_mne_hauk_participant_zscore_summary_payload",
     "build_l2_mne_hauk_zscore_surface_payload",
+    "compute_l2_mne_hauk_participant_zscore_source_values",
     "compute_l2_mne_hauk_zscore_source_values",
+    "summarize_l2_mne_hauk_participant_zscores",
+    "write_l2_mne_hauk_participant_zscore_surface_payloads",
     "write_l2_mne_hauk_zscore_surface_payloads",
 }
 _PROJECT_FULLFFT_INPUT_EXPORTS = {
     "ProjectFullFftBinPlan",
+    "ProjectParticipantSourceFrequencyBinInputSet",
     "ProjectSourceFrequencyBinInputSet",
+    "build_l2_mne_hauk_participant_zscore_conditions_from_project",
     "build_l2_mne_hauk_zscore_conditions_from_project",
 }
 _PROJECT_INPUT_EXPORTS = {
@@ -91,8 +112,11 @@ _PROJECT_L2_MNE_EXPORTS = {
     "write_project_l2_mne_cortical_surface_payloads",
 }
 _PROJECT_HAUK_ZSCORE_EXPORTS = {
+    "PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST",
+    "PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST",
     "ProjectL2MNEHaukZScoreExportResult",
     "default_project_l2_mne_hauk_zscore_output_dir",
+    "write_project_l2_mne_hauk_zscore_group_first_payloads",
     "write_project_l2_mne_hauk_zscore_payloads",
 }
 
@@ -100,28 +124,40 @@ __all__ = [
     "L2MNECorticalForwardModel",
     "L2MNEFPVSCondition",
     "L2MNEHaukHarmonicBins",
+    "L2MNEHaukParticipantGroupCondition",
+    "L2MNEHaukParticipantSourceInput",
+    "L2MNEHaukParticipantZScoreValues",
     "L2MNEHaukZScoreCondition",
     "L2MNEHaukZScoreConfig",
     "L2MNEProducerConfig",
+    "PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST",
+    "PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST",
     "ProducedPayload",
     "ProjectConditionTopographySummary",
     "ProjectFullFftBinPlan",
     "ProjectL2MNEHaukZScoreExportResult",
     "ProjectL2MNEExportResult",
+    "ProjectParticipantSourceFrequencyBinInputSet",
     "ProjectSourceFrequencyBinInputSet",
     "ProjectSourceTopographyInputSet",
     "SourceProducerRunResult",
+    "build_l2_mne_hauk_participant_zscore_conditions_from_project",
+    "build_l2_mne_hauk_participant_zscore_summary_payload",
     "build_l2_mne_hauk_zscore_conditions_from_project",
     "build_l2_mne_hauk_zscore_surface_payload",
     "build_mne_fsaverage_l2_mne_forward_model",
     "build_l2_mne_cortical_surface_payload",
     "build_l2_mne_conditions_from_project",
+    "compute_l2_mne_hauk_participant_zscore_source_values",
     "compute_l2_mne_hauk_zscore_source_values",
     "compute_l2_mne_source_values",
     "default_project_l2_mne_hauk_zscore_output_dir",
     "default_project_l2_mne_output_dir",
     "make_l2_mne_cortical_surface_beta_fixture",
+    "summarize_l2_mne_hauk_participant_zscores",
+    "write_l2_mne_hauk_participant_zscore_surface_payloads",
     "write_l2_mne_hauk_zscore_surface_payloads",
+    "write_project_l2_mne_hauk_zscore_group_first_payloads",
     "write_project_l2_mne_hauk_zscore_payloads",
     "write_project_l2_mne_cortical_surface_payloads",
     "write_l2_mne_cortical_surface_fixture",

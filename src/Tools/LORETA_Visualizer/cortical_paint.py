@@ -40,10 +40,12 @@ def uses_cortical_surface_paint(payload: SourcePayload) -> bool:
         (
             payload.source_model,
             str(payload.metadata.get("producer_method", "")),
+            str(payload.metadata.get("base_producer_method", "")),
             str(payload.metadata.get("source_model", "")),
+            str(payload.metadata.get("source_space", "")),
         )
     ).lower()
-    return "l2_mne" in model_text and "cortical" in model_text and "surface" in model_text
+    return "l2_mne" in model_text
 
 
 def project_cortical_surface_payload(

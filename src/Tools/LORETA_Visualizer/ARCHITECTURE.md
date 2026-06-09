@@ -228,8 +228,14 @@ compact rebuild summaries, but source-estimation math still belongs only to
   model and writes prepared source-map JSON. Phase 6D includes
   `l2_mne_hauk_zscore.py`, `project_fullfft_inputs.py`, and
   `project_l2_mne_hauk_zscore_export.py`, which produce project-local
-  source-space z-score payloads from FullFFT target/noise-bin data. Later
-  producers may use LORETA/eLORETA volume or mixed source-space models.
+  source-space z-score payloads from FullFFT target/noise-bin data. Phase
+  6H-A(2) makes that Hauk-style path participant-first by default: project
+  inputs preserve participant target/noise-bin topographies, the producer
+  computes participant source-space z-score maps, and the export writes group
+  raw mean, median, and 20% trimmed-mean prepared payloads plus a participant
+  sidecar for future individual viewing. The deprecated group-first z-score
+  model is retained only as an advanced comparison fallback. Later producers
+  may use LORETA/eLORETA volume or mixed source-space models.
 - `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
   the expected output shape for future source-localization producers. They are
   format examples only and are not source estimates. This directory also holds

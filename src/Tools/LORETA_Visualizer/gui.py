@@ -71,6 +71,8 @@ DEFAULT_ACTIVATION_OPACITY_PERCENT = 72
 DEFAULT_DISPLAY_MODE = DISPLAY_MODE_SPLIT_HEMISPHERE
 PROJECT_SOURCE_EXPORT_AMPLITUDE = "amplitude"
 PROJECT_SOURCE_EXPORT_HAUK_ZSCORE = "hauk_zscore"
+PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST = "participant_first"
+PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST = "deprecated_group_first"
 SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
 SOURCE_OPTIONS_ACTION_LOAD_MANIFEST = "load_manifest"
 SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE = "rebuild_zscore"
@@ -129,11 +131,13 @@ class ProjectSourceMapExportWorker(QObject):
         project_root: Path,
         export_mode: str,
         include_flagged_subjects: bool,
+        zscore_model: str,
     ) -> None:
         super().__init__()
         self._project_root = project_root
         self._export_mode = export_mode
         self._include_flagged_subjects = include_flagged_subjects
+        self._zscore_model = zscore_model
 
     @Slot()
     def run(self) -> None:
@@ -143,10 +147,14 @@ class ProjectSourceMapExportWorker(QObject):
                     write_project_l2_mne_hauk_zscore_payloads,
                 )
 
-                self.progress.emit("Starting Hauk-style source-space z-score rebuild...")
+                if self._zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
+                    self.progress.emit("Starting deprecated group-first source-space z-score rebuild...")
+                else:
+                    self.progress.emit("Starting participant-first source-space z-score rebuild...")
                 result = write_project_l2_mne_hauk_zscore_payloads(
                     project_root=self._project_root,
                     include_flagged_subjects=self._include_flagged_subjects,
+                    zscore_model=self._zscore_model,
                     progress_callback=self.progress.emit,
                 )
             else:
@@ -373,12 +381,15 @@ def _source_export_status_text(
     *,
     automatic: bool,
     include_flagged_subjects: bool,
+    zscore_model: str = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
 ) -> str:
     flag_text = "including flagged participants" if include_flagged_subjects else "excluding flagged participants"
     if automatic:
-        return f"Preparing project source-space z-score maps ({flag_text})..."
+        return f"Preparing participant-first project source-space z-score maps ({flag_text})..."
     if export_mode == PROJECT_SOURCE_EXPORT_HAUK_ZSCORE:
-        return f"Building Hauk-style source-space z-score JSON from the active project ({flag_text})..."
+        if zscore_model == PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST:
+            return f"Building deprecated group-first source-space z-score JSON from the active project ({flag_text})..."
+        return f"Building participant-first source-space z-score JSON from the active project ({flag_text})..."
     return f"Building beta L2-MNE source JSON from the active project ({flag_text})..."
 
 
@@ -409,18 +420,19 @@ class SourceMapOptionsDialog(AppDialog):
         parent: QWidget,
         *,
         include_flagged_subjects: bool,
+        zscore_model: str,
         zscore_display_threshold: float,
         project_available: bool,
         export_busy: bool,
     ) -> None:
-        super().__init__("Source Map Options", parent, size=SurfaceSize(width=460, height=430, min_width=410))
+        super().__init__("Source Map Options", parent, size=SurfaceSize(width=480, height=500, min_width=430))
         self.selected_action: str | None = None
         self._syncing_threshold_controls = False
 
         method_label = QLabel(
-            "Default project maps use beta Hauk-style L2-MNE source-space z-scores. "
-            "The method uses project FullFFT target/noise bins, the Stats-selected "
-            "oddball harmonics, and a BioSemi64/fsaverage cortical template.",
+            "Default project maps use participant-first beta Hauk-style L2-MNE source-space z-scores. "
+            "The method uses project FullFFT target/noise bins, Stats-selected oddball harmonics, "
+            "and a BioSemi64/fsaverage cortical template.",
             self,
         )
         method_label.setObjectName("loreta_source_options_method_label")
@@ -479,6 +491,34 @@ class SourceMapOptionsDialog(AppDialog):
         data_layout.setContentsMargins(8, 8, 8, 8)
         data_layout.setSpacing(8)
         tabs.addTab(data_tab, "Data")
+
+        zscore_model_label = QLabel("Z-score generation model", data_tab)
+        zscore_model_label.setObjectName("loreta_zscore_model_label")
+        data_layout.addWidget(zscore_model_label)
+
+        self.zscore_model_combo = QComboBox(data_tab)
+        self.zscore_model_combo.setObjectName("loreta_zscore_model_combo")
+        self.zscore_model_combo.addItem(
+            "Participant-first source z-scores (default)",
+            PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST,
+        )
+        self.zscore_model_combo.addItem(
+            "Deprecated group-first beta model",
+            PROJECT_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST,
+        )
+        for index in range(self.zscore_model_combo.count()):
+            if self.zscore_model_combo.itemData(index) == zscore_model:
+                self.zscore_model_combo.setCurrentIndex(index)
+                break
+        data_layout.addWidget(self.zscore_model_combo)
+
+        deprecated_note = QLabel(
+            "The deprecated group-first model is retained only for comparison and is planned for removal.",
+            data_tab,
+        )
+        deprecated_note.setObjectName("loreta_zscore_model_deprecated_note")
+        deprecated_note.setWordWrap(True)
+        data_layout.addWidget(deprecated_note)
 
         self.include_flagged_check = QCheckBox("Include Stats QC flagged participants in source-map calculations", self)
         self.include_flagged_check.setObjectName("loreta_include_flagged_subjects_check")
@@ -679,6 +719,7 @@ class LoretaVisualizerWindow(QWidget):
         self._manifest_conditions: dict[str, PreparedSourceManifestEntry] = {}
         self._auto_project_zscore_attempted = False
         self._include_flagged_subjects = False
+        self._zscore_model = PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST
         self._zscore_display_threshold = DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
         self._display_mode = DEFAULT_DISPLAY_MODE
 
@@ -1338,12 +1379,14 @@ class LoretaVisualizerWindow(QWidget):
         dialog = SourceMapOptionsDialog(
             self,
             include_flagged_subjects=self._include_flagged_subjects,
+            zscore_model=self._zscore_model,
             zscore_display_threshold=self._zscore_display_threshold,
             project_available=project_root is not None,
             export_busy=self._source_export_thread is not None,
         )
         dialog.exec()
         self._include_flagged_subjects = dialog.include_flagged_check.isChecked()
+        self._zscore_model = str(dialog.zscore_model_combo.currentData() or PROJECT_ZSCORE_MODEL_PARTICIPANT_FIRST)
         self._set_zscore_display_threshold(dialog.zscore_threshold_spin.value())
         if dialog.selected_action == SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE:
             self._build_project_zscore_source_maps()
@@ -1430,10 +1473,12 @@ class LoretaVisualizerWindow(QWidget):
             )
             return
         include_flagged_subjects = self._include_flagged_subjects
+        zscore_model = self._zscore_model
         status_text = _source_export_status_text(
             export_mode,
             automatic=automatic,
             include_flagged_subjects=include_flagged_subjects,
+            zscore_model=zscore_model,
         )
         self._set_source_export_status(status_text, variant="info")
         self._sync_project_source_button()
@@ -1443,6 +1488,7 @@ class LoretaVisualizerWindow(QWidget):
                 "project_root": str(project_root),
                 "export_mode": export_mode,
                 "include_flagged_subjects": include_flagged_subjects,
+                "zscore_model": zscore_model,
             },
         )
 
@@ -1451,6 +1497,7 @@ class LoretaVisualizerWindow(QWidget):
             project_root=project_root,
             export_mode=export_mode,
             include_flagged_subjects=include_flagged_subjects,
+            zscore_model=zscore_model,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1484,8 +1531,9 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._last_import_dir = output_dir
         method_id = str(getattr(producer_result, "method_id", ""))
-        source_label = "source-space z-score maps" if "hauk_zscore" in method_id else "source maps"
+        source_label = "source-space z-score maps" if "zscore" in method_id or "z_score" in method_id else "source maps"
         project_inputs = getattr(result, "project_inputs", None)
+        export_model = str(getattr(result, "export_model", self._zscore_model))
         flagged_subjects = tuple(getattr(project_inputs, "flagged_subjects", ()) or ())
         excluded_subjects = tuple(getattr(project_inputs, "excluded_subjects", ()) or ())
         logger.info(
@@ -1495,6 +1543,7 @@ class LoretaVisualizerWindow(QWidget):
                 "method_id": method_id,
                 "condition_count": len(payloads),
                 "include_flagged_subjects": self._include_flagged_subjects,
+                "zscore_model": export_model,
                 "flagged_subject_count": len(flagged_subjects),
                 "excluded_subject_count": len(excluded_subjects),
             },
@@ -1509,7 +1558,11 @@ class LoretaVisualizerWindow(QWidget):
     def _on_project_source_maps_failed(self, message: str) -> None:
         logger.warning(
             "loreta_project_source_maps_export_failed",
-            extra={"error": message, "include_flagged_subjects": self._include_flagged_subjects},
+            extra={
+                "error": message,
+                "include_flagged_subjects": self._include_flagged_subjects,
+                "zscore_model": self._zscore_model,
+            },
         )
         self._set_source_export_status(_project_source_export_failure_text(message), variant="warning")
 

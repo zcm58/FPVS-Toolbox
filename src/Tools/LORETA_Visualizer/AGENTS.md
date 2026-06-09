@@ -67,6 +67,17 @@ MNE-native inverse estimator with `method="MNE"`, `loose=0.2`, `depth=None`,
 GUI, importer, display transforms, and fsaverage display mesh helpers must
 remain unaware of inverse-operator details.
 
+Phase 6H-A(2) makes participant-first Hauk-style source-space z-score maps the
+default real-project z-score model. The project adapter must preserve each
+included participant's FullFFT target/noise-bin topographies, source-estimate
+each participant independently, compute participant source-space z-score maps,
+and only then aggregate those z-score maps into group raw mean, median, and 20%
+trimmed-mean payloads. The participant sidecar is for future individual viewing;
+the renderer still loads the group prepared payloads. The older group-first
+model is a deprecated advanced fallback only and must not be treated as the
+default design precedent. Cluster-permutation masking remains future work and
+must not be implied by display thresholds.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.

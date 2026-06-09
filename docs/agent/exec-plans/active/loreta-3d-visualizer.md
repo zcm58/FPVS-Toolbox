@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, Phase 6G, and Phase 6H-A(1) are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling, and builds real-project Hauk z-score maps through MNE-native L2-MNE with loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, Phase 6G, Phase 6H-A(1), and Phase 6H-A(2) are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling, builds real-project Hauk z-score maps through MNE-native L2-MNE with loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`, and now defaults Hauk-style real-project z-score generation to participant-first source maps with raw mean, median, and 20% trimmed-mean group summaries.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -32,7 +32,10 @@ split-hemisphere cortical view the default selected cortical display. Phase
 6H-A(1) updates the group-level fsaverage/template Hauk path to use
 MNE-native L2-MNE inverse settings aligned with Hauk et al.: `method="MNE"`,
 `loose=0.2`, `depth=None`, `fixed=False`, no dSPM/sLORETA/eLORETA noise
-normalization, and `lambda2 = 1 / 9`.
+normalization, and `lambda2 = 1 / 9`. Phase 6H-A(2) changes the default
+Hauk-style project z-score export to participant-first source-space z-scores,
+then group raw mean, median, and 20% trimmed-mean summaries, while keeping the
+older group-first model as a deprecated advanced fallback.
 Post-6G hardening adds durable root-local fsaverage cache behavior, skips stale
 unsafe generic MNE fsaverage config paths, reads project workbooks from both
 flat condition folders and condition/group subfolders, surfaces clear
@@ -57,10 +60,12 @@ Phase 6F established the opaque cortical paint visualization and display
 threshold selector for surface maps. Phase 6G established a source-view mode
 selector with a split-hemisphere, publication-style cortical viewer alongside
 the single pial surface view and transparent mesh view. Phase 6H-A(1)
-established Hauk-style MNE-native inverse settings for the existing group-level
-fsaverage/template source-map export. The next recommended development slice is
-Phase 6H-A(2): design participant-level source-map generation and group
-combination before adding inferential cluster masks or another source method.
+established Hauk-style MNE-native inverse settings, and Phase 6H-A(2)
+established participant-first source-map generation and group summaries before
+inferential masking. The next recommended development slice is manual
+scientific validation of participant-first maps against scalp maps and the
+deprecated group-first output, then planning Hauk-style cluster-permutation
+masking if the participant-first outputs are scientifically plausible.
 
 ## Date
 
@@ -1150,7 +1155,8 @@ Implemented scope:
 
 ### Phase 6H: Manual Scientific Validation And Comparison
 
-Status: Started. Phase 6H-A(1) is implemented; Phase 6H-A(2) is planned.
+Status: Started. Phase 6H-A(1) is implemented; Phase 6H-A(2) is planned
+with implementation decisions locked.
 
 Objective:
 
@@ -1208,28 +1214,106 @@ Done means:
 
 #### Phase 6H-A(2): Participant-Level Source Maps And Group Combination
 
-Status: Planned.
+Status: Implemented.
 
 Objective:
 
-- Design how to compute source maps per participant and then combine them into
-  one group visualization.
-- Decide whether the first participant-level output should be:
-  - participant z-score payloads plus a group mean/median payload;
-  - a project-local validation report;
-  - or both.
+- Compute source-space z-score maps per participant before group aggregation,
+  then emit group-level prepared payloads that the existing renderer can load.
 - Preserve the renderer/importer contract. Participant-level source estimation
   should live in `source_producers/`, and group combination should emit the same
   prepared payload/manifest shape the viewer already understands.
+- Save participant-level source maps for a future individual-viewer workflow,
+  while keeping the current viewer focused on group summary maps.
 
-Open questions:
+Implemented scope:
 
-- Whether participant-level z-scores should be averaged, median-combined, or
-  summarized with a separate group-statistics mask.
-- Whether the first inferential mask should be a simple one-sample
-  participant-level source test or a Hauk-style cluster-permutation mask.
-- Whether to keep fsaverage-template source space for all participants in this
-  phase or introduce subject-specific forward models later.
+- `project_fullfft_inputs.py` now has a participant-preserving FullFFT adapter
+  that keeps target/noise-bin topographies per participant instead of reducing
+  them to group means.
+- `l2_mne_hauk_zscore.py` computes source-space z-score maps per participant,
+  writes group raw mean, median, and 20% trimmed-mean summary payloads, and
+  writes a participant-level sidecar JSON for a future individual viewer.
+- `project_l2_mne_hauk_zscore_export.py` defaults real-project z-score exports
+  to the participant-first model and retains the old group-first export as
+  `deprecated_group_first`.
+- The Source Map Options dialog exposes the participant-first default and the
+  deprecated group-first model selector without moving calculation logic into
+  the GUI.
+- User and agent docs describe the participant-first calculation order,
+  summary outputs, deprecated fallback, Stats-QC inclusion rule, and
+  `cluster_mask=none` limitation.
+
+Locked decisions:
+
+- Participant inclusion follows the current project source-map default:
+  Stats-QC-excluded participants are excluded unless the advanced option to
+  include them is enabled.
+- Harmonic selection uses the exact condition-level significant harmonic list
+  from the Stats workflow. Do not add manual harmonic overrides in this slice.
+- Neighboring-bin source-space z-scores use the same FPVS window policy as
+  Stats: offsets `-10..-2` and `+2..+10`, excluding target and immediately
+  adjacent bins, dropping the single finite min and max noise values, then
+  computing the neighboring-bin mean and population SD.
+- The first participant-level calculation order is:
+  1. read each participant's sensor FFT amplitude topography for each selected
+     harmonic and neighboring noise bin;
+  2. estimate source values for each participant target and noise topography;
+  3. sum source estimates across the selected significant harmonics;
+  4. compute each participant's source-space z-score map from summed target
+     source values against summed neighboring-bin noise source values;
+  5. combine participant z-score maps into group summaries.
+- Provide raw mean, median, and trimmed-mean group summaries immediately. The
+  viewer should default to the mean participant z-score map unless the user
+  selects a different summary.
+- Keep the existing group-first Hauk z-score producer for now as a deprecated
+  model available only through advanced settings. Mark it as intended for
+  eventual removal once participant-first output is validated.
+- Label the new method metadata explicitly, for example
+  `l2_mne_fsaverage_participant_zscore_mean`,
+  `l2_mne_fsaverage_participant_zscore_median`, and
+  `l2_mne_fsaverage_participant_zscore_trimmed_mean`.
+- Do not implement cluster-permutation masking in this slice. Generated
+  metadata should state that `cluster_mask` is absent or `none`; the viewer's
+  threshold display remains a visualization threshold, not an inferential mask.
+- Keep the fsaverage-template source space for all participants in this phase.
+  Subject-specific MRIs, subject-specific forward models, and mixed
+  surface/volume source spaces remain future method work.
+
+Documentation requirements:
+
+- Update user-facing source-localization docs to explain the participant-first
+  source-space z-score workflow, the available group summaries, the deprecated
+  group-first fallback, the Stats-QC inclusion rule, and the absence of
+  cluster-permutation masking.
+- Update agent-facing LORETA Visualizer docs so future agents preserve the
+  calculation/rendering separation and do not reintroduce group-first maps as
+  the default method.
+- Document that the renderer displays prepared payloads only; participant
+  source estimation, z-score computation, and group aggregation belong in
+  `source_producers/` and project export helpers.
+
+Done means:
+
+- Real-project export can build participant-first source-space z-score maps for
+  each condition and write mean, median, and trimmed-mean group payloads plus a
+  participant-level sidecar or equivalent project-local artifact for future
+  individual viewing.
+- Existing viewer condition selection can load the new group-summary payloads
+  without renderer changes.
+- Advanced settings can still opt into the deprecated group-first model, with
+  clear labeling and low-noise status/log messages.
+- JSON metadata distinguishes participant-first summaries from deprecated
+  group-first exports, records the aggregation method, participant inclusion
+  rule, harmonic list, neighboring-bin policy, inverse settings, and
+  `cluster_mask=none`.
+- Focused tests prove that participant source z-score maps are computed before
+  group aggregation, that all three aggregation summaries are deterministic,
+  that deprecated group-first generation remains explicitly opt-in, and that
+  the renderer-facing payload contract is unchanged.
+- Compile, ruff, focused `tests/loreta`, GUI import audit, project-path audit,
+  protected-edit/source-localization audits, and a documented visible manual
+  smoke path pass. Do not run offscreen Qt tests locally.
 
 ## Integration Safety
 

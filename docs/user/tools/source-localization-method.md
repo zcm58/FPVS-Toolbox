@@ -67,31 +67,41 @@ participants for QC comparison.
 For each condition:
 
 1. Read the exact Stats-selected oddball harmonics.
-2. Read the 64-channel target topography at each selected harmonic.
-3. Read neighboring frequency-bin topographies around each selected harmonic.
-4. Average included participants at each target and neighboring bin.
-5. Sum target topographies across selected harmonics.
-6. Sum matching-offset neighboring-bin topographies across selected harmonics.
-7. Apply the same MNE-native L2-MNE inverse model to the summed target
-   topography and each summed neighboring-bin topography. The current settings
-   are `method="MNE"`, `loose=0.2`, `depth=None`, `fixed=False`, and
-   `lambda2 = 1 / 9`.
-8. For each source point, compute a neighboring-bin baseline mean and population
-   standard deviation after dropping the minimum and maximum neighboring source
-   amplitudes.
-9. Compute a source-space z-score:
+2. For each included participant, read the 64-channel target topography at each
+   selected harmonic.
+3. For each included participant, read neighboring frequency-bin topographies
+   around each selected harmonic.
+4. Apply the same MNE-native L2-MNE inverse model to each participant target
+   and neighboring-bin topography. The current settings are `method="MNE"`,
+   `loose=0.2`, `depth=None`, `fixed=False`, no depth weighting, no
+   dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`.
+5. For each participant, sum source estimates across the selected significant
+   harmonics.
+6. For each participant and source point, compute a neighboring-bin baseline
+   mean and population standard deviation after dropping the minimum and
+   maximum neighboring source amplitudes.
+7. For each participant, compute a source-space z-score:
    `(target source amplitude - neighboring-bin mean) / neighboring-bin SD`.
-10. Write one prepared source JSON payload per condition plus a manifest.
+8. Combine participant source-space z-score maps into group summaries.
+9. Write prepared group-summary source JSON payloads plus a manifest and a
+   participant-level sidecar for future individual viewing.
 
 The default neighboring-bin policy uses offsets `-10..-2` and `+2..+10`,
 excluding the target bin and immediately adjacent bins. This mirrors the
 project's FPVS neighboring-bin style while moving the correction into source
 space.
 
-At this stage, included participants are averaged at the sensor-topography
-stage before the template inverse is applied. A future validation phase will
-design participant-level source maps followed by group-level combination and
-inferential masking.
+The default viewer condition entries are group summaries of participant-level
+source-space z-scores. The export writes raw mean, median, and 20% trimmed mean
+summaries for each condition. The visualizer loads the raw mean entries by
+default when the manifest order is unchanged, and the other summaries are
+available from the condition selector.
+
+Source Map Options can still build the older group-first beta model for
+comparison. That deprecated model averages target and neighboring-bin
+topographies before source estimation. It is retained only as an advanced
+fallback and is intended to be removed after participant-first maps are
+validated.
 
 ## What the viewer displays
 
@@ -166,6 +176,15 @@ The default project-local output folder is:
 The main manifest is:
 
 `project_l2_mne_hauk_zscore_beta_manifest.json`
+
+The manifest contains one group-summary entry per condition and aggregation:
+raw mean, median, and 20% trimmed mean participant z-score maps. The same
+folder also contains:
+
+`participant_l2_mne_hauk_zscore_maps.json`
+
+That sidecar stores participant-level z-score maps for future individual-viewer
+support. The current viewer loads the group-summary payloads, not the sidecar.
 
 The visualizer automatically loads this manifest when it is present. If it is
 missing and the required FullFFT data are available, the visualizer can build it
