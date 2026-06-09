@@ -34,7 +34,6 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
     _minimum_norm_inverse_matrix,
     _referenced_leadfield,
     _round_harmonic,
-    _source_amplitudes_from_topography,
     _slug,
     _validate_harmonics,
     _validate_label,
@@ -225,16 +224,8 @@ def compute_l2_mne_hauk_zscore_source_values(
             bin_set.target_topography,
             apply_average_reference=config.apply_average_reference,
         )
-    if inverse is None:
-        target_source_values = _source_amplitudes_from_topography(
-            forward_model,
-            target_topography,
-            lambda2=config.lambda2,
-        )
-    else:
-        target_source_values = np.abs(inverse @ target_topography)
 
-    noise_source_rows: list[np.ndarray] = []
+    noise_topographies: list[np.ndarray] = []
     for offset in common_offsets:
         noise_topography = np.zeros(len(forward_model.channel_names), dtype=float)
         for bin_set in harmonic_bins:
@@ -242,17 +233,19 @@ def compute_l2_mne_hauk_zscore_source_values(
                 bin_set.noise_topographies_by_offset[offset],
                 apply_average_reference=config.apply_average_reference,
             )
-        if inverse is None:
-            noise_source_rows.append(
-                _source_amplitudes_from_topography(
-                    forward_model,
-                    noise_topography,
-                    lambda2=config.lambda2,
-                )
-            )
-        else:
-            noise_source_rows.append(np.abs(inverse @ noise_topography))
-    noise_source_values = np.vstack(noise_source_rows)
+        noise_topographies.append(noise_topography)
+    topographies = np.vstack((target_topography, *noise_topographies))
+    source_values = (
+        _source_amplitudes_from_topographies(
+            forward_model,
+            topographies,
+            lambda2=config.lambda2,
+        )
+        if inverse is None
+        else np.abs(topographies @ inverse.T)
+    )
+    target_source_values = source_values[0]
+    noise_source_values = source_values[1:]
     used_noise = _drop_extreme_noise_rows(noise_source_values) if config.drop_min_max_noise_per_source else noise_source_values
     noise_mean = np.mean(used_noise, axis=0)
     noise_std = np.std(used_noise, axis=0, ddof=0)
@@ -386,6 +379,35 @@ def write_l2_mne_hauk_zscore_surface_payloads(
         payloads=tuple(emitted),
         manifest_validation=manifest_validation,
     )
+
+
+def _source_amplitudes_from_topographies(
+    forward_model: L2MNECorticalForwardModel,
+    topographies: np.ndarray,
+    *,
+    lambda2: float,
+) -> np.ndarray:
+    source_estimator = forward_model.source_estimator
+    if source_estimator is None:
+        raise ValueError("Batch source topography estimation requires an estimator-backed forward model.")
+    topography_matrix = np.asarray(topographies, dtype=float)
+    if topography_matrix.ndim != 2 or topography_matrix.shape[1] != len(forward_model.channel_names):
+        raise ValueError(
+            "Batch source topography estimation expected shape "
+            f"n_topographies x {len(forward_model.channel_names)} channels."
+        )
+    values = np.asarray(source_estimator(topography_matrix, lambda2=float(lambda2)), dtype=float)
+    if values.ndim == 1 and topography_matrix.shape[0] == 1:
+        values = values.reshape(1, -1)
+    if values.ndim != 2:
+        raise ValueError("Estimator-backed batch source estimation returned an unexpected shape.")
+    expected_shape = (topography_matrix.shape[0], len(forward_model.source_points))
+    if values.shape != expected_shape:
+        raise ValueError(
+            "Estimator-backed batch source estimation returned shape "
+            f"{values.shape}; expected {expected_shape}."
+        )
+    return values.astype(float)
 
 
 def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:

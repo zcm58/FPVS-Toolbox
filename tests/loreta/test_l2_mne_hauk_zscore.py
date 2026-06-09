@@ -92,8 +92,9 @@ def test_hauk_zscore_uses_estimator_backed_forward_model() -> None:
     assert metadata["fixed_orientation"] is False
     assert metadata["depth_weighting"] == "none"
     assert metadata["noise_normalization"] == "none"
-    assert len(calls) == 6
-    assert np.allclose(calls[0][0], np.asarray([10.0, 4.0, 2.0]))
+    assert len(calls) == 1
+    assert calls[0][0].shape == (6, 3)
+    assert np.allclose(calls[0][0][0], np.asarray([10.0, 4.0, 2.0]))
     assert calls[0][1] == pytest.approx(0.25)
 
 

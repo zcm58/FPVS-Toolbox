@@ -80,7 +80,7 @@ class L2MNECorticalForwardModel:
     coordinate_space: str = COORDINATE_SPACE_FSAVERAGE
     label: str = "fsaverage cortical surface"
     metadata: Mapping[str, Any] = field(default_factory=dict)
-    source_estimator: Callable[..., Sequence[float]] | None = None
+    source_estimator: Callable[..., Sequence[float] | np.ndarray] | None = None
 
     def __post_init__(self) -> None:
         channels = tuple(_validate_channel_name(name) for name in self.channel_names)

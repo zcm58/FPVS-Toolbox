@@ -389,14 +389,21 @@ def _make_mne_native_source_estimator(  # noqa: ANN001
     channel_names = tuple(info.ch_names)
 
     def estimate_source_values(topography, *, lambda2: float):  # noqa: ANN001, ANN202
-        topography_values = np.asarray(topography, dtype=float).reshape(-1)
-        if len(topography_values) != len(channel_names):
+        topography_values = np.asarray(topography, dtype=float)
+        single_topography = topography_values.ndim == 1
+        if single_topography:
+            topography_matrix = topography_values.reshape(1, -1)
+        elif topography_values.ndim == 2:
+            topography_matrix = topography_values
+        else:
+            raise ValueError("MNE-native L2-MNE estimator expected a 1D or 2D topography array.")
+        if topography_matrix.shape[1] != len(channel_names):
             raise ValueError(
                 "MNE-native L2-MNE estimator expected "
-                f"{len(channel_names)} channel values; got {len(topography_values)}."
+                f"{len(channel_names)} channel values; got shape {topography_matrix.shape}."
             )
         evoked = mne_module.EvokedArray(
-            topography_values[:, np.newaxis] * MNE_SOURCE_TOPOGRAPHY_UV_TO_V,
+            topography_matrix.T * MNE_SOURCE_TOPOGRAPHY_UV_TO_V,
             info.copy(),
             tmin=0.0,
             comment="FPVS source topography",
@@ -419,12 +426,16 @@ def _make_mne_native_source_estimator(  # noqa: ANN001
         source_values = np.asarray(source_estimate.data, dtype=float)
         if source_values.ndim != 2 or source_values.shape[1] < 1:
             raise ProjectL2MNEExportError("MNE-native L2-MNE returned an unexpected source-estimate shape.")
-        first_timepoint = np.abs(source_values[:, 0])
-        if len(first_timepoint) != int(source_count):
+        if source_values.shape[0] != int(source_count):
             raise ProjectL2MNEExportError(
-                f"MNE-native L2-MNE returned {len(first_timepoint)} source values; {source_count} expected."
+                f"MNE-native L2-MNE returned {source_values.shape[0]} source values; {source_count} expected."
             )
-        return first_timepoint.astype(float)
+        if source_values.shape[1] != topography_matrix.shape[0]:
+            raise ProjectL2MNEExportError(
+                "MNE-native L2-MNE returned an unexpected number of topography time points."
+            )
+        estimates = np.abs(source_values.T).astype(float)
+        return estimates[0] if single_topography else estimates
 
     return estimate_source_values
 
