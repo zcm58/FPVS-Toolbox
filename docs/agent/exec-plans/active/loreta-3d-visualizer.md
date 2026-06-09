@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, and Phase 6G are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, and keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, Phase 6G, and Phase 6H-A(1) are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling, and builds real-project Hauk z-score maps through MNE-native L2-MNE with loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -28,7 +28,11 @@ reporting for source-map rebuilds. Phase 6F adds opaque pial cortical paint
 rendering and a user-facing z-score display cutoff selector for L2-MNE cortical
 surface payloads while preserving transparent overlay rendering for volume/deep
 payloads. Phase 6G adds a display-mode selector and makes a publication-style
-split-hemisphere cortical view the default selected cortical display.
+split-hemisphere cortical view the default selected cortical display. Phase
+6H-A(1) updates the group-level fsaverage/template Hauk path to use
+MNE-native L2-MNE inverse settings aligned with Hauk et al.: `method="MNE"`,
+`loose=0.2`, `depth=None`, `fixed=False`, no dSPM/sLORETA/eLORETA noise
+normalization, and `lambda2 = 1 / 9`.
 Post-6G hardening adds durable root-local fsaverage cache behavior, skips stale
 unsafe generic MNE fsaverage config paths, reads project workbooks from both
 flat condition folders and condition/group subfolders, surfaces clear
@@ -52,9 +56,11 @@ Phase 6E established source-map method/QC controls and documentation, and
 Phase 6F established the opaque cortical paint visualization and display
 threshold selector for surface maps. Phase 6G established a source-view mode
 selector with a split-hemisphere, publication-style cortical viewer alongside
-the single pial surface view and transparent mesh view. The next recommended
-development slice is Phase 6H: visible/manual scientific validation and
-comparison against expected publication-style cortical maps.
+the single pial surface view and transparent mesh view. Phase 6H-A(1)
+established Hauk-style MNE-native inverse settings for the existing group-level
+fsaverage/template source-map export. The next recommended development slice is
+Phase 6H-A(2): design participant-level source-map generation and group
+combination before adding inferential cluster masks or another source method.
 
 ## Date
 
@@ -617,9 +623,11 @@ Implementation notes:
   status, not renderer objects.
 - `source_producers/l2_mne_cortical.py` owns the Phase 6A beta implementation:
   explicit source-ready forward model arrays, FPVS condition harmonic
-  topographies, fixed-orientation L2 minimum-norm inverse calculation, prepared
-  payload/manifest writing, and a deterministic BioSemi64/10-10 fixture writer.
-- The beta producer applies an average-reference projection by default, uses
+  topographies, optional estimator-backed L2 minimum-norm source calculation,
+  prepared payload/manifest writing, and a deterministic BioSemi64/10-10
+  fixture writer. The deterministic fixture remains a lightweight manual
+  inverse; real project exports can attach an MNE-native estimator.
+- The beta producer applies an average-reference step by default, uses
   `lambda2 = 1 / 9` by default, records the harmonic strategy in payload
   metadata, and defaults to summing selected sensor harmonic topographies before
   inversion.
@@ -775,8 +783,10 @@ Implementation notes:
 
 - `source_producers/project_l2_mne_export.py` owns the 6C export orchestration.
   It reads project topographies through `project_inputs.py`, builds a
-  fixed-orientation MNE/fsaverage BioSemi64 EEG forward model, calls the 6A
-  L2-MNE producer, and writes validated payload/manifest JSON.
+  MNE/fsaverage BioSemi64 EEG model, calls the 6A L2-MNE producer, and writes
+  validated payload/manifest JSON. After Phase 6H-A(1), the default
+  project-built model carries an MNE-native loose-orientation source estimator
+  for real project exports.
 - The default output folder is project-local:
   `6 - Source Localization/L2-MNE Cortical Surface Beta/`.
 - The default source metric is `BCA (uV)` to match the current FPVS
@@ -851,10 +861,13 @@ Important equivalence boundary:
   current toolbox has the same acquisition model as Hauk 2021.
 - Hauk 2021 used combined EEG/MEG, individual MRIs, individual head/source
   models, whitening across sensor types, loose orientation constraints, no
-  depth weighting or noise normalization, and SNR=3 regularization. The current
-  beta project path is BioSemi64 EEG-only with an fsaverage/template head model.
-  Those differences must remain explicit in payload metadata and user-facing
-  documentation until the toolbox actually supports them.
+  depth weighting or noise normalization, and SNR=3 regularization. After Phase
+  6H-A(1), the current beta project path uses MNE-native L2-MNE with
+  `loose=0.2`, `depth=None`, `fixed=False`, `method="MNE"`, and
+  `lambda2 = 1 / 9`, but it is still BioSemi64 EEG-only with an
+  fsaverage/template head model and group-level topographies. Those differences
+  must remain explicit in payload metadata and user-facing documentation until
+  the toolbox actually supports them.
 - The finished Phase 6D mode must therefore be named clearly, for example
   `l2_mne_cortical_surface_hauk_zscore_beta`, and metadata must state
   `hauk_2021_frequency_domain_zscore_aligned: true` plus the remaining
@@ -947,6 +960,13 @@ Implementation notes completed:
   default display cutoff is `z >= 1.64`.
 - The z-score path reads `FullFFT Amplitude (uV)` only. It refuses BCA-only or
   compact-summary-only workbooks with a clear Phase 6D input error.
+- After Phase 6H-A(1), the default project-built Hauk z-score model uses an
+  MNE-native inverse operator and stores method metadata including
+  `inverse_backend: mne_python`, `orientation_constraint: loose`,
+  `loose_orientation: 0.2`, `fixed_orientation: false`,
+  `depth_weighting: none`, `noise_normalization: none`, and `lambda2: 1 / 9`.
+  Existing generated project manifests must be rebuilt to pick up these
+  settings; the prepared payload/manifest schema is unchanged.
 - GUI failure text now maps missing Stats-ready workbooks, missing selected
   harmonics, missing FullFFT sheets, and missing included FullFFT workbooks to
   a user-facing prerequisite message: re-run preprocessing, then open Stats and
@@ -1130,7 +1150,7 @@ Implemented scope:
 
 ### Phase 6H: Manual Scientific Validation And Comparison
 
-Status: Planned.
+Status: Started. Phase 6H-A(1) is implemented; Phase 6H-A(2) is planned.
 
 Objective:
 
@@ -1141,6 +1161,75 @@ Objective:
   adding another source-localization method.
 - Decide whether the next method should be eLORETA/sLORETA volume, a mixed
   cortical-volume source space, or a more subject-specific forward model.
+
+#### Phase 6H-A(1): Hauk-Style MNE-Native Group-Level Inverse Settings
+
+Status: Implemented.
+
+Objective:
+
+- Update the existing group-level fsaverage/template Hauk z-score producer to
+  use MNE-native L2-MNE settings that more closely match Hauk et al. while
+  preserving the current prepared payload/manifest contract.
+- Keep this as a group-level source-map export. Do not add participant-level
+  source maps or cluster-permutation masking in this slice.
+
+Implemented scope:
+
+- `project_l2_mne_export.py` now builds an MNE-native inverse operator for real
+  project exports using:
+  - `method="MNE"` through `mne.minimum_norm.apply_inverse`;
+  - `loose=0.2`;
+  - `depth=None`;
+  - `fixed=False`;
+  - no dSPM/sLORETA/eLORETA noise normalization;
+  - `lambda2 = 1 / 9`.
+- The project-built model adds an EEG average-reference projection, uses an
+  MNE ad hoc diagonal EEG covariance for the EEG-only template inverse, and
+  converts project topographies from uV to V before MNE inverse application.
+- `l2_mne_cortical.py` now supports estimator-backed forward models, while the
+  deterministic fixture path can keep using the lightweight manual inverse for
+  fast tests.
+- `l2_mne_hauk_zscore.py` routes target and neighboring-bin topographies
+  through the model's estimator when present, so target and noise bins use the
+  same MNE-native inverse.
+- Payload metadata now records the inverse backend, orientation constraint,
+  loose-orientation value, depth weighting, noise-normalization choice, and
+  remaining Hauk-alignment limitations.
+
+Done means:
+
+- Focused tests verify estimator-backed source estimation and metadata.
+- Existing renderer, importer, payload schema, GUI, project workbooks, Stats,
+  and preprocessing remain unchanged.
+- Existing generated source JSON remains loadable but should be rebuilt for
+  manual review because older payloads do not contain the 6H-A(1) method
+  settings.
+
+#### Phase 6H-A(2): Participant-Level Source Maps And Group Combination
+
+Status: Planned.
+
+Objective:
+
+- Design how to compute source maps per participant and then combine them into
+  one group visualization.
+- Decide whether the first participant-level output should be:
+  - participant z-score payloads plus a group mean/median payload;
+  - a project-local validation report;
+  - or both.
+- Preserve the renderer/importer contract. Participant-level source estimation
+  should live in `source_producers/`, and group combination should emit the same
+  prepared payload/manifest shape the viewer already understands.
+
+Open questions:
+
+- Whether participant-level z-scores should be averaged, median-combined, or
+  summarized with a separate group-statistics mask.
+- Whether the first inferential mask should be a simple one-sample
+  participant-level source test or a Hauk-style cluster-permutation mask.
+- Whether to keep fsaverage-template source space for all participants in this
+  phase or introduce subject-specific forward models later.
 
 ## Integration Safety
 

@@ -34,6 +34,7 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
     _minimum_norm_inverse_matrix,
     _referenced_leadfield,
     _round_harmonic,
+    _source_amplitudes_from_topography,
     _slug,
     _validate_harmonics,
     _validate_label,
@@ -202,8 +203,13 @@ def compute_l2_mne_hauk_zscore_source_values(
     config: L2MNEHaukZScoreConfig,
 ) -> L2MNEHaukZScoreValues:
     """Compute Hauk-style source-space z-scores for one condition."""
-    leadfield = _referenced_leadfield(forward_model.leadfield, apply_average_reference=config.apply_average_reference)
-    inverse = _minimum_norm_inverse_matrix(leadfield, lambda2=config.lambda2)
+    inverse = None
+    if forward_model.source_estimator is None:
+        leadfield = _referenced_leadfield(
+            forward_model.leadfield,
+            apply_average_reference=config.apply_average_reference,
+        )
+        inverse = _minimum_norm_inverse_matrix(leadfield, lambda2=config.lambda2)
     harmonic_bins = _selected_harmonic_bins(condition, config=config, n_channels=len(forward_model.channel_names))
     common_offsets = _common_noise_offsets(harmonic_bins, config=config)
     if len(common_offsets) < config.min_noise_bins:
@@ -218,7 +224,14 @@ def compute_l2_mne_hauk_zscore_source_values(
             bin_set.target_topography,
             apply_average_reference=config.apply_average_reference,
         )
-    target_source_values = np.abs(inverse @ target_topography)
+    if inverse is None:
+        target_source_values = _source_amplitudes_from_topography(
+            forward_model,
+            target_topography,
+            lambda2=config.lambda2,
+        )
+    else:
+        target_source_values = np.abs(inverse @ target_topography)
 
     noise_source_rows: list[np.ndarray] = []
     for offset in common_offsets:
@@ -228,7 +241,16 @@ def compute_l2_mne_hauk_zscore_source_values(
                 bin_set.noise_topographies_by_offset[offset],
                 apply_average_reference=config.apply_average_reference,
             )
-        noise_source_rows.append(np.abs(inverse @ noise_topography))
+        if inverse is None:
+            noise_source_rows.append(
+                _source_amplitudes_from_topography(
+                    forward_model,
+                    noise_topography,
+                    lambda2=config.lambda2,
+                )
+            )
+        else:
+            noise_source_rows.append(np.abs(inverse @ noise_topography))
     noise_source_values = np.vstack(noise_source_rows)
     used_noise = _drop_extreme_noise_rows(noise_source_values) if config.drop_min_max_noise_per_source else noise_source_values
     noise_mean = np.mean(used_noise, axis=0)
@@ -459,7 +481,15 @@ def _payload_metadata(
         "selected_harmonics_hz": list(config.selected_harmonics_hz),
         "harmonic_strategy": config.harmonic_strategy,
         "lambda2": float(config.lambda2),
-        "regularization": "lambda2 scaled by leadfield sensor-space trace",
+        "inverse_backend": str(forward_model.metadata.get("inverse_backend", "manual_ridge")),
+        "orientation_constraint": str(forward_model.metadata.get("orientation_constraint", "fixed")),
+        "loose_orientation": forward_model.metadata.get("loose_orientation"),
+        "fixed_orientation": forward_model.metadata.get("fixed_orientation", True),
+        "depth_weighting": str(forward_model.metadata.get("depth_weighting", "not_applicable")),
+        "noise_normalization": str(forward_model.metadata.get("noise_normalization", "none")),
+        "regularization": str(
+            forward_model.metadata.get("regularization", "lambda2 scaled by leadfield sensor-space trace")
+        ),
         "average_reference_applied": bool(config.apply_average_reference),
         "sensor_value_unit": condition.sensor_value_unit,
         "source_value_unit": "z-score",
@@ -485,9 +515,9 @@ def _payload_metadata(
         "hauk_alignment_target": "frequency-domain L2-MNE source-space baseline correction and z-scoring",
         "hauk_alignment_limitations": [
             "EEG only; Hauk 2021 used combined EEG and MEG.",
-            "Template fsaverage head/source model; Hauk 2021 used individual MRIs.",
-            "Fixed-orientation cortical surface model; Hauk 2021 used loose orientation constraints.",
-            "No sensor whitening across modalities in this beta EEG-only path.",
+            "Template fsaverage head/source model; Hauk 2021 and 2025 used individual MRIs.",
+            "Group-level topographies are source-estimated once; Hauk-style group inference likely used participant-level source maps.",
+            "Ad hoc diagonal EEG covariance is used for whitening in this EEG-only template path.",
         ],
         "sensor_modalities": ["EEG"],
         "head_model": "fsaverage template",

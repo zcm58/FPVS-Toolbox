@@ -216,8 +216,10 @@ compact rebuild summaries, but source-estimation math still belongs only to
 - `source_producers/`: swappable source-localization calculation methods that
   read explicit source-ready inputs and write validated prepared
   payload/manifest JSON. Phase 6A includes method-neutral producer result
-  contracts and `l2_mne_cortical.py`, a beta fixed-orientation L2-MNE cortical
-  surface producer with a deterministic BioSemi64/10-10 source-ready fixture.
+  contracts and `l2_mne_cortical.py`, a beta L2-MNE cortical surface producer
+  with a deterministic BioSemi64/10-10 source-ready fixture. Phase 6H-A(1)
+  lets real project exports attach an MNE-native loose-orientation estimator
+  while preserving the same payload contract.
   Phase 6B includes `project_inputs.py`, a read-only adapter that assembles
   source-ready condition topographies from existing flat or condition/group
   project workbooks. Phase 6C includes `project_l2_mne_export.py`, a

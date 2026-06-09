@@ -14,7 +14,9 @@ from Tools.LORETA_Visualizer.prepared_payload_validator import (
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
     METHOD_ID_L2_MNE_CORTICAL_SURFACE_BETA,
     SOURCE_KIND_SURFACE_MESH,
+    L2MNECorticalForwardModel,
     L2MNEFPVSCondition,
+    L2MNEProducerConfig,
     compute_l2_mne_source_values,
     make_l2_mne_cortical_surface_beta_fixture,
     write_l2_mne_cortical_surface_fixture,
@@ -110,3 +112,52 @@ def test_l2_mne_condition_requires_exact_selected_harmonics() -> None:
             condition=missing_harmonic_condition,
             config=config,
         )
+
+
+def test_l2_mne_uses_estimator_backed_forward_model() -> None:
+    calls: list[tuple[np.ndarray, float]] = []
+
+    def source_estimator(topography, *, lambda2: float):  # noqa: ANN001, ANN202
+        values = np.asarray(topography, dtype=float)
+        calls.append((values.copy(), float(lambda2)))
+        return np.asarray([values[0], values[1], values[0] - values[1]], dtype=float)
+
+    forward_model = L2MNECorticalForwardModel(
+        channel_names=("A", "B"),
+        source_points=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        leadfield=np.ones((2, 9), dtype=float),
+        faces=np.asarray([[0, 1, 2]], dtype=np.int64),
+        metadata={
+            "inverse_backend": "mne_python",
+            "orientation_constraint": "loose",
+            "loose_orientation": 0.2,
+        },
+        source_estimator=source_estimator,
+    )
+    condition = L2MNEFPVSCondition(
+        condition_id="native_estimator",
+        label="Native estimator",
+        harmonic_topographies={
+            1.0: np.asarray([3.0, 1.0], dtype=float),
+            2.0: np.asarray([5.0, 2.0], dtype=float),
+        },
+    )
+    config = L2MNEProducerConfig(
+        selected_harmonics_hz=(1.0, 2.0),
+        apply_average_reference=False,
+        lambda2=0.25,
+    )
+
+    values = compute_l2_mne_source_values(forward_model=forward_model, condition=condition, config=config)
+
+    assert np.allclose(values, np.asarray([8.0, 3.0, 5.0]))
+    assert len(calls) == 1
+    assert np.allclose(calls[0][0], np.asarray([8.0, 3.0]))
+    assert calls[0][1] == pytest.approx(0.25)

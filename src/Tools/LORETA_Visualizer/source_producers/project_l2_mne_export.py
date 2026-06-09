@@ -48,6 +48,8 @@ PROJECT_SOURCE_LOCALIZATION_FOLDER = "6 - Source Localization"
 PROJECT_L2_MNE_BETA_OUTPUT_FOLDER = "L2-MNE Cortical Surface Beta"
 DEFAULT_MNE_FSAVERAGE_SPACING = "ico3"
 DEFAULT_MNE_MINDIST_MM = 5.0
+DEFAULT_MNE_LOOSE_ORIENTATION = 0.2
+MNE_SOURCE_TOPOGRAPHY_UV_TO_V = 1e-6
 FSAVERAGE_BEM_SOLUTION = "fsaverage-5120-5120-5120-bem-sol.fif"
 FSAVERAGE_TRANS = "fsaverage-trans.fif"
 SUPPORTED_PROJECT_SOURCE_METRICS = (
@@ -161,10 +163,12 @@ def build_mne_fsaverage_l2_mne_forward_model(
     spacing: str = DEFAULT_MNE_FSAVERAGE_SPACING,
     allow_fetch_fsaverage: bool = False,
     mindist_mm: float = DEFAULT_MNE_MINDIST_MM,
+    loose_orientation: float = DEFAULT_MNE_LOOSE_ORIENTATION,
 ) -> L2MNECorticalForwardModel:
-    """Build a fixed-orientation BioSemi64/fsaverage forward model with MNE."""
+    """Build a Hauk-style loose-orientation BioSemi64/fsaverage inverse model with MNE."""
     try:
         import mne
+        from mne.minimum_norm import apply_inverse, make_inverse_operator
     except (ImportError, ModuleNotFoundError) as exc:
         raise ProjectL2MNEExportError(f"MNE is required for the beta fsaverage forward model: {exc}") from exc
 
@@ -177,6 +181,7 @@ def build_mne_fsaverage_l2_mne_forward_model(
 
     channel_names = tuple(DEFAULT_ELECTRODE_NAMES_64)
     info = _biosemi64_info(mne, channel_names)
+    info = _with_eeg_average_reference_projection(mne, info)
     try:
         src = mne.setup_source_space(
             FSAVERAGE_SUBJECT,
@@ -196,30 +201,48 @@ def build_mne_fsaverage_l2_mne_forward_model(
             n_jobs=1,
             verbose=False,
         )
-        fixed_forward = mne.convert_forward_solution(
+        loose_forward = mne.convert_forward_solution(
             forward,
             surf_ori=True,
-            force_fixed=True,
+            force_fixed=False,
+            use_cps=True,
+            verbose=False,
+        )
+        noise_cov = mne.make_ad_hoc_cov(info, verbose=False)
+        inverse_operator = make_inverse_operator(
+            info,
+            loose_forward,
+            noise_cov,
+            loose=float(loose_orientation),
+            depth=None,
+            fixed=False,
             use_cps=True,
             verbose=False,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         raise ProjectL2MNEExportError(f"Unable to build MNE/fsaverage forward model: {exc}") from exc
 
-    leadfield = np.asarray(fixed_forward["sol"]["data"], dtype=float)
-    row_names = tuple(str(name) for name in fixed_forward["sol"]["row_names"])
+    leadfield = np.asarray(loose_forward["sol"]["data"], dtype=float)
+    row_names = tuple(str(name) for name in loose_forward["sol"]["row_names"])
     if row_names != channel_names:
         raise ProjectL2MNEExportError(
             "MNE forward model channel order did not match the expected BioSemi64 order."
         )
     source_points, faces, hemi_counts = _surface_source_points_and_faces(
-        fixed_forward["src"],
+        loose_forward["src"],
         coordinate_source_spaces=src,
     )
-    if leadfield.shape[1] != len(source_points):
+    if leadfield.shape[1] not in {len(source_points), len(source_points) * 3}:
         raise ProjectL2MNEExportError(
             "MNE forward model source count does not match extracted source-space coordinates."
         )
+    source_estimator = _make_mne_native_source_estimator(
+        mne,
+        info=info,
+        apply_inverse_func=apply_inverse,
+        inverse_operator=inverse_operator,
+        source_count=len(source_points),
+    )
 
     return L2MNECorticalForwardModel(
         channel_names=channel_names,
@@ -227,9 +250,20 @@ def build_mne_fsaverage_l2_mne_forward_model(
         leadfield=leadfield,
         faces=faces,
         coordinate_space=COORDINATE_SPACE_FSAVERAGE,
-        label=f"MNE fsaverage {spacing} BioSemi64 fixed-orientation cortical surface",
+        label=f"MNE fsaverage {spacing} BioSemi64 loose-orientation cortical surface",
         metadata={
-            "forward_model_status": "beta MNE/fsaverage template EEG forward model",
+            "forward_model_status": "beta MNE/fsaverage template EEG inverse model",
+            "inverse_backend": "mne_python",
+            "mne_inverse_method": "MNE",
+            "orientation_constraint": "loose",
+            "loose_orientation": float(loose_orientation),
+            "fixed_orientation": False,
+            "depth_weighting": "none",
+            "noise_normalization": "none",
+            "noise_covariance": "mne_ad_hoc_diagonal_eeg",
+            "average_reference_projection": True,
+            "regularization": "MNE inverse lambda2 with SNR=3 default",
+            "input_unit_conversion": "uV topographies converted to V before MNE apply_inverse",
             "mne_version": str(mne.__version__),
             "fsaverage_subjects_dir": str(subjects_dir),
             "fsaverage_subject": FSAVERAGE_SUBJECT,
@@ -240,6 +274,7 @@ def build_mne_fsaverage_l2_mne_forward_model(
             "hemi_source_counts": list(hemi_counts),
             "subject_mri": "template fsaverage only",
         },
+        source_estimator=source_estimator,
     )
 
 
@@ -318,6 +353,80 @@ def _biosemi64_info(mne_module, channel_names: tuple[str, ...]):  # noqa: ANN001
     info = mne_module.create_info(ch_names=list(channel_names), sfreq=100.0, ch_types="eeg")
     info.set_montage(montage, match_case=False)
     return info
+
+
+def _with_eeg_average_reference_projection(mne_module, info):  # noqa: ANN001, ANN202
+    try:
+        evoked = mne_module.EvokedArray(
+            np.zeros((len(info.ch_names), 1), dtype=float),
+            info.copy(),
+            tmin=0.0,
+            comment="average-reference setup",
+            nave=1,
+            baseline=None,
+            verbose=False,
+        )
+        evoked, _ = mne_module.set_eeg_reference(
+            evoked,
+            ref_channels="average",
+            projection=True,
+            copy=False,
+            verbose=False,
+        )
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise ProjectL2MNEExportError(f"Unable to add EEG average-reference projection: {exc}") from exc
+    return evoked.info
+
+
+def _make_mne_native_source_estimator(  # noqa: ANN001
+    mne_module,
+    *,
+    info,
+    apply_inverse_func,
+    inverse_operator,
+    source_count: int,
+):
+    channel_names = tuple(info.ch_names)
+
+    def estimate_source_values(topography, *, lambda2: float):  # noqa: ANN001, ANN202
+        topography_values = np.asarray(topography, dtype=float).reshape(-1)
+        if len(topography_values) != len(channel_names):
+            raise ValueError(
+                "MNE-native L2-MNE estimator expected "
+                f"{len(channel_names)} channel values; got {len(topography_values)}."
+            )
+        evoked = mne_module.EvokedArray(
+            topography_values[:, np.newaxis] * MNE_SOURCE_TOPOGRAPHY_UV_TO_V,
+            info.copy(),
+            tmin=0.0,
+            comment="FPVS source topography",
+            nave=1,
+            baseline=None,
+            verbose=False,
+        )
+        try:
+            evoked.apply_proj(verbose=False)
+        except (RuntimeError, TypeError, ValueError) as exc:
+            raise ProjectL2MNEExportError(f"Unable to apply MNE projection before source estimation: {exc}") from exc
+        source_estimate = apply_inverse_func(
+            evoked,
+            inverse_operator,
+            lambda2=float(lambda2),
+            method="MNE",
+            pick_ori=None,
+            verbose=False,
+        )
+        source_values = np.asarray(source_estimate.data, dtype=float)
+        if source_values.ndim != 2 or source_values.shape[1] < 1:
+            raise ProjectL2MNEExportError("MNE-native L2-MNE returned an unexpected source-estimate shape.")
+        first_timepoint = np.abs(source_values[:, 0])
+        if len(first_timepoint) != int(source_count):
+            raise ProjectL2MNEExportError(
+                f"MNE-native L2-MNE returned {len(first_timepoint)} source values; {source_count} expected."
+            )
+        return first_timepoint.astype(float)
+
+    return estimate_source_values
 
 
 def _surface_source_points_and_faces(  # noqa: ANN001

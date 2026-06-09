@@ -56,6 +56,47 @@ def test_hauk_zscore_payload_metadata_declares_zscore_units() -> None:
     assert payload["metadata"]["neighboring_bin_policy"]["common_offsets_used"] == [-3, -2, 2, 3, 4]
 
 
+def test_hauk_zscore_uses_estimator_backed_forward_model() -> None:
+    calls: list[tuple[np.ndarray, float]] = []
+
+    def source_estimator(topography, *, lambda2: float):  # noqa: ANN001, ANN202
+        values = np.asarray(topography, dtype=float)
+        calls.append((values.copy(), float(lambda2)))
+        return values
+
+    payload = build_l2_mne_hauk_zscore_surface_payload(
+        forward_model=_identity_forward_model(
+            metadata={
+                "inverse_backend": "mne_python",
+                "orientation_constraint": "loose",
+                "loose_orientation": 0.2,
+                "fixed_orientation": False,
+                "depth_weighting": "none",
+                "noise_normalization": "none",
+            },
+            source_estimator=source_estimator,
+        ),
+        condition=_hauk_condition(),
+        config=L2MNEHaukZScoreConfig(
+            selected_harmonics_hz=(1.0, 2.0),
+            apply_average_reference=False,
+            lambda2=0.25,
+            min_noise_bins=4,
+        ),
+    )
+
+    metadata = payload["metadata"]
+    assert metadata["inverse_backend"] == "mne_python"
+    assert metadata["orientation_constraint"] == "loose"
+    assert metadata["loose_orientation"] == 0.2
+    assert metadata["fixed_orientation"] is False
+    assert metadata["depth_weighting"] == "none"
+    assert metadata["noise_normalization"] == "none"
+    assert len(calls) == 6
+    assert np.allclose(calls[0][0], np.asarray([10.0, 4.0, 2.0]))
+    assert calls[0][1] == pytest.approx(0.25)
+
+
 def test_hauk_zscore_writer_emits_manifest_importer_contract(tmp_path) -> None:
     result = write_l2_mne_hauk_zscore_surface_payloads(
         forward_model=_identity_forward_model(),
@@ -74,7 +115,11 @@ def test_hauk_zscore_writer_emits_manifest_importer_contract(tmp_path) -> None:
     assert manifest["conditions"][0]["metadata"]["source_value_unit"] == "z-score"
 
 
-def _identity_forward_model() -> L2MNECorticalForwardModel:
+def _identity_forward_model(
+    *,
+    metadata: dict[str, object] | None = None,
+    source_estimator=None,  # noqa: ANN001
+) -> L2MNECorticalForwardModel:
     return L2MNECorticalForwardModel(
         channel_names=("A", "B", "C"),
         source_points=np.asarray(
@@ -87,7 +132,8 @@ def _identity_forward_model() -> L2MNECorticalForwardModel:
         ),
         leadfield=np.eye(3, dtype=float),
         faces=np.asarray([[0, 1, 2]], dtype=np.int64),
-        metadata={"fixture": True},
+        metadata={"fixture": True, **(metadata or {})},
+        source_estimator=source_estimator,
     )
 
 

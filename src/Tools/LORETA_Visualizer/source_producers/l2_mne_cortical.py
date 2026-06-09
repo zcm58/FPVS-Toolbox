@@ -12,6 +12,7 @@ import argparse
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -70,7 +71,7 @@ class L2MNEProducerConfig:
 
 @dataclass(frozen=True)
 class L2MNECorticalForwardModel:
-    """Source-ready cortical surface forward model for fixed-orientation L2-MNE."""
+    """Source-ready cortical surface forward/inverse model for L2-MNE."""
 
     channel_names: tuple[str, ...]
     source_points: np.ndarray
@@ -79,6 +80,7 @@ class L2MNECorticalForwardModel:
     coordinate_space: str = COORDINATE_SPACE_FSAVERAGE
     label: str = "fsaverage cortical surface"
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    source_estimator: Callable[..., Sequence[float]] | None = None
 
     def __post_init__(self) -> None:
         channels = tuple(_validate_channel_name(name) for name in self.channel_names)
@@ -88,10 +90,18 @@ class L2MNECorticalForwardModel:
             raise ValueError("L2-MNE forward model channel names must be unique.")
         points = _validate_points(self.source_points, field_name="source_points")
         leadfield = _validate_matrix(self.leadfield, field_name="leadfield")
-        if leadfield.shape != (len(channels), len(points)):
+        source_estimator = self.source_estimator
+        if source_estimator is not None and not callable(source_estimator):
+            raise TypeError("L2-MNE source_estimator must be callable when provided.")
+        if source_estimator is None and leadfield.shape != (len(channels), len(points)):
             raise ValueError(
                 "L2-MNE leadfield must have shape n_channels x n_sources "
                 f"({len(channels)} x {len(points)} expected, got {leadfield.shape})."
+            )
+        if source_estimator is not None and leadfield.shape[0] != len(channels):
+            raise ValueError(
+                "L2-MNE estimator-backed leadfield must have one row per channel "
+                f"({len(channels)} expected, got {leadfield.shape[0]})."
             )
         faces = _validate_triangle_faces(self.faces, point_count=len(points))
         object.__setattr__(self, "channel_names", channels)
@@ -140,9 +150,7 @@ def compute_l2_mne_source_values(
     condition: L2MNEFPVSCondition,
     config: L2MNEProducerConfig,
 ) -> np.ndarray:
-    """Compute beta fixed-orientation L2-MNE source amplitudes for one condition."""
-    leadfield = _referenced_leadfield(forward_model.leadfield, apply_average_reference=config.apply_average_reference)
-    inverse = _minimum_norm_inverse_matrix(leadfield, lambda2=config.lambda2)
+    """Compute beta L2-MNE source amplitudes for one condition."""
     topographies = _selected_condition_topographies(
         condition,
         selected_harmonics=config.selected_harmonics_hz,
@@ -150,11 +158,36 @@ def compute_l2_mne_source_values(
         apply_average_reference=config.apply_average_reference,
     )
 
-    if config.harmonic_strategy == HARMONIC_STRATEGY_SUM_SOURCE_MAGNITUDES:
-        values = np.sum(np.abs(topographies @ inverse.T), axis=0)
+    if forward_model.source_estimator is not None:
+        if config.harmonic_strategy == HARMONIC_STRATEGY_SUM_SOURCE_MAGNITUDES:
+            values = np.sum(
+                [
+                    _source_amplitudes_from_topography(
+                        forward_model,
+                        topography,
+                        lambda2=config.lambda2,
+                    )
+                    for topography in topographies
+                ],
+                axis=0,
+            )
+        else:
+            values = _source_amplitudes_from_topography(
+                forward_model,
+                np.sum(topographies, axis=0),
+                lambda2=config.lambda2,
+            )
     else:
-        summed_topography = np.sum(topographies, axis=0)
-        values = np.abs(inverse @ summed_topography)
+        leadfield = _referenced_leadfield(
+            forward_model.leadfield,
+            apply_average_reference=config.apply_average_reference,
+        )
+        inverse = _minimum_norm_inverse_matrix(leadfield, lambda2=config.lambda2)
+        if config.harmonic_strategy == HARMONIC_STRATEGY_SUM_SOURCE_MAGNITUDES:
+            values = np.sum(np.abs(topographies @ inverse.T), axis=0)
+        else:
+            summed_topography = np.sum(topographies, axis=0)
+            values = np.abs(inverse @ summed_topography)
     if not np.all(np.isfinite(values)):
         raise ValueError("L2-MNE produced non-finite source values.")
     return values.astype(float)
@@ -323,6 +356,27 @@ def _minimum_norm_inverse_matrix(leadfield: np.ndarray, *, lambda2: float) -> np
     return leadfield.T @ np.linalg.pinv(regularized)
 
 
+def _source_amplitudes_from_topography(
+    forward_model: L2MNECorticalForwardModel,
+    topography: Sequence[float],
+    *,
+    lambda2: float,
+) -> np.ndarray:
+    source_estimator = forward_model.source_estimator
+    topography_array = np.asarray(topography, dtype=float).reshape(-1)
+    if source_estimator is None:
+        inverse = _minimum_norm_inverse_matrix(forward_model.leadfield, lambda2=lambda2)
+        values = np.abs(inverse @ topography_array)
+    else:
+        values = np.asarray(source_estimator(topography_array, lambda2=float(lambda2)), dtype=float).reshape(-1)
+    expected = len(forward_model.source_points)
+    if len(values) != expected:
+        raise ValueError(f"L2-MNE source estimator returned {len(values)} values; {expected} expected.")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("L2-MNE source estimator returned non-finite source values.")
+    return values.astype(float)
+
+
 def _selected_condition_topographies(
     condition: L2MNEFPVSCondition,
     *,
@@ -372,7 +426,15 @@ def _payload_metadata(
         "selected_harmonics_hz": list(config.selected_harmonics_hz),
         "harmonic_strategy": config.harmonic_strategy,
         "lambda2": float(config.lambda2),
-        "regularization": "lambda2 scaled by leadfield sensor-space trace",
+        "inverse_backend": str(forward_model.metadata.get("inverse_backend", "manual_ridge")),
+        "orientation_constraint": str(forward_model.metadata.get("orientation_constraint", "fixed")),
+        "loose_orientation": forward_model.metadata.get("loose_orientation"),
+        "fixed_orientation": forward_model.metadata.get("fixed_orientation", True),
+        "depth_weighting": str(forward_model.metadata.get("depth_weighting", "not_applicable")),
+        "noise_normalization": str(forward_model.metadata.get("noise_normalization", "none")),
+        "regularization": str(
+            forward_model.metadata.get("regularization", "lambda2 scaled by leadfield sensor-space trace")
+        ),
         "average_reference_applied": bool(config.apply_average_reference),
         "sensor_value_unit": condition.sensor_value_unit,
         "source_value_unit": "arbitrary units",

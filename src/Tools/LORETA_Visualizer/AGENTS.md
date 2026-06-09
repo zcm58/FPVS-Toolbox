@@ -60,6 +60,13 @@ clear preprocessing/Stats-export prerequisite message when source-map inputs
 are missing, and uses driver-tolerant alpha blending instead of VTK depth
 peeling for transparent mesh modes.
 
+Phase 6H-A(1) updates the real-project Hauk-style L2-MNE path to use an
+MNE-native inverse estimator with `method="MNE"`, `loose=0.2`, `depth=None`,
+`fixed=False`, no dSPM/sLORETA/eLORETA noise normalization, and
+`lambda2 = 1 / 9`. Keep that estimator inside `source_producers/`; renderer,
+GUI, importer, display transforms, and fsaverage display mesh helpers must
+remain unaware of inverse-operator details.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.

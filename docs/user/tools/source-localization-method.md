@@ -21,6 +21,10 @@ individual MRI/head models. The current toolbox path is EEG-only, uses a
 BioSemi64/fsaverage template cortical surface, and is intended for beta method
 review before scientific interpretation.
 
+The current project Hauk-style path uses MNE-native L2-MNE inverse settings:
+loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise
+normalization, and `lambda2 = 1 / 9` for SNR = 3.
+
 ## References
 
 - Hauk et al. (2021), *Face-selective responses in combined EEG/MEG recordings
@@ -68,8 +72,10 @@ For each condition:
 4. Average included participants at each target and neighboring bin.
 5. Sum target topographies across selected harmonics.
 6. Sum matching-offset neighboring-bin topographies across selected harmonics.
-7. Apply the same L2-MNE inverse model to the summed target topography and each
-   summed neighboring-bin topography.
+7. Apply the same MNE-native L2-MNE inverse model to the summed target
+   topography and each summed neighboring-bin topography. The current settings
+   are `method="MNE"`, `loose=0.2`, `depth=None`, `fixed=False`, and
+   `lambda2 = 1 / 9`.
 8. For each source point, compute a neighboring-bin baseline mean and population
    standard deviation after dropping the minimum and maximum neighboring source
    amplitudes.
@@ -81,6 +87,11 @@ The default neighboring-bin policy uses offsets `-10..-2` and `+2..+10`,
 excluding the target bin and immediately adjacent bins. This mirrors the
 project's FPVS neighboring-bin style while moving the correction into source
 space.
+
+At this stage, included participants are averaged at the sensor-topography
+stage before the template inverse is applied. A future validation phase will
+design participant-level source maps followed by group-level combination and
+inferential masking.
 
 ## What the viewer displays
 
