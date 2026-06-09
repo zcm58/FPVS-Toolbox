@@ -22,6 +22,7 @@ DEFAULT_BCA_MID_COLOR = "#1a9850"
 DEFAULT_BCA_UPPER_MID_COLOR = "#fee08b"
 DEFAULT_BCA_HIGH_MID_COLOR = "#fdae61"
 DEFAULT_BCA_HIGH_COLOR = "#b2182b"
+DEFAULT_Z_SCORE_THRESHOLD = 1.64
 
 
 class PublicationMetric(str, Enum):
@@ -29,21 +30,28 @@ class PublicationMetric(str, Enum):
 
     BCA = "bca"
     SNR = "snr"
+    Z_SCORE = "z_score"
 
     @property
     def display_name(self) -> str:
+        if self is PublicationMetric.Z_SCORE:
+            return "Z Score"
         if self is PublicationMetric.SNR:
             return "SNR"
         return "BCA"
 
     @property
     def source_sheet(self) -> str:
+        if self is PublicationMetric.Z_SCORE:
+            return "Z Score"
         if self is PublicationMetric.SNR:
             return "SNR"
         return "BCA (uV)"
 
     @property
     def value_column(self) -> str:
+        if self is PublicationMetric.Z_SCORE:
+            return "Z Score"
         if self is PublicationMetric.SNR:
             return "SNR"
         return "BCA (uV)"

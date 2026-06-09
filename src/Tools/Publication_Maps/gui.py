@@ -50,6 +50,7 @@ from Tools.Publication_Maps.models import (
     ColorBounds,
     DEFAULT_BCA_HIGH_COLOR,
     DEFAULT_BCA_LOW_COLOR,
+    DEFAULT_Z_SCORE_THRESHOLD,
     PublicationMapRequest,
     PublicationMetric,
 )
@@ -202,6 +203,12 @@ class PublicationMapsWindow(QWidget):
         self.metric_snr_check.toggled.connect(
             lambda _checked: self._on_metric_selection_changed()
         )
+        self.metric_z_check = QCheckBox("Z-score", group)
+        self.metric_z_check.setChecked(True)
+        self.metric_z_check.setToolTip("Export z-score scalp maps.")
+        self.metric_z_check.toggled.connect(
+            lambda _checked: self._on_metric_selection_changed()
+        )
 
         self.color_low_btn = QPushButton(group)
         self.color_low_btn.setFixedSize(20, 20)
@@ -259,6 +266,16 @@ class PublicationMapsWindow(QWidget):
         self.snr_vmax_spin.setSuffix(" SNR")
         self.snr_vmax_spin.setValue(1.5)
 
+        self.z_threshold_spin = QDoubleSpinBox(group)
+        self.z_threshold_spin.setDecimals(3)
+        self.z_threshold_spin.setRange(-1_000_000.0, 1_000_000.0)
+        self.z_threshold_spin.setSingleStep(0.01)
+        self.z_threshold_spin.setSuffix(" z")
+        self.z_threshold_spin.setValue(DEFAULT_Z_SCORE_THRESHOLD)
+        self.z_threshold_spin.setToolTip(
+            "Z scores below this threshold render as white; the upper limit auto-scales."
+        )
+
         color_row = QWidget(group)
         color_layout = QHBoxLayout(color_row)
         color_layout.setContentsMargins(0, 0, 0, 0)
@@ -276,6 +293,7 @@ class PublicationMapsWindow(QWidget):
         metrics_layout.setSpacing(12)
         metrics_layout.addWidget(self.metric_bca_check)
         metrics_layout.addWidget(self.metric_snr_check)
+        metrics_layout.addWidget(self.metric_z_check)
         metrics_layout.addStretch(1)
 
         range_row = self._build_range_control_grid(
@@ -295,6 +313,7 @@ class PublicationMapsWindow(QWidget):
         form.addRow("BCA range:", range_row)
         form.addRow("", self.fixed_snr_range_check)
         form.addRow("SNR range:", snr_range_row)
+        form.addRow("Z threshold:", self.z_threshold_spin)
         group.content_layout.addLayout(form)
         self._apply_bca_color_button_styles()
         self._toggle_metric_range_controls()
@@ -543,6 +562,8 @@ class PublicationMapsWindow(QWidget):
             selected.append(PublicationMetric.BCA)
         if self.metric_snr_check.isChecked():
             selected.append(PublicationMetric.SNR)
+        if self.metric_z_check.isChecked():
+            selected.append(PublicationMetric.Z_SCORE)
         return tuple(selected)
 
     def _update_condition_summary(self) -> None:
@@ -686,6 +707,7 @@ class PublicationMapsWindow(QWidget):
     def _toggle_metric_range_controls(self) -> None:
         bca_selected = self.metric_bca_check.isChecked()
         snr_selected = self.metric_snr_check.isChecked()
+        z_selected = self.metric_z_check.isChecked()
         bca_fixed_enabled = bca_selected and not self._busy
         snr_fixed_enabled = snr_selected and not self._busy
         self.fixed_bca_range_check.setEnabled(bca_fixed_enabled)
@@ -702,6 +724,7 @@ class PublicationMapsWindow(QWidget):
         self.snr_vmax_spin.setEnabled(
             snr_fixed_enabled and self.fixed_snr_range_check.isChecked()
         )
+        self.z_threshold_spin.setEnabled(z_selected and not self._busy)
 
     def _fixed_bca_range_is_valid(self) -> bool:
         return float(self.bca_vmax_spin.value()) > float(self.bca_vmin_spin.value())
@@ -718,6 +741,7 @@ class PublicationMapsWindow(QWidget):
             self.select_none_btn,
             self.metric_bca_check,
             self.metric_snr_check,
+            self.metric_z_check,
             self.color_low_btn,
             self.color_high_btn,
             self.fixed_bca_range_check,
@@ -726,6 +750,7 @@ class PublicationMapsWindow(QWidget):
             self.fixed_snr_range_check,
             self.snr_vmin_spin,
             self.snr_vmax_spin,
+            self.z_threshold_spin,
             self.output_root_row,
             self.export_png_check,
             self.export_svg_check,
@@ -799,6 +824,14 @@ class PublicationMapsWindow(QWidget):
                 auto_scale=not use_fixed_snr_range,
                 vmin=float(self.snr_vmin_spin.value()) if use_fixed_snr_range else None,
                 vmax=float(self.snr_vmax_spin.value()) if use_fixed_snr_range else None,
+                low_color=self.bca_low_color,
+                high_color=self.bca_high_color,
+            )
+        if PublicationMetric.Z_SCORE in metrics:
+            color_bounds[PublicationMetric.Z_SCORE] = ColorBounds(
+                auto_scale=True,
+                vmin=float(self.z_threshold_spin.value()),
+                vmax=None,
                 low_color=self.bca_low_color,
                 high_color=self.bca_high_color,
             )

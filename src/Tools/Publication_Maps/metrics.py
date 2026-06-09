@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -292,7 +293,15 @@ def _build_grand_average_frame(
     frames: list[pd.DataFrame] = []
     for metric_value, group in metric_df.groupby("metric", dropna=False):
         metric = PublicationMetric(metric_value)
-        subject_aggregator = _safe_sum if metric is PublicationMetric.BCA else _safe_mean
+        if metric is PublicationMetric.BCA:
+            subject_aggregator = _safe_sum
+        elif metric is PublicationMetric.Z_SCORE:
+            subject_aggregator = partial(
+                _safe_normalized_sum,
+                harmonic_count=len(selected_harmonics_hz),
+            )
+        else:
+            subject_aggregator = _safe_mean
         subject_values = (
             group.groupby(
                 ["condition", "subject_id", "electrode", "is_montage_electrode"],
@@ -324,6 +333,8 @@ def _build_grand_average_frame(
 
 
 def _map_label(metric: PublicationMetric) -> str:
+    if metric is PublicationMetric.Z_SCORE:
+        return "Z-score significant-harmonic sum"
     if metric is PublicationMetric.SNR:
         return "SNR significant-harmonic mean"
     return "BCA significant-harmonic sum"
@@ -333,6 +344,14 @@ def _safe_sum(values: pd.Series) -> float:
     numeric = pd.to_numeric(values, errors="coerce")
     finite = numeric[np.isfinite(numeric)]
     return float(finite.sum()) if len(finite) else float("nan")
+
+
+def _safe_normalized_sum(values: pd.Series, *, harmonic_count: int) -> float:
+    numeric = pd.to_numeric(values, errors="coerce")
+    finite = numeric[np.isfinite(numeric)]
+    if harmonic_count <= 0 or len(finite) != harmonic_count:
+        return float("nan")
+    return float(finite.sum() / np.sqrt(float(harmonic_count)))
 
 
 def _safe_mean(values: pd.Series) -> float:

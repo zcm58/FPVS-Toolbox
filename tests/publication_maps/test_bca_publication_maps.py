@@ -15,6 +15,7 @@ from Tools.Publication_Maps.excel_inputs import discover_conditions
 from Tools.Publication_Maps.metrics import build_publication_map_result
 from Tools.Publication_Maps.models import (
     ColorBounds,
+    DEFAULT_Z_SCORE_THRESHOLD,
     GRAND_AVERAGE_SHEET,
     LONG_VALUES_SHEET,
     PARAMETERS_SHEET,
@@ -24,6 +25,7 @@ from Tools.Publication_Maps.models import (
 )
 from Tools.Publication_Maps.rendering import (
     COMBINED_PAIRED_MAP_FIGSIZE,
+    COMBINED_PAIRED_THREE_ROW_MAP_FIGSIZE,
     JOURNAL_TEXT_WIDTH_IN,
     _combined_paired_layout_rects,
     _metric_limits,
@@ -112,6 +114,36 @@ def test_snr_maps_use_stats_significant_selection_and_mean_per_electrode(
     assert o1["render_value"] == pytest.approx(1.35)
     assert o1["valid_subject_count"] == 2
     assert o1["map_label"] == "SNR significant-harmonic mean"
+
+
+def test_z_score_maps_use_stats_significant_selection_and_combined_z_per_electrode(
+    tmp_path: Path,
+) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1", "S2"))
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=project_root / "4 - Scalp Maps",
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=8.4,
+        project_root=project_root,
+        metrics=(PublicationMetric.Z_SCORE,),
+    )
+
+    result = build_publication_map_result(request)
+
+    assert result.selected_harmonics_hz == pytest.approx((1.2, 3.6, 7.2))
+    assert set(result.long_values["metric"]) == {PublicationMetric.Z_SCORE.value}
+    assert set(result.long_values["source_sheet"]) == {"Z Score"}
+    o1 = result.grand_average_values[
+        (result.grand_average_values["condition"] == "Faces")
+        & (result.grand_average_values["electrode"] == "O1")
+        & (result.grand_average_values["metric"] == PublicationMetric.Z_SCORE.value)
+    ].iloc[0]
+    assert o1["aggregate_value"] == pytest.approx(6.5 / np.sqrt(3.0))
+    assert o1["render_value"] == pytest.approx(6.5 / np.sqrt(3.0))
+    assert o1["valid_subject_count"] == 2
+    assert o1["map_label"] == "Z-score significant-harmonic sum"
 
 
 def test_snr_maps_report_missing_exact_selected_columns(tmp_path: Path) -> None:
@@ -228,6 +260,37 @@ def test_source_workbook_includes_bca_and_snr_when_both_selected(tmp_path: Path)
     assert params_by_key["snr_range_max"] == pytest.approx(1.5)
 
 
+def test_source_workbook_includes_z_score_threshold_when_selected(tmp_path: Path) -> None:
+    project_root, excel_root = _write_project_workbooks(tmp_path, subjects=("S1",))
+    output_root = project_root / "4 - Scalp Maps"
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=output_root,
+        conditions=("Faces",),
+        base_frequency_hz=6.0,
+        max_frequency_hz=3.6,
+        project_root=project_root,
+        metrics=(PublicationMetric.Z_SCORE,),
+        color_bounds={
+            PublicationMetric.Z_SCORE: ColorBounds(vmin=DEFAULT_Z_SCORE_THRESHOLD),
+        },
+    )
+    result = build_publication_map_result(request)
+
+    workbook_path = export_source_workbook(result, request)
+
+    long_values = pd.read_excel(workbook_path, sheet_name=LONG_VALUES_SHEET)
+    grand_values = pd.read_excel(workbook_path, sheet_name=GRAND_AVERAGE_SHEET)
+    params = pd.read_excel(workbook_path, sheet_name=PARAMETERS_SHEET)
+    params_by_key = dict(zip(params["key"], params["value"]))
+    assert set(long_values["metric"]) == {PublicationMetric.Z_SCORE.value}
+    assert set(long_values["source_sheet"]) == {"Z Score"}
+    assert set(grand_values["metric"]) == {PublicationMetric.Z_SCORE.value}
+    assert params_by_key["metrics"] == PublicationMetric.Z_SCORE.value
+    assert bool(params_by_key["z_score_auto_scale"])
+    assert params_by_key["z_score_range_min"] == pytest.approx(DEFAULT_Z_SCORE_THRESHOLD)
+
+
 def test_exports_combined_paired_condition_figure_when_bca_and_snr_selected(
     tmp_path: Path,
 ) -> None:
@@ -261,6 +324,50 @@ def test_exports_combined_paired_condition_figure_when_bca_and_snr_selected(
         assert image.height == int(COMBINED_PAIRED_MAP_FIGSIZE[1] * request.png_dpi)
 
 
+def test_exports_combined_paired_condition_figure_with_z_score_third_row(
+    tmp_path: Path,
+) -> None:
+    project_root, excel_root = _write_project_workbooks(
+        tmp_path,
+        subjects=("S1",),
+        conditions=("Faces", "Objects"),
+    )
+    output_root = project_root / "4 - Scalp Maps"
+    request = PublicationMapRequest(
+        input_root=excel_root,
+        output_root=output_root,
+        conditions=("Faces", "Objects"),
+        base_frequency_hz=6.0,
+        max_frequency_hz=3.6,
+        project_root=project_root,
+        metrics=(
+            PublicationMetric.BCA,
+            PublicationMetric.SNR,
+            PublicationMetric.Z_SCORE,
+        ),
+        color_bounds={
+            PublicationMetric.Z_SCORE: ColorBounds(vmin=DEFAULT_Z_SCORE_THRESHOLD),
+        },
+        export_paired_figures=True,
+        paired_conditions=("Objects", "Faces"),
+    )
+    result = build_publication_map_result(request)
+
+    figures = render_publication_figures(result, request)
+
+    paired = [path for path in figures if "_and_" in path.stem]
+    assert {path.suffix for path in paired} == {".png", ".svg"}
+    assert {path.stem for path in paired} == {
+        "Objects_and_Faces_bca_snr_z_score_paired"
+    }
+    paired_png = next(path for path in paired if path.suffix == ".png")
+    with Image.open(paired_png) as image:
+        assert image.width == int(JOURNAL_TEXT_WIDTH_IN * request.png_dpi)
+        assert image.height == int(
+            COMBINED_PAIRED_THREE_ROW_MAP_FIGSIZE[1] * request.png_dpi
+        )
+
+
 def test_combined_paired_layout_balances_outer_spacing() -> None:
     layout = _combined_paired_layout_rects()
     bca_row = layout[PublicationMetric.BCA]
@@ -274,6 +381,25 @@ def test_combined_paired_layout_balances_outer_spacing() -> None:
     assert bca_row["second"][0] > bca_row["first"][0] + bca_row["first"][2]
     assert bca_row["colorbar"][0] > bca_row["second"][0] + bca_row["second"][2]
     assert 1.0 - (bca_row["colorbar"][0] + bca_row["colorbar"][2]) >= 0.10
+
+
+def test_combined_paired_layout_supports_z_score_third_row() -> None:
+    layout = _combined_paired_layout_rects(
+        metrics=(
+            PublicationMetric.BCA,
+            PublicationMetric.SNR,
+            PublicationMetric.Z_SCORE,
+        )
+    )
+    bca_row = layout[PublicationMetric.BCA]
+    snr_row = layout[PublicationMetric.SNR]
+    z_row = layout[PublicationMetric.Z_SCORE]
+
+    assert bca_row["first"][0] == snr_row["first"][0] == z_row["first"][0]
+    assert bca_row["second"][0] == snr_row["second"][0] == z_row["second"][0]
+    assert bca_row["colorbar"][0] == snr_row["colorbar"][0] == z_row["colorbar"][0]
+    assert bca_row["first"][1] > snr_row["first"][1] > z_row["first"][1]
+    assert snr_row["first"][1] > z_row["first"][1] + z_row["first"][3]
 
 
 def test_bca_colormap_defaults_and_custom_endpoints() -> None:
@@ -308,6 +434,15 @@ def test_snr_uses_detailed_scalp_colormap() -> None:
     assert to_hex(snr_cmap(1.0)).lower() == "#b2182b"
 
 
+def test_z_score_colormap_uses_white_below_threshold() -> None:
+    z_cmap = colormap_for_metric(PublicationMetric.Z_SCORE, ColorBounds())
+
+    assert z_cmap.name == "FpvsDetailedScalpSequentialCustom"
+    assert to_hex(z_cmap(-0.1)).lower() == "#ffffff"
+    assert to_hex(z_cmap(0.0)).lower() == "#2166ac"
+    assert to_hex(z_cmap(1.0)).lower() == "#b2182b"
+
+
 def test_bca_metric_limits_auto_or_fixed() -> None:
     data = np.asarray([0.0, 0.25, 0.75])
 
@@ -336,6 +471,24 @@ def test_snr_metric_limits_auto_or_fixed() -> None:
     ) == (1.0, 1.5)
 
 
+def test_z_score_metric_limits_use_threshold_and_auto_upper_limit() -> None:
+    data = np.asarray([0.5, 1.7, 3.2])
+
+    assert _metric_limits(
+        data,
+        metric=PublicationMetric.Z_SCORE,
+        bounds=ColorBounds(vmin=DEFAULT_Z_SCORE_THRESHOLD),
+    ) == (DEFAULT_Z_SCORE_THRESHOLD, 3.2)
+    assert _metric_limits(
+        np.asarray([0.2, 0.5]),
+        metric=PublicationMetric.Z_SCORE,
+        bounds=ColorBounds(vmin=DEFAULT_Z_SCORE_THRESHOLD),
+    ) == (
+        DEFAULT_Z_SCORE_THRESHOLD,
+        DEFAULT_Z_SCORE_THRESHOLD + 1.0,
+    )
+
+
 def test_bca_colorbar_label_and_fonts_use_shared_component_typography() -> None:
     axis_font = matplotlib_font_kwargs("figure_axis_label")
     title_font = matplotlib_font_kwargs("figure_title")
@@ -344,6 +497,7 @@ def test_bca_colorbar_label_and_fonts_use_shared_component_typography() -> None:
         "Baseline-corrected amplitude (µV)"
     )
     assert colorbar_label_for_metric(PublicationMetric.SNR) == "Signal to Noise Ratio"
+    assert colorbar_label_for_metric(PublicationMetric.Z_SCORE) == "Z Score"
     assert axis_font["fontsize"] >= 12
     assert title_font["fontsize"] >= axis_font["fontsize"]
 
@@ -500,9 +654,22 @@ def _write_group_policy_workbook(
         index=["O1", "O2", "FZ"],
     )
     snr.index.name = "Electrode"
+    z_score = pd.DataFrame(
+        {
+            "1.2000_Hz": [1.0 * scale, 2.0 * scale, 0.5 * scale],
+            "2.4000_Hz": [9.0, 9.0, 9.0],
+            "3.6000_Hz": [2.0, 1.0, 0.5],
+            "4.8000_Hz": [9.0, 9.0, 9.0],
+            "6.0000_Hz": [9.0, 9.0, 9.0],
+            "7.2000_Hz": [3.0, 2.0, 1.0],
+        },
+        index=["O1", "O2", "FZ"],
+    )
+    z_score.index.name = "Electrode"
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         bca.to_excel(writer, sheet_name="BCA (uV)")
         snr.to_excel(writer, sheet_name="SNR")
+        z_score.to_excel(writer, sheet_name="Z Score")
         full_fft.to_excel(writer, sheet_name="FullFFT Amplitude (uV)")
 
 

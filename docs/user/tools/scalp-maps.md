@@ -1,7 +1,7 @@
 # Scalp Maps
 
-Use this page when you want publication-ready BCA or SNR scalp maps from
-processed FPVS Toolbox Excel outputs.
+Use this page when you want publication-ready BCA, SNR, or z-score scalp maps
+from processed FPVS Toolbox Excel outputs.
 
 The Scalp Maps tool opens from the main app sidebar as **Scalp Maps**. It reads
 condition folders from `1 - Excel Data Files` and saves figures plus an audit
@@ -14,16 +14,13 @@ workbooks for each condition.
 
 It is useful when you need:
 
-- condition-level grand-average BCA and SNR scalp maps;
+- condition-level grand-average BCA, SNR, and z-score scalp maps;
 - one shared significant-harmonic list selected with the Statistics tool
   method;
 - transparent SVG figures for PowerPoint, Illustrator, Inkscape, Affinity
   Designer, or similar figure-composition software;
 - a selected pair of condition scalp maps on one figure;
 - source data that documents exactly which values were plotted.
-
-The current Scalp Maps tool generates BCA and SNR scalp maps. It does not
-generate z-score scalp maps.
 
 ## Inputs
 
@@ -36,7 +33,9 @@ The tool reads:
 - `FullFFT Amplitude (uV)` to select significant harmonics with the Statistics
   tool group-level harmonic-selection method;
 - `BCA (uV)` to sum the selected harmonic amplitudes for each electrode;
-- `SNR` to calculate the mean selected-harmonic SNR for each electrode.
+- `SNR` to calculate the mean selected-harmonic SNR for each electrode;
+- `Z Score` to calculate combined selected-harmonic z scores for each
+  electrode.
 
 Base frequency and the BCA upper frequency limit come from project settings, so
 you do not need to re-enter them in this tool. Change those settings in the main
@@ -53,13 +52,14 @@ project, Scalp Maps can reuse it. If no matching cache is available, the tool
 computes the selection using the same locked Statistics method.
 
 Only exact selected frequency columns are used. The tool sums selected
-`BCA (uV)` columns and averages selected `SNR` columns; it does not use
-nearest-bin matching for plotted values.
+`BCA (uV)` columns, averages selected `SNR` columns, and combines selected
+`Z Score` columns as `sum(z) / sqrt(K)` where `K` is the number of selected
+harmonics. It does not use nearest-bin matching for plotted values.
 
 ## Color scale
 
-Choose the metrics to export with the **BCA** and **SNR** checkboxes. Both
-metrics start checked.
+Choose the metrics to export with the **BCA**, **SNR**, and **Z-score**
+checkboxes. All three metrics start checked.
 
 The default palette maps low values to blue and high values to red for both
 metrics.
@@ -78,6 +78,12 @@ Keep the fixed range checked when you want all exported maps for that metric to
 use the same colorbar. Uncheck it when each scalp map should auto-scale to its
 own values.
 
+Z-score maps use a threshold instead of a fixed upper range. The default
+threshold is `1.64 z`; values below the threshold render as white. You can edit
+the threshold in the **Z threshold** field. The upper z-score limit is automatic:
+for paired condition figures, both z-score maps use the maximum z score found in
+either paired condition so their color grading is directly comparable.
+
 Use the low and high color selectors if a journal, slide deck, or collaborator
 requires a different palette.
 
@@ -87,6 +93,10 @@ Check **Also export paired condition figures** when you want two scalp maps on
 one figure. The paired controls let you choose **Condition A** and
 **Condition B** from the checked condition list, following the same general
 condition-pair layout as the SNR Plot Generator.
+
+When BCA, SNR, and Z-score are all selected, the paired figure uses three rows:
+BCA, SNR, then Z-score. If only BCA and SNR are selected, the paired figure keeps
+the original two-row layout.
 
 Keep both conditions checked in the Conditions list so the tool computes their
 grand-average maps before building the paired figure.

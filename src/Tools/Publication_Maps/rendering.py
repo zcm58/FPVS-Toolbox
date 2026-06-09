@@ -23,6 +23,7 @@ from Tools.Publication_Maps.models import (
     PARAMETERS_SHEET,
     SOURCE_WORKBOOK_NAME,
     ColorBounds,
+    DEFAULT_Z_SCORE_THRESHOLD,
     Diagnostic,
     PublicationMapRequest,
     PublicationMapResult,
@@ -35,6 +36,7 @@ JOURNAL_TEXT_WIDTH_IN = 6.5
 SINGLE_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 5.6)
 PAIRED_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 3.4)
 COMBINED_PAIRED_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 5.8)
+COMBINED_PAIRED_THREE_ROW_MAP_FIGSIZE = (JOURNAL_TEXT_WIDTH_IN, 8.0)
 COMBINED_PAIRED_MAP_LEFT = 0.07
 COMBINED_PAIRED_MAP_WIDTH = 0.31
 COMBINED_PAIRED_SECOND_COL_LEFT = 0.49
@@ -43,6 +45,13 @@ COMBINED_PAIRED_COLORBAR_WIDTH = 0.025
 COMBINED_PAIRED_TOP_ROW_BOTTOM = 0.555
 COMBINED_PAIRED_BOTTOM_ROW_BOTTOM = 0.10
 SNR_COLORBAR_LABEL = "Signal to Noise Ratio"
+ZSCORE_COLORBAR_LABEL = "Z Score"
+ZSCORE_UNDER_COLOR = "#ffffff"
+COMBINED_PAIRED_METRIC_ORDER = (
+    PublicationMetric.BCA,
+    PublicationMetric.SNR,
+    PublicationMetric.Z_SCORE,
+)
 BCA_COLORBAR_LABEL = "Baseline-corrected amplitude (µV)"
 
 
@@ -204,7 +213,13 @@ def render_topomap(
             cmap=cmap,
             bounds=bounds,
         )
-        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar = fig.colorbar(
+            im,
+            ax=ax,
+            fraction=0.046,
+            pad=0.04,
+            extend=_colorbar_extend(metric),
+        )
         _style_colorbar(cbar, metric=metric)
         ax.set_title(title, pad=8, **matplotlib_font_kwargs("figure_title"))
         if missing_count:
@@ -226,14 +241,19 @@ def render_topomap(
 def colormap_for_metric(metric: PublicationMetric, bounds: ColorBounds | None = None):
     """Return the publication colormap for a metric."""
 
-    _ = metric
     if bounds is None:
-        return BCA_CMAP
-    return scalp_colormap(
-        name="FpvsDetailedScalpSequentialCustom",
-        low_color=bounds.low_color,
-        high_color=bounds.high_color,
-    )
+        cmap = BCA_CMAP
+    else:
+        cmap = scalp_colormap(
+            name="FpvsDetailedScalpSequentialCustom",
+            low_color=bounds.low_color,
+            high_color=bounds.high_color,
+        )
+    if metric is PublicationMetric.Z_SCORE:
+        cmap = cmap.copy()
+        cmap.set_under(ZSCORE_UNDER_COLOR)
+        cmap.set_bad(ZSCORE_UNDER_COLOR)
+    return cmap
 
 
 def _render_paired_condition_figures(
@@ -309,7 +329,10 @@ def _render_combined_paired_condition_figures(
 ) -> list[Path]:
     grand = result.grand_average_values
     rendered: list[Path] = []
-    metrics = (PublicationMetric.BCA, PublicationMetric.SNR)
+    requested_metrics = _request_metrics(request)
+    metrics = tuple(
+        metric for metric in COMBINED_PAIRED_METRIC_ORDER if metric in requested_metrics
+    )
     for first, second in condition_pairs:
         groups: dict[PublicationMetric, tuple[pd.DataFrame, pd.DataFrame]] = {}
         for metric in metrics:
@@ -329,11 +352,13 @@ def _render_combined_paired_condition_figures(
         if not groups:
             continue
 
-        stem = sanitize_filename_stem(f"{first}_and_{second}_bca_snr_paired")
+        metric_stem = "_".join(metric.value for metric in metrics)
+        stem = sanitize_filename_stem(f"{first}_and_{second}_{metric_stem}_paired")
         if request.export_png:
             png_path = request.output_root / f"{stem}.png"
             _render_combined_paired_topomap(
                 groups,
+                metrics=metrics,
                 first_title=str(first),
                 second_title=str(second),
                 output_path=png_path,
@@ -345,6 +370,7 @@ def _render_combined_paired_condition_figures(
             svg_path = request.output_root / f"{stem}.svg"
             _render_combined_paired_topomap(
                 groups,
+                metrics=metrics,
                 first_title=str(first),
                 second_title=str(second),
                 output_path=svg_path,
@@ -427,7 +453,13 @@ def _render_paired_topomap(
             _add_missing_note(axes[0], first_missing)
         if second_missing:
             _add_missing_note(axes[1], second_missing)
-        cbar = fig.colorbar(im, ax=list(axes), fraction=0.035, pad=0.04)
+        cbar = fig.colorbar(
+            im,
+            ax=list(axes),
+            fraction=0.035,
+            pad=0.04,
+            extend=_colorbar_extend(metric),
+        )
         _style_colorbar(cbar, metric=metric)
         _save_figure(fig, output_path, dpi=dpi)
     finally:
@@ -437,16 +469,17 @@ def _render_paired_topomap(
 def _render_combined_paired_topomap(
     values_by_metric: dict[PublicationMetric, tuple[pd.DataFrame, pd.DataFrame]],
     *,
+    metrics: tuple[PublicationMetric, ...],
     first_title: str,
     second_title: str,
     output_path: Path,
     bounds_by_metric: dict[PublicationMetric, ColorBounds],
     dpi: int,
 ) -> None:
-    fig = plt.figure(figsize=COMBINED_PAIRED_MAP_FIGSIZE, dpi=dpi)
-    layout = _combined_paired_layout_rects()
+    fig = plt.figure(figsize=_combined_paired_figsize(metrics), dpi=dpi)
+    layout = _combined_paired_layout_rects(metrics=metrics)
     try:
-        for row_idx, metric in enumerate((PublicationMetric.BCA, PublicationMetric.SNR)):
+        for row_idx, metric in enumerate(metrics):
             first_values, second_values = values_by_metric[metric]
             row_layout = layout[metric]
             row_axes = [
@@ -485,21 +518,39 @@ def _render_combined_paired_topomap(
                 _add_missing_note(row_axes[0], first_missing)
             if second_missing:
                 _add_missing_note(row_axes[1], second_missing)
-            cbar = fig.colorbar(im, cax=cax)
+            cbar = fig.colorbar(im, cax=cax, extend=_colorbar_extend(metric))
             _style_colorbar(cbar, metric=metric)
         _save_figure(fig, output_path, dpi=dpi)
     finally:
         plt.close(fig)
 
 
-def _combined_paired_layout_rects() -> dict[PublicationMetric, dict[str, tuple[float, float, float, float]]]:
-    map_height = COMBINED_PAIRED_MAP_WIDTH * (
-        COMBINED_PAIRED_MAP_FIGSIZE[0] / COMBINED_PAIRED_MAP_FIGSIZE[1]
-    )
-    rows = {
-        PublicationMetric.BCA: COMBINED_PAIRED_TOP_ROW_BOTTOM,
-        PublicationMetric.SNR: COMBINED_PAIRED_BOTTOM_ROW_BOTTOM,
-    }
+def _combined_paired_layout_rects(
+    *,
+    metrics: tuple[PublicationMetric, ...] = (
+        PublicationMetric.BCA,
+        PublicationMetric.SNR,
+    ),
+) -> dict[PublicationMetric, dict[str, tuple[float, float, float, float]]]:
+    figure_size = _combined_paired_figsize(metrics)
+    map_height = COMBINED_PAIRED_MAP_WIDTH * (figure_size[0] / figure_size[1])
+    if metrics == (PublicationMetric.BCA, PublicationMetric.SNR):
+        rows = {
+            PublicationMetric.BCA: COMBINED_PAIRED_TOP_ROW_BOTTOM,
+            PublicationMetric.SNR: COMBINED_PAIRED_BOTTOM_ROW_BOTTOM,
+        }
+    else:
+        top = 0.94
+        bottom = 0.075
+        if len(metrics) > 1:
+            gap = (top - bottom - (len(metrics) * map_height)) / (len(metrics) - 1)
+            gap = max(gap, 0.035)
+        else:
+            gap = 0.0
+        rows = {
+            metric: top - map_height - index * (map_height + gap)
+            for index, metric in enumerate(metrics)
+        }
     return {
         metric: {
             "first": (
@@ -523,6 +574,12 @@ def _combined_paired_layout_rects() -> dict[PublicationMetric, dict[str, tuple[f
         }
         for metric, bottom in rows.items()
     }
+
+
+def _combined_paired_figsize(metrics: tuple[PublicationMetric, ...]) -> tuple[float, float]:
+    if len(metrics) >= 3:
+        return COMBINED_PAIRED_THREE_ROW_MAP_FIGSIZE
+    return COMBINED_PAIRED_MAP_FIGSIZE
 
 
 def _draw_topomap(
@@ -579,7 +636,15 @@ def colorbar_label_for_metric(metric: PublicationMetric) -> str:
         return BCA_COLORBAR_LABEL
     if metric is PublicationMetric.SNR:
         return SNR_COLORBAR_LABEL
+    if metric is PublicationMetric.Z_SCORE:
+        return ZSCORE_COLORBAR_LABEL
     return metric.display_name
+
+
+def _colorbar_extend(metric: PublicationMetric) -> str:
+    if metric is PublicationMetric.Z_SCORE:
+        return "min"
+    return "neither"
 
 
 def _style_colorbar(
@@ -626,7 +691,20 @@ def _metric_limits(
 ) -> tuple[float, float]:
     finite = data[np.isfinite(data)]
     if not len(finite):
-        finite = np.asarray([1.0, 1.5] if metric is PublicationMetric.SNR else [0.0])
+        if metric is PublicationMetric.Z_SCORE:
+            finite = np.asarray([DEFAULT_Z_SCORE_THRESHOLD])
+        else:
+            finite = np.asarray([1.0, 1.5] if metric is PublicationMetric.SNR else [0.0])
+    if metric is PublicationMetric.Z_SCORE:
+        vmin = (
+            float(bounds.vmin)
+            if bounds.vmin is not None
+            else DEFAULT_Z_SCORE_THRESHOLD
+        )
+        vmax = float(np.nanmax(finite))
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+        return (vmin, vmax)
     if not bounds.auto_scale and bounds.vmin is not None and bounds.vmax is not None:
         vmin = float(bounds.vmin)
         vmax = float(bounds.vmax)
