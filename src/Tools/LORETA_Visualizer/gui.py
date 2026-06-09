@@ -304,6 +304,7 @@ def _project_source_export_failure_text(message: str) -> str:
         or "harmonic_selection" in lowered
         or "selected harmonics" in lowered
         or "fullfft amplitude" in lowered
+        or "fullfft workbooks" in lowered
         or "fullfft source z-score" in lowered
     ):
         return (

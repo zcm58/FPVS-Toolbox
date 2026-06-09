@@ -239,6 +239,17 @@ def test_project_source_export_failure_text_guides_fullfft_prerequisites() -> No
     assert "FullFFT Amplitude (uV)" in text
 
 
+def test_project_source_export_failure_text_guides_missing_fullfft_workbooks() -> None:
+    message = "No included FullFFT workbooks were found for source-space z-score assembly."
+
+    text = _project_source_export_failure_text(message)
+
+    assert text.startswith("Project source maps are not ready yet.")
+    assert "Re-run preprocessing for this project" in text
+    assert "Export Stats-Ready Workbook" in text
+    assert message in text
+
+
 def test_project_source_export_failure_text_preserves_unrecognized_error() -> None:
     assert (
         _project_source_export_failure_text("Unable to build MNE/fsaverage forward model")
