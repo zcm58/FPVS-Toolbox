@@ -38,6 +38,12 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
     _validate_harmonics,
     _validate_label,
 )
+from Tools.LORETA_Visualizer.source_producers.source_lateralization import (
+    DEFAULT_SOURCE_LATERALIZATION_CSV_NAME,
+    DEFAULT_SOURCE_LATERALIZATION_JSON_NAME,
+    build_source_lateralization_rows,
+    write_source_lateralization_summary_files,
+)
 
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], None]
@@ -355,6 +361,8 @@ class L2MNEHaukParticipantZScoreWriteResult:
 
     producer_result: SourceProducerRunResult
     participant_sidecar_path: Path
+    lateralization_summary_path: Path | None = None
+    lateralization_summary_csv_path: Path | None = None
 
 
 def compute_l2_mne_hauk_zscore_source_values(
@@ -751,6 +759,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
     used_file_names: set[str] = set()
     participant_rows_by_condition: dict[str, tuple[L2MNEHaukParticipantZScoreValues, ...]] = {}
     cluster_results_by_condition: dict[str, L2MNEHaukClusterPermutationResult | None] = {}
+    lateralization_rows: list[dict[str, Any]] = []
     for condition_index, condition in enumerate(condition_list, start=1):
         _emit_progress(
             progress_callback,
@@ -784,12 +793,14 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
                 ),
             )
         cluster_results_by_condition[condition.condition_id] = cluster_result
+        condition_summaries: list[L2MNEHaukParticipantZScoreSummary] = []
         for aggregation in aggregation_list:
             summary = summarize_l2_mne_hauk_participant_zscores(
                 participant_rows,
                 aggregation=aggregation,
                 trim_fraction=trim_fraction,
             )
+            condition_summaries.append(summary)
             _emit_progress(
                 progress_callback,
                 f"Writing {condition.label} {summary.label_suffix} source JSON...",
@@ -831,6 +842,16 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
                     },
                 }
             )
+        lateralization_rows.extend(
+            build_source_lateralization_rows(
+                source_points=forward_model.source_points,
+                condition_id=condition.condition_id,
+                condition_label=condition.label,
+                participant_values=participant_rows,
+                group_summaries=condition_summaries,
+                cluster_mask=None if cluster_result is None else cluster_result.mask,
+            )
+        )
 
     sidecar_path = output_path / participant_sidecar_name
     _emit_progress(progress_callback, "Writing participant source-map sidecar...")
@@ -843,6 +864,31 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
             participant_rows_by_condition=participant_rows_by_condition,
             cluster_results_by_condition=cluster_results_by_condition,
         ),
+    )
+
+    lateralization_json_path = output_path / DEFAULT_SOURCE_LATERALIZATION_JSON_NAME
+    lateralization_csv_path = output_path / DEFAULT_SOURCE_LATERALIZATION_CSV_NAME
+    _emit_progress(progress_callback, "Writing source lateralization summary...")
+    write_source_lateralization_summary_files(
+        json_path=lateralization_json_path,
+        csv_path=lateralization_csv_path,
+        rows=lateralization_rows,
+        metadata={
+            "source_map_model": "participant_first",
+            "source_value_unit": "z-score",
+            "participant_sidecar_file": sidecar_path.name,
+            "selected_harmonics_hz": list(config.selected_harmonics_hz),
+            "cluster_mask": (
+                "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
+            ),
+            "cluster_mask_method": (
+                CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP if config.cluster_mask_enabled else "none"
+            ),
+            "summary_note": (
+                "Descriptive source-space lateralization companion metric. It does not replace "
+                "sensor-space BCA lateralization statistics."
+            ),
+        },
     )
 
     manifest = {
@@ -873,6 +919,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
             "condition_count": len(condition_list),
             "payload_count": len(emitted),
             "participant_sidecar_path": str(sidecar_path),
+            "lateralization_summary_path": str(lateralization_json_path),
         },
     )
     return L2MNEHaukParticipantZScoreWriteResult(
@@ -884,6 +931,8 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
             manifest_validation=manifest_validation,
         ),
         participant_sidecar_path=sidecar_path,
+        lateralization_summary_path=lateralization_json_path,
+        lateralization_summary_csv_path=lateralization_csv_path,
     )
 
 

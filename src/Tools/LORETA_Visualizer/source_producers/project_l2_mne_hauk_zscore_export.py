@@ -60,6 +60,8 @@ class ProjectL2MNEHaukZScoreExportResult:
     forward_model: L2MNECorticalForwardModel
     export_model: str = PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST
     participant_sidecar_path: Path | None = None
+    lateralization_summary_path: Path | None = None
+    lateralization_summary_csv_path: Path | None = None
 
     @property
     def output_dir(self) -> Path:
@@ -206,6 +208,8 @@ def write_project_l2_mne_hauk_zscore_payloads(
         )
         producer_result = participant_result.producer_result
         participant_sidecar_path = participant_result.participant_sidecar_path
+        lateralization_summary_path = participant_result.lateralization_summary_path
+        lateralization_summary_csv_path = participant_result.lateralization_summary_csv_path
     else:
         producer_result = write_l2_mne_hauk_zscore_surface_payloads(
             forward_model=model_forward,
@@ -216,6 +220,8 @@ def write_project_l2_mne_hauk_zscore_payloads(
             progress_callback=progress_callback,
         )
         participant_sidecar_path = None
+        lateralization_summary_path = None
+        lateralization_summary_csv_path = None
 
     _emit_progress(progress_callback, f"Source-map JSON export complete: {producer_result.manifest_path}")
     logger.info(
@@ -225,6 +231,7 @@ def write_project_l2_mne_hauk_zscore_payloads(
             "output_dir": str(producer_result.output_dir),
             "condition_count": len(producer_result.payloads),
             "zscore_model": model,
+            "lateralization_summary_path": str(lateralization_summary_path) if lateralization_summary_path else "",
         },
     )
     return ProjectL2MNEHaukZScoreExportResult(
@@ -233,6 +240,8 @@ def write_project_l2_mne_hauk_zscore_payloads(
         forward_model=model_forward,
         export_model=model,
         participant_sidecar_path=participant_sidecar_path,
+        lateralization_summary_path=lateralization_summary_path,
+        lateralization_summary_csv_path=lateralization_summary_csv_path,
     )
 
 
@@ -360,6 +369,9 @@ def main() -> int:
             "manifest_path": str(result.manifest_path),
             "condition_count": len(result.producer_result.payloads),
             "zscore_model": result.export_model,
+            "lateralization_summary_path": (
+                str(result.lateralization_summary_path) if result.lateralization_summary_path else ""
+            ),
         },
     )
     return 0

@@ -237,8 +237,14 @@ compact rebuild summaries, but source-estimation math still belongs only to
   model is retained only as an advanced comparison fallback. Phase 6H-A(3)
   computes participant-first source-space cluster-permutation masks and stores
   the significant source vertices in payload metadata for publication-style
-  display. Later producers may use LORETA/eLORETA volume or mixed source-space
-  models.
+  display. Phase 6H-A(4) writes a descriptive source-space lateralization
+  summary from already-computed participant/group maps and producer masks.
+  Later producers may use LORETA/eLORETA volume or mixed source-space models.
+- `source_lateralization.py`: producer-side descriptive summaries of
+  right/left source activation from already-computed source values. It may use
+  producer-provided masks and may emit coordinate-defined whole-hemisphere and
+  LOT/ROT occipito-temporal ROI rows, but it must not run inverse estimation,
+  perform inferential lateralization tests, or inspect renderer state.
 - `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
   the expected output shape for future source-localization producers. They are
   format examples only and are not source estimates. This directory also holds

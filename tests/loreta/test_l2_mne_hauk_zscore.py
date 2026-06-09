@@ -209,6 +209,10 @@ def test_participant_first_writer_emits_group_summaries_and_sidecar(tmp_path) ->
     assert result.producer_result.method_id == "l2_mne_fsaverage_participant_zscore"
     assert len(result.producer_result.payloads) == 3
     assert result.participant_sidecar_path.is_file()
+    assert result.lateralization_summary_path is not None
+    assert result.lateralization_summary_path.is_file()
+    assert result.lateralization_summary_csv_path is not None
+    assert result.lateralization_summary_csv_path.is_file()
     manifest = json.loads(result.producer_result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["label"] == "L2-MNE participant-first source-space z-score maps"
     assert [entry["metadata"]["participant_zscore_aggregation"] for entry in manifest["conditions"]] == [
@@ -226,6 +230,11 @@ def test_participant_first_writer_emits_group_summaries_and_sidecar(tmp_path) ->
     sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
     assert sidecar["format"] == PARTICIPANT_SOURCE_MAP_SIDECAR_FORMAT
     assert sidecar["conditions"][0]["participant_count"] == 2
+    lateralization = json.loads(result.lateralization_summary_path.read_text(encoding="utf-8"))
+    assert lateralization["format"] == "fpvs_loreta_source_lateralization_summary_v1"
+    assert lateralization["metadata"]["positive_lateralization_index"] == "right_lateralized"
+    assert "occipitotemporal_lot_rot" in lateralization["metadata"]["roi_definitions"]
+    assert len(lateralization["rows"]) == 10
 
 
 def test_hauk_zscore_writer_emits_manifest_importer_contract(tmp_path) -> None:

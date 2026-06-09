@@ -69,6 +69,11 @@ if TYPE_CHECKING:
         default_project_l2_mne_output_dir,
         write_project_l2_mne_cortical_surface_payloads,
     )
+    from Tools.LORETA_Visualizer.source_producers.source_lateralization import (
+        SOURCE_LATERALIZATION_SUMMARY_FORMAT,
+        build_source_lateralization_rows,
+        write_source_lateralization_summary_files,
+    )
 
 _L2_MNE_EXPORTS = {
     "L2MNECorticalForwardModel",
@@ -123,6 +128,11 @@ _PROJECT_HAUK_ZSCORE_EXPORTS = {
     "write_project_l2_mne_hauk_zscore_group_first_payloads",
     "write_project_l2_mne_hauk_zscore_payloads",
 }
+_SOURCE_LATERALIZATION_EXPORTS = {
+    "SOURCE_LATERALIZATION_SUMMARY_FORMAT",
+    "build_source_lateralization_rows",
+    "write_source_lateralization_summary_files",
+}
 
 __all__ = [
     "L2MNECorticalForwardModel",
@@ -145,6 +155,7 @@ __all__ = [
     "ProjectParticipantSourceFrequencyBinInputSet",
     "ProjectSourceFrequencyBinInputSet",
     "ProjectSourceTopographyInputSet",
+    "SOURCE_LATERALIZATION_SUMMARY_FORMAT",
     "SourceProducerRunResult",
     "build_l2_mne_hauk_participant_zscore_conditions_from_project",
     "build_l2_mne_hauk_participant_zscore_summary_payload",
@@ -153,6 +164,7 @@ __all__ = [
     "build_mne_fsaverage_l2_mne_forward_model",
     "build_l2_mne_cortical_surface_payload",
     "build_l2_mne_conditions_from_project",
+    "build_source_lateralization_rows",
     "compute_l2_mne_hauk_participant_zscore_source_values",
     "compute_l2_mne_hauk_source_cluster_mask",
     "compute_l2_mne_hauk_zscore_source_values",
@@ -168,6 +180,7 @@ __all__ = [
     "write_project_l2_mne_cortical_surface_payloads",
     "write_l2_mne_cortical_surface_fixture",
     "write_l2_mne_cortical_surface_payloads",
+    "write_source_lateralization_summary_files",
 ]
 
 
@@ -203,4 +216,9 @@ def __getattr__(name: str) -> Any:
             "Tools.LORETA_Visualizer.source_producers.project_l2_mne_hauk_zscore_export"
         )
         return getattr(project_l2_mne_hauk_zscore_export, name)
+    if name in _SOURCE_LATERALIZATION_EXPORTS:
+        source_lateralization = importlib.import_module(
+            "Tools.LORETA_Visualizer.source_producers.source_lateralization"
+        )
+        return getattr(source_lateralization, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

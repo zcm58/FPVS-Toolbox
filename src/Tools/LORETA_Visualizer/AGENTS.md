@@ -86,6 +86,15 @@ but they must not compute t statistics, sign flips, clusters, or p-values. The
 manual z-score display cutoff is a fallback/exploratory display setting for
 unmasked payloads and must not be described as inferential.
 
+Phase 6H-A(4) adds a descriptive source-space lateralization summary for
+participant-first Hauk-style L2-MNE z-score maps. It is computed only in
+`source_producers/` from already-computed participant and group source maps,
+using the producer cluster mask when present. It writes CSV/JSON sidecars for
+right-minus-left source activation and a source lateralization index. It emits
+both whole-hemisphere and coordinate-defined LOT/ROT occipito-temporal ROI
+rows. It is a companion validation metric and must not replace the existing
+sensor-space BCA lateralization statistics.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -199,8 +208,11 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   `source_producers/project_l2_mne_hauk_zscore_export.py`; together they read
   project FullFFT target/noise bins from the same flat or grouped workbook
   layouts, compute Hauk-style source-space z-scores, compute participant-first
-  source-space cluster-permutation masks, and write project-local z-score
-  prepared source JSON.
+  source-space cluster-permutation masks, write source-space lateralization
+  summary sidecars, and write project-local z-score prepared source JSON.
+  `source_lateralization.py` computes descriptive right/left source summaries
+  from already-computed source values; it must not estimate sources, perform
+  lateralization statistics, or inspect renderer state.
 
 ## Boundary Rules
 

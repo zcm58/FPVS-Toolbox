@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, Phase 6G, Phase 6H-A(1), Phase 6H-A(2), and Phase 6H-A(3) are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling, builds real-project Hauk z-score maps through MNE-native L2-MNE with loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`, defaults Hauk-style real-project z-score generation to participant-first source maps with raw mean, median, and 20% trimmed-mean group summaries, and now writes source-space cluster-permutation masks for participant-first L2-MNE publication maps.
+Phase 1, Phase 2, Phase 3, Phase 4, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 6A, Phase 6B, Phase 6C, Phase 6D, Phase 6E, Phase 6F, Phase 6G, Phase 6H-A(1), Phase 6H-A(2), Phase 6H-A(3), and Phase 6H-A(4) are implemented on `codex/loreta-3d-visualizer`. The renderer payload contract is source-model agnostic, supports scalar-gradient source maps, preserves native-to-display coordinate transforms, includes a prepared source-map fixture, imports controlled prepared JSON payloads, supports prepared payload manifests, provides checked-in JSON examples, includes producer-facing schema/validation, has a separate beta L2-MNE cortical-surface source producer for source-ready FPVS fixtures, can assemble source-ready 64-channel condition topographies from flat or condition/group project workbooks, can write beta project source-map JSON from real project data, can write Hauk-style L2-MNE source-space z-score payloads from real FullFFT target and neighboring-bin project data, exposes method/QC controls plus user-facing method documentation, renders L2-MNE cortical-surface maps as opaque cortical paint, defaults cortical viewing to a publication-style split-hemisphere layout, uses the root-local fsaverage cache for automatic downloads, keeps transparent mesh rendering visible across tested Windows/VTK stacks by disabling depth peeling, builds real-project Hauk z-score maps through MNE-native L2-MNE with loose orientation `0.2`, no depth weighting, no dSPM/sLORETA/eLORETA noise normalization, and `lambda2 = 1 / 9`, defaults Hauk-style real-project z-score generation to participant-first source maps with raw mean, median, and 20% trimmed-mean group summaries, writes source-space cluster-permutation masks for participant-first L2-MNE publication maps, and now writes descriptive source-space lateralization summary sidecars.
 
 This plan is the source of truth for a completely new source-localization development branch. It is not a restoration, continuation, refactor, or design descendant of the retired Source Localization/eLORETA implementation. Old Source Localization code, quarantine code, retired GUI workflows, historical settings, and legacy tests must not be used for design choices.
 
@@ -67,10 +67,14 @@ the single pial surface view and transparent mesh view. Phase 6H-A(1)
 established Hauk-style MNE-native inverse settings, Phase 6H-A(2) established
 participant-first source-map generation and group summaries, and Phase
 6H-A(3) established producer-side source-space cluster-permutation masks for
-publication-style cortical display. The next recommended development slice is
-manual scientific validation of masked maps against scalp maps, unmasked maps,
-and the deprecated group-first output before expanding cluster controls or
-adding another source method.
+publication-style cortical display. Phase 6H-A(4) adds descriptive
+whole-hemisphere and coordinate-defined LOT/ROT source-space lateralization
+summaries so source maps can be compared against known sensor-space BCA
+lateralization results without changing the renderer. The next recommended
+development slice is manual scientific validation of masked maps against scalp
+maps, unmasked maps, source-space lateralization summaries, and the deprecated
+group-first output before expanding cluster controls or adding another source
+method.
 
 ## Date
 
@@ -1160,7 +1164,7 @@ Implemented scope:
 
 ### Phase 6H: Manual Scientific Validation And Comparison
 
-Status: Started. Phase 6H-A(1), Phase 6H-A(2), and Phase 6H-A(3) are
+Status: Started. Phase 6H-A(1), Phase 6H-A(2), Phase 6H-A(3), and Phase 6H-A(4) are
 implemented.
 
 Objective:
@@ -1380,6 +1384,63 @@ Done means:
   z-score threshold behavior.
 - Focused tests prove cluster formation/correction, payload metadata, and
   cluster-mask display precedence over the old threshold fallback.
+- Compile, ruff, focused `tests/loreta`, GUI import audit, project-path audit,
+  protected-edit/source-localization audits, and a documented visible manual
+  smoke path pass. Do not run offscreen Qt tests locally.
+
+#### Phase 6H-A(4): Source-Space Lateralization Summary
+
+Status: Implemented.
+
+Objective:
+
+- Add a descriptive source-space lateralization summary that can be compared
+  against sensor-space BCA lateralization statistics.
+- Keep this in the source producer/reporting layer. Do not compute
+  lateralization from renderer actors, colors, camera views, or screenshots.
+
+Implemented scope:
+
+- `source_lateralization.py` computes participant and group-summary right/left
+  source activation rows from already-computed source z-score maps.
+- Participant-first Hauk-style exports write
+  `source_lateralization_summary.json` and
+  `source_lateralization_summary.csv` next to the source-map manifest and
+  participant sidecar.
+- The summary emits both whole-hemisphere rows and
+  `occipitotemporal_lot_rot` rows. The initial LOT/ROT ROI is a transparent
+  coordinate-defined posterior lateral source mask:
+  `abs(x) >= 20 mm`, `y <= -35 mm`, and `z <= 35 mm`.
+- The summary uses the producer source-space cluster mask when present. If no
+  cluster mask exists, it falls back to positive z-score source values.
+- The primary descriptive index is
+  `(right_sum_positive_z - left_sum_positive_z) /
+  (right_sum_positive_z + left_sum_positive_z)`, where positive values indicate
+  right-lateralized source activation and negative values indicate
+  left-lateralized source activation.
+
+Locked decisions:
+
+- This is a companion validation metric, not a replacement for the existing
+  sensor-space BCA lateralization tests.
+- The current hemisphere split uses source-space x coordinates:
+  x < 0 is left, x > 0 is right, and midline sources are ignored.
+- The current LOT/ROT source ROI is coordinate-defined because prepared
+  payloads do not yet store stable original FreeSurfer source vertex IDs for
+  label-based fsaverage ROI extraction.
+- Values are positive z-score magnitudes so the summary tracks positive FPVS
+  activation in the same direction as the current publication-style maps.
+- The summary is descriptive. Formal source-space condition/lateralization
+  inference is a future phase.
+
+Done means:
+
+- Participant-first project rebuilds emit JSON and CSV lateralization
+  summaries under the project-local source localization output folder.
+- Result metadata and user docs explain the formula, sign convention, value
+  policy, and relationship to BCA lateralization.
+- Focused tests prove helper math, JSON/CSV output, and project export path
+  propagation.
 - Compile, ruff, focused `tests/loreta`, GUI import audit, project-path audit,
   protected-edit/source-localization audits, and a documented visible manual
   smoke path pass. Do not run offscreen Qt tests locally.

@@ -85,7 +85,9 @@ For each condition:
 8. Combine participant source-space z-score maps into group summaries.
 9. Compute a source-space cluster-permutation mask from participant z-score
    maps.
-10. Write prepared group-summary source JSON payloads plus a manifest and a
+10. Compute descriptive source-space lateralization summaries for each
+    participant and group summary map.
+11. Write prepared group-summary source JSON payloads plus a manifest and a
    participant-level sidecar for future individual viewing.
 
 The default neighboring-bin policy uses offsets `-10..-2` and `+2..+10`,
@@ -167,6 +169,48 @@ permutations. For small participant counts, the exact available sign flips are
 used. The resulting cluster p-value applies to the cluster as a whole, not to
 each individual vertex inside the cluster.
 
+## Source-space lateralization summary
+
+The source-map builder also writes a descriptive lateralization summary. This
+is a source-space companion to the sensor-space BCA lateralization tests. It
+does not replace those BCA tests.
+
+In simple terms, the summary asks:
+
+`How much positive source activation is on the right side of the cortical source surface compared with the left side?`
+
+The main source lateralization index is:
+
+`(Right source activation - Left source activation) / (Right source activation + Left source activation)`
+
+Interpretation:
+
+- Positive values mean the source map is more right-lateralized.
+- Negative values mean the source map is more left-lateralized.
+- Values near zero mean the source map is roughly balanced.
+
+For current cluster-masked participant-first maps, the summary uses the
+producer's source-space cluster mask first, then sums positive z-score
+magnitudes within left and right source vertices. Vertices outside the
+significant source cluster are not counted. If an older unmasked payload is
+summarized, the fallback is positive z-score source values.
+
+The summary currently writes two ROI scopes:
+
+- `whole_hemisphere`: all source vertices split by source-space x coordinate.
+- `occipitotemporal_lot_rot`: an approximate LOT/ROT source ROI using
+  posterior lateral occipito-temporal source coordinates:
+  `abs(x) >= 20 mm`, `y <= -35 mm`, and `z <= 35 mm`.
+
+For both scopes, x < 0 is left, x > 0 is right, and midline source points are
+ignored. The LOT/ROT ROI is coordinate-defined because the current prepared
+payload stores source coordinates but not original FreeSurfer vertex IDs. A
+future label-based ROI could use fsaverage anatomical labels if the source
+payload contract adds stable source-vertex identifiers.
+
+This is a descriptive source-estimate check, not a formal source-space
+lateralization statistical test.
+
 ## What this method is not
 
 This method is not:
@@ -214,6 +258,19 @@ folder also contains:
 
 That sidecar stores participant-level z-score maps for future individual-viewer
 support. The current viewer loads the group-summary payloads, not the sidecar.
+
+The source-map builder also writes:
+
+`source_lateralization_summary.csv`
+
+and:
+
+`source_lateralization_summary.json`
+
+These files summarize left/right source activation for each condition,
+participant, and group-summary map. A positive lateralization index means the
+source estimate is more right-lateralized; a negative index means it is more
+left-lateralized.
 
 The visualizer automatically loads this manifest when it is present. If it is
 missing and the required FullFFT data are available, the visualizer can build it
