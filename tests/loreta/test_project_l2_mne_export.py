@@ -20,6 +20,7 @@ from Tools.LORETA_Visualizer.fsaverage_cache import (
     candidate_fsaverage_subjects_dirs,
     default_fsaverage_subjects_dir,
     ensure_allowed_fsaverage_subjects_dir,
+    fetch_fsaverage_subjects_dir,
     fpvs_toolbox_root,
 )
 from Tools.LORETA_Visualizer import fsaverage_mesh
@@ -93,6 +94,23 @@ def test_default_fsaverage_cache_is_root_local(monkeypatch) -> None:
 
     assert default_fsaverage_subjects_dir() == expected
     assert candidate_fsaverage_subjects_dirs(FakeMneConfig())[0] == expected
+
+
+def test_fsaverage_cache_ignores_stale_mne_config_under_src(monkeypatch) -> None:
+    monkeypatch.delenv("FPVS_FSAVERAGE_SUBJECTS_DIR", raising=False)
+    monkeypatch.delenv("SUBJECTS_DIR", raising=False)
+    root = fpvs_toolbox_root()
+    expected = root / DEFAULT_FSAVERAGE_SUBJECTS_DIR
+
+    class FakeMneConfig:
+        @staticmethod
+        def get_config(key: str) -> str | None:
+            if key == "SUBJECTS_DIR":
+                return str(root / "src")
+            return None
+
+    assert candidate_fsaverage_subjects_dirs(FakeMneConfig())[0] == expected
+    assert fetch_fsaverage_subjects_dir() == expected
 
 
 def test_fsaverage_cache_rejects_source_and_docs_paths() -> None:

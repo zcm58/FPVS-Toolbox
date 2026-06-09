@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 from typing import Protocol
 
 FSAVERAGE_SUBJECT = "fsaverage"
 FPVS_FSAVERAGE_SUBJECTS_DIR_ENV = "FPVS_FSAVERAGE_SUBJECTS_DIR"
 DEFAULT_FSAVERAGE_SUBJECTS_DIR = Path(".fpvs_cache") / "mne" / "MNE-fsaverage-data"
+
+logger = logging.getLogger(__name__)
 
 
 class _MneConfigProvider(Protocol):
@@ -37,11 +40,14 @@ def default_fsaverage_dir() -> Path:
 def preferred_fsaverage_subjects_dirs() -> list[Path]:
     """Return explicit-env plus root-local subjects dirs used before any global fallback."""
     candidates: list[Path] = []
-    env_subjects_dir = _env_fsaverage_subjects_dir()
-    if env_subjects_dir is not None:
-        candidates.append(env_subjects_dir)
+    fpvs_env_subjects_dir = _fpvs_env_fsaverage_subjects_dir()
+    if fpvs_env_subjects_dir is not None:
+        candidates.append(ensure_allowed_fsaverage_subjects_dir(fpvs_env_subjects_dir))
+    subjects_dir_env = _subjects_dir_env_subjects_dir()
+    if subjects_dir_env is not None:
+        candidates.append(subjects_dir_env)
     candidates.append(default_fsaverage_subjects_dir())
-    return _unique_valid_subjects_dirs(candidates)
+    return _unique_subjects_dirs(candidates)
 
 
 def preferred_fsaverage_dirs() -> list[Path]:
@@ -70,10 +76,15 @@ def candidate_fsaverage_subjects_dirs(mne_module: _MneConfigProvider | None = No
         for key in ("SUBJECTS_DIR", "MNE_DATASETS_FSAVERAGE_PATH", "MNE_DATA"):
             value = mne_module.get_config(key)
             if value:
-                candidates.append(_subjects_dir_from_config_path(Path(value).expanduser()))
+                candidate = _optional_subjects_dir_from_path(
+                    Path(value).expanduser(),
+                    source=f"MNE config {key}",
+                )
+                if candidate is not None:
+                    candidates.append(candidate)
 
     candidates.append(Path.home() / "mne_data" / "MNE-fsaverage-data")
-    return _unique_valid_subjects_dirs(candidates)
+    return _unique_subjects_dirs(candidates)
 
 
 def candidate_fsaverage_dirs(mne_module: _MneConfigProvider | None = None) -> list[Path]:
@@ -99,18 +110,39 @@ def _subjects_dir_from_config_path(path: Path) -> Path:
     return path.parent if path.name == FSAVERAGE_SUBJECT else path
 
 
-def _env_fsaverage_subjects_dir() -> Path | None:
-    env_subjects_dir = os.environ.get(FPVS_FSAVERAGE_SUBJECTS_DIR_ENV) or os.environ.get("SUBJECTS_DIR")
+def _fpvs_env_fsaverage_subjects_dir() -> Path | None:
+    env_subjects_dir = os.environ.get(FPVS_FSAVERAGE_SUBJECTS_DIR_ENV)
     if not env_subjects_dir:
         return None
     return _subjects_dir_from_config_path(Path(env_subjects_dir).expanduser())
 
 
-def _unique_valid_subjects_dirs(candidates: list[Path]) -> list[Path]:
+def _subjects_dir_env_subjects_dir() -> Path | None:
+    env_subjects_dir = os.environ.get("SUBJECTS_DIR")
+    if not env_subjects_dir:
+        return None
+    return _optional_subjects_dir_from_path(Path(env_subjects_dir).expanduser(), source="SUBJECTS_DIR")
+
+
+def _optional_subjects_dir_from_path(path: Path, *, source: str) -> Path | None:
+    subjects_dir = _subjects_dir_from_config_path(path)
+    try:
+        return ensure_allowed_fsaverage_subjects_dir(subjects_dir)
+    except ValueError as exc:
+        logger.warning(
+            "Ignoring fsaverage subjects-dir candidate from %s because it points into a forbidden path: %s",
+            source,
+            subjects_dir,
+            extra={"source": source, "path": str(subjects_dir), "error": str(exc)},
+        )
+        return None
+
+
+def _unique_subjects_dirs(candidates: list[Path]) -> list[Path]:
     unique: list[Path] = []
     seen: set[Path] = set()
     for candidate in candidates:
-        resolved = ensure_allowed_fsaverage_subjects_dir(candidate)
+        resolved = candidate.expanduser().resolve()
         if resolved not in seen:
             unique.append(resolved)
             seen.add(resolved)
