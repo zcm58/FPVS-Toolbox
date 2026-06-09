@@ -8,6 +8,7 @@ from Tools.LORETA_Visualizer.gui import _activation_display_payload, _activation
 from Tools.LORETA_Visualizer.renderer import (
     BrainRendererWidget,
     DISPLAY_MODE_SPLIT_HEMISPHERE,
+    _configure_transparency_backend,
     _publication_hemisphere_points,
     _publication_surface_rgb,
 )
@@ -332,6 +333,48 @@ def test_split_payload_refresh_preserves_existing_camera_and_orientation(monkeyp
 class _FakePlotter:
     def render(self) -> None:
         return None
+
+
+class _FakeTransparencyPlotter:
+    def __init__(self) -> None:
+        self.disable_depth_peeling_calls = 0
+        self.enable_depth_peeling_calls = 0
+
+    def disable_depth_peeling(self) -> None:
+        self.disable_depth_peeling_calls += 1
+
+    def enable_depth_peeling(self, *_args, **_kwargs) -> None:
+        self.enable_depth_peeling_calls += 1
+
+
+class _FakeVtkRenderer:
+    def __init__(self) -> None:
+        self.use_depth_peeling: bool | None = None
+
+    def SetUseDepthPeeling(self, value: bool) -> None:
+        self.use_depth_peeling = bool(value)
+
+
+class _FakeLegacyTransparencyPlotter:
+    def __init__(self) -> None:
+        self.renderer = _FakeVtkRenderer()
+
+
+def test_renderer_transparency_prefers_plain_alpha_blending() -> None:
+    plotter = _FakeTransparencyPlotter()
+
+    _configure_transparency_backend(plotter)
+
+    assert plotter.disable_depth_peeling_calls == 1
+    assert plotter.enable_depth_peeling_calls == 0
+
+
+def test_renderer_transparency_disables_depth_peeling_on_legacy_renderer() -> None:
+    plotter = _FakeLegacyTransparencyPlotter()
+
+    _configure_transparency_backend(plotter)
+
+    assert plotter.renderer.use_depth_peeling is False
 
 
 def test_publication_hemisphere_points_separate_left_and_right_layouts() -> None:

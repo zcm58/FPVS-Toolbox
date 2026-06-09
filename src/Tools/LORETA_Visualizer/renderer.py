@@ -115,10 +115,7 @@ class BrainRendererWidget(QWidget):
         plotter.setObjectName("loreta_pyvista_interactor")
         plotter.set_background("#f7f9fc")
         plotter.enable_trackball_style()
-        try:
-            plotter.enable_depth_peeling(number_of_peels=8, occlusion_ratio=0.0)
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            logger.debug("loreta_depth_peeling_unavailable", exc_info=True)
+        _configure_transparency_backend(plotter)
         layout.addWidget(plotter)
         self._plotter = plotter
 
@@ -761,6 +758,19 @@ def _hex_to_rgb(color: str) -> tuple[float, float, float]:
     if len(value) != 6:
         return (0.79, 0.80, 0.82)
     return tuple(int(value[index : index + 2], 16) / 255 for index in (0, 2, 4))
+
+
+def _configure_transparency_backend(plotter: Any) -> None:
+    """Prefer driver-tolerant alpha blending for translucent brain meshes."""
+    try:
+        plotter.disable_depth_peeling()
+    except AttributeError:
+        try:
+            plotter.renderer.SetUseDepthPeeling(False)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            logger.debug("loreta_depth_peeling_disable_unavailable", exc_info=True)
+    except (RuntimeError, TypeError, ValueError):
+        logger.debug("loreta_depth_peeling_disable_failed", exc_info=True)
 
 
 def _publication_surface_rgb(
