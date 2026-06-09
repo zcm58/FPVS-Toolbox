@@ -117,6 +117,7 @@ class FsaverageLoadWorker(QObject):
 class ProjectSourceMapExportWorker(QObject):
     """Write project beta source maps without touching widgets."""
 
+    progress = Signal(str)
     exported = Signal(object)
     failed = Signal(str)
     finished = Signal()
@@ -141,15 +142,18 @@ class ProjectSourceMapExportWorker(QObject):
                     write_project_l2_mne_hauk_zscore_payloads,
                 )
 
+                self.progress.emit("Starting Hauk-style source-space z-score rebuild...")
                 result = write_project_l2_mne_hauk_zscore_payloads(
                     project_root=self._project_root,
                     include_flagged_subjects=self._include_flagged_subjects,
+                    progress_callback=self.progress.emit,
                 )
             else:
                 from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
                     write_project_l2_mne_cortical_surface_payloads,
                 )
 
+                self.progress.emit("Starting diagnostic L2-MNE amplitude source-map export...")
                 result = write_project_l2_mne_cortical_surface_payloads(
                     project_root=self._project_root,
                     include_flagged_subjects=self._include_flagged_subjects,
@@ -202,6 +206,30 @@ def default_project_zscore_manifest_path(project_root: Path | None) -> Path | No
         / DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME
     )
     return manifest_path if manifest_path.is_file() else None
+
+
+def _coerce_existing_project_root(value: object) -> Path | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        root = Path(value)
+    except TypeError:
+        return None
+    if root.exists():
+        return root.resolve()
+    return None
+
+
+def _project_root_from_object(candidate: object | None) -> Path | None:
+    if candidate is None:
+        return None
+    project = getattr(candidate, "currentProject", None)
+    root = _coerce_existing_project_root(getattr(project, "project_root", None))
+    if root is not None:
+        return root
+    return _coerce_existing_project_root(getattr(candidate, "project_root", None))
 
 
 def _activation_color_ramp_stylesheet(colors: tuple[str, ...] = LORETA_SCALAR_COLORS) -> str:
@@ -402,10 +430,13 @@ class SourceMapOptionsDialog(AppDialog):
         )
         data_layout.addWidget(self.include_flagged_check)
 
-        availability_label = QLabel(
-            "Open a project to rebuild source maps." if not project_available else "Rebuilds write project-local JSON and load the resulting manifest.",
-            self,
-        )
+        if export_busy:
+            availability_text = "A source-map rebuild is already running. Rebuild actions will be available when it finishes."
+        elif project_available:
+            availability_text = "Rebuilds write project-local JSON and load the resulting manifest."
+        else:
+            availability_text = "Open a project to rebuild source maps."
+        availability_label = QLabel(availability_text, self)
         availability_label.setObjectName("loreta_source_options_availability_label")
         availability_label.setWordWrap(True)
         data_layout.addWidget(availability_label)
@@ -554,25 +585,34 @@ class LoretaVisualizerWindow(QWidget):
         if self.renderer is not None:
             self._start_fsaverage_load(allow_fetch=True)
 
-    def _resolve_project_root(self, provided_root: str | None) -> Path | None:
-        if provided_root:
-            root = Path(provided_root)
-            if root.exists():
-                return root.resolve()
+    def _resolve_project_root(self, provided_root: str | os.PathLike[str] | None) -> Path | None:
+        root = _coerce_existing_project_root(provided_root)
+        if root is not None:
+            return root
+        widget_root = _project_root_from_object(self.window())
+        if widget_root is not None:
+            return widget_root
+        parent_root = _project_root_from_object(self.parent())
+        if parent_root is not None:
+            return parent_root
         env_root = os.environ.get("FPVS_PROJECT_ROOT")
-        if env_root:
-            root = Path(env_root)
-            if root.exists():
-                return root.resolve()
+        root = _coerce_existing_project_root(env_root)
+        if root is not None:
+            return root
         parent: QObject | None = self.parent()
         while parent is not None:
-            project = getattr(parent, "currentProject", None)
-            if project is not None and hasattr(project, "project_root"):
-                root = Path(project.project_root)
-                if root.exists():
-                    return root.resolve()
+            root = _project_root_from_object(parent)
+            if root is not None:
+                return root
             parent = parent.parent()
         return None
+
+    def _refresh_project_root(self) -> Path | None:
+        root = self._resolve_project_root(None)
+        if root is None:
+            root = _coerce_existing_project_root(self._project_root)
+        self._project_root = root
+        return root
 
     def _build_controls(self) -> SectionCard:
         controls = SectionCard("Source Map", self, object_name="loreta_view_controls")
@@ -811,6 +851,12 @@ class LoretaVisualizerWindow(QWidget):
     def _sync_project_source_button(self) -> None:
         if hasattr(self, "source_options_btn"):
             self.source_options_btn.setEnabled(self.renderer is not None)
+            if self._source_export_thread is not None:
+                self.source_options_btn.setToolTip(
+                    "A source-map rebuild is running. Options remain available, but rebuild actions are paused."
+                )
+            else:
+                self.source_options_btn.setToolTip("Open source-map rebuild, import, and participant QC options.")
 
     def _on_transparency_changed(self, value: int) -> None:
         self._update_transparency_label(value)
@@ -946,11 +992,12 @@ class LoretaVisualizerWindow(QWidget):
     def _open_source_map_options(self) -> None:
         if self.renderer is None:
             return
+        project_root = self._refresh_project_root()
         dialog = SourceMapOptionsDialog(
             self,
             include_flagged_subjects=self._include_flagged_subjects,
             zscore_display_threshold=self._zscore_display_threshold,
-            project_available=self._project_root is not None,
+            project_available=project_root is not None,
             export_busy=self._source_export_thread is not None,
         )
         dialog.exec()
@@ -969,8 +1016,9 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None:
             return
+        project_root = self._refresh_project_root()
         initial_dir = resolve_loreta_import_start_dir(
-            project_root=self._project_root,
+            project_root=project_root,
             last_import_dir=self._last_import_dir,
         )
         file_name, _selected_filter = QFileDialog.getOpenFileName(
@@ -994,8 +1042,9 @@ class LoretaVisualizerWindow(QWidget):
         renderer = self.renderer
         if renderer is None:
             return
+        project_root = self._refresh_project_root()
         initial_dir = resolve_loreta_import_start_dir(
-            project_root=self._project_root,
+            project_root=project_root,
             last_import_dir=self._last_import_dir,
         )
         file_name, _selected_filter = QFileDialog.getOpenFileName(
@@ -1015,10 +1064,11 @@ class LoretaVisualizerWindow(QWidget):
         self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_HAUK_ZSCORE)
 
     def _ensure_default_project_zscore_maps(self) -> None:
-        if self._auto_project_zscore_attempted or self._project_root is None or self.renderer is None:
+        project_root = self._refresh_project_root()
+        if self._auto_project_zscore_attempted or project_root is None or self.renderer is None:
             return
         self._auto_project_zscore_attempted = True
-        manifest_path = default_project_zscore_manifest_path(self._project_root)
+        manifest_path = default_project_zscore_manifest_path(project_root)
         if manifest_path is not None:
             self.condition_status_label.setText("Loading project source-space z-score maps...")
             self._last_import_dir = manifest_path.parent
@@ -1027,10 +1077,15 @@ class LoretaVisualizerWindow(QWidget):
         self._build_project_source_maps_for_mode(PROJECT_SOURCE_EXPORT_HAUK_ZSCORE, automatic=True)
 
     def _build_project_source_maps_for_mode(self, export_mode: str, *, automatic: bool = False) -> None:
-        if self._project_root is None:
+        project_root = self._refresh_project_root()
+        if project_root is None:
             self.condition_status_label.setText("Open a project before building beta source JSON.")
             return
         if self._source_export_thread is not None:
+            self._set_source_export_status(
+                "Source-map rebuild is already running. You can keep using the viewer while it finishes.",
+                variant="info",
+            )
             return
         include_flagged_subjects = self._include_flagged_subjects
         status_text = _source_export_status_text(
@@ -1038,12 +1093,12 @@ class LoretaVisualizerWindow(QWidget):
             automatic=automatic,
             include_flagged_subjects=include_flagged_subjects,
         )
-        self.condition_status_label.setText(status_text)
-        self.source_options_btn.setEnabled(False)
+        self._set_source_export_status(status_text, variant="info")
+        self._sync_project_source_button()
         logger.info(
             "loreta_project_source_maps_export_started",
             extra={
-                "project_root": str(self._project_root),
+                "project_root": str(project_root),
                 "export_mode": export_mode,
                 "include_flagged_subjects": include_flagged_subjects,
             },
@@ -1051,12 +1106,13 @@ class LoretaVisualizerWindow(QWidget):
 
         thread = QThread(self)
         worker = ProjectSourceMapExportWorker(
-            project_root=self._project_root,
+            project_root=project_root,
             export_mode=export_mode,
             include_flagged_subjects=include_flagged_subjects,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
+        worker.progress.connect(self._on_project_source_maps_progress)
         worker.exported.connect(self._on_project_source_maps_exported)
         worker.failed.connect(self._on_project_source_maps_failed)
         worker.finished.connect(thread.quit)
@@ -1065,7 +1121,12 @@ class LoretaVisualizerWindow(QWidget):
         thread.finished.connect(self._project_source_export_finished)
         self._source_export_thread = thread
         self._source_export_worker = worker
+        self._sync_project_source_button()
         thread.start()
+
+    @Slot(str)
+    def _on_project_source_maps_progress(self, message: str) -> None:
+        self._set_source_export_status(message, variant="info")
 
     @Slot(object)
     def _on_project_source_maps_exported(self, result: object) -> None:
@@ -1074,7 +1135,10 @@ class LoretaVisualizerWindow(QWidget):
         producer_result = getattr(result, "producer_result", None)
         payloads = getattr(producer_result, "payloads", ())
         if not isinstance(output_dir, Path) or not isinstance(manifest_path, Path):
-            self.condition_status_label.setText("Project source export failed: unexpected export result.")
+            self._set_source_export_status(
+                "Project source export failed: unexpected export result.",
+                variant="warning",
+            )
             return
         self._last_import_dir = output_dir
         method_id = str(getattr(producer_result, "method_id", ""))
@@ -1093,8 +1157,9 @@ class LoretaVisualizerWindow(QWidget):
                 "excluded_subject_count": len(excluded_subjects),
             },
         )
-        self.condition_status_label.setText(
-            f"Prepared project {source_label} for {len(payloads)} conditions."
+        self._set_source_export_status(
+            f"Prepared project {source_label} for {len(payloads)} conditions. Loaded regenerated maps.",
+            variant="success",
         )
         self._import_prepared_source_manifest(manifest_path)
 
@@ -1104,13 +1169,18 @@ class LoretaVisualizerWindow(QWidget):
             "loreta_project_source_maps_export_failed",
             extra={"error": message, "include_flagged_subjects": self._include_flagged_subjects},
         )
-        self.condition_status_label.setText(_project_source_export_failure_text(message))
+        self._set_source_export_status(_project_source_export_failure_text(message), variant="warning")
 
     @Slot()
     def _project_source_export_finished(self) -> None:
         self._source_export_thread = None
         self._source_export_worker = None
         self._sync_project_source_button()
+
+    def _set_source_export_status(self, message: str, *, variant: str) -> None:
+        self.condition_status_label.setText(message)
+        self.mesh_status.set_variant(variant)
+        self.mesh_status.set_text(message)
 
     def _import_prepared_source_payload(self, path: Path) -> None:
         renderer = self.renderer

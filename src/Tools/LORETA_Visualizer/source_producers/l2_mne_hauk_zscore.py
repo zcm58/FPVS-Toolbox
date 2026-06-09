@@ -11,7 +11,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
@@ -41,6 +41,7 @@ from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import (
 )
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[str], None]
 
 METHOD_ID_L2_MNE_CORTICAL_SURFACE_HAUK_ZSCORE_BETA = "l2_mne_cortical_surface_hauk_zscore_beta"
 DEFAULT_HAUK_ZSCORE_NOISE_WINDOW_BINS = 10
@@ -312,6 +313,7 @@ def write_l2_mne_hauk_zscore_surface_payloads(
     config: L2MNEHaukZScoreConfig,
     output_dir: str | Path,
     manifest_name: str = "l2_mne_hauk_zscore_beta_manifest.json",
+    progress_callback: ProgressCallback | None = None,
 ) -> SourceProducerRunResult:
     """Write validated Hauk-style source-space z-score payloads and manifest."""
     output_path = Path(output_dir)
@@ -323,7 +325,11 @@ def write_l2_mne_hauk_zscore_surface_payloads(
     emitted: list[ProducedPayload] = []
     manifest_conditions: list[dict[str, Any]] = []
     used_file_names: set[str] = set()
-    for condition in condition_list:
+    for index, condition in enumerate(condition_list, start=1):
+        _emit_progress(
+            progress_callback,
+            f"Computing source-space z-score map {index}/{len(condition_list)}: {condition.label}...",
+        )
         payload = build_l2_mne_hauk_zscore_surface_payload(
             forward_model=forward_model,
             condition=condition,
@@ -331,6 +337,10 @@ def write_l2_mne_hauk_zscore_surface_payloads(
         )
         file_name = _unique_payload_file_name(condition.condition_id, used_file_names)
         payload_path = output_path / file_name
+        _emit_progress(
+            progress_callback,
+            f"Writing and validating source JSON {index}/{len(condition_list)}: {condition.label}...",
+        )
         _write_json(payload_path, payload)
         validation = validate_prepared_source_payload_json(payload_path)
         emitted.append(
@@ -361,7 +371,9 @@ def write_l2_mne_hauk_zscore_surface_payloads(
         "conditions": manifest_conditions,
     }
     manifest_path = output_path / manifest_name
+    _emit_progress(progress_callback, "Writing source-map manifest...")
     _write_json(manifest_path, manifest)
+    _emit_progress(progress_callback, "Validating source-map manifest...")
     manifest_validation = validate_prepared_source_manifest_json(manifest_path, require_payload_files=True)
     logger.info(
         "l2_mne_hauk_zscore_payloads_written",
@@ -374,6 +386,11 @@ def write_l2_mne_hauk_zscore_surface_payloads(
         payloads=tuple(emitted),
         manifest_validation=manifest_validation,
     )
+
+
+def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
 
 
 def _selected_harmonic_bins(

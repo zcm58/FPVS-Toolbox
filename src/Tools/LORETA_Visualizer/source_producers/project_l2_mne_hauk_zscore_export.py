@@ -12,7 +12,7 @@ import argparse
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 from Tools.LORETA_Visualizer.source_producers.contracts import SourceProducerRunResult
 from Tools.LORETA_Visualizer.source_producers.l2_mne_cortical import L2MNECorticalForwardModel
@@ -34,6 +34,7 @@ from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
 )
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[str], None]
 
 PROJECT_L2_MNE_HAUK_ZSCORE_OUTPUT_FOLDER = "L2-MNE Hauk Z-Score Beta"
 DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME = "project_l2_mne_hauk_zscore_beta_manifest.json"
@@ -80,6 +81,7 @@ def write_project_l2_mne_hauk_zscore_payloads(
     noise_window_bins: int = DEFAULT_HAUK_ZSCORE_NOISE_WINDOW_BINS,
     excluded_offsets: Sequence[int] = DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS,
     min_noise_bins: int = DEFAULT_HAUK_ZSCORE_MIN_NOISE_BINS,
+    progress_callback: ProgressCallback | None = None,
 ) -> ProjectL2MNEHaukZScoreExportResult:
     """Write Hauk-style source-space z-score JSON for an existing project.
 
@@ -88,6 +90,7 @@ def write_project_l2_mne_hauk_zscore_payloads(
     """
     root = _project_root(project_root)
     resolved_output = _project_output_dir(root, output_dir)
+    _emit_progress(progress_callback, "Reading project FullFFT workbooks and selected harmonics...")
     project_inputs = build_l2_mne_hauk_zscore_conditions_from_project(
         root,
         conditions=conditions,
@@ -101,11 +104,27 @@ def write_project_l2_mne_hauk_zscore_payloads(
         raise ProjectL2MNEHaukZScoreExportError(
             f"Project Hauk z-score L2-MNE export has no conditions to write: {diagnostics}."
         )
-
-    model = forward_model or build_mne_fsaverage_l2_mne_forward_model(
-        spacing=spacing,
-        allow_fetch_fsaverage=allow_fetch_fsaverage,
+    _emit_progress(
+        progress_callback,
+        (
+            f"Prepared source inputs for {len(project_inputs.conditions)} condition(s) "
+            f"using {len(project_inputs.selected_harmonics_hz)} selected harmonic(s)."
+        ),
     )
+
+    if forward_model is None:
+        _emit_progress(
+            progress_callback,
+            f"Building fsaverage L2-MNE inverse model ({spacing}); this can take a minute...",
+        )
+        model = build_mne_fsaverage_l2_mne_forward_model(
+            spacing=spacing,
+            allow_fetch_fsaverage=allow_fetch_fsaverage,
+        )
+    else:
+        _emit_progress(progress_callback, "Using supplied L2-MNE inverse model.")
+        model = forward_model
+    _emit_progress(progress_callback, "L2-MNE inverse model is ready.")
     config = L2MNEHaukZScoreConfig(
         selected_harmonics_hz=project_inputs.selected_harmonics_hz,
         noise_window_bins=project_inputs.bin_plan.noise_window_bins,
@@ -130,7 +149,9 @@ def write_project_l2_mne_hauk_zscore_payloads(
         config=config,
         output_dir=resolved_output,
         manifest_name=DEFAULT_PROJECT_HAUK_ZSCORE_MANIFEST_NAME,
+        progress_callback=progress_callback,
     )
+    _emit_progress(progress_callback, f"Source-map JSON export complete: {producer_result.manifest_path}")
     logger.info(
         "project_l2_mne_hauk_zscore_payloads_written",
         extra={
@@ -144,6 +165,11 @@ def write_project_l2_mne_hauk_zscore_payloads(
         producer_result=producer_result,
         forward_model=model,
     )
+
+
+def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
 
 
 def _project_root(project_root: str | Path) -> Path:

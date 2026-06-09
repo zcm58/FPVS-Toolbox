@@ -72,6 +72,27 @@ def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path)
     assert metadata["condition_project_input_assembly"] == "phase_6d_fullfft_neighbor_bins_read_only"
 
 
+def test_project_hauk_zscore_export_reports_progress(tmp_path) -> None:
+    project_root = _build_project_fixture(tmp_path)
+    messages: list[str] = []
+
+    write_project_l2_mne_hauk_zscore_payloads(
+        project_root=project_root,
+        forward_model=_tiny_forward_model(),
+        noise_window_bins=3,
+        min_noise_bins=4,
+        progress_callback=messages.append,
+    )
+
+    assert any("Reading project FullFFT workbooks" in message for message in messages)
+    assert any("Prepared source inputs for 2 condition" in message for message in messages)
+    assert any("Using supplied L2-MNE inverse model" in message for message in messages)
+    assert any("L2-MNE inverse model is ready" in message for message in messages)
+    assert any("Computing source-space z-score map 1/2" in message for message in messages)
+    assert any("Writing source-map manifest" in message for message in messages)
+    assert any("Source-map JSON export complete" in message for message in messages)
+
+
 def test_project_hauk_zscore_export_reads_group_subfolder_workbooks(tmp_path) -> None:
     project_root = _build_project_fixture(tmp_path, group_subfolders=True)
 

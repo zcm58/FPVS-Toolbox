@@ -10,6 +10,8 @@ import pytest
 from config import DEFAULT_ELECTRODE_NAMES_64
 from Tools.LORETA_Visualizer.gui import (
     PROJECT_SOURCE_EXPORT_HAUK_ZSCORE,
+    _coerce_existing_project_root,
+    _project_root_from_object,
     _project_source_export_failure_text,
     _source_export_status_text,
     default_project_zscore_manifest_path,
@@ -213,6 +215,25 @@ def test_default_project_zscore_manifest_path_requires_existing_manifest(tmp_pat
 
     manifest_path.write_text("{}", encoding="utf-8")
     assert default_project_zscore_manifest_path(project_root) == manifest_path
+
+
+def test_loreta_project_root_resolver_reads_current_project(tmp_path) -> None:
+    project_root = tmp_path / "Project"
+    project_root.mkdir()
+
+    class ProjectLike:
+        def __init__(self, root: Path) -> None:
+            self.project_root = root
+
+    class HostLike:
+        def __init__(self, project: ProjectLike) -> None:
+            self.currentProject = project
+
+    assert _project_root_from_object(HostLike(ProjectLike(project_root))) == project_root.resolve()
+
+
+def test_loreta_project_root_resolver_ignores_empty_string() -> None:
+    assert _coerce_existing_project_root("") is None
 
 
 def test_source_export_status_text_reports_flagged_participant_choice() -> None:
