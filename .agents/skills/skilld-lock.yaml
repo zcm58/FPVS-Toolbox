@@ -1,0 +1,22 @@
+skills:
+  frontend-design:
+    repo: anthropics/skills
+    source: github
+    syncedAt: 2026-06-10
+    generator: external
+    path: skills/frontend-design
+    ref: main
+  web-design-guidelines:
+    repo: vercel-labs/agent-skills
+    source: github
+    syncedAt: 2026-06-10
+    generator: external
+    path: skills/web-design-guidelines
+    ref: main
+  emil-design-eng:
+    repo: emilkowalski/skill
+    source: github
+    syncedAt: 2026-06-10
+    generator: external
+    path: skills/emil-design-eng
+    ref: main

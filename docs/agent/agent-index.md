@@ -37,6 +37,7 @@ Activate the repo environment before Python commands:
 | GUI smoke coverage definitions | `pytest-qt-smoke` | `docs/agent/quality/test-selection.md`; do not run pytest-qt/offscreen locally |
 | Generated files, temp folders, local caches | `cleanup-generated-files` | `docs/agent/quality/garbage-collection.md`; `docs/agent/exec-plans/tech-debt-tracker.md` |
 | Plan pressure-testing, design interrogation, dependency-aware decision trees | `grillme` | Explore code first when the answer is discoverable locally; ask one question at a time |
+| Web/frontend design skill requests outside normal FPVS PySide6 app work | `frontend-design`, `web-design-guidelines`, `emil-design-eng` | Use only when the user explicitly requests web/frontend design; normal FPVS Toolbox GUI work remains PySide6-first |
 
 Repo-local skills and rules are the default for FPVS Toolbox work. Use
 installed/global skills only when the user explicitly names them or the task is
