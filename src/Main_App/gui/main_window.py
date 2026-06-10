@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QAbstractButton,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QWidget,
 )
 
@@ -638,6 +639,18 @@ class MainWindow(QMainWindow, ProcessingMixin):
             self._loreta_visualizer_page = page
         return page
 
+    def _acknowledge_loreta_beta_warning(self) -> None:
+        if getattr(self, "_loreta_beta_warning_acknowledged", False):
+            return
+        QMessageBox.warning(
+            self,
+            "Source Localization Beta",
+            "Warning: the source localization tool is currently in beta. Features are subject to change.",
+            QMessageBox.StandardButton.Ok,
+            QMessageBox.StandardButton.Ok,
+        )
+        self._loreta_beta_warning_acknowledged = True
+
     def _ensure_epoch_averaging_page(self) -> AdvancedAveragingWindow | None:
         paths = tool_workflows.resolve_epoch_averaging_paths(self)
         if paths is None:
@@ -681,6 +694,7 @@ class MainWindow(QMainWindow, ProcessingMixin):
         self._set_sidebar_selection("btn_publication_report")
 
     def open_loreta_visualizer(self) -> None:
+        self._acknowledge_loreta_beta_warning()
         if hasattr(self, "stacked"):
             self.stacked.setCurrentIndex(1)
         self.workspace_stack.setCurrentWidget(self._ensure_loreta_visualizer_page())

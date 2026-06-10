@@ -149,7 +149,9 @@ Branch expectations:
 
 - Keep the feature isolated on the branch until the user approves promotion.
 - On the branch, the sidebar entry should be visible so the embedded tool can be manually tested like the other tools.
-- Before merging into a release branch or mainline, decide whether the tool remains visible by default or moves behind an explicit feature flag.
+- The promotion decision is to keep the tool visible by default in the sidebar.
+  Opening it first shows a session-scoped beta warning that users must
+  acknowledge before the workspace switches to the visualizer.
 - Do not use branch work as permission to touch preprocessing, Stats methods, project manifests, BDF loading, diagnostics, or active Source Localization paths.
 
 ## Proposed Boundaries
@@ -1545,14 +1547,18 @@ Manual visible smoke path for Phase 1:
 
 1. Launch the app visibly with the repo environment.
 2. Confirm the LORETA Visualizer sidebar icon/logo appears under Workspace Tools.
-3. Open the visualizer from the sidebar.
-4. Confirm the embedded viewport renders a nonblank 3D brain-like mesh.
-5. Drag to rotate; use mouse-wheel/trackpad to zoom.
-6. Switch to transparent mesh mode, move the transparency slider below 100%,
+3. Open the visualizer from the sidebar and confirm the beta warning appears:
+   `Warning: the source localization tool is currently in beta. Features are subject to change.`
+4. Click OK and confirm the workspace switches to the visualizer.
+5. Confirm reopening the visualizer in the same app session does not repeat the
+   warning.
+6. Confirm the embedded viewport renders a nonblank 3D brain-like mesh.
+7. Drag to rotate; use mouse-wheel/trackpad to zoom.
+8. Switch to transparent mesh mode, move the transparency slider below 100%,
    and confirm the brain mesh remains visible while alpha changes immediately.
-7. Use reset camera/default view.
-8. Switch Home -> LORETA Visualizer -> another embedded tool -> LORETA Visualizer and confirm no crash, stale state, or duplicate widget behavior.
-9. Confirm existing tools still open.
+9. Use reset camera/default view.
+10. Switch Home -> LORETA Visualizer -> another embedded tool -> LORETA Visualizer and confirm no crash, stale state, or duplicate widget behavior.
+11. Confirm existing tools still open.
 
 Additional visible smoke path for current and future slices:
 
@@ -1572,7 +1578,6 @@ Additional visible smoke path for current and future slices:
 
 ## Open Decisions
 
-- Whether the branch-visible sidebar entry should remain default-visible after promotion or be hidden behind a release feature flag.
 - Whether future source methods need an alternate harmonic strategy. Phase 6D
   chose Hauk-style summed sensor topographies before inversion: target
   topographies are summed across selected harmonics, matching-offset

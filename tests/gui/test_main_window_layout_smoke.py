@@ -12,6 +12,7 @@ if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pyte
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QSplitter,
@@ -791,6 +792,36 @@ def test_sidebar_publication_report_embeds_in_main_workspace(
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_home"]
+
+
+def test_loreta_sidebar_open_shows_beta_warning_once(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    page = QWidget(win.workspace_stack)
+    page.setObjectName("embedded_loreta_visualizer_page")
+    win.workspace_stack.addWidget(page)
+    warning_calls: list[tuple[str, str]] = []
+
+    def fake_warning(parent, title, message, *args):
+        warning_calls.append((title, message))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(main_window_module.QMessageBox, "warning", fake_warning)
+    monkeypatch.setattr(win, "_ensure_loreta_visualizer_page", lambda: page)
+
+    win.open_loreta_visualizer()
+    win.open_loreta_visualizer()
+
+    assert warning_calls == [
+        (
+            "Source Localization Beta",
+            "Warning: the source localization tool is currently in beta. Features are subject to change.",
+        )
+    ]
+    assert win.workspace_stack.currentWidget() is page
 
 
 def test_sidebar_individual_detectability_embeds_in_main_workspace(

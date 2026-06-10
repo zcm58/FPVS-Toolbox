@@ -4,9 +4,11 @@ Use this page when you want to inspect the experimental 3D LORETA/source
 visualization tool.
 
 The LORETA Visualizer opens from the main app sidebar as **LORETA Visualizer**.
-Its current implementation is an experimental visualization and beta
-source-map viewer: it renders a brain mesh, synthetic source maps, prepared
-JSON payloads, and early real-project cortical L2-MNE maps.
+The first time you open it in an app session, FPVS Toolbox shows a beta warning
+that must be acknowledged before the workspace switches to the visualizer. Its
+current implementation is an experimental visualization and beta source-map
+viewer: it renders a brain mesh, synthetic source maps, prepared JSON payloads,
+and early real-project cortical L2-MNE maps.
 
 ## Current status
 
