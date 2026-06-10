@@ -242,6 +242,10 @@ compact rebuild summaries, but source-estimation math still belongs only to
   Phase 6H-A(5) preserves fsaverage source vertex IDs and hemisphere labels,
   reads fsaverage Desikan-Killiany `aparc` temporal labels, and writes the
   primary Hauk-style inferior/middle/superior temporal ROI lateralization rows.
+  `source_validation_report.py` writes project-local JSON/Markdown summaries
+  from already-generated manifest, payload, participant-sidecar, and
+  lateralization files. It is a reporting helper only: it must not estimate
+  sources, run statistics, inspect renderer state, or mutate project inputs.
   Later producers may use LORETA/eLORETA volume or mixed source-space models.
 - `source_rois.py`: producer-side anatomical ROI helpers that map named
   fsaverage label definitions onto already-computed source spaces using stable
@@ -253,6 +257,11 @@ compact rebuild summaries, but source-estimation math still belongs only to
   and coordinate-defined whole-hemisphere/LOT-ROT QC rows, but it must not run
   inverse estimation, perform inferential lateralization tests, or inspect
   renderer state.
+- `source_validation_report.py`: producer-side project report generation from
+  emitted source-output files. It writes `source_validation_report.json` and
+  `source_validation_report.md` beside the Hauk z-score manifest and must not
+  calculate source values, derive masks, inspect renderer actors, or discover
+  unrelated project files.
 - `examples/`: checked-in synthetic JSON payload and manifest fixtures that show
   the expected output shape for future source-localization producers. They are
   format examples only and are not source estimates. This directory also holds

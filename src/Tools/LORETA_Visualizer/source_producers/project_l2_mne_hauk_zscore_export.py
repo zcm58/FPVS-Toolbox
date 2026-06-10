@@ -37,6 +37,9 @@ from Tools.LORETA_Visualizer.source_producers.project_l2_mne_export import (
     PROJECT_SOURCE_LOCALIZATION_FOLDER,
     build_mne_fsaverage_l2_mne_forward_model,
 )
+from Tools.LORETA_Visualizer.source_producers.source_validation_report import (
+    write_project_source_validation_report,
+)
 
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str], None]
@@ -62,6 +65,8 @@ class ProjectL2MNEHaukZScoreExportResult:
     participant_sidecar_path: Path | None = None
     lateralization_summary_path: Path | None = None
     lateralization_summary_csv_path: Path | None = None
+    validation_report_path: Path | None = None
+    validation_report_markdown_path: Path | None = None
 
     @property
     def output_dir(self) -> Path:
@@ -223,6 +228,18 @@ def write_project_l2_mne_hauk_zscore_payloads(
         lateralization_summary_path = None
         lateralization_summary_csv_path = None
 
+    _emit_progress(progress_callback, "Writing project source-validation report...")
+    validation_report = write_project_source_validation_report(
+        output_dir=producer_result.output_dir,
+        manifest_path=producer_result.manifest_path,
+        payloads=producer_result.payloads,
+        project_inputs=project_inputs,
+        export_model=model,
+        participant_sidecar_path=participant_sidecar_path,
+        lateralization_summary_path=lateralization_summary_path,
+        lateralization_summary_csv_path=lateralization_summary_csv_path,
+        forward_model_metadata=model_forward.metadata,
+    )
     _emit_progress(progress_callback, f"Source-map JSON export complete: {producer_result.manifest_path}")
     logger.info(
         "project_l2_mne_hauk_zscore_payloads_written",
@@ -232,6 +249,7 @@ def write_project_l2_mne_hauk_zscore_payloads(
             "condition_count": len(producer_result.payloads),
             "zscore_model": model,
             "lateralization_summary_path": str(lateralization_summary_path) if lateralization_summary_path else "",
+            "validation_report_path": str(validation_report.json_path),
         },
     )
     return ProjectL2MNEHaukZScoreExportResult(
@@ -242,6 +260,8 @@ def write_project_l2_mne_hauk_zscore_payloads(
         participant_sidecar_path=participant_sidecar_path,
         lateralization_summary_path=lateralization_summary_path,
         lateralization_summary_csv_path=lateralization_summary_csv_path,
+        validation_report_path=validation_report.json_path,
+        validation_report_markdown_path=validation_report.markdown_path,
     )
 
 
@@ -372,6 +392,7 @@ def main() -> int:
             "lateralization_summary_path": (
                 str(result.lateralization_summary_path) if result.lateralization_summary_path else ""
             ),
+            "validation_report_path": str(result.validation_report_path) if result.validation_report_path else "",
         },
     )
     return 0

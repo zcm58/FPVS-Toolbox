@@ -124,6 +124,12 @@ raw mean, median, and 20% trimmed mean entries for each condition. The same
 folder also stores `participant_l2_mne_hauk_zscore_maps.json`, a participant
 sidecar reserved for future individual-viewer support.
 
+Each project rebuild also writes `source_validation_report.md` and
+`source_validation_report.json` in the same folder. Use the Markdown report as
+the quick review artifact for payload validation status, cluster-mask coverage,
+source lateralization highlights, beta limitations, and the manual comparison
+checks that should be completed before treating maps as validated.
+
 The older 6C diagnostic amplitude exporter remains available in Source Map
 Options and writes project-local output under:
 

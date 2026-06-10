@@ -106,6 +106,13 @@ masking in `source_producers/`; renderer, GUI, importer, and display helpers
 must not infer anatomical ROIs from actors, colors, screenshots, or display
 coordinates.
 
+Project Hauk-style z-score exports also write
+`source_validation_report.json` and `source_validation_report.md` beside the
+manifest. The report is generated in `source_producers/` from already-emitted
+manifest, payload, participant-sidecar, and lateralization files. It is a
+review artifact only and must not compute inverse estimates, cluster masks,
+lateralization statistics, or renderer-derived facts.
+
 Allowed outside this directory:
 
 - `src/Main_App/gui/main_window.py` for the embedded page factory/open method.
@@ -227,6 +234,9 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
   spaces. `source_lateralization.py` computes descriptive right/left source
   summaries from already-computed source values; it must not estimate sources,
   perform lateralization statistics, or inspect renderer state.
+  `source_validation_report.py` summarizes already-written source output files
+  into project-local JSON/Markdown review artifacts; it must not calculate
+  source values, run statistics, or inspect renderer state.
 
 ## Boundary Rules
 

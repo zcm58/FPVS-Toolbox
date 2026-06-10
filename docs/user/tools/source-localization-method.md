@@ -310,6 +310,20 @@ participant, and group-summary map. A positive lateralization index means the
 source estimate is more right-lateralized; a negative index means it is more
 left-lateralized.
 
+The builder also writes a project-local validation report:
+
+`source_validation_report.md`
+
+and:
+
+`source_validation_report.json`
+
+The Markdown report is meant for quick review. It summarizes the manifest,
+payload validation status, selected harmonics, cluster-mask availability,
+Desikan-Killiany temporal lateralization highlights, generated files, beta
+limitations, and recommended manual checks. The JSON report carries the same
+information in a machine-readable form for later validation tooling.
+
 The visualizer automatically loads this manifest when it is present. If it is
 missing and the required FullFFT data are available, the visualizer can build it
 in the background.

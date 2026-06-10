@@ -75,14 +75,17 @@ participant-first source-map generation and group summaries, and Phase
 publication-style cortical display. Phase 6H-A(4) adds descriptive
 whole-hemisphere and coordinate-defined LOT/ROT source-space lateralization
 summaries so source maps can be compared against known sensor-space BCA
-lateralization results without changing the renderer. Phase 6H-A(5) replaces
-the coordinate-defined LOT/ROT approximation as the Hauk-style target by
-adding Desikan-Killiany temporal label masks from fsaverage `aparc`; the older
-coordinate LOT/ROT row remains as a transparent QC/fallback row. The next
-recommended development slice is manual scientific validation of masked maps
-against scalp maps, unmasked maps, source-space lateralization summaries, and
-the deprecated group-first output before expanding cluster controls or adding
-another source method.
+  lateralization results without changing the renderer. Phase 6H-A(5) replaces
+  the coordinate-defined LOT/ROT approximation as the Hauk-style target by
+  adding Desikan-Killiany temporal label masks from fsaverage `aparc`; the older
+  coordinate LOT/ROT row remains as a transparent QC/fallback row. Project
+  Hauk-style z-score exports also write project-local JSON/Markdown validation
+  reports that summarize generated files, payload validation, cluster-mask
+  coverage, source lateralization highlights, beta limitations, and recommended
+  manual checks. The next recommended development slice is manual scientific
+  validation of masked maps against scalp maps, unmasked maps, source-space
+  lateralization summaries, and the deprecated group-first output before
+  expanding cluster controls or adding another source method.
 
 ## Date
 
@@ -1025,8 +1028,9 @@ Objective:
 - Expose the existing producer-side flagged-participant include/exclude option
   in the GUI so maps can be rebuilt with or without participants listed in
   `Flagged Participants.xlsx`.
-- Keep source-map rebuild reporting compact in structured IDE logs instead of
-  adding a sidecar report file.
+- Keep source-map rebuild progress compact in the GUI and structured IDE logs.
+  The later project-local validation report artifact summarizes completed
+  source outputs after payloads and sidecars have been written.
 - Do not change renderer behavior or move source-estimation logic into GUI,
   renderer, importer, bridge helpers, preprocessing, Stats, or project
   manifests.
@@ -1054,6 +1058,10 @@ Implementation notes completed:
 - Source-map rebuild defaults were updated after initial Phase 6E completion:
   participants listed in `Flagged Participants.xlsx` are excluded by default;
   the modal checkbox is an opt-in to include them.
+- Project Hauk-style z-score rebuilds now write
+  `source_validation_report.json` and `source_validation_report.md` beside the
+  generated manifest. The report is produced from existing emitted files and
+  does not compute source estimates or renderer-derived facts.
 
 Done means:
 
@@ -1586,5 +1594,3 @@ Additional visible smoke path for current and future slices:
 - Future method target after beta L2-MNE: LORETA/eLORETA volume, mixed
   cortical-volume source space, subject-specific forward models, or another
   explicitly scoped model.
-- Whether Phase 6H validation should remain manual notes only or produce a
-  project-local, non-source-data validation report artifact.

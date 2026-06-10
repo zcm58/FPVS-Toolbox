@@ -92,6 +92,10 @@ def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path)
     assert result.lateralization_summary_path.is_file()
     assert result.lateralization_summary_csv_path is not None
     assert result.lateralization_summary_csv_path.is_file()
+    assert result.validation_report_path is not None
+    assert result.validation_report_path.is_file()
+    assert result.validation_report_markdown_path is not None
+    assert result.validation_report_markdown_path.is_file()
     assert result.producer_result.manifest_validation.label == validate_prepared_source_manifest_json(
         result.manifest_path,
         require_payload_files=True,
@@ -122,6 +126,18 @@ def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path)
     assert lateralization["metadata"]["source_map_model"] == "participant_first"
     assert "occipitotemporal_lot_rot" in lateralization["metadata"]["roi_definitions"]
     assert len(lateralization["rows"]) == 20
+    report = json.loads(result.validation_report_path.read_text(encoding="utf-8"))
+    assert report["format"] == "fpvs-loreta-source-validation-report-v1"
+    assert report["export_model"] == PROJECT_HAUK_ZSCORE_MODEL_PARTICIPANT_FIRST
+    assert report["manifest"]["file"] == result.manifest_path.name
+    assert report["validation_checks"]["payload_count"] == 6
+    assert report["validation_checks"]["participant_sidecar_available"] is True
+    assert report["validation_checks"]["lateralization_summary_available"] is True
+    assert report["input_summary"]["selected_harmonics_hz"] == [2.4, 4.8]
+    assert report["lateralization_summary"]["primary_roi_id"] == "desikan_killiany_temporal_hauk"
+    report_markdown = result.validation_report_markdown_path.read_text(encoding="utf-8")
+    assert "# Source Localization Validation Report" in report_markdown
+    assert "Source-space lateralization summaries are descriptive" in report_markdown
 
 
 def test_project_hauk_zscore_export_keeps_deprecated_group_first_opt_in(tmp_path) -> None:
@@ -139,11 +155,17 @@ def test_project_hauk_zscore_export_keeps_deprecated_group_first_opt_in(tmp_path
     assert result.participant_sidecar_path is None
     assert result.lateralization_summary_path is None
     assert result.lateralization_summary_csv_path is None
+    assert result.validation_report_path is not None
+    assert result.validation_report_path.is_file()
     assert len(result.producer_result.payloads) == 2
     payload = json.loads(result.producer_result.payloads[0].payload_path.read_text(encoding="utf-8"))
     assert payload["source_model"] == "l2_mne_cortical_surface_hauk_zscore_beta"
     assert payload["metadata"]["source_map_model"] == "deprecated_group_first"
     assert payload["metadata"]["deprecated_model"] is True
+    report = json.loads(result.validation_report_path.read_text(encoding="utf-8"))
+    assert report["export_model"] == PROJECT_HAUK_ZSCORE_MODEL_DEPRECATED_GROUP_FIRST
+    assert report["validation_checks"]["participant_sidecar_available"] is False
+    assert report["validation_checks"]["lateralization_summary_available"] is False
 
 
 def test_project_hauk_zscore_export_reports_progress(tmp_path) -> None:
@@ -167,6 +189,7 @@ def test_project_hauk_zscore_export_reports_progress(tmp_path) -> None:
     assert any("Writing participant source-map sidecar" in message for message in messages)
     assert any("Writing source lateralization summary" in message for message in messages)
     assert any("Writing source-map manifest" in message for message in messages)
+    assert any("Writing project source-validation report" in message for message in messages)
     assert any("Source-map JSON export complete" in message for message in messages)
 
 

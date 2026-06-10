@@ -81,6 +81,11 @@ if TYPE_CHECKING:
         desikan_killiany_temporal_hauk_roi,
         desikan_killiany_temporal_hauk_roi_from_label_vertices,
     )
+    from Tools.LORETA_Visualizer.source_producers.source_validation_report import (
+        SOURCE_VALIDATION_REPORT_FORMAT,
+        SourceValidationReportResult,
+        write_project_source_validation_report,
+    )
 
 _L2_MNE_EXPORTS = {
     "L2MNECorticalForwardModel",
@@ -147,6 +152,11 @@ _SOURCE_ROI_EXPORTS = {
     "desikan_killiany_temporal_hauk_roi",
     "desikan_killiany_temporal_hauk_roi_from_label_vertices",
 }
+_SOURCE_VALIDATION_REPORT_EXPORTS = {
+    "SOURCE_VALIDATION_REPORT_FORMAT",
+    "SourceValidationReportResult",
+    "write_project_source_validation_report",
+}
 
 __all__ = [
     "L2MNECorticalForwardModel",
@@ -172,8 +182,10 @@ __all__ = [
     "DESIKAN_KILLIANY_TEMPORAL_HAUK_ROI_ID",
     "SOURCE_LATERALIZATION_SUMMARY_FORMAT",
     "SOURCE_LATERALIZATION_ROI_DESIKAN_KILLIANY_TEMPORAL_HAUK",
+    "SOURCE_VALIDATION_REPORT_FORMAT",
     "SourceRoiMaskPair",
     "SourceProducerRunResult",
+    "SourceValidationReportResult",
     "build_l2_mne_hauk_participant_zscore_conditions_from_project",
     "build_l2_mne_hauk_participant_zscore_summary_payload",
     "build_l2_mne_hauk_zscore_conditions_from_project",
@@ -195,6 +207,7 @@ __all__ = [
     "write_project_l2_mne_hauk_zscore_group_first_payloads",
     "write_project_l2_mne_hauk_zscore_payloads",
     "write_project_l2_mne_cortical_surface_payloads",
+    "write_project_source_validation_report",
     "write_l2_mne_cortical_surface_fixture",
     "write_l2_mne_cortical_surface_payloads",
     "write_source_lateralization_summary_files",
@@ -245,4 +258,9 @@ def __getattr__(name: str) -> Any:
             "Tools.LORETA_Visualizer.source_producers.source_rois"
         )
         return getattr(source_rois, name)
+    if name in _SOURCE_VALIDATION_REPORT_EXPORTS:
+        source_validation_report = importlib.import_module(
+            "Tools.LORETA_Visualizer.source_producers.source_validation_report"
+        )
+        return getattr(source_validation_report, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
