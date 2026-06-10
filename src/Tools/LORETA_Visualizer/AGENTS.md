@@ -294,6 +294,10 @@ Do not spread LORETA implementation code into unrelated `Main_App`, `Tools`, Sta
 - Do not run offscreen Qt workflows in this repo; use non-GUI checks plus visible/manual smoke paths.
 - Keep source-map rebuild/import controls in the Source Map Options modal unless
   a future plan explicitly scopes a different interaction model.
+- Keep figure export actions in the Export Figures modal. The side panel should
+  expose a single Export Figures entry point; individual export formats or
+  display-specific figure actions should be added inside that modal as they
+  become real, enabled workflows.
 
 ## Verification
 

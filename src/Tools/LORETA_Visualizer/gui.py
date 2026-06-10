@@ -79,6 +79,8 @@ SOURCE_OPTIONS_ACTION_LOAD_PAYLOAD = "load_payload"
 SOURCE_OPTIONS_ACTION_LOAD_MANIFEST = "load_manifest"
 SOURCE_OPTIONS_ACTION_REBUILD_ZSCORE = "rebuild_zscore"
 SOURCE_OPTIONS_ACTION_REBUILD_AMPLITUDE = "rebuild_amplitude"
+EXPORT_FIGURES_ACTION_SPLIT_SVG = "split_svg"
+EXPORT_FIGURES_ACTION_STACKED_SPLIT_SVG = "stacked_split_svg"
 ZSCORE_DISPLAY_THRESHOLD_CUSTOM_ID = "custom"
 ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
     ("z >= 1.64 (~one-tailed p < .05)", 1.64),
@@ -274,6 +276,10 @@ def _safe_export_stem(text: str) -> str:
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text).strip())
     stem = re.sub(r"_+", "_", stem).strip("._-")
     return stem or "loreta_split_hemispheres"
+
+
+def _object_name_slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(text).lower()).strip("_")
 
 
 def _coerce_existing_project_root(value: object) -> Path | None:
@@ -626,6 +632,61 @@ class SourceMapOptionsDialog(AppDialog):
             self._syncing_threshold_controls = False
 
 
+class ExportFiguresDialog(AppDialog):
+    """Compact launcher for available LORETA figure exports."""
+
+    def __init__(
+        self,
+        parent: QWidget,
+        *,
+        can_export_split_svg: bool,
+        can_export_stacked_split_svg: bool,
+    ) -> None:
+        super().__init__("Export Figures", parent, size=SurfaceSize(width=420, height=230, min_width=380))
+        self.selected_action: str | None = None
+
+        self.split_svg_btn = make_action_button("Export split hemisphere SVG", compact=True, parent=self)
+        self.split_svg_btn.setObjectName("loreta_export_figures_split_svg_btn")
+        self.split_svg_btn.setEnabled(can_export_split_svg)
+        self.split_svg_btn.setToolTip(
+            "Export the current publication split-hemisphere view as a transparent SVG."
+            if can_export_split_svg
+            else "Switch to Publication split hemispheres with a loaded source map to export this figure."
+        )
+        self.split_svg_btn.clicked.connect(lambda: self._select_action(EXPORT_FIGURES_ACTION_SPLIT_SVG))
+        self.root_layout.addWidget(self.split_svg_btn)
+
+        self.stacked_split_svg_btn = make_action_button("Export condition stack SVG", compact=True, parent=self)
+        self.stacked_split_svg_btn.setObjectName("loreta_export_figures_stacked_split_svg_btn")
+        self.stacked_split_svg_btn.setEnabled(can_export_stacked_split_svg)
+        self.stacked_split_svg_btn.setToolTip(
+            "Choose two conditions and export them as one transparent split-hemisphere SVG."
+            if can_export_stacked_split_svg
+            else "Load at least two source-map conditions before exporting a condition stack."
+        )
+        self.stacked_split_svg_btn.clicked.connect(
+            lambda: self._select_action(EXPORT_FIGURES_ACTION_STACKED_SPLIT_SVG)
+        )
+        self.root_layout.addWidget(self.stacked_split_svg_btn)
+
+        coming_next_label = QLabel(
+            "Coming next: current view, transparent mesh, brain mesh, batch figure export.",
+            self,
+        )
+        coming_next_label.setObjectName("loreta_export_figures_coming_next_label")
+        coming_next_label.setWordWrap(True)
+        self.root_layout.addWidget(coming_next_label)
+        self.root_layout.addStretch(1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
+        buttons.rejected.connect(self.reject)
+        self.root_layout.addWidget(buttons)
+
+    def _select_action(self, action: str) -> None:
+        self.selected_action = action
+        self.accept()
+
+
 class StackedSplitSvgExportDialog(AppDialog):
     """Modal for choosing the two conditions in a stacked split-hemisphere SVG."""
 
@@ -794,6 +855,12 @@ class LoretaVisualizerWindow(QWidget):
         controls = SectionCard("Source Map", self, object_name="loreta_view_controls")
         controls.setFixedWidth(240)
 
+        def add_group_header(text: str) -> None:
+            header = SubsectionHeaderLabel(text, controls)
+            header.setObjectName(f"loreta_{_object_name_slug(text)}_group_header")
+            controls.content_layout.addSpacing(4)
+            controls.content_layout.addWidget(header)
+
         condition_label = QLabel("Condition", controls)
         condition_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         controls.content_layout.addWidget(condition_label)
@@ -804,12 +871,6 @@ class LoretaVisualizerWindow(QWidget):
             self.condition_combo.addItem(condition.label, condition.condition_id)
         self.condition_combo.currentIndexChanged.connect(self._on_condition_changed)
         controls.content_layout.addWidget(self.condition_combo)
-
-        self.condition_status_label = QLabel("", controls)
-        self.condition_status_label.setObjectName("loreta_condition_status_label")
-        self.condition_status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.condition_status_label.setWordWrap(True)
-        controls.content_layout.addWidget(self.condition_status_label)
 
         display_mode_label = QLabel("Display", controls)
         display_mode_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -823,7 +884,9 @@ class LoretaVisualizerWindow(QWidget):
         controls.content_layout.addWidget(self.display_mode_combo)
         self._set_display_mode_combo_data(self._display_mode)
 
-        self.activation_auto_scale_check = QCheckBox("Auto scale intensity", controls)
+        add_group_header("Color")
+
+        self.activation_auto_scale_check = QCheckBox("Auto color scale", controls)
         self.activation_auto_scale_check.setObjectName("loreta_activation_auto_scale_check")
         self.activation_auto_scale_check.setChecked(True)
         self.activation_auto_scale_check.toggled.connect(self._on_activation_auto_scale_changed)
@@ -853,7 +916,7 @@ class LoretaVisualizerWindow(QWidget):
         scale_row.addWidget(self.activation_scale_max_label, 0)
         controls.content_layout.addLayout(scale_row)
 
-        range_label = QLabel("Manual range", controls)
+        range_label = QLabel("Color range", controls)
         range_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         controls.content_layout.addWidget(range_label)
 
@@ -879,11 +942,15 @@ class LoretaVisualizerWindow(QWidget):
         range_row.addWidget(self.activation_max_spin)
         controls.content_layout.addLayout(range_row)
 
-        self.activation_value_label = QLabel("", controls)
-        self.activation_value_label.setObjectName("loreta_activation_value_label")
-        self.activation_value_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.activation_value_label.setWordWrap(True)
-        controls.content_layout.addWidget(self.activation_value_label)
+        add_group_header("Layers")
+
+        self.activation_visible_check = QCheckBox("Source map", controls)
+        self.activation_visible_check.setObjectName("loreta_activation_visible_check")
+        self.activation_visible_check.setChecked(True)
+        self.activation_visible_check.toggled.connect(self._on_activation_visibility_changed)
+        controls.content_layout.addWidget(self.activation_visible_check)
+
+        add_group_header("View")
 
         self.opacity_label = QLabel("Brain opacity", controls)
         self.opacity_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -914,12 +981,6 @@ class LoretaVisualizerWindow(QWidget):
         self.activation_opacity_slider.valueChanged.connect(self._on_activation_opacity_changed)
         controls.content_layout.addWidget(self.activation_opacity_slider)
         controls.content_layout.addWidget(self.activation_opacity_value_label)
-
-        self.activation_visible_check = QCheckBox("Show source map", controls)
-        self.activation_visible_check.setObjectName("loreta_activation_visible_check")
-        self.activation_visible_check.setChecked(True)
-        self.activation_visible_check.toggled.connect(self._on_activation_visibility_changed)
-        controls.content_layout.addWidget(self.activation_visible_check)
 
         self.split_rotation_label = QLabel("Hemisphere rotation", controls)
         self.split_rotation_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -967,27 +1028,19 @@ class LoretaVisualizerWindow(QWidget):
         right_split_rotation_layout.addWidget(self.right_split_rotate_plus_btn, 0)
         controls.content_layout.addWidget(self.right_split_rotation_row)
 
-        self.reset_camera_btn = make_action_button("Reset", compact=True, parent=controls)
+        self.reset_camera_btn = make_action_button("Reset view", compact=True, parent=controls)
         self.reset_camera_btn.setObjectName("loreta_reset_camera_btn")
         self.reset_camera_btn.setToolTip("Reset view")
         self.reset_camera_btn.clicked.connect(self._reset_camera)
         controls.content_layout.addWidget(self.reset_camera_btn)
 
-        self.export_split_svg_btn = make_action_button("Export Split SVG...", compact=True, parent=controls)
-        self.export_split_svg_btn.setObjectName("loreta_export_split_svg_btn")
-        self.export_split_svg_btn.setToolTip(
-            "Export the current publication split-hemisphere view as a transparent SVG."
-        )
-        self.export_split_svg_btn.clicked.connect(self._export_split_hemisphere_svg)
-        controls.content_layout.addWidget(self.export_split_svg_btn)
+        add_group_header("Actions")
 
-        self.export_stacked_split_svg_btn = make_action_button("Export Stack SVG...", compact=True, parent=controls)
-        self.export_stacked_split_svg_btn.setObjectName("loreta_export_stacked_split_svg_btn")
-        self.export_stacked_split_svg_btn.setToolTip(
-            "Export two split-hemisphere conditions as one transparent SVG."
-        )
-        self.export_stacked_split_svg_btn.clicked.connect(self._export_stacked_split_hemisphere_svg)
-        controls.content_layout.addWidget(self.export_stacked_split_svg_btn)
+        self.export_figures_btn = make_action_button("Export Figures...", compact=True, parent=controls)
+        self.export_figures_btn.setObjectName("loreta_export_figures_btn")
+        self.export_figures_btn.setToolTip("Open figure export actions.")
+        self.export_figures_btn.clicked.connect(self._open_export_figures)
+        controls.content_layout.addWidget(self.export_figures_btn)
 
         self.source_options_btn = make_action_button("Source Map Options...", compact=True, parent=controls)
         self.source_options_btn.setObjectName("loreta_source_options_btn")
@@ -1036,8 +1089,7 @@ class LoretaVisualizerWindow(QWidget):
         self.display_mode_combo.setEnabled(enabled)
         self.activation_visible_check.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
-        self.export_split_svg_btn.setEnabled(enabled)
-        self.export_stacked_split_svg_btn.setEnabled(enabled)
+        self.export_figures_btn.setEnabled(enabled)
         self.source_options_btn.setEnabled(enabled)
         self._sync_activation_render_mode_controls()
         self._sync_project_source_button()
@@ -1165,11 +1217,7 @@ class LoretaVisualizerWindow(QWidget):
     def _update_condition_status(self) -> None:
         manifest_entry = self._manifest_conditions.get(self._selected_condition_id)
         if manifest_entry is not None:
-            self.condition_status_label.setText("")
             return
-        condition = condition_by_id(self._selected_condition_id)
-        region_label = condition.activation_region.replace("_", " ")
-        self.condition_status_label.setText(f"Showing synthetic {region_label} activation.")
 
     def _zoom_in(self) -> None:
         if self.renderer is not None:
@@ -1182,6 +1230,26 @@ class LoretaVisualizerWindow(QWidget):
     def _reset_camera(self) -> None:
         if self.renderer is not None:
             self.renderer.reset_camera()
+
+    def _open_export_figures(self) -> None:
+        renderer = self.renderer
+        can_export_split_svg = (
+            renderer is not None
+            and renderer.display_mode() == DISPLAY_MODE_SPLIT_HEMISPHERE
+            and renderer.can_export_split_hemisphere_svg()
+        )
+        can_export_stacked_split_svg = len(self._condition_options()) >= 2
+        dialog = ExportFiguresDialog(
+            self,
+            can_export_split_svg=can_export_split_svg,
+            can_export_stacked_split_svg=can_export_stacked_split_svg,
+        )
+        if not dialog.exec():
+            return
+        if dialog.selected_action == EXPORT_FIGURES_ACTION_SPLIT_SVG:
+            self._export_split_hemisphere_svg()
+        elif dialog.selected_action == EXPORT_FIGURES_ACTION_STACKED_SPLIT_SVG:
+            self._export_stacked_split_hemisphere_svg()
 
     def _export_split_hemisphere_svg(self) -> None:
         renderer = self.renderer
@@ -1463,7 +1531,7 @@ class LoretaVisualizerWindow(QWidget):
         self._auto_project_zscore_attempted = True
         manifest_path = default_project_zscore_manifest_path(project_root)
         if manifest_path is not None:
-            self.condition_status_label.setText("Loading project source-space z-score maps...")
+            self._set_source_export_status("Loading project source-space z-score maps...", variant="info")
             self._last_import_dir = manifest_path.parent
             self._import_prepared_source_manifest(manifest_path)
             return
@@ -1472,7 +1540,7 @@ class LoretaVisualizerWindow(QWidget):
     def _build_project_source_maps_for_mode(self, export_mode: str, *, automatic: bool = False) -> None:
         project_root = self._refresh_project_root()
         if project_root is None:
-            self.condition_status_label.setText("Open a project before building beta source JSON.")
+            self._set_source_export_status("Open a project before building beta source JSON.", variant="warning")
             return
         if self._source_export_thread is not None:
             self._set_source_export_status(
@@ -1581,7 +1649,6 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_project_source_button()
 
     def _set_source_export_status(self, message: str, *, variant: str) -> None:
-        self.condition_status_label.setText(message)
         self.mesh_status.set_variant(variant)
         self.mesh_status.set_text(message)
 
@@ -1591,24 +1658,26 @@ class LoretaVisualizerWindow(QWidget):
             return
         display_transform = renderer.mesh_display_transform()
         if display_transform is None:
-            self.condition_status_label.setText("Prepared source import failed: no mesh transform is available.")
+            self._set_source_export_status(
+                "Prepared source import failed: no mesh transform is available.",
+                variant="warning",
+            )
             return
         try:
             payload = load_prepared_source_payload_json(path, display_transform=display_transform)
         except PreparedSourcePayloadImportError as exc:
             logger.warning("loreta_prepared_source_payload_import_failed", extra={"path": str(path), "error": str(exc)})
-            self.condition_status_label.setText(f"Prepared source import failed: {exc}")
+            self._set_source_export_status(f"Prepared source import failed: {exc}", variant="warning")
             return
         self._last_import_dir = path.parent
         self._set_activation_payload(payload)
-        self.condition_status_label.setText("")
 
     def _import_prepared_source_manifest(self, path: Path) -> None:
         try:
             entries = load_prepared_source_manifest_json(path)
         except PreparedSourcePayloadImportError as exc:
             logger.warning("loreta_prepared_source_manifest_import_failed", extra={"path": str(path), "error": str(exc)})
-            self.condition_status_label.setText(f"Prepared source manifest import failed: {exc}")
+            self._set_source_export_status(f"Prepared source manifest import failed: {exc}", variant="warning")
             return
         self._last_import_dir = path.parent
         self._replace_manifest_conditions(entries)
@@ -1725,7 +1794,10 @@ class LoretaVisualizerWindow(QWidget):
             return
         display_transform = renderer.mesh_display_transform()
         if display_transform is None:
-            self.condition_status_label.setText("Imported source condition failed: no mesh transform is available.")
+            self._set_source_export_status(
+                "Imported source condition failed: no mesh transform is available.",
+                variant="warning",
+            )
             return
         try:
             payload = load_prepared_source_payload_json(entry.payload_path, display_transform=display_transform)
@@ -1734,7 +1806,7 @@ class LoretaVisualizerWindow(QWidget):
                 "loreta_manifest_condition_payload_failed",
                 extra={"path": str(entry.payload_path), "condition": entry.condition_id, "error": str(exc)},
             )
-            self.condition_status_label.setText(f"Imported source condition failed: {exc}")
+            self._set_source_export_status(f"Imported source condition failed: {exc}", variant="warning")
             return
         payload.metadata.update(
             {
@@ -1749,9 +1821,10 @@ class LoretaVisualizerWindow(QWidget):
             and _source_payload_uses_zscores(payload)
             and not payload_has_cluster_mask(payload)
         ):
-            self.condition_status_label.setText("Loaded unmasked source map. Rebuild z-score maps to add cluster masks.")
-        else:
-            self.condition_status_label.setText("")
+            self._set_source_export_status(
+                "Loaded unmasked source map. Rebuild z-score maps to add cluster masks.",
+                variant="warning",
+            )
 
     def _set_activation_payload(self, payload: SourcePayload) -> None:
         renderer = self.renderer
@@ -1808,13 +1881,6 @@ class LoretaVisualizerWindow(QWidget):
     def _update_activation_scale_readout(self, vmin: float, vmax: float) -> None:
         self.activation_scale_min_label.setText(format_scalar_value(vmin))
         self.activation_scale_max_label.setText(format_scalar_value(vmax))
-        self.activation_value_label.setText(
-            _activation_value_readout(
-                self._current_activation_payload,
-                zscore_display_threshold=self._zscore_display_threshold,
-                cortical_threshold_display=self._activation_uses_opaque_cortical_mode(),
-            )
-        )
 
     def closeEvent(self, event) -> None:  # noqa: N802, ANN001
         renderer = self.renderer

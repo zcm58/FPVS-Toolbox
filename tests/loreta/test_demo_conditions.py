@@ -4,7 +4,10 @@ import numpy as np
 
 from Tools.LORETA_Visualizer.conditions import condition_by_id
 from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activation
-from Tools.LORETA_Visualizer.gui import _activation_display_payload, _activation_value_readout
+from Tools.LORETA_Visualizer.gui import (
+    _activation_display_payload,
+    _activation_value_readout,
+)
 from Tools.LORETA_Visualizer.renderer import (
     BrainRendererWidget,
     DISPLAY_MODE_SPLIT_HEMISPHERE,

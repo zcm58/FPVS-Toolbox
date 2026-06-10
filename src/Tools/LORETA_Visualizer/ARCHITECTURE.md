@@ -172,7 +172,9 @@ compact rebuild summaries, but source-estimation math still belongs only to
 
 - `gui.py`: embedded page, controls, status text, fsaverage worker wiring, and
   user-triggered renderer updates. Source-map rebuild/import controls live in
-  the Source Map Options modal.
+  the Source Map Options modal. Figure export actions live behind the compact
+  Export Figures modal so future display-specific exports can be added without
+  crowding the side panel.
 - `renderer.py`: PyVista/VTK scene adapter. It displays base meshes,
   prepared source payloads, opacity where relevant, scalar ranges, cortical
   paint actors, split-hemisphere publication actors, and camera controls. It

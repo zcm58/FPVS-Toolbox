@@ -1168,6 +1168,10 @@ Implemented scope:
 - The transparent mesh mode remains available and keeps opacity controls. It is
   still the fallback-compatible path for volume/deep payloads and future
   LORETA/eLORETA volume methods.
+- The side-panel figure exports are consolidated behind an Export Figures modal.
+  The modal exposes only currently working export actions and reserves future
+  figure export expansion for current-view, transparent-mesh, brain-mesh, and
+  batch workflows.
 - Transparent mesh mode uses normal alpha blending with depth peeling disabled
   because depth peeling caused the brain actor to disappear at opacity values
   below 100% on at least one Windows/VTK machine. Revisit only with visible
