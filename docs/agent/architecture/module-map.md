@@ -51,7 +51,8 @@ Current `Legacy_App` runtime couplings:
 - `src/Tools/Publication_Report/`: embedded single-group report workflow. `runner.py`
   owns GUI-agnostic report generation, `gui.py` owns the manually-run sidebar
   page, `worker.py` wraps the runner for QThread use, and the other modules own
-  discovery, typed request/result contracts, narrative/DOCX writing, and source
+  discovery, typed request/result contracts, additive source tables,
+  manuscript statistical diagnostics, narrative/DOCX writing, and source
   workbook/audit exports.
 - `src/Tools/Average_Preprocessing/New_PySide6/`: active PySide6 average-preprocessing UI.
 - `src/Tools/Average_Preprocessing/Legacy/advanced_analysis_core.py`: UI-agnostic average-preprocessing behavior used by the PySide6 tool.
