@@ -85,6 +85,29 @@ def test_cortical_paint_cluster_mask_overrides_display_threshold() -> None:
     assert np.isnan(projection.values[1])
 
 
+def test_cortical_paint_cluster_mask_keeps_negative_two_tailed_values() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([-2.4, 3.1], dtype=float),
+        label="two-tailed cluster masked surface z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_forming_tail": "two-sided",
+            "cluster_mask_vertex_indices": [0, 1],
+        },
+        normalize_values=False,
+    )
+
+    projection = project_cortical_surface_payload(payload.points, payload, neighbors=1, z_threshold=1.64)
+
+    assert projection.values.tolist() == [-2.4, 3.1]
+
+
 def test_cortical_paint_detects_participant_first_surface_metadata() -> None:
     payload = make_source_payload(
         points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),

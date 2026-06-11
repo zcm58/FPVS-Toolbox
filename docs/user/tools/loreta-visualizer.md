@@ -255,14 +255,16 @@ geometry-derived underlay if neither file is available. The same payload can
 also be shown on a single fsaverage pial surface or in the transparent mesh
 view. The signed z-score payload is still preserved in the generated JSON for
 QC. Regenerated participant-first payloads include a source-space
-cluster-permutation mask, and opaque cortical paint mode uses that mask as the
-primary publication-style display. Source vertices outside significant clusters
-show the gray-white shaded cortex rather than activation colors. Older
-unmasked payloads fall back to the selected display threshold. The default
-threshold is `z >= 1.64`. Source Map Options > Display provides preset cutoffs
-for `z >= 1.64`, `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89`.
-Values retained by either the cluster mask or fallback cutoff are painted on
-top with the same heatmap color ramp used by the transparent visualizer.
+two-tailed cluster-permutation mask, and opaque cortical paint mode uses that
+mask as the primary publication-style display. Source vertices outside
+significant clusters show the gray-white shaded cortex rather than activation
+colors. Significant positive and negative retained source z-scores can both be
+painted. Older unmasked payloads fall back to the selected display threshold.
+The default threshold is `z >= 1.64`. Source Map Options > Display provides
+preset cutoffs for `z >= 1.64`, `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and
+`z >= 3.89`. Values retained by either the cluster mask or fallback cutoff are
+painted on top with the same heatmap color ramp used by the transparent
+visualizer.
 
 The threshold is a display mask only. The cluster-permutation mask is the
 statistical mask for current participant-first Hauk-style L2-MNE maps, and it

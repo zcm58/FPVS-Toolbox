@@ -384,7 +384,7 @@ def _activation_scale_values(
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
         cluster_mask = payload_cluster_mask(payload)
         if cluster_mask is not None:
-            return values[cluster_mask & (values > 0.0)]
+            return values[cluster_mask & np.isfinite(values)]
         return values[values >= float(zscore_display_threshold)]
     return values
 
@@ -1425,7 +1425,14 @@ class LoretaVisualizerWindow(QWidget):
         )
         if all_cortical_zscore:
             has_cluster_mask = any(payload_has_cluster_mask(payload) for payload in payloads)
-            lower_bound = 0.0 if has_cluster_mask else self._zscore_display_threshold
+            if has_cluster_mask:
+                return resolve_scalar_limits(
+                    scale_values,
+                    auto_scale=self.activation_auto_scale_check.isChecked(),
+                    manual_min=self.activation_min_spin.value(),
+                    manual_max=self.activation_max_spin.value(),
+                )
+            lower_bound = self._zscore_display_threshold
             if self.activation_auto_scale_check.isChecked():
                 finite = scale_values[np.isfinite(scale_values)]
                 vmax = float(np.nanmax(finite)) if len(finite) else lower_bound + 1.0
@@ -1849,9 +1856,18 @@ class LoretaVisualizerWindow(QWidget):
             zscore_display_threshold=self._zscore_display_threshold,
             cortical_threshold_display=self._activation_uses_opaque_cortical_mode(),
         )
-        manual_min = self.activation_min_spin.value()
         if self._activation_uses_opaque_cortical_mode() and _source_payload_uses_zscores(payload):
-            lower_bound = 0.0 if payload_has_cluster_mask(payload) else self._zscore_display_threshold
+            if payload_has_cluster_mask(payload):
+                vmin, vmax = resolve_scalar_limits(
+                    scale_values,
+                    auto_scale=self.activation_auto_scale_check.isChecked(),
+                    manual_min=self.activation_min_spin.value(),
+                    manual_max=self.activation_max_spin.value(),
+                )
+                renderer.set_activation_scalar_range(vmin, vmax)
+                self._update_activation_scale_readout(vmin, vmax)
+                return
+            lower_bound = self._zscore_display_threshold
             if self.activation_auto_scale_check.isChecked():
                 finite = scale_values[np.isfinite(scale_values)]
                 vmax = float(np.nanmax(finite)) if len(finite) else lower_bound + 1.0
@@ -1865,14 +1881,14 @@ class LoretaVisualizerWindow(QWidget):
                 vmin, vmax = resolve_scalar_limits(
                     scale_values,
                     auto_scale=False,
-                    manual_min=max(lower_bound, manual_min),
+                    manual_min=max(lower_bound, self.activation_min_spin.value()),
                     manual_max=self.activation_max_spin.value(),
                 )
         else:
             vmin, vmax = resolve_scalar_limits(
                 scale_values,
                 auto_scale=self.activation_auto_scale_check.isChecked(),
-                manual_min=manual_min,
+                manual_min=self.activation_min_spin.value(),
                 manual_max=self.activation_max_spin.value(),
             )
         renderer.set_activation_scalar_range(vmin, vmax)

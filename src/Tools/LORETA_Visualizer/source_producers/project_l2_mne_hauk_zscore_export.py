@@ -103,7 +103,7 @@ def write_project_l2_mne_hauk_zscore_payloads(
     cluster_mask_enabled: bool = True,
     cluster_forming_p_value: float = 0.05,
     cluster_alpha: float = 0.05,
-    cluster_permutation_count: int = 2048,
+    cluster_permutation_count: int = 10000,
     cluster_permutation_seed: int = 20260609,
     progress_callback: ProgressCallback | None = None,
 ) -> ProjectL2MNEHaukZScoreExportResult:

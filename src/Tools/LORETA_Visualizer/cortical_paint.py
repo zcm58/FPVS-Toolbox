@@ -120,7 +120,7 @@ def project_cortical_surface_payload(
     )
     if is_zscore_payload and source_cluster_mask is not None:
         display_cluster_mask = _nearest_mask_values(target_points, source_points, source_cluster_mask)
-        interpolated = np.where(display_cluster_mask & (interpolated > 0.0), interpolated, np.nan)
+        interpolated = np.where(display_cluster_mask & np.isfinite(interpolated), interpolated, np.nan)
     elif is_zscore_payload:
         interpolated = np.where(interpolated >= threshold, interpolated, np.nan)
     return CorticalPaintProjection(

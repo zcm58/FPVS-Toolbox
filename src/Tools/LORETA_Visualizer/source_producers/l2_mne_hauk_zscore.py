@@ -81,13 +81,17 @@ DEFAULT_HAUK_ZSCORE_EXCLUDED_OFFSETS = (-1, 0, 1)
 DEFAULT_CLUSTER_MASK_ENABLED = True
 DEFAULT_CLUSTER_FORMING_P_VALUE = 0.05
 DEFAULT_CLUSTER_ALPHA = 0.05
-DEFAULT_CLUSTER_PERMUTATION_COUNT = 2048
+DEFAULT_CLUSTER_PERMUTATION_COUNT = 10000
 DEFAULT_CLUSTER_PERMUTATION_SEED = 20260609
-CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP = "one_sample_sign_flip_max_cluster_mass"
+CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_POSITIVE = "one_sample_sign_flip_max_cluster_mass_positive_tail"
+CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_TWO_TAILED = "one_sample_sign_flip_max_cluster_mass_two_tailed"
+CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP = CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_TWO_TAILED
 CLUSTER_MASK_STATUS_COMPUTED = "computed"
 CLUSTER_MASK_STATUS_NO_CANDIDATES = "no_candidate_clusters"
 CLUSTER_MASK_STATUS_DISABLED = "disabled"
 CLUSTER_TAIL_POSITIVE = "positive"
+CLUSTER_TAIL_NEGATIVE = "negative"
+CLUSTER_TAIL_TWO_SIDED = "two-sided"
 
 
 @dataclass(frozen=True)
@@ -108,7 +112,7 @@ class L2MNEHaukZScoreConfig:
     cluster_alpha: float = DEFAULT_CLUSTER_ALPHA
     cluster_permutation_count: int = DEFAULT_CLUSTER_PERMUTATION_COUNT
     cluster_permutation_seed: int = DEFAULT_CLUSTER_PERMUTATION_SEED
-    cluster_tail: str = CLUSTER_TAIL_POSITIVE
+    cluster_tail: str = CLUSTER_TAIL_TWO_SIDED
     montage_name: str = "BioSemi ActiveTwo 64-channel 10-10"
     harmonic_policy_id: str = "stats_group_significant_oddball_harmonics"
     template_subject: str = "fsaverage"
@@ -140,8 +144,8 @@ class L2MNEHaukZScoreConfig:
         if cluster_permutation_count < 1:
             raise ValueError("Cluster permutation count must be at least 1.")
         cluster_tail = str(self.cluster_tail).strip().lower()
-        if cluster_tail != CLUSTER_TAIL_POSITIVE:
-            raise ValueError("Only positive one-sided source-space cluster masks are currently supported.")
+        if cluster_tail not in {CLUSTER_TAIL_POSITIVE, CLUSTER_TAIL_TWO_SIDED}:
+            raise ValueError("Cluster tail must be 'two-sided' or 'positive'.")
         object.__setattr__(self, "selected_harmonics_hz", selected)
         object.__setattr__(self, "lambda2", lambda2)
         object.__setattr__(self, "noise_window_bins", noise_window_bins)
@@ -333,6 +337,7 @@ class L2MNEHaukSourceCluster:
     """One source-space cluster from the participant-level permutation test."""
 
     cluster_id: int
+    tail: str
     vertex_indices: tuple[int, ...]
     cluster_mass: float
     p_value: float
@@ -513,10 +518,10 @@ def compute_l2_mne_hauk_source_cluster_mask(
 ) -> L2MNEHaukClusterPermutationResult:
     """Compute a Hauk-style source-space cluster mask across participants.
 
-    This is a one-sample, positive-tail sign-flip permutation test against zero
-    over participant source-space z-score maps. It produces an inferential mask
-    for display payloads; it does not alter source values or run the inverse
-    solution.
+    This is a one-sample sign-flip permutation test against zero over
+    participant source-space z-score maps. The default two-sided mode matches
+    the Hauk-style source-space mask; it produces an inferential display mask
+    and does not alter source values or run the inverse solution.
     """
     matrix = _participant_zscore_matrix(participant_values)
     source_count = matrix.shape[1]
@@ -525,8 +530,14 @@ def compute_l2_mne_hauk_source_cluster_mask(
     threshold = _cluster_forming_t_threshold(
         participant_count=matrix.shape[0],
         p_value=config.cluster_forming_p_value,
+        tail=config.cluster_tail,
     )
-    observed_clusters = _cluster_components(observed_t >= threshold, adjacency)
+    observed_clusters = _signed_cluster_components(
+        observed_t,
+        threshold=threshold,
+        adjacency=adjacency,
+        tail=config.cluster_tail,
+    )
     empty_mask = np.zeros(source_count, dtype=bool)
     if not observed_clusters:
         return L2MNEHaukClusterPermutationResult(
@@ -546,14 +557,15 @@ def compute_l2_mne_hauk_source_cluster_mask(
         matrix,
         adjacency=adjacency,
         threshold=threshold,
+        tail=config.cluster_tail,
         permutation_count=config.cluster_permutation_count,
         seed=config.cluster_permutation_seed,
     )
     clusters: list[L2MNEHaukSourceCluster] = []
     mask = empty_mask.copy()
     denominator = float(len(null_max_masses) + 1)
-    for cluster_index, cluster_vertices in enumerate(observed_clusters, start=1):
-        cluster_mass = float(np.sum(observed_t[np.asarray(cluster_vertices, dtype=np.int64)]))
+    for cluster_index, (cluster_tail, cluster_vertices) in enumerate(observed_clusters, start=1):
+        cluster_mass = _cluster_mass(observed_t, cluster_vertices, tail=cluster_tail)
         p_value = float((1 + np.count_nonzero(null_max_masses >= cluster_mass - 1e-12)) / denominator)
         significant = p_value <= config.cluster_alpha
         if significant:
@@ -561,6 +573,7 @@ def compute_l2_mne_hauk_source_cluster_mask(
         clusters.append(
             L2MNEHaukSourceCluster(
                 cluster_id=cluster_index,
+                tail=cluster_tail,
                 vertex_indices=tuple(int(index) for index in cluster_vertices),
                 cluster_mass=cluster_mass,
                 p_value=p_value,
@@ -889,7 +902,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
                 "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
             ),
             "cluster_mask_method": (
-                CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP if config.cluster_mask_enabled else "none"
+                _cluster_mask_method_label(config.cluster_tail) if config.cluster_mask_enabled else "none"
             ),
             "desikan_killiany_temporal_roi": bool(precomputed_lateralization_rois),
             "summary_note": (
@@ -911,7 +924,7 @@ def write_l2_mne_hauk_participant_zscore_surface_payloads(
                 "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
             ),
             "cluster_mask_method": (
-                CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP if config.cluster_mask_enabled else "none"
+                _cluster_mask_method_label(config.cluster_tail) if config.cluster_mask_enabled else "none"
             ),
         },
     }
@@ -1095,15 +1108,17 @@ def _one_sample_t_values(matrix: np.ndarray) -> np.ndarray:
     return np.where(np.isfinite(t_values), t_values, 0.0)
 
 
-def _cluster_forming_t_threshold(*, participant_count: int, p_value: float) -> float:
+def _cluster_forming_t_threshold(*, participant_count: int, p_value: float, tail: str) -> float:
     if participant_count < 2:
         raise ValueError("Cluster-forming threshold requires at least two participants.")
+    cluster_tail = _validate_cluster_tail(tail)
+    tail_probability = float(p_value) / 2.0 if cluster_tail == CLUSTER_TAIL_TWO_SIDED else float(p_value)
     try:
         from scipy import stats
 
-        threshold = float(stats.t.ppf(1.0 - float(p_value), df=participant_count - 1))
+        threshold = float(stats.t.ppf(1.0 - tail_probability, df=participant_count - 1))
     except (ImportError, AttributeError, TypeError, ValueError):
-        threshold = 1.6448536269514722
+        threshold = 1.959963984540054 if cluster_tail == CLUSTER_TAIL_TWO_SIDED else 1.6448536269514722
     if not np.isfinite(threshold):
         raise ValueError("Cluster-forming threshold was not finite.")
     return threshold
@@ -1114,6 +1129,7 @@ def _permutation_max_cluster_masses(
     *,
     adjacency: Sequence[set[int]],
     threshold: float,
+    tail: str,
     permutation_count: int,
     seed: int,
 ) -> np.ndarray:
@@ -1122,9 +1138,14 @@ def _permutation_max_cluster_masses(
     for signs in _sign_flip_vectors(values.shape[0], permutation_count=permutation_count, seed=seed):
         signed = values * signs[:, np.newaxis]
         t_values = _one_sample_t_values(signed)
-        clusters = _cluster_components(t_values >= threshold, adjacency)
+        clusters = _signed_cluster_components(t_values, threshold=threshold, adjacency=adjacency, tail=tail)
         if clusters:
-            masses.append(max(float(np.sum(t_values[np.asarray(cluster, dtype=np.int64)])) for cluster in clusters))
+            masses.append(
+                max(
+                    _cluster_mass(t_values, cluster_vertices, tail=cluster_tail)
+                    for cluster_tail, cluster_vertices in clusters
+                )
+            )
         else:
             masses.append(0.0)
     return np.asarray(masses, dtype=float)
@@ -1203,6 +1224,48 @@ def _cluster_components(
                     cluster.append(neighbor)
         clusters.append(tuple(sorted(cluster)))
     return tuple(clusters)
+
+
+def _signed_cluster_components(
+    t_values: np.ndarray,
+    *,
+    threshold: float,
+    adjacency: Sequence[set[int]],
+    tail: str,
+) -> tuple[tuple[str, tuple[int, ...]], ...]:
+    cluster_tail = _validate_cluster_tail(tail)
+    values = np.asarray(t_values, dtype=float).reshape(-1)
+    if cluster_tail == CLUSTER_TAIL_POSITIVE:
+        return tuple((CLUSTER_TAIL_POSITIVE, cluster) for cluster in _cluster_components(values >= threshold, adjacency))
+    positive_clusters = tuple(
+        (CLUSTER_TAIL_POSITIVE, cluster) for cluster in _cluster_components(values >= threshold, adjacency)
+    )
+    negative_clusters = tuple(
+        (CLUSTER_TAIL_NEGATIVE, cluster) for cluster in _cluster_components(values <= -float(threshold), adjacency)
+    )
+    return (*positive_clusters, *negative_clusters)
+
+
+def _cluster_mass(t_values: np.ndarray, cluster_vertices: Sequence[int], *, tail: str) -> float:
+    values = np.asarray(t_values, dtype=float)[np.asarray(cluster_vertices, dtype=np.int64)]
+    cluster_tail = _validate_cluster_tail(tail)
+    if cluster_tail == CLUSTER_TAIL_NEGATIVE:
+        return float(np.sum(-values))
+    return float(np.sum(values))
+
+
+def _validate_cluster_tail(tail: str) -> str:
+    cluster_tail = str(tail).strip().lower()
+    if cluster_tail not in {CLUSTER_TAIL_POSITIVE, CLUSTER_TAIL_TWO_SIDED, CLUSTER_TAIL_NEGATIVE}:
+        raise ValueError("Cluster tail must be 'two-sided', 'positive', or 'negative'.")
+    return cluster_tail
+
+
+def _cluster_mask_method_label(tail: str) -> str:
+    cluster_tail = _validate_cluster_tail(tail)
+    if cluster_tail == CLUSTER_TAIL_POSITIVE:
+        return CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_POSITIVE
+    return CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP_TWO_TAILED
 
 
 def _validate_probability(value: float, label: str) -> float:
@@ -1352,7 +1415,7 @@ def _cluster_payload_metadata(
         "cluster_mask": "source_space_cluster_permutation",
         "cluster_mask_status": cluster_result.status,
         "cluster_mask_primary_display": True,
-        "cluster_mask_method": CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP,
+        "cluster_mask_method": _cluster_mask_method_label(cluster_result.tail),
         "cluster_mask_note": (
             "Renderer uses this producer-computed source-space mask as the primary "
             "publication-style L2-MNE display mask; source values remain unchanged."
@@ -1372,6 +1435,7 @@ def _cluster_payload_metadata(
         "cluster_significant_clusters": [
             {
                 "cluster_id": int(cluster.cluster_id),
+                "tail": str(cluster.tail),
                 "vertex_count": int(len(cluster.vertex_indices)),
                 "cluster_mass": float(cluster.cluster_mass),
                 "p_value": float(cluster.p_value),
@@ -1397,6 +1461,8 @@ def _cluster_manifest_entry_metadata(
         "cluster_mask_source_count": int(len(cluster_result.mask)),
         "cluster_significant_cluster_count": int(len(cluster_result.significant_clusters)),
         "cluster_forming_p_value": float(cluster_result.cluster_forming_p_value),
+        "cluster_forming_tail": cluster_result.tail,
+        "cluster_forming_threshold": float(cluster_result.cluster_forming_threshold),
         "cluster_alpha": float(cluster_result.cluster_alpha),
         "cluster_permutation_count": int(cluster_result.permutation_count),
     }
@@ -1542,7 +1608,7 @@ def _participant_zscore_sidecar_payload(
                 "source_space_cluster_permutation" if config.cluster_mask_enabled else CLUSTER_MASK_STATUS_DISABLED
             ),
             "cluster_mask_method": (
-                CLUSTER_MASK_METHOD_SOURCE_SPACE_SIGN_FLIP if config.cluster_mask_enabled else "none"
+                _cluster_mask_method_label(config.cluster_tail) if config.cluster_mask_enabled else "none"
             ),
             "renderer_dependency": "none",
         },

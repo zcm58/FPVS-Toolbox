@@ -101,10 +101,9 @@ space.
 The default viewer condition entries are group summaries of participant-level
 source-space z-scores. The export writes raw mean, median, and 20% trimmed mean
 summaries for each condition. The same participant-level maps are also used to
-compute a one-sided positive source-space cluster-permutation mask against
-zero. The visualizer loads the raw mean entries by default when the manifest
-order is unchanged, and the other summaries are available from the condition
-selector.
+compute a two-tailed source-space cluster-permutation mask against zero. The
+visualizer loads the raw mean entries by default when the manifest order is
+unchanged, and the other summaries are available from the condition selector.
 
 Source Map Options can still build the older group-first beta model for
 comparison. That deprecated model averages target and neighboring-bin
@@ -132,8 +131,8 @@ payloads fall back to the selected display threshold. The default cutoff is
 same heatmap color scale as the transparent source-map view.
 
 The color legend is in z-score units for these payloads. With auto-scaling on,
-cluster-masked maps use `0` as the lower color bound and the largest retained
-positive z-score in the current condition as the upper bound. Manual color
+cluster-masked maps use the retained signed source z-score range, so
+significant negative and positive clusters can both be displayed. Manual color
 limits change only the display scale; they do not change the generated source
 values or statistical mask.
 
@@ -153,21 +152,21 @@ in the source JSON metadata. The renderer only obeys that prepared mask.
 ## Cluster-permutation mask
 
 The cluster mask asks whether a connected region of the fsaverage cortical
-source surface is reliably above zero across participants.
+source surface reliably differs from zero across participants.
 
-The toolbox currently uses a one-sample, positive-tail sign-flip permutation
+The toolbox currently uses a one-sample, two-tailed sign-flip permutation
 test:
 
 - compute a one-sample t statistic against zero at each source vertex from the
   participant z-score maps;
-- form candidate clusters from neighboring source vertices that pass the
-  cluster-forming threshold;
+- form positive and negative candidate clusters separately from neighboring
+  source vertices that pass the two-tailed cluster-forming threshold;
 - randomly flip participant signs to build a null distribution of the largest
-  cluster mass expected by chance;
+  sign-corrected cluster mass expected by chance;
 - keep clusters whose mass survives cluster-level correction.
 
 Default settings are cluster-forming `p = .05`, corrected cluster
-`alpha = .05`, deterministic seed `20260609`, and up to `2048` sign-flip
+`alpha = .05`, deterministic seed `20260609`, and up to `10000` sign-flip
 permutations. For small participant counts, the exact available sign flips are
 used. The resulting cluster p-value applies to the cluster as a whole, not to
 each individual vertex inside the cluster.
@@ -241,11 +240,12 @@ are summed across the Stats-selected significant oddball harmonics, then each
 source vertex is converted to a z-score relative to neighboring-bin source
 activity after excluding the minimum and maximum neighboring values.
 Participant z-score maps are combined into group raw mean, median, and 20%
-trimmed-mean maps. Publication-style displays use a one-sample positive-tail
-source-space sign-flip cluster-permutation mask against zero. Source-space
-laterality is summarized descriptively by collapsing positive cluster-masked
-z-score magnitudes within the fsaverage Desikan-Killiany inferior, middle, and
-superior temporal labels in the left and right hemispheres and computing
+trimmed-mean maps. Publication-style displays use a one-sample two-tailed
+source-space sign-flip cluster-permutation mask against zero with 10,000
+permutations. Source-space laterality is summarized descriptively by collapsing
+positive cluster-masked z-score magnitudes within the fsaverage
+Desikan-Killiany inferior, middle, and superior temporal labels in the left and
+right hemispheres and computing
 `(Right - Left) / (Right + Left)`, where positive values indicate greater
 right-hemisphere source activation.
 

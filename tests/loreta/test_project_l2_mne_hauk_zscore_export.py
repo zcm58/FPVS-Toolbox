@@ -119,7 +119,8 @@ def test_project_hauk_zscore_export_writes_manifest_under_project_root(tmp_path)
     assert metadata["config_project_integration"] == "phase_6h_a2_project_l2_mne_participant_first_hauk_zscore"
     assert metadata["condition_project_input_assembly"] == "phase_6h_a2_fullfft_participant_neighbor_bins_read_only"
     assert metadata["cluster_mask"] == "source_space_cluster_permutation"
-    assert metadata["cluster_mask_method"] == "one_sample_sign_flip_max_cluster_mass"
+    assert metadata["cluster_mask_method"] == "one_sample_sign_flip_max_cluster_mass_two_tailed"
+    assert metadata["cluster_forming_tail"] == "two-sided"
     sidecar = json.loads(result.participant_sidecar_path.read_text(encoding="utf-8"))
     assert sidecar["conditions"][0]["participant_count"] == 2
     lateralization = json.loads(result.lateralization_summary_path.read_text(encoding="utf-8"))
