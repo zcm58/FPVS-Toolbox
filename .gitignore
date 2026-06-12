@@ -94,7 +94,8 @@ src/quarantine/**
 !src/quarantine/
 /src/fpvs_cache/
 
-# Root-local FPVS cache, including MNE/fsaverage downloads.
+# Root-local FPVS cache, including MNE/fsaverage downloads. Preserve during
+# routine cleanup unless the user explicitly requests cache removal.
 .fpvs_cache/
 
 # Agent harness manifests intentionally tracked despite the general *.txt rule.

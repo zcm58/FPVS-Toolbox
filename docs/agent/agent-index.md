@@ -51,6 +51,8 @@ outside the repo-local skill set; they do not override `AGENTS.md`,
 - `scripts/debug/`: focused debugging probes.
 - `scripts/manual_diagnostics/`: developer-run project/data probes.
 - `scripts/packaging/`: release packaging and installer inputs.
+- `src/Standalone_Scripts/`: developer-only scratch/manual scripts. Do not read
+  or use as architectural precedent unless the user explicitly asks.
 
 ## Execution Plans
 
@@ -83,3 +85,5 @@ outside the repo-local skill set; they do not override `AGENTS.md`,
 Do not scan broad folders just to confirm invariants that a script already
 checks. Read focused architecture docs after a script fails, when the task
 changes that area, or when the user asks for design/context rather than code.
+Exclude `src/Standalone_Scripts/**` from routine code search and context
+gathering unless the user explicitly scopes that folder.

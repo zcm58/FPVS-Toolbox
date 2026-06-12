@@ -1,6 +1,6 @@
 ---
 name: cleanup-generated-files
-description: Clean generated build artifacts, Python/tool caches, test scratch folders, and deprecated local data caches in FPVS Toolbox Repo. Use when the user asks to clean repo clutter, remove temp/cache files, clear build output, reclaim disk space, or delete stale generated folders such as build, site, __pycache__, .mypy_cache, .ruff_cache, .codex-tmp, test_tmp, retired fsaverage template caches, or src/fpvs_cache.
+description: Clean generated build artifacts, Python/tool caches, test scratch folders, and deprecated local data caches in FPVS Toolbox Repo. Use when the user asks to clean repo clutter, remove temp/cache files, clear build output, reclaim disk space, or delete stale generated folders such as build, site, __pycache__, .mypy_cache, .ruff_cache, .codex-tmp, test_tmp, retired bundled fsaverage template caches, or src/fpvs_cache. Preserve the root .fpvs_cache MNE/fsaverage cache unless the user explicitly requests cache removal.
 ---
 
 # Cleanup Generated Files
@@ -8,7 +8,7 @@ description: Clean generated build artifacts, Python/tool caches, test scratch f
 ## Workflow
 
 1. State the cleanup scope before deleting anything.
-2. Preserve `.venv1/`, `.idea/`, `src/quarantine/`, source files, docs, tests, and packaging scripts unless the user explicitly names them. The retired `fsaverage` MRI template is the only approved quarantine data-cache exception.
+2. Preserve `.venv1/`, `.idea/`, root `.fpvs_cache/`, `src/quarantine/`, source files, docs, tests, and packaging scripts unless the user explicitly names them. The retired bundled `fsaverage` MRI template is the only approved quarantine data-cache exception.
 3. Run a dry run first:
 
 ```powershell
@@ -30,7 +30,8 @@ git status --short --ignored
 ## Guardrails
 
 - Delete only ignored/generated artifacts or user-approved local data caches.
-- Keep Source Localization/eLORETA code quarantined, but do not keep bundled `fsaverage` MRI template data.
+- Keep Source Localization/eLORETA code quarantined, but do not keep bundled `fsaverage` MRI template data in tracked source or quarantine paths.
+- Preserve root `.fpvs_cache/` when it contains MNE/fsaverage template data for local LORETA Visualizer use.
 - Do not remove `src/quarantine/`; it is intentionally retained legacy reference material.
 - Do not remove virtual environments unless the user explicitly identifies the stale environment.
 - If deletion fails with permission errors, rerun the same script with escalation rather than broadening the command.

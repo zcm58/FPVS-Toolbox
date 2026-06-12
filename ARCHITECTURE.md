@@ -46,6 +46,7 @@ Primary areas:
 - `src/Main_App/PySide6_App/`: retired historical package designation. Do not recreate it; PySide6 runtime code now lives under purpose-based `Main_App` packages.
 - `src/Tools/`: standalone and integrated tools for preprocessing, plotting, ratios, statistics, image resizing, detectability, and the new LORETA Visualizer.
 - `src/Tools/LORETA_Visualizer/`: new embedded 3D source-visualization tool. Its renderer displays anatomical meshes and prepared source payloads only; future source-localization calculations must stay separate and pass through tool-local helper/adapters. See [LORETA Visualizer Architecture](src/Tools/LORETA_Visualizer/ARCHITECTURE.md).
+- `src/Standalone_Scripts/`: developer-only scratch/manual scripts. Agents should not read these files, treat them as active architecture, or use them as implementation precedent unless the user explicitly asks about this folder.
 - `src/quarantine/`: quarantined legacy code retained for reference or compatibility checks.
 - `tests/`: unit, integration, and pytest-qt smoke coverage.
 - `.agents/scripts/audit/`: repo-level agent invariant checks such as `agent_audit.py`.
@@ -83,6 +84,7 @@ Focused architecture pages:
 - Historical legacy behavior should be consumed through existing current-app APIs or thin adapters in purpose-based packages. Do not add new `Legacy_App` or `PySide6_App` modules.
 - Project-aware workflows should resolve files through the active project root and preserve existing generated formats.
 - Source Localization/eLORETA has been removed from active runtime. Keep `src/Tools/SourceLocalization/**` empty of source files and do not add GUI, settings, tests, or quarantine-tree imports for it unless restoration is explicitly scoped as a new feature. The new `src/Tools/LORETA_Visualizer/` branch is a separate visualization tool, not a design continuation of the removed implementation; it must keep renderer logic separate from future calculation logic and must not bundle `fsaverage` MRI template data in active source or quarantine.
+- The ignored repository-root `.fpvs_cache/` is the local MNE/fsaverage cache used by the LORETA Visualizer. Preserve it during routine cleanup unless the user explicitly requests cache removal.
 
 ## Verification Strategy
 

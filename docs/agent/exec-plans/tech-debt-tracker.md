@@ -15,6 +15,23 @@ Use this page for known debt that is not yet an active execution plan.
 - Oversized modules remain in Stats workers/controllers, Plot/Ratio GUI code,
   `Main_App` processing/preprocessing, and diagnostics. Treat these as future
   focused refactors, not opportunistic cleanup during behavior-sensitive work.
+- High-context modules are now a maintainability and agent-cost concern. Future
+  refactors should reduce file size and cognitive load without changing
+  behavior, prioritizing `src/Tools/Publication_Report/analysis_tables.py`,
+  `src/Tools/Stats/analysis/dv_policy_group_significant.py`,
+  `src/Tools/LORETA_Visualizer/gui.py`,
+  `src/Tools/LORETA_Visualizer/source_producers/l2_mne_hauk_zscore.py`,
+  `src/Tools/LORETA_Visualizer/renderer.py`, and
+  `src/Main_App/Performance/process_runner.py`. Prefer extracting named helper
+  modules behind the existing public entry points, then run focused tests for
+  the touched behavior.
+- `src/Standalone_Scripts/**` is developer-only scratch/manual material. Agents
+  should not read it, route work through it, or treat it as user-facing/runtime
+  precedent unless the user explicitly asks about that folder.
+- Preserve root `.fpvs_cache/` when it contains local MNE/fsaverage template
+  data for LORETA Visualizer. Routine cleanup may remove generated artifacts
+  such as `site/`, `.codex-tmp/`, test scratch folders, and Python caches, but
+  root `.fpvs_cache/` is not a default deletion target.
 - Retired `Main_App` package names are now guarded by `.agents/scripts/audit/agent_audit.py`;
   future debt should focus on oversized modules and behavior-covered cleanup,
   not resurrecting historical package wrappers.

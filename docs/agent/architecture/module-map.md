@@ -60,6 +60,8 @@ Current `Legacy_App` runtime couplings:
   plain alpha blending instead of VTK depth peeling for transparent mesh
   compatibility. `fsaverage_cache.py` keeps automatic fsaverage downloads in
   the ignored repository-root `.fpvs_cache/mne/MNE-fsaverage-data/` cache.
+  Preserve this root `.fpvs_cache/` local dependency cache during routine
+  cleanup unless the user explicitly requests cache removal.
   `source_payloads.py`, `transforms.py`, and `scalar_fields.py` are the bridge
   helpers between future calculation outputs and the renderer. Project source
   calculation lives in `source_producers/`, which reads existing flat or
@@ -71,6 +73,9 @@ Current `Legacy_App` runtime couplings:
 - `src/Tools/Image_Resizer/`: image resizing utility.
 - `.agents/scripts/audit/agent_audit.py` and `.agents/skills/*/scripts/`: repo-evaluation and agent harness checks, not runtime toolbox diagnostics.
 - `scripts/manual_diagnostics/`: developer-run project/data investigation utilities, not runtime toolbox APIs.
+- `src/Standalone_Scripts/`: developer-only scratch/manual scripts. Agents
+  should not read these files or use them as implementation precedent unless
+  the user explicitly scopes this folder.
 
 ## Dead Or Quarantined
 
