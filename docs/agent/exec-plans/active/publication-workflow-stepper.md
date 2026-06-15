@@ -68,8 +68,10 @@ The current workflow is powerful but too implicit:
 
 ## User Experience
 
-Create a main-sidebar entry such as `Results Workflow` or `Publication
-Workflow`. The page is a stepper, not a static form.
+Create a main-sidebar entry named `Publication Workflow`. The page is a
+stepper, not a static form. Keep the label isolated in the sidebar/action
+registration so it can be renamed later without changing workflow state,
+artifact names, or processing code.
 
 Stepper steps:
 
@@ -319,8 +321,7 @@ smoke path that covers:
 
 ## Open Questions
 
-- User-facing name: `Results Workflow`, `Publication Workflow`, or another
-  label?
+- Final icon and sidebar ordering for the `Publication Workflow` entry.
 - Should QC be a required gate before report generation, or a recommended gate
   that can be bypassed with an explicit audit warning?
 - Should v1 store only JSON decisions, or also write an Excel decision workbook
