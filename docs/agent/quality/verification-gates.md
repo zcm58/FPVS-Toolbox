@@ -52,6 +52,10 @@ ruff check .
   `src/Main_App/gui/update_manager.py`, then document manual Windows smoke for
   `File > Check for Updates` and installer `/RELAUNCH=1`.
 - Project path or file I/O changes: add or run tests with `tmp_path`; do not depend on a developer machine path.
+- Publication Maps or Publication Report changes: run the focused package tests,
+  `py_compile` touched package modules, `audit_gui_imports.py` for embedded
+  page changes, and `audit_hardcoded_paths.py` for workbook/output path
+  changes. Do not run offscreen GUI tests locally.
 - Legacy-boundary changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check protected` and confirm retired `Legacy_App` paths were not recreated; any historical behavior cleanup must preserve the processing pipeline.
 - Source Localization/eLORETA changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.
 - LORETA Visualizer changes: activate `.\.venv1`, then run focused checks for

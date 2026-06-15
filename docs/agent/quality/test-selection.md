@@ -41,6 +41,7 @@ When changing a specific module, run the nearest named test first.
 
 Tests are grouped by workflow under `tests/audit/`, `tests/gui/`,
 `tests/processing/`, `tests/project_io/`, `tests/plot_generator/`,
+`tests/publication_maps/`, `tests/publication_report/`,
 `tests/ratio_calculator/`, and `tests/stats/`.
 
 ## Main Window And GUI
@@ -80,6 +81,29 @@ via pytest-qt/offscreen unless explicitly approved.
 - FFT/SNR behavior: `tests/plot_generator/test_plot_generator_fft_snr.py`, `tests/plot_generator/test_plot_generator_full_snr_roi.py`
 - Exports and manifests: `tests/plot_generator/test_plot_generator_export_svg_smoke.py`, `tests/plot_generator/test_plot_generator_project_defaults.py`
 - Full focused suite after worker/rendering changes: `python -m pytest tests/plot_generator -q`
+
+## Publication Maps
+
+The GUI target below identifies relevant coverage only; do not run it locally
+via pytest-qt/offscreen unless explicitly approved.
+
+- Scalp-map source workbook, BCA/SNR rendering contracts, selected harmonics,
+  paired-condition output, and colorbar behavior:
+  `python -m pytest tests/publication_maps/test_bca_publication_maps.py -q`
+- After changing shared harmonic-selection behavior, also run
+  `python -m pytest tests/stats/analysis/test_fixed_predefined_harmonics.py tests/stats/analysis/test_full_snr_reference_equivalence.py -q`
+
+## Publication Report
+
+The GUI target below identifies relevant coverage only; do not run it locally
+via pytest-qt/offscreen unless explicitly approved.
+
+- Headless report runner, source workbook, audit JSON, Markdown, DOCX, default
+  ROIs, exclusions, single-group guard, and generated report tables:
+  `python -m pytest tests/publication_report/test_publication_report_runner.py -q`
+- GUI wiring changes should use `py_compile` on
+  `src/Tools/Publication_Report/gui.py`, focused `ruff`, agent audits, and a
+  documented visible/manual smoke path for the embedded sidebar page.
 
 ## Ratio Calculator
 
