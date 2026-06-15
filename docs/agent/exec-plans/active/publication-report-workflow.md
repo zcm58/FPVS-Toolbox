@@ -23,6 +23,13 @@ Implemented in `codex/publication-report-workflow` initial slice:
   ROI, comparison agreement, participant-first individual
   detectability/electrode counts, electrode-level summed-harmonic Z scores,
   manuscript-facing Z-score inventories, and base-rate summaries.
+- Built-in descriptive QC distribution outputs: participant-level IQR outlier
+  tables, Shapiro-Wilk/Q-Q normality diagnostics, and manual-inspection
+  boxplot/histogram/Q-Q figures under the publication report figure folder.
+- Companion active plan `publication-workflow-stepper.md` now owns the
+  higher-level guided post-processing stepper: QC review, manual outlier
+  decisions, frozen participant exclusions, report generation, and downstream
+  figure handoff.
 - Focused headless tests for generated Markdown, DOCX, workbook, audit JSON,
   missing selected conditions, and single-group enforcement.
 
@@ -184,6 +191,7 @@ Expected files:
 - `Publication_Report_Data.xlsx`: source workbook for all reported numbers.
 - `Publication_Report_Audit.json`: machine-readable settings and provenance.
 - `figures/`: spectra, scalp maps, and optional individual-detectability figures.
+  - `figures/qc/`: descriptive QC distribution figures for manual inspection.
 - `logs/`: readable run log and warnings.
 
 ## Report Sections
@@ -284,6 +292,13 @@ Initial workbook sheets:
   from harmonic selection, ROI harmonic summaries, and base-rate summaries.
 - `Base_Rate_Summary`: 6 Hz and harmonic summaries by condition and base-rate
   ROI.
+- `QC_Outlier_Values`: participant-level manual-review rows for report-derived
+  distribution metrics, including IQR fences and participant IDs flagged as
+  high/low IQR outliers.
+- `QC_Outlier_Summary`: condition x ROI x metric IQR summaries with outlier
+  counts and Shapiro-Wilk/Q-Q fields merged for review.
+- `QC_Normality_Checks`: Shapiro-Wilk, skewness, kurtosis, and Q-Q correlation
+  diagnostics for report-derived condition x ROI distributions.
 - `Figure_Manifest`: generated figures and source parameters.
 - `Warnings`: missing sheets, missing electrodes, skipped files, and
   non-fatal assumptions.
@@ -390,6 +405,23 @@ Use the David/Rossion-compatible summed-harmonic Z logic:
 Add table exports so the figures are not the only source of individual-level
 results.
 
+### QC Distribution Diagnostics
+
+Add descriptive manual-review diagnostics to every report bundle when QC figures
+are enabled:
+
+- compute IQR fences separately for each condition x ROI x metric distribution;
+- flag participant-level values outside 1.5xIQR fences without excluding them;
+- export participant IDs, values, fences, and high/low direction in source-data
+  workbook sheets;
+- run Shapiro-Wilk and Q-Q correlation diagnostics where enough finite
+  observations are available;
+- render boxplots with participant points and labeled IQR outliers, histograms
+  with median and IQR-fence markers, and Q-Q plots for manual inspection;
+- keep QC diagnostics descriptive only. They must not alter participant
+  inclusion, harmonic selection, statistical tests, or manuscript counts unless
+  the user explicitly changes the report exclusion inputs and reruns the report.
+
 ### Base-Rate Response
 
 Add a base-rate summary that is separate from the oddball response:
@@ -466,6 +498,7 @@ is stable. Candidate fields:
 - `generate_spectra`
 - `generate_scalp_maps`
 - `generate_individual_figures`
+- `generate_qc_figures`
 - `output_markdown`
 - `output_docx`
 

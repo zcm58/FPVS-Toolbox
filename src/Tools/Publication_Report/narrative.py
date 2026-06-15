@@ -13,10 +13,13 @@ from Tools.Publication_Report.models import (
     BASE_RATE_SUMMARY_SHEET,
     COMPARISON_AGREEMENT_SHEET,
     CONDITION_PAIRS_BY_ROI_SHEET,
+    FIGURE_MANIFEST_SHEET,
     HARMONIC_SELECTION_SHEET,
     GROUP_ELECTRODE_SIGNIFICANCE_SHEET,
     INDIVIDUAL_DETECTABILITY_COUNTS_SHEET,
     PLANNED_LATERALIZATION_SHEET,
+    QC_NORMALITY_CHECKS_SHEET,
+    QC_OUTLIER_SUMMARY_SHEET,
     ROI_RESPONSE_SUMMARY_SHEET,
     SEMANTIC_COLOR_RATIO_SUMMARY_SHEET,
     STATISTICAL_TEST_DECISIONS_SHEET,
@@ -107,6 +110,13 @@ def _analysis_sections(frames: Mapping[str, pd.DataFrame]) -> list[str]:
     sections.extend(_individual_count_lines(frames.get(INDIVIDUAL_DETECTABILITY_COUNTS_SHEET)))
     sections.extend(_electrode_summary_lines(frames.get(GROUP_ELECTRODE_SIGNIFICANCE_SHEET)))
     sections.extend(_base_rate_lines(frames.get(BASE_RATE_SUMMARY_SHEET)))
+    sections.extend(
+        _qc_diagnostic_lines(
+            frames.get(QC_OUTLIER_SUMMARY_SHEET),
+            frames.get(QC_NORMALITY_CHECKS_SHEET),
+            frames.get(FIGURE_MANIFEST_SHEET),
+        )
+    )
     sections.extend(_z_score_inventory_lines(frames.get(Z_SCORE_REPORT_SHEET)))
     if sections:
         return sections
@@ -445,6 +455,58 @@ def _base_rate_lines(frame: pd.DataFrame | None) -> list[str]:
                 f"{highest['roi']} ROI."
             )
         )
+    return lines
+
+
+def _qc_diagnostic_lines(
+    outlier_summary: pd.DataFrame | None,
+    normality: pd.DataFrame | None,
+    figure_manifest: pd.DataFrame | None,
+) -> list[str]:
+    if (outlier_summary is None or outlier_summary.empty) and (normality is None or normality.empty):
+        return []
+    lines = ["", "### QC Distribution Diagnostics", ""]
+    lines.append(
+        "QC diagnostics are descriptive manual-review outputs. They flag possible "
+        "participant-level distribution concerns but do not exclude participants "
+        "or alter the reported statistics."
+    )
+    if outlier_summary is not None and not outlier_summary.empty:
+        outlier_counts = pd.to_numeric(
+            outlier_summary.get("iqr_outlier_count", pd.Series(dtype=float)),
+            errors="coerce",
+        ).fillna(0)
+        flagged_groups = int((outlier_counts > 0).sum())
+        flagged_points = int(outlier_counts.sum())
+        lines.append(
+            f"IQR screening was exported for {len(outlier_summary)} metric x condition x ROI "
+            f"group(s); {flagged_groups} group(s) contained {flagged_points} flagged "
+            "participant value(s). Participant IDs and IQR fences are listed in "
+            "`QC_Outlier_Values` and `QC_Outlier_Summary`."
+        )
+    if normality is not None and not normality.empty:
+        p_values = pd.to_numeric(normality.get("normality_p", pd.Series(dtype=float)), errors="coerce")
+        tested = int(p_values.notna().sum())
+        nonnormal = int((p_values < 0.05).sum())
+        lines.append(
+            f"Shapiro-Wilk and Q-Q diagnostics were exported for {len(normality)} "
+            f"group(s); {tested} had testable Shapiro-Wilk results and {nonnormal} "
+            "had p < .05."
+        )
+    if figure_manifest is not None and not figure_manifest.empty and "figure_family" in figure_manifest.columns:
+        qc_figures = figure_manifest.loc[
+            figure_manifest["figure_family"].astype(str) == "qc_distributions"
+        ]
+        generated = (
+            qc_figures.loc[qc_figures["status"].astype(str) == "generated"]
+            if "status" in qc_figures.columns
+            else pd.DataFrame()
+        )
+        if not generated.empty:
+            lines.append(
+                f"QC distribution figures were generated ({len(generated)} file(s)) "
+                "under `figures/qc/` for manual inspection."
+            )
     return lines
 
 

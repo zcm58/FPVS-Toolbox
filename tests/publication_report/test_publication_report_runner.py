@@ -37,6 +37,9 @@ from Tools.Publication_Report.models import (
     PARTICIPANT_INCLUSION_SHEET,
     PLANNED_LATERALIZATION_SHEET,
     PLANNED_ROI_COMPARISONS_HOLM_SHEET,
+    QC_NORMALITY_CHECKS_SHEET,
+    QC_OUTLIER_SUMMARY_SHEET,
+    QC_OUTLIER_VALUES_SHEET,
     ROI_HARMONIC_SUMMARY_SHEET,
     ROI_HARMONIC_VALUES_SHEET,
     ROI_DEFINITIONS_SHEET,
@@ -56,6 +59,7 @@ from Tools.Publication_Report.models import (
     report_rois_from_settings_pairs,
 )
 from Tools.Publication_Report.narrative import build_markdown
+from Tools.Publication_Report.qc import build_qc_frames, render_qc_figures
 from Tools.Publication_Report.runner import generate_publication_report
 from Tools.Publication_Report.discovery import WorkbookEntry
 
@@ -163,6 +167,9 @@ def test_generate_publication_report_writes_initial_bundle(tmp_path: Path) -> No
         OLD_VS_NEW_DETECTABILITY_COMPARISON_SHEET,
         Z_SCORE_REPORT_SHEET,
         BASE_RATE_SUMMARY_SHEET,
+        QC_OUTLIER_VALUES_SHEET,
+        QC_OUTLIER_SUMMARY_SHEET,
+        QC_NORMALITY_CHECKS_SHEET,
     }.issubset(set(workbook.sheetnames))
 
     participants = pd.read_excel(result.workbook_path, sheet_name=PARTICIPANT_INCLUSION_SHEET)
@@ -456,6 +463,81 @@ def test_semantic_color_ratio_frames_report_raw_trimmed_and_stability() -> None:
     invalid = values.loc[values["subject_id"] == "S07"].iloc[0]
     assert bool(invalid["ratio_valid"]) is False
     assert invalid["invalid_reason"] == "zero_color_denominator"
+
+
+def test_qc_frames_flag_iqr_outliers_and_normality() -> None:
+    response_values = pd.DataFrame(
+        [
+            {
+                "condition": "CondA",
+                "subject_id": f"S{index:02d}",
+                "roi": "LOT",
+                "roi_role": "primary",
+                "summed_bca_uv": float(value),
+            }
+            for index, value in enumerate([1, 2, 3, 4, 5, 100], start=1)
+        ]
+    )
+
+    frames = build_qc_frames(
+        response_values=response_values,
+        individual_roi_summed_z=pd.DataFrame(),
+        semantic_color_ratio_values=pd.DataFrame(),
+    )
+
+    values = frames[QC_OUTLIER_VALUES_SHEET]
+    summary = frames[QC_OUTLIER_SUMMARY_SHEET]
+    normality = frames[QC_NORMALITY_CHECKS_SHEET]
+    flagged = values.loc[values["iqr_outlier"].fillna(False).astype(bool)]
+
+    assert flagged["participant_id"].tolist() == ["S06"]
+    assert flagged["outlier_direction"].tolist() == ["high"]
+    assert summary.iloc[0]["iqr_outlier_count"] == 1
+    assert summary.iloc[0]["iqr_outlier_participant_ids"] == "S06"
+    assert normality.iloc[0]["normality_test"] == "Shapiro-Wilk"
+    assert normality.iloc[0]["normality_p"] < 0.05
+    assert normality.iloc[0]["qq_correlation"] < 1.0
+
+
+def test_qc_figure_rendering_exports_manual_inspection_figures(tmp_path: Path) -> None:
+    pytest.importorskip("matplotlib")
+    response_values = pd.DataFrame(
+        [
+            {
+                "condition": condition,
+                "subject_id": f"S{index:02d}",
+                "roi": roi,
+                "roi_role": "primary",
+                "summed_bca_uv": float(value),
+            }
+            for condition, roi, values in [
+                ("CondA", "LOT", [1, 2, 3, 4, 5, 100]),
+                ("CondB", "LOT", [1, 2, 2, 3, 4, 5]),
+            ]
+            for index, value in enumerate(values, start=1)
+        ]
+    )
+    qc_frames = build_qc_frames(
+        response_values=response_values,
+        individual_roi_summed_z=pd.DataFrame(),
+        semantic_color_ratio_values=pd.DataFrame(),
+    )
+    warnings: list[str] = []
+
+    paths, manifest = render_qc_figures(
+        qc_frames=qc_frames,
+        output_root=tmp_path,
+        z_thresholds=(1.64, 2.32, 3.1),
+        warnings=warnings,
+    )
+
+    assert warnings == []
+    assert paths
+    assert all(path.exists() and path.stat().st_size > 0 for path in paths)
+    assert {path.suffix for path in paths} == {".png", ".svg"}
+    assert (tmp_path / "figures" / "qc").exists()
+    assert set(manifest["figure_family"]) == {"qc_distributions"}
+    assert set(manifest["status"]) == {"generated"}
 
 
 def test_report_rois_from_settings_pairs_marks_semantic_defaults() -> None:
