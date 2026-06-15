@@ -305,6 +305,9 @@ Initial workbook sheets:
   counts and Shapiro-Wilk/Q-Q fields merged for review.
 - `QC_Normality_Checks`: Shapiro-Wilk, skewness, kurtosis, and Q-Q correlation
   diagnostics for report-derived condition x ROI distributions.
+- `Sensitivity_Summary`: full-sample versus included-participant comparison
+  rows for key manuscript-facing outputs after manual participant-level
+  exclusions.
 - `Figure_Manifest`: requested/generated figure families, status, and source
   parameters.
 - `Warnings`: missing sheets, missing electrodes, skipped files, and
@@ -428,6 +431,25 @@ are enabled:
 - keep QC diagnostics descriptive only. They must not alter participant
   inclusion, harmonic selection, statistical tests, or manuscript counts unless
   the user explicitly changes the report exclusion inputs and reruns the report.
+
+### Exclusion Sensitivity Summary
+
+When manual participant-level exclusions are present, add an interpretable
+sensitivity summary to the report bundle:
+
+- rerun key publication-facing summaries on the full valid sample and on the
+  frozen included-participant sample;
+- compare summed-BCA condition x ROI estimates, manuscript-facing condition
+  comparisons, and participant-level detectability counts in v1;
+- report full-sample N, included N, excluded participant IDs, estimates,
+  p-values or decisions, and absolute/percent change;
+- label each conclusion as unchanged, weaker but same conclusion, stronger but
+  same conclusion, or changed conclusion;
+- present the plain-language conclusion before detailed p-value changes so
+  non-expert users can interpret the result without reading every statistical
+  column;
+- treat sensitivity as an audit/interpretation output only, not as an automatic
+  rule for adding or removing exclusions.
 
 ### Base-Rate Response
 

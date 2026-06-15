@@ -107,6 +107,10 @@ Stepper steps:
    - Generate the report using the frozen participant-level exclusion set.
    - Include the QC decision summary and before/after sensitivity context in
      the report audit outputs.
+   - Show an easy-to-read sensitivity panel that compares full-sample results
+     with included-participant results and labels each key conclusion as
+     unchanged, weaker but same conclusion, stronger but same conclusion, or
+     changed conclusion.
    - Keep the report runnable directly for advanced/manual workflows, but guide
      normal users through the stepper.
 
@@ -136,6 +140,7 @@ Candidate artifacts:
 - `5 - Publication Report/Workflow_State.json`
 - `5 - Publication Report/QC_Decisions.json`
 - `5 - Publication Report/QC_Decisions.xlsx`
+- `5 - Publication Report/Sensitivity_Summary.xlsx`
 - `5 - Publication Report/figures/qc/`
 - `5 - Publication Report/Publication_Report_Audit.json`
 
@@ -165,6 +170,17 @@ Candidate artifacts:
 - frozen participant exclusion list consumed by Publication Report v1;
 - warning summaries surfaced in the UI.
 
+`Sensitivity_Summary` should include:
+
+- one row per key manuscript-facing condition x ROI comparison;
+- full-sample N, included N, and excluded participant IDs;
+- full-sample estimate, included-sample estimate, and absolute/percent change;
+- full-sample p-value or decision and included-sample p-value or decision;
+- plain-language outcome label: `unchanged`, `weaker_same_conclusion`,
+  `stronger_same_conclusion`, or `changed_conclusion`;
+- a short end-user message such as "Excluding flagged participants did not
+  change the conclusion for this ROI."
+
 ## Method Policy
 
 The stepper validates the publication pipeline without silently changing it.
@@ -178,6 +194,13 @@ The stepper validates the publication pipeline without silently changing it.
   or watching a participant.
 - If future work supports condition-specific or ROI-specific exclusions, it
   needs an explicit methods decision and report language update first.
+- Full-sample versus included-sample comparisons are sensitivity checks, not a
+  second exclusion decision rule. The user decides exclusions first; the
+  sensitivity output then reports whether those confirmed exclusions materially
+  changed the publication-facing conclusions.
+- Sensitivity outputs should be readable by non-expert users first, with
+  detailed p-values, effect sizes, confidence intervals, and bootstrap or
+  jackknife diagnostics available in the workbook for reviewers.
 - Significant-harmonic selection remains the locked Stats default unless a
   separate statistical-method plan changes it. The stepper should expose the
   selected harmonics and their source parameters so users can diagnose whether
@@ -245,8 +268,15 @@ while the stepper becomes the recommended path.
 - Feed frozen participant exclusions into Publication Report generation.
 - Add audit rows that distinguish manual exclusions, QC-confirmed exclusions,
   and non-finite required exclusions.
-- Include sensitivity summaries where feasible: all participants versus frozen
-  exclusions for key summed-BCA condition x ROI outputs.
+- Add sensitivity summaries for all participants versus frozen exclusions.
+  The first user-facing slice should cover summed-BCA condition x ROI outputs,
+  manuscript-facing condition comparisons, and participant-level detectability
+  counts.
+- Present sensitivity results in a plain-language report panel and workbook
+  sheet. The panel should emphasize conclusion stability before showing
+  p-value changes.
+- Where feasible, include bootstrap or jackknife uncertainty for the change in
+  estimate, but keep this secondary to the plain-language conclusion label.
 
 ### Phase 6: Figure Step Integration
 
@@ -282,6 +312,8 @@ smoke path that covers:
 - running QC from the stepper;
 - reviewing and freezing an outlier decision;
 - generating a Publication Report using the frozen exclusion set;
+- confirming the sensitivity panel labels whether conclusions changed after
+  exclusions;
 - verifying stale-state warnings after changing decisions;
 - opening generated QC/report/figure artifacts.
 
@@ -295,7 +327,7 @@ smoke path that covers:
   for easier manual review?
 - Should the stepper live beside the current `Publication Report` sidebar entry
   at first, or eventually replace it as the default entry point?
-- Which sensitivity outputs are mandatory for v1: summed BCA only, or also
-  detectability counts and condition-pair comparisons?
+- Which additional sensitivity outputs belong after v1: individual electrode
+  FDR summaries, scalp-map source values, or LORETA/source-map payload metrics?
 - What should count as a source fingerprint for stale-state detection:
   workbook modified time and size, content hash, or both?
