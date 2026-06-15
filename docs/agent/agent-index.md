@@ -37,6 +37,7 @@ Activate the repo environment before Python commands:
 | Publication scalp maps and source-data exports | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Maps/AGENTS.md`; `docs/agent/architecture/statistics-tools.md` |
 | Publication report workflow, source workbook, manuscript diagnostics, narrative, and embedded page | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Report/AGENTS.md`; `docs/agent/exec-plans/active/publication-report-workflow.md` |
 | Publication workflow orchestrator, QC decisions, frozen participant exclusions, and stepper handoff | `pyside6-gui-cleanup` + `project-path-audit` | `src/Tools/Publication_Workflow/AGENTS.md`; `docs/agent/exec-plans/active/publication-workflow-stepper.md` |
+| Publication-ready table PNG/SVG exports under a project root | `publication-table-export` + `project-path-audit` | `.agents/skills/publication-table-export/SKILL.md`; `docs/agent/architecture/statistics-tools.md` |
 | GUI smoke coverage definitions | `pytest-qt-smoke` | `docs/agent/quality/test-selection.md`; do not run pytest-qt/offscreen locally |
 | Generated files, temp folders, local caches | `cleanup-generated-files` | `docs/agent/quality/garbage-collection.md`; `docs/agent/exec-plans/tech-debt-tracker.md` |
 | Plan pressure-testing, design interrogation, dependency-aware decision trees | `grillme` | Explore code first when the answer is discoverable locally; ask one question at a time |

@@ -30,6 +30,16 @@ Rules:
   individual-detectability tables, Z-score report tables, and base-rate
   summaries. Treat new sheets as additive unless the user explicitly requests a
   schema change.
+- Publication-ready table figures should follow the shared toolbox figure
+  pattern. Use Great Tables for report-facing table layout where practical, but
+  keep final PNG/SVG table exports table-only by default: no embedded table
+  number, title, caption, prose description, source note, or methods text unless
+  the user explicitly asks for those elements in the graphic. Use
+  `Main_App.gui.typography` roles and `Main_App.gui.style_tokens` colors for
+  fonts, weights, borders, and backgrounds. Export both SVG and 600-DPI PNG for
+  final table figures, preserve text as vector text in SVG when possible, and
+  verify dimensions, DPI metadata, and absence of caption/title text in the
+  table-only assets.
 - Do not run offscreen Qt workflows locally.
 
 Focused checks:

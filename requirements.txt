@@ -7,6 +7,7 @@ cycler==0.12.1
 decorator==5.2.1
 et_xmlfile==2.0.0
 fonttools==4.58.4
+great-tables==0.22.0
 idna==3.10
 Jinja2==3.1.6
 kiwisolver==1.4.8
