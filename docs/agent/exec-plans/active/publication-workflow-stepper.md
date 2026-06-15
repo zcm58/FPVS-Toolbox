@@ -2,7 +2,27 @@
 
 ## Status
 
-Active planning.
+Active implementation.
+
+Initial executable slice implemented on `codex/publication-workflow-stepper`:
+
+- `src/Tools/Publication_Workflow/` package with project-local workflow state,
+  QC decision JSON persistence, and an embedded PySide6 `Publication Workflow`
+  sidebar page.
+- Main sidebar entry: `Publication Workflow`, living beside the existing
+  direct `Publication Report` tool.
+- Stepper status table for Data Ready, QC Review, Outlier Decisions, Freeze
+  Analysis Set, Publication Report, Figures, and Export Package.
+- QC run action that reuses `PublicationReportWorker` with report narrative
+  outputs disabled and QC figures enabled, preserving all participants.
+- Summed-BCA IQR candidate table populated from the report workbook's
+  `QC_Outlier_Values` sheet.
+- Manual participant-level decision freezing through `QC_Decisions.json`, with
+  required reasons for `exclude` decisions.
+- Publication Report action that reuses `PublicationReportWorker` with frozen
+  participant-level QC exclusions applied.
+- Figure handoff buttons for Publication Report, Scalp Maps, and LORETA
+  Visualizer; deeper automated figure orchestration remains a later slice.
 
 This plan defines a guided post-processing workflow that starts immediately
 after data processing is complete and walks the user through QC, manual

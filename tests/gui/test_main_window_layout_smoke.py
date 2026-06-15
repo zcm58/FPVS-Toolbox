@@ -34,6 +34,7 @@ from Tools.Individual_Detectability.main_window import IndividualDetectabilityWi
 from Tools.Plot_Generator.plot_generator import PlotGeneratorWindow
 from Tools.Publication_Maps.gui import PublicationMapsWindow
 from Tools.Publication_Report.gui import PublicationReportWindow
+from Tools.Publication_Workflow.gui import PublicationWorkflowWindow
 from Tools.Ratio_Calculator.gui import RatioCalculatorWindow
 from Tools.Stats import StatsWindow
 
@@ -417,6 +418,35 @@ def test_sidebar_ratio_calculator_embeds_in_main_workspace(
         if widget.property("selected") is True
     ]
     assert selected_roles == ["btn_home"]
+
+
+def test_sidebar_publication_workflow_embeds_in_main_workspace(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    win = _build_window(tmp_path, qtbot, monkeypatch)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    win.currentProject = SimpleNamespace(
+        project_root=project_root,
+        input_folder=project_root,
+        subfolders={"excel": "1 - Excel Data Files"},
+    )
+    win.stacked.setCurrentIndex(1)
+    qtbot.wait(20)
+
+    qtbot.mouseClick(_sidebar_button(win, "btn_publication_workflow"), Qt.LeftButton)
+    qtbot.wait(20)
+
+    assert isinstance(win.workspace_stack.currentWidget(), PublicationWorkflowWindow)
+    assert win.workspace_stack.currentWidget().objectName() == "embedded_publication_workflow_page"
+    selected_roles = [
+        widget.property("role")
+        for widget in win.sidebar.findChildren(QWidget)
+        if widget.property("selected") is True
+    ]
+    assert selected_roles == ["btn_publication_workflow"]
 
 
 def test_sidebar_stats_embeds_in_main_workspace(

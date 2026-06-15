@@ -54,6 +54,12 @@ Current `Legacy_App` runtime couplings:
   discovery, typed request/result contracts, additive source tables,
   manuscript statistical diagnostics, narrative/DOCX writing, and source
   workbook/audit exports.
+- `src/Tools/Publication_Workflow/`: embedded Publication Workflow stepper.
+  `gui.py` owns the sidebar page that guides QC review, manual participant-level
+  outlier decisions, report generation, and figure handoff while reusing
+  existing Publication Report workers. `state.py` owns project-local
+  `Workflow_State.json` and `QC_Decisions.json` artifacts under
+  `5 - Publication Report`.
 - `src/Tools/LORETA_Visualizer/`: embedded 3D LORETA/source-visualization
   viewer. This is a new source-localization visualization branch, not a
   continuation of the removed `Tools.SourceLocalization` implementation.

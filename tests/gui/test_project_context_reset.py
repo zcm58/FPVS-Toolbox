@@ -35,6 +35,7 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
     stats_page = _FakeWidget()
     ratio_page = _FakeWidget()
     publication_report_page = _FakeWidget()
+    publication_workflow_page = _FakeWidget()
     epoch_page = _FakeWidget()
     settings_dialog = _FakeWidget()
     home_calls = []
@@ -50,6 +51,7 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
         _epoch_page=epoch_page,
         _epoch_win=epoch_page,
         _publication_report_page=publication_report_page,
+        _publication_workflow_page=publication_workflow_page,
         show_home_page=lambda: home_calls.append("home"),
     )
 
@@ -64,6 +66,7 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
     assert host._individual_detectability_page is None
     assert host._plot_generator_page is None
     assert host._publication_report_page is None
+    assert host._publication_workflow_page is None
     assert host._epoch_page is None
     assert host._epoch_win is None
     assert settings_dialog.rejected == 1
@@ -72,6 +75,7 @@ def test_project_context_reset_discards_embedded_pages_and_returns_home() -> Non
     assert stats_page in workspace.removed
     assert ratio_page in workspace.removed
     assert publication_report_page in workspace.removed
+    assert publication_workflow_page in workspace.removed
     assert epoch_page in workspace.removed
     assert epoch_page.closed == 1
     assert epoch_page.deleted == 1
