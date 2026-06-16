@@ -49,7 +49,9 @@ def uses_cortical_surface_paint(payload: SourcePayload) -> bool:
 
 
 def payload_cluster_mask(payload: SourcePayload) -> np.ndarray | None:
-    """Return a source-space cluster mask from payload metadata when present."""
+    """Return a usable source-space cluster mask from payload metadata."""
+    if payload_cluster_mask_is_underpowered(payload):
+        return None
     metadata = payload.metadata
     mask_label = str(metadata.get("cluster_mask", "")).strip().lower()
     if mask_label in {"", "none", "disabled"}:
@@ -76,6 +78,35 @@ def payload_cluster_mask(payload: SourcePayload) -> np.ndarray | None:
 def payload_has_cluster_mask(payload: SourcePayload) -> bool:
     """Return whether a payload carries a usable source-space cluster mask."""
     return payload_cluster_mask(payload) is not None
+
+
+def payload_cluster_mask_is_underpowered(payload: SourcePayload) -> bool:
+    """Return whether a saved empty cluster mask is resolution-limited.
+
+    Small participant counts use exact sign flips. With the producer's plus-one
+    p-value correction, some exact tests cannot reach the selected alpha even
+    when the source z-score field is large. In that case, cortical paint should
+    use the exploratory display threshold instead of treating an empty mask as a
+    meaningful group-level null result.
+    """
+    metadata = payload.metadata
+    if not _payload_declares_cluster_mask(metadata):
+        return False
+    if _cluster_mask_retained_count(payload) != 0:
+        return False
+    alpha = _optional_float(metadata.get("cluster_alpha"))
+    permutation_count = _optional_int(metadata.get("cluster_permutation_count"))
+    if alpha is None or permutation_count is None or permutation_count < 1:
+        return False
+    return payload_cluster_mask_minimum_p(payload) > alpha
+
+
+def payload_cluster_mask_minimum_p(payload: SourcePayload) -> float:
+    """Return the smallest possible cluster p-value from payload metadata."""
+    permutation_count = _optional_int(payload.metadata.get("cluster_permutation_count"))
+    if permutation_count is None or permutation_count < 1:
+        return float("nan")
+    return 1.0 / float(permutation_count + 1)
 
 
 def project_cortical_surface_payload(
@@ -135,6 +166,55 @@ def _valid_z_threshold(z_threshold: float) -> float:
     if not np.isfinite(threshold) or threshold < 0.0:
         return DEFAULT_CORTICAL_PAINT_Z_THRESHOLD
     return threshold
+
+
+def _payload_declares_cluster_mask(metadata: dict[str, object]) -> bool:
+    mask_label = str(metadata.get("cluster_mask", "")).strip().lower()
+    return mask_label not in {"", "none", "disabled"}
+
+
+def _cluster_mask_retained_count(payload: SourcePayload) -> int | None:
+    metadata = payload.metadata
+    count = _optional_int(metadata.get("cluster_mask_vertex_count"))
+    if count is not None:
+        return count
+    raw_mask = metadata.get("cluster_mask_values")
+    if raw_mask is not None:
+        try:
+            mask = np.asarray(raw_mask, dtype=bool).reshape(-1)
+        except (TypeError, ValueError):
+            return None
+        return int(np.count_nonzero(mask))
+    raw_indices = metadata.get("cluster_mask_vertex_indices")
+    if raw_indices is not None:
+        try:
+            indices = np.asarray(raw_indices, dtype=np.int64).reshape(-1)
+        except (TypeError, ValueError):
+            return None
+        return int(len(indices))
+    return None
+
+
+def _optional_int(value: object) -> int | None:
+    try:
+        if value is None or isinstance(value, bool):
+            return None
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric
+
+
+def _optional_float(value: object) -> float | None:
+    try:
+        if value is None or isinstance(value, bool):
+            return None
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(numeric):
+        return None
+    return numeric
 
 
 def _validate_projection_inputs(

@@ -36,6 +36,8 @@ from Main_App.gui.components import (
 from Tools.LORETA_Visualizer.conditions import DEMO_LORETA_CONDITIONS, condition_by_id, default_condition
 from Tools.LORETA_Visualizer.cortical_paint import (
     DEFAULT_CORTICAL_PAINT_Z_THRESHOLD,
+    payload_cluster_mask_is_underpowered,
+    payload_cluster_mask_minimum_p,
     payload_cluster_mask,
     payload_has_cluster_mask,
     source_payload_uses_zscores,
@@ -351,6 +353,8 @@ def _activation_display_filter_readout(
     cortical_threshold_display: bool = True,
 ) -> str:
     if cortical_threshold_display and uses_cortical_surface_paint(payload) and _source_payload_uses_zscores(payload):
+        if payload_cluster_mask_is_underpowered(payload):
+            return f"; display: exploratory z >= {format_scalar_value(zscore_display_threshold)}"
         if payload_has_cluster_mask(payload):
             return "; display: source-space cluster mask"
         return f"; display: z >= {format_scalar_value(zscore_display_threshold)}"
@@ -387,6 +391,28 @@ def _activation_scale_values(
             return values[cluster_mask & np.isfinite(values)]
         return values[values >= float(zscore_display_threshold)]
     return values
+
+
+def _underpowered_cluster_mask_status_text(payload: SourcePayload) -> str | None:
+    if not (
+        uses_cortical_surface_paint(payload)
+        and _source_payload_uses_zscores(payload)
+        and payload_cluster_mask_is_underpowered(payload)
+    ):
+        return None
+    participant_count = payload.metadata.get("participant_count")
+    minimum_p = payload_cluster_mask_minimum_p(payload)
+    sample_text = ""
+    try:
+        sample_text = f" ({int(participant_count)} participants)"
+    except (TypeError, ValueError):
+        pass
+    p_text = f"; minimum possible cluster p = {format_scalar_value(minimum_p)}" if np.isfinite(minimum_p) else ""
+    return (
+        f"Due to the small sample size{sample_text}, the cluster-based permutation mask cannot be "
+        f"applied at the selected alpha{p_text}. Opaque cortical renders are underpowered, "
+        "not group-masked, and should be considered exploratory."
+    )
 
 
 def _source_export_status_text(
@@ -1678,6 +1704,7 @@ class LoretaVisualizerWindow(QWidget):
             return
         self._last_import_dir = path.parent
         self._set_activation_payload(payload)
+        self._set_payload_display_status(payload)
 
     def _import_prepared_source_manifest(self, path: Path) -> None:
         try:
@@ -1823,6 +1850,13 @@ class LoretaVisualizerWindow(QWidget):
             }
         )
         self._set_activation_payload(payload)
+        self._set_payload_display_status(payload)
+
+    def _set_payload_display_status(self, payload: SourcePayload) -> None:
+        underpowered_text = _underpowered_cluster_mask_status_text(payload)
+        if underpowered_text is not None:
+            self._set_source_export_status(underpowered_text, variant="warning")
+            return
         if (
             uses_cortical_surface_paint(payload)
             and _source_payload_uses_zscores(payload)

@@ -7,6 +7,7 @@ from Tools.LORETA_Visualizer.dummy_activation import make_demo_condition_activat
 from Tools.LORETA_Visualizer.gui import (
     _activation_display_payload,
     _activation_value_readout,
+    _underpowered_cluster_mask_status_text,
 )
 from Tools.LORETA_Visualizer.renderer import (
     BrainRendererWidget,
@@ -245,6 +246,39 @@ def test_l2_mne_surface_zscore_display_uses_cortical_paint_without_filtering_poi
     assert _activation_value_readout(display_payload, cortical_threshold_display=False) == (
         "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV"
     )
+
+
+def test_underpowered_cluster_mask_readout_marks_exploratory_threshold_display() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.2], dtype=float),
+        label="Erotic",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "sensor_value_unit": "raw FFT amplitude uV",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [],
+            "cluster_mask_vertex_count": 0,
+            "participant_count": 4,
+            "cluster_permutation_count": 16,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+    assert _activation_value_readout(payload) == (
+        "Value: source-space z-score; unit: z-score; input: raw FFT amplitude uV; "
+        "display: exploratory z >= 1.64"
+    )
+    warning = _underpowered_cluster_mask_status_text(payload)
+    assert warning is not None
+    assert "small sample size (4 participants)" in warning
+    assert "minimum possible cluster p = 0.0588" in warning
+    assert "not group-masked" in warning
 
 
 def test_split_hemisphere_projection_uses_projection_points_for_values() -> None:

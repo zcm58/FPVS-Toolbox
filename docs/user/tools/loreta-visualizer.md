@@ -79,7 +79,10 @@ update from the loaded payload values after cortical paint masking. For
 regenerated participant-first maps, the primary mask is the producer-computed
 source-space cluster-permutation mask. Older unmasked maps fall back to the
 selected display cutoff. Hidden vertices are shown as the neutral gray cortex
-color.
+color. If an exact small-sample permutation mask cannot reach the selected
+cluster alpha, the visualizer warns that the cortical render is underpowered
+and falls back to the selected exploratory z-score display cutoff instead of
+showing an empty group-level mask.
 
 ## Inputs
 
@@ -260,11 +263,13 @@ mask as the primary publication-style display. Source vertices outside
 significant clusters show the gray-white shaded cortex rather than activation
 colors. Significant positive and negative retained source z-scores can both be
 painted. Older unmasked payloads fall back to the selected display threshold.
-The default threshold is `z >= 1.64`. Source Map Options > Display provides
-preset cutoffs for `z >= 1.64`, `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and
-`z >= 3.89`. Values retained by either the cluster mask or fallback cutoff are
-painted on top with the same heatmap color ramp used by the transparent
-visualizer.
+If an exact small-sample permutation mask cannot reach the selected cluster
+alpha, the visualizer warns that the render is underpowered, not group-masked,
+and exploratory, then uses the selected display threshold. The default
+threshold is `z >= 1.64`. Source Map Options > Display provides preset cutoffs
+for `z >= 1.64`, `z >= 1.96`, `z >= 2.58`, `z >= 3.29`, and `z >= 3.89`.
+Values retained by either the cluster mask or fallback cutoff are painted on
+top with the same heatmap color ramp used by the transparent visualizer.
 
 The threshold is a display mask only. The cluster-permutation mask is the
 statistical mask for current participant-first Hauk-style L2-MNE maps, and it

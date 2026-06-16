@@ -4,6 +4,8 @@ import numpy as np
 
 from Tools.LORETA_Visualizer.cortical_paint import (
     payload_cluster_mask,
+    payload_cluster_mask_is_underpowered,
+    payload_cluster_mask_minimum_p,
     payload_has_cluster_mask,
     project_cortical_surface_payload,
     source_payload_uses_zscores,
@@ -83,6 +85,66 @@ def test_cortical_paint_cluster_mask_overrides_display_threshold() -> None:
     assert payload_cluster_mask(payload).tolist() == [True, False]
     assert projection.values[0] == 0.8
     assert np.isnan(projection.values[1])
+
+
+def test_underpowered_empty_cluster_mask_falls_back_to_threshold_display() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([0.8, 4.0], dtype=float),
+        label="small sample surface z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [],
+            "cluster_mask_vertex_count": 0,
+            "participant_count": 4,
+            "cluster_permutation_count": 16,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+    projection = project_cortical_surface_payload(payload.points, payload, neighbors=1, z_threshold=1.64)
+
+    assert payload_cluster_mask_is_underpowered(payload) is True
+    assert payload_cluster_mask_minimum_p(payload) == 1.0 / 17.0
+    assert payload_has_cluster_mask(payload) is False
+    assert payload_cluster_mask(payload) is None
+    assert np.isnan(projection.values[0])
+    assert projection.values[1] == 4.0
+
+
+def test_empty_cluster_mask_still_masks_when_permutation_resolution_can_reach_alpha() -> None:
+    payload = make_source_payload(
+        points=np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float),
+        values=np.asarray([2.4, 4.0], dtype=float),
+        label="large sample empty mask surface z",
+        kind=SOURCE_KIND_SURFACE_MESH,
+        source_model="l2_mne_fsaverage_participant_zscore_mean",
+        value_label="source-space z-score",
+        faces=np.asarray([[0, 1, 1]], dtype=np.int64),
+        metadata={
+            "source_value_unit": "z-score",
+            "cluster_mask": "source_space_cluster_permutation",
+            "cluster_mask_vertex_indices": [],
+            "cluster_mask_vertex_count": 0,
+            "participant_count": 24,
+            "cluster_permutation_count": 10000,
+            "cluster_alpha": 0.05,
+        },
+        normalize_values=False,
+    )
+
+    projection = project_cortical_surface_payload(payload.points, payload, neighbors=1, z_threshold=1.64)
+
+    assert payload_cluster_mask_is_underpowered(payload) is False
+    assert payload_has_cluster_mask(payload) is True
+    assert payload_cluster_mask(payload).tolist() == [False, False]
+    assert np.isnan(projection.values).all()
 
 
 def test_cortical_paint_cluster_mask_keeps_negative_two_tailed_values() -> None:

@@ -372,7 +372,11 @@ combined pial mesh. For participant-first maps with producer-computed
 cluster-permutation metadata, source vertices outside the significant cluster
 mask are shown as shaded cortex and retained positive z-scores use the same
 heatmap ramp as the transparent overlay view. Older unmasked payloads fall
-back to the manual display cutoff, whose default is `z >= 1.64`. The
+back to the manual display cutoff, whose default is `z >= 1.64`. Empty exact
+small-sample cluster masks whose minimum possible corrected p-value is above
+the selected alpha are treated as underpowered display masks: the visualizer
+warns the user and falls back to the exploratory manual cutoff without
+changing the saved source values or computing statistics in the renderer. The
 neighboring-bin policy mirrors the Stats-style FPVS neighboring-bin window by
 using offsets `-10..-2` and `+2..+10`, dropping the minimum and maximum
 neighboring source amplitude per source point before computing the source-space

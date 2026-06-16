@@ -128,7 +128,12 @@ are shown as shaded cortex rather than activation colors. Older unmasked
 payloads fall back to the selected display threshold. The default cutoff is
 `z >= 1.64`; Source Map Options > Display also offers `z >= 1.96`,
 `z >= 2.58`, `z >= 3.29`, and `z >= 3.89` presets. Displayed values use the
-same heatmap color scale as the transparent source-map view.
+same heatmap color scale as the transparent source-map view. For very small
+participant counts, exact sign-flip permutation resolution can make the
+minimum possible corrected p-value larger than the selected cluster alpha. In
+that case, the visualizer warns that the cluster mask is underpowered, treats
+the cortical render as not group-masked, and uses the selected exploratory
+display threshold instead of showing an empty publication mask.
 
 The color legend is in z-score units for these payloads. With auto-scaling on,
 cluster-masked maps use the retained signed source z-score range, so
@@ -147,7 +152,10 @@ the source calculation.
 The display threshold is not the source-space cluster-permutation test. It is
 kept for exploratory/unmasked payloads. For current regenerated
 participant-first maps, the cluster mask is computed before rendering and saved
-in the source JSON metadata. The renderer only obeys that prepared mask.
+in the source JSON metadata. The renderer only obeys that prepared mask, except
+when the saved empty mask is mathematically unable to reach the selected alpha
+because of exact small-sample permutation resolution; that case is explicitly
+labeled exploratory in the visualizer.
 
 ## Cluster-permutation mask
 
