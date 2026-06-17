@@ -192,6 +192,7 @@ class _Worker(
             "plot_render": 0.0,
             "file_save": 0.0,
         }
+        self._timing_details: dict[str, float] = {}
 
     def run(self) -> None:
         try:
@@ -257,6 +258,13 @@ class _Worker(
             return
         message = "Timing summary: " + ", ".join(parts) + f", total={total:.2f}s"
         self._emit(message, 0, 0)
+        detail_parts = [
+            f"{name.replace('_', ' ').replace('fullsnr', 'FullSNR')}={seconds:.2f}s"
+            for name, seconds in self._timing_details.items()
+            if seconds > 0
+        ]
+        if detail_parts:
+            self._emit("Excel load details: " + ", ".join(detail_parts), 0, 0)
         logger.info(
             "SNR plot generation timing summary.",
             extra={
@@ -264,6 +272,9 @@ class _Worker(
                 "project_root": self.project_root,
                 "condition": self.condition,
                 "timings": {key: round(value, 4) for key, value in self._timings.items()},
+                "timing_details": {
+                    key: round(value, 4) for key, value in self._timing_details.items()
+                },
                 "timed_total_seconds": round(total, 4),
             },
         )

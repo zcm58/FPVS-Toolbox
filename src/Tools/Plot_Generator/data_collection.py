@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import time
 from typing import Dict, Iterable, List, Sequence
 
 import numpy as np
@@ -22,6 +23,18 @@ _FULLSNR_SHEET = "FullSNR"
 _MISSING_FULLSNR_MESSAGE = "Worksheet named 'FullSNR' not found"
 
 
+def _add_timing_detail(
+    timing_details: dict[str, float] | None,
+    phase: str,
+    started: float,
+) -> None:
+    if timing_details is None:
+        return
+    timing_details[phase] = timing_details.get(phase, 0.0) + (
+        time.perf_counter() - started
+    )
+
+
 def _is_missing_full_snr_sheet(exc: ValueError) -> bool:
     return _MISSING_FULLSNR_MESSAGE in str(exc)
 
@@ -31,20 +44,28 @@ def _read_full_snr_sheet_read_only(
     *,
     x_min: float,
     x_max: float,
+    timing_details: dict[str, float] | None = None,
 ) -> tuple[pd.DataFrame, List[float], List[str]]:
+    started = time.perf_counter()
     workbook = load_workbook(
         excel_path,
         read_only=True,
         data_only=True,
     )
+    _add_timing_detail(timing_details, "fullsnr_workbook_open", started)
     try:
+        started = time.perf_counter()
         if _FULLSNR_SHEET not in workbook.sheetnames:
             raise ValueError(_MISSING_FULLSNR_MESSAGE)
 
         worksheet = workbook[_FULLSNR_SHEET]
         header = next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
         if header is None:
-            return pd.DataFrame(), [], []
+            _add_timing_detail(timing_details, "fullsnr_header_scan", started)
+            started = time.perf_counter()
+            df = pd.DataFrame()
+            _add_timing_detail(timing_details, "fullsnr_dataframe_build", started)
+            return df, [], []
 
         electrode_index = None
         freq_pairs: list[tuple[float, str, int]] = []
@@ -72,13 +93,18 @@ def _read_full_snr_sheet_read_only(
         ordered_freqs = [freq for freq, _, _ in selected]
         ordered_cols = [column for _, column, _ in selected]
         selected_indexes = [index for _, _, index in selected]
+        _add_timing_detail(timing_details, "fullsnr_header_scan", started)
         if not selected_indexes:
-            return pd.DataFrame(columns=["Electrode"]), ordered_freqs, ordered_cols
+            started = time.perf_counter()
+            df = pd.DataFrame(columns=["Electrode"])
+            _add_timing_detail(timing_details, "fullsnr_dataframe_build", started)
+            return df, ordered_freqs, ordered_cols
 
         columns = ["Electrode"] + ordered_cols
         rows = []
         required_indexes = [electrode_index] + selected_indexes
         max_required_column = max(required_indexes) + 1
+        started = time.perf_counter()
         for row in worksheet.iter_rows(
             min_row=2,
             max_col=max_required_column,
@@ -90,7 +116,11 @@ def _read_full_snr_sheet_read_only(
                     for index in required_indexes
                 ]
             )
-        return pd.DataFrame(rows, columns=columns), ordered_freqs, ordered_cols
+        _add_timing_detail(timing_details, "fullsnr_row_stream", started)
+        started = time.perf_counter()
+        df = pd.DataFrame(rows, columns=columns)
+        _add_timing_detail(timing_details, "fullsnr_dataframe_build", started)
+        return df, ordered_freqs, ordered_cols
     finally:
         workbook.close()
 
@@ -126,6 +156,7 @@ class PlotDataCollectionMixin:
                 excel_path,
                 x_min=self.x_min,
                 x_max=self.x_max,
+                timing_details=self._timing_details,
             ),
         )
 

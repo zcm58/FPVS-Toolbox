@@ -276,6 +276,7 @@ def test_full_snr_without_scalp_uses_direct_sheet_read(tmp_path, monkeypatch):
 def test_full_snr_direct_read_limits_data_rows_to_selected_xmax(monkeypatch):
     worksheet = _FakeFullSNRWorksheet()
     workbook = _FakeFullSNRWorkbook(worksheet)
+    timing_details = {}
 
     monkeypatch.setattr(
         plot_data_collection,
@@ -287,6 +288,7 @@ def test_full_snr_direct_read_limits_data_rows_to_selected_xmax(monkeypatch):
         repo_root() / "unused.xlsx",
         x_min=0.0,
         x_max=2.0,
+        timing_details=timing_details,
     )
 
     assert ordered_freqs == [1.0, 2.0]
@@ -297,4 +299,10 @@ def test_full_snr_direct_read_limits_data_rows_to_selected_xmax(monkeypatch):
         "2.0000_Hz": [2.0, 4.0],
     }
     assert worksheet.calls[1]["max_col"] == 3
+    assert set(timing_details) == {
+        "fullsnr_workbook_open",
+        "fullsnr_header_scan",
+        "fullsnr_row_stream",
+        "fullsnr_dataframe_build",
+    }
     assert workbook.closed
