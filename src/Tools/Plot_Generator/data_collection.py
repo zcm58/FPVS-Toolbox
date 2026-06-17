@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
@@ -21,9 +20,6 @@ from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 
 _FULLSNR_SHEET = "FullSNR"
 _MISSING_FULLSNR_MESSAGE = "Worksheet named 'FullSNR' not found"
-_FULLSNR_MAX_CONCURRENT_READS = 2
-
-_FullSNRReadResult = tuple[pd.DataFrame, List[float], List[str]]
 
 
 def _is_missing_full_snr_sheet(exc: ValueError) -> bool:
@@ -115,44 +111,20 @@ class PlotDataCollectionMixin:
         files.sort()
         return files
 
-    def _read_full_snr_direct_parallel(
+    def _read_full_snr_direct(
         self,
-        files: Sequence[Path],
-    ) -> dict[Path, _FullSNRReadResult | Exception]:
-        if len(files) == 1:
-            excel_path = files[0]
-            try:
-                return {
-                    excel_path: _read_full_snr_sheet_read_only(
-                        excel_path,
-                        x_min=self.x_min,
-                        x_max=self.x_max,
-                    )
-                }
-            except Exception as exc:  # pragma: no cover - handled by caller
-                return {excel_path: exc}
+        excel_path: Path,
+    ) -> tuple[pd.DataFrame, List[float], List[str]]:
+        return self._timed_call(
+            "excel_load",
+            lambda: _read_full_snr_sheet_read_only(
+                excel_path,
+                x_min=self.x_min,
+                x_max=self.x_max,
+            ),
+        )
 
-        results: dict[Path, _FullSNRReadResult | Exception] = {}
-        max_workers = min(_FULLSNR_MAX_CONCURRENT_READS, len(files))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    _read_full_snr_sheet_read_only,
-                    excel_path,
-                    x_min=self.x_min,
-                    x_max=self.x_max,
-                ): excel_path
-                for excel_path in files
-            }
-            for future in as_completed(futures):
-                excel_path = futures[future]
-                try:
-                    results[excel_path] = future.result()
-                except Exception as exc:  # pragma: no cover - handled by caller
-                    results[excel_path] = exc
-        return results
-
-    def _read_full_snr_from_workbook(self, xls) -> _FullSNRReadResult:
+    def _read_full_snr_from_workbook(self, xls) -> tuple[pd.DataFrame, List[float], List[str]]:
         header = self._read_excel_timed(xls, sheet_name=_FULLSNR_SHEET, nrows=0)
         freq_pairs = _frequency_pairs_from_columns(header.columns)
         ordered_freqs, ordered_cols = _select_frequency_pairs(
@@ -170,7 +142,7 @@ class PlotDataCollectionMixin:
             df = pd.DataFrame()
         return df, ordered_freqs, ordered_cols
 
-    def _read_fft_amplitude_from_workbook(self, xls) -> _FullSNRReadResult:
+    def _read_fft_amplitude_from_workbook(self, xls) -> tuple[pd.DataFrame, List[float], List[str]]:
         df_amp = self._read_excel_timed(xls, sheet_name="FFT Amplitude (uV)")
         freq_pairs = _frequency_pairs_from_columns(df_amp.columns)
         freq_cols_tmp = [col for _, col in freq_pairs]
@@ -237,18 +209,6 @@ class PlotDataCollectionMixin:
             roi: np.asarray(sorted(chans), dtype=str)
             for roi, chans in roi_channels_upper.items()
         }
-        full_snr_reads: dict[Path, _FullSNRReadResult | Exception] = {}
-        if not collect_scalp:
-            reader_count = min(_FULLSNR_MAX_CONCURRENT_READS, len(files))
-            self._emit(
-                f"Reading FullSNR sheets with up to {reader_count} concurrent reads",
-                offset + processed_files,
-                overall_total,
-            )
-            full_snr_reads = self._timed_call(
-                "excel_load",
-                lambda: self._read_full_snr_direct_parallel(files),
-            )
 
         for excel_path in files:
             if self._stop_requested:
@@ -262,17 +222,13 @@ class PlotDataCollectionMixin:
             scalp_map: Dict[str, float] | None = None
             try:
                 if not collect_scalp:
-                    read_result = full_snr_reads[excel_path]
-                    if isinstance(read_result, Exception):
-                        if not (
-                            isinstance(read_result, ValueError)
-                            and _is_missing_full_snr_sheet(read_result)
-                        ):
-                            raise read_result
+                    try:
+                        df, ordered_freqs, ordered_cols = self._read_full_snr_direct(excel_path)
+                    except ValueError as exc:
+                        if not _is_missing_full_snr_sheet(exc):
+                            raise
                         with self._timed_call("excel_load", lambda: pd.ExcelFile(excel_path)) as xls:
                             df, ordered_freqs, ordered_cols = self._read_fft_amplitude_from_workbook(xls)
-                    else:
-                        df, ordered_freqs, ordered_cols = read_result
                 else:
                     with self._timed_call("excel_load", lambda: pd.ExcelFile(excel_path)) as xls:
                         sheet_names = set(xls.sheet_names)
