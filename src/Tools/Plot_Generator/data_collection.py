@@ -17,6 +17,30 @@ from Tools.Plot_Generator.excel_inputs import (
 from Tools.Plot_Generator.scalp_utils import summarize_subject_scalp
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 
+_FULLSNR_SHEET = "FullSNR"
+_MISSING_FULLSNR_MESSAGE = "Worksheet named 'FullSNR' not found"
+
+
+def _full_snr_usecols(x_min: float, x_max: float):
+    tolerance = 1e-3
+
+    def include_column(column: object) -> bool:
+        if column == "Electrode":
+            return True
+        if not isinstance(column, str) or not column.endswith("_Hz"):
+            return False
+        try:
+            freq = float(column.split("_")[0])
+        except ValueError:
+            return False
+        return (x_min - tolerance) <= freq <= (x_max + tolerance)
+
+    return include_column
+
+
+def _is_missing_full_snr_sheet(exc: ValueError) -> bool:
+    return _MISSING_FULLSNR_MESSAGE in str(exc)
+
 
 class PlotDataCollectionMixin:
     """Worker-state helpers for Excel discovery, reading, and SNR fallback."""
@@ -38,6 +62,61 @@ class PlotDataCollectionMixin:
         ]
         files.sort()
         return files
+
+    def _read_full_snr_direct(
+        self,
+        excel_path: Path,
+    ) -> tuple[pd.DataFrame, List[float], List[str]]:
+        df = self._read_excel_timed(
+            excel_path,
+            sheet_name=_FULLSNR_SHEET,
+            usecols=_full_snr_usecols(self.x_min, self.x_max),
+        )
+        freq_pairs = _frequency_pairs_from_columns(df.columns)
+        ordered_freqs, ordered_cols = _select_frequency_pairs(
+            freq_pairs,
+            x_min=self.x_min,
+            x_max=self.x_max,
+        )
+        return df, ordered_freqs, ordered_cols
+
+    def _read_full_snr_from_workbook(self, xls) -> tuple[pd.DataFrame, List[float], List[str]]:
+        header = self._read_excel_timed(xls, sheet_name=_FULLSNR_SHEET, nrows=0)
+        freq_pairs = _frequency_pairs_from_columns(header.columns)
+        ordered_freqs, ordered_cols = _select_frequency_pairs(
+            freq_pairs,
+            x_min=self.x_min,
+            x_max=self.x_max,
+        )
+        if ordered_cols:
+            df = self._read_excel_timed(
+                xls,
+                sheet_name=_FULLSNR_SHEET,
+                usecols=["Electrode"] + ordered_cols,
+            )
+        else:
+            df = pd.DataFrame()
+        return df, ordered_freqs, ordered_cols
+
+    def _read_fft_amplitude_from_workbook(self, xls) -> tuple[pd.DataFrame, List[float], List[str]]:
+        df_amp = self._read_excel_timed(xls, sheet_name="FFT Amplitude (uV)")
+        freq_pairs = _frequency_pairs_from_columns(df_amp.columns)
+        freq_cols_tmp = [col for _, col in freq_pairs]
+        snr_vals = df_amp[freq_cols_tmp].apply(
+            calc_snr_matlab,
+            axis=1,
+            result_type="expand",
+        )
+        snr_vals.columns = freq_cols_tmp
+        snr_vals.insert(0, "Electrode", df_amp["Electrode"])
+        ordered_freqs, ordered_cols = _select_frequency_pairs(
+            freq_pairs,
+            x_min=self.x_min,
+            x_max=self.x_max,
+        )
+        if ordered_cols:
+            snr_vals = snr_vals[["Electrode"] + ordered_cols]
+        return snr_vals, ordered_freqs, ordered_cols
 
     def _collect_data(
         self,
@@ -98,60 +177,22 @@ class PlotDataCollectionMixin:
             )
             scalp_map: Dict[str, float] | None = None
             try:
-                with self._timed_call("excel_load", lambda: pd.ExcelFile(excel_path)) as xls:
-                    sheet_names = set(xls.sheet_names)
-                    if "FullSNR" in sheet_names:
-                        header = self._read_excel_timed(xls, sheet_name="FullSNR", nrows=0)
-                        freq_pairs = _frequency_pairs_from_columns(header.columns)
-                        ordered_freqs, ordered_cols = _select_frequency_pairs(
-                            freq_pairs,
-                            x_min=self.x_min,
-                            x_max=self.x_max,
-                        )
-                        if not ordered_cols:
-                            self._emit(
-                                f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
-                                offset + processed_files,
-                                overall_total,
-                            )
-                            self._record_failure(
-                                item=excel_path.name,
-                                error="No frequencies in selected x-range",
-                            )
-                            processed_files += 1
-                            continue
-                        usecols = ["Electrode"] + ordered_cols
-                        df = self._read_excel_timed(xls, sheet_name="FullSNR", usecols=usecols)
-                    else:
-                        df_amp = self._read_excel_timed(xls, sheet_name="FFT Amplitude (uV)")
-                        freq_pairs = _frequency_pairs_from_columns(df_amp.columns)
-                        freq_cols_tmp = [col for _, col in freq_pairs]
-                        snr_vals = df_amp[freq_cols_tmp].apply(
-                            calc_snr_matlab, axis=1, result_type="expand"
-                        )
-                        snr_vals.columns = freq_cols_tmp
-                        snr_vals.insert(0, "Electrode", df_amp["Electrode"])
-                        df = snr_vals
-                        ordered_freqs, ordered_cols = _select_frequency_pairs(
-                            freq_pairs,
-                            x_min=self.x_min,
-                            x_max=self.x_max,
-                        )
-                        if not ordered_cols:
-                            self._emit(
-                                f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
-                                offset + processed_files,
-                                overall_total,
-                            )
-                            self._record_failure(
-                                item=excel_path.name,
-                                error="No frequencies in selected x-range",
-                            )
-                            processed_files += 1
-                            continue
-                        df = df[["Electrode"] + ordered_cols]
+                if not collect_scalp:
+                    try:
+                        df, ordered_freqs, ordered_cols = self._read_full_snr_direct(excel_path)
+                    except ValueError as exc:
+                        if not _is_missing_full_snr_sheet(exc):
+                            raise
+                        with self._timed_call("excel_load", lambda: pd.ExcelFile(excel_path)) as xls:
+                            df, ordered_freqs, ordered_cols = self._read_fft_amplitude_from_workbook(xls)
+                else:
+                    with self._timed_call("excel_load", lambda: pd.ExcelFile(excel_path)) as xls:
+                        sheet_names = set(xls.sheet_names)
+                        if _FULLSNR_SHEET in sheet_names:
+                            df, ordered_freqs, ordered_cols = self._read_full_snr_from_workbook(xls)
+                        else:
+                            df, ordered_freqs, ordered_cols = self._read_fft_amplitude_from_workbook(xls)
 
-                    if collect_scalp:
                         has_bca = "BCA (uV)" in sheet_names
                         has_z = "Z Score" in sheet_names
                         if not has_bca and not warned_missing_bca:
@@ -192,11 +233,14 @@ class PlotDataCollectionMixin:
                 continue
             if not ordered_cols:
                 self._emit(
-                    f"No freq columns in {excel_path.name}",
+                    f"No frequencies in x-range [{self.x_min}, {self.x_max}] for {excel_path.name}",
                     offset + processed_files,
                     overall_total,
                 )
-                self._record_failure(item=excel_path.name, error="No frequency columns found")
+                self._record_failure(
+                    item=excel_path.name,
+                    error="No frequencies in selected x-range",
+                )
                 processed_files += 1
                 continue
             self._emit(

@@ -7,6 +7,7 @@ if importlib.util.find_spec("matplotlib") is None:
 
 import pandas as pd
 
+from Tools.Plot_Generator import data_collection as plot_data_collection
 from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
 
 
@@ -176,3 +177,64 @@ def test_full_snr_all_roi_and_group_aggregation(tmp_path, monkeypatch):
             "Posterior": pytest.approx([600.0, 700.0]),
         },
     }
+
+
+def test_full_snr_without_scalp_uses_direct_sheet_read(tmp_path, monkeypatch):
+    module = _import_module()
+
+    cond_dir = tmp_path / "Cond"
+    cond_dir.mkdir()
+    df = pd.DataFrame(
+        {
+            "Electrode": ["Cz", "Pz"],
+            "0.5000_Hz": [100, 100],
+            "1.0000_Hz": [1, 3],
+            "2.0000_Hz": [5, 7],
+            "3.0000_Hz": [100, 100],
+        }
+    )
+    with pd.ExcelWriter(cond_dir / "P01_Cond_Results.xlsx") as writer:
+        df.to_excel(writer, sheet_name="FullSNR", index=False)
+
+    original_read_excel = plot_data_collection.pd.read_excel
+    read_calls = []
+
+    def counting_read_excel(*args, **kwargs):
+        read_calls.append(kwargs.get("sheet_name"))
+        return original_read_excel(*args, **kwargs)
+
+    def fail_excel_file(*args, **kwargs):
+        raise AssertionError("FullSNR fast path should not open pd.ExcelFile")
+
+    monkeypatch.setattr(plot_data_collection.pd, "read_excel", counting_read_excel)
+    monkeypatch.setattr(plot_data_collection.pd, "ExcelFile", fail_excel_file)
+    monkeypatch.setattr(module._Worker, "_emit", lambda *a, **k: None)
+
+    captured = {}
+
+    def dummy_plot(self, freqs, roi_data):
+        captured["freqs"] = freqs
+        captured["roi_data"] = roi_data
+
+    monkeypatch.setattr(module._Worker, "_plot", dummy_plot)
+
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"All": ["Cz", "Pz"]},
+        selected_roi="All",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=1.0,
+        x_max=2.0,
+        y_min=0.0,
+        y_max=10.0,
+        out_dir=str(tmp_path),
+    )
+
+    worker._run()
+
+    assert read_calls == ["FullSNR"]
+    assert captured["freqs"] == [1.0, 2.0]
+    assert captured["roi_data"] == {"All": [2.0, 6.0]}
