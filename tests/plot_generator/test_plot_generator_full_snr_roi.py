@@ -11,47 +11,6 @@ from Tools.Plot_Generator import data_collection as plot_data_collection
 from Tools.Stats.analysis.stats_analysis import ALL_ROIS_OPTION
 
 
-class _FakeFullSNRWorksheet:
-    def __init__(self):
-        self.calls = []
-
-    def iter_rows(self, **kwargs):
-        self.calls.append(kwargs)
-        if kwargs.get("min_row") == 1:
-            return iter(
-                [
-                    (
-                        "Electrode",
-                        "1.0000_Hz",
-                        "2.0000_Hz",
-                        "3.0000_Hz",
-                        "4.0000_Hz",
-                    )
-                ]
-            )
-        return iter(
-            [
-                ("Cz", 1.0, 2.0),
-                ("Pz", 3.0, 4.0),
-            ]
-        )
-
-
-class _FakeFullSNRWorkbook:
-    sheetnames = ["FullSNR"]
-
-    def __init__(self, worksheet):
-        self._worksheet = worksheet
-        self.closed = False
-
-    def __getitem__(self, name):
-        assert name == "FullSNR"
-        return self._worksheet
-
-    def close(self):
-        self.closed = True
-
-
 def _import_module():
     path = repo_root() / "src" / "Tools" / "Plot_Generator" / "plot_generator.py"
     spec = importlib.util.spec_from_file_location("plot_generator", path)
@@ -273,36 +232,41 @@ def test_full_snr_without_scalp_uses_direct_sheet_read(tmp_path, monkeypatch):
     assert captured["roi_data"] == {"All": [2.0, 6.0]}
 
 
-def test_full_snr_direct_read_limits_data_rows_to_selected_xmax(monkeypatch):
-    worksheet = _FakeFullSNRWorksheet()
-    workbook = _FakeFullSNRWorkbook(worksheet)
+def test_full_snr_direct_read_filters_to_selected_roi_electrodes(tmp_path):
+    excel_path = tmp_path / "P01_Cond_Results.xlsx"
+    df = pd.DataFrame(
+        {
+            "Electrode": ["Cz", "Fz", "Pz"],
+            "0.5000_Hz": [100.0, 100.0, 100.0],
+            "1.0000_Hz": [1.0, 900.0, 3.0],
+            "2.0000_Hz": [5.0, 900.0, 7.0],
+            "3.0000_Hz": [100.0, 100.0, 100.0],
+        }
+    )
+    with pd.ExcelWriter(excel_path) as writer:
+        df.to_excel(writer, sheet_name="FullSNR", index=False)
+
     timing_details = {}
 
-    monkeypatch.setattr(
-        plot_data_collection,
-        "load_workbook",
-        lambda *args, **kwargs: workbook,
-    )
-
-    df, ordered_freqs, ordered_cols = plot_data_collection._read_full_snr_sheet_read_only(
-        repo_root() / "unused.xlsx",
-        x_min=0.0,
+    filtered, ordered_freqs, ordered_cols = plot_data_collection._read_full_snr_sheet_read_only(
+        excel_path,
+        x_min=1.0,
         x_max=2.0,
         timing_details=timing_details,
+        included_electrodes_upper={"CZ", "PZ"},
     )
 
     assert ordered_freqs == [1.0, 2.0]
     assert ordered_cols == ["1.0000_Hz", "2.0000_Hz"]
-    assert df.to_dict("list") == {
+    assert filtered.to_dict("list") == {
         "Electrode": ["Cz", "Pz"],
         "1.0000_Hz": [1.0, 3.0],
-        "2.0000_Hz": [2.0, 4.0],
+        "2.0000_Hz": [5.0, 7.0],
     }
-    assert worksheet.calls[1]["max_col"] == 3
     assert set(timing_details) == {
         "fullsnr_workbook_open",
+        "fullsnr_shared_strings",
         "fullsnr_header_scan",
         "fullsnr_row_stream",
         "fullsnr_dataframe_build",
     }
-    assert workbook.closed

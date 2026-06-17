@@ -18,6 +18,9 @@ Current ownership map:
   older imports.
 - `worker_config.py`: `_Worker` constructor payload dataclass.
 - `excel_inputs.py`: subject ID and frequency-column helpers.
+- `full_snr_reader.py`: direct `.xlsx` XML reader for the no-scalp FullSNR
+  fast path, including selected-frequency parsing, selected-ROI electrode
+  filtering, and FullSNR load subtimings.
 - `data_collection.py`: Excel discovery/loading, FullSNR preference, FFT
   Amplitude SNR fallback, and source data collection.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and

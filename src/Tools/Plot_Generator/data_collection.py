@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import time
 from typing import Dict, Iterable, List, Sequence
 
 import numpy as np
-from openpyxl import load_workbook
 import pandas as pd
 
 from Tools.Plot_Generator.excel_inputs import (
@@ -16,113 +14,13 @@ from Tools.Plot_Generator.excel_inputs import (
     _infer_subject_id_from_path,
     _select_frequency_pairs,
 )
+from Tools.Plot_Generator.full_snr_reader import (
+    _FULLSNR_SHEET,
+    _is_missing_full_snr_sheet,
+    _read_full_snr_sheet_read_only,
+)
 from Tools.Plot_Generator.scalp_utils import summarize_subject_scalp
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
-
-_FULLSNR_SHEET = "FullSNR"
-_MISSING_FULLSNR_MESSAGE = "Worksheet named 'FullSNR' not found"
-
-
-def _add_timing_detail(
-    timing_details: dict[str, float] | None,
-    phase: str,
-    started: float,
-) -> None:
-    if timing_details is None:
-        return
-    timing_details[phase] = timing_details.get(phase, 0.0) + (
-        time.perf_counter() - started
-    )
-
-
-def _is_missing_full_snr_sheet(exc: ValueError) -> bool:
-    return _MISSING_FULLSNR_MESSAGE in str(exc)
-
-
-def _read_full_snr_sheet_read_only(
-    excel_path: Path,
-    *,
-    x_min: float,
-    x_max: float,
-    timing_details: dict[str, float] | None = None,
-) -> tuple[pd.DataFrame, List[float], List[str]]:
-    started = time.perf_counter()
-    workbook = load_workbook(
-        excel_path,
-        read_only=True,
-        data_only=True,
-    )
-    _add_timing_detail(timing_details, "fullsnr_workbook_open", started)
-    try:
-        started = time.perf_counter()
-        if _FULLSNR_SHEET not in workbook.sheetnames:
-            raise ValueError(_MISSING_FULLSNR_MESSAGE)
-
-        worksheet = workbook[_FULLSNR_SHEET]
-        header = next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-        if header is None:
-            _add_timing_detail(timing_details, "fullsnr_header_scan", started)
-            started = time.perf_counter()
-            df = pd.DataFrame()
-            _add_timing_detail(timing_details, "fullsnr_dataframe_build", started)
-            return df, [], []
-
-        electrode_index = None
-        freq_pairs: list[tuple[float, str, int]] = []
-        for index, column in enumerate(header):
-            if column == "Electrode":
-                electrode_index = index
-            if not isinstance(column, str) or not column.endswith("_Hz"):
-                continue
-            try:
-                freq = float(column.split("_")[0])
-            except ValueError:
-                continue
-            freq_pairs.append((freq, column, index))
-
-        if electrode_index is None:
-            raise KeyError("Electrode")
-
-        freq_pairs.sort(key=lambda item: item[0])
-        tolerance = 1e-3
-        selected = [
-            (freq, column, index)
-            for freq, column, index in freq_pairs
-            if (x_min - tolerance) <= freq <= (x_max + tolerance)
-        ]
-        ordered_freqs = [freq for freq, _, _ in selected]
-        ordered_cols = [column for _, column, _ in selected]
-        selected_indexes = [index for _, _, index in selected]
-        _add_timing_detail(timing_details, "fullsnr_header_scan", started)
-        if not selected_indexes:
-            started = time.perf_counter()
-            df = pd.DataFrame(columns=["Electrode"])
-            _add_timing_detail(timing_details, "fullsnr_dataframe_build", started)
-            return df, ordered_freqs, ordered_cols
-
-        columns = ["Electrode"] + ordered_cols
-        rows = []
-        required_indexes = [electrode_index] + selected_indexes
-        max_required_column = max(required_indexes) + 1
-        started = time.perf_counter()
-        for row in worksheet.iter_rows(
-            min_row=2,
-            max_col=max_required_column,
-            values_only=True,
-        ):
-            rows.append(
-                [
-                    row[index] if index < len(row) else None
-                    for index in required_indexes
-                ]
-            )
-        _add_timing_detail(timing_details, "fullsnr_row_stream", started)
-        started = time.perf_counter()
-        df = pd.DataFrame(rows, columns=columns)
-        _add_timing_detail(timing_details, "fullsnr_dataframe_build", started)
-        return df, ordered_freqs, ordered_cols
-    finally:
-        workbook.close()
 
 
 class PlotDataCollectionMixin:
@@ -149,6 +47,8 @@ class PlotDataCollectionMixin:
     def _read_full_snr_direct(
         self,
         excel_path: Path,
+        *,
+        included_electrodes_upper: set[str],
     ) -> tuple[pd.DataFrame, List[float], List[str]]:
         return self._timed_call(
             "excel_load",
@@ -157,6 +57,7 @@ class PlotDataCollectionMixin:
                 x_min=self.x_min,
                 x_max=self.x_max,
                 timing_details=self._timing_details,
+                included_electrodes_upper=included_electrodes_upper,
             ),
         )
 
@@ -245,6 +146,11 @@ class PlotDataCollectionMixin:
             roi: np.asarray(sorted(chans), dtype=str)
             for roi, chans in roi_channels_upper.items()
         }
+        included_electrodes_upper = {
+            channel
+            for channels in roi_channels_upper.values()
+            for channel in channels
+        }
 
         for excel_path in files:
             if self._stop_requested:
@@ -259,7 +165,10 @@ class PlotDataCollectionMixin:
             try:
                 if not collect_scalp:
                     try:
-                        df, ordered_freqs, ordered_cols = self._read_full_snr_direct(excel_path)
+                        df, ordered_freqs, ordered_cols = self._read_full_snr_direct(
+                            excel_path,
+                            included_electrodes_upper=included_electrodes_upper,
+                        )
                     except ValueError as exc:
                         if not _is_missing_full_snr_sheet(exc):
                             raise
