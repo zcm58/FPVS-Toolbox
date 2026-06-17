@@ -78,7 +78,12 @@ def _read_full_snr_sheet_read_only(
         columns = ["Electrode"] + ordered_cols
         rows = []
         required_indexes = [electrode_index] + selected_indexes
-        for row in worksheet.iter_rows(min_row=2, values_only=True):
+        max_required_column = max(required_indexes) + 1
+        for row in worksheet.iter_rows(
+            min_row=2,
+            max_col=max_required_column,
+            values_only=True,
+        ):
             rows.append(
                 [
                     row[index] if index < len(row) else None
