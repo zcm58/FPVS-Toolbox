@@ -126,7 +126,7 @@ def test_full_snr_all_roi_and_group_aggregation(tmp_path, monkeypatch):
 
     captured = {}
 
-    def dummy_plot(self, freqs, roi_data, group_curves=None, scalp_inputs=None):
+    def dummy_plot(self, freqs, roi_data, group_curves=None):
         captured["freqs"] = freqs
         captured["roi_data"] = roi_data
         captured["group_curves"] = group_curves or {}
@@ -179,7 +179,7 @@ def test_full_snr_all_roi_and_group_aggregation(tmp_path, monkeypatch):
     }
 
 
-def test_full_snr_without_scalp_uses_direct_sheet_read(tmp_path, monkeypatch):
+def test_full_snr_uses_direct_sheet_read(tmp_path, monkeypatch):
     module = _import_module()
 
     cond_dir = tmp_path / "Cond"

@@ -1,5 +1,5 @@
 The Plot_Generator directory contains the standalone PySide6 tool that builds SNR
-or BCA line plots from Excel files created by the FPVS Toolbox. GUI adjustments
+line plots from Excel files created by the FPVS Toolbox. GUI adjustments
 and minor bug fixes are allowed. Keep processing code modular and under 500 lines
 per file. ROI definitions should be loaded from the existing settings using the
 utilities in `Tools.Stats`. Plots should be averaged across participants within
@@ -18,15 +18,13 @@ Current ownership map:
   older imports.
 - `worker_config.py`: `_Worker` constructor payload dataclass.
 - `excel_inputs.py`: subject ID and frequency-column helpers.
-- `full_snr_reader.py`: direct `.xlsx` XML reader for the no-scalp FullSNR
-  fast path, including selected-frequency parsing, selected-ROI electrode
+- `full_snr_reader.py`: direct `.xlsx` XML reader for the FullSNR fast path,
+  including selected-frequency parsing, selected-ROI electrode
   filtering, and FullSNR load subtimings.
 - `data_collection.py`: Excel discovery/loading, FullSNR preference, FFT
   Amplitude SNR fallback, and source data collection.
 - `aggregation.py`: selected ROI resolution, ROI averaging, group curves, and
   unknown-subject warnings.
-- `scalp_rendering.py` and `scalp_utils.py`: scalp input selection and MNE
-  topomap rendering.
 - `rendering.py`: line and overlay plot rendering plus Matplotlib `Agg`
   configuration.
 - `snr_utils.py`: shared SNR calculation helpers.
@@ -41,9 +39,12 @@ v2.1 project contract:
   Plot Generator `input_folder` settings override that canonical project root.
   Group Options should only activate when that canonical Excel root is selected.
 - Multi-group plotting is a one-condition, group-overlay workflow. Hide the
-  condition overlay and scalp-map checkboxes in multi-group mode; the existing
+  condition overlay checkbox in multi-group mode; the existing
   A/B colors, legend labels, and peak labels map to the first and second
   selected groups.
+- Plot Generator is SNR-line-plot only. Scalp maps belong to the dedicated
+  scalp plotting tool; do not reintroduce scalp-map GUI controls, BCA/Z scalp
+  data collection, MNE topomap rendering, or Plot Generator scalp helper modules.
 - Multi-group Excel files live under
   `<Excel Root>/<Condition>/<Group>/<Participant>_<Condition>_Results.xlsx`.
   Discovery may recurse within a condition folder, but group membership should
@@ -72,7 +73,7 @@ Use script output to decide what to read next.
 For Plot Generator worker or rendering changes, start with:
 
 ```powershell
-.\.venv1\Scripts\python.exe -m py_compile src\Tools\Plot_Generator\worker.py src\Tools\Plot_Generator\excel_inputs.py src\Tools\Plot_Generator\worker_config.py src\Tools\Plot_Generator\data_collection.py src\Tools\Plot_Generator\aggregation.py src\Tools\Plot_Generator\scalp_rendering.py src\Tools\Plot_Generator\rendering.py
+.\.venv1\Scripts\python.exe -m py_compile src\Tools\Plot_Generator\worker.py src\Tools\Plot_Generator\excel_inputs.py src\Tools\Plot_Generator\worker_config.py src\Tools\Plot_Generator\data_collection.py src\Tools\Plot_Generator\aggregation.py src\Tools\Plot_Generator\rendering.py
 .\.venv1\Scripts\python.exe -m pytest tests\plot_generator -q
 ```
 
@@ -80,8 +81,6 @@ Future feature/fix plans:
 
 - `docs/agent/exec-plans/future/plot-generator-multigroup-snr-overlays.md`
   covers first-class multi-group SNR overlays.
-- `docs/agent/exec-plans/future/plot-generator-scalp-topography-fix.md`
-  covers the scalp map/topography diagnosis and fix.
 
 This tool will be used to generate publication quality figures within the FPVS Toolbox. Users should have the ability
 to edit the plot title, x and y labels, and the scale of the x and y axes.

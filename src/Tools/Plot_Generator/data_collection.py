@@ -19,7 +19,6 @@ from Tools.Plot_Generator.full_snr_reader import (
     _is_missing_full_snr_sheet,
     _read_full_snr_sheet_read_only,
 )
-from Tools.Plot_Generator.scalp_utils import summarize_subject_scalp
 from Tools.Plot_Generator.snr_utils import calc_snr_matlab
 
 
@@ -106,18 +105,18 @@ class PlotDataCollectionMixin:
         excel_files: Sequence[Path] | None = None,
         offset: int = 0,
         total_override: int | None = None,
-    ) -> tuple[List[float], Dict[str, Dict[str, List[float]]], Dict[str, Dict[str, float]]]:
+    ) -> tuple[List[float], Dict[str, Dict[str, List[float]]]]:
         cond_folder = Path(self.folder) / condition
         if not cond_folder.is_dir():
             self._emit(f"Condition folder not found: {cond_folder}")
-            return [], {}, {}
+            return [], {}
 
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
         files = list(excel_files) if excel_files is not None else self._list_excel_files(condition)
         if not files:
             self._emit("No Excel files found for condition.")
-            return [], {}, {}
+            return [], {}
 
         total_files = len(files)
         overall_total = total_override if total_override is not None else total_files
@@ -131,11 +130,6 @@ class PlotDataCollectionMixin:
         roi_names = self._selected_roi_names()
 
         subject_roi_data: Dict[str, Dict[str, List[float]]] = {}
-        subject_scalp_data: Dict[str, Dict[str, float]] = {}
-        collect_scalp = self.include_scalp_maps
-        scalp_oddballs = self._scalp_oddball_frequencies() if collect_scalp else []
-        warned_missing_bca = False
-        warned_missing_z = False
         freqs: Iterable[float] | None = None
         self._unknown_subject_files.clear()
         roi_channels_upper = {
@@ -155,67 +149,23 @@ class PlotDataCollectionMixin:
         for excel_path in files:
             if self._stop_requested:
                 self._emit("Generation cancelled by user.")
-                return [], {}, {}
+                return [], {}
             self._emit(
                 f"Reading {excel_path.name}",
                 offset + processed_files,
                 overall_total,
             )
-            scalp_map: Dict[str, float] | None = None
             try:
-                if not collect_scalp:
-                    try:
-                        df, ordered_freqs, ordered_cols = self._read_full_snr_direct(
-                            excel_path,
-                            included_electrodes_upper=included_electrodes_upper,
-                        )
-                    except ValueError as exc:
-                        if not _is_missing_full_snr_sheet(exc):
-                            raise
-                        with self._timed_call("excel_load", lambda: pd.ExcelFile(excel_path)) as xls:
-                            df, ordered_freqs, ordered_cols = self._read_fft_amplitude_from_workbook(xls)
-                else:
+                try:
+                    df, ordered_freqs, ordered_cols = self._read_full_snr_direct(
+                        excel_path,
+                        included_electrodes_upper=included_electrodes_upper,
+                    )
+                except ValueError as exc:
+                    if not _is_missing_full_snr_sheet(exc):
+                        raise
                     with self._timed_call("excel_load", lambda: pd.ExcelFile(excel_path)) as xls:
-                        sheet_names = set(xls.sheet_names)
-                        if _FULLSNR_SHEET in sheet_names:
-                            df, ordered_freqs, ordered_cols = self._read_full_snr_from_workbook(xls)
-                        else:
-                            df, ordered_freqs, ordered_cols = self._read_fft_amplitude_from_workbook(xls)
-
-                        has_bca = "BCA (uV)" in sheet_names
-                        has_z = "Z Score" in sheet_names
-                        if not has_bca and not warned_missing_bca:
-                            self._emit(
-                                "BCA (uV) sheet missing; scalp maps skipped.",
-                                offset + processed_files,
-                                overall_total,
-                            )
-                            warned_missing_bca = True
-                        if not has_z and not warned_missing_z:
-                            self._emit(
-                                "Z Score sheet missing; scalp maps skipped.",
-                                offset + processed_files,
-                                overall_total,
-                            )
-                            warned_missing_z = True
-                        if has_bca and has_z:
-                            try:
-                                df_bca = self._read_excel_timed(xls, sheet_name="BCA (uV)")
-                                df_z = self._read_excel_timed(xls, sheet_name="Z Score")
-                                scalp_map = self._timed_call(
-                                    "scalp_prepare",
-                                    lambda: summarize_subject_scalp(
-                                        df_bca,
-                                        df_z,
-                                        scalp_oddballs,
-                                    ),
-                                )
-                            except Exception as exc:  # pragma: no cover - logged to UI
-                                self._emit(f"Failed reading scalp data in {excel_path.name}: {exc}")
-                                self._record_failure(
-                                    item=excel_path.name,
-                                    error=f"Failed reading scalp data: {exc}",
-                                )
+                        df, ordered_freqs, ordered_cols = self._read_fft_amplitude_from_workbook(xls)
             except Exception as exc:  # pragma: no cover - simple logging
                 self._emit(f"Failed reading {excel_path.name}: {exc}")
                 self._record_failure(item=excel_path.name, error=f"Failed reading Excel: {exc}")
@@ -294,9 +244,6 @@ class PlotDataCollectionMixin:
                 ).tolist()
                 subject_roi_data.setdefault(subject_id, {})[roi] = means
 
-            if scalp_map is not None:
-                subject_scalp_data[subject_id] = scalp_map
-
             processed_files += 1
             self._emit("", offset + processed_files, overall_total)
 
@@ -306,10 +253,10 @@ class PlotDataCollectionMixin:
                 offset + processed_files,
                 overall_total,
             )
-            return [], {}, {}
+            return [], {}
 
         if not subject_roi_data:
             self._emit("No ROI data to plot.")
-            return [], {}, {}
+            return [], {}
 
-        return list(freqs), subject_roi_data, subject_scalp_data
+        return list(freqs), subject_roi_data

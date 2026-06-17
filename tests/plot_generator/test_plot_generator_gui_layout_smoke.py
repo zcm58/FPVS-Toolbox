@@ -53,8 +53,11 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert window.xmax_spin.width() >= 100
     assert window.ymin_spin.width() >= 100
     assert window.ymax_spin.width() >= 100
-    assert window.scalp_min_spin.width() >= 100
-    assert window.scalp_max_spin.width() >= 100
+    assert not hasattr(window, "scalp_check")
+    assert not hasattr(window, "scalp_min_spin")
+    assert not hasattr(window, "scalp_max_spin")
+    assert not hasattr(window, "scalp_title_a_edit")
+    assert not hasattr(window, "scalp_title_b_edit")
     assert isinstance(window.condition_b_label, SubsectionHeaderLabel)
     assert isinstance(window.axis_ranges_label, SubsectionHeaderLabel)
     subsection_titles = [
@@ -94,8 +97,6 @@ def test_plot_generator_gui_layout_smoke(qtbot):
     assert abs(window.params_box.height() - window.legend_group.height()) <= 4
     assert abs(legend_bottom - console_bottom) <= 4
     assert not window.group_box.isVisible()
-    assert not window.scalp_title_a_edit.isEnabled()
-    assert not window.scalp_title_b_edit.isEnabled()
 
     initial_visible = window.condition_b_label.isVisible()
     initial_width = window.width()
@@ -123,10 +124,6 @@ def test_plot_generator_gui_layout_smoke(qtbot):
         assert window.legend_condition_b_edit.width() >= 220
         assert window.legend_condition_b_edit.height() >= 20
         assert window.legend_b_peaks_edit.height() >= 20
-    window.scalp_check.setChecked(True)
-    qtbot.wait(50)
-    assert window.scalp_title_a_edit.isEnabled()
-    assert window.scalp_title_b_edit.isEnabled()
 
     window.overlay_check.setChecked(not window.overlay_check.isChecked())
     qtbot.wait(50)

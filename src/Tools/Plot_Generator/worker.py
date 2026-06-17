@@ -19,8 +19,6 @@ from Tools.Plot_Generator.excel_inputs import (
     _infer_subject_id_from_path,
     _select_frequency_pairs,
 )
-from Tools.Plot_Generator.scalp_utils import select_oddball_harmonics
-from Tools.Plot_Generator.scalp_rendering import PlotScalpRenderingMixin
 from Tools.Plot_Generator.rendering import PlotRenderingMixin, matplotlib, plt
 from Tools.Plot_Generator.worker_config import PlotWorkerConfig
 
@@ -40,7 +38,6 @@ class _Worker(
     QObject,
     PlotDataCollectionMixin,
     PlotAggregationMixin,
-    PlotScalpRenderingMixin,
     PlotRenderingMixin,
 ):
     """Worker to process Excel files and generate plots."""
@@ -73,11 +70,6 @@ class _Worker(
         selected_groups: Sequence[str] | None = None,
         enable_group_overlay: bool = False,
         multi_group_mode: bool = False,
-        include_scalp_maps: bool = False,
-        scalp_vmin: float = -1.0,
-        scalp_vmax: float = 1.0,
-        scalp_title_a_template: str = "{condition} {roi} scalp map",
-        scalp_title_b_template: str = "{condition} {roi} scalp map",
         legend_custom_enabled: bool = False,
         legend_condition_a: str | None = None,
         legend_condition_b: str | None = None,
@@ -109,11 +101,6 @@ class _Worker(
             selected_groups=selected_groups,
             enable_group_overlay=enable_group_overlay,
             multi_group_mode=multi_group_mode,
-            include_scalp_maps=include_scalp_maps,
-            scalp_vmin=scalp_vmin,
-            scalp_vmax=scalp_vmax,
-            scalp_title_a_template=scalp_title_a_template,
-            scalp_title_b_template=scalp_title_b_template,
             legend_custom_enabled=legend_custom_enabled,
             legend_condition_a=legend_condition_a,
             legend_condition_b=legend_condition_b,
@@ -171,12 +158,6 @@ class _Worker(
         self.enable_group_overlay = bool(self.config.enable_group_overlay and ordered)
         self.multi_group_mode = self.config.multi_group_mode
         self._unknown_subject_files: set[str] = set()
-        self.include_scalp_maps = self.config.include_scalp_maps
-        self.scalp_vmin = self.config.scalp_vmin
-        self.scalp_vmax = self.config.scalp_vmax
-        self.scalp_title_a_template = self.config.scalp_title_a_template
-        self.scalp_title_b_template = self.config.scalp_title_b_template
-        self._scalp_title_warned = False
         self.legend_custom_enabled = self.config.legend_custom_enabled
         self.legend_condition_a = self.config.legend_condition_a
         self.legend_condition_b = self.config.legend_condition_b
@@ -188,7 +169,6 @@ class _Worker(
         self._timings: dict[str, float] = {
             "excel_load": 0.0,
             "roi_aggregate": 0.0,
-            "scalp_prepare": 0.0,
             "plot_render": 0.0,
             "file_save": 0.0,
         }
@@ -312,13 +292,28 @@ class _Worker(
             return []
 
         configured = [oddball_freq * idx for idx in range(1, max_harmonic + 1)]
-        selected = select_oddball_harmonics(configured, base_freq=self._analysis_base_freq)
+        selected = [
+            freq
+            for freq in configured
+            if math.isfinite(freq)
+            and not self._is_base_harmonic(freq, self._analysis_base_freq)
+        ]
         return sorted(
             {
                 round(freq, 4)
                 for freq in selected
                 if math.isfinite(freq) and freq > 0
             }
+        )
+
+    def _is_base_harmonic(self, freq: float, base_freq: float) -> bool:
+        if base_freq <= 0:
+            return False
+        ratio = freq / base_freq
+        nearest = round(ratio)
+        return (
+            math.isclose(ratio, nearest, rel_tol=1e-3, abs_tol=1e-3)
+            and nearest > 0
         )
 
     def _visible_oddball_frequencies(self, freqs: Sequence[float]) -> List[float]:
@@ -335,13 +330,13 @@ class _Worker(
             total_a = len(files_a)
             total_b = len(files_b)
             total = total_a + total_b
-            freqs_a, data_a, scalp_a = self._collect_data(
+            freqs_a, data_a = self._collect_data(
                 self.condition,
                 excel_files=files_a,
                 offset=0,
                 total_override=total,
             )
-            freqs_b, data_b, scalp_b = self._collect_data(
+            freqs_b, data_b = self._collect_data(
                 self.condition_b,
                 excel_files=files_b,
                 offset=total_a,
@@ -351,23 +346,18 @@ class _Worker(
                 avg_a = self._aggregate_roi_data(data_a)
                 avg_b = self._aggregate_roi_data(data_b)
                 if avg_a and avg_b:
-                    scalp_inputs_a = self._prepare_scalp_inputs(scalp_a)
-                    scalp_inputs_b = self._prepare_scalp_inputs(scalp_b)
-                    self._plot_overlay(
-                        freqs_a, avg_a, avg_b, scalp_inputs_a, scalp_inputs_b
-                    )
+                    self._plot_overlay(freqs_a, avg_a, avg_b)
             return
 
-        freqs, subject_data, scalp_data = self._collect_data(self.condition)
+        freqs, subject_data = self._collect_data(self.condition)
         if freqs and subject_data:
             averaged = self._aggregate_roi_data(subject_data)
             if not averaged:
                 self._emit("No ROI data to plot.")
                 return
             group_curves = self._build_group_curves(subject_data)
-            scalp_inputs = self._prepare_scalp_inputs(scalp_data)
-            if group_curves or scalp_inputs is not None:
-                self._plot(freqs, averaged, group_curves, scalp_inputs)
+            if group_curves:
+                self._plot(freqs, averaged, group_curves)
             else:
                 self._plot(freqs, averaged)
 

@@ -15,25 +15,6 @@ _LEGEND_DEFAULT_B_PEAKS = "B-Peaks"
 logger = logging.getLogger(__name__)
 
 
-def _settings_bool(value: object, fallback: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off"}:
-            return False
-    return fallback
-
-
-def _settings_float(value: object, fallback: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return fallback
-
-
 def _project_has_groups(project: Project | None) -> bool:
     """Return True when the loaded project declares experimental groups."""
 
@@ -110,11 +91,6 @@ class PlotGeneratorSettingsMixin:
         payload: dict[str, object] = {
             "stem_color": self.stem_color,
             "stem_color_b": self.stem_color_b,
-            "include_scalp_maps": self.scalp_check.isChecked(),
-            "scalp_min": self.scalp_min_spin.value(),
-            "scalp_max": self.scalp_max_spin.value(),
-            "title_a_template": self.scalp_title_a_edit.text(),
-            "title_b_template": self.scalp_title_b_edit.text(),
         }
         if include_paths:
             if not _project_has_groups(self._project):
