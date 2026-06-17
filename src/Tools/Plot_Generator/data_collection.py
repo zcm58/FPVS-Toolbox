@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
+import numpy as np
 import pandas as pd
 
 from Tools.Plot_Generator.excel_inputs import (
@@ -80,6 +81,10 @@ class PlotDataCollectionMixin:
         roi_channels_upper = {
             roi: {ch.upper() for ch in self.roi_map.get(roi, [])}
             for roi in roi_names
+        }
+        roi_channel_arrays = {
+            roi: np.asarray(sorted(chans), dtype=str)
+            for roi, chans in roi_channels_upper.items()
         }
 
         for excel_path in files:
@@ -224,7 +229,8 @@ class PlotDataCollectionMixin:
             if freqs is None:
                 freqs = ordered_freqs
 
-            electrode_upper = df["Electrode"].astype(str).str.upper()
+            electrode_upper = df["Electrode"].astype(str).str.upper().to_numpy()
+            snr_values = df[ordered_cols].to_numpy(dtype=float, copy=False)
             for roi in roi_names:
                 chans = roi_channels_upper.get(roi, set())
                 if not chans:
@@ -234,8 +240,8 @@ class PlotDataCollectionMixin:
                         error="No electrodes configured for ROI",
                     )
                     continue
-                df_roi = df[electrode_upper.isin(chans)]
-                if df_roi.empty:
+                roi_mask = np.isin(electrode_upper, roi_channel_arrays[roi])
+                if not roi_mask.any():
                     self._emit(f"No electrodes for ROI {roi} in {excel_path.name}")
                     self._record_failure(
                         item=f"{excel_path.name}:{roi}",
@@ -243,7 +249,16 @@ class PlotDataCollectionMixin:
                     )
                     continue
 
-                means = df_roi[ordered_cols].mean().tolist()
+                roi_values = snr_values[roi_mask]
+                valid = ~np.isnan(roi_values)
+                counts = valid.sum(axis=0)
+                sums = np.nansum(roi_values, axis=0)
+                means = np.divide(
+                    sums,
+                    counts,
+                    out=np.full(sums.shape, np.nan, dtype=float),
+                    where=counts > 0,
+                ).tolist()
                 subject_roi_data.setdefault(subject_id, {})[roi] = means
 
             if scalp_map is not None:
