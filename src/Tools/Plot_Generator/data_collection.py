@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
 import numpy as np
+from openpyxl import load_workbook
 import pandas as pd
 
 from Tools.Plot_Generator.excel_inputs import (
@@ -21,25 +22,72 @@ _FULLSNR_SHEET = "FullSNR"
 _MISSING_FULLSNR_MESSAGE = "Worksheet named 'FullSNR' not found"
 
 
-def _full_snr_usecols(x_min: float, x_max: float):
-    tolerance = 1e-3
-
-    def include_column(column: object) -> bool:
-        if column == "Electrode":
-            return True
-        if not isinstance(column, str) or not column.endswith("_Hz"):
-            return False
-        try:
-            freq = float(column.split("_")[0])
-        except ValueError:
-            return False
-        return (x_min - tolerance) <= freq <= (x_max + tolerance)
-
-    return include_column
-
-
 def _is_missing_full_snr_sheet(exc: ValueError) -> bool:
     return _MISSING_FULLSNR_MESSAGE in str(exc)
+
+
+def _read_full_snr_sheet_read_only(
+    excel_path: Path,
+    *,
+    x_min: float,
+    x_max: float,
+) -> tuple[pd.DataFrame, List[float], List[str]]:
+    workbook = load_workbook(
+        excel_path,
+        read_only=True,
+        data_only=True,
+    )
+    try:
+        if _FULLSNR_SHEET not in workbook.sheetnames:
+            raise ValueError(_MISSING_FULLSNR_MESSAGE)
+
+        worksheet = workbook[_FULLSNR_SHEET]
+        header = next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        if header is None:
+            return pd.DataFrame(), [], []
+
+        electrode_index = None
+        freq_pairs: list[tuple[float, str, int]] = []
+        for index, column in enumerate(header):
+            if column == "Electrode":
+                electrode_index = index
+            if not isinstance(column, str) or not column.endswith("_Hz"):
+                continue
+            try:
+                freq = float(column.split("_")[0])
+            except ValueError:
+                continue
+            freq_pairs.append((freq, column, index))
+
+        if electrode_index is None:
+            raise KeyError("Electrode")
+
+        freq_pairs.sort(key=lambda item: item[0])
+        tolerance = 1e-3
+        selected = [
+            (freq, column, index)
+            for freq, column, index in freq_pairs
+            if (x_min - tolerance) <= freq <= (x_max + tolerance)
+        ]
+        ordered_freqs = [freq for freq, _, _ in selected]
+        ordered_cols = [column for _, column, _ in selected]
+        selected_indexes = [index for _, _, index in selected]
+        if not selected_indexes:
+            return pd.DataFrame(columns=["Electrode"]), ordered_freqs, ordered_cols
+
+        columns = ["Electrode"] + ordered_cols
+        rows = []
+        required_indexes = [electrode_index] + selected_indexes
+        for row in worksheet.iter_rows(min_row=2, values_only=True):
+            rows.append(
+                [
+                    row[index] if index < len(row) else None
+                    for index in required_indexes
+                ]
+            )
+        return pd.DataFrame(rows, columns=columns), ordered_freqs, ordered_cols
+    finally:
+        workbook.close()
 
 
 class PlotDataCollectionMixin:
@@ -67,18 +115,14 @@ class PlotDataCollectionMixin:
         self,
         excel_path: Path,
     ) -> tuple[pd.DataFrame, List[float], List[str]]:
-        df = self._read_excel_timed(
-            excel_path,
-            sheet_name=_FULLSNR_SHEET,
-            usecols=_full_snr_usecols(self.x_min, self.x_max),
+        return self._timed_call(
+            "excel_load",
+            lambda: _read_full_snr_sheet_read_only(
+                excel_path,
+                x_min=self.x_min,
+                x_max=self.x_max,
+            ),
         )
-        freq_pairs = _frequency_pairs_from_columns(df.columns)
-        ordered_freqs, ordered_cols = _select_frequency_pairs(
-            freq_pairs,
-            x_min=self.x_min,
-            x_max=self.x_max,
-        )
-        return df, ordered_freqs, ordered_cols
 
     def _read_full_snr_from_workbook(self, xls) -> tuple[pd.DataFrame, List[float], List[str]]:
         header = self._read_excel_timed(xls, sheet_name=_FULLSNR_SHEET, nrows=0)

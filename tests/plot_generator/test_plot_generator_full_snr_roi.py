@@ -196,18 +196,11 @@ def test_full_snr_without_scalp_uses_direct_sheet_read(tmp_path, monkeypatch):
     with pd.ExcelWriter(cond_dir / "P01_Cond_Results.xlsx") as writer:
         df.to_excel(writer, sheet_name="FullSNR", index=False)
 
-    original_read_excel = plot_data_collection.pd.read_excel
-    read_calls = []
+    def fail_pandas_excel(*args, **kwargs):
+        raise AssertionError("FullSNR fast path should not use Pandas Excel readers")
 
-    def counting_read_excel(*args, **kwargs):
-        read_calls.append(kwargs.get("sheet_name"))
-        return original_read_excel(*args, **kwargs)
-
-    def fail_excel_file(*args, **kwargs):
-        raise AssertionError("FullSNR fast path should not open pd.ExcelFile")
-
-    monkeypatch.setattr(plot_data_collection.pd, "read_excel", counting_read_excel)
-    monkeypatch.setattr(plot_data_collection.pd, "ExcelFile", fail_excel_file)
+    monkeypatch.setattr(plot_data_collection.pd, "read_excel", fail_pandas_excel)
+    monkeypatch.setattr(plot_data_collection.pd, "ExcelFile", fail_pandas_excel)
     monkeypatch.setattr(module._Worker, "_emit", lambda *a, **k: None)
 
     captured = {}
@@ -235,6 +228,5 @@ def test_full_snr_without_scalp_uses_direct_sheet_read(tmp_path, monkeypatch):
 
     worker._run()
 
-    assert read_calls == ["FullSNR"]
     assert captured["freqs"] == [1.0, 2.0]
     assert captured["roi_data"] == {"All": [2.0, 6.0]}
