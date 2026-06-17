@@ -1,4 +1,7 @@
 import importlib.util
+import threading
+import time
+
 import pytest
 from tests import repo_root
 
@@ -230,3 +233,68 @@ def test_full_snr_without_scalp_uses_direct_sheet_read(tmp_path, monkeypatch):
 
     assert captured["freqs"] == [1.0, 2.0]
     assert captured["roi_data"] == {"All": [2.0, 6.0]}
+
+
+def test_full_snr_without_scalp_reads_with_one_extra_worker(tmp_path, monkeypatch):
+    module = _import_module()
+
+    cond_dir = tmp_path / "Cond"
+    cond_dir.mkdir()
+    for name in [
+        "P01_Cond_Results.xlsx",
+        "P02_Cond_Results.xlsx",
+        "P03_Cond_Results.xlsx",
+    ]:
+        (cond_dir / name).write_text("", encoding="utf-8")
+
+    thread_names = set()
+    lock = threading.Lock()
+
+    def fake_read_full_snr(excel_path, *, x_min, x_max):  # noqa: ARG001
+        with lock:
+            thread_names.add(threading.current_thread().name)
+        if excel_path.name.startswith("P01"):
+            time.sleep(0.15)
+            freq, col, value = 1.0, "1.0000_Hz", 10.0
+        elif excel_path.name.startswith("P02"):
+            time.sleep(0.05)
+            freq, col, value = 2.0, "2.0000_Hz", 20.0
+        else:
+            time.sleep(0.05)
+            freq, col, value = 3.0, "3.0000_Hz", 30.0
+        return pd.DataFrame({"Electrode": ["Cz"], col: [value]}), [freq], [col]
+
+    captured = {}
+
+    def dummy_plot(self, freqs, roi_data):
+        captured["freqs"] = freqs
+        captured["roi_data"] = roi_data
+
+    monkeypatch.setattr(
+        plot_data_collection,
+        "_read_full_snr_sheet_read_only",
+        fake_read_full_snr,
+    )
+    monkeypatch.setattr(module._Worker, "_plot", dummy_plot)
+    monkeypatch.setattr(module._Worker, "_emit", lambda *a, **k: None)
+
+    worker = module._Worker(
+        folder=str(tmp_path),
+        condition="Cond",
+        roi_map={"All": ["Cz"]},
+        selected_roi="All",
+        title="t",
+        xlabel="x",
+        ylabel="y",
+        x_min=0.0,
+        x_max=5.0,
+        y_min=0.0,
+        y_max=40.0,
+        out_dir=str(tmp_path),
+    )
+
+    worker._run()
+
+    assert len(thread_names) == 2
+    assert captured["freqs"] == [1.0]
+    assert captured["roi_data"] == {"All": [20.0]}
