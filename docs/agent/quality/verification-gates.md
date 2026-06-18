@@ -56,6 +56,11 @@ ruff check .
   `py_compile` touched package modules, `audit_gui_imports.py` for embedded
   page changes, and `audit_hardcoded_paths.py` for workbook/output path
   changes. Do not run offscreen GUI tests locally.
+- Publication figure generation changes: run
+  `python -m pytest tests/audit/test_figure_style_contract.py -q`, the nearest
+  focused figure-output tests, `py_compile` for touched renderers, and path/GUI
+  audits when outputs or GUI-adjacent code are touched. Figure renderers must
+  use `Main_App.exports.figure_style`, not GUI typography helpers.
 - Legacy-boundary changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check protected` and confirm retired `Legacy_App` paths were not recreated; any historical behavior cleanup must preserve the processing pipeline.
 - Source Localization/eLORETA changes: activate `.\.venv1`, then run `python .agents/scripts/audit/agent_audit.py --check source-localization`; it should remain removed from active runtime unless explicitly restored.
 - LORETA Visualizer changes: activate `.\.venv1`, then run focused checks for

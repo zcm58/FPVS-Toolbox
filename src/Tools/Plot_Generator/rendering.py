@@ -9,13 +9,20 @@ from typing import Dict, List
 import matplotlib
 import numpy as np
 
+from Main_App.exports.figure_style import (
+    FIGURE_EXPORT_DPI,
+    apply_axis_text_style,
+    apply_matplotlib_figure_style,
+    figure_legend_kwargs,
+    figure_text_kwargs,
+)
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+apply_matplotlib_figure_style()
 plt.rcParams.update(
     {
-        "font.family": "serif",
-        "font.size": 12,
         "lines.linewidth": 1.5,
         "xtick.major.size": 6,
         "ytick.major.size": 6,
@@ -24,7 +31,6 @@ plt.rcParams.update(
 
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
-FIGURE_EXPORT_DPI = 600
 
 
 class PlotRenderingMixin:
@@ -205,14 +211,15 @@ class PlotRenderingMixin:
 
             handles, _labels = ax.get_legend_handles_labels()
             if handles:
-                ax.legend(loc="upper right", frameon=True)
+                ax.legend(loc="upper right", frameon=True, **figure_legend_kwargs())
 
-            ax.set_xlabel(self.xlabel)
-            ax.set_ylabel(self.ylabel)
+            ax.set_xlabel(self.xlabel, **figure_text_kwargs("axis_label"))
+            ax.set_ylabel(self.ylabel, **figure_text_kwargs("axis_label"))
+            apply_axis_text_style(ax)
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
             combined_title = f"{self.title}: {roi}"
-            fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
+            fig.suptitle(combined_title, ha="center", va="top", **figure_text_kwargs("annotation"))
 
             fig.tight_layout(rect=[0, 0, 1, 0.93])
             fname = f"{self.condition}_{roi}_{self.metric}.png"
@@ -241,7 +248,6 @@ class PlotRenderingMixin:
         data_a: Dict[str, List[float]],
         data_b: Dict[str, List[float]],
     ) -> None:
-        plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
         odd_freqs = self._visible_oddball_frequencies(freqs)
 
         for roi in data_a:
@@ -335,15 +341,16 @@ class PlotRenderingMixin:
 
             handles, _labels = ax.get_legend_handles_labels()
             if handles:
-                ax.legend(loc="upper right", frameon=True)
+                ax.legend(loc="upper right", frameon=True, **figure_legend_kwargs())
 
-            ax.set_xlabel(self.xlabel)
-            ax.set_ylabel(self.ylabel)
+            ax.set_xlabel(self.xlabel, **figure_text_kwargs("axis_label"))
+            ax.set_ylabel(self.ylabel, **figure_text_kwargs("axis_label"))
+            apply_axis_text_style(ax)
             base = self.title or f"{self.condition} vs {self.condition_b}"
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
             combined_title = f"{base}: {roi}"
-            fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
+            fig.suptitle(combined_title, ha="center", va="top", **figure_text_kwargs("annotation"))
 
             fig.tight_layout(rect=[0, 0, 1, 0.93])
 

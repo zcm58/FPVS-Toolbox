@@ -44,6 +44,21 @@ Tests are grouped by workflow under `tests/audit/`, `tests/gui/`,
 `tests/publication_maps/`, `tests/publication_report/`,
 `tests/ratio_calculator/`, and `tests/stats/`.
 
+## Figure Generation
+
+- Shared figure style contract and GUI-typography boundary:
+  `python -m pytest tests/audit/test_figure_style_contract.py -q`
+- Plot Generator export pairs:
+  `python -m pytest tests/plot_generator/test_plot_generator_export_pdf_smoke.py tests/plot_generator/test_plot_generator_group_overlay_worker.py -q`
+- Publication Maps figure output and typography:
+  `python -m pytest tests/publication_maps/test_bca_publication_maps.py -q`
+- Ratio Calculator figure output:
+  `python -m pytest tests/ratio_calculator/test_ratio_calculator_plots.py -q`
+- Individual Detectability figure output:
+  `python -m pytest tests/processing/test_individual_detectability_core.py -q`
+- LORETA Visualizer split-hemisphere figure output:
+  `python -m pytest tests/loreta/test_demo_conditions.py tests/loreta/test_project_l2_mne_export.py -q`
+
 ## Main Window And GUI
 
 The targets below identify relevant coverage only; do not run them locally via

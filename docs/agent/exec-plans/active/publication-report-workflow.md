@@ -525,6 +525,9 @@ slices.
 - Programmatically call existing figure builders where reusable.
 - Record every generated figure in `Figure_Manifest`.
 - Keep figure failures non-fatal when data tables still succeed.
+- Generated figures must follow `docs/agent/quality/figure-generation.md`:
+  matching 600 DPI PNG/PDF outputs with shared Arial figure typography from
+  `Main_App.exports.figure_style`.
 
 ### Phase 5: GUI Integration
 

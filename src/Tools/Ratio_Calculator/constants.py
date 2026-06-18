@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+from Main_App.exports.figure_style import FIGURE_EXPORT_DPI
+
 
 ROI_DEFS_DEFAULT: dict[str, list[str]] = {
     "Bilateral OT": ["P7", "P9", "PO7", "PO3", "O1", "Oz", "O2", "P8", "P10", "PO8", "PO4"],
@@ -31,7 +33,6 @@ EXCEL_MIN_COL_WIDTH = 8
 EXCEL_MAX_COL_WIDTH = 70
 
 EPS = 1e-12
-FIGURE_EXPORT_DPI = 600
 
 
 @dataclass

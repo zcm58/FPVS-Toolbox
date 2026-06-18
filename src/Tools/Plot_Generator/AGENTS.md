@@ -89,6 +89,11 @@ The plot generator should read the user-defined ROIs from the settings menu and 
 individually. The user must choose an Excel file from which to pull data. This will typically be the same as the
 output folder in the main app GUI where the Excel data is saved after processing .BDF files.
 
+Publication figure exports should follow `docs/agent/quality/figure-generation.md`:
+write matching 600 DPI PNG/PDF outputs and use `Main_App.exports.figure_style`
+for Arial figure typography instead of GUI typography or local Matplotlib font
+defaults.
+
 Inside this folder, you'll find subfolders of varying names. The names of each of these folders represent the FPVS
 conditions that were run. Within each subfolder, there will be Excel files named like "P3 Fruit vs Veg_Results".
 You'll have one Excel file per participant per condition.

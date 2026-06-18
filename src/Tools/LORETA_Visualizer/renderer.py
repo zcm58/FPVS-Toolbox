@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
-from Main_App.gui.typography import FONT_ROLES
+from Main_App.exports.figure_style import (
+    FIGURE_EXPORT_DPI,
+    apply_matplotlib_figure_style,
+    figure_text_spec,
+    pil_font_candidates,
+)
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from Tools.LORETA_Visualizer.cortical_paint import (
@@ -57,7 +62,7 @@ DEFAULT_SPLIT_FIGURE_SINGLE_HEIGHT_IN = 3.0
 DEFAULT_SPLIT_FIGURE_STACK_HEIGHT_IN = 6.75
 DEFAULT_SPLIT_FIGURE_MAX_FACES_PER_HEMISPHERE: int | None = None
 _SPLIT_FIGURE_UNITS_PER_INCH = DEFAULT_SPLIT_FIGURE_WIDTH / DEFAULT_SPLIT_FIGURE_WIDTH_IN
-SPLIT_FIGURE_EXPORT_DPI = 600
+SPLIT_FIGURE_EXPORT_DPI = FIGURE_EXPORT_DPI
 
 
 class RenderBackendError(RuntimeError):
@@ -1064,13 +1069,13 @@ def _draw_split_figure_panel(
             float(width) / 2.0,
             panel_top + 54.0 * scale_factor,
             panel.label.strip(),
-            role="figure_title",
+            role="condition_label",
             scale_factor=scale_factor,
         )
     if show_hemisphere_labels:
         label_y = panel_top + (88.0 if show_condition_label else 70.0) * scale_factor
-        _draw_centered_text(draw, left_center, label_y, "Left", role="figure_axis_label", scale_factor=scale_factor)
-        _draw_centered_text(draw, right_center, label_y, "Right", role="figure_axis_label", scale_factor=scale_factor)
+        _draw_centered_text(draw, left_center, label_y, "Left", role="axis_label", scale_factor=scale_factor)
+        _draw_centered_text(draw, right_center, label_y, "Right", role="axis_label", scale_factor=scale_factor)
 
 
 def _draw_split_figure_legend(
@@ -1118,7 +1123,7 @@ def _draw_split_figure_legend(
         legend_x,
         label_y,
         _format_figure_scalar(vmin),
-        role="figure_tick",
+        role="tick_label",
         scale_factor=scale_factor,
     )
     _draw_centered_text(
@@ -1126,7 +1131,7 @@ def _draw_split_figure_legend(
         legend_x + legend_width,
         label_y,
         _format_figure_scalar(vmax),
-        role="figure_tick",
+        role="tick_label",
         scale_factor=scale_factor,
     )
 
@@ -1144,6 +1149,7 @@ def _save_publication_split_pdf(
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
 
+    apply_matplotlib_figure_style()
     fig = plt.figure(figsize=(float(width_inches), float(height_inches)), dpi=dpi)
     fig.patch.set_alpha(0)
     ax = fig.add_axes([0, 0, 1, 1])
@@ -1171,15 +1177,10 @@ def _draw_centered_text(
 def _pil_font(role: str, *, scale_factor: float):
     from PIL import ImageFont
 
-    spec = FONT_ROLES[role]
+    spec = figure_text_spec(role)
     size = max(8, int(round(spec.point_size * _SPLIT_FIGURE_UNITS_PER_INCH * scale_factor / 72.0)))
-    bold = int(spec.css_weight) >= 600
-    candidates = (
-        ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf")
-        if bold
-        else ("segoeui.ttf", "arial.ttf", "DejaVuSans.ttf")
-    )
-    for candidate in candidates:
+    bold = str(spec.weight).lower() == "bold"
+    for candidate in pil_font_candidates(bold=bold):
         try:
             return ImageFont.truetype(candidate, size=size)
         except OSError:

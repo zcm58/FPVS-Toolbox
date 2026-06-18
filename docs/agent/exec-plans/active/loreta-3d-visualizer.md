@@ -1172,6 +1172,9 @@ Implemented scope:
   The modal exposes only currently working export actions and reserves future
   figure export expansion for current-view, transparent-mesh, brain-mesh, and
   batch workflows.
+- Publication figure exports follow `docs/agent/quality/figure-generation.md`:
+  matching 600 DPI PNG/PDF outputs and shared Arial figure typography from
+  `Main_App.exports.figure_style`.
 - Transparent mesh mode uses normal alpha blending with depth peeling disabled
   because depth peeling caused the brain actor to disappear at opacity values
   below 100% on at least one Windows/VTK machine. Revisit only with visible

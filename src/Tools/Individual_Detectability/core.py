@@ -8,6 +8,15 @@ import re
 import traceback
 from typing import Callable, Sequence, TYPE_CHECKING
 
+from Main_App.exports.figure_style import (
+    FIGURE_EXPORT_DPI,
+    FIGURE_FONT_FAMILY,
+    FIGURE_SMALL_TEXT_MIN_SIZE_PT,
+    FIGURE_TEXT_SIZE_PT,
+    apply_matplotlib_figure_style,
+    figure_text_kwargs,
+)
+
 if TYPE_CHECKING:
     import numpy as np
 
@@ -67,7 +76,7 @@ WSPACE = 0.25
 # Reduce vertical spacing between topo/snr rows
 HSPACE = 0.42
 
-FIG_DPI = 600
+FIG_DPI = FIGURE_EXPORT_DPI
 
 # Colorbar placement tuning within the reserved bottom band
 # (place it lower so it cannot overlap x-axis labels on the last row)
@@ -84,9 +93,9 @@ _XLABEL_PAD = -1
 # -----------------------------------------------------------------------------
 _MAX_GRID_NCOLS = 10  # 11+ forbidden
 
-# Slightly larger legend text for clarity
-_LEGEND_LABEL_FONTSIZE = 10
-_LEGEND_SIDE_TEXT_FONTSIZE = 9
+_LEGEND_LABEL_FONTSIZE = FIGURE_TEXT_SIZE_PT
+_LEGEND_SIDE_TEXT_FONTSIZE = FIGURE_TEXT_SIZE_PT
+_PARTICIPANT_SECONDARY_FONTSIZE = FIGURE_SMALL_TEXT_MIN_SIZE_PT
 
 
 @dataclass(frozen=True)
@@ -1002,18 +1011,7 @@ def generate_condition_figure(
     import matplotlib.pyplot as plt
     import matplotlib as mpl
 
-    # Times New Roman everywhere (fallbacks included)
-    plt.rcParams.update(
-        {
-            "font.family": "serif",
-            "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
-            "font.size": 9,
-            "axes.titlesize": 9,
-            "axes.labelsize": 9,
-            "xtick.labelsize": 8,
-            "ytick.labelsize": 8,
-        }
-    )
+    apply_matplotlib_figure_style()
 
     # Enforce the "max 10 columns" rule here (GUI should also enforce upstream)
     try:
@@ -1161,7 +1159,7 @@ def generate_condition_figure(
         pid, n_sig, z_topo, snr_x, snr_y = records[i]
 
         _plot_topomap_compat(z_topo, info, ax_topo, cmap, vmin=vmin, vmax=vmax)
-        ax_topo.set_title(f"{pid}", fontsize=9, pad=1)
+        ax_topo.set_title(f"{pid}", pad=1, **figure_text_kwargs("annotation"))
         ax_topo.text(
             0.5,
             -0.10,
@@ -1169,7 +1167,7 @@ def generate_condition_figure(
             transform=ax_topo.transAxes,
             ha="center",
             va="top",
-            fontsize=8,
+            **figure_text_kwargs("small"),
         )
 
         if n_sig <= 0 or snr_x is None or snr_y is None:
@@ -1199,19 +1197,21 @@ def generate_condition_figure(
                 [f"{-float(settings.half_window_hz):.1f}", "0", f"{float(settings.half_window_hz):.1f}"]
             )
 
-        ax_snr.tick_params(labelsize=8)
+        ax_snr.tick_params(labelsize=FIGURE_TEXT_SIZE_PT)
+        for tick_label in [*ax_snr.get_xticklabels(), *ax_snr.get_yticklabels()]:
+            tick_label.set_fontfamily(FIGURE_FONT_FAMILY)
         for spine in ["top", "right"]:
             ax_snr.spines[spine].set_visible(False)
 
         if not row_ylabel_set[rr]:
-            ax_snr.set_ylabel("SNR", fontsize=9)
+            ax_snr.set_ylabel("SNR", **figure_text_kwargs("axis_label"))
             row_ylabel_set[rr] = True
         else:
             ax_snr.set_ylabel("")
             ax_snr.set_yticklabels([])
 
         if rr == nrows - 1:
-            ax_snr.set_xlabel("Rel. freq (Hz)", fontsize=9, labelpad=_XLABEL_PAD)
+            ax_snr.set_xlabel("Rel. freq (Hz)", labelpad=_XLABEL_PAD, **figure_text_kwargs("axis_label"))
         else:
             ax_snr.set_xlabel("")
             ax_snr.set_xticklabels([])
@@ -1234,7 +1234,7 @@ def generate_condition_figure(
     cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
     cb.set_ticks([])
     cb.ax.tick_params(length=0)
-    cb.set_label("Summed-harmonic Z", fontsize=_LEGEND_LABEL_FONTSIZE, labelpad=3)
+    cb.set_label("Summed-harmonic Z", labelpad=3, **figure_text_kwargs("legend"))
 
     y_text = max(0.0, cbar_bottom - _CBAR_TEXT_PAD_FRAC)
     fig.text(
@@ -1243,7 +1243,7 @@ def generate_condition_figure(
         f"White = not significant at z >= {settings.z_threshold:g}",
         ha="left",
         va="top",
-        fontsize=_LEGEND_SIDE_TEXT_FONTSIZE,
+        **figure_text_kwargs("annotation"),
     )
     fig.text(
         cbar_left + cbar_w,
@@ -1251,7 +1251,7 @@ def generate_condition_figure(
         "Max",
         ha="right",
         va="top",
-        fontsize=_LEGEND_SIDE_TEXT_FONTSIZE,
+        **figure_text_kwargs("annotation"),
     )
 
     pdf_path = output_dir / f"{sanitize_filename_stem(output_stem)}.pdf"
