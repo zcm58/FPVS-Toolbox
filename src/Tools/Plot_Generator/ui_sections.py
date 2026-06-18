@@ -303,7 +303,7 @@ class PlotGeneratorUiSectionsMixin:
 
         self.title_edit = QLineEdit(self._defaults["title_snr"])
         self.title_edit.setPlaceholderText("e.g. Fruit vs Veg")
-        self.title_edit.setToolTip("Title shown on the plot")
+        self.title_edit.setToolTip("Base name used for exported figure files")
 
         self.xlabel_edit = QLineEdit(self._defaults["xlabel"])
         self.xlabel_edit.setPlaceholderText("e.g. Frequency (Hz)")
@@ -373,7 +373,7 @@ class PlotGeneratorUiSectionsMixin:
         advanced_layout.setSpacing(6)
 
         advanced_form = make_form_layout()
-        advanced_form.addRow(QLabel("Chart title:"), self.title_edit)
+        advanced_form.addRow(QLabel("Figure name:"), self.title_edit)
         advanced_form.addRow(QLabel("X-axis label:"), self.xlabel_edit)
         advanced_form.addRow(QLabel("Y-axis label:"), self.ylabel_edit)
         advanced_layout.addLayout(advanced_form)

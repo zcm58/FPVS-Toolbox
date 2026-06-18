@@ -49,3 +49,4 @@ def test_snr_export_pdf_smoke(tmp_path, monkeypatch):
     pdf_stems = {path.with_suffix("").name for path in pdf_files}
     png_stems = {path.with_suffix("").name for path in png_files}
     assert pdf_stems == png_stems
+    assert pdf_stems == {"SNR Plot - All"}

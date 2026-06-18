@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 from typing import Dict, List
 
@@ -31,6 +32,18 @@ plt.rcParams.update(
 
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
+_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\\\|?*]+')
+
+
+def _safe_figure_stem(*, base_title: str, roi: str) -> str:
+    """Return a Windows-safe figure stem while preserving the title/ROI shape."""
+
+    title = str(base_title or "").strip() or "SNR Plot"
+    roi_label = str(roi or "").strip() or "ROI"
+    stem = f"{title} - {roi_label}"
+    stem = _ILLEGAL_FILENAME_CHARS.sub("_", stem)
+    stem = re.sub(r"\s+", " ", stem).strip(" ._")
+    return stem or "SNR Plot"
 
 
 class PlotRenderingMixin:
@@ -218,11 +231,8 @@ class PlotRenderingMixin:
             apply_axis_text_style(ax)
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
-            combined_title = f"{self.title}: {roi}"
-            fig.suptitle(combined_title, ha="center", va="top", **figure_text_kwargs("annotation"))
-
-            fig.tight_layout(rect=[0, 0, 1, 0.93])
-            fname = f"{self.condition}_{roi}_{self.metric}.png"
+            fig.tight_layout()
+            fname = f"{_safe_figure_stem(base_title=self.title or self.condition, roi=roi)}.png"
             save_kwargs = {
                 "dpi": FIGURE_EXPORT_DPI,
                 "pad_inches": 0.05,
@@ -349,12 +359,9 @@ class PlotRenderingMixin:
             base = self.title or f"{self.condition} vs {self.condition_b}"
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
-            combined_title = f"{base}: {roi}"
-            fig.suptitle(combined_title, ha="center", va="top", **figure_text_kwargs("annotation"))
+            fig.tight_layout()
 
-            fig.tight_layout(rect=[0, 0, 1, 0.93])
-
-            fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
+            fname = f"{_safe_figure_stem(base_title=base, roi=roi)}.png"
             out_path = self.out_dir / fname
             pdf_path = out_path.with_suffix(".pdf")
             self._mark_timing("plot_render", render_started)
