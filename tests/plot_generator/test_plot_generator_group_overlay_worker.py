@@ -122,5 +122,5 @@ def test_group_overlay_renderer_writes_overlay_plot(tmp_path, monkeypatch) -> No
         },
     )
 
-    assert (out_dir / "Angry_Central_SNR.png").is_file()
-    assert (out_dir / "Angry_Central_SNR.pdf").is_file()
+    assert (out_dir / "Angry - Central.png").is_file()
+    assert (out_dir / "Angry - Central.pdf").is_file()

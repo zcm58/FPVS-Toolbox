@@ -24,7 +24,8 @@ Primary paths:
   Its GUI reads base frequency and BCA upper-limit values from Settings and
   exposes low/high BCA color selectors plus an optional fixed BCA colorbar
   range for rendered palette endpoints and scaling. Rendered labels use shared
-  component typography roles and the BCA colorbar label is
+  publication figure typography from `Main_App.exports.figure_style`, and the
+  BCA colorbar label is
   `Baseline-corrected amplitude (µV)`.
 
 - `src/Tools/Publication_Report/`: embedded single-group publication report

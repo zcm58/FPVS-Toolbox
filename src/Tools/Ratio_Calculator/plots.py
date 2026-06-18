@@ -16,13 +16,22 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
+from Main_App.exports.figure_style import (
+    FIGURE_EXPORT_DPI,
+    apply_axis_text_style,
+    apply_matplotlib_figure_style,
+    figure_legend_kwargs,
+    figure_text_kwargs,
+)
+
 from .constants import (
     EPS,
-    FIGURE_EXPORT_DPI,
     MANUAL_EXCLUDED_POINT_COLOR,
     MANUAL_EXCLUDED_POINT_MARKER,
     PALETTES,
 )
+
+apply_matplotlib_figure_style()
 
 
 @dataclass(frozen=True)
@@ -236,14 +245,15 @@ def make_raincloud_figure(
     if panel.ylim is not None:
         ax.set_ylim(panel.ylim)
 
-    ax.set_ylabel(panel.ylabel, fontsize=12, fontweight="bold")
+    ax.set_ylabel(panel.ylabel, **figure_text_kwargs("axis_label"))
     if panel.title:
-        ax.set_title(panel.title, fontsize=14, fontweight="bold", pad=10)
+        ax.set_title(panel.title, pad=10, **figure_text_kwargs("annotation"))
 
     ax.grid(axis="y", linestyle="--", alpha=0.4)
 
     ax.set_xticks(np.arange(len(conds)))
-    ax.set_xticklabels(conds, fontsize=11, fontweight="bold")
+    ax.set_xticklabels(conds, **figure_text_kwargs("tick_label"))
+    apply_axis_text_style(ax)
 
     roi_handles = [
         Line2D(
@@ -265,7 +275,12 @@ def make_raincloud_figure(
         markersize=10,
         label="Manual excluded",
     )
-    ax.legend(handles=roi_handles + [excl_handle], loc="upper right", frameon=True)
+    ax.legend(
+        handles=roi_handles + [excl_handle],
+        loc="upper right",
+        frameon=True,
+        **figure_legend_kwargs(),
+    )
 
     fig.savefig(
         out_path_no_ext.with_suffix(".pdf"),
@@ -402,16 +417,17 @@ def make_raincloud_figure_roi_x(
     if panel.ylim is not None:
         ax.set_ylim(panel.ylim)
 
-    ax.set_xlabel(xlabel, fontsize=12, fontweight="bold")
-    ax.set_ylabel(panel.ylabel, fontsize=12, fontweight="bold")
+    ax.set_xlabel(xlabel, **figure_text_kwargs("axis_label"))
+    ax.set_ylabel(panel.ylabel, **figure_text_kwargs("axis_label"))
 
     if panel.title:
-        ax.set_title(panel.title, fontsize=14, fontweight="bold", pad=10)
+        ax.set_title(panel.title, pad=10, **figure_text_kwargs("annotation"))
 
     ax.grid(axis="y", linestyle="--", alpha=0.4)
 
     ax.set_xticks(np.arange(len(rois_present)))
-    ax.set_xticklabels(rois_present, fontsize=11, fontweight="bold")
+    ax.set_xticklabels(rois_present, **figure_text_kwargs("tick_label"))
+    apply_axis_text_style(ax)
 
     roi_handles = [
         Line2D(
@@ -433,7 +449,12 @@ def make_raincloud_figure_roi_x(
         markersize=10,
         label="Manual excluded",
     )
-    ax.legend(handles=roi_handles + [excl_handle], loc="upper right", frameon=True)
+    ax.legend(
+        handles=roi_handles + [excl_handle],
+        loc="upper right",
+        frameon=True,
+        **figure_legend_kwargs(),
+    )
 
     fig.savefig(
         out_path_no_ext.with_suffix(".pdf"),

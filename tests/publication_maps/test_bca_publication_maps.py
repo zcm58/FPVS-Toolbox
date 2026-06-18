@@ -8,7 +8,12 @@ import pandas as pd
 from PIL import Image
 import pytest
 
-from Main_App.gui.components import matplotlib_font_kwargs
+from Main_App.exports.figure_style import (
+    FIGURE_FONT_FAMILY,
+    FIGURE_PANEL_LABEL_SIZE_PT,
+    FIGURE_TEXT_SIZE_PT,
+    figure_text_kwargs,
+)
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
 from Tools.Publication_Maps.colormaps import SCALP_COLORMAP_STOPS
 from Tools.Publication_Maps.excel_inputs import discover_conditions
@@ -489,17 +494,21 @@ def test_z_score_metric_limits_use_threshold_and_auto_upper_limit() -> None:
     )
 
 
-def test_bca_colorbar_label_and_fonts_use_shared_component_typography() -> None:
-    axis_font = matplotlib_font_kwargs("figure_axis_label")
-    title_font = matplotlib_font_kwargs("figure_title")
+def test_bca_colorbar_label_and_fonts_use_shared_figure_typography() -> None:
+    axis_font = figure_text_kwargs("axis_label")
+    condition_font = figure_text_kwargs("condition_label")
+    panel_font = figure_text_kwargs("panel_label")
 
     assert colorbar_label_for_metric(PublicationMetric.BCA) == (
         "Baseline-corrected amplitude (µV)"
     )
     assert colorbar_label_for_metric(PublicationMetric.SNR) == "Signal to Noise Ratio"
     assert colorbar_label_for_metric(PublicationMetric.Z_SCORE) == "Z Score"
-    assert axis_font["fontsize"] >= 12
-    assert title_font["fontsize"] >= axis_font["fontsize"]
+    assert axis_font["fontfamily"] == FIGURE_FONT_FAMILY
+    assert axis_font["fontsize"] == FIGURE_TEXT_SIZE_PT
+    assert condition_font["fontsize"] == FIGURE_TEXT_SIZE_PT
+    assert panel_font["fontsize"] == FIGURE_PANEL_LABEL_SIZE_PT
+    assert panel_font["fontweight"] == "bold"
 
 
 def test_worker_emits_progress_messages_and_finished_without_widgets(

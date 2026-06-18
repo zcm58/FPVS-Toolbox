@@ -3,19 +3,27 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 from typing import Dict, List
 
 import matplotlib
 import numpy as np
 
+from Main_App.exports.figure_style import (
+    FIGURE_EXPORT_DPI,
+    apply_axis_text_style,
+    apply_matplotlib_figure_style,
+    figure_legend_kwargs,
+    figure_text_kwargs,
+)
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+apply_matplotlib_figure_style()
 plt.rcParams.update(
     {
-        "font.family": "serif",
-        "font.size": 12,
         "lines.linewidth": 1.5,
         "xtick.major.size": 6,
         "ytick.major.size": 6,
@@ -24,7 +32,18 @@ plt.rcParams.update(
 
 _DEFAULT_A_PEAKS = "A-Peaks"
 _DEFAULT_B_PEAKS = "B-Peaks"
-FIGURE_EXPORT_DPI = 600
+_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\\\|?*]+')
+
+
+def _safe_figure_stem(*, base_title: str, roi: str) -> str:
+    """Return a Windows-safe figure stem while preserving the title/ROI shape."""
+
+    title = str(base_title or "").strip() or "SNR Plot"
+    roi_label = str(roi or "").strip() or "ROI"
+    stem = f"{title} - {roi_label}"
+    stem = _ILLEGAL_FILENAME_CHARS.sub("_", stem)
+    stem = re.sub(r"\s+", " ", stem).strip(" ._")
+    return stem or "SNR Plot"
 
 
 class PlotRenderingMixin:
@@ -205,17 +224,15 @@ class PlotRenderingMixin:
 
             handles, _labels = ax.get_legend_handles_labels()
             if handles:
-                ax.legend(loc="upper right", frameon=True)
+                ax.legend(loc="upper right", frameon=True, **figure_legend_kwargs())
 
-            ax.set_xlabel(self.xlabel)
-            ax.set_ylabel(self.ylabel)
+            ax.set_xlabel(self.xlabel, **figure_text_kwargs("axis_label"))
+            ax.set_ylabel(self.ylabel, **figure_text_kwargs("axis_label"))
+            apply_axis_text_style(ax)
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
-            combined_title = f"{self.title}: {roi}"
-            fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
-
-            fig.tight_layout(rect=[0, 0, 1, 0.93])
-            fname = f"{self.condition}_{roi}_{self.metric}.png"
+            fig.tight_layout()
+            fname = f"{_safe_figure_stem(base_title=self.title or self.condition, roi=roi)}.png"
             save_kwargs = {
                 "dpi": FIGURE_EXPORT_DPI,
                 "pad_inches": 0.05,
@@ -241,7 +258,6 @@ class PlotRenderingMixin:
         data_a: Dict[str, List[float]],
         data_b: Dict[str, List[float]],
     ) -> None:
-        plt.rcParams.update({"font.family": "Times New Roman", "font.size": 12})
         odd_freqs = self._visible_oddball_frequencies(freqs)
 
         for roi in data_a:
@@ -335,19 +351,17 @@ class PlotRenderingMixin:
 
             handles, _labels = ax.get_legend_handles_labels()
             if handles:
-                ax.legend(loc="upper right", frameon=True)
+                ax.legend(loc="upper right", frameon=True, **figure_legend_kwargs())
 
-            ax.set_xlabel(self.xlabel)
-            ax.set_ylabel(self.ylabel)
+            ax.set_xlabel(self.xlabel, **figure_text_kwargs("axis_label"))
+            ax.set_ylabel(self.ylabel, **figure_text_kwargs("axis_label"))
+            apply_axis_text_style(ax)
             base = self.title or f"{self.condition} vs {self.condition_b}"
             ax.grid(axis="y", linestyle=":", linewidth=0.8, color="gray")
 
-            combined_title = f"{base}: {roi}"
-            fig.suptitle(combined_title, fontsize=16, ha="center", va="top")
+            fig.tight_layout()
 
-            fig.tight_layout(rect=[0, 0, 1, 0.93])
-
-            fname = f"{self.condition}_vs_{self.condition_b}_{roi}_{self.metric}.png"
+            fname = f"{_safe_figure_stem(base_title=base, roi=roi)}.png"
             out_path = self.out_dir / fname
             pdf_path = out_path.with_suffix(".pdf")
             self._mark_timing("plot_render", render_started)
